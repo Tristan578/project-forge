@@ -273,10 +273,12 @@ fn handle_create_joint(payload: serde_json::Value) -> super::CommandResult {
 
     let motor = payload.get("motor").and_then(|v| {
         let obj = v.as_object()?;
-        Some(JointMotor {
-            target_velocity: obj.get("targetVelocity")?.as_f64()? as f32,
-            max_force: obj.get("maxForce")?.as_f64()? as f32,
-        })
+        let target_velocity = obj.get("targetVelocity")?.as_f64()? as f32;
+        let max_force = obj.get("maxForce")?.as_f64()? as f32;
+        if !target_velocity.is_finite() || !max_force.is_finite() {
+            return None;
+        }
+        Some(JointMotor { target_velocity, max_force })
     });
 
     let joint_data = JointData {
@@ -378,10 +380,12 @@ fn handle_update_joint(payload: serde_json::Value) -> super::CommandResult {
     let motor = if payload.get("motor").is_some() {
         Some(payload.get("motor").and_then(|v| {
             let obj = v.as_object()?;
-            Some(JointMotor {
-                target_velocity: obj.get("targetVelocity")?.as_f64()? as f32,
-                max_force: obj.get("maxForce")?.as_f64()? as f32,
-            })
+            let target_velocity = obj.get("targetVelocity")?.as_f64()? as f32;
+            let max_force = obj.get("maxForce")?.as_f64()? as f32;
+            if !target_velocity.is_finite() || !max_force.is_finite() {
+                return None;
+            }
+            Some(JointMotor { target_velocity, max_force })
         }))
     } else {
         None

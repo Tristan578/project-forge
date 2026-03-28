@@ -151,10 +151,38 @@ impl CustomShaderRegistry {
                     }
                     let mut balance: i32 = 0;
                     let mut escaped = false;
-                    for ch in slot.wgsl_function_body.chars() {
-                        match ch {
-                            '{' => balance += 1,
-                            '}' => {
+                    // Comment-aware brace scanner: skip braces inside // line comments
+                    // and /* */ block comments so they do not affect balance.
+                    let body = &slot.wgsl_function_body;
+                    let bytes = body.as_bytes();
+                    let len = bytes.len();
+                    let mut i = 0;
+                    while i < len {
+                        // Check for block comment start /*
+                        if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+                            i += 2;
+                            // Advance until */ or end of string
+                            while i + 1 < len {
+                                if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                                    i += 2;
+                                    break;
+                                }
+                                i += 1;
+                            }
+                            continue;
+                        }
+                        // Check for line comment start //
+                        if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'/' {
+                            i += 2;
+                            // Advance until newline or end of string
+                            while i < len && bytes[i] != b'\n' {
+                                i += 1;
+                            }
+                            continue;
+                        }
+                        match bytes[i] {
+                            b'{' => balance += 1,
+                            b'}' => {
                                 balance -= 1;
                                 // balance == -1 means the user body has closed the wrapping '{',
                                 // which would terminate the enclosing function.
@@ -165,6 +193,7 @@ impl CustomShaderRegistry {
                             }
                             _ => {}
                         }
+                        i += 1;
                     }
                     if escaped {
                         tracing::warn!("Slot {} rejected: brace escape detected in WGSL body", i);
@@ -247,16 +276,50 @@ pub fn validate_wgsl_source(code: &str) -> WgslValidation {
     }
 
     // Check balanced braces to catch obvious syntax errors early.
-    let open = code.chars().filter(|c| *c == '{').count();
-    let close = code.chars().filter(|c| *c == '}').count();
-    if open != close {
-        return WgslValidation {
-            valid: false,
-            error: Some(format!(
-                "Unbalanced braces: {} open, {} close",
-                open, close
-            )),
-        };
+    // Comment-aware: skip braces inside // line comments and /* */ block comments.
+    {
+        let bytes = code.as_bytes();
+        let len = bytes.len();
+        let mut i = 0;
+        let mut open: i32 = 0;
+        let mut close: i32 = 0;
+        while i < len {
+            // Block comment /*
+            if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+                i += 2;
+                while i + 1 < len {
+                    if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                        i += 2;
+                        break;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+            // Line comment //
+            if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'/' {
+                i += 2;
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            match bytes[i] {
+                b'{' => open += 1,
+                b'}' => close += 1,
+                _ => {}
+            }
+            i += 1;
+        }
+        if open != close {
+            return WgslValidation {
+                valid: false,
+                error: Some(format!(
+                    "Unbalanced braces: {} open, {} close",
+                    open, close
+                )),
+            };
+        }
     }
 
     WgslValidation {

@@ -199,6 +199,9 @@ fn perform_subdivide(mesh: &mut Mesh, level: u32) {
 
     // Cap subdivision level: level 6 already produces ~65k triangles from a basic quad.
     // Level 20 would create ~1 trillion triangles — a guaranteed browser hang/OOM.
+    if level > 5 {
+        tracing::warn!("Subdivision level {} clamped to 5", level);
+    }
     let level = level.min(5);
 
     for _ in 0..level {

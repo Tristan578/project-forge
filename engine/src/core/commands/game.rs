@@ -189,6 +189,10 @@ fn handle_mouse_delta(payload: serde_json::Value) -> super::CommandResult {
     let dx = payload.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
     let dy = payload.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
 
+    if !dx.is_finite() || !dy.is_finite() {
+        return Err("mouse_delta values must be finite".into());
+    }
+
     if queue_mouse_delta_from_bridge(dx, dy) {
         Ok(())
     } else {

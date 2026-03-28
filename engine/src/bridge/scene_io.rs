@@ -441,7 +441,6 @@ pub(super) fn apply_gltf_import(
     for request in pending.gltf_import_requests.drain(..) {
         // Guard against excessively large glTF payloads (base64 overhead ~1.33x,
         // so 50MB decoded ≈ 67.5MB base64).
-        const MAX_GLTF_BASE64_LEN: usize = 67_500_000;
         if request.data_base64.len() > MAX_GLTF_BASE64_LEN {
             tracing::error!(
                 "glTF import rejected: base64 payload {} bytes exceeds 50MB limit",
@@ -623,7 +622,6 @@ pub(super) fn apply_texture_load(
     for request in pending.texture_load_requests.drain(..) {
         // Guard against excessively large texture payloads (base64 overhead ~1.33x,
         // so 50MB decoded ≈ 67.5MB base64).
-        const MAX_TEXTURE_BASE64_LEN: usize = 67_500_000;
         if request.data_base64.len() > MAX_TEXTURE_BASE64_LEN {
             tracing::error!(
                 "Texture load rejected: base64 payload {} bytes exceeds 50MB limit",
