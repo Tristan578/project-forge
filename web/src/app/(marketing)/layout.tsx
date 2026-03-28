@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'SpawnForge - Create Games with AI',
     description:
-      'The AI-native browser-based game engine. 327+ MCP commands, visual scripting, one-click publish.',
+      'The AI-native browser-based game engine. 350 MCP commands, visual scripting, one-click publish.',
     type: 'website',
   },
 };

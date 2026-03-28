@@ -8,6 +8,10 @@ interface ErrorProps {
 }
 
 export default function Error({ error, reset }: ErrorProps) {
+  const displayMessage =
+    process.env.NODE_ENV === 'development'
+      ? error.message
+      : 'An unexpected error occurred. Please try again.';
   return (
     <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
       <div className="text-center space-y-6 px-4">
@@ -19,7 +23,7 @@ export default function Error({ error, reset }: ErrorProps) {
             Something went wrong
           </h1>
           <p className="text-zinc-400 max-w-sm mx-auto">
-            {error.message || "An unexpected error occurred."}
+            {displayMessage}
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
