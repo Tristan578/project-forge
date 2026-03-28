@@ -108,6 +108,12 @@ describe('load_scene', () => {
     expect(result.success).toBe(false);
     expect(result.error).toBeDefined();
   });
+
+  it('returns failure when json is structurally invalid', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'load_scene', { json: '{bad json}' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid JSON');
+  });
 });
 
 // ---------------------------------------------------------------------------

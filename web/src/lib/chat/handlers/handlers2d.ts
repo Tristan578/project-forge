@@ -208,7 +208,7 @@ const spriteHandlers: Record<string, ToolHandler> = {
 
   set_sprite_tint: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const p = parseArgs(z.object({ entityId: zEntityId, color: z.string() }), args);
+      const p = parseArgs(z.object({ entityId: zEntityId, color: z.string().regex(/^#[0-9a-fA-F]{3,8}$/, 'color must be a valid hex string (#RGB, #RRGGBB, etc.)') }), args);
       if (p.error) return p.error;
       const { entityId, color } = p.data;
       const existing = ctx.store.sprites[entityId] ?? defaultSpriteData();
