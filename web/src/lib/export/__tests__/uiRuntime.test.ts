@@ -279,13 +279,8 @@ describe('generateUIRuntimeCode: script injection prevention', () => {
     expect(code).toContain(`const uiData = ${safe}`);
   });
 
-  it('handles the classic }; alert(1) // injection payload', () => {
-    const malicious = '}; alert(1) //';
-    const code = generateUIRuntimeCode(malicious);
-    // The payload itself has no </script> or <!-- so it passes through unchanged,
-    // but crucially the embedding is as a JS expression value (caller controls quoting).
-    // The function's contract is escapeScriptContent, not full JS value escaping.
-    expect(code).toBeDefined();
+  it('rejects non-JSON uiData with JS injection payload', () => {
+    expect(() => generateUIRuntimeCode('}; alert(1) //')).toThrow('uiData must be valid JSON');
   });
 
   it('handles multiple </script> occurrences in uiData', () => {

@@ -7,6 +7,11 @@
 import { escapeScriptContent } from './exportUtils';
 
 export function generateUIRuntimeCode(uiData: string): string {
+  try {
+    JSON.parse(uiData);
+  } catch {
+    throw new Error('uiData must be valid JSON');
+  }
   return `
 (function() {
   const uiData = ${escapeScriptContent(uiData)};
