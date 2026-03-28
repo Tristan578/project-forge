@@ -1,9 +1,18 @@
 //! Physics command handlers (3D physics, joints, 2D physics).
 
 use serde::Deserialize;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::core::pending_commands::*;
 use crate::core::physics::{PhysicsData, JointData, JointType, JointLimits, JointMotor};
+
+/// Monotonic counter for request IDs — avoids `SystemTime::now()` which panics on WASM.
+static RAYCAST_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn next_request_id() -> String {
+    let id = RAYCAST_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("ray_{}", id)
+}
 use crate::core::physics_2d::{
     Physics2dData, ColliderShape2d, BodyType2d, PhysicsJoint2d,
 };
@@ -164,10 +173,7 @@ fn handle_raycast_query(payload: serde_json::Value) -> super::CommandResult {
     let data: RaycastPayload = serde_json::from_value(payload)
         .map_err(|e| format!("Invalid raycast_query payload: {}", e))?;
 
-    let request_id = data.request_id.unwrap_or_else(|| format!("ray_{}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis()));
+    let request_id = data.request_id.unwrap_or_else(next_request_id);
     let max_distance = data.max_distance.unwrap_or(100.0);
 
     let request = RaycastRequest {
@@ -257,10 +263,12 @@ fn handle_create_joint(payload: serde_json::Value) -> super::CommandResult {
 
     let limits = payload.get("limits").and_then(|v| {
         let obj = v.as_object()?;
-        Some(JointLimits {
-            min: obj.get("min")?.as_f64()? as f32,
-            max: obj.get("max")?.as_f64()? as f32,
-        })
+        let min = obj.get("min")?.as_f64()? as f32;
+        let max = obj.get("max")?.as_f64()? as f32;
+        if !min.is_finite() || !max.is_finite() || min > max {
+            return None;
+        }
+        Some(JointLimits { min, max })
     });
 
     let motor = payload.get("motor").and_then(|v| {
@@ -355,10 +363,12 @@ fn handle_update_joint(payload: serde_json::Value) -> super::CommandResult {
     let limits = if payload.get("limits").is_some() {
         Some(payload.get("limits").and_then(|v| {
             let obj = v.as_object()?;
-            Some(JointLimits {
-                min: obj.get("min")?.as_f64()? as f32,
-                max: obj.get("max")?.as_f64()? as f32,
-            })
+            let min = obj.get("min")?.as_f64()? as f32;
+            let max = obj.get("max")?.as_f64()? as f32;
+            if !min.is_finite() || !max.is_finite() || min > max {
+                return None;
+            }
+            Some(JointLimits { min, max })
         }))
     } else {
         None
