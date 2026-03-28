@@ -12,17 +12,35 @@ pub fn build_game_component(component_type: &str, properties_json: &str) -> Resu
     match component_type {
         "character_controller" => {
             let mut data = CharacterControllerData::default();
-            if let Some(v) = props.get("speed").and_then(|v| v.as_f64()) { data.speed = v as f32; }
-            if let Some(v) = props.get("jumpHeight").and_then(|v| v.as_f64()) { data.jump_height = v as f32; }
-            if let Some(v) = props.get("gravityScale").and_then(|v| v.as_f64()) { data.gravity_scale = v as f32; }
+            if let Some(v) = props.get("speed").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.speed = v.clamp(0.0, 1000.0); }
+            }
+            if let Some(v) = props.get("jumpHeight").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.jump_height = v.clamp(0.0, 100.0); }
+            }
+            if let Some(v) = props.get("gravityScale").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.gravity_scale = v.clamp(-10.0, 10.0); }
+            }
             if let Some(v) = props.get("canDoubleJump").and_then(|v| v.as_bool()) { data.can_double_jump = v; }
             Ok(GameComponentData::CharacterController(data))
         }
         "health" => {
             let mut data = HealthData::default();
-            if let Some(v) = props.get("maxHp").and_then(|v| v.as_f64()) { data.max_hp = v as f32; }
-            if let Some(v) = props.get("currentHp").and_then(|v| v.as_f64()) { data.current_hp = v as f32; }
-            if let Some(v) = props.get("invincibilitySecs").and_then(|v| v.as_f64()) { data.invincibility_secs = v as f32; }
+            if let Some(v) = props.get("maxHp").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() && v > 0.0 { data.max_hp = v.clamp(1.0, 1_000_000.0); }
+            }
+            if let Some(v) = props.get("currentHp").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.current_hp = v.clamp(0.0, 1_000_000.0); }
+            }
+            if let Some(v) = props.get("invincibilitySecs").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.invincibility_secs = v.clamp(0.0, 60.0); }
+            }
             if let Some(v) = props.get("respawnOnDeath").and_then(|v| v.as_bool()) { data.respawn_on_death = v; }
             if let Some(arr) = props.get("respawnPoint").and_then(|v| v.as_array()) {
                 if arr.len() == 3 {
@@ -38,15 +56,21 @@ pub fn build_game_component(component_type: &str, properties_json: &str) -> Resu
         }
         "collectible" => {
             let mut data = CollectibleData::default();
-            if let Some(v) = props.get("value").and_then(|v| v.as_u64()) { data.value = v as u32; }
+            if let Some(v) = props.get("value").and_then(|v| v.as_u64()) { data.value = v.min(1_000_000) as u32; }
             if let Some(v) = props.get("destroyOnCollect").and_then(|v| v.as_bool()) { data.destroy_on_collect = v; }
             if let Some(v) = props.get("pickupSoundAsset").and_then(|v| v.as_str()) { data.pickup_sound_asset = Some(v.to_string()); }
-            if let Some(v) = props.get("rotateSpeed").and_then(|v| v.as_f64()) { data.rotate_speed = v as f32; }
+            if let Some(v) = props.get("rotateSpeed").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.rotate_speed = v.clamp(-100.0, 100.0); }
+            }
             Ok(GameComponentData::Collectible(data))
         }
         "damage_zone" => {
             let mut data = DamageZoneData::default();
-            if let Some(v) = props.get("damagePerSecond").and_then(|v| v.as_f64()) { data.damage_per_second = v as f32; }
+            if let Some(v) = props.get("damagePerSecond").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.damage_per_second = v.clamp(0.0, 10_000.0); }
+            }
             if let Some(v) = props.get("oneShot").and_then(|v| v.as_bool()) { data.one_shot = v; }
             Ok(GameComponentData::DamageZone(data))
         }
@@ -59,19 +83,26 @@ pub fn build_game_component(component_type: &str, properties_json: &str) -> Resu
             let mut data = TeleporterData::default();
             if let Some(arr) = props.get("targetPosition").and_then(|v| v.as_array()) {
                 if arr.len() == 3 {
-                    data.target_position = [
-                        arr[0].as_f64().unwrap_or(0.0) as f32,
-                        arr[1].as_f64().unwrap_or(1.0) as f32,
-                        arr[2].as_f64().unwrap_or(0.0) as f32,
-                    ];
+                    let x = arr[0].as_f64().unwrap_or(0.0) as f32;
+                    let y = arr[1].as_f64().unwrap_or(1.0) as f32;
+                    let z = arr[2].as_f64().unwrap_or(0.0) as f32;
+                    if x.is_finite() && y.is_finite() && z.is_finite() {
+                        data.target_position = [x, y, z];
+                    }
                 }
             }
-            if let Some(v) = props.get("cooldownSecs").and_then(|v| v.as_f64()) { data.cooldown_secs = v as f32; }
+            if let Some(v) = props.get("cooldownSecs").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.cooldown_secs = v.clamp(0.0, 300.0); }
+            }
             Ok(GameComponentData::Teleporter(data))
         }
         "moving_platform" => {
             let mut data = MovingPlatformData::default();
-            if let Some(v) = props.get("speed").and_then(|v| v.as_f64()) { data.speed = v as f32; }
+            if let Some(v) = props.get("speed").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.speed = v.clamp(0.0, 1000.0); }
+            }
             if let Some(arr) = props.get("waypoints").and_then(|v| v.as_array()) {
                 let waypoints: Vec<[f32; 3]> = arr.iter().filter_map(|w| {
                     let wp = w.as_array()?;
@@ -89,7 +120,10 @@ pub fn build_game_component(component_type: &str, properties_json: &str) -> Resu
                     data.waypoints = waypoints;
                 }
             }
-            if let Some(v) = props.get("pauseDuration").and_then(|v| v.as_f64()) { data.pause_duration = v as f32; }
+            if let Some(v) = props.get("pauseDuration").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.pause_duration = v.clamp(0.0, 60.0); }
+            }
             if let Some(v) = props.get("loopMode").and_then(|v| v.as_str()) {
                 data.loop_mode = match v {
                     "pingPong" => PlatformLoopMode::PingPong,
@@ -109,8 +143,11 @@ pub fn build_game_component(component_type: &str, properties_json: &str) -> Resu
         "spawner" => {
             let mut data = SpawnerData::default();
             if let Some(v) = props.get("entityType").and_then(|v| v.as_str()) { data.entity_type = v.to_string(); }
-            if let Some(v) = props.get("intervalSecs").and_then(|v| v.as_f64()) { data.interval_secs = v as f32; }
-            if let Some(v) = props.get("maxCount").and_then(|v| v.as_u64()) { data.max_count = v as u32; }
+            if let Some(v) = props.get("intervalSecs").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.interval_secs = v.clamp(0.1, 3600.0); }
+            }
+            if let Some(v) = props.get("maxCount").and_then(|v| v.as_u64()) { data.max_count = v.min(1000) as u32; }
             if let Some(arr) = props.get("spawnOffset").and_then(|v| v.as_array()) {
                 if arr.len() == 3 {
                     data.spawn_offset = [
@@ -126,16 +163,31 @@ pub fn build_game_component(component_type: &str, properties_json: &str) -> Resu
         "follower" => {
             let mut data = FollowerData::default();
             if let Some(v) = props.get("targetEntityId").and_then(|v| v.as_str()) { data.target_entity_id = Some(v.to_string()); }
-            if let Some(v) = props.get("speed").and_then(|v| v.as_f64()) { data.speed = v as f32; }
-            if let Some(v) = props.get("stopDistance").and_then(|v| v.as_f64()) { data.stop_distance = v as f32; }
+            if let Some(v) = props.get("speed").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.speed = v.clamp(0.0, 1000.0); }
+            }
+            if let Some(v) = props.get("stopDistance").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.stop_distance = v.clamp(0.0, 1000.0); }
+            }
             if let Some(v) = props.get("lookAtTarget").and_then(|v| v.as_bool()) { data.look_at_target = v; }
             Ok(GameComponentData::Follower(data))
         }
         "projectile" => {
             let mut data = ProjectileData::default();
-            if let Some(v) = props.get("speed").and_then(|v| v.as_f64()) { data.speed = v as f32; }
-            if let Some(v) = props.get("damage").and_then(|v| v.as_f64()) { data.damage = v as f32; }
-            if let Some(v) = props.get("lifetimeSecs").and_then(|v| v.as_f64()) { data.lifetime_secs = v as f32; }
+            if let Some(v) = props.get("speed").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.speed = v.clamp(0.0, 10_000.0); }
+            }
+            if let Some(v) = props.get("damage").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.damage = v.clamp(0.0, 100_000.0); }
+            }
+            if let Some(v) = props.get("lifetimeSecs").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.lifetime_secs = v.clamp(0.0, 300.0); }
+            }
             if let Some(v) = props.get("gravity").and_then(|v| v.as_bool()) { data.gravity = v; }
             if let Some(v) = props.get("destroyOnHit").and_then(|v| v.as_bool()) { data.destroy_on_hit = v; }
             Ok(GameComponentData::Projectile(data))
@@ -157,7 +209,10 @@ pub fn build_game_component(component_type: &str, properties_json: &str) -> Resu
         "dialogue_trigger" => {
             let mut data = DialogueTriggerData::default();
             if let Some(v) = props.get("dialogueTreeId").and_then(|v| v.as_str()) { data.dialogue_tree_id = v.to_string(); }
-            if let Some(v) = props.get("interactionRadius").and_then(|v| v.as_f64()) { data.interaction_radius = v as f32; }
+            if let Some(v) = props.get("interactionRadius").and_then(|v| v.as_f64()) {
+                let v = v as f32;
+                if v.is_finite() { data.interaction_radius = v.clamp(0.0, 100.0); }
+            }
             if let Some(v) = props.get("autoStart").and_then(|v| v.as_bool()) { data.auto_start = v; }
             if let Some(v) = props.get("oneShot").and_then(|v| v.as_bool()) { data.one_shot = v; }
             if let Some(v) = props.get("interactionKey").and_then(|v| v.as_str()) { data.interaction_key = v.to_string(); }
