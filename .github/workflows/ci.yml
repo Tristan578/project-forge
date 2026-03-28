@@ -161,6 +161,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install docs dependencies
+        run: cd apps/docs && npm ci
+
       - name: Run docs vitest suite
         run: cd apps/docs && npx vitest run
 
