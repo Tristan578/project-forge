@@ -1,36 +1,20 @@
-//! Entity reparenting system.
+//! Entity reparenting — pure logic.
 //!
 //! Handles reparenting entities in the scene hierarchy, including validation
 //! for circular references and proper ChildOf/Children component management.
+//!
+//! The bridge-side apply system (which drains requests and emits JS events)
+//! lives in `bridge/reparent.rs`.
 
 use bevy::prelude::*;
 
 use super::entity_id::EntityId;
-use super::pending_commands::{PendingCommands, ReparentRequest};
-#[cfg(target_arch = "wasm32")]
-use crate::bridge::events::emit_event;
-
-/// System that processes reparent requests from the bridge.
-pub fn apply_reparent_requests(
-    mut pending: ResMut<PendingCommands>,
-    mut commands: Commands,
-    query: Query<(Entity, &EntityId, Option<&ChildOf>, Option<&Children>)>,
-) {
-    for request in pending.reparent_requests.drain(..) {
-        let result = process_reparent(&request, &mut commands, &query);
-
-        // Emit result event for bridge
-        let (success, error) = match result {
-            Ok(()) => (true, None),
-            Err(e) => (false, Some(e)),
-        };
-
-        emit_reparent_result(&request.entity_id, success, error);
-    }
-}
+use super::pending_commands::ReparentRequest;
 
 /// Process a single reparent request.
-fn process_reparent(
+/// Returns `Ok(())` on success or an error message.
+/// Called from `bridge::reparent::apply_reparent_requests`.
+pub fn process_reparent(
     request: &ReparentRequest,
     commands: &mut Commands,
     query: &Query<(Entity, &EntityId, Option<&ChildOf>, Option<&Children>)>,
@@ -111,18 +95,3 @@ fn is_descendant_of(
     false
 }
 
-/// Emit reparent result event to JavaScript.
-#[cfg(target_arch = "wasm32")]
-fn emit_reparent_result(entity_id: &str, success: bool, error: Option<String>) {
-    let payload = serde_json::json!({
-        "success": success,
-        "entityId": entity_id,
-        "error": error,
-    });
-
-    emit_event("REPARENT_RESULT", &payload);
-}
-
-/// No-op on non-wasm targets.
-#[cfg(not(target_arch = "wasm32"))]
-fn emit_reparent_result(_entity_id: &str, _success: bool, _error: Option<String>) {}

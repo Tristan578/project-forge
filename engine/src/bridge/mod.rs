@@ -12,6 +12,7 @@ mod audio;
 mod query;
 mod animation;
 mod particles;
+mod reparent;
 mod scene_io;
 mod procedural;
 mod mesh_ops;
@@ -489,7 +490,7 @@ impl Plugin for SelectionPlugin {
                     material::apply_shader_removals,
                     entity_factory::apply_undo_requests,
                     entity_factory::apply_redo_requests,
-                    core::reparent::apply_reparent_requests,
+                    reparent::apply_reparent_requests,
                     core_systems::apply_selection_requests,
                 ).in_set(EditorApplySet))
                 .add_systems(Update, material::apply_custom_wgsl_source_updates.in_set(EditorApplySet))
