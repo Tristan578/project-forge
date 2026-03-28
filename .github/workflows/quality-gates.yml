@@ -190,8 +190,6 @@ jobs:
           name: coverage-report
           path: web/coverage
 
-      - name: Install jq and bc
-        run: sudo apt-get install -y jq bc
 
       - name: Run coverage ratchet (informational on PRs, commits on main)
         run: bash .claude/skills/testing/scripts/ratchet-coverage.sh web/coverage
@@ -445,7 +443,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm

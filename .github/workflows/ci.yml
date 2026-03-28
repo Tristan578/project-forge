@@ -173,6 +173,36 @@ jobs:
       - name: Verify MCP manifest sync
         run: npx tsx apps/docs/scripts/check-manifest-sync.ts
 
+  # ---- Design Internal Gate ----
+  # Runs when apps/design/** or packages/ui/** changed.
+  # Builds Storybook to verify no compilation errors in design system changes.
+  # Path-gated so design-only PRs pay the Storybook build tax but engine/web PRs
+  # that don't touch the design system are unaffected.
+  design-internal-gate:
+    name: Design Internal Gate
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-design == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      - name: Build Storybook
+        run: cd apps/design && npx storybook build -o storybook-static
+
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without
   # a local build. Only runs when VERCEL_DEPLOY_ENABLED is set and web/mcp files changed.
@@ -201,7 +231,7 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@latest
+        run: npm i -g vercel@50.34.3
 
       - name: Install dependencies
         run: npm ci
