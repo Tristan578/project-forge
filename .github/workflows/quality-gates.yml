@@ -534,27 +534,43 @@ jobs:
 
   storybook-internal-gate:
     name: Storybook Internal Leak Gate
-    needs: [ci-gate]
-    if: ${{ contains(github.event.pull_request.changed_files || '', 'apps/design') || contains(github.event.pull_request.changed_files || '', 'packages/ui') }}
+    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check if design system files changed
+        id: check-design
+        run: |
+          CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} 2>/dev/null || echo "")
+          if echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No design system changes — skipping Storybook build"
+          fi
       - uses: actions/setup-node@v6
+        if: steps.check-design.outputs.changed == 'true'
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
+        if: steps.check-design.outputs.changed == 'true'
       - run: cd packages/ui && npm run build
+        if: steps.check-design.outputs.changed == 'true'
 
       - name: Build public Storybook (INCLUDE_INTERNAL not set)
+        if: steps.check-design.outputs.changed == 'true'
         run: cd apps/design && npm run build-storybook -- --output-dir storybook-public
         env:
           INCLUDE_INTERNAL: ''
 
       - name: Assert no internal story titles in public build
+        if: steps.check-design.outputs.changed == 'true'
         run: |
           if [ ! -d "apps/design/stories/internal" ]; then
             echo "No internal stories directory -- nothing to check."

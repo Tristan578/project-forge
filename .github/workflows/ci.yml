@@ -30,6 +30,7 @@ jobs:
       needs-mcp: ${{ steps.changes.outputs.mcp }}
       needs-ci: ${{ steps.changes.outputs.ci }}
       needs-docs: ${{ steps.changes.outputs.docs }}
+      needs-design: ${{ steps.changes.outputs.design }}
       needs-any-code: ${{ steps.changes.outputs.any-code }}
     steps:
       - uses: actions/checkout@v4
@@ -44,16 +45,17 @@ jobs:
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
-          web=false; engine=false; mcp=false; ci=false; docs=false
+          web=false; engine=false; mcp=false; ci=false; docs=false; design=false
 
           echo "$CHANGED" | grep -q '^web/' && web=true
           echo "$CHANGED" | grep -q '^engine/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
           echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
           echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && docs=true
+          echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
 
           any_code=false
-          if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ]; then
+          if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] || [ "$design" = "true" ]; then
             any_code=true
           fi
 
@@ -62,10 +64,11 @@ jobs:
           echo "mcp=$mcp" >> "$GITHUB_OUTPUT"
           echo "ci=$ci" >> "$GITHUB_OUTPUT"
           echo "docs=$docs" >> "$GITHUB_OUTPUT"
+          echo "design=$design" >> "$GITHUB_OUTPUT"
           echo "any-code=$any_code" >> "$GITHUB_OUTPUT"
 
           echo "Changed paths detected:"
-          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs any-code=$any_code"
+          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design any-code=$any_code"
           if [ "$any_code" = "false" ]; then
             echo "No code changes — downstream jobs will be skipped"
           fi
