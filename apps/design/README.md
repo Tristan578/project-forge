@@ -15,6 +15,23 @@ cd packages/ui && npm run build
 cd apps/design && npm run storybook
 ```
 
+## Vendored `@spawnforge/ui`
+
+The design app uses a vendored copy of `@spawnforge/ui` at `vendored/spawnforge-ui/` because Vercel's per-app root directory scoping cannot access the monorepo's `packages/ui/` during remote builds.
+
+**To update the vendored copy after changing `packages/ui/`:**
+
+```bash
+# From monorepo root:
+cd packages/ui && npm run build
+rm -rf apps/design/vendored/spawnforge-ui/dist
+cp -r packages/ui/dist apps/design/vendored/spawnforge-ui/dist
+cp packages/ui/src/effects/effects.css apps/design/vendored/spawnforge-ui/dist/effects/
+cp packages/ui/src/tokens/theme.css apps/design/vendored/spawnforge-ui/dist/tokens/
+```
+
+Commit the updated `vendored/` directory alongside your `packages/ui/` changes.
+
 ## Theme Switcher
 
 The Storybook toolbar includes a theme switcher addon. Click the palette icon in the toolbar to cycle through the seven SpawnForge themes: `dark`, `light`, `ember`, `ice`, `leaf`, `rust`, `mech`.

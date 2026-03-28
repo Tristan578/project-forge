@@ -69,6 +69,17 @@ cd web && npm run db:studio # Visual DB browser
 
 Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_KEY`, `UPSTASH_REDIS_REST_URL`. See `web/.env.example` for full list.
 
+### CD Pipeline Secrets (GitHub Repository Settings)
+
+| Secret | Purpose |
+|--------|---------|
+| `VERCEL_TOKEN` | Vercel API token for all deployments |
+| `VERCEL_TEAM_ID` | Vercel team/org ID |
+| `VERCEL_PROJECT_ID` | Main web app project ID |
+| `VERCEL_STAGING_PROJECT_ID` | Staging web app project ID |
+| `VERCEL_DOCS_PROJECT_ID` | Docs app (`apps/docs/`) project ID |
+| `VERCEL_DESIGN_PROJECT_ID` | Design workbench (`apps/design/`) project ID |
+
 ## MCP Servers (`.mcp.json`)
 
 - **context7** — live library documentation lookup for all 30+ dependencies
