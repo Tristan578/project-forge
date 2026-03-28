@@ -10,8 +10,7 @@
 import { useState, useCallback, useRef, useMemo, memo, type MouseEvent, type KeyboardEvent } from 'react';
 import { Layers, PackagePlus } from 'lucide-react';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { useEditorStore, type SceneGraph } from '@/stores/editorStore';
-import { getWasmModule } from '@/hooks/useEngine';
+import { useEditorStore, getCommandDispatcher, type SceneGraph } from '@/stores/editorStore';
 import { SceneNode } from './SceneNode';
 import { ContextMenu } from './ContextMenu';
 import { HierarchySearch } from './HierarchySearch';
@@ -281,10 +280,11 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
 
   const handleFocus = useCallback(() => {
     if (contextMenu.entityId) {
-      // Send focus_camera command to Rust
-      const wasmModule = getWasmModule();
-      if (wasmModule) {
-        wasmModule.handle_command('focus_camera', { entityId: contextMenu.entityId });
+      // Route through the store dispatcher so the command is tracked and goes
+      // through the same path as all other engine operations (undo/event/analytics).
+      const dispatch = getCommandDispatcher();
+      if (dispatch) {
+        dispatch('focus_camera', { entityId: contextMenu.entityId });
       }
     }
   }, [contextMenu.entityId]);
@@ -396,7 +396,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
   return (
     <div ref={containerRef} className="flex flex-col h-full relative">
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-neutral-700">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--sf-border)]">
         <Layers className="w-4 h-4 text-neutral-400" />
         <span className="text-sm font-medium text-neutral-300">Scene Hierarchy</span>
         {selectedIds.size > 0 && (

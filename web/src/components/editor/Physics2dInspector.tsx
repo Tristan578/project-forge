@@ -123,6 +123,7 @@ export function Physics2dInspector() {
   );
 
   const handleRemove = useCallback(() => {
+    // TODO(PF): Replace window.confirm() with an inline confirmation dialog (accessible, styled).
     if (primaryId && window.confirm('Remove 2D physics from this entity?')) {
       removePhysics2d(primaryId);
     }
