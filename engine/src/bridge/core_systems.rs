@@ -122,38 +122,15 @@ pub(super) fn apply_mode_change_requests(
                 if current == EngineMode::Edit { continue; }
                 // Restore scene from snapshot (uses mutable query p1)
                 {
-                    let restore_query = queries.p1();
+                    let mut restore_query = queries.p1();
                     crate::core::engine_mode::restore_scene(
                         &mut commands,
                         &snapshot,
-                        &restore_query,
+                        &mut restore_query,
                         &runtime_query,
                         &mut meshes,
                         &mut materials,
                     );
-                }
-                // Restore transform state for existing entities
-                {
-                    let mut restore_query = queries.p1();
-                    for snap in &snapshot.entities {
-                        for (_, eid, mut transform, mut ename, mut visible, mat_data, light_data, phys_data) in restore_query.iter_mut() {
-                            if eid.0 == snap.entity_id {
-                                *transform = snap.transform.to_transform();
-                                ename.0 = snap.name.clone();
-                                visible.0 = snap.visible;
-                                if let (Some(snap_mat), Some(mut current_mat)) = (&snap.material_data, mat_data) {
-                                    *current_mat = snap_mat.clone();
-                                }
-                                if let (Some(snap_light), Some(mut current_light)) = (&snap.light_data, light_data) {
-                                    *current_light = snap_light.clone();
-                                }
-                                if let (Some(snap_phys), Some(mut current_phys)) = (&snap.physics_data, phys_data) {
-                                    *current_phys = snap_phys.clone();
-                                }
-                                break;
-                            }
-                        }
-                    }
                 }
                 *mode = EngineMode::Edit;
                 events::emit_engine_mode_changed(&mode);
