@@ -44,3 +44,17 @@ export { Toast, type ToastProps, type ToastVariant } from './primitives/Toast';
 
 // Ambient theme effects
 export { ThemeAmbient } from './effects/ThemeAmbient';
+
+// Tier 2 Composites
+export { ThemeImportExport } from './composites/ThemeImportExport';
+export { SettingsPanel, type SettingsPanelProps } from './composites/SettingsPanel';
+
+// Utilities
+export { validateCustomTheme, type ValidatedTheme } from './utils/themeValidator';
+export { applyThemeTokens } from './utils/applyThemeTokens';
+export {
+  saveCustomTheme,
+  loadCustomTheme,
+  deleteCustomTheme,
+  listCustomThemes,
+} from './utils/themeStorage';

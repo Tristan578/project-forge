@@ -603,3 +603,168 @@ jobs:
       - name: cargo audit (engine)
         working-directory: engine
         run: cargo audit
+
+  lighthouse-delta:
+    name: Lighthouse Effects Delta Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      - name: Install web dependencies
+        run: cd web && npm ci
+
+      - name: Install @lhci/cli
+        run: npm install -g @lhci/cli
+
+      - name: Start dev server for baseline (effects off)
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          NEXT_PUBLIC_EFFECTS: 'off'
+          PORT: '3000'
+        run: |
+          npm run dev &
+          npx wait-on http://localhost:3000 --timeout 60000
+
+      - name: Collect baseline Lighthouse runs (effects off)
+        run: |
+          lhci collect \
+            --url=http://localhost:3000/dev \
+            --number-of-runs=3 \
+            --output=json \
+            --output-path=.lhci-baseline/ \
+            --chrome-flags="--headless --no-sandbox --disable-gpu"
+
+      - name: Start dev server for effects-on run
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          NEXT_PUBLIC_EFFECTS: 'on'
+          PORT: '3001'
+        run: |
+          npm run dev &
+          npx wait-on http://localhost:3001 --timeout 60000
+
+      - name: Collect effects-on Lighthouse runs
+        run: |
+          lhci collect \
+            --url=http://localhost:3001/dev \
+            --number-of-runs=3 \
+            --output=json \
+            --output-path=.lhci-effects/ \
+            --chrome-flags="--headless --no-sandbox --disable-gpu"
+
+      - name: Assert effects delta less than 5 performance points
+        run: |
+          node << 'NODE_EOF'
+          const fs = require('fs');
+          const path = require('path');
+
+          function getMedianPerformance(dir) {
+            const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+            const scores = files.map(f => {
+              const report = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+              return report.categories && report.categories.performance
+                ? report.categories.performance.score
+                : 0;
+            }).sort((a, b) => a - b);
+            return scores[Math.floor(scores.length / 2)] || 0;
+          }
+
+          const baseScore = getMedianPerformance('.lhci-baseline');
+          const testScore = getMedianPerformance('.lhci-effects');
+          const delta = baseScore - testScore;
+
+          console.log('Baseline (effects off): ' + (baseScore * 100).toFixed(1));
+          console.log('Effects on: ' + (testScore * 100).toFixed(1));
+          console.log('Delta: ' + (delta * 100).toFixed(1) + ' points');
+
+          if (delta > 0.05) {
+            console.error('FAIL: Effects caused ' + (delta * 100).toFixed(1) + ' point regression (max allowed: 5)');
+            process.exit(1);
+          }
+          console.log('PASS: Effects delta within acceptable range (< 5 points)');
+          NODE_EOF
+
+  storybook-internal-gate:
+    name: Storybook Internal Leak Gate
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check if design system files changed
+        id: check-design
+        run: |
+          CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} 2>/dev/null || echo "")
+          if echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No design system changes — skipping Storybook build"
+          fi
+      - uses: actions/setup-node@v6
+        if: steps.check-design.outputs.changed == 'true'
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+        if: steps.check-design.outputs.changed == 'true'
+      - run: cd packages/ui && npm run build
+        if: steps.check-design.outputs.changed == 'true'
+
+      - name: Build public Storybook (INCLUDE_INTERNAL not set)
+        if: steps.check-design.outputs.changed == 'true'
+        run: cd apps/design && npm run build-storybook -- --output-dir storybook-public
+        env:
+          INCLUDE_INTERNAL: ''
+
+      - name: Assert no internal story titles in public build
+        if: steps.check-design.outputs.changed == 'true'
+        run: |
+          if [ ! -d "apps/design/stories/internal" ]; then
+            echo "No internal stories directory -- nothing to check."
+            exit 0
+          fi
+          # Extract one title per line; use grep -F (fixed-string) so special regex
+          # characters in story titles (.  +  (  etc.) cannot cause false matches or
+          # ReDoS issues when the title is used as the search term.
+          INTERNAL_TITLES=$(grep -r --include="*.stories.*" "title:" apps/design/stories/internal/ \
+            | sed "s/.*title:[[:space:]]*['\"]//;s/['\"].*//")
+          if [ -z "$INTERNAL_TITLES" ]; then
+            echo "No internal story titles found -- nothing to check."
+            exit 0
+          fi
+          echo "Checking for internal titles:"
+          echo "$INTERNAL_TITLES"
+          FOUND=0
+          while IFS= read -r title; do
+            [ -z "$title" ] && continue
+            if grep -r --include="*.js" -F "$title" apps/design/storybook-public/ 2>/dev/null | head -1; then
+              FOUND=1
+            fi
+          done <<< "$INTERNAL_TITLES"
+          if [ "$FOUND" -eq 1 ]; then
+            echo "::error::Public Storybook build contains internal story titles. Check INCLUDE_INTERNAL gating."
+            exit 1
+          fi
+          echo "PASS: No internal story titles found in public Storybook build."
