@@ -3,7 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { gameComments, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { rateLimit, rateLimitResponse, rateLimitPublicRoute } from '@/lib/rateLimit';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 import { containsBlockedKeyword } from '@/lib/moderation/keywords';
 import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
@@ -13,9 +13,12 @@ export const dynamic = 'force-dynamic';
 
 // Get comments for a game
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const limited = await rateLimitPublicRoute(req, 'community-game-comments', 30, 60_000);
+  if (limited) return limited;
+
   try {
     const db = getDb();
     const { id: gameId } = await params;
