@@ -290,8 +290,8 @@ test.describe('Accessibility @ui', () => {
       // At least one aria-live region should exist for dynamic announcements
       const liveRegions = page.locator('[aria-live]');
       const count = await liveRegions.count();
-      // Editor should have aria-live regions for status announcements
-      expect(count).toBeGreaterThanOrEqual(0); // May be 0 if all are lazily rendered
+      // Editor must have aria-live regions for status announcements
+      expect(count).toBeGreaterThan(0);
     });
 
     test('status announcements area exists or polite live region is present', async ({ page }) => {
@@ -300,10 +300,9 @@ test.describe('Accessibility @ui', () => {
       const assertiveRegions = page.locator('[aria-live="assertive"]');
       const totalLive = (await politeRegions.count()) + (await assertiveRegions.count());
 
-      // The editor may use aria-live regions for entity spawn confirmations,
-      // filter match counts, etc. Zero is acceptable for a game engine editor
-      // as most feedback is visual — this test documents the current state.
-      expect(totalLive).toBeGreaterThanOrEqual(0);
+      // The editor must have aria-live regions for entity spawn confirmations,
+      // filter match counts, and other dynamic status announcements.
+      expect(totalLive).toBeGreaterThan(0);
     });
   });
 });

@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
 import { PixelArtEditor } from '../PixelArtEditor';
 import { useEditorStore } from '@/stores/editorStore';
 
@@ -25,11 +25,11 @@ describe('PixelArtEditor', () => {
   });
 
   it('renders nothing when closed', () => {
-    const { container } = render(
+    render(
       <PixelArtEditor open={false} onClose={vi.fn()} entityId={null} />
     );
-    // When not open, should render nothing or an empty shell
-    expect(container).toBeDefined();
+    // When not open, no dialog or modal content should be rendered
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('renders the editor when open', () => {

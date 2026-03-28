@@ -83,12 +83,12 @@ describe('POST /api/generate/model', () => {
   });
 
   it('returns 400 for invalid JSON', async () => {
-    const req = new Request('http://test/api/generate/model', {
+    const req = new NextRequest('http://test/api/generate/model', {
       method: 'POST',
       body: 'not json',
     });
 
-    const res = await POST(req as unknown as import('next/server').NextRequest);
+    const res = await POST(req);
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error).toBe('Invalid JSON');

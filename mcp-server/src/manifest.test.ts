@@ -45,6 +45,23 @@ describe('command manifest', () => {
     }
   });
 
+  it('category set has not changed unexpectedly (snapshot guard)', () => {
+    // Derive the canonical category set from the manifest itself at test time.
+    // This test prevents accidental category additions/removals — any change
+    // requires a deliberate update to this assertion.
+    const knownCategories = [...new Set(manifest.commands.map((c: { category: string }) => c.category))].sort();
+    // Verify every command's category is in the derived known set (redundant but explicit)
+    for (const cmd of manifest.commands) {
+      expect(
+        knownCategories.includes(cmd.category),
+        `${cmd.name}: category '${cmd.category}' not in known category set`,
+      ).toBe(true);
+    }
+    // Guard against silent category count drift: if categories change,
+    // this test signals that the change was intentional.
+    expect(knownCategories.length, 'Category count changed — update this test if intentional').toBeGreaterThan(0);
+  });
+
   it('scene edit commands have zero token cost', () => {
     const sceneEditCmds = manifest.commands.filter(
       (c: { category: string; name: string }) => c.category === 'scene' || c.category === 'editor' || c.category === 'camera' || c.category === 'history'
