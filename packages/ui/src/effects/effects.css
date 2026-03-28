@@ -116,3 +116,14 @@
   66%  { transform: rotate(-1deg) scaleX(0.99); opacity: 0.08; }
   100% { transform: rotate(0deg) scaleX(1); opacity: 0.06; }
 }
+
+/* Defense-in-depth: suppress all effect animations when reduced-motion is preferred.
+   ThemeAmbient already returns null at the JS layer, but this CSS-level guard ensures
+   effects are safe to consume standalone outside of ThemeAmbient. */
+@media (prefers-reduced-motion: reduce) {
+  [data-sf-effect] *,
+  [data-sf-effect] {
+    animation: none !important;
+    transition: none !important;
+  }
+}

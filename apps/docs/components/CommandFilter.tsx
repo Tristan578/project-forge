@@ -288,7 +288,8 @@ const clearButtonStyle: React.CSSProperties = {
   cursor: 'pointer',
   fontSize: '0.75rem',
   fontWeight: 500,
-  padding: '0.25rem 0.625rem',
+  padding: '0.625rem 0.875rem',
+  minHeight: '44px',
 };
 
 const inlineTextButtonStyle: React.CSSProperties = {
@@ -297,6 +298,7 @@ const inlineTextButtonStyle: React.CSSProperties = {
   color: 'var(--accent, #3b82f6)',
   cursor: 'pointer',
   textDecoration: 'underline',
-  padding: 0,
+  padding: '0.625rem 0',
+  minHeight: '44px',
   fontSize: 'inherit',
 };
