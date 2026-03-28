@@ -14,7 +14,8 @@
     "next": "^16",
     "react": "^19",
     "react-dom": "^19",
-    "gray-matter": "^4"
+    "gray-matter": "^4",
+    "tailwindcss": "^4"
   },
   "devDependencies": {
     "tsx": "^4",

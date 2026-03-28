@@ -13,7 +13,7 @@
     "@storybook/addon-a11y": "^8.6",
     "@storybook/addon-essentials": "^8.6",
     "@storybook/test": "^8.6",
-    "@spawnforge/ui": "*",
+    "@spawnforge/ui": "file:./vendored/spawnforge-ui",
     "chromatic": "^11",
     "react": "^19",
     "react-dom": "^19"

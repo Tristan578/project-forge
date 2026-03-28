@@ -84,8 +84,9 @@ export function sanitizeAuthor(raw: string): string | null {
   return escaped;
 }
 
-/** Escape a string for safe inclusion in YAML double-quoted strings and MDX body. */
-function htmlEscape(str: string): string {
+/** Escape a value for safe inclusion in YAML double-quoted strings and MDX body. */
+function htmlEscape(value: unknown): string {
+  const str = value == null ? '' : String(value);
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -299,7 +300,9 @@ const isMainModule =
   process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isMainModule) {
-  const manifestPath = path.join(repoRoot, 'mcp-server/manifest/commands.json');
+  const manifestPath = process.env.MANIFEST_PATH
+    ? path.resolve(process.env.MANIFEST_PATH)
+    : path.join(repoRoot, 'mcp-server/manifest/commands.json');
   const outputDir = path.join(__dirname, '../content/mcp');
 
   const result = generateMcpDocs(manifestPath, outputDir);
@@ -308,9 +311,10 @@ if (isMainModule) {
     console.error(`Error: ${err}`);
   }
 
-  if (result.errors.length === 0) {
-    console.log(`Generated ${result.generatedCount} MCP command pages.`);
-  } else {
-    process.exit(1);
+  console.log(`Generated ${result.generatedCount} MCP command pages.`);
+  if (result.errors.length > 0) {
+    console.warn(`${result.errors.length} commands had generation errors (non-fatal).`);
+    // Don't exit(1) — partial generation is acceptable for deployment.
+    // CI gate script (ci-gate-check.ts) enforces strict error checking separately.
   }
 }
