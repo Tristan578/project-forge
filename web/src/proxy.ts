@@ -29,7 +29,7 @@ function handleCors(req: NextRequest): NextResponse | null {
     const isAllowedOrigin =
       !origin ||
       ALLOWED_ORIGINS.includes(origin) ||
-      (process.env.NODE_ENV === 'development' && origin.startsWith('http://localhost'));
+      (process.env.NODE_ENV === 'development' && (origin.startsWith('http://localhost') || origin.includes('.localhost:')));
 
     if (!isAllowedOrigin) {
       return NextResponse.json({ error: 'Origin not allowed' }, { status: 403 });

@@ -61,7 +61,7 @@ const features = [
     icon: Users,
     title: 'Real-Time Collaboration',
     description:
-      'Work together on games in real time. Full multiplayer editing support with conflict resolution.',
+      'Multi-user game editing with real-time sync and conflict resolution. Designed for teams.',
     badge: 'Coming Soon',
   },
   {
