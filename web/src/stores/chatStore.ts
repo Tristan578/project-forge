@@ -104,9 +104,8 @@ interface ChatState {
   loadConversations: () => void;
 }
 
-let messageCounter = 0;
 function nextId(): string {
-  return `msg_${Date.now()}_${++messageCounter}`;
+  return crypto.randomUUID();
 }
 
 // ---------------------------------------------------------------------------

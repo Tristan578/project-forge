@@ -1,3 +1,5 @@
+'use client';
+
 import { create } from 'zustand';
 import type { DockviewApi, SerializedDockview } from 'dockview-react';
 import { LAYOUT_PRESETS, type LayoutPresetId } from '@/lib/workspace/presets';
