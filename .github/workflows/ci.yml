@@ -161,6 +161,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run docs vitest suite
+        run: cd apps/docs && npx vitest run
+
       - name: Generate MCP docs
         run: cd apps/docs && npx tsx scripts/generate-mcp-docs.ts
 
