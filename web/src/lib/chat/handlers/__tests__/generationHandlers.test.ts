@@ -401,6 +401,46 @@ describe('generationHandlers', () => {
       const { result } = await invoke('generate_voice', {});
       expect(result.success).toBe(false);
     });
+
+    it('sends enriched voiceStyle (not raw speaker) to API', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioBase64: 'base64voice' }),
+      });
+      await invoke('generate_voice', { text: 'Ready?', speaker: 'Hero', voiceStyle: 'heroic' });
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      // enrichVoiceStyle is mocked to return 'enriched-voice-style'
+      expect(body.voiceStyle).toBe('enriched-voice-style');
+      // speaker is NOT forwarded to the API — consumed by enrichVoiceStyle
+      expect(body.speaker).toBeUndefined();
+    });
+
+    it('works without speaker (anonymous voice)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioBase64: 'base64voice' }),
+      });
+      const { result } = await invoke('generate_voice', { text: 'Beware!' });
+      expect(result.success).toBe(true);
+    });
+
+    it('attaches voice audio to entityId when provided', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioBase64: 'base64voice' }),
+      });
+      const { store } = await invoke('generate_voice', { text: 'Hello', entityId: 'ent-1' });
+      expect(store.setAudio).toHaveBeenCalledWith('ent-1', expect.objectContaining({ bus: 'voice' }));
+    });
+
+    it('does not call setAudio when entityId is absent', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioBase64: 'base64voice' }),
+      });
+      const { store } = await invoke('generate_voice', { text: 'Narration text' });
+      expect(store.setAudio).not.toHaveBeenCalled();
+    });
   });
 
   // =========================================================================
@@ -544,6 +584,27 @@ describe('generationHandlers', () => {
     it('fails without sourceAssetId', async () => {
       const { result } = await invoke('generate_sprite_sheet', {});
       expect(result.success).toBe(false);
+    });
+
+    it('passes frameCount: 1 (minimum non-zero value)', async () => {
+      mockFetchSuccess();
+      await invoke('generate_sprite_sheet', { sourceAssetId: 'asset-1', frameCount: 1 });
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.frameCount).toBe(1);
+    });
+
+    it('passes large frameCount for animation-dense sprites', async () => {
+      mockFetchSuccess();
+      await invoke('generate_sprite_sheet', { sourceAssetId: 'asset-1', frameCount: 64 });
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.frameCount).toBe(64);
+    });
+
+    it('passes custom size', async () => {
+      mockFetchSuccess();
+      await invoke('generate_sprite_sheet', { sourceAssetId: 'asset-1', size: '128x128' });
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.size).toBe('128x128');
     });
   });
 

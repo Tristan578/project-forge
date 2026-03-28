@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { ChatPanel } from '../ChatPanel';
 
 vi.mock('lucide-react', () => ({
@@ -37,46 +38,47 @@ vi.mock('lucide-react', () => ({
 const mockClearChat = vi.fn();
 const mockSendMessage = vi.fn();
 
+// Mutable chat store state for per-test overrides
+const mockChatState: Record<string, unknown> = {
+  messages: [],
+  isStreaming: false,
+  error: null,
+  clearChat: mockClearChat,
+  sendMessage: mockSendMessage,
+  loopIteration: 0,
+  sessionTokens: { input: 0, output: 0 },
+  rightPanelTab: 'chat',
+  setRightPanelTab: vi.fn(),
+  activeModel: 'claude-sonnet-4-5-20250929',
+  setModel: vi.fn(),
+  thinkingEnabled: false,
+  setThinkingEnabled: vi.fn(),
+  approvalMode: false,
+  setApprovalMode: vi.fn(),
+  showEntityPicker: false,
+  setShowEntityPicker: vi.fn(),
+  setEntityPickerFilter: vi.fn(),
+  pendingEntityRefs: {},
+  addEntityRef: vi.fn(),
+  clearEntityRefs: vi.fn(),
+  stopStreaming: vi.fn(),
+  entityPickerFilter: '',
+  setMessageFeedback: vi.fn(),
+  batchUndoMessage: vi.fn(),
+  approveToolCalls: vi.fn(),
+  rejectToolCalls: vi.fn(),
+  conversations: [],
+  activeConversationId: null,
+  createConversation: vi.fn(),
+  switchConversation: vi.fn(),
+  deleteConversation: vi.fn(),
+  renameConversation: vi.fn(),
+  loadConversations: vi.fn(),
+};
+
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: Object.assign(
-    vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
-      selector({
-        messages: [],
-        isStreaming: false,
-        error: null,
-        clearChat: mockClearChat,
-        sendMessage: mockSendMessage,
-        loopIteration: 0,
-        sessionTokens: { input: 0, output: 0 },
-        rightPanelTab: 'chat',
-        setRightPanelTab: vi.fn(),
-        activeModel: 'claude-sonnet-4-5-20250929',
-        setModel: vi.fn(),
-        thinkingEnabled: false,
-        setThinkingEnabled: vi.fn(),
-        approvalMode: false,
-        setApprovalMode: vi.fn(),
-        showEntityPicker: false,
-        setShowEntityPicker: vi.fn(),
-        setEntityPickerFilter: vi.fn(),
-        pendingEntityRefs: {},
-        addEntityRef: vi.fn(),
-        clearEntityRefs: vi.fn(),
-        stopStreaming: vi.fn(),
-        entityPickerFilter: '',
-        setMessageFeedback: vi.fn(),
-        batchUndoMessage: vi.fn(),
-        approveToolCalls: vi.fn(),
-        rejectToolCalls: vi.fn(),
-        conversations: [],
-        activeConversationId: null,
-        createConversation: vi.fn(),
-        switchConversation: vi.fn(),
-        deleteConversation: vi.fn(),
-        renameConversation: vi.fn(),
-        loadConversations: vi.fn(),
-      })
-    ),
+    vi.fn((selector: (s: Record<string, unknown>) => unknown) => selector(mockChatState)),
     { setState: vi.fn(), getState: vi.fn() },
   ),
 }));
@@ -96,6 +98,12 @@ vi.mock('@/stores/editorStore', () => ({
 describe('ChatPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset state to defaults
+    mockChatState.messages = [];
+    mockChatState.isStreaming = false;
+    mockChatState.error = null;
+    mockChatState.loopIteration = 0;
+    mockChatState.sessionTokens = { input: 0, output: 0 };
   });
 
   afterEach(() => {
@@ -127,5 +135,92 @@ describe('ChatPanel', () => {
     render(<ChatPanel />);
     // ConversationList renders a button with "New Chat" or similar
     expect(screen.getByLabelText('Switch conversation')).toBeDefined();
+  });
+
+  it('shows streaming indicator when isStreaming is true', () => {
+    mockChatState.isStreaming = true;
+    mockChatState.messages = [
+      { id: 'msg-1', role: 'user', content: 'Build me a game', timestamp: Date.now() },
+    ];
+    render(<ChatPanel />);
+    // StreamingIndicator renders a pulsing dot and status text
+    expect(screen.getByText('Thinking...')).toBeDefined();
+  });
+
+  it('shows agentic loop status text when loopIteration > 0', () => {
+    mockChatState.isStreaming = true;
+    mockChatState.loopIteration = 2;
+    mockChatState.messages = [
+      { id: 'msg-1', role: 'user', content: 'Build me a game', timestamp: Date.now() },
+    ];
+    render(<ChatPanel />);
+    expect(screen.getByText(/Step 3/)).toBeDefined();
+    expect(screen.getByText('(agentic loop)')).toBeDefined();
+  });
+
+  it('shows executing tool status text when there are pending tool calls', () => {
+    mockChatState.isStreaming = true;
+    mockChatState.loopIteration = 0;
+    mockChatState.messages = [
+      {
+        id: 'msg-1',
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now(),
+        toolCalls: [{ id: 'tc-1', name: 'update_terrain', input: {}, status: 'pending', undoable: false }],
+      },
+    ];
+    render(<ChatPanel />);
+    expect(screen.getByText(/Executing update terrain/)).toBeDefined();
+  });
+
+  it('shows error banner with role="alert" when error is set', () => {
+    mockChatState.error = 'Something went wrong with the AI request';
+    render(<ChatPanel />);
+    const alert = screen.getByRole('alert');
+    expect(alert).toBeDefined();
+    expect(alert.textContent).toContain('Something went wrong');
+  });
+
+  it('does not show error banner when error is null', () => {
+    mockChatState.error = null;
+    render(<ChatPanel />);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows clear chat button when messages are present', () => {
+    mockChatState.messages = [
+      { id: 'msg-1', role: 'user', content: 'Hello', timestamp: Date.now() },
+    ];
+    render(<ChatPanel />);
+    expect(screen.getByLabelText('Clear chat')).toBeDefined();
+  });
+
+  it('does not show clear chat button when there are no messages', () => {
+    mockChatState.messages = [];
+    render(<ChatPanel />);
+    expect(screen.queryByLabelText('Clear chat')).toBeNull();
+  });
+
+  it('calls clearChat when clear chat button is clicked', () => {
+    mockChatState.messages = [
+      { id: 'msg-1', role: 'user', content: 'Hello', timestamp: Date.now() },
+    ];
+    render(<ChatPanel />);
+    fireEvent.click(screen.getByLabelText('Clear chat'));
+    expect(mockClearChat).toHaveBeenCalledOnce();
+  });
+
+  it('shows session token counter when total tokens > 0', () => {
+    mockChatState.sessionTokens = { input: 500, output: 300 };
+    render(<ChatPanel />);
+    expect(screen.getByTitle('Session token usage')).toBeDefined();
+    expect(screen.getByText('800 tokens')).toBeDefined();
+  });
+
+  it('does not show session token counter when total is 0', () => {
+    mockChatState.sessionTokens = { input: 0, output: 0 };
+    render(<ChatPanel />);
+    expect(screen.queryByTitle('Session token usage')).toBeNull();
   });
 });
