@@ -504,6 +504,7 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: '1'
           PORT: '3000'
+          SKIP_ENV_VALIDATION: 'true'
         run: |
           npx next start -p 3000 &
           npx wait-on http://localhost:3000 --timeout 30000
@@ -532,6 +533,7 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: '1'
           PORT: '3001'
+          SKIP_ENV_VALIDATION: 'true'
         run: |
           npx next start -p 3001 &
           npx wait-on http://localhost:3001 --timeout 30000
