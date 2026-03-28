@@ -126,7 +126,7 @@ export function ApiKeyManager() {
     <div className="space-y-6 p-4">
       {/* Error banner */}
       {error && (
-        <div className="rounded border border-red-800 bg-red-900/30 px-3 py-2 text-xs text-red-300">
+        <div role="alert" className="rounded border border-red-800 bg-red-900/30 px-3 py-2 text-xs text-red-300">
           {error}
         </div>
       )}
@@ -156,6 +156,7 @@ export function ApiKeyManager() {
                     onClick={() => removeKey(id)}
                     className="text-red-400 hover:text-red-300"
                     title="Remove key"
+                    aria-label={`Remove ${label} API key`}
                   >
                     <Trash2 size={14} />
                   </button>
@@ -169,6 +170,7 @@ export function ApiKeyManager() {
                       setKeyInputs((prev) => ({ ...prev, [id]: e.target.value }))
                     }
                     placeholder={placeholder}
+                    aria-label={`${label} API key`}
                     className="flex-1 rounded border border-zinc-600 bg-zinc-950 px-2 py-1 text-xs text-zinc-200"
                   />
                   <button
@@ -235,6 +237,7 @@ export function ApiKeyManager() {
                 onClick={() => revokeMcpKey(key.id)}
                 className="text-red-400 hover:text-red-300"
                 title="Revoke key"
+                aria-label={`Revoke key ${key.name}`}
               >
                 <Trash2 size={14} />
               </button>
