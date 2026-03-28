@@ -197,6 +197,10 @@ fn perform_extrude(mesh: &mut Mesh, indices: &[u32], distance: f32, direction: [
 fn perform_subdivide(mesh: &mut Mesh, level: u32) {
     use std::collections::HashMap;
 
+    // Cap subdivision level: level 6 already produces ~65k triangles from a basic quad.
+    // Level 20 would create ~1 trillion triangles — a guaranteed browser hang/OOM.
+    let level = level.min(5);
+
     for _ in 0..level {
         let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
             Some(VertexAttributeValues::Float32x3(pos)) => pos.clone(),
