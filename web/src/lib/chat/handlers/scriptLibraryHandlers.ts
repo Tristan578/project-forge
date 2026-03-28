@@ -209,7 +209,7 @@ export const scriptLibraryHandlers: Record<string, ToolHandler> = {
   publish_game: async (args, ctx) => {
     const p = parseArgs(z.object({
       title: z.string().min(1),
-      slug: z.string().min(1),
+      slug: z.string().min(1).regex(/^[a-z0-9-]+$/, 'Slug must contain only lowercase letters, numbers, and hyphens'),
       description: z.string().optional(),
     }), args);
     if (p.error) return p.error;

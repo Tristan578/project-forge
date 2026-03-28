@@ -240,7 +240,7 @@ export const shaderHandlers: Record<string, ToolHandler> = {
       z.object({
         slot: z.number().int().min(0).max(CUSTOM_SHADER_SLOT_COUNT - 1),
         name: z.string().min(1),
-        wgslCode: z.string().min(1),
+        wgslCode: z.string().min(1).max(65536),
         paramNames: z.array(z.string()).max(16).optional(),
       }),
       args,
@@ -330,7 +330,7 @@ export const shaderHandlers: Record<string, ToolHandler> = {
 
   set_custom_wgsl_source: async (args, ctx) => {
     const p = parseArgs(z.object({
-      userCode: z.string().min(1, 'userCode is required'),
+      userCode: z.string().min(1, 'userCode is required').max(65536),
       name: z.string().optional(),
     }), args);
     if (p.error) return p.error;

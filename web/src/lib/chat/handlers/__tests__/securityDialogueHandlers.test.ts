@@ -1006,7 +1006,7 @@ describe('dialogueHandlers', () => {
       mockImportTree.mockReturnValue(null);
 
       const { result } = await invokeHandler(dialogueHandlers, 'import_dialogue_tree', {
-        jsonData: 'not valid json at all',
+        jsonData: '{"id":"t1","nodes":[]}',
       });
 
       expect(result.success).toBe(false);

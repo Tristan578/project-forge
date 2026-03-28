@@ -36,6 +36,7 @@ import type {
 
 /** Parse a hex color string (#RGB, #RGBA, #RRGGBB, #RRGGBBAA) into RGBA 0-1. */
 function hexToRgba(hex: string): [number, number, number, number] {
+  if (!/^#[0-9a-fA-F]{3,8}$/.test(hex)) return [1, 1, 1, 1];
   const clean = hex.replace('#', '');
   if (clean.length === 3 || clean.length === 4) {
     const r = parseInt(clean[0] + clean[0], 16) / 255;

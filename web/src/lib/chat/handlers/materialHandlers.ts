@@ -3,11 +3,12 @@
  */
 
 import { z } from 'zod';
-import type { ToolHandler, MaterialData, LightData } from './types';
+import type { ToolHandler, LightData } from './types';
 import { zEntityId, zVec3, parseArgs } from './types';
 import { parseHandlerArgs } from '@/lib/validation/parseArgs';
 import { entityId, boundedString } from '@/lib/validation/validators';
 import { getPresetById } from '@/lib/materialPresets';
+import { buildMaterialFromPartial } from './helpers';
 
 export const materialHandlers: Record<string, ToolHandler> = {
   update_material: async (args, { store }) => {
@@ -17,39 +18,9 @@ export const materialHandlers: Record<string, ToolHandler> = {
     const matInput = { ...args } as Record<string, unknown>;
     delete matInput.entityId;
 
-    // Get current material as base, overlay with provided fields
-    const baseMaterial: MaterialData = store.primaryMaterial ?? {
-      baseColor: [1, 1, 1, 1],
-      metallic: 0,
-      perceptualRoughness: 0.5,
-      reflectance: 0.5,
-      emissive: [0, 0, 0, 1],
-      emissiveExposureWeight: 1,
-      alphaMode: 'opaque',
-      alphaCutoff: 0.5,
-      doubleSided: false,
-      unlit: false,
-      uvOffset: [0, 0],
-      uvScale: [1, 1],
-      uvRotation: 0,
-      parallaxDepthScale: 0.1,
-      parallaxMappingMethod: 'occlusion',
-      maxParallaxLayerCount: 16,
-      parallaxReliefMaxSteps: 5,
-      clearcoat: 0,
-      clearcoatPerceptualRoughness: 0.5,
-      specularTransmission: 0,
-      diffuseTransmission: 0,
-      ior: 1.5,
-      thickness: 0,
-      attenuationDistance: null,
-      attenuationColor: [1, 1, 1],
-    };
-
-    const merged: MaterialData = { ...baseMaterial };
-    for (const [key, value] of Object.entries(matInput)) {
-      (merged as unknown as Record<string, unknown>)[key] = value;
-    }
+    // Merge incoming fields over current material, then validate with buildMaterialFromPartial
+    const baseMaterial = store.primaryMaterial ?? {};
+    const merged = buildMaterialFromPartial({ ...baseMaterial, ...matInput });
 
     store.updateMaterial(p.data.entityId, merged);
     return { success: true };

@@ -6,137 +6,15 @@
 import { z } from 'zod';
 import type { ToolHandler } from './types';
 import { zEntityId, zVec3, parseArgs } from './types';
-import type { GameCameraData, GameComponentData, EntityType, PlatformLoopMode, WinConditionType } from '@/stores/editorStore';
+import type { GameCameraData, EntityType } from '@/stores/editorStore';
 import { MATERIAL_PRESETS, getPresetsByCategory, saveCustomMaterial, deleteCustomMaterial, loadCustomMaterials } from '@/lib/materialPresets';
+import { buildGameComponentFromInput } from './helpers';
 
 const VALID_COMPONENT_TYPES = [
   'character_controller', 'health', 'collectible', 'damage_zone', 'checkpoint',
   'teleporter', 'moving_platform', 'trigger_zone', 'spawner', 'follower',
   'projectile', 'win_condition',
 ].join(', ');
-
-function buildGameComponentFromInput(
-  type: string,
-  props: Record<string, unknown>
-): GameComponentData | null {
-  switch (type) {
-    case 'character_controller':
-      return {
-        type: 'characterController',
-        characterController: {
-          speed: (props.speed as number) ?? 5,
-          jumpHeight: (props.jumpHeight as number) ?? 8,
-          gravityScale: (props.gravityScale as number) ?? 1,
-          canDoubleJump: (props.canDoubleJump as boolean) ?? false,
-        },
-      };
-    case 'health':
-      return {
-        type: 'health',
-        health: {
-          maxHp: (props.maxHealth as number) ?? (props.maxHp as number) ?? 100,
-          currentHp: (props.currentHealth as number) ?? (props.currentHp as number) ?? (props.maxHealth as number) ?? (props.maxHp as number) ?? 100,
-          invincibilitySecs: (props.invincibilitySecs as number) ?? 0.5,
-          respawnOnDeath: (props.respawnOnDeath as boolean) ?? true,
-          respawnPoint: (props.respawnPoint as [number, number, number]) ?? [0, 1, 0],
-        },
-      };
-    case 'collectible':
-      return {
-        type: 'collectible',
-        collectible: {
-          value: (props.value as number) ?? 1,
-          destroyOnCollect: (props.destroyOnCollect as boolean) ?? true,
-          pickupSoundAsset: (props.pickupSoundAsset as string | null) ?? null,
-          rotateSpeed: (props.rotateSpeed as number) ?? 90,
-        },
-      };
-    case 'damage_zone':
-      return {
-        type: 'damageZone',
-        damageZone: {
-          damagePerSecond: (props.damagePerSecond as number) ?? 25,
-          oneShot: (props.oneShot as boolean) ?? false,
-        },
-      };
-    case 'checkpoint':
-      return {
-        type: 'checkpoint',
-        checkpoint: {
-          autoSave: (props.autoSave as boolean) ?? true,
-        },
-      };
-    case 'teleporter':
-      return {
-        type: 'teleporter',
-        teleporter: {
-          targetPosition: (props.targetPosition as [number, number, number]) ?? [0, 1, 0],
-          cooldownSecs: (props.cooldownSecs as number) ?? 1,
-        },
-      };
-    case 'moving_platform':
-      return {
-        type: 'movingPlatform',
-        movingPlatform: {
-          speed: (props.speed as number) ?? 2,
-          waypoints: (props.waypoints as [number, number, number][]) ?? [[0, 0, 0], [0, 3, 0]],
-          pauseDuration: (props.pauseDuration as number) ?? 0.5,
-          loopMode: (props.loopMode as PlatformLoopMode) ?? 'pingPong',
-        },
-      };
-    case 'trigger_zone':
-      return {
-        type: 'triggerZone',
-        triggerZone: {
-          eventName: (props.eventName as string) ?? 'trigger',
-          oneShot: (props.oneShot as boolean) ?? false,
-        },
-      };
-    case 'spawner':
-      return {
-        type: 'spawner',
-        spawner: {
-          entityType: (props.entityType as string) ?? 'cube',
-          intervalSecs: (props.intervalSecs as number) ?? 3,
-          maxCount: (props.maxCount as number) ?? 5,
-          spawnOffset: (props.spawnOffset as [number, number, number]) ?? [0, 1, 0],
-          onTrigger: (props.onTrigger as string | null) ?? null,
-        },
-      };
-    case 'follower':
-      return {
-        type: 'follower',
-        follower: {
-          targetEntityId: (props.targetEntityId as string | null) ?? null,
-          speed: (props.speed as number) ?? 3,
-          stopDistance: (props.stopDistance as number) ?? 1.5,
-          lookAtTarget: (props.lookAtTarget as boolean) ?? true,
-        },
-      };
-    case 'projectile':
-      return {
-        type: 'projectile',
-        projectile: {
-          speed: (props.speed as number) ?? 15,
-          damage: (props.damage as number) ?? 10,
-          lifetimeSecs: (props.lifetimeSecs as number) ?? 5,
-          gravity: (props.gravity as boolean) ?? false,
-          destroyOnHit: (props.destroyOnHit as boolean) ?? true,
-        },
-      };
-    case 'win_condition':
-      return {
-        type: 'winCondition',
-        winCondition: {
-          conditionType: (props.conditionType as WinConditionType) ?? 'score',
-          targetScore: (props.targetScore as number | null) ?? 10,
-          targetEntityId: (props.targetEntityId as string | null) ?? null,
-        },
-      };
-    default:
-      return null;
-  }
-}
 
 // Zod schema for the properties bag passed to game components — any shape is
 // accepted here; individual fields are coerced inside buildGameComponentFromInput.

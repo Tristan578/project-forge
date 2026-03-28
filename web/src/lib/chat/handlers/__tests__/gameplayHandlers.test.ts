@@ -117,11 +117,11 @@ describe('add_game_component', () => {
     expect(comp.characterController.speed).toBe(5);
   });
 
-  it('adds health component with custom maxHealth', async () => {
+  it('adds health component with custom maxHp', async () => {
     const { result, store } = await invokeHandler(gameplayHandlers, 'add_game_component', {
       entityId: 'ent-2',
       componentType: 'health',
-      properties: { maxHealth: 200 },
+      properties: { maxHp: 200 },
     });
     expect(result.success).toBe(true);
     const [, comp] = (store.addGameComponent as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { health: { maxHp: number } }];

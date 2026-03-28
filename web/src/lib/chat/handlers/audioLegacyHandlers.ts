@@ -9,20 +9,35 @@ import { zEntityId, parseArgs } from './types';
 
 export const audioLegacyHandlers: Record<string, ToolHandler> = {
   set_audio: async (args, { store }) => {
-    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    const p = parseArgs(
+      z.object({
+        entityId: zEntityId,
+        assetId: z.string().optional(),
+        volume: z.number().min(0).max(1).optional(),
+        pitch: z.number().finite().optional(),
+        loopAudio: z.boolean().optional(),
+        spatial: z.boolean().optional(),
+        maxDistance: z.number().nonnegative().optional(),
+        refDistance: z.number().nonnegative().optional(),
+        rolloffFactor: z.number().nonnegative().optional(),
+        autoplay: z.boolean().optional(),
+      }),
+      args,
+    );
     if (p.error) return p.error;
+    const { entityId: id, ...fields } = p.data;
     const audioData: Record<string, unknown> = {};
-    if (args.assetId !== undefined) audioData.assetId = args.assetId;
-    if (args.volume !== undefined) audioData.volume = args.volume;
-    if (args.pitch !== undefined) audioData.pitch = args.pitch;
-    if (args.loopAudio !== undefined) audioData.loopAudio = args.loopAudio;
-    if (args.spatial !== undefined) audioData.spatial = args.spatial;
-    if (args.maxDistance !== undefined) audioData.maxDistance = args.maxDistance;
-    if (args.refDistance !== undefined) audioData.refDistance = args.refDistance;
-    if (args.rolloffFactor !== undefined) audioData.rolloffFactor = args.rolloffFactor;
-    if (args.autoplay !== undefined) audioData.autoplay = args.autoplay;
-    store.setAudio(p.data.entityId, audioData);
-    return { success: true, result: { message: `Audio set on ${p.data.entityId}` } };
+    if (fields.assetId !== undefined) audioData.assetId = fields.assetId;
+    if (fields.volume !== undefined) audioData.volume = fields.volume;
+    if (fields.pitch !== undefined) audioData.pitch = fields.pitch;
+    if (fields.loopAudio !== undefined) audioData.loopAudio = fields.loopAudio;
+    if (fields.spatial !== undefined) audioData.spatial = fields.spatial;
+    if (fields.maxDistance !== undefined) audioData.maxDistance = fields.maxDistance;
+    if (fields.refDistance !== undefined) audioData.refDistance = fields.refDistance;
+    if (fields.rolloffFactor !== undefined) audioData.rolloffFactor = fields.rolloffFactor;
+    if (fields.autoplay !== undefined) audioData.autoplay = fields.autoplay;
+    store.setAudio(id, audioData);
+    return { success: true, result: { message: `Audio set on ${id}` } };
   },
 
   remove_audio: async (args, { store }) => {
@@ -62,12 +77,20 @@ export const audioLegacyHandlers: Record<string, ToolHandler> = {
   },
 
   update_audio_bus: async (args, { store }) => {
-    const p = parseArgs(z.object({ busName: z.string().min(1) }), args);
+    const p = parseArgs(
+      z.object({
+        busName: z.string().min(1),
+        volume: z.number().min(0).max(1).optional(),
+        muted: z.boolean().optional(),
+        soloed: z.boolean().optional(),
+      }),
+      args,
+    );
     if (p.error) return p.error;
     const update: Record<string, unknown> = {};
-    if (args.volume !== undefined) update.volume = args.volume;
-    if (args.muted !== undefined) update.muted = args.muted;
-    if (args.soloed !== undefined) update.soloed = args.soloed;
+    if (p.data.volume !== undefined) update.volume = p.data.volume;
+    if (p.data.muted !== undefined) update.muted = p.data.muted;
+    if (p.data.soloed !== undefined) update.soloed = p.data.soloed;
     store.updateAudioBus(p.data.busName, update);
     return { success: true, result: { message: `Updated bus: ${p.data.busName}` } };
   },
@@ -239,33 +262,37 @@ export const audioLegacyHandlers: Record<string, ToolHandler> = {
   },
 
   set_reverb_zone: async (args, { store }) => {
-    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    const p = parseArgs(
+      z.object({
+        entityId: zEntityId,
+        shape: z.enum(['sphere', 'box']).optional(),
+        sizeX: z.number().finite().optional(),
+        sizeY: z.number().finite().optional(),
+        sizeZ: z.number().finite().optional(),
+        radius: z.number().positive().optional(),
+        reverbType: z.enum(['room', 'hall', 'cave', 'cathedral', 'plate', 'none']).optional(),
+        wetMix: z.number().min(0).max(1).optional(),
+        decayTime: z.number().nonnegative().optional(),
+        preDelay: z.number().nonnegative().optional(),
+        priority: z.number().int().optional(),
+      }),
+      args,
+    );
     if (p.error) return p.error;
 
-    const shape = args.shape as string | undefined;
-    const sizeX = args.sizeX as number | undefined;
-    const sizeY = args.sizeY as number | undefined;
-    const sizeZ = args.sizeZ as number | undefined;
-    const radius = args.radius as number | undefined;
-    const reverbType = args.reverbType as string | undefined;
-    const wetMix = args.wetMix as number | undefined;
-    const decayTime = args.decayTime as number | undefined;
-    const preDelay = args.preDelay as number | undefined;
-    const priority = args.priority as number | undefined;
-
     const current = store.reverbZones[p.data.entityId];
-    const shapeData = shape === 'sphere'
-      ? { type: 'sphere' as const, radius: radius ?? 5 }
-      : { type: 'box' as const, size: [sizeX ?? 10, sizeY ?? 5, sizeZ ?? 10] as [number, number, number] };
+    const shapeData = p.data.shape === 'sphere'
+      ? { type: 'sphere' as const, radius: p.data.radius ?? 5 }
+      : { type: 'box' as const, size: [p.data.sizeX ?? 10, p.data.sizeY ?? 5, p.data.sizeZ ?? 10] as [number, number, number] };
 
     store.updateReverbZone(p.data.entityId, {
       shape: shapeData,
-      preset: reverbType ?? current?.preset ?? 'hall',
-      wetMix: wetMix ?? current?.wetMix ?? 0.5,
-      decayTime: decayTime ?? current?.decayTime ?? 2.0,
-      preDelay: preDelay ?? current?.preDelay ?? 20,
+      preset: p.data.reverbType ?? current?.preset ?? 'hall',
+      wetMix: p.data.wetMix ?? current?.wetMix ?? 0.5,
+      decayTime: p.data.decayTime ?? current?.decayTime ?? 2.0,
+      preDelay: p.data.preDelay ?? current?.preDelay ?? 20,
       blendRadius: current?.blendRadius ?? 2.0,
-      priority: priority ?? current?.priority ?? 0,
+      priority: p.data.priority ?? current?.priority ?? 0,
     });
     return { success: true, result: { message: `Reverb zone set on ${p.data.entityId}` } };
   },

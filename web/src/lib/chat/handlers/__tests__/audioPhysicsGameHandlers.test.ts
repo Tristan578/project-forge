@@ -1082,7 +1082,7 @@ describe('gameplayHandlers', () => {
       const { result, store } = await invokeHandler(gameplayHandlers, 'add_game_component', {
         entityId: 'player',
         componentType: 'health',
-        properties: { maxHealth: 200, invincibilitySecs: 2 },
+        properties: { maxHp: 200, invincibilitySecs: 2 },
       });
       expect(result.success).toBe(true);
       expect(store.addGameComponent).toHaveBeenCalledWith('player', expect.objectContaining({

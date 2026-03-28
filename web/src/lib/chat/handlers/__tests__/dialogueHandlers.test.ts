@@ -439,7 +439,7 @@ describe('import_dialogue_tree', () => {
   it('returns error when importTree returns null (parse failure)', async () => {
     mockImportTree.mockReturnValue(null);
     const { result } = await invokeHandler(dialogueHandlers, 'import_dialogue_tree', {
-      jsonData: 'bad_json',
+      jsonData: '{"id":"t1","nodes":[]}',
     });
     expect(result.success).toBe(false);
     expect(result.error).toBe('Failed to import tree');

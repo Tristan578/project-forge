@@ -194,11 +194,22 @@ describe('transformHandlers', () => {
     expect(store.toggleGrid).toHaveBeenCalled();
   });
 
-  it('set_snap_settings calls setSnapSettings', async () => {
-    const args = { positionSnap: 0.5, rotationSnap: 15, scaleSnap: 0.1 };
+  it('set_snap_settings calls setSnapSettings with correct field names', async () => {
+    const args = { translationSnap: 0.5, rotationSnapDegrees: 15, scaleSnap: 0.1 };
     const { result, store } = await invokeHandler(transformHandlers, 'set_snap_settings', args);
     expect(result.success).toBe(true);
     expect(store.setSnapSettings).toHaveBeenCalledWith(args);
+  });
+
+  it('set_snap_settings rejects non-finite values', async () => {
+    const { result } = await invokeHandler(transformHandlers, 'set_snap_settings', { translationSnap: Infinity });
+    expect(result.success).toBe(false);
+  });
+
+  it('set_snap_settings accepts snapEnabled boolean', async () => {
+    const { result, store } = await invokeHandler(transformHandlers, 'set_snap_settings', { snapEnabled: true });
+    expect(result.success).toBe(true);
+    expect(store.setSnapSettings).toHaveBeenCalledWith({ snapEnabled: true });
   });
 
   it('set_camera_preset calls setCameraPreset', async () => {

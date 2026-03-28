@@ -16,6 +16,11 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   load_scene: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ json: z.string().min(1) }), args);
     if (p.error) return p.error;
+    try {
+      JSON.parse(p.data.json);
+    } catch {
+      return { success: false, error: 'Invalid JSON: scene data could not be parsed' };
+    }
     ctx.store.loadScene(p.data.json);
     return { success: true, result: { message: 'Scene load triggered' } };
   },

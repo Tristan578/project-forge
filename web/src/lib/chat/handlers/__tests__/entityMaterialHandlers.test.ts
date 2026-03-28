@@ -466,8 +466,8 @@ describe('entityHandlers', () => {
   // set_snap_settings
   // -----------------------------------------------------------------------
   describe('set_snap_settings', () => {
-    it('calls setSnapSettings with the provided args', async () => {
-      const args = { positionSnap: 0.5, rotationSnap: 15, scaleSnap: 0.1 };
+    it('calls setSnapSettings with correct store field names', async () => {
+      const args = { translationSnap: 0.5, rotationSnapDegrees: 15, scaleSnap: 0.1 };
       const { result, store } = await invokeHandler(transformHandlers, 'set_snap_settings', args);
       expect(result.success).toBe(true);
       expect(store.setSnapSettings).toHaveBeenCalledWith(args);

@@ -440,11 +440,11 @@ describe('toggle_grid', () => {
 describe('set_snap_settings', () => {
   it('calls store.setSnapSettings with args', async () => {
     const { result, store } = await invokeHandler(transformHandlers, 'set_snap_settings', {
-      translateSnap: 0.5,
-      rotateSnap: 15,
+      translationSnap: 0.5,
+      rotationSnapDegrees: 15,
     });
     expect(result.success).toBe(true);
-    expect(store.setSnapSettings).toHaveBeenCalledWith({ translateSnap: 0.5, rotateSnap: 15 });
+    expect(store.setSnapSettings).toHaveBeenCalledWith({ translationSnap: 0.5, rotationSnapDegrees: 15 });
   });
 });
 

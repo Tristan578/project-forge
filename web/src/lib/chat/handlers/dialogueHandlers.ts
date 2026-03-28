@@ -145,6 +145,11 @@ export const dialogueHandlers: Record<string, ToolHandler> = {
   import_dialogue_tree: async (args, _ctx) => {
     const p = parseArgs(z.object({ jsonData: z.string().min(1) }), args);
     if (p.error) return p.error;
+    try {
+      JSON.parse(p.data.jsonData);
+    } catch {
+      return { success: false, error: 'Invalid JSON: dialogue tree data could not be parsed' };
+    }
     const { useDialogueStore } = await import('@/stores/dialogueStore');
     const treeId = useDialogueStore.getState().importTree(p.data.jsonData);
     if (!treeId) return { success: false, error: 'Failed to import tree' };

@@ -692,8 +692,8 @@ describe('get_physics2d — edge cases', () => {
       { physics2d: { 'sprite-A': dataA, 'sprite-B': dataB } }
     );
 
-    expect((resultA.result as { data: typeof dataA }).data.bodyType).toBe('dynamic');
-    expect((resultB.result as { data: typeof dataB }).data.bodyType).toBe('static');
-    expect((resultB.result as { data: typeof dataB }).data.oneWayPlatform).toBe(true);
+    expect((resultA.result as typeof dataA).bodyType).toBe('dynamic');
+    expect((resultB.result as typeof dataB).bodyType).toBe('static');
+    expect((resultB.result as typeof dataB).oneWayPlatform).toBe(true);
   });
 });

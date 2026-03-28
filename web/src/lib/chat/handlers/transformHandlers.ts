@@ -128,7 +128,20 @@ export const transformHandlers: Record<string, ToolHandler> = {
   },
 
   set_snap_settings: async (args, { store }) => {
-    store.setSnapSettings(args);
+    const p = parseArgs(
+      z.object({
+        snapEnabled: z.boolean().optional(),
+        translationSnap: z.number().finite().optional(),
+        rotationSnapDegrees: z.number().finite().optional(),
+        scaleSnap: z.number().finite().optional(),
+        gridVisible: z.boolean().optional(),
+        gridSize: z.number().finite().positive().optional(),
+        gridExtent: z.number().finite().positive().optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+    store.setSnapSettings(p.data);
     return { success: true };
   },
 
