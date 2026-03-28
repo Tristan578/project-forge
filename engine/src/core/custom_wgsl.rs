@@ -156,31 +156,31 @@ impl CustomShaderRegistry {
                     let body = &slot.wgsl_function_body;
                     let bytes = body.as_bytes();
                     let len = bytes.len();
-                    let mut i = 0;
-                    while i < len {
+                    let mut byte_i = 0;
+                    while byte_i < len {
                         // Check for block comment start /*
-                        if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'*' {
-                            i += 2;
+                        if byte_i + 1 < len && bytes[byte_i] == b'/' && bytes[byte_i + 1] == b'*' {
+                            byte_i += 2;
                             // Advance until */ or end of string
-                            while i + 1 < len {
-                                if bytes[i] == b'*' && bytes[i + 1] == b'/' {
-                                    i += 2;
+                            while byte_i + 1 < len {
+                                if bytes[byte_i] == b'*' && bytes[byte_i + 1] == b'/' {
+                                    byte_i += 2;
                                     break;
                                 }
-                                i += 1;
+                                byte_i += 1;
                             }
                             continue;
                         }
                         // Check for line comment start //
-                        if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'/' {
-                            i += 2;
+                        if byte_i + 1 < len && bytes[byte_i] == b'/' && bytes[byte_i + 1] == b'/' {
+                            byte_i += 2;
                             // Advance until newline or end of string
-                            while i < len && bytes[i] != b'\n' {
-                                i += 1;
+                            while byte_i < len && bytes[byte_i] != b'\n' {
+                                byte_i += 1;
                             }
                             continue;
                         }
-                        match bytes[i] {
+                        match bytes[byte_i] {
                             b'{' => balance += 1,
                             b'}' => {
                                 balance -= 1;
@@ -193,7 +193,7 @@ impl CustomShaderRegistry {
                             }
                             _ => {}
                         }
-                        i += 1;
+                        byte_i += 1;
                     }
                     if escaped {
                         tracing::warn!("Slot {} rejected: brace escape detected in WGSL body", i);
