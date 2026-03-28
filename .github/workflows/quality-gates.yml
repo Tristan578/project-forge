@@ -517,6 +517,9 @@ jobs:
             --output-path=.lhci-baseline/ \
             --chrome-flags="--headless --no-sandbox --disable-gpu"
 
+      - name: Stop baseline server
+        run: kill $(lsof -t -i:3000) 2>/dev/null || true
+
       - name: Build Next.js for effects-on run
         working-directory: web
         env:

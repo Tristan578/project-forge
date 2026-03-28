@@ -584,9 +584,10 @@ jobs:
     name: Deploy to Production
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # check-changes not needed: production only runs after deploy-staging succeeds
-    # (which already requires quality gates to pass).
-    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, deploy-staging]
+    # check-changes is required: its outputs.web-changed-files is consumed by the
+    # schema migration step. Without this in needs, the expression resolves to
+    # empty string and the migration is always skipped.
+    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, deploy-staging, check-changes]
     if: |
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&

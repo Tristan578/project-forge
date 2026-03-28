@@ -7,11 +7,11 @@ export default defineConfig({
     environment: 'jsdom',
     testTimeout: VITEST_TEST_TIMEOUT_MS,
     hookTimeout: VITEST_HOOK_TIMEOUT_MS,
-    // 'threads' is faster than 'forks' (shared memory, no process overhead).
-    // Changed from 'forks' during quality sweep optimization. If flaky tests
-    // appear due to reduced isolation (shared globals, localStorage leaks),
-    // revert to 'forks'. The vitest.setup.ts afterEach cleanup should prevent this.
-    pool: 'threads',
+    // 'forks' is required because 14+ test files fully reassign process.env
+    // (e.g. process.env = { ...backup }). Under 'threads', this races across
+    // workers sharing the same process object. Switch to 'threads' only after
+    // migrating all process.env reassignments to vi.stubEnv().
+    pool: 'forks',
     teardownTimeout: 5000,
     isolate: true,
     retry: process.env.CI ? 1 : 0,
