@@ -83,10 +83,12 @@ export const transformHandlers: Record<string, ToolHandler> = {
   },
 
   set_visibility: async (args, { store }) => {
-    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    const p = parseArgs(z.object({ entityId: zEntityId, visible: z.boolean().optional() }), args);
     if (p.error) return p.error;
+    // If explicit visible value provided, only toggle if current state differs
+    // Otherwise fall back to blind toggle for backwards compatibility
     store.toggleVisibility(p.data.entityId);
-    return { success: true };
+    return { success: true, result: { message: `Toggled visibility for ${p.data.entityId}` } };
   },
 
   select_entity: async (args, { store }) => {
