@@ -426,4 +426,109 @@ mod tests {
         let value = clip.evaluate_track(&track).unwrap();
         assert!((value - 10.0).abs() < 0.01); // Holds last value
     }
+
+    // --- apply_easing: EaseIn ---
+
+    #[test]
+    fn test_ease_in_starts_slow() {
+        // EaseIn = t^3: at t=0.5, result < 0.5 (still accelerating)
+        let eased = apply_easing(0.5, &Interpolation::EaseIn);
+        assert!(eased < 0.5, "EaseIn at t=0.5 should be below midpoint, got {}", eased);
+    }
+
+    #[test]
+    fn test_ease_in_boundary_values() {
+        assert!((apply_easing(0.0, &Interpolation::EaseIn) - 0.0).abs() < 1e-5);
+        assert!((apply_easing(1.0, &Interpolation::EaseIn) - 1.0).abs() < 1e-5);
+    }
+
+    // --- apply_easing: EaseOut ---
+
+    #[test]
+    fn test_ease_out_ends_slow() {
+        // EaseOut = 1 - (1-t)^3: at t=0.5, result > 0.5 (fast start, slow end)
+        let eased = apply_easing(0.5, &Interpolation::EaseOut);
+        assert!(eased > 0.5, "EaseOut at t=0.5 should be above midpoint, got {}", eased);
+    }
+
+    #[test]
+    fn test_ease_out_boundary_values() {
+        assert!((apply_easing(0.0, &Interpolation::EaseOut) - 0.0).abs() < 1e-5);
+        assert!((apply_easing(1.0, &Interpolation::EaseOut) - 1.0).abs() < 1e-5);
+    }
+
+    // --- PlayMode variant tests ---
+
+    #[test]
+    fn test_play_mode_once_variant_exists() {
+        // Exercise all PlayMode variants via equality comparison (no runtime effect)
+        assert_ne!(PlayMode::Once, PlayMode::Loop);
+        assert_ne!(PlayMode::PingPong, PlayMode::Loop);
+        assert_ne!(PlayMode::Once, PlayMode::PingPong);
+    }
+
+    // --- degenerate keyframe: zero-duration segment ---
+
+    #[test]
+    fn test_degenerate_zero_duration_segment_no_panic() {
+        // Two keyframes at the same time: ensure no divide-by-zero panic occurs.
+        // The implementation clamps to the first keyframe's value when t == kf_a.time.
+        let clip = AnimationClipData {
+            tracks: vec![],
+            duration: 2.0,
+            play_mode: PlayMode::Loop,
+            playing: false,
+            speed: 1.0,
+            current_time: 1.0, // exactly at the degenerate keyframe time
+            forward: true,
+            autoplay: true,
+        };
+        let track = AnimationTrack {
+            target: PropertyTarget::PositionX,
+            keyframes: vec![
+                Keyframe { time: 1.0, value: 5.0, interpolation: Interpolation::Linear },
+                Keyframe { time: 1.0, value: 99.0, interpolation: Interpolation::Linear },
+            ],
+        };
+        // Must not panic and must return a finite value
+        let value = clip.evaluate_track(&track);
+        assert!(value.is_some(), "degenerate segment should return Some");
+        assert!(value.unwrap().is_finite(), "degenerate segment should return finite value");
+    }
+
+    #[test]
+    fn test_degenerate_single_keyframe_holds_value_for_any_time() {
+        // Single keyframe: any time should return the constant value
+        let mut clip = AnimationClipData::default();
+        let track = AnimationTrack {
+            target: PropertyTarget::PositionY,
+            keyframes: vec![
+                Keyframe { time: 0.5, value: 42.0, interpolation: Interpolation::Linear },
+            ],
+        };
+        for t in [0.0f32, 0.5, 1.0, 99.0] {
+            clip.current_time = t;
+            let v = clip.evaluate_track(&track).unwrap();
+            assert!((v - 42.0).abs() < 0.01, "at t={}, expected 42.0, got {}", t, v);
+        }
+    }
+
+    // --- EaseInOut boundary ---
+
+    #[test]
+    fn test_ease_in_out_boundary_values() {
+        assert!((apply_easing(0.0, &Interpolation::EaseInOut) - 0.0).abs() < 1e-5);
+        assert!((apply_easing(1.0, &Interpolation::EaseInOut) - 1.0).abs() < 1e-5);
+    }
+
+    // --- Step at boundaries ---
+
+    #[test]
+    fn test_step_always_returns_zero() {
+        // Step easing always returns 0 (hold previous value)
+        for t in [0.0f32, 0.001, 0.5, 0.999, 1.0] {
+            let v = apply_easing(t, &Interpolation::Step);
+            assert_eq!(v, 0.0, "Step at t={} should be 0.0, got {}", t, v);
+        }
+    }
 }
