@@ -7,6 +7,12 @@ import { getDb } from '@/lib/db/client';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/db/client');
+vi.mock('@/lib/rateLimit', () => ({
+  rateLimitAdminRoute: vi.fn().mockResolvedValue(null),
+}));
+vi.mock('@/lib/monitoring/sentry-server', () => ({
+  captureException: vi.fn(),
+}));
 vi.mock('@/lib/db/schema', () => ({
   tokenConfig: { id: 'id', tokenCost: 'tokenCost', estimatedCostCents: 'estimatedCostCents', active: 'active', updatedAt: 'updatedAt' },
   tierConfig: { id: 'id', monthlyTokens: 'monthlyTokens', maxProjects: 'maxProjects', maxPublished: 'maxPublished', priceCentsMonthly: 'priceCentsMonthly', updatedAt: 'updatedAt' },
@@ -73,6 +79,49 @@ describe('PUT /api/admin/economics/config', () => {
 
     expect(res.status).toBe(200);
     expect(body.success).toBe(true);
+  });
+
+  it('should return 400 for missing id', async () => {
+    const { PUT } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/admin/economics/config', {
+      method: 'PUT',
+      body: JSON.stringify({ type: 'token_config', tokenCost: 10, estimatedCostCents: 5 }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain('id');
+  });
+
+  it('should return 400 for negative tokenCost', async () => {
+    const { PUT } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/admin/economics/config', {
+      method: 'PUT',
+      body: JSON.stringify({ type: 'token_config', id: 'tc1', tokenCost: -5, estimatedCostCents: 5 }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain('tokenCost');
+  });
+
+  it('should return 400 for NaN tokenCost', async () => {
+    const { PUT } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/admin/economics/config', {
+      method: 'PUT',
+      body: JSON.stringify({ type: 'token_config', id: 'tc1', tokenCost: 'abc', estimatedCostCents: 5 }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(400);
+  });
+
+  it('should return 400 for unknown type', async () => {
+    const { PUT } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/admin/economics/config', {
+      method: 'PUT',
+      body: JSON.stringify({ type: 'unknown_config', id: 'x' }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('Invalid type');
   });
 
   it('should update tier config', async () => {

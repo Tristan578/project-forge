@@ -39,13 +39,24 @@ export async function PATCH(
     // Build update object
     const updates: Record<string, unknown> = { updatedAt: new Date() };
 
-    if (body.status) updates.status = body.status;
-    if (typeof body.progress === 'number') updates.progress = body.progress;
+    const VALID_STATUSES = ['pending', 'processing', 'downloading', 'completed', 'failed', 'cancelled'] as const;
+    if (body.status) {
+      if (!VALID_STATUSES.includes(body.status)) {
+        return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
+      }
+      updates.status = body.status;
+    }
+    if (typeof body.progress === 'number') {
+      if (!Number.isFinite(body.progress) || body.progress < 0 || body.progress > 100) {
+        return NextResponse.json({ error: 'progress must be a finite number between 0 and 100' }, { status: 400 });
+      }
+      updates.progress = body.progress;
+    }
     if (body.errorMessage !== undefined) updates.errorMessage = body.errorMessage;
     if (body.resultUrl !== undefined) updates.resultUrl = body.resultUrl;
     if (body.resultMeta !== undefined) updates.resultMeta = body.resultMeta;
     if (typeof body.imported === 'boolean') updates.imported = body.imported ? 1 : 0;
-    if (typeof body.refunded === 'boolean') updates.refunded = body.refunded ? 1 : 0;
+    // refunded field intentionally omitted — only server-side refundTokens() may set this
 
     if (body.status === 'completed' || body.status === 'failed') {
       updates.completedAt = new Date();
