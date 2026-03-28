@@ -88,7 +88,7 @@ describe('POST /api/generate/model', () => {
       body: 'not json',
     });
 
-    const res = await POST(req as any);
+    const res = await POST(req as unknown as import('next/server').NextRequest);
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error).toBe('Invalid JSON');

@@ -82,8 +82,8 @@ vi.mock('lucide-react', async () => {
 import { generateIdeas } from '@/lib/ai/ideaGenerator';
 
 describe('IdeaGeneratorModal', () => {
-  let onClose: ReturnType<typeof vi.fn>;
-  let onStart: ReturnType<typeof vi.fn>;
+  let onClose: () => void;
+  let onStart: () => void;
 
   beforeEach(() => {
     vi.clearAllMocks();

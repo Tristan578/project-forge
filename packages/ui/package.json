@@ -20,7 +20,7 @@
     "./tokens/theme.css": "./src/tokens/theme.css"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/effects/effects.css dist/effects/effects.css && cp src/tokens/theme.css dist/tokens/theme.css",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest"
