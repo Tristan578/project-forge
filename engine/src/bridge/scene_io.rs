@@ -205,6 +205,16 @@ pub(super) fn apply_scene_load(
         return;
     };
 
+    // Guard against pathologically large scene payloads that could cause OOM during deser.
+    const MAX_SCENE_JSON_BYTES: usize = 50 * 1024 * 1024; // 50MB
+    if request.json.len() > MAX_SCENE_JSON_BYTES {
+        tracing::error!(
+            "Scene load rejected: JSON payload {} bytes exceeds 50MB limit",
+            request.json.len()
+        );
+        return;
+    }
+
     let scene_file: scene_file::SceneFile = match serde_json::from_str(&request.json) {
         Ok(sf) => sf,
         Err(e) => {
@@ -215,6 +225,17 @@ pub(super) fn apply_scene_load(
 
     if scene_file.format_version > 3 {
         tracing::error!("Unsupported scene format version: {}", scene_file.format_version);
+        return;
+    }
+
+    // Cap entity count to prevent runaway scene loading.
+    const MAX_SCENE_ENTITIES: usize = 10_000;
+    if scene_file.entities.len() > MAX_SCENE_ENTITIES {
+        tracing::error!(
+            "Scene load rejected: {} entities exceeds limit of {}",
+            scene_file.entities.len(),
+            MAX_SCENE_ENTITIES
+        );
         return;
     }
 
