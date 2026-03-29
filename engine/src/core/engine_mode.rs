@@ -24,6 +24,7 @@ use super::scripting::ScriptData;
 use super::selection::Selection;
 use super::shader_effects::ShaderEffectData;
 use super::lod::LodData;
+use super::physics_2d::{Physics2dData, Physics2dEnabled, PhysicsJoint2d};
 use super::tilemap::{TilemapData, TilemapEnabled};
 
 /// The current engine mode.
@@ -126,7 +127,7 @@ pub fn snapshot_scene(
     )>,
     script_audio_query: &Query<(&EntityId, Option<&ScriptData>, Option<&AudioData>)>,
     reverb_particle_shader_query: &Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>, Option<&ParticleData>, Option<&ParticleEnabled>, Option<&ShaderEffectData>)>,
-    csg_sprite_query: &Query<(&EntityId, Option<&CsgMeshData>, Option<&super::sprite::SpriteData>)>,
+    csg_sprite_physics2d_query: &Query<(&EntityId, Option<&CsgMeshData>, Option<&super::sprite::SpriteData>, Option<&Physics2dData>, Option<&Physics2dEnabled>, Option<&PhysicsJoint2d>)>,
     procedural_joint_gc_camera_query: &Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>, Option<&JointData>, Option<&super::game_components::GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
     tilemap_skeleton2d_query: &Query<(&EntityId, Option<&TilemapData>, Option<&TilemapEnabled>, Option<&super::skeleton2d::SkeletonData2d>, Option<&super::skeleton2d::SkeletonEnabled2d>, Option<&super::skeletal_animation2d::SkeletalAnimation2d>, Option<&LodData>)>,
     selection: &Selection,
@@ -145,9 +146,9 @@ pub fn snapshot_scene(
         .map(|(eid, rzd, rze, pd, pe, sed)| (eid.0.as_str(), (rzd.cloned(), rze.is_some(), pd.cloned(), pe.is_some(), sed.cloned())))
         .collect();
 
-    type CsgSpriteRow = (Option<CsgMeshData>, Option<super::sprite::SpriteData>);
-    let csg_sprite_map: HashMap<&str, CsgSpriteRow> = csg_sprite_query.iter()
-        .map(|(eid, cmd, sd)| (eid.0.as_str(), (cmd.cloned(), sd.cloned())))
+    type CsgSpritePhysics2dRow = (Option<CsgMeshData>, Option<super::sprite::SpriteData>, Option<Physics2dData>, bool, Option<PhysicsJoint2d>);
+    let csg_sprite_physics2d_map: HashMap<&str, CsgSpritePhysics2dRow> = csg_sprite_physics2d_query.iter()
+        .map(|(eid, cmd, sd, p2d, p2e, j2d)| (eid.0.as_str(), (cmd.cloned(), sd.cloned(), p2d.cloned(), p2e.is_some(), j2d.cloned())))
         .collect();
 
     type ProceduralJointGcCameraRow = (Option<super::procedural_mesh::ProceduralMeshData>, Option<JointData>, Option<super::game_components::GameComponents>, Option<GameCameraData>, bool);
@@ -187,9 +188,9 @@ pub fn snapshot_scene(
             .map(|(rzd, rze, pd, pe, sed)| (rzd.clone(), *rze, pd.clone(), *pe, sed.clone()))
             .unwrap_or((None, false, None, false, None));
 
-        let (csg_mesh_data, sprite_data) = csg_sprite_map.get(eid.0.as_str())
-            .map(|(cmd, sd)| (cmd.clone(), sd.clone()))
-            .unwrap_or((None, None));
+        let (csg_mesh_data, sprite_data, physics2d_data_pre, physics2d_enabled_pre, joint2d_data_pre) = csg_sprite_physics2d_map.get(eid.0.as_str())
+            .map(|(cmd, sd, p2d, p2e, j2d)| (cmd.clone(), sd.clone(), p2d.clone(), *p2e, j2d.clone()))
+            .unwrap_or((None, None, None, false, None));
 
         let (procedural_mesh_data, joint_data, game_components, game_camera_data, active_game_camera) = procedural_joint_gc_camera_map.get(eid.0.as_str())
             .map(|(pmd, jd, gc, gcd, agc)| (pmd.clone(), jd.clone(), gc.clone(), gcd.clone(), *agc))
@@ -231,6 +232,9 @@ pub fn snapshot_scene(
         snap.skeleton2d_enabled = skeleton2d_enabled;
         snap.skeletal_animations = skeletal_animations;
         snap.lod_data = lod_data;
+        snap.physics2d_data = physics2d_data_pre;
+        snap.physics2d_enabled = physics2d_enabled_pre;
+        snap.joint2d_data = joint2d_data_pre;
         entities.push(snap);
     }
 

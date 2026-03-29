@@ -27,6 +27,7 @@ use crate::core::particles::{ParticleData, ParticleEnabled};
 use crate::core::shader_effects::ShaderEffectData;
 use crate::core::game_components::GameComponents;
 use crate::core::game_camera::{GameCameraData, ActiveGameCamera};
+use crate::core::physics_2d::{Physics2dData, Physics2dEnabled, PhysicsJoint2d};
 use crate::core::{entity_factory, history, pending_commands};
 
 use super::events;
@@ -87,7 +88,7 @@ pub(super) fn apply_mode_change_requests(
     )>,
     script_audio_query: Query<(&EntityId, Option<&ScriptData>, Option<&AudioData>)>,
     reverb_particle_shader_query: Query<(&EntityId, Option<&ReverbZoneData>, Option<&ReverbZoneEnabled>, Option<&ParticleData>, Option<&ParticleEnabled>, Option<&ShaderEffectData>)>,
-    csg_sprite_query: Query<(&EntityId, Option<&crate::core::csg::CsgMeshData>, Option<&crate::core::sprite::SpriteData>)>,
+    csg_sprite_physics2d_query: Query<(&EntityId, Option<&crate::core::csg::CsgMeshData>, Option<&crate::core::sprite::SpriteData>, Option<&Physics2dData>, Option<&Physics2dEnabled>, Option<&PhysicsJoint2d>)>,
     procedural_joint_game_query: Query<(&EntityId, Option<&crate::core::procedural_mesh::ProceduralMeshData>, Option<&crate::core::physics::JointData>, Option<&GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
     tilemap_skeleton2d_query: Query<(&EntityId, Option<&crate::core::tilemap::TilemapData>, Option<&crate::core::tilemap::TilemapEnabled>, Option<&crate::core::skeleton2d::SkeletonData2d>, Option<&crate::core::skeleton2d::SkeletonEnabled2d>, Option<&crate::core::skeletal_animation2d::SkeletalAnimation2d>, Option<&crate::core::lod::LodData>)>,
     runtime_query: Query<Entity, With<crate::core::engine_mode::RuntimeEntity>>,
@@ -105,7 +106,7 @@ pub(super) fn apply_mode_change_requests(
                 // Snapshot the scene (uses read-only query p0)
                 {
                     let snapshot_query = queries.p0();
-                    *snapshot = crate::core::engine_mode::snapshot_scene(&snapshot_query, &script_audio_query, &reverb_particle_shader_query, &csg_sprite_query, &procedural_joint_game_query, &tilemap_skeleton2d_query, &selection);
+                    *snapshot = crate::core::engine_mode::snapshot_scene(&snapshot_query, &script_audio_query, &reverb_particle_shader_query, &csg_sprite_physics2d_query, &procedural_joint_game_query, &tilemap_skeleton2d_query, &selection);
                 }
                 // Clear selection for play mode
                 selection.clear();
@@ -131,6 +132,56 @@ pub(super) fn apply_mode_change_requests(
                         &mut meshes,
                         &mut materials,
                     );
+                }
+                // Restore transform state for existing entities
+                {
+                    let mut restore_query = queries.p1();
+                    for snap in &snapshot.entities {
+                        for (_, eid, mut transform, mut ename, mut visible, mat_data, light_data, phys_data) in restore_query.iter_mut() {
+                            if eid.0 == snap.entity_id {
+                                *transform = snap.transform.to_transform();
+                                ename.0 = snap.name.clone();
+                                visible.0 = snap.visible;
+                                if let (Some(snap_mat), Some(mut current_mat)) = (&snap.material_data, mat_data) {
+                                    *current_mat = snap_mat.clone();
+                                }
+                                if let (Some(snap_light), Some(mut current_light)) = (&snap.light_data, light_data) {
+                                    *current_light = snap_light.clone();
+                                }
+                                if let (Some(snap_phys), Some(mut current_phys)) = (&snap.physics_data, phys_data) {
+                                    *current_phys = snap_phys.clone();
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                // Restore 2D physics components for existing entities.
+                // These are not in the main restore query (tuple limit), so handled separately.
+                {
+                    let restore_query = queries.p1();
+                    let entity_map: std::collections::HashMap<&str, Entity> = restore_query.iter()
+                        .map(|(entity, eid, ..)| (eid.0.as_str(), entity))
+                        .collect();
+                    for snap in &snapshot.entities {
+                        if let Some(&entity) = entity_map.get(snap.entity_id.as_str()) {
+                            if let Some(p2d) = &snap.physics2d_data {
+                                commands.entity(entity).insert(p2d.clone());
+                            } else {
+                                commands.entity(entity).remove::<Physics2dData>();
+                            }
+                            if snap.physics2d_enabled {
+                                commands.entity(entity).insert(Physics2dEnabled);
+                            } else {
+                                commands.entity(entity).remove::<Physics2dEnabled>();
+                            }
+                            if let Some(j2d) = &snap.joint2d_data {
+                                commands.entity(entity).insert(j2d.clone());
+                            } else {
+                                commands.entity(entity).remove::<PhysicsJoint2d>();
+                            }
+                        }
+                    }
                 }
                 *mode = EngineMode::Edit;
                 events::emit_engine_mode_changed(&mode);
