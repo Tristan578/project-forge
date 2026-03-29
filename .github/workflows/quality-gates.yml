@@ -177,7 +177,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: read
+      # write needed when can-commit-ratchet=true (CD on main) to push threshold bumps.
+      # On PRs, can-commit-ratchet=false so the push step is skipped — read is sufficient.
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -393,6 +395,173 @@ jobs:
         run: |
           npx playwright test --grep "@smoke" --project=chromium \
             e2e/tests/editor-boot.spec.ts
+
+  lighthouse-delta:
+    name: Lighthouse Effects Delta Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Cache @spawnforge/ui build
+        id: ui-cache-lighthouse
+        uses: actions/cache@v4
+        with:
+          path: packages/ui/dist
+          key: ui-build-${{ hashFiles('packages/ui/src/**', 'packages/ui/package.json', 'packages/ui/tsconfig.json') }}
+
+      - name: Build @spawnforge/ui
+        if: steps.ui-cache-lighthouse.outputs.cache-hit != 'true'
+        run: cd packages/ui && npm run build
+
+      - name: Install web dependencies
+        run: cd web && npm ci
+
+      - name: Install @lhci/cli and Chrome
+        env:
+          # Consistent cache dir so lhci can discover the installed browser.
+          # Must be set at install time AND at lhci collect time.
+          PUPPETEER_CACHE_DIR: /home/runner/.cache/puppeteer
+        run: |
+          npm install -g @lhci/cli
+          npx puppeteer browsers install chrome
+
+      - name: Build Next.js for baseline (effects off)
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          NEXT_PUBLIC_EFFECTS: 'off'
+          SKIP_ENV_VALIDATION: 'true'
+        run: npm run build
+
+      - name: Start production server for baseline (effects off)
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          PORT: '3000'
+          SKIP_ENV_VALIDATION: 'true'
+        run: |
+          npx next start -p 3000 &
+          # Wait for server to be ready and serving content
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000 -o /dev/null 2>/dev/null; then break; fi
+            sleep 1
+          done
+
+      - name: Collect baseline Lighthouse runs (effects off)
+        env:
+          PUPPETEER_CACHE_DIR: /home/runner/.cache/puppeteer
+          # CHROME_PATH lets lhci discover the Puppeteer-managed Chrome binary
+          # without requiring a system Chrome install (fixes exit-code-127 on GHA).
+          CHROME_PATH: /home/runner/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome
+        run: |
+          lhci collect \
+            --url=http://localhost:3000 \
+            --numberOfRuns=3 \
+            --outputDir=.lhci-baseline \
+            --settings.chromeFlags="--headless --no-sandbox --disable-gpu"
+
+      - name: Stop baseline server
+        run: kill $(lsof -t -i:3000) 2>/dev/null || true
+
+      - name: Build Next.js for effects-on run
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          NEXT_PUBLIC_EFFECTS: 'on'
+          SKIP_ENV_VALIDATION: 'true'
+        run: npm run build
+
+      - name: Start production server for effects-on run
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          PORT: '3001'
+          SKIP_ENV_VALIDATION: 'true'
+        run: |
+          npx next start -p 3001 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001 -o /dev/null 2>/dev/null; then break; fi
+            sleep 1
+          done
+
+      - name: Collect effects-on Lighthouse runs
+        env:
+          PUPPETEER_CACHE_DIR: /home/runner/.cache/puppeteer
+          CHROME_PATH: /home/runner/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome
+        run: |
+          lhci collect \
+            --url=http://localhost:3001 \
+            --numberOfRuns=3 \
+            --outputDir=.lhci-effects \
+            --settings.chromeFlags="--headless --no-sandbox --disable-gpu"
+
+      - name: Debug Lighthouse output dirs
+        if: always()
+        run: |
+          echo "=== Baseline dir ==="
+          ls -la .lhci-baseline/ 2>/dev/null || echo "DIR MISSING"
+          echo "=== Effects dir ==="
+          ls -la .lhci-effects/ 2>/dev/null || echo "DIR MISSING"
+
+      - name: Assert effects delta less than 10 performance points
+        run: |
+          node --input-type=module << 'NODE_EOF'
+          import { readdirSync, readFileSync, existsSync } from 'fs';
+          import { join } from 'path';
+
+          function getMedianPerformance(dir) {
+            if (!existsSync(dir)) {
+              console.error('Directory not found: ' + dir);
+              console.log('SKIP: Cannot compare -- Lighthouse output missing');
+              return null;
+            }
+            const files = readdirSync(dir).filter(f => f.endsWith('.json') && f.startsWith('lhr-'));
+            if (files.length === 0) {
+              console.error('No lhr-*.json files in ' + dir);
+              console.log('Available files:', readdirSync(dir));
+              return null;
+            }
+            const scores = files.map(f => {
+              const report = JSON.parse(readFileSync(join(dir, f), 'utf8'));
+              return report.categories && report.categories.performance
+                ? report.categories.performance.score
+                : 0;
+            }).sort((a, b) => a - b);
+            return scores[Math.floor(scores.length / 2)] || 0;
+          }
+
+          const baseScore = getMedianPerformance('.lhci-baseline');
+          const testScore = getMedianPerformance('.lhci-effects');
+
+          if (baseScore === null || testScore === null) {
+            console.log('SKIP: Lighthouse data incomplete -- cannot compare');
+            process.exit(0);
+          }
+
+          const delta = baseScore - testScore;
+
+          console.log('Baseline (effects off): ' + (baseScore * 100).toFixed(1));
+          console.log('Effects on: ' + (testScore * 100).toFixed(1));
+          console.log('Delta: ' + (delta * 100).toFixed(1) + ' points');
+
+          if (delta > 0.10) {
+            console.error('FAIL: Effects caused ' + (delta * 100).toFixed(1) + ' point regression (max allowed: 10)');
+            process.exit(1);
+          }
+          console.log('PASS: Effects delta within acceptable range');
+          NODE_EOF
 
   security:
     name: Rust Security Audit

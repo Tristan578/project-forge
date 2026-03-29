@@ -73,121 +73,23 @@ jobs:
             -H "Content-Type: application/json" \
             -d "$payload" || echo "Slack notification failed (non-fatal)"
 
-  # ---- Quality Gates (must all pass before any deployment) ----
+  # ---- Quality Gates (reusable workflow shared with CI) ----
 
-  # Quality gate jobs run on every trigger (push to main and workflow_dispatch).
-  # This ensures merges that bypass branch protection are still validated before deploy.
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - run: npm ci
-
-      - name: Build @spawnforge/ui
-        run: cd packages/ui && npm run build
-
-      - run: npx eslint --max-warnings 0
-        working-directory: web
-
-  typecheck:
-    name: TypeScript
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - run: npm ci
-
-      - name: Build @spawnforge/ui
-        run: cd packages/ui && npm run build
-
-      - run: npx tsc --noEmit
-        working-directory: web
-
-  test-web:
-    name: Web Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - run: npm ci
-
-      - name: Build @spawnforge/ui
-        run: cd packages/ui && npm run build
-
-      - name: Run tests
-        working-directory: web
-        # Timeout safety net: vitest hangs after test completion due to jsdom open
-        # handles (known issue vitest#3077). Exit 124 = timeout killed a hung process
-        # after tests already completed successfully -- treat as warning, not failure.
-        run: |
-          set +e
-          timeout 600 npx vitest run 2>&1 | tee /tmp/vitest-output.txt
-          EXIT_CODE=${PIPESTATUS[0]}
-          set -e
-          if [ $EXIT_CODE -eq 124 ]; then
-            echo "::warning::vitest process was killed after 600s -- likely hung during cleanup (vitest#3077)"
-            exit 0
-          fi
-          # vitest 4.x may exit non-zero due to open handles even when all tests pass.
-          # Check if any tests actually failed before propagating the exit code.
-          if [ $EXIT_CODE -ne 0 ]; then
-            if sed 's/\x1b\[[0-9;]*m//g' /tmp/vitest-output.txt | grep -q "Test Files.*failed"; then
-              exit $EXIT_CODE
-            else
-              echo "::warning::vitest exited with code $EXIT_CODE but no test failures detected -- likely open handle issue (vitest#3077)"
-              exit 0
-            fi
-          fi
-
-  test-mcp:
-    name: MCP Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: mcp-server/package-lock.json
-
-      - run: npm ci
-        working-directory: mcp-server
-
-      - run: npx vitest run
-        working-directory: mcp-server
+  # Delegates to the shared quality-gates.yml to avoid duplicating lint/typecheck/
+  # test-web/test-mcp steps between CI and CD. All inputs default to true so
+  # every job runs regardless of which files changed (CD always validates
+  # everything before deploying).
+  # can-commit-ratchet=true allows the coverage ratchet to commit threshold
+  # bumps on main -- CD only runs on push to main where write perms are available.
+  quality-gates:
+    name: Quality Gates
+    uses: ./.github/workflows/quality-gates.yml
+    with:
+      web-changed: true
+      engine-changed: false
+      mcp-changed: true
+      ci-changed: false
+      can-commit-ratchet: true
 
   check-changes:
     name: Detect Changed Paths
@@ -496,15 +398,12 @@ jobs:
     timeout-minutes: 15
     # check-changes is intentionally NOT in needs -- path detection only gates
     # build-wasm (slow). Every push to main that passes quality gates must deploy.
-    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn]
+    needs: [quality-gates, build-wasm, e2e, security, upload-wasm-cdn]
     if: |
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       github.event.inputs.promote_to_production != 'true' &&
-      needs.lint.result == 'success' &&
-      needs.typecheck.result == 'success' &&
-      needs.test-web.result == 'success' &&
-      (needs.test-mcp.result == 'success' || needs.test-mcp.result == 'skipped') &&
+      needs.quality-gates.result == 'success' &&
       (needs.security.result == 'success' || needs.security.result == 'skipped') &&
       (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
       (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
@@ -572,17 +471,14 @@ jobs:
     timeout-minutes: 20
     # check-changes not needed: production only runs after deploy-staging succeeds
     # (which already requires quality gates to pass).
-    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, deploy-staging]
+    needs: [quality-gates, build-wasm, e2e, security, upload-wasm-cdn, deploy-staging]
     if: |
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       (
         (needs.deploy-staging.result == 'success' && github.event_name == 'push') ||
         (github.event.inputs.promote_to_production == 'true' &&
-         needs.lint.result == 'success' &&
-         needs.typecheck.result == 'success' &&
-         needs.test-web.result == 'success' &&
-         needs.test-mcp.result == 'success' &&
+         needs.quality-gates.result == 'success' &&
          (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
          (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
          needs.security.result == 'success' &&
