@@ -23,6 +23,7 @@ import type { ResolvedRoute } from '@/lib/providers/types';
 import { convertManifestToolsToSdkTools } from '@/lib/ai/toolAdapter';
 import type { ManifestTool } from '@/lib/ai/toolAdapter';
 import { AI_MODEL_PRIMARY, AI_MODELS } from '@/lib/ai/models';
+import { DEFAULT_MAX_TOKENS, THINKING_MAX_TOKENS } from '@/lib/constants';
 
 // ---------------------------------------------------------------------------
 // Anthropic model ID mapping for the gateway (provider/model format)
@@ -111,7 +112,7 @@ export async function* streamViaSdk(
     : (options.systemPrompt ?? '');
 
   const canonicalModel = options.model ?? AI_MODEL_PRIMARY;
-  const maxTokens = options.thinking ? 16384 : (options.maxTokens ?? 4096);
+  const maxTokens = options.thinking ? THINKING_MAX_TOKENS : (options.maxTokens ?? DEFAULT_MAX_TOKENS);
 
   // Convert tools if provided
   const tools =

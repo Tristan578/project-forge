@@ -7,6 +7,12 @@
  * Throws the last error after all attempts are exhausted.
  */
 
+import {
+  RETRY_DEFAULT_MAX_ATTEMPTS,
+  RETRY_DEFAULT_BASE_DELAY_MS,
+  RETRY_DEFAULT_MAX_DELAY_MS,
+} from '@/lib/constants';
+
 export interface RetryOptions {
   /** Maximum number of attempts (including the initial one). Default: 3 */
   maxAttempts?: number;
@@ -24,9 +30,9 @@ export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   options?: RetryOptions,
 ): Promise<T> {
-  const maxAttempts = Math.max(1, options?.maxAttempts ?? 3);
-  const baseDelayMs = options?.baseDelayMs ?? 500;
-  const maxDelayMs = options?.maxDelayMs ?? 5000;
+  const maxAttempts = Math.max(1, options?.maxAttempts ?? RETRY_DEFAULT_MAX_ATTEMPTS);
+  const baseDelayMs = options?.baseDelayMs ?? RETRY_DEFAULT_BASE_DELAY_MS;
+  const maxDelayMs = options?.maxDelayMs ?? RETRY_DEFAULT_MAX_DELAY_MS;
   const jitter = options?.jitter ?? true;
 
   let lastError: unknown;

@@ -31,6 +31,7 @@ import { resolveBackend, resolveBackendWithCircuitBreaker } from './registry';
 import Anthropic from '@anthropic-ai/sdk';
 import { AI_MODELS, AI_MODEL_PRIMARY } from '@/lib/ai/models';
 import { streamViaSdk } from '@/lib/ai/aiSdkAdapter';
+import { DEFAULT_MAX_TOKENS, THINKING_MAX_TOKENS } from '@/lib/constants';
 import type { ManifestTool } from '@/lib/ai/toolAdapter';
 
 // Feature flag: the AI SDK v5 adapter path is now ON by default.
@@ -104,7 +105,7 @@ async function* streamOpenAICompat(
   options: ResolveChatOptions
 ): AsyncGenerator<ResolveChatStreamEvent> {
   const modelId = route.modelId ?? options.model ?? AI_MODELS.gatewayChat;
-  const maxTokens = options.maxTokens ?? 4096;
+  const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
 
   // Build system message from systemBlocks or systemPrompt
   const systemText = options.systemBlocks
@@ -217,7 +218,7 @@ async function* streamAnthropicDirect(
 ): AsyncGenerator<ResolveChatStreamEvent> {
   const client = new Anthropic({ apiKey });
   const modelId = options.model ?? AI_MODEL_PRIMARY;
-  const maxTokens = options.thinking ? 16384 : (options.maxTokens ?? 4096);
+  const maxTokens = options.thinking ? THINKING_MAX_TOKENS : (options.maxTokens ?? DEFAULT_MAX_TOKENS);
 
   // Narrow messages to Anthropic format
   const anthropicMessages = messages

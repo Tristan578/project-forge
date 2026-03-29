@@ -8,6 +8,7 @@
 
 import type { SceneContext, EntitySummary } from './sceneContext';
 import { AI_MODEL_PRIMARY } from './models';
+import { DEFAULT_MAX_TOKENS } from '@/lib/constants';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -238,7 +239,7 @@ export async function planModification(
       model,
       system: MODIFIER_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userPrompt }],
-      max_tokens: 4096,
+      max_tokens: DEFAULT_MAX_TOKENS,
     }),
   });
 
