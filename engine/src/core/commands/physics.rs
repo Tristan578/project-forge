@@ -61,7 +61,14 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "set_physics_enabled" => Some(Err("Not yet implemented: set_physics_enabled (use toggle_physics)".to_string())),
         "enable_physics_debug" => Some(handle_set_debug_physics(true)),
         "disable_physics_debug" => Some(handle_set_debug_physics(false)),
-        "apply_impulse" => Some(handle_apply_force(payload.clone())),
+        "apply_impulse" => {
+            // Force is_impulse=true regardless of payload — this is an impulse command.
+            let mut p = payload.clone();
+            if let Some(obj) = p.as_object_mut() {
+                obj.insert("isImpulse".to_string(), serde_json::Value::Bool(true));
+            }
+            Some(handle_apply_force(p))
+        }
         "set_linear_velocity" => Some(Err("Not yet implemented: set_linear_velocity".to_string())),
         "set_angular_velocity" => Some(Err("Not yet implemented: set_angular_velocity".to_string())),
         "get_velocity" => Some(Err("Not yet implemented: get_velocity".to_string())),
