@@ -3,15 +3,29 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import dynamic from "next/dynamic";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, setRequestLocale } from "next-intl/server";
 import { defaultLocale } from "@/i18n/config";
 import { Toaster } from "sonner";
-import { AnalyticsProvider } from "@/components/AnalyticsProvider";
-import { CookieConsent } from "@/components/CookieConsent";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
-import { PostHogProvider } from "@/components/providers/PostHogProvider";
 import "./globals.css";
+
+// Lazy-load analytics and consent providers — they rely on browser APIs
+// (localStorage, window) and are not needed for the initial HTML render.
+// Deferring them reduces the client JS parsed on the critical path.
+const AnalyticsProvider = dynamic(
+  () => import("@/components/AnalyticsProvider").then((m) => m.AnalyticsProvider),
+  { ssr: false }
+);
+const PostHogProvider = dynamic(
+  () => import("@/components/providers/PostHogProvider").then((m) => m.PostHogProvider),
+  { ssr: false }
+);
+const CookieConsent = dynamic(
+  () => import("@/components/CookieConsent").then((m) => m.CookieConsent),
+  { ssr: false }
+);
 
 // Root layout calls getMessages() (next-intl) which reads from request context — must be dynamic
 export const dynamic = "force-dynamic";
