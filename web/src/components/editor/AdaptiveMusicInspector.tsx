@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Play, Pause, Save, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEditorStore } from '@/stores/editorStore';
@@ -49,6 +49,11 @@ export default function AdaptiveMusicInspector() {
       console.error('Failed to load audio snapshots:', err);
     }
   }, []);
+
+  // Auto-load snapshots when the panel mounts (fix #7657)
+  useEffect(() => {
+    loadSnapshots();
+  }, [loadSnapshots]);
 
   const handleIntensityChange = useCallback((value: number) => {
     setAdaptiveMusicIntensity(value);
