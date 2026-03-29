@@ -687,7 +687,7 @@ gh workflow run cd.yml --ref <good-commit-sha>
   - Org: `tristan-nolan`, Project: `spawnforge-ai`
 - **Health endpoint**: `/api/health` with 8 service checks (5s timeout each, 3s for external services)
 - **Post-deploy smoke tests**: 4 checks run automatically after CD
-- **Env validation**: Startup check for 5 required vars (`validateEnvironment()`)
+- **Env validation**: Startup check for 8 required vars (`validateEnvironment()` in `lib/config/validateEnv.ts`)
 
 ### Gaps (Addressed by PF-607 through PF-617)
 - No external synthetic monitoring (PF-607)

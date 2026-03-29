@@ -211,7 +211,7 @@ project-forge/
 | `cd web && npm run build` | Production build |
 | `cd web && npm run lint` | Run ESLint |
 | `cd web && npx tsc --noEmit` | TypeScript type checking |
-| `cd web && npx vitest run` | Run web tests (~13,600+ tests) |
+| `cd web && npx vitest run` | Run web tests (~14,200+ tests) |
 | `cd mcp-server && npx vitest run` | Run MCP server tests |
 
 ### Key conventions
@@ -436,7 +436,7 @@ go install github.com/tcarac/taskboard@latest
 **Start:**
 ```bash
 cd project-forge
-taskboard start --port 3010 --db .claude/taskboard.db
+taskboard start --port 3010
 ```
 
 - **Web UI:** http://localhost:3010
