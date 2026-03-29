@@ -23,14 +23,16 @@ interface SliderRowProps {
 }
 
 function SliderRow({ label, value, min = 0, max = 1, step = 0.01, onChange, tooltipTerm, tooltipText }: SliderRowProps) {
+  const inputId = `slider-${label.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`;
   return (
     <div className="flex items-center gap-2">
-      <label className="w-20 shrink-0 text-xs text-zinc-400">
+      <label htmlFor={inputId} className="w-20 shrink-0 text-xs text-zinc-400">
         {label}
         {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
         {tooltipText && <InfoTooltip text={tooltipText} />}
       </label>
       <input
+        id={inputId}
         type="range"
         min={min}
         max={max}
