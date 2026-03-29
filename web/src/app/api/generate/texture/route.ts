@@ -49,6 +49,29 @@ export async function POST(request: NextRequest) {
 
   const { prompt, resolution = '1024', style = 'realistic', tiling = true, entityId, generateMaps } = body;
 
+  // Validate generateMaps: must be a plain object with boolean values if provided
+  if (generateMaps !== undefined) {
+    if (
+      typeof generateMaps !== 'object' ||
+      generateMaps === null ||
+      Array.isArray(generateMaps) ||
+      !Object.values(generateMaps).every((v) => typeof v === 'boolean')
+    ) {
+      return NextResponse.json(
+        { error: 'generateMaps must be an object with boolean values (e.g. { normal: true, roughness: false })' },
+        { status: 422 }
+      );
+    }
+    const allowedMapKeys = new Set(['normal', 'roughness', 'metallic', 'ao', 'emissive']);
+    const unknownKeys = Object.keys(generateMaps).filter((k) => !allowedMapKeys.has(k));
+    if (unknownKeys.length > 0) {
+      return NextResponse.json(
+        { error: `generateMaps contains unknown keys: ${unknownKeys.join(', ')}` },
+        { status: 422 }
+      );
+    }
+  }
+
   // Validate
   if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
     return NextResponse.json(
