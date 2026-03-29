@@ -293,14 +293,16 @@ export async function refundTokenAmount(
           WHERE user_id = ${userId}
             AND operation = 'partial_refund'
             AND metadata->>'refundedUsageId' = ${usageId}
-        )`
+        )
+        RETURNING id`
     : neonSql`
         INSERT INTO token_usage (user_id, operation, tokens, source, metadata)
-        VALUES (${userId}, 'partial_refund', ${-tokens}, ${source}, ${metadata}::jsonb)`;
+        VALUES (${userId}, 'partial_refund', ${-tokens}, ${source}, ${metadata}::jsonb)
+        RETURNING id`;
 
   const insertResult = await insertStmt;
-  // If no rows were inserted, a refund already exists — skip credit update.
-  // neon-http returns an array; INSERT...WHERE NOT EXISTS returns 0 rows when skipped.
+  // RETURNING id gives us the inserted row. Empty array = INSERT was skipped
+  // by the WHERE NOT EXISTS guard (refund already exists).
   if (usageId && insertResult.length === 0) return;
 
   const updateStmt = source === 'monthly'
