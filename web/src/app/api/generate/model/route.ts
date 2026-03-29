@@ -69,6 +69,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Reject oversized base64 image payloads (>10 MB decoded = ~13.6 MB base64)
+  if (imageBase64 !== undefined) {
+    const MAX_BASE64_CHARS = Math.ceil((10 * 1024 * 1024 * 4) / 3); // 10 MB decoded
+    if (typeof imageBase64 !== 'string' || imageBase64.length > MAX_BASE64_CHARS) {
+      return NextResponse.json(
+        { error: 'imageBase64 exceeds 10 MB limit' },
+        { status: 413 }
+      );
+    }
+  }
+
   // 2b. Content safety filter
   const safety = sanitizePrompt(prompt);
   if (!safety.safe) {
