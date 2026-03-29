@@ -7,12 +7,14 @@
  * Design notes:
  * - In-process ring buffer of the last 500 query records (5-minute window at
  *   typical load). Older records are evicted automatically.
- * - Route tracking uses a per-request context key injected by the caller.
- *   API routes should call setCurrentRoute() at the start of each request.
+ * - Route tracking uses AsyncLocalStorage so each concurrent request carries
+ *   its own route label — no shared mutable state between requests. API routes
+ *   call setCurrentRoute() at the top of each handler to populate the context.
  * - All timestamps use Date.now() for monotonic-free, zero-dependency timing.
  * - This module is server-only (imported with 'server-only' sentinel).
  */
 import 'server-only';
+import { AsyncLocalStorage } from 'async_hooks';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -71,24 +73,40 @@ const MAX_RECORDS = 500;
 let _records: QueryRecord[] = [];
 
 /**
- * AsyncLocalStorage-based current route tracking is not available in all
- * Next.js Edge/Node environments. Use a simple module-level string that
- * callers set at the beginning of each API handler. This is safe because
- * Next.js API routes run in isolated V8 microtask queues within a single
- * request lifecycle in the Node.js server (not shared across requests).
- *
- * For full correctness in concurrent scenarios, callers should always call
- * setCurrentRoute() before running queries.
+ * Per-request route context stored in AsyncLocalStorage.
+ * Each concurrent request gets its own store, so `_currentRoute` is never
+ * shared across requests even under high concurrency.
  */
-let _currentRoute = 'unknown';
+const _routeStorage = new AsyncLocalStorage<string>();
 
 // ---------------------------------------------------------------------------
 // Public API — route context
 // ---------------------------------------------------------------------------
 
 /**
- * Set the route label for subsequent queries in this request.
- * Call this at the top of each API handler before any DB access.
+ * Run a callback with a specific route label bound to the current async context.
+ * Preferred API: wraps the request handler so the route is scoped for the
+ * entire async call tree, including any awaited DB operations.
+ *
+ * @example
+ * export async function GET() {
+ *   return withRoute('/api/admin/economics', async () => {
+ *     const db = getDb();
+ *     // ... queries now attributed to the route above
+ *   });
+ * }
+ */
+export function withRoute<T>(route: string, fn: () => T): T {
+  return _routeStorage.run(route, fn);
+}
+
+/**
+ * Set the route label for the current async context.
+ * Equivalent to mutating the context in place; only affects the current
+ * request's AsyncLocalStorage store.
+ *
+ * Prefer `withRoute()` for new code; use this form when you cannot wrap the
+ * entire handler (e.g. in middleware where the request boundary is implicit).
  *
  * @example
  * export async function GET() {
@@ -98,12 +116,16 @@ let _currentRoute = 'unknown';
  * }
  */
 export function setCurrentRoute(route: string): void {
-  _currentRoute = route;
+  // AsyncLocalStorage doesn't support mutation; we enter a new store for the
+  // remainder of the async continuation by re-running the tail in a new context.
+  // For the simple "set at top of handler" pattern this behaves identically to
+  // the old module-level variable but is now request-scoped.
+  _routeStorage.enterWith(route);
 }
 
-/** Return the current route label (primarily for testing). */
+/** Return the route label for the current async context (primarily for testing). */
 export function getCurrentRoute(): string {
-  return _currentRoute;
+  return _routeStorage.getStore() ?? 'unknown';
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +141,7 @@ export function getCurrentRoute(): string {
  */
 export function recordQuery(durationMs: number, label?: string): QueryRecord {
   const record: QueryRecord = {
-    route: _currentRoute,
+    route: getCurrentRoute(),
     startedAt: Date.now() - durationMs,
     durationMs,
     isSlow: durationMs >= SLOW_QUERY_THRESHOLD_MS,
@@ -198,7 +220,7 @@ export { WINDOW_MS as METRICS_WINDOW_MS };
 /** Reset all in-memory state. Used by tests between test cases. */
 export function _resetForTesting(): void {
   _records = [];
-  _currentRoute = 'unknown';
+  // AsyncLocalStorage context is inherently per-async-call; no route state to reset.
 }
 
 /** Return the raw record buffer. Used by tests to inspect internal state. */

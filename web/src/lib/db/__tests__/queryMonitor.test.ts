@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 vi.mock('server-only', () => ({}));
+// async_hooks is a Node built-in — no mock needed; it works in vitest node env.
 
 import {
   recordQuery,
   getMetrics,
   setCurrentRoute,
   getCurrentRoute,
+  withRoute,
   monitoredQuery,
   _resetForTesting,
   _getRecordsForTesting,
@@ -47,7 +49,7 @@ describe('exported constants', () => {
 // ---------------------------------------------------------------------------
 
 describe('setCurrentRoute / getCurrentRoute', () => {
-  it('defaults to "unknown"', () => {
+  it('defaults to "unknown" in a fresh async context', () => {
     expect(getCurrentRoute()).toBe('unknown');
   });
 
@@ -60,6 +62,55 @@ describe('setCurrentRoute / getCurrentRoute', () => {
     setCurrentRoute('/api/first');
     setCurrentRoute('/api/second');
     expect(getCurrentRoute()).toBe('/api/second');
+  });
+});
+
+describe('withRoute', () => {
+  it('scopes the route to the callback and restores outside', () => {
+    setCurrentRoute('/api/outer');
+    let innerRoute = '';
+    withRoute('/api/inner', () => {
+      innerRoute = getCurrentRoute();
+    });
+    expect(innerRoute).toBe('/api/inner');
+    // After withRoute completes, the outer context is restored
+    expect(getCurrentRoute()).toBe('/api/outer');
+  });
+
+  it('returns the callback return value', () => {
+    const result = withRoute('/api/test', () => 42);
+    expect(result).toBe(42);
+  });
+
+  it('records queries inside withRoute with the scoped route', () => {
+    withRoute('/api/scoped', () => {
+      recordQuery(50);
+    });
+    const rec = _getRecordsForTesting()[0];
+    expect(rec.route).toBe('/api/scoped');
+  });
+
+  it('isolates routes across concurrent async contexts (regression for #8019)', async () => {
+    vi.useRealTimers();
+    const results: string[] = [];
+
+    await Promise.all([
+      withRoute('/api/route-a', async () => {
+        // yield to let the other context start, then read route
+        await Promise.resolve();
+        results.push(getCurrentRoute());
+      }),
+      withRoute('/api/route-b', async () => {
+        await Promise.resolve();
+        results.push(getCurrentRoute());
+      }),
+    ]);
+
+    // Both routes must be present and neither should contaminate the other
+    expect(results).toContain('/api/route-a');
+    expect(results).toContain('/api/route-b');
+    expect(results).toHaveLength(2);
+    vi.useFakeTimers();
   });
 });
 
@@ -315,9 +366,13 @@ describe('_resetForTesting', () => {
     expect(_getRecordsForTesting()).toHaveLength(0);
   });
 
-  it('resets the current route to "unknown"', () => {
+  it('does not reset the route (AsyncLocalStorage context is per-call)', () => {
+    // Route tracking is now per-async-context; _resetForTesting only clears
+    // the ring buffer. Each vitest test runs in a fresh context so the route
+    // effectively resets between tests via normal async scoping.
     setCurrentRoute('/api/something');
     _resetForTesting();
-    expect(getCurrentRoute()).toBe('unknown');
+    // Route is still set in this async context — that is correct behaviour
+    expect(getCurrentRoute()).toBe('/api/something');
   });
 });
