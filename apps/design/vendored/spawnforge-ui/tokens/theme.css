@@ -1,0 +1,28 @@
+/* packages/ui/src/tokens/theme.css */
+
+/* Static spacing tokens — safe for @theme (don't change per theme) */
+@theme {
+  --spacing-sf-1: 4px;
+  --spacing-sf-2: 8px;
+  --spacing-sf-3: 12px;
+  --spacing-sf-4: 16px;
+  --spacing-sf-6: 24px;
+  --spacing-sf-8: 32px;
+}
+
+/* Utility shortcuts for semantic color tokens.
+   Color tokens use var() for runtime theme switching — @theme can't do this.
+   @utility creates named classes that resolve at runtime. */
+@utility sf-surface { background-color: var(--sf-bg-surface); }
+@utility sf-elevated { background-color: var(--sf-bg-elevated); }
+@utility sf-overlay { background-color: var(--sf-bg-overlay); }
+@utility sf-text { color: var(--sf-text); }
+@utility sf-text-secondary { color: var(--sf-text-secondary); }
+@utility sf-text-muted { color: var(--sf-text-muted); }
+@utility sf-text-disabled { color: var(--sf-text-disabled); }
+@utility sf-border { border-color: var(--sf-border); }
+@utility sf-border-strong { border-color: var(--sf-border-strong); }
+@utility sf-accent { color: var(--sf-accent); }
+@utility sf-destructive { color: var(--sf-destructive); }
+@utility sf-success { color: var(--sf-success); }
+@utility sf-warning { color: var(--sf-warning); }

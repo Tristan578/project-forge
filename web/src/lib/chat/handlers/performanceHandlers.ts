@@ -1,3 +1,8 @@
+/**
+ * Performance and LOD handlers — quality presets, LOD configuration,
+ * performance budget, and scene-wide mesh optimization.
+ */
+
 import { z } from 'zod';
 import type { ToolHandler } from './types';
 import { zEntityId, parseArgs } from './types';

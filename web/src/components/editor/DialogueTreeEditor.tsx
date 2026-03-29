@@ -212,7 +212,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                   <button
                     onClick={() => {
                       const choices = [...(node as ChoiceNode).choices, {
-                        id: `ch_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                        id: `ch_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
                         text: 'New choice',
                         nextNodeId: null,
                       }];

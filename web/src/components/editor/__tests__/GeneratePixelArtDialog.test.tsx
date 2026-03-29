@@ -63,7 +63,7 @@ describe('GeneratePixelArtDialog', () => {
 
   it('should render when open', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
-    expect(screen.getByText('Generate Pixel Art')).toBeDefined();
+    expect(screen.getByText('Generate Pixel Art')).toBeInTheDocument();
   });
 
   // ── Form controls ─────────────────────────────────────────────────────
@@ -72,37 +72,37 @@ describe('GeneratePixelArtDialog', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
     expect(
       screen.getByPlaceholderText(/describe your pixel art/i),
-    ).toBeDefined();
+    ).toBeInTheDocument();
   });
 
   it('should show style selector', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
-    expect(screen.getByText('Style')).toBeDefined();
-    expect(screen.getByText('Character')).toBeDefined();
+    expect(screen.getByText('Style')).toBeInTheDocument();
+    expect(screen.getByText('Character')).toBeInTheDocument();
   });
 
   it('should show size options', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
-    expect(screen.getByText('16px')).toBeDefined();
-    expect(screen.getByText('32px')).toBeDefined();
-    expect(screen.getByText('64px')).toBeDefined();
-    expect(screen.getByText('128px')).toBeDefined();
+    expect(screen.getByText('16px')).toBeInTheDocument();
+    expect(screen.getByText('32px')).toBeInTheDocument();
+    expect(screen.getByText('64px')).toBeInTheDocument();
+    expect(screen.getByText('128px')).toBeInTheDocument();
   });
 
   it('should show palette selector with preview swatches', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
-    expect(screen.getByText('Palette')).toBeDefined();
+    expect(screen.getByText('Palette')).toBeInTheDocument();
   });
 
   it('should show dithering selector', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
-    expect(screen.getByText('Dithering')).toBeDefined();
+    expect(screen.getByText('Dithering')).toBeInTheDocument();
   });
 
   it('should show token cost and balance', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
-    expect(screen.getByText(/Cost: 10 tokens/)).toBeDefined();
-    expect(screen.getByText(/Balance: 100/)).toBeDefined();
+    expect(screen.getByText(/Cost: 10 tokens/)).toBeInTheDocument();
+    expect(screen.getByText(/Balance: 100/)).toBeInTheDocument();
   });
 
   // ── Submit button state ───────────────────────────────────────────────

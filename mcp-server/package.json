@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
-    "start": "node dist/index.ts",
+    "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -27,6 +27,9 @@
     "vitest": "^4.1.1"
   },
   "overrides": {
-    "path-to-regexp": ">=8.4.0"
+    "path-to-regexp": "^8.4.0"
+  },
+  "_comments": {
+    "overrides": "path-to-regexp pinned to >=8.4.0 (verified: 8.4.0 via npm ls). Transitive dep via express@5/router@2; older versions had ReDoS vulnerabilities."
   }
 }

@@ -56,27 +56,27 @@ describe('GenerateMusicDialog', () => {
 
   it('renders Generate Music heading', () => {
     render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Generate Music')).toBeDefined();
+    expect(screen.getByText('Generate Music')).toBeInTheDocument();
   });
 
   it('renders preview notice about Suno API', () => {
     render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText(/Music generation is in preview/)).toBeDefined();
+    expect(screen.getByText(/Music generation is in preview/)).toBeInTheDocument();
   });
 
   it('renders prompt textarea', () => {
     render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByPlaceholderText('Upbeat chiptune adventure music')).toBeDefined();
+    expect(screen.getByPlaceholderText('Upbeat chiptune adventure music')).toBeInTheDocument();
   });
 
   it('renders Instrumental checkbox', () => {
     render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Instrumental (no vocals)')).toBeDefined();
+    expect(screen.getByText('Instrumental (no vocals)')).toBeInTheDocument();
   });
 
   it('renders token cost of 80', () => {
     render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('80')).toBeDefined();
+    expect(screen.getByText('80')).toBeInTheDocument();
   });
 
   it('disables Generate when prompt is empty', () => {
@@ -108,8 +108,8 @@ describe('GenerateMusicDialog', () => {
   it('shows auto-attach checkbox when entityId provided', () => {
     setupStore(1000, 'AudioEntity');
     render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} entityId="entity-1" />);
-    expect(screen.getByText(/Auto-attach to/)).toBeDefined();
-    expect(screen.getByText('AudioEntity')).toBeDefined();
+    expect(screen.getByText(/Auto-attach to/)).toBeInTheDocument();
+    expect(screen.getByText('AudioEntity')).toBeInTheDocument();
   });
 
   it('hides auto-attach checkbox when no entityId', () => {
@@ -119,11 +119,11 @@ describe('GenerateMusicDialog', () => {
 
   it('shows prompt character count', () => {
     render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('0/500')).toBeDefined();
+    expect(screen.getByText('0/500')).toBeInTheDocument();
   });
 
   it('renders duration range slider', () => {
     render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText(/Duration:/)).toBeDefined();
+    expect(screen.getByText(/Duration:/)).toBeInTheDocument();
   });
 });

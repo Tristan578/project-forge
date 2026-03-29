@@ -24,6 +24,7 @@ const {
   mockHandleSubscriptionDeleted,
   mockHandleInvoicePaid,
   mockHandleInvoicePaymentFailed,
+  mockHandleChargeRefunded,
 } = vi.hoisted(() => ({
   mockConstructEvent: vi.fn(),
   mockClaimEvent: vi.fn(() => Promise.resolve(true)),
@@ -34,6 +35,7 @@ const {
   mockHandleSubscriptionDeleted: vi.fn(() => Promise.resolve()),
   mockHandleInvoicePaid: vi.fn(() => Promise.resolve()),
   mockHandleInvoicePaymentFailed: vi.fn(() => Promise.resolve()),
+  mockHandleChargeRefunded: vi.fn(() => Promise.resolve()),
 }));
 
 // ---------------------------------------------------------------------------
@@ -76,6 +78,7 @@ vi.mock('@/lib/billing/subscription-lifecycle', () => ({
   handleSubscriptionDeleted: mockHandleSubscriptionDeleted,
   handleInvoicePaid: mockHandleInvoicePaid,
   handleInvoicePaymentFailed: mockHandleInvoicePaymentFailed,
+  handleChargeRefunded: mockHandleChargeRefunded,
 }));
 
 vi.mock('stripe', () => {
@@ -145,6 +148,7 @@ describe('POST /api/stripe/webhook', () => {
     mockHandleSubscriptionDeleted.mockResolvedValue(undefined);
     mockHandleInvoicePaid.mockResolvedValue(undefined);
     mockHandleInvoicePaymentFailed.mockResolvedValue(undefined);
+    mockHandleChargeRefunded.mockResolvedValue(undefined);
 
     process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test';
     process.env.STRIPE_PRICE_STARTER = 'price_starter';
@@ -423,5 +427,87 @@ describe('POST /api/stripe/webhook', () => {
     await POST(makeRequest('{}'));
 
     expect(mockHandleSubscriptionCreated).toHaveBeenCalledWith('cus_object', 'sub_123', 'hobbyist');
+  });
+
+  // -------------------------------------------------------------------------
+  // charge.refunded
+  // -------------------------------------------------------------------------
+
+  it('calls handleChargeRefunded with customer string, chargeId, amounts, and paymentIntentId', async () => {
+    const charge = {
+      id: 'ch_abc123',
+      customer: 'cus_refund',
+      payment_intent: 'pi_refund_001',
+      amount: 1000,
+      amount_refunded: 1000,
+    };
+    mockConstructEvent.mockReturnValue(makeStripeEvent('charge.refunded', charge));
+
+    const res = await POST(makeRequest('{}'));
+    expect(res.status).toBe(200);
+    expect(mockHandleChargeRefunded).toHaveBeenCalledWith(
+      'cus_refund',
+      'ch_abc123',
+      1000,
+      1000,
+      'pi_refund_001'
+    );
+  });
+
+  it('calls handleChargeRefunded for partial refund with correct amounts', async () => {
+    const charge = {
+      id: 'ch_partial',
+      customer: 'cus_partial',
+      payment_intent: 'pi_partial_001',
+      amount: 2000,
+      amount_refunded: 500,
+    };
+    mockConstructEvent.mockReturnValue(makeStripeEvent('charge.refunded', charge));
+
+    await POST(makeRequest('{}'));
+
+    expect(mockHandleChargeRefunded).toHaveBeenCalledWith(
+      'cus_partial',
+      'ch_partial',
+      500,
+      2000,
+      'pi_partial_001'
+    );
+  });
+
+  it('skips handleChargeRefunded when charge customer is null', async () => {
+    const charge = {
+      id: 'ch_nullcust',
+      customer: null,
+      payment_intent: 'pi_null',
+      amount: 1000,
+      amount_refunded: 1000,
+    };
+    mockConstructEvent.mockReturnValue(makeStripeEvent('charge.refunded', charge));
+
+    await POST(makeRequest('{}'));
+
+    expect(mockHandleChargeRefunded).not.toHaveBeenCalled();
+  });
+
+  it('resolves paymentIntentId from expanded payment_intent object', async () => {
+    const charge = {
+      id: 'ch_expanded',
+      customer: 'cus_expanded',
+      payment_intent: { id: 'pi_expanded_id' },
+      amount: 1500,
+      amount_refunded: 1500,
+    };
+    mockConstructEvent.mockReturnValue(makeStripeEvent('charge.refunded', charge));
+
+    await POST(makeRequest('{}'));
+
+    expect(mockHandleChargeRefunded).toHaveBeenCalledWith(
+      'cus_expanded',
+      'ch_expanded',
+      1500,
+      1500,
+      'pi_expanded_id'
+    );
   });
 });

@@ -245,7 +245,7 @@ export function ContextMenu({
       ref={menuRef}
       role="menu"
       aria-label="Entity actions"
-      className="fixed z-50 min-w-[180px] bg-neutral-800 border border-neutral-600 rounded-md shadow-lg py-1 text-sm"
+      className="fixed z-50 min-w-[180px] bg-[var(--sf-bg-surface)] border border-[var(--sf-border)] rounded-md shadow-lg py-1 text-sm"
       style={{
         left: `${clampedPosition.x}px`,
         top: `${clampedPosition.y}px`,
@@ -260,7 +260,7 @@ export function ContextMenu({
             <div
               key={`divider-${index}`}
               role="separator"
-              className="h-px bg-neutral-600 my-1 mx-2"
+              className="h-px bg-[var(--sf-border)] my-1 mx-2"
             />
           );
         }

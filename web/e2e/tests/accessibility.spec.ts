@@ -239,4 +239,71 @@ test.describe('Accessibility @ui', () => {
       expect(count).toBeGreaterThan(0);
     });
   });
+
+  test.describe('Keyboard-only workflow', () => {
+    test.beforeEach(async ({ editor }) => {
+      await editor.loadPage();
+    });
+
+    test('scene hierarchy panel is keyboard accessible', async ({ page }) => {
+      // Verify the tree is rendered, visible, and has tabIndex=0 (keyboard reachable).
+      // We test focusability directly rather than counting Tab presses because the
+      // editor has 20+ interactive elements (toolbar, sidebar) before the tree in
+      // DOM order — a fixed tab count is fragile and layout-dependent.
+      const hierarchyTree = page.locator('[role="tree"][aria-label="Scene hierarchy"]');
+      await expect(hierarchyTree).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+
+      // tabindex="0" means it participates in the natural tab order
+      const tabIndex = await hierarchyTree.getAttribute('tabindex');
+      expect(tabIndex).toBe('0');
+
+      // Programmatic focus confirms the element accepts keyboard focus
+      await hierarchyTree.focus();
+      await expect(hierarchyTree).toBeFocused();
+    });
+
+    test('Tab key reaches the inspector area', async ({ page }) => {
+      test.slow();
+      // Inspector inputs should be in the tab order
+      const inspectorInputs = page.locator('[data-panel="inspector"] input, [data-panel="inspector"] button').first();
+      const hasInspectorInputs = await inspectorInputs.count() > 0;
+
+      if (hasInspectorInputs) {
+        await inspectorInputs.focus();
+        const focused = await page.evaluate(() => document.activeElement !== null);
+        expect(focused).toBe(true);
+      } else {
+        // If no entity is selected, the inspector shows placeholder — just check it's visible
+        const inspector = page.locator('[aria-label*="inspector" i], [data-panel="inspector"]').first();
+        if (await inspector.count() > 0) {
+          await expect(inspector).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+        }
+      }
+    });
+  });
+
+  test.describe('ARIA live regions', () => {
+    test.beforeEach(async ({ editor }) => {
+      await editor.loadPage();
+    });
+
+    test('aria-live regions are present in the editor', async ({ page }) => {
+      // At least one aria-live region should exist for dynamic announcements
+      const liveRegions = page.locator('[aria-live]');
+      const count = await liveRegions.count();
+      // Editor must have aria-live regions for status announcements
+      expect(count).toBeGreaterThan(0);
+    });
+
+    test('status announcements area exists or polite live region is present', async ({ page }) => {
+      // Check for aria-live="polite" (non-interrupting status updates)
+      const politeRegions = page.locator('[aria-live="polite"]');
+      const assertiveRegions = page.locator('[aria-live="assertive"]');
+      const totalLive = (await politeRegions.count()) + (await assertiveRegions.count());
+
+      // The editor must have aria-live regions for entity spawn confirmations,
+      // filter match counts, and other dynamic status announcements.
+      expect(totalLive).toBeGreaterThan(0);
+    });
+  });
 });

@@ -52,7 +52,7 @@ describe('SceneNode', () => {
       />
     );
     
-    expect(screen.getByText('Test Cube')).toBeDefined();
+    expect(screen.getByText('Test Cube')).toBeInTheDocument();
   });
 
   it('calls selectEntity when clicked', () => {
@@ -86,17 +86,75 @@ describe('SceneNode', () => {
   it('calls onToggleExpand when expansion arrow is clicked', () => {
     const nodeWithChildren = { ...node, children: ['e2'] };
     render(
-      <SceneNode 
-        node={nodeWithChildren} 
+      <SceneNode
+        node={nodeWithChildren}
         depth={0}
         onContextMenu={mockOnContextMenu}
         onToggleExpand={mockOnToggleExpand}
       />
     );
-    
+
     const expandBtn = screen.getByRole('button', { name: /Collapse Test Cube/i });
     fireEvent.click(expandBtn);
-    
+
     expect(mockOnToggleExpand).toHaveBeenCalledWith('e1');
+  });
+
+  it('calls onDragStart with entityId and name when drag begins', () => {
+    const mockOnDragStart = vi.fn();
+    const { container } = render(
+      <SceneNode
+        node={node}
+        depth={0}
+        onContextMenu={mockOnContextMenu}
+        onDragStart={mockOnDragStart}
+      />
+    );
+
+    const draggable = container.querySelector('[draggable]') as HTMLElement;
+    expect(draggable).not.toBeNull();
+    // Provide a mock dataTransfer since jsdom does not implement it
+    fireEvent.dragStart(draggable, {
+      dataTransfer: {
+        effectAllowed: 'move',
+        setData: vi.fn(),
+        getData: vi.fn(),
+      },
+    });
+
+    expect(mockOnDragStart).toHaveBeenCalledWith('e1', 'Test Cube');
+  });
+
+  it('calls onDragEnd when drag finishes', () => {
+    const mockOnDragEnd = vi.fn();
+    const { container } = render(
+      <SceneNode
+        node={node}
+        depth={0}
+        onContextMenu={mockOnContextMenu}
+        onDragEnd={mockOnDragEnd}
+      />
+    );
+
+    const draggable = container.querySelector('[draggable]') as HTMLElement;
+    expect(draggable).not.toBeNull();
+    fireEvent.dragEnd(draggable);
+
+    expect(mockOnDragEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies opacity-50 class when isBeingDragged is true', () => {
+    const { container } = render(
+      <SceneNode
+        node={node}
+        depth={0}
+        onContextMenu={mockOnContextMenu}
+        draggedEntityId="e1"
+      />
+    );
+
+    const row = container.querySelector('[draggable]');
+    expect(row).not.toBeNull();
+    expect(row!.className).toContain('opacity-50');
   });
 });

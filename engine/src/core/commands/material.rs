@@ -610,6 +610,9 @@ fn handle_apply_custom_shader(payload: serde_json::Value) -> super::CommandResul
             data.params.len()
         ));
     }
+    if data.params.values().any(|v| !v.is_finite()) {
+        return Err("shader params must be finite".into());
+    }
     let params: Vec<f32> = data.params.values().copied().collect();
 
     let req = ApplyCustomShaderRequest {

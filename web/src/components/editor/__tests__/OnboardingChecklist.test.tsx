@@ -64,38 +64,38 @@ describe('OnboardingChecklist', () => {
   it('renders "Getting Started" heading when not dismissed', () => {
     setupStore();
     render(<OnboardingChecklist />);
-    expect(screen.getByText('Getting Started')).toBeDefined();
+    expect(screen.getByText('Getting Started')).toBeInTheDocument();
   });
 
   it('renders Progress label', () => {
     setupStore();
     render(<OnboardingChecklist />);
-    expect(screen.getByText('Progress')).toBeDefined();
+    expect(screen.getByText('Progress')).toBeInTheDocument();
   });
 
   it('renders Basics section', () => {
     setupStore();
     render(<OnboardingChecklist />);
-    expect(screen.getByText('Basics')).toBeDefined();
+    expect(screen.getByText('Basics')).toBeInTheDocument();
   });
 
   it('renders Advanced section', () => {
     setupStore();
     render(<OnboardingChecklist />);
-    expect(screen.getByText('Advanced')).toBeDefined();
+    expect(screen.getByText('Advanced')).toBeInTheDocument();
   });
 
   it('shows "Locked" badge on Advanced when basics not complete', () => {
     setupStore();
     render(<OnboardingChecklist />);
-    expect(screen.getByText('Locked')).toBeDefined();
+    expect(screen.getByText('Locked')).toBeInTheDocument();
   });
 
   it('renders checklist task titles', () => {
     setupStore();
     render(<OnboardingChecklist />);
-    expect(screen.getByText('Create Your First Entity')).toBeDefined();
-    expect(screen.getByText('Write a Script')).toBeDefined();
+    expect(screen.getByText('Create Your First Entity')).toBeInTheDocument();
+    expect(screen.getByText('Write a Script')).toBeInTheDocument();
   });
 
   it('dismisses checklist when X button is clicked', () => {
@@ -124,12 +124,12 @@ describe('OnboardingChecklist', () => {
     render(<OnboardingChecklist />);
     fireEvent.click(screen.getByTitle('Collapse'));
     fireEvent.click(screen.getByTitle('Expand'));
-    expect(screen.getByText('Progress')).toBeDefined();
+    expect(screen.getByText('Progress')).toBeInTheDocument();
   });
 
   it('shows task count as 0/12 by default', () => {
     setupStore();
     render(<OnboardingChecklist />);
-    expect(screen.getByText('0 / 12')).toBeDefined();
+    expect(screen.getByText('0 / 12')).toBeInTheDocument();
   });
 });

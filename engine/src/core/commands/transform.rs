@@ -142,6 +142,27 @@ fn handle_update_transform(payload: serde_json::Value) -> CommandResult {
     let data: UpdateTransformPayload = serde_json::from_value(payload)
         .map_err(|e| format!("Invalid update_transform payload: {}", e))?;
 
+    // Validate all components are finite
+    if let Some(p) = &data.position {
+        if p.iter().any(|v| !v.is_finite()) {
+            return Err("update_transform: position contains non-finite values".to_string());
+        }
+    }
+    if let Some(r) = &data.rotation {
+        if r.iter().any(|v| !v.is_finite()) {
+            return Err("update_transform: rotation contains non-finite values".to_string());
+        }
+    }
+    if let Some(s) = &data.scale {
+        if s.iter().any(|v| !v.is_finite()) {
+            return Err("update_transform: scale contains non-finite values".to_string());
+        }
+        // Near-zero scale (including denormals) collapses entity geometry and can cause NaN in physics
+        if s.iter().any(|v| v.abs() < f32::EPSILON) {
+            return Err("update_transform: scale components must be non-zero".to_string());
+        }
+    }
+
     let update = TransformUpdate {
         entity_id: data.entity_id.clone(),
         position: data.position.map(|p| Vec3::new(p[0], p[1], p[2])),

@@ -147,7 +147,12 @@ export async function POST(
 
     // Validate fields
     const boardName = typeof body.name === 'string' ? body.name.trim() : '';
-    const playerName = typeof body.playerName === 'string' ? body.playerName.trim() : '';
+    // Strip ASCII and Unicode angle brackets from playerName to prevent tag injection.
+    // Unicode alternatives: single/double angle quotes, mathematical/CJK angle brackets.
+    const rawPlayerName = typeof body.playerName === 'string' ? body.playerName.trim() : '';
+    const playerName = rawPlayerName
+      .replace(/[<>]/g, '')
+      .replace(/[\u2039\u203A\u00AB\u00BB\u2329\u232A\u3008\u3009]/g, '');
     const score = typeof body.score === 'number' ? body.score : undefined;
 
     if (!boardName) {

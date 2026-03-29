@@ -100,6 +100,9 @@ jobs:
     outputs:
       engine-changed: ${{ steps.filter.outputs.engine }}
       web-changed: ${{ steps.filter.outputs.web }}
+      docs-changed: ${{ steps.filter.outputs.docs-changed }}
+      design-changed: ${{ steps.filter.outputs.design-changed }}
+      web-changed-files: ${{ steps.filter.outputs.web-changed-files }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -126,6 +129,8 @@ jobs:
             echo "::warning::git diff returned empty output -- defaulting web=true engine=false"
             echo "engine=false" >> "$GITHUB_OUTPUT"
             echo "web=true" >> "$GITHUB_OUTPUT"
+            echo "docs-changed=false" >> "$GITHUB_OUTPUT"
+            echo "design-changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -144,6 +149,15 @@ jobs:
             echo "web=false" >> "$GITHUB_OUTPUT"
             echo "No web changes -- skipping deploy"
           fi
+
+          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && echo "docs-changed=true" >> "$GITHUB_OUTPUT" || echo "docs-changed=false" >> "$GITHUB_OUTPUT"
+          echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && echo "design-changed=true" >> "$GITHUB_OUTPUT" || echo "design-changed=false" >> "$GITHUB_OUTPUT"
+
+          # Expose changed web file list for schema-change gating
+          WEB_FILES=$(echo "$CHANGED" | grep '^web/' || true)
+          echo "web-changed-files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$WEB_FILES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
   build-wasm:
     name: WASM Build
@@ -231,7 +245,7 @@ jobs:
     name: E2E (UI)
     runs-on: ubuntu-latest
     needs: [build-wasm]
-    if: ${{ needs.build-wasm.result == 'success' }}
+    if: ${{ needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -304,7 +318,7 @@ jobs:
 
   security:
     name: Rust Security Audit
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -469,9 +483,10 @@ jobs:
     name: Deploy to Production
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # check-changes not needed: production only runs after deploy-staging succeeds
-    # (which already requires quality gates to pass).
-    needs: [quality-gates, build-wasm, e2e, security, upload-wasm-cdn, deploy-staging]
+    # check-changes is required: its outputs.web-changed-files is consumed by the
+    # schema migration step. Without this in needs, the expression resolves to
+    # empty string and the migration is always skipped.
+    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, deploy-staging, check-changes]
     if: |
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
@@ -543,10 +558,13 @@ jobs:
         # pushed manually during development. db:migrate (SQL file based) fails
         # when migrations were pre-applied via db:push.
         # DATABASE_URL is supplied as a repository secret (matches the production DB).
+        # Only runs when schema files changed — avoids unnecessary DB round-trips on
+        # non-schema pushes and prevents accidental destructive schema changes.
+        if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema')
         working-directory: web
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: npx drizzle-kit push --force
+        run: npx drizzle-kit push
 
       # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
       # Adding working-directory:web here causes web/web path doubling on remote builds.
@@ -614,3 +632,81 @@ jobs:
           curl --silent --fail -X POST "$SLACK_WEBHOOK" \
             -H "Content-Type: application/json" \
             -d "$payload" || echo "Slack notification failed (non-fatal)"
+
+
+  # ---- Docs Site Deploy ----
+  # Deploys apps/docs to the Vercel docs project when docs or MCP manifest changed.
+  # Independent of the main web deploy — docs can ship without a full Vercel web build.
+  deploy-docs:
+    name: Deploy Docs
+    needs: [check-changes, lint, typecheck]
+    if: (needs.check-changes.outputs.docs-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      - name: Install Vercel CLI
+        run: npm i -g vercel@50.34.3
+
+      - name: Deploy docs to production
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          cd apps/docs
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          vercel deploy --prod --token="$VERCEL_TOKEN"
+
+  # ---- Design Workbench Deploy ----
+  # Deploys apps/design (Storybook) to the Vercel design project when UI or design files changed.
+  deploy-design:
+    name: Deploy Design Workbench
+    needs: [check-changes, lint, typecheck]
+    if: (needs.check-changes.outputs.design-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      - name: Install Vercel CLI
+        run: npm i -g vercel@50.34.3
+
+      - name: Deploy design workbench to production
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DESIGN_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          cd apps/design
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          vercel deploy --prod --token="$VERCEL_TOKEN"

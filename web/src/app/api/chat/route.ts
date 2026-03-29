@@ -1,3 +1,12 @@
+/**
+ * POST /api/chat — AI chat with streaming tool use.
+ *
+ * Resolves an API key (BYOK first, then platform), deducts tokens upfront,
+ * and streams Claude responses back via SSE. If the stream fails after deduction,
+ * tokens are refunded via refundTokens(). Never remove `usageId` from the response —
+ * client-side useGenerationPolling.triggerRefund() needs it for async job refunds.
+ */
+
 export const maxDuration = 120; // API_MAX_DURATION_CHAT_S
 
 import { NextRequest } from 'next/server';

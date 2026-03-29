@@ -1,3 +1,10 @@
+/**
+ * POST /api/billing/checkout — create a Stripe Checkout session for subscription upgrade.
+ *
+ * Requires authentication. Rate-limited. Returns a Stripe Checkout URL.
+ * The subscription is activated via the stripe/webhook handler on successful payment.
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { withApiMiddleware } from '@/lib/api/middleware';

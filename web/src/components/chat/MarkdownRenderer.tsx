@@ -148,11 +148,12 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         return <h3 className="mb-1 text-sm font-semibold text-zinc-200">{children}</h3>;
       },
 
-      // Links
+      // Links — sanitize href to prevent javascript: protocol XSS
       a({ href, children }) {
+        const safeSrc = href && /^https?:\/\//i.test(href) ? href : '#';
         return (
           <a
-            href={href}
+            href={safeSrc}
             target="_blank"
             rel="noopener noreferrer"
             className="text-blue-400 underline hover:text-blue-300"

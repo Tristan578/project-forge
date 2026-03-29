@@ -132,12 +132,94 @@ impl CustomShaderRegistry {
 
     /// Build the combined WGSL containing one function per registered slot.
     /// Unregistered slots get a passthrough stub.
+    /// Returns an error string if any slot's body would escape the wrapping function.
     pub fn build_combined_wgsl(&self) -> String {
         let mut functions = String::new();
         for i in 0..CUSTOM_SHADER_SLOT_COUNT {
             let fn_name = format!("custom_shader_{}", i + 1);
             match &self.slots[i] {
                 Some(slot) => {
+                    // Security: reject bodies that could escape the wrapping function.
+                    // Track brace balance — if it hits zero, the user code has closed
+                    // the wrapping function and anything after is injected at top-level.
+                    if slot.wgsl_function_body.contains("FORGE_USER_CODE_INJECTION_POINT") {
+                        tracing::warn!("Slot {} rejected: contains injection point marker", i);
+                        functions.push_str(&format!(
+                            "fn {fn_name}(color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) -> vec4<f32> {{\n    return color;\n}}\n\n"
+                        ));
+                        continue;
+                    }
+                    let mut balance: i32 = 0;
+                    let mut escaped = false;
+                    // Comment-and-string-aware brace scanner: skip braces inside
+                    // // line comments, /* */ block comments, and "..." string literals
+                    // so they do not affect balance.
+                    let body = &slot.wgsl_function_body;
+                    let bytes = body.as_bytes();
+                    let len = bytes.len();
+                    let mut byte_i = 0;
+                    while byte_i < len {
+                        // Check for block comment start /*
+                        if byte_i + 1 < len && bytes[byte_i] == b'/' && bytes[byte_i + 1] == b'*' {
+                            byte_i += 2;
+                            // Advance until */ or end of string
+                            while byte_i + 1 < len {
+                                if bytes[byte_i] == b'*' && bytes[byte_i + 1] == b'/' {
+                                    byte_i += 2;
+                                    break;
+                                }
+                                byte_i += 1;
+                            }
+                            continue;
+                        }
+                        // Check for line comment start //
+                        if byte_i + 1 < len && bytes[byte_i] == b'/' && bytes[byte_i + 1] == b'/' {
+                            byte_i += 2;
+                            // Advance until newline or end of string
+                            while byte_i < len && bytes[byte_i] != b'\n' {
+                                byte_i += 1;
+                            }
+                            continue;
+                        }
+                        // Skip string literals — advance past the closing unescaped `"`
+                        if bytes[byte_i] == b'"' {
+                            byte_i += 1;
+                            while byte_i < len {
+                                if bytes[byte_i] == b'\\' {
+                                    // Escape sequence: skip the next character
+                                    byte_i += 2;
+                                    continue;
+                                }
+                                if bytes[byte_i] == b'"' {
+                                    byte_i += 1;
+                                    break;
+                                }
+                                byte_i += 1;
+                            }
+                            continue;
+                        }
+                        match bytes[byte_i] {
+                            b'{' => balance += 1,
+                            b'}' => {
+                                balance -= 1;
+                                // balance == -1 means the user body has closed the wrapping '{',
+                                // which would terminate the enclosing function.
+                                if balance < 0 {
+                                    escaped = true;
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                        byte_i += 1;
+                    }
+                    if escaped {
+                        tracing::warn!("Slot {} rejected: brace escape detected in WGSL body", i);
+                        functions.push_str(&format!(
+                            "fn {fn_name}(color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) -> vec4<f32> {{\n    return color;\n}}\n\n"
+                        ));
+                        continue;
+                    }
                     // Indent the user body by 4 spaces
                     let indented = slot
                         .wgsl_function_body
@@ -212,16 +294,68 @@ pub fn validate_wgsl_source(code: &str) -> WgslValidation {
     }
 
     // Check balanced braces to catch obvious syntax errors early.
-    let open = code.chars().filter(|c| *c == '{').count();
-    let close = code.chars().filter(|c| *c == '}').count();
-    if open != close {
-        return WgslValidation {
-            valid: false,
-            error: Some(format!(
-                "Unbalanced braces: {} open, {} close",
-                open, close
-            )),
-        };
+    // Comment-and-string-aware: skip braces inside // line comments,
+    // /* */ block comments, and "..." string literals.
+    {
+        let bytes = code.as_bytes();
+        let len = bytes.len();
+        let mut i = 0;
+        let mut open: i32 = 0;
+        let mut close: i32 = 0;
+        while i < len {
+            // Block comment /*
+            if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+                i += 2;
+                while i + 1 < len {
+                    if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                        i += 2;
+                        break;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+            // Line comment //
+            if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'/' {
+                i += 2;
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            // String literal — skip past the closing unescaped `"`
+            if bytes[i] == b'"' {
+                i += 1;
+                while i < len {
+                    if bytes[i] == b'\\' {
+                        // Escape sequence: skip the next character
+                        i += 2;
+                        continue;
+                    }
+                    if bytes[i] == b'"' {
+                        i += 1;
+                        break;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+            match bytes[i] {
+                b'{' => open += 1,
+                b'}' => close += 1,
+                _ => {}
+            }
+            i += 1;
+        }
+        if open != close {
+            return WgslValidation {
+                valid: false,
+                error: Some(format!(
+                    "Unbalanced braces: {} open, {} close",
+                    open, close
+                )),
+            };
+        }
     }
 
     WgslValidation {

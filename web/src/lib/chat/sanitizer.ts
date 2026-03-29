@@ -221,7 +221,16 @@ export function detectPromptInjection(input: string): boolean {
     return false;
   }
 
-  const lowerInput = input.toLowerCase();
+  // Normalize to NFKD to collapse visually-similar Unicode characters (e.g. full-width
+  // latin letters, homoglyph substitutions) before pattern matching. This prevents
+  // injections that use Unicode look-alikes to bypass keyword checks.
+  // Also strip Unicode bidirectional override characters which can be used to reverse
+  // text rendering and obfuscate injection patterns from human reviewers.
+  const normalized = input
+    .normalize('NFKD')
+    .replace(/[\u202A-\u202E\u2066-\u2069\u200F\u061C]/g, '');
+
+  const lowerInput = normalized.toLowerCase();
 
   // Common injection patterns
   const injectionPatterns = [

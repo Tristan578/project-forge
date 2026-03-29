@@ -206,7 +206,8 @@ export function ChatInput() {
               <img src={img} alt="Preview" width={48} height={48} className="h-12 w-12 rounded border border-zinc-700 object-cover" />
               <button
                 onClick={() => removeImage(i)}
-                className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-zinc-700 text-zinc-300 group-hover:flex"
+                aria-label={`Remove image ${i + 1}`}
+                className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-zinc-700 text-zinc-300 group-hover:flex group-focus-within:flex"
               >
                 &times;
               </button>
@@ -258,7 +259,7 @@ export function ChatInput() {
       </div>
 
       {/* Bottom toolbar */}
-      <div className="flex items-center gap-2 border-t border-zinc-800 px-2 py-1">
+      <div role="toolbar" aria-label="Chat options" className="flex items-center gap-2 border-t border-zinc-800 px-2 py-1">
         {tokenEstimate > 0 && (
           <span className="text-[9px] text-zinc-400" title="Estimated token cost for this message">
             {formatTokenEstimate(tokenEstimate)} tokens

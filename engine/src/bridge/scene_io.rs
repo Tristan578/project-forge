@@ -1,5 +1,14 @@
 //! Scene import/export and asset loading systems.
 
+/// Maximum size of a scene JSON payload in bytes (50 MB).
+pub const MAX_SCENE_JSON_BYTES: usize = 50 * 1024 * 1024;
+/// Maximum number of entities permitted in a loaded scene.
+pub const MAX_SCENE_ENTITIES: usize = 10_000;
+/// Maximum byte length of a glTF base64 payload (~50 MB decoded, 1.33× overhead).
+pub const MAX_GLTF_BASE64_LEN: usize = 67_500_000;
+/// Maximum byte length of a texture base64 payload (~50 MB decoded, 1.33× overhead).
+pub const MAX_TEXTURE_BASE64_LEN: usize = 67_500_000;
+
 use bevy::prelude::*;
 use crate::core::{
     asset_manager::{AssetRef, AssetRegistry},
@@ -206,6 +215,15 @@ pub(super) fn apply_scene_load(
         return;
     };
 
+    // Guard against pathologically large scene payloads that could cause OOM during deser.
+    if request.json.len() > MAX_SCENE_JSON_BYTES {
+        tracing::error!(
+            "Scene load rejected: JSON payload {} bytes exceeds 50MB limit",
+            request.json.len()
+        );
+        return;
+    }
+
     let scene_file: scene_file::SceneFile = match serde_json::from_str(&request.json) {
         Ok(sf) => sf,
         Err(e) => {
@@ -218,6 +236,16 @@ pub(super) fn apply_scene_load(
         let msg = format!("Unsupported scene format version {}", scene_file.format_version);
         tracing::error!("{}", msg);
         events::emit_event("SCENE_LOAD_ERROR", &serde_json::json!({"error": msg}));
+        return;
+    }
+
+    // Cap entity count to prevent runaway scene loading.
+    if scene_file.entities.len() > MAX_SCENE_ENTITIES {
+        tracing::error!(
+            "Scene load rejected: {} entities exceeds limit of {}",
+            scene_file.entities.len(),
+            MAX_SCENE_ENTITIES
+        );
         return;
     }
 
@@ -414,6 +442,16 @@ pub(super) fn apply_gltf_import(
     use base64::Engine as _;
 
     for request in pending.gltf_import_requests.drain(..) {
+        // Guard against excessively large glTF payloads (base64 overhead ~1.33x,
+        // so 50MB decoded ≈ 67.5MB base64).
+        if request.data_base64.len() > MAX_GLTF_BASE64_LEN {
+            tracing::error!(
+                "glTF import rejected: base64 payload {} bytes exceeds 50MB limit",
+                request.data_base64.len()
+            );
+            continue;
+        }
+
         let asset_id = uuid::Uuid::new_v4().to_string();
         let file_size = request.data_base64.len() as u64;
 
@@ -585,6 +623,16 @@ pub(super) fn apply_texture_load(
     use bevy::asset::RenderAssetUsages;
 
     for request in pending.texture_load_requests.drain(..) {
+        // Guard against excessively large texture payloads (base64 overhead ~1.33x,
+        // so 50MB decoded ≈ 67.5MB base64).
+        if request.data_base64.len() > MAX_TEXTURE_BASE64_LEN {
+            tracing::error!(
+                "Texture load rejected: base64 payload {} bytes exceeds 50MB limit",
+                request.data_base64.len()
+            );
+            continue;
+        }
+
         let asset_id = uuid::Uuid::new_v4().to_string();
         let file_size = request.data_base64.len() as u64;
 

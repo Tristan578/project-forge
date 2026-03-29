@@ -301,6 +301,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
       {/* Remove Skeleton */}
       <button
         onClick={() => {
+          // TODO(PF): Replace confirm() with an inline confirmation dialog (accessible, styled).
           if (confirm('Remove skeleton data?')) {
             removeSkeleton2d(entityId);
             setSelectedBone(null);

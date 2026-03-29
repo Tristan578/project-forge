@@ -70,6 +70,20 @@ const ReviewPanel = lazy(() => import('./ReviewPanel').then(m => ({ default: m.R
 
 const TAB_ORDER: RightPanelTab[] = ['inspector', 'chat', 'modify', 'script', 'ui', 'gdd', 'review', 'behavior'];
 
+/**
+ * Displays the current scene name in the top bar.
+ * Extracted so the display logic (truncation, "Untitled" handling) lives in one place.
+ */
+function SceneNameDisplay({ sceneName, className }: { sceneName: string; className?: string }) {
+  return (
+    <span
+      className={className ?? 'max-w-[200px] truncate text-xs text-zinc-400'}
+      title={sceneName !== 'Untitled' ? sceneName : undefined}
+    >
+      {sceneName}
+    </span>
+  );
+}
 
 function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; onTabChange: (tab: RightPanelTab) => void }) {
   const hasUnread = useChatStore((s) => s.hasUnreadMessages);
@@ -540,7 +554,7 @@ export function EditorLayout() {
             {sceneName !== 'Untitled' && (
               <>
                 <span className="text-zinc-700">/</span>
-                <span className="truncate text-[10px] text-zinc-400">{sceneName}</span>
+                <SceneNameDisplay sceneName={sceneName} className="truncate text-[10px] text-zinc-400" />
               </>
             )}
           </div>
@@ -605,9 +619,7 @@ export function EditorLayout() {
         <div className="flex items-center gap-3">
           <span className="text-xs font-semibold text-zinc-400">SpawnForge</span>
           <div className="h-3 w-px bg-zinc-700" />
-          <span className="max-w-[200px] truncate text-xs text-zinc-400" title={sceneName}>
-            {sceneName}
-          </span>
+          <SceneNameDisplay sceneName={sceneName} />
           <SceneToolbar />
         </div>
         <div className="flex items-center gap-2">

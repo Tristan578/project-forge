@@ -404,6 +404,7 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: ToolCallCardProp
                 e.stopPropagation();
                 undo();
               }}
+              aria-label="Undo this action"
               className="rounded px-1 py-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
               title="Undo this action"
             >

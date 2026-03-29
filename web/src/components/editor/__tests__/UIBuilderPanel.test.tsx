@@ -79,13 +79,13 @@ describe('UIBuilderPanel', () => {
   it('shows empty-state message when no screen is active', () => {
     setupStores({ activeScreenId: null });
     render(<UIBuilderPanel />);
-    expect(screen.getByText(/select or create a screen/i)).toBeDefined();
+    expect(screen.getByText(/select or create a screen/i)).toBeInTheDocument();
   });
 
   it('renders ScreenList in the header even with no active screen', () => {
     setupStores({ activeScreenId: null });
     render(<UIBuilderPanel />);
-    expect(screen.getByTestId('screen-list')).toBeDefined();
+    expect(screen.getByTestId('screen-list')).toBeInTheDocument();
   });
 
   // ── Active screen (no selected widget) ────────────────────────────────
@@ -93,19 +93,19 @@ describe('UIBuilderPanel', () => {
   it('renders WidgetPalette when a screen is active', () => {
     setupStores({ activeScreenId: 'screen-1' });
     render(<UIBuilderPanel />);
-    expect(screen.getByTestId('widget-palette')).toBeDefined();
+    expect(screen.getByTestId('widget-palette')).toBeInTheDocument();
   });
 
   it('renders WidgetTree when a screen is active', () => {
     setupStores({ activeScreenId: 'screen-1' });
     render(<UIBuilderPanel />);
-    expect(screen.getByTestId('widget-tree')).toBeDefined();
+    expect(screen.getByTestId('widget-tree')).toBeInTheDocument();
   });
 
   it('renders ScreenSettingsPanel when screen is active but no widget is selected', () => {
     setupStores({ activeScreenId: 'screen-1', selectedWidgetId: null });
     render(<UIBuilderPanel />);
-    expect(screen.getByTestId('screen-settings-panel')).toBeDefined();
+    expect(screen.getByTestId('screen-settings-panel')).toBeInTheDocument();
   });
 
   it('does not render WidgetPropertyPanel when no widget is selected', () => {
@@ -119,13 +119,13 @@ describe('UIBuilderPanel', () => {
   it('renders WidgetPropertyPanel when a widget is selected', () => {
     setupStores({ activeScreenId: 'screen-1', selectedWidgetId: 'widget-42' });
     render(<UIBuilderPanel />);
-    expect(screen.getByTestId('widget-property-panel')).toBeDefined();
+    expect(screen.getByTestId('widget-property-panel')).toBeInTheDocument();
   });
 
   it('renders WidgetStyleEditor when a widget is selected', () => {
     setupStores({ activeScreenId: 'screen-1', selectedWidgetId: 'widget-42' });
     render(<UIBuilderPanel />);
-    expect(screen.getByTestId('widget-style-editor')).toBeDefined();
+    expect(screen.getByTestId('widget-style-editor')).toBeInTheDocument();
   });
 
   it('does not render ScreenSettingsPanel when a widget is selected', () => {
@@ -139,7 +139,7 @@ describe('UIBuilderPanel', () => {
   it('renders the UI Settings button', () => {
     setupStores();
     render(<UIBuilderPanel />);
-    expect(screen.getByTitle('UI Settings')).toBeDefined();
+    expect(screen.getByTitle('UI Settings')).toBeInTheDocument();
   });
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────

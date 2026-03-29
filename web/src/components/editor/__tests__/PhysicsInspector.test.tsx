@@ -43,8 +43,8 @@ describe('PhysicsInspector', () => {
   it('renders physics heading with enabled toggle', () => {
     mockEditorStore();
     render(<PhysicsInspector />);
-    expect(screen.getByText('Physics')).toBeDefined();
-    expect(screen.getByText('Enabled')).toBeDefined();
+    expect(screen.getByText('Physics')).toBeInTheDocument();
+    expect(screen.getByText('Enabled')).toBeInTheDocument();
   });
 
   it('shows detailed settings when physics is enabled', () => {
@@ -67,10 +67,10 @@ describe('PhysicsInspector', () => {
       },
     });
     render(<PhysicsInspector />);
-    expect(screen.getByText('Body Type')).toBeDefined();
-    expect(screen.getByText('Collider')).toBeDefined();
-    expect(screen.getByText('Restitution')).toBeDefined();
-    expect(screen.getByText('Friction')).toBeDefined();
+    expect(screen.getByText('Body Type')).toBeInTheDocument();
+    expect(screen.getByText('Collider')).toBeInTheDocument();
+    expect(screen.getByText('Restitution')).toBeInTheDocument();
+    expect(screen.getByText('Friction')).toBeInTheDocument();
   });
 
   it('hides detailed settings when physics is disabled', () => {

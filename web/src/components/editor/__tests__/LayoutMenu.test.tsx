@@ -61,7 +61,7 @@ describe('LayoutMenu', () => {
 
   it('renders Layout button', () => {
     render(<LayoutMenu />);
-    expect(screen.getByText('Layout')).toBeDefined();
+    expect(screen.getByText('Layout')).toBeInTheDocument();
   });
 
   it('does not show dropdown initially', () => {
@@ -72,14 +72,14 @@ describe('LayoutMenu', () => {
   it('shows dropdown when Layout button clicked', () => {
     render(<LayoutMenu />);
     fireEvent.click(screen.getByTitle('Layout presets'));
-    expect(screen.getByText('Presets')).toBeDefined();
+    expect(screen.getByText('Presets')).toBeInTheDocument();
   });
 
   it('shows preset names in dropdown', () => {
     render(<LayoutMenu />);
     fireEvent.click(screen.getByTitle('Layout presets'));
-    expect(screen.getByText('Default')).toBeDefined();
-    expect(screen.getByText('Focus')).toBeDefined();
+    expect(screen.getByText('Default')).toBeInTheDocument();
+    expect(screen.getByText('Focus')).toBeInTheDocument();
   });
 
   it('calls applyPreset when a preset button clicked', () => {
@@ -92,28 +92,28 @@ describe('LayoutMenu', () => {
   it('shows Save Current Layout button in dropdown', () => {
     render(<LayoutMenu />);
     fireEvent.click(screen.getByTitle('Layout presets'));
-    expect(screen.getByText('Save Current Layout')).toBeDefined();
+    expect(screen.getByText('Save Current Layout')).toBeInTheDocument();
   });
 
   it('shows Reset to Default button in dropdown', () => {
     render(<LayoutMenu />);
     fireEvent.click(screen.getByTitle('Layout presets'));
-    expect(screen.getByText('Reset to Default')).toBeDefined();
+    expect(screen.getByText('Reset to Default')).toBeInTheDocument();
   });
 
   it('shows preset name input when Save Current Layout clicked', () => {
     render(<LayoutMenu />);
     fireEvent.click(screen.getByTitle('Layout presets'));
     fireEvent.click(screen.getByText('Save Current Layout'));
-    expect(screen.getByPlaceholderText('Preset name...')).toBeDefined();
+    expect(screen.getByPlaceholderText('Preset name...')).toBeInTheDocument();
   });
 
   it('shows custom preset names when customPresets exist', () => {
     setupStore({ customPresets: [{ name: 'My Layout' }] });
     render(<LayoutMenu />);
     fireEvent.click(screen.getByTitle('Layout presets'));
-    expect(screen.getByText('My Layout')).toBeDefined();
-    expect(screen.getByText('Custom')).toBeDefined();
+    expect(screen.getByText('My Layout')).toBeInTheDocument();
+    expect(screen.getByText('Custom')).toBeInTheDocument();
   });
 
   it('calls loadCustomPreset when custom preset clicked', () => {

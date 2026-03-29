@@ -288,9 +288,27 @@ pub(super) fn process_query_requests(
             QueryRequest::PlayState => {
                 // Handled by process_play_state_queries system to avoid system parameter limit
             }
-            // ReverbZoneState is routed to `remaining` above and handled by
-            // process_reverb_zone_queries. This arm exists only for exhaustiveness.
-            QueryRequest::ReverbZoneState { .. } => {}
+            QueryRequest::GameComponentTypes => {
+                // Static list of all available game component type names
+                let types_json = serde_json::json!({
+                    "types": [
+                        "character_controller",
+                        "health",
+                        "collectible",
+                        "damage_zone",
+                        "checkpoint",
+                        "teleporter",
+                        "moving_platform",
+                        "trigger_zone",
+                        "spawner",
+                        "follower",
+                        "projectile",
+                        "win_condition",
+                        "dialogue_trigger"
+                    ]
+                });
+                events::emit_event("QUERY_GAME_COMPONENT_TYPES", &types_json.to_string());
+            }
         }
     }
 }

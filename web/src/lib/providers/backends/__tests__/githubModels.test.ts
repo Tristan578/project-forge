@@ -8,16 +8,14 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-const envBackup = { ...process.env };
-
 describe('githubModelsBackend', () => {
   beforeEach(() => {
     vi.resetModules();
-    delete process.env.GITHUB_MODELS_PAT;
+    vi.stubEnv('GITHUB_MODELS_PAT', '');
   });
 
   afterEach(() => {
-    process.env = { ...envBackup };
+    vi.unstubAllEnvs();
   });
 
   describe('isConfigured', () => {
@@ -27,13 +25,13 @@ describe('githubModelsBackend', () => {
     });
 
     it('returns true when GITHUB_MODELS_PAT is set', async () => {
-      process.env.GITHUB_MODELS_PAT = 'ghp_test123';
+      vi.stubEnv('GITHUB_MODELS_PAT', 'ghp_test123');
       const { githubModelsBackend } = await import('@/lib/providers/backends/githubModels');
       expect(githubModelsBackend.isConfigured()).toBe(true);
     });
 
     it('returns false when GITHUB_MODELS_PAT is empty string', async () => {
-      process.env.GITHUB_MODELS_PAT = '';
+      vi.stubEnv('GITHUB_MODELS_PAT', '');
       const { githubModelsBackend } = await import('@/lib/providers/backends/githubModels');
       expect(githubModelsBackend.isConfigured()).toBe(false);
     });
@@ -41,7 +39,7 @@ describe('githubModelsBackend', () => {
 
   describe('getApiKey', () => {
     it('returns the PAT when set', async () => {
-      process.env.GITHUB_MODELS_PAT = 'ghp_secrettoken';
+      vi.stubEnv('GITHUB_MODELS_PAT', 'ghp_secrettoken');
       const { githubModelsBackend } = await import('@/lib/providers/backends/githubModels');
       expect(githubModelsBackend.getApiKey()).toBe('ghp_secrettoken');
     });

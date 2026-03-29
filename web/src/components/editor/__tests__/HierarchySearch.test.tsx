@@ -48,13 +48,13 @@ describe('HierarchySearch', () => {
   it('renders search input with placeholder', () => {
     setupStore();
     render(<HierarchySearch />);
-    expect(screen.getByPlaceholderText('Search entities...')).toBeDefined();
+    expect(screen.getByPlaceholderText('Search entities...')).toBeInTheDocument();
   });
 
   it('shows search icon', () => {
     setupStore();
     render(<HierarchySearch />);
-    expect(screen.getByTestId('search-icon')).toBeDefined();
+    expect(screen.getByTestId('search-icon')).toBeInTheDocument();
   });
 
   it('does not show clear button when input is empty', () => {
@@ -66,13 +66,13 @@ describe('HierarchySearch', () => {
   it('shows clear button when input has value', () => {
     setupStore('cube');
     render(<HierarchySearch />);
-    expect(screen.getByTestId('x-icon')).toBeDefined();
+    expect(screen.getByTestId('x-icon')).toBeInTheDocument();
   });
 
   it('shows match count when matchCount provided and input has value', () => {
     setupStore('cube');
     render(<HierarchySearch matchCount={3} />);
-    expect(screen.getByText('3')).toBeDefined();
+    expect(screen.getByText('3')).toBeInTheDocument();
   });
 
   it('does not show match count when input is empty', () => {
@@ -99,6 +99,6 @@ describe('HierarchySearch', () => {
   it('has aria-label for accessibility', () => {
     setupStore();
     render(<HierarchySearch />);
-    expect(screen.getByLabelText('Search entities')).toBeDefined();
+    expect(screen.getByLabelText('Search entities')).toBeInTheDocument();
   });
 });

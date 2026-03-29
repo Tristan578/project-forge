@@ -1,12 +1,12 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { MeshyClient } from '@/lib/generate/meshyClient';
+import type { User } from '@/lib/db/schema';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
@@ -19,11 +19,11 @@ vi.mock('@/lib/generate/meshyClient', () => ({
   })),
 }));
 
-function makeRequest(jobId?: string) {
+function makeRequest(jobId?: string): NextRequest {
   const url = jobId
     ? `http://test/api/generate/skybox/status?jobId=${jobId}`
     : 'http://test/api/generate/skybox/status';
-  return new Request(url) as any;
+  return new NextRequest(url);
 }
 
 describe('GET /api/generate/skybox/status', () => {
@@ -31,7 +31,7 @@ describe('GET /api/generate/skybox/status', () => {
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
-      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
+      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as unknown as User },
     });
     vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
   });
@@ -65,15 +65,15 @@ describe('GET /api/generate/skybox/status', () => {
   });
 
   it('returns completed status with first map URL for SUCCEEDED task', async () => {
-    vi.mocked(MeshyClient).mockImplementation(function () {
-      return {
-        getTextureStatus: vi.fn().mockResolvedValue({
+    vi.mocked(MeshyClient).mockImplementation(
+      function (this: InstanceType<typeof MeshyClient>) {
+        this.getTextureStatus = vi.fn().mockResolvedValue({
           status: 'SUCCEEDED',
           progress: 100,
           maps: { baseColor: 'https://cdn.meshy.ai/skybox.hdr', normal: 'https://cdn.meshy.ai/normal.hdr' },
-        }),
-      } as any;
-    } as any);
+        });
+      } as unknown as typeof MeshyClient
+    );
 
     const res = await GET(makeRequest('job-123'));
     expect(res.status).toBe(200);
@@ -85,15 +85,15 @@ describe('GET /api/generate/skybox/status', () => {
   });
 
   it('returns undefined resultUrl when maps is empty', async () => {
-    vi.mocked(MeshyClient).mockImplementation(function () {
-      return {
-        getTextureStatus: vi.fn().mockResolvedValue({
+    vi.mocked(MeshyClient).mockImplementation(
+      function (this: InstanceType<typeof MeshyClient>) {
+        this.getTextureStatus = vi.fn().mockResolvedValue({
           status: 'SUCCEEDED',
           progress: 100,
           maps: undefined,
-        }),
-      } as any;
-    } as any);
+        });
+      } as unknown as typeof MeshyClient
+    );
 
     const res = await GET(makeRequest('job-123'));
     const data = await res.json();
@@ -102,14 +102,14 @@ describe('GET /api/generate/skybox/status', () => {
   });
 
   it('returns failed status for EXPIRED task', async () => {
-    vi.mocked(MeshyClient).mockImplementation(function () {
-      return {
-        getTextureStatus: vi.fn().mockResolvedValue({
+    vi.mocked(MeshyClient).mockImplementation(
+      function (this: InstanceType<typeof MeshyClient>) {
+        this.getTextureStatus = vi.fn().mockResolvedValue({
           status: 'EXPIRED',
           progress: 0,
-        }),
-      } as any;
-    } as any);
+        });
+      } as unknown as typeof MeshyClient
+    );
 
     const res = await GET(makeRequest('job-123'));
     const data = await res.json();
@@ -118,11 +118,11 @@ describe('GET /api/generate/skybox/status', () => {
   });
 
   it('returns 500 when provider throws', async () => {
-    vi.mocked(MeshyClient).mockImplementation(function () {
-      return {
-        getTextureStatus: vi.fn().mockRejectedValue(new Error('Network error')),
-      } as any;
-    } as any);
+    vi.mocked(MeshyClient).mockImplementation(
+      function (this: InstanceType<typeof MeshyClient>) {
+        this.getTextureStatus = vi.fn().mockRejectedValue(new Error('Network error'));
+      } as unknown as typeof MeshyClient
+    );
 
     const res = await GET(makeRequest('job-123'));
     expect(res.status).toBe(500);

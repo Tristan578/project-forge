@@ -351,6 +351,16 @@ pub(super) fn apply_instantiate_prefab(
     mut cache: ResMut<SceneGraphCache>,
 ) {
     for request in pending.instantiate_prefab_requests.drain(..) {
+        // Reject oversized payloads before deserializing (1 MB limit)
+        const MAX_SNAPSHOT_BYTES: usize = 1_048_576;
+        if request.snapshot_json.len() > MAX_SNAPSHOT_BYTES {
+            log(&format!(
+                "Prefab snapshot too large ({} bytes, limit {} bytes) — skipping",
+                request.snapshot_json.len(),
+                MAX_SNAPSHOT_BYTES
+            ));
+            continue;
+        }
         // Deserialize the snapshot JSON
         let snapshot: HistEntitySnapshot = match serde_json::from_str(&request.snapshot_json) {
             Ok(s) => s,

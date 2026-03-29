@@ -1,3 +1,5 @@
+//! 2D skeletal animation bridge — applies bone transforms, skin vertices, IK, and keyframes.
+
 use bevy::prelude::*;
 use bevy::mesh::Mesh2d;
 use bevy::sprite_render::{ColorMaterial, MeshMaterial2d};

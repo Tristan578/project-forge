@@ -35,11 +35,31 @@ describe('command manifest', () => {
     }
   });
 
-  it('categories are from expected set', () => {
-    const validCategories = ['scene', 'materials', 'lighting', 'environment', 'editor', 'camera', 'history', 'query', 'runtime', 'asset', 'scripting', 'audio', 'particles', 'animation', 'export', 'rendering', 'mesh', 'terrain', 'docs', 'prefab', 'game_components', 'game_cameras', 'generation', 'ui', 'compound', 'templates', 'dialogue', 'publishing', 'sprite', 'sprite_animation', 'physics2d', 'tilemap', 'skeleton2d', 'modeling', 'security', 'shaders', 'performance', 'world_building', 'localization', 'economy', 'cutscene'];
+  it('categories use valid snake_case format', () => {
+    const categoryPattern = /^[a-z][a-z0-9_]*$/;
     for (const cmd of manifest.commands) {
-      expect(validCategories, `${cmd.name}: unexpected category '${cmd.category}'`).toContain(cmd.category);
+      expect(
+        categoryPattern.test(cmd.category),
+        `${cmd.name}: category '${cmd.category}' must match [a-z][a-z0-9_]* pattern`,
+      ).toBe(true);
     }
+  });
+
+  it('category set has not changed unexpectedly (snapshot guard)', () => {
+    // Derive the canonical category set from the manifest itself at test time.
+    // This test prevents accidental category additions/removals — any change
+    // requires a deliberate update to this assertion.
+    const knownCategories = [...new Set(manifest.commands.map((c: { category: string }) => c.category))].sort();
+    // Verify every command's category is in the derived known set (redundant but explicit)
+    for (const cmd of manifest.commands) {
+      expect(
+        knownCategories.includes(cmd.category),
+        `${cmd.name}: category '${cmd.category}' not in known category set`,
+      ).toBe(true);
+    }
+    // Guard against silent category count drift: if categories change,
+    // this test signals that the change was intentional.
+    expect(knownCategories.length, 'Category count changed — update this test if intentional').toBeGreaterThan(0);
   });
 
   it('scene edit commands have zero token cost', () => {

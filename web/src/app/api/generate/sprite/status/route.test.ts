@@ -55,13 +55,14 @@ describe('GET /api/generate/sprite/status', () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
 
-    const jobId = 'https://dalle.example.com/image.png';
+    const resultUrl = 'https://dalle.example.com/image.png';
+    const jobId = `dalle3:${resultUrl}`;
     const res = await GET(makeRequest({ jobId }));
     const data = await res.json();
 
     expect(res.status).toBe(200);
     expect(data.status).toBe('completed');
-    expect(data.resultUrl).toBe(jobId);
+    expect(data.resultUrl).toBe(resultUrl);
     expect(data.progress).toBe(100);
   });
 

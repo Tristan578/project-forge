@@ -1,3 +1,12 @@
+/**
+ * Neon PostgreSQL client (server-only).
+ *
+ * Exports `getDb()` (Drizzle ORM for typed queries) and `getNeonSql()` (raw
+ * neon-http client for batched transactions). Both are lazy-initialized from
+ * `DATABASE_URL`. See the comment block below for why `db.transaction()` must
+ * NOT be used with the neon-http driver.
+ */
+
 import 'server-only';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';

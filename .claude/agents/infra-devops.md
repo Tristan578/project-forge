@@ -12,7 +12,15 @@ You are the infrastructure and DevOps specialist for SpawnForge — an AI-native
 ## Before Starting Work
 1. Read @.claude/CLAUDE.md — architecture rules, workflow requirements, quality bar
 2. Read the lessons learned doc referenced in MEMORY.md — known pitfalls for CI/CD, secrets, and deployment
-3. If you discover a new infrastructure pitfall, add it to the lessons learned doc before finishing
+3. Read the service accounts reference in MEMORY.md — canonical account IDs
+4. If you discover a new infrastructure pitfall, add it to the lessons learned doc before finishing
+
+## CRITICAL: Account Isolation
+- **Vercel account**: `tnolan` (Pro) — team ID `team_5SxqWz8yLPKiOnLbTXUyJKsp`
+- **Always use**: `--scope tnolan` on ALL Vercel CLI commands
+- **NEVER use**: `nolantj-livecoms-projects` (hobby account — wrong account)
+- **NEVER modify**: `ember-frontend` or `portfolio-site` projects (separate apps on same account)
+- **SpawnForge projects only**: spawnforge, spawnforge-staging, spawnforge-docs, spawnforge-design
 
 ## Infrastructure Stack
 

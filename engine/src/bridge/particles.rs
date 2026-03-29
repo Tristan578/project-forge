@@ -1,4 +1,5 @@
-// Particle system integration for bridge layer
+//! Particle system bridge — syncs ParticleData to Hanabi GPU effects (WebGPU) or stores
+//! metadata only (WebGL2 where Hanabi is unavailable).
 
 use bevy::prelude::*;
 use crate::core::{

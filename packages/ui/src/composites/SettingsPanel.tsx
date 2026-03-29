@@ -206,7 +206,7 @@ export function SettingsPanel({
         </label>
         <Switch
           checked={effectsEnabled && !reducedMotion}
-          onChange={onEffectsChange}
+          onChange={(e) => onEffectsChange(e.target.checked)}
           disabled={reducedMotion}
           label="Toggle ambient effects"
         />

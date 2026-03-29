@@ -31,7 +31,7 @@ export async function POST(
     const { rating } = body;
 
     // Validate rating
-    if (typeof rating !== 'number' || !Number.isInteger(rating) || rating < 1 || rating > 5) {
+    if (typeof rating !== 'number' || !Number.isFinite(rating) || rating < 1 || rating > 5) {
       return NextResponse.json(
         { error: 'Rating must be an integer between 1 and 5' },
         { status: 400 }

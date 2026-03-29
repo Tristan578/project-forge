@@ -11,11 +11,11 @@ vi.mock('lucide-react', async () => {
   return Object.fromEntries(Object.keys(actual).map(k => [k, () => null]));
 });
 
-vi.mock('../ExportDialog', () => ({
+vi.mock('@/components/editor/ExportDialog', () => ({
   ExportDialog: () => null,
 }));
 
-vi.mock('../SceneBrowser', () => ({
+vi.mock('@/components/editor/SceneBrowser', () => ({
   SceneBrowser: () => null,
 }));
 
@@ -59,21 +59,21 @@ describe('SceneToolbar', () => {
   it('renders scene name button', () => {
     mockEditorStore();
     render(<SceneToolbar />);
-    expect(screen.getByText('My Scene')).toBeDefined();
+    expect(screen.getByText('My Scene')).toBeInTheDocument();
   });
 
   it('renders save, load, new, and export buttons', () => {
     mockEditorStore();
     render(<SceneToolbar />);
-    expect(screen.getByRole('button', { name: /save/i })).toBeDefined();
-    expect(screen.getByRole('button', { name: /load/i })).toBeDefined();
-    expect(screen.getByRole('button', { name: /new scene/i })).toBeDefined();
-    expect(screen.getByRole('button', { name: /export/i })).toBeDefined();
+    expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /load/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /new scene/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /export/i })).toBeInTheDocument();
   });
 
   it('shows modification indicator when scene is modified', () => {
     mockEditorStore({ sceneModified: true });
     render(<SceneToolbar />);
-    expect(screen.getByText('*')).toBeDefined();
+    expect(screen.getByText('*')).toBeInTheDocument();
   });
 });

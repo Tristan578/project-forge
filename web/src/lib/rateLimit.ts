@@ -1,3 +1,13 @@
+/**
+ * Distributed rate limiting via Upstash Redis.
+ *
+ * `rateLimitPublicRoute()` — 30 req/5 min per IP for unauthenticated endpoints.
+ * `rateLimit()` — configurable per-key limiting for authenticated routes.
+ *
+ * GOTCHA: `rateLimitPublicRoute()` is async — always `await` it.
+ * Without `await`, the Promise is truthy and silently bypasses all limits.
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
 import {
   RATE_LIMIT_PUBLIC_WINDOW_MS,
@@ -209,8 +219,23 @@ function isValidIpFormat(ip: string): boolean {
 
 /**
  * Extract a client identifier from the request for rate limiting.
+ *
+ * Header priority:
+ * 1. x-vercel-forwarded-for — set by Vercel's edge network, trusted on Vercel deployments.
+ *    This is the most reliable source because it cannot be spoofed by the client on Vercel.
+ * 2. x-forwarded-for — the standard proxy header. On non-Vercel deployments (local dev,
+ *    other platforms) this is the best available option. We take the first IP because
+ *    proxies append IPs left-to-right and the leftmost is the original client.
+ * 3. x-real-ip — Nginx convention, used by some hosting providers.
+ * 4. 'unknown' — fallback when no trustworthy IP is available.
  */
 export function getClientIp(req: NextRequest): string {
+  // Primary: Vercel's own header is set by the Vercel edge and cannot be forged by clients
+  const vercelIp = req.headers.get('x-vercel-forwarded-for');
+  if (vercelIp && isValidIpFormat(vercelIp.split(',')[0].trim())) {
+    return vercelIp.split(',')[0].trim();
+  }
+
   const forwarded = req.headers.get('x-forwarded-for');
   if (forwarded) {
     const parts = forwarded.split(',').map(s => s.trim()).filter(Boolean);

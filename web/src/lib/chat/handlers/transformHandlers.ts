@@ -83,10 +83,16 @@ export const transformHandlers: Record<string, ToolHandler> = {
   },
 
   set_visibility: async (args, { store }) => {
-    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    const p = parseArgs(z.object({ entityId: zEntityId, visible: z.boolean() }), args);
     if (p.error) return p.error;
-    store.toggleVisibility(p.data.entityId);
-    return { success: true };
+    const { entityId, visible } = p.data;
+    // Idempotent set — only toggle if current state differs from requested
+    const node = store.sceneGraph?.nodes?.[entityId];
+    const currentVisible = node?.visible ?? true;
+    if (currentVisible !== visible) {
+      store.toggleVisibility(entityId);
+    }
+    return { success: true, result: { message: `Set visibility for ${entityId} to ${visible}` } };
   },
 
   select_entity: async (args, { store }) => {

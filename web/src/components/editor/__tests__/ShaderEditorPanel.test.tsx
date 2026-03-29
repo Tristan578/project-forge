@@ -117,7 +117,7 @@ describe('ShaderEditorPanel', () => {
   it('renders the editor when isOpen is true', () => {
     setupStore({ isOpen: true });
     render(<ShaderEditorPanel />);
-    expect(screen.getByText('Shader Editor')).toBeDefined();
+    expect(screen.getByText('Shader Editor')).toBeInTheDocument();
   });
 
   // ── Header ─────────────────────────────────────────────────────────────
@@ -125,14 +125,14 @@ describe('ShaderEditorPanel', () => {
   it('displays the active graph name in the header', () => {
     setupStore();
     render(<ShaderEditorPanel />);
-    expect(screen.getByText('Test Shader')).toBeDefined();
+    expect(screen.getByText('Test Shader')).toBeInTheDocument();
   });
 
   it('shows "Untitled" when no active graph exists', () => {
     setupStore({ activeGraphId: null, graphs: {} });
     render(<ShaderEditorPanel />);
     // The graph name span should say 'Untitled'
-    expect(screen.getByText('Untitled')).toBeDefined();
+    expect(screen.getByText('Untitled')).toBeInTheDocument();
   });
 
   // ── Close button ───────────────────────────────────────────────────────
@@ -186,8 +186,8 @@ describe('ShaderEditorPanel', () => {
     render(<ShaderEditorPanel />);
     fireEvent.click(screen.getByText('Compile'));
 
-    expect(screen.getByText('Compiled WGSL Code')).toBeDefined();
-    expect(screen.getByText('fn main() { }')).toBeDefined();
+    expect(screen.getByText('Compiled WGSL Code')).toBeInTheDocument();
+    expect(screen.getByText('fn main() { }')).toBeInTheDocument();
   });
 
   it('shows error in code preview when compile fails', () => {
@@ -196,7 +196,7 @@ describe('ShaderEditorPanel', () => {
     render(<ShaderEditorPanel />);
     fireEvent.click(screen.getByText('Compile'));
 
-    expect(screen.getByText('Cycle detected in graph')).toBeDefined();
+    expect(screen.getByText('Cycle detected in graph')).toBeInTheDocument();
   });
 
   it('does not open code preview when no active graph', () => {
@@ -214,7 +214,7 @@ describe('ShaderEditorPanel', () => {
     setupStore();
     render(<ShaderEditorPanel />);
     fireEvent.click(screen.getByText('Compile'));
-    expect(screen.getByText('Compiled WGSL Code')).toBeDefined();
+    expect(screen.getByText('Compiled WGSL Code')).toBeInTheDocument();
 
     // The modal has an X close button — find and click it
     const modalCloseButtons = screen.getAllByRole('button').filter(
@@ -231,7 +231,7 @@ describe('ShaderEditorPanel', () => {
   it('renders ShaderNodePalette by default', () => {
     setupStore();
     render(<ShaderEditorPanel />);
-    expect(screen.getByTestId('shader-node-palette')).toBeDefined();
+    expect(screen.getByTestId('shader-node-palette')).toBeInTheDocument();
   });
 
   it('hides palette after clicking the palette close button', () => {
@@ -245,7 +245,7 @@ describe('ShaderEditorPanel', () => {
     setupStore();
     render(<ShaderEditorPanel />);
     fireEvent.click(screen.getByText('Close Palette'));
-    expect(screen.getByText('+ Add Node')).toBeDefined();
+    expect(screen.getByText('+ Add Node')).toBeInTheDocument();
   });
 
   it('reopens palette when "+ Add Node" is clicked', () => {
@@ -253,7 +253,7 @@ describe('ShaderEditorPanel', () => {
     render(<ShaderEditorPanel />);
     fireEvent.click(screen.getByText('Close Palette'));
     fireEvent.click(screen.getByText('+ Add Node'));
-    expect(screen.getByTestId('shader-node-palette')).toBeDefined();
+    expect(screen.getByTestId('shader-node-palette')).toBeInTheDocument();
   });
 
   // ── React Flow canvas ─────────────────────────────────────────────────
@@ -261,6 +261,6 @@ describe('ShaderEditorPanel', () => {
   it('renders the ReactFlow canvas area', () => {
     setupStore();
     render(<ShaderEditorPanel />);
-    expect(screen.getByTestId('react-flow')).toBeDefined();
+    expect(screen.getByTestId('react-flow')).toBeInTheDocument();
   });
 });

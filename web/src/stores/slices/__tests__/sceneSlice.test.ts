@@ -24,7 +24,7 @@ describe('sceneSlice', () => {
       expect(store.getState().scenes).toEqual([]);
       expect(store.getState().activeSceneId).toBeNull();
       expect(store.getState().sceneSwitching).toBe(false);
-      expect(store.getState().sceneTransition).toEqual({ active: false, config: null, targetScene: null });
+      expect(store.getState().sceneTransition).toEqual({ active: false, config: null, targetScene: null, transitionId: null });
       expect(store.getState().terrainData).toEqual({});
       expect(store.getState().isExporting).toBe(false);
       expect(store.getState().projectId).toBeNull();

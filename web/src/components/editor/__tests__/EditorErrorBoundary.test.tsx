@@ -28,12 +28,12 @@ describe('EditorErrorBoundary', () => {
 
   it('renders children normally', () => {
     render(<EditorErrorBoundary><ThrowingChild shouldThrow={false} /></EditorErrorBoundary>);
-    expect(screen.getByTestId('child-content')).toBeDefined();
+    expect(screen.getByTestId('child-content')).toBeInTheDocument();
   });
 
   it('shows fallback UI when child throws', () => {
     render(<EditorErrorBoundary><ThrowingChild shouldThrow={true} /></EditorErrorBoundary>);
-    expect(screen.getByText('Something went wrong')).toBeDefined();
+    expect(screen.getByText('Something went wrong')).toBeInTheDocument();
   });
 
   it('hides child content on error', () => {
@@ -43,12 +43,12 @@ describe('EditorErrorBoundary', () => {
 
   it('shows Reload Editor button', () => {
     render(<EditorErrorBoundary><ThrowingChild shouldThrow={true} /></EditorErrorBoundary>);
-    expect(screen.getByText('Reload Editor')).toBeDefined();
+    expect(screen.getByText('Reload Editor')).toBeInTheDocument();
   });
 
   it('shows Back to Dashboard button', () => {
     render(<EditorErrorBoundary><ThrowingChild shouldThrow={true} /></EditorErrorBoundary>);
-    expect(screen.getByText('Back to Dashboard')).toBeDefined();
+    expect(screen.getByText('Back to Dashboard')).toBeInTheDocument();
   });
 
   it('reports error to Sentry', async () => {

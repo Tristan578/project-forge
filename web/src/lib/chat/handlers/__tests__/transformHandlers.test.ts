@@ -119,12 +119,30 @@ describe('transformHandlers', () => {
     expect(store.reparentEntity).toHaveBeenCalledWith('child2', 'parent2', undefined);
   });
 
-  it('set_visibility calls toggleVisibility', async () => {
+  it('set_visibility calls toggleVisibility when state differs', async () => {
     const { result, store } = await invokeHandler(transformHandlers, 'set_visibility', {
       entityId: 'ent6',
+      visible: false,
     });
     expect(result.success).toBe(true);
     expect(store.toggleVisibility).toHaveBeenCalledWith('ent6');
+  });
+
+  it('set_visibility is idempotent when already in requested state', async () => {
+    const { result, store } = await invokeHandler(transformHandlers, 'set_visibility', {
+      entityId: 'ent6',
+      visible: true,
+    });
+    expect(result.success).toBe(true);
+    // default visible is true (no sceneGraph node) — no toggle needed
+    expect(store.toggleVisibility).not.toHaveBeenCalled();
+  });
+
+  it('set_visibility rejects missing visible param', async () => {
+    const { result } = await invokeHandler(transformHandlers, 'set_visibility', {
+      entityId: 'ent6',
+    });
+    expect(result.success).toBe(false);
   });
 
   it('select_entity calls selectEntity with mode', async () => {

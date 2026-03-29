@@ -1,3 +1,11 @@
+/**
+ * POST /api/generate/refund — refund tokens for a failed generation job.
+ *
+ * Idempotent: checks metadata->>'refundedUsageId' before crediting to prevent
+ * double-refund when both server and client race to trigger a refund.
+ * Requires the `usageId` returned by the original generate endpoint.
+ */
+
 export const maxDuration = 10; // API_MAX_DURATION_SIMPLE_S
 
 import { NextRequest, NextResponse } from 'next/server';

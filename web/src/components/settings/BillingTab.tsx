@@ -18,6 +18,8 @@ export function BillingTab() {
   const tokenBalance = useUserStore((s) => s.tokenBalance);
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [portalError, setPortalError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchBillingStatus();
@@ -29,23 +31,28 @@ export function BillingTab() {
       if (res.ok) {
         const data = await res.json();
         setBillingStatus(data);
+      } else {
+        setFetchError('Unable to load billing information. Please refresh the page.');
       }
-    } catch (err) {
-      console.error('Failed to fetch billing status:', err);
+    } catch {
+      setFetchError('Unable to load billing information. Please check your connection and refresh.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleManageSubscription = async () => {
+    setPortalError(null);
     try {
       const res = await fetch('/api/billing/portal', { method: 'POST' });
       if (res.ok) {
         const { url } = await res.json();
         window.open(url, '_blank');
+      } else {
+        setPortalError('Unable to open the billing portal. Please try again.');
       }
-    } catch (err) {
-      console.error('Failed to open billing portal:', err);
+    } catch {
+      setPortalError('Unable to open the billing portal. Please check your connection and try again.');
     }
   };
 
@@ -87,6 +94,16 @@ export function BillingTab() {
 
   return (
     <div className="p-4">
+      {fetchError && (
+        <div role="alert" className="mb-4 rounded border border-red-800 bg-red-900/30 px-3 py-2 text-xs text-red-300">
+          {fetchError}
+        </div>
+      )}
+      {portalError && (
+        <div role="alert" className="mb-4 rounded border border-red-800 bg-red-900/30 px-3 py-2 text-xs text-red-300">
+          {portalError}
+        </div>
+      )}
       {/* Current Plan */}
       <div className="mb-6">
         <h3 className="mb-3 text-sm font-semibold text-zinc-200">

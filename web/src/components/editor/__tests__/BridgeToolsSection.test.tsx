@@ -42,17 +42,17 @@ describe('BridgeToolsSection', () => {
 
   it('renders Bridge Tools heading', () => {
     render(<BridgeToolsSection />);
-    expect(screen.getByText('Bridge Tools')).toBeDefined();
+    expect(screen.getByText('Bridge Tools')).toBeInTheDocument();
   });
 
   it('shows "No tools discovered yet" when empty', () => {
     render(<BridgeToolsSection />);
-    expect(screen.getByText('No tools discovered yet.')).toBeDefined();
+    expect(screen.getByText('No tools discovered yet.')).toBeInTheDocument();
   });
 
   it('renders Discover Aseprite button', () => {
     render(<BridgeToolsSection />);
-    expect(screen.getByText('Discover Aseprite')).toBeDefined();
+    expect(screen.getByText('Discover Aseprite')).toBeInTheDocument();
   });
 
   it('renders tool name when bridgeTools exist', () => {
@@ -62,7 +62,7 @@ describe('BridgeToolsSection', () => {
       },
     });
     render(<BridgeToolsSection />);
-    expect(screen.getByText('Aseprite')).toBeDefined();
+    expect(screen.getByText('Aseprite')).toBeInTheDocument();
   });
 
   it('shows Connected status for connected tool', () => {
@@ -72,7 +72,7 @@ describe('BridgeToolsSection', () => {
       },
     });
     render(<BridgeToolsSection />);
-    expect(screen.getByText('Connected')).toBeDefined();
+    expect(screen.getByText('Connected')).toBeInTheDocument();
   });
 
   it('shows Not Found status for not_found tool', () => {
@@ -82,7 +82,7 @@ describe('BridgeToolsSection', () => {
       },
     });
     render(<BridgeToolsSection />);
-    expect(screen.getByText('Not Found')).toBeDefined();
+    expect(screen.getByText('Not Found')).toBeInTheDocument();
   });
 
   it('shows version when activeVersion provided', () => {
@@ -92,7 +92,7 @@ describe('BridgeToolsSection', () => {
       },
     });
     render(<BridgeToolsSection />);
-    expect(screen.getByText('v1.3')).toBeDefined();
+    expect(screen.getByText('v1.3')).toBeInTheDocument();
   });
 
   it('shows Discovering... during discovery', async () => {
@@ -100,7 +100,7 @@ describe('BridgeToolsSection', () => {
     mockFetch.mockReturnValue(new Promise(() => {}));
     render(<BridgeToolsSection />);
     fireEvent.click(screen.getByText('Discover Aseprite'));
-    expect(screen.getByText('Discovering...')).toBeDefined();
+    expect(screen.getByText('Discovering...')).toBeInTheDocument();
   });
 
   it('shows error message on failed discovery', async () => {
@@ -112,7 +112,7 @@ describe('BridgeToolsSection', () => {
     fireEvent.click(screen.getByText('Discover Aseprite'));
     // Wait for async update
     await vi.waitFor(() => {
-      expect(screen.getByText('Aseprite not found in PATH')).toBeDefined();
+      expect(screen.getByText('Aseprite not found in PATH')).toBeInTheDocument();
     });
   });
 

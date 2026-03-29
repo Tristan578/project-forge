@@ -1,3 +1,8 @@
+/**
+ * Cloud project CRUD — create, read, update, delete projects in the database.
+ * Enforces per-tier project limits defined in `limits.ts`.
+ */
+
 import { eq, and, desc, count } from 'drizzle-orm';
 import { getDb } from '../db/client';
 import { projects, users, type Project } from '../db/schema';

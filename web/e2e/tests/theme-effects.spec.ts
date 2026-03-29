@@ -13,7 +13,10 @@ const LIGHT_THEMES = ['ember', 'ice', 'leaf', 'rust', 'mech', 'light'] as const;
 
 test.describe('Theme Effects @ui', () => {
   test.beforeEach(async ({ editor }) => {
-    await editor.load();
+    // Theme-effects tests only need DOM/CSS — no WASM engine required.
+    // loadPage() injects __SKIP_ENGINE=true and waits for React hydration only,
+    // which works in CI headless Chrome (--disable-gpu blocks engine init).
+    await editor.loadPage();
   });
 
   test('dark theme has no effect element', async ({ page }) => {

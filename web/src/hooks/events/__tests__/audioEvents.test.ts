@@ -95,7 +95,7 @@ describe('handleAudioEvent', () => {
   });
 
   describe('AUDIO_CHANGED', () => {
-    it('constructs audio data with defaults and calls setEntityAudio', () => {
+    it('constructs audio data with defaults and calls setPrimaryAudio', () => {
       const payload = {
         entityId: 'entity-audio-1',
         assetId: 'sound-asset-1',
@@ -118,7 +118,7 @@ describe('handleAudioEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-1', {
+      expect(actions.setPrimaryAudio).toHaveBeenCalledWith({
         assetId: 'sound-asset-1',
         volume: 0.8,
         pitch: 1.2,
@@ -146,7 +146,7 @@ describe('handleAudioEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-2', {
+      expect(actions.setPrimaryAudio).toHaveBeenCalledWith({
         assetId: 'sound-asset-2',
         volume: 1.0,
         pitch: 1.0,
@@ -174,7 +174,7 @@ describe('handleAudioEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-3', {
+      expect(actions.setPrimaryAudio).toHaveBeenCalledWith({
         assetId: null,
         volume: 1.0,
         pitch: 1.0,
@@ -202,7 +202,7 @@ describe('handleAudioEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-4', null);
+      expect(actions.setPrimaryAudio).toHaveBeenCalledWith(null);
     });
   });
 

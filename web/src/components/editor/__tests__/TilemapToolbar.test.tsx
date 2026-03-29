@@ -82,17 +82,17 @@ describe('TilemapToolbar', () => {
   it('renders paint tool button', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapToolbar />);
-    expect(screen.getByTitle('Paint (B)')).toBeDefined();
+    expect(screen.getByTitle('Paint (B)')).toBeInTheDocument();
   });
 
   it('renders all tool buttons', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapToolbar />);
-    expect(screen.getByTitle('Paint (B)')).toBeDefined();
-    expect(screen.getByTitle('Erase (E)')).toBeDefined();
-    expect(screen.getByTitle('Fill (G)')).toBeDefined();
-    expect(screen.getByTitle('Rectangle (R)')).toBeDefined();
-    expect(screen.getByTitle('Tile Picker (Alt+Click)')).toBeDefined();
+    expect(screen.getByTitle('Paint (B)')).toBeInTheDocument();
+    expect(screen.getByTitle('Erase (E)')).toBeInTheDocument();
+    expect(screen.getByTitle('Fill (G)')).toBeInTheDocument();
+    expect(screen.getByTitle('Rectangle (R)')).toBeInTheDocument();
+    expect(screen.getByTitle('Tile Picker (Alt+Click)')).toBeInTheDocument();
   });
 
   it('calls setActiveTool when a tool button is clicked', () => {
@@ -105,14 +105,14 @@ describe('TilemapToolbar', () => {
   it('renders Layer selector label', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapToolbar />);
-    expect(screen.getByText('Layer:')).toBeDefined();
+    expect(screen.getByText('Layer:')).toBeInTheDocument();
   });
 
   it('renders layer options in selector', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapToolbar />);
-    expect(screen.getByRole('option', { name: 'Layer 1' })).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Layer 2' })).toBeDefined();
+    expect(screen.getByRole('option', { name: 'Layer 1' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Layer 2' })).toBeInTheDocument();
   });
 
   it('calls setActiveLayerIndex when layer select changes', () => {
@@ -128,6 +128,6 @@ describe('TilemapToolbar', () => {
     render(<TilemapToolbar />);
     // Paint button should be the "active" one — just verify it renders
     const paintButton = screen.getByTitle('Paint (B)');
-    expect(paintButton).toBeDefined();
+    expect(paintButton).toBeInTheDocument();
   });
 });

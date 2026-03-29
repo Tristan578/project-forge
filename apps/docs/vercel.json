@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "npm install",
+  "buildCommand": "MANIFEST_PATH=./data/commands.json npx tsx scripts/generate-mcp-docs.ts && next build",
+  "outputDirectory": ".next",
+  "git": {
+    "deploymentEnabled": false
+  }
+}

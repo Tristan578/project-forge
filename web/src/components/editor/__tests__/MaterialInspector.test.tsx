@@ -467,6 +467,6 @@ describe('MaterialInspector', () => {
     render(<MaterialInspector />);
     // Expand transmission section
     fireEvent.click(screen.getByText('Transmission'));
-    expect(screen.getByText(/Set alpha mode to Blend/)).toBeDefined();
+    expect(screen.getByText(/Set alpha mode to Blend/)).toBeInTheDocument();
   });
 });

@@ -4,6 +4,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import { rateLimit } from '@/lib/rateLimit';
 
+const mockCreateCheckoutSession = vi.hoisted(() => vi.fn());
+
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/rateLimit', () => ({
   rateLimit: vi.fn(),
@@ -16,6 +18,20 @@ vi.mock('@/lib/tokens/pricing', () => ({
     inferno: { tokens: 5000, price: 2999 },
   },
 }));
+vi.mock('@/lib/rateLimit/distributed', () => ({
+  distributedRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 4, resetAt: Date.now() + 60000 }),
+}));
+vi.mock('@/lib/monitoring/sentry-server');
+vi.mock('stripe', () => {
+  function StripeMock(_key: string, _opts: unknown) {
+    return {
+      checkout: {
+        sessions: { create: mockCreateCheckoutSession },
+      },
+    };
+  }
+  return { default: StripeMock };
+});
 
 describe('POST /api/tokens/purchase', () => {
   beforeEach(() => {
@@ -34,6 +50,10 @@ describe('POST /api/tokens/purchase', () => {
     });
     vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 4, resetAt: Date.now() + 60000 });
     vi.mocked(assertTier).mockReturnValue(null);
+    mockCreateCheckoutSession.mockResolvedValue({
+      id: 'cs_test_123',
+      url: 'https://checkout.stripe.com/pay/cs_test_123',
+    });
     process.env.STRIPE_SECRET_KEY = 'sk_test_123';
     process.env.STRIPE_PRICE_TOKEN_SPARK = 'price_spark';
     process.env.STRIPE_PRICE_TOKEN_BLAZE = 'price_blaze';
@@ -57,8 +77,9 @@ describe('POST /api/tokens/purchase', () => {
     expect(res.status).toBe(401);
   });
 
-  it('should return 429 when rate limited', async () => {
-    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+  it('should return 429 when distributed rate limited', async () => {
+    const { distributedRateLimit } = await import('@/lib/rateLimit/distributed');
+    vi.mocked(distributedRateLimit).mockResolvedValueOnce({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const { POST } = await import('./route');
     const req = new Request('http://localhost:3000/api/tokens/purchase', {
@@ -95,5 +116,41 @@ describe('POST /api/tokens/purchase', () => {
 
     expect(res.status).toBe(400);
     expect(body.error).toContain('Invalid package');
+  });
+
+  it('returns checkoutUrl on successful Stripe checkout session creation', async () => {
+    const { POST } = await import('./route');
+    const req = new Request('http://localhost:3000/api/tokens/purchase', {
+      method: 'POST',
+      body: JSON.stringify({ package: 'spark' }),
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.checkoutUrl).toBe('https://checkout.stripe.com/pay/cs_test_123');
+    expect(mockCreateCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'payment',
+        customer: 'cus_123',
+        line_items: [{ price: 'price_spark', quantity: 1 }],
+        metadata: expect.objectContaining({ userId: 'user_1', package: 'spark' }),
+      })
+    );
+  });
+
+  it('returns 500 when Stripe throws', async () => {
+    mockCreateCheckoutSession.mockRejectedValueOnce(new Error('Stripe network error'));
+
+    const { POST } = await import('./route');
+    const req = new Request('http://localhost:3000/api/tokens/purchase', {
+      method: 'POST',
+      body: JSON.stringify({ package: 'blaze' }),
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.error).toContain('checkout session');
   });
 });

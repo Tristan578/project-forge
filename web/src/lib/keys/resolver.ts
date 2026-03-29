@@ -124,7 +124,9 @@ export async function storeProviderKey(
   const { encryptProviderKey } = await import('./encryption');
   const { encrypted, iv } = encryptProviderKey(plainKey);
 
-  // Upsert: insert or update on conflict
+  // Upsert: insert or update on conflict.
+  // Note: createdAt is reset on key rotation (upsert). A proper updatedAt column
+  // would preserve the original creation time, but requires a DB migration.
   await db
     .insert(providerKeys)
     .values({

@@ -40,7 +40,7 @@ cd web && npx eslint --max-warnings 0 .
 # TypeScript
 cd web && npx tsc --noEmit
 
-# Unit tests (13,600+)
+# Unit tests (14,200+)
 cd web && npx vitest run
 
 # Unit tests with coverage
@@ -68,6 +68,17 @@ cd web && npm run db:studio # Visual DB browser
 ```
 
 Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_KEY`, `UPSTASH_REDIS_REST_URL`. See `web/.env.example` for full list.
+
+### CD Pipeline Secrets (GitHub Repository Settings)
+
+| Secret | Purpose |
+|--------|---------|
+| `VERCEL_TOKEN` | Vercel API token for all deployments |
+| `VERCEL_TEAM_ID` | Vercel team/org ID |
+| `VERCEL_PROJECT_ID` | Main web app project ID |
+| `VERCEL_STAGING_PROJECT_ID` | Staging web app project ID |
+| `VERCEL_DOCS_PROJECT_ID` | Docs app (`apps/docs/`) project ID |
+| `VERCEL_DESIGN_PROJECT_ID` | Design workbench (`apps/design/`) project ID |
 
 ## MCP Servers (`.mcp.json`)
 
@@ -142,3 +153,10 @@ Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_K
 - **Dockview CSS class** — `.dv-dockview` (NOT `.dv-dockview-container`). Used in E2E fixtures and editor boot tests.
 - **Sentry re-reviews every commit** — Reply with commit SHA + evidence, not "already fixed". Sentry doesn't resolve until the code on the PR branch actually changes.
 - **SHADOWED_GLOBALS shared module** — `web/src/lib/scripting/sandboxGlobals.ts` is single source of truth. Import in scriptWorker, scriptBundler, and tests. Never duplicate the list.
+- **Vercel account scope** — ALWAYS use `--scope tnolan` on Vercel CLI commands. The `nolantj-livecoms-projects` hobby account must NEVER be used for SpawnForge. See `memory/reference_service_accounts.md` for all project IDs.
+- **Worktree branch loss** — Nested worktrees (worktree-within-worktree) lose their branches on cleanup. Never nest. Always rebase onto main first. Always push before agent completes.
+- **Schema changes need migrations** — Any change to `web/src/lib/db/schema.ts` MUST include a migration file via `npm run db:generate` or be reverted. `db:push` works in dev but production needs `ALTER TABLE`.
+- **IV/crypto changes need migration path** — Changing encryption parameters (IV length, algorithm) breaks decryption of existing stored data without a re-encryption migration.
+- **`.lighthouserc.js` auto-detected by lhci** — The `startServerCommand` in this file overrides manually-started servers. If Lighthouse CI fails with exit code 127, check this file first. The workflow manages servers directly via `next build && next start`.
+- **`next start` requires env vars** — In production mode, the instrumentation hook validates env vars at startup. Set `SKIP_ENV_VALIDATION=true` in CI when running `next start` without the full env.
+- **Max 5-7 fixes per builder dispatch** — Agents rushing through 25+ fix lists introduce the same anti-patterns they're fixing. Cap scope, require lint+tsc pass after EACH fix.

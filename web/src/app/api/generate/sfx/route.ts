@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (durationSeconds < 0.5 || durationSeconds > 22) {
+  if (typeof durationSeconds !== 'number' || !Number.isFinite(durationSeconds) || durationSeconds < 0.5 || durationSeconds > 22) {
     return NextResponse.json(
       { error: 'Duration must be between 0.5 and 22 seconds' },
       { status: 422 }
