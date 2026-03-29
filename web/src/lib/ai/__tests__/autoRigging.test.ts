@@ -361,7 +361,7 @@ describe('rigToCommands', () => {
     expect(payload.ikConstraints).toHaveLength(4); // 2 arms + 2 legs
   });
 
-  it('produces valid bone format with localPosition tuple', () => {
+  it('produces valid bone format with localPosition tuple including Z', () => {
     const rig: RigTemplate = {
       type: 'custom',
       bones: [{ name: 'root', position: { x: 1, y: 2, z: 3 }, length: 0.5 }],
@@ -370,10 +370,11 @@ describe('rigToCommands', () => {
     };
     const commands = rigToCommands(rig, 'e1');
     const payload = commands[0].payload as {
-      bones: Array<{ name: string; localPosition: [number, number]; length: number }>;
+      bones: Array<{ name: string; localPosition: [number, number, number]; length: number }>;
     };
     expect(payload.bones[0].name).toBe('root');
-    expect(payload.bones[0].localPosition).toEqual([1, 2]);
+    // All 3 coordinates must be preserved (Z is no longer dropped)
+    expect(payload.bones[0].localPosition).toEqual([1, 2, 3]);
     expect(payload.bones[0].length).toBe(0.5);
   });
 });

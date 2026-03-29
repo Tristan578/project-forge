@@ -320,19 +320,21 @@ fn compute_bone_world_positions(
         .collect();
 
     for bone in bones {
-        let mut pos = bone.local_position;
+        // Use only XY for 2D world-position accumulation; Z is stored but not used here.
+        let mut pos_x = bone.local_position[0];
+        let mut pos_y = bone.local_position[1];
         let mut current = bone.parent_bone.as_deref();
         // Walk up the hierarchy, accumulating positions
         while let Some(parent_name) = current {
             if let Some(&idx) = name_to_idx.get(parent_name) {
-                pos[0] += bones[idx].local_position[0];
-                pos[1] += bones[idx].local_position[1];
+                pos_x += bones[idx].local_position[0];
+                pos_y += bones[idx].local_position[1];
                 current = bones[idx].parent_bone.as_deref();
             } else {
                 break;
             }
         }
-        positions.insert(bone.name.clone(), pos);
+        positions.insert(bone.name.clone(), [pos_x, pos_y]);
     }
     positions
 }
@@ -512,12 +514,14 @@ fn interpolate_bone(bone: &mut Bone2dDef, keyframes: &[BoneKeyframe], t: f32) {
     let eased = apply_easing(alpha, prev.easing);
 
     if let (Some(p0), Some(p1)) = (prev.position, next.position) {
+        // Preserve Z from current bone — only interpolate XY from 2D keyframes.
         bone.local_position = [
             p0[0] + (p1[0] - p0[0]) * eased,
             p0[1] + (p1[1] - p0[1]) * eased,
+            bone.local_position[2],
         ];
     } else if let Some(p) = prev.position {
-        bone.local_position = p;
+        bone.local_position = [p[0], p[1], bone.local_position[2]];
     }
 
     if let (Some(r0), Some(r1)) = (prev.rotation, next.rotation) {
@@ -1071,7 +1075,7 @@ mod tests {
         Bone2dDef {
             name: name.to_string(),
             parent_bone: parent.map(|s| s.to_string()),
-            local_position: pos,
+            local_position: [pos[0], pos[1], 0.0],
             local_rotation: rot,
             local_scale: [1.0, 1.0],
             length,

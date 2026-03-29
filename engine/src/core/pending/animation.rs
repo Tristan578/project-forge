@@ -104,7 +104,7 @@ pub struct RemoveBone2dRequest {
 pub struct UpdateBone2dRequest {
     pub entity_id: String,
     pub bone_name: String,
-    pub local_position: Option<[f32; 2]>,
+    pub local_position: Option<[f32; 3]>,
     pub local_rotation: Option<f32>,
     pub local_scale: Option<[f32; 2]>,
     pub length: Option<f32>,
