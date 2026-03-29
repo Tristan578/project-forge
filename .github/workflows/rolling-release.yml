@@ -1,0 +1,127 @@
+# Rolling Release management workflow
+#
+# Rolling Releases are ENABLED on the spawnforge Vercel project
+# (prj_DmdZsmoMsAsp98AbMd591qWXCeoL) via the Vercel REST API.
+#
+# Configuration (applied 2026-03-29, ticket #7993):
+#   Stage 1: 5%  canary -- automatic, 10-minute linear ramp
+#   Stage 2: 25% canary -- automatic, 30-minute linear ramp
+#   Stage 3: 100%        -- automatic promotion
+#
+# Each production deploy from cd.yml automatically enters Stage 1.
+# The canary advances through stages based on the duration settings.
+#
+# To re-configure stages, update the PATCH call in the reconfigure job.
+# To abort a stuck rollout, trigger this workflow with action=abort.
+# To force-complete early, trigger with action=complete.
+#
+# API endpoints used:
+#   GET  /v1/projects/{id}/rolling-release          -- current state
+#   PATCH /v1/projects/{id}/rolling-release/config  -- update config
+#   POST /v1/projects/{id}/rollingrelease/complete  -- force complete
+
+name: Rolling Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform (status|complete|abort|reconfigure)'
+        required: true
+        type: choice
+        options:
+          - status
+          - complete
+          - abort
+          - reconfigure
+        default: status
+
+jobs:
+  status:
+    name: Rolling Release Status
+    if: ${{ inputs.action == 'status' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check current rolling release status
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          echo "=== Rolling Release Status ==="
+          curl -s \
+            "https://api.vercel.com/v1/projects/${VERCEL_PROJECT_ID}/rolling-release?teamId=${VERCEL_TEAM_ID}" \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" | python3 -m json.tool
+
+  complete:
+    name: Rolling Release Force-Complete
+    if: ${{ inputs.action == 'complete' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Force-complete rolling release
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          echo "Force-completing rolling release (100% promotion)..."
+          curl -s -X POST \
+            "https://api.vercel.com/v1/projects/${VERCEL_PROJECT_ID}/rollingrelease/complete?teamId=${VERCEL_TEAM_ID}" \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            -H "Content-Type: application/json" | python3 -m json.tool
+
+  abort:
+    name: Rolling Release Abort
+    if: ${{ inputs.action == 'abort' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Abort rolling release and re-enable for next deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          echo "Aborting rolling release (rolling back to previous deployment)..."
+          curl -s -X PATCH \
+            "https://api.vercel.com/v1/projects/${VERCEL_PROJECT_ID}/rolling-release/config?teamId=${VERCEL_TEAM_ID}" \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"enabled": false, "disableRolloutAction": "abort"}' | python3 -m json.tool
+          echo "Re-enabling rolling release for next deploy..."
+          curl -s -X PATCH \
+            "https://api.vercel.com/v1/projects/${VERCEL_PROJECT_ID}/rolling-release/config?teamId=${VERCEL_TEAM_ID}" \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"enabled":true,"advancementType":"automatic","stages":[{"targetPercentage":5,"duration":10,"linearShift":true},{"targetPercentage":25,"duration":30,"linearShift":true},{"targetPercentage":100}]}' \
+            | python3 -m json.tool
+
+  reconfigure:
+    name: Rolling Release Reconfigure
+    if: ${{ inputs.action == 'reconfigure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Re-apply rolling release configuration
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          echo "Re-applying rolling release configuration (5pct -> 25pct -> 100pct)..."
+          curl -s -X PATCH \
+            "https://api.vercel.com/v1/projects/${VERCEL_PROJECT_ID}/rolling-release/config?teamId=${VERCEL_TEAM_ID}" \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"enabled":true,"advancementType":"automatic","stages":[{"targetPercentage":5,"duration":10,"linearShift":true},{"targetPercentage":25,"duration":30,"linearShift":true},{"targetPercentage":100}]}' \
+            | python3 -m json.tool
