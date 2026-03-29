@@ -3,6 +3,8 @@
 Manual verification checklist for user-facing features. Run these after major changes to ensure end-to-end functionality.
 
 > **Automated tests:** 14,200+ unit tests (`cd web && npx vitest run`), 63 E2E spec files (`cd web && npx playwright test`), 400 MCP tests (`cd mcp-server && npx vitest run`)
+>
+> **Vitest pool:** The standalone `vitest.config.ts` uses `pool: 'threads'`. All test files must use `vi.stubEnv()` / `vi.unstubAllEnvs()` for env var mutations — do NOT mutate `process.env` directly, as threads share the same process object. The `vitest.config.jsdom.ts` workspace config still uses `pool: 'forks'` for jsdom compatibility.
 
 ## Prerequisites
 
@@ -200,3 +202,15 @@ Manual verification checklist for user-facing features. Run these after major ch
 - [ ] Resize browser to mobile width → verify compact layout activates
 - [ ] Enter Play mode on mobile layout → verify touch controls appear
 - [ ] Test virtual joystick → verify movement input works
+
+---
+
+## Production Smoke
+
+### Sign-in Page Rendering
+- [ ] Open `https://spawnforge.ai/sign-in` in a fresh private window
+- [ ] Verify the Clerk sign-in widget renders (not a blank page)
+- [ ] Verify no JavaScript errors in the browser console
+- [ ] Verify the page is not a white screen caused by failed SRI checks
+
+> This test guards against the `experimental.sri` regression (blank sign-in page on Vercel CDN deployments). The E2E equivalent is `web/tests/production-sign-in.spec.ts`.

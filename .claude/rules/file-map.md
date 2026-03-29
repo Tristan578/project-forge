@@ -66,7 +66,7 @@
 | `material.rs` | `MaterialData` synced to `StandardMaterial` via `MeshMaterial3d` |
 | `lighting.rs` | `LightData` (Point/Directional/Spot) |
 | `environment.rs` | `EnvironmentSettings` (ClearColor + `DistanceFog`) |
-| `engine_mode.rs` | `EngineMode` (Edit/Play/Paused), `EditorSystemSet`, `PlaySystemSet`, snapshot/restore |
+| `engine_mode.rs` | `EngineMode` (Edit/Play/Paused), `EditorSystemSet`, `PlaySystemSet`, snapshot/restore (3D + 2D physics) |
 | `input.rs` | `InputMap`/`InputState`, `InputPreset`, `capture_input` |
 | `physics.rs` | `PhysicsData`/`PhysicsEnabled`, `manage_physics_lifecycle` |
 | `audio.rs` | `AudioData`/`AudioEnabled` (metadata — playback is JS-side) |
@@ -173,7 +173,11 @@ Fumadocs-based docs site for the SpawnForge platform API and MCP command referen
 
 ## Design Workbench (`apps/design/`)
 
-Storybook-based catalogue for `@spawnforge/ui` components and effects.
+Storybook-based catalogue for `@spawnforge/ui` components and effects. Uses Vite (not Next.js) — bundled with `@vitejs/plugin-react`.
+
+### `apps/design/` — Root files
+- `vite.config.ts` — Vite config for the design workbench (added `@vitejs/plugin-react`)
+- `scripts/sync-vendored-ui.sh` — Copies built `@spawnforge/ui` output into `apps/design/vendored/` for Storybook consumption without a monorepo build step
 
 ### `apps/design/stories/` — Story files
 - `effects/` — Stories for each theme ambient effect (EmberGlow, IceFrost, etc.)

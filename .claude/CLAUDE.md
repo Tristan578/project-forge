@@ -286,15 +286,15 @@ All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. E
 | `docs-maintainer` | Documentation updates, README, CLAUDE.md |
 | `rust-engine` | Bevy ECS, bridge, WASM, engine/ code |
 
-### Skills (33 total in `.claude/skills/`)
+### Skills (36 total in `.claude/skills/`)
 
 **Orchestration:** `/planner`, `/builder`, `/cycle`, `/developer-experience`
 **Engine:** `/rust-engine`, `/build`, `/arch-validator`
 **Web:** `/frontend`, `/mcp-commands`, `/next-best-practices`, `/vercel-react-best-practices`, `/web-accessibility`, `/web-design-guidelines`, `/game-ui-design`
 **Testing:** `/testing` (knowledge), `/test` (action), `/vitest`, `/playwright-best-practices`
-**Infrastructure:** `/infra-services`, `/troubleshoot`, `/kanban`, `/babysit-prs`, `/pr-code-review`, `/pr-green-machine`
+**Infrastructure:** `/infra-services`, `/troubleshoot`, `/kanban`, `/babysit-prs`, `/pr-code-review`, `/pr-green-machine`, `/ci-status`, `/lockfile-check`
 **Features:** `/game-engine`, `/multiplayer-readiness`, `/db-migrate`, `/viewport`
-**Workflow:** `/design`, `/architect-flow`, `/docs`, `/sync-push`, `/sync-pull`
+**Workflow:** `/design`, `/architect-flow`, `/docs`, `/doc-review`, `/sync-push`, `/sync-pull`
 
 ### MCP Servers (`.mcp.json`)
 - `context7` — live library documentation for all dependencies
@@ -304,12 +304,14 @@ All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. E
 | Hook | Event | Purpose |
 |------|-------|---------|
 | `inject-lessons-learned.sh` | PreToolUse (Edit/Write/Bash) | Shows relevant anti-patterns before action |
-| `inject-lessons-learned.sh` | PreToolUse (Edit/Write/Bash) | Shows relevant anti-patterns before action |
 | `pre-push-quality-gate.sh` | PreToolUse (Bash: git push) | Runs lint+tsc on changed files before push |
 | `verify-branch.sh` | PreToolUse (Edit/Write) | Prevents edits on wrong branch |
 | `check-db-transaction.sh` | PreToolUse (Edit/Write) | Warns if db.transaction() used (neon-http crashes) |
+| `check-vercel-json.sh` | PreToolUse (Edit/Write) | Validates vercel.json edits (catches `nodeVersion` and other invalid fields) |
+| `check-docs-quality.sh` | PreToolUse (Bash: git push) | Validates JSDoc, stale TODOs, and manifest counts before push |
 | `post-edit-lint.sh` | PostToolUse (Edit/Write) | Auto-lint after file changes |
 | `check-arch.sh` | PostToolUse (Edit/Write) | Architecture boundary check |
+| `auto-lockfile-sync.sh` | PostToolUse (Edit/Write) | Auto-regenerates lockfile when package.json changes |
 | `post-commit-clean.sh` | PostToolUse (Bash) | Cleanup after git commits |
 | `post-merge-doc-check.sh` | PostToolUse (Bash) | Doc freshness check after merges |
 | `on-session-start.sh` | SessionStart | Taskboard state + sync |
