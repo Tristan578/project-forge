@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { Play, Pause, Save, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEditorStore } from '@/stores/editorStore';
@@ -35,10 +35,20 @@ export default function AdaptiveMusicInspector() {
   const setCurrentMusicSegment = useEditorStore((s) => s.setCurrentMusicSegment);
   const [isPlaying, setIsPlaying] = useState(false);
   const [stems, setStems] = useState<StemConfig>({ bpm: 120 });
-  const [snapshots, setSnapshots] = useState<AudioSnapshot[]>([]);
+  // Eagerly load snapshots from localStorage on mount via lazy initializer (fix #7657).
+  // This component is 'use client' so localStorage is always available here.
+  const [snapshots, setSnapshots] = useState<AudioSnapshot[]>(() => {
+    try {
+      const stored = localStorage.getItem('audioSnapshots');
+      if (stored) return JSON.parse(stored) as AudioSnapshot[];
+    } catch (err) {
+      console.error('Failed to load audio snapshots:', err);
+    }
+    return [];
+  });
   const [snapshotName, setSnapshotName] = useState('');
 
-  // Load snapshots from localStorage on mount
+  // Manually refresh snapshots from localStorage (e.g. after external writes).
   const loadSnapshots = useCallback(() => {
     try {
       const stored = localStorage.getItem('audioSnapshots');
@@ -49,11 +59,6 @@ export default function AdaptiveMusicInspector() {
       console.error('Failed to load audio snapshots:', err);
     }
   }, []);
-
-  // Auto-load snapshots when the panel mounts (fix #7657)
-  useEffect(() => {
-    loadSnapshots();
-  }, [loadSnapshots]);
 
   const handleIntensityChange = useCallback((value: number) => {
     setAdaptiveMusicIntensity(value);
