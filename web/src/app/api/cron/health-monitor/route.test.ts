@@ -23,11 +23,9 @@ function makeReq(authHeader?: string): NextRequest {
 }
 
 describe('GET /api/cron/health-monitor', () => {
-  const originalEnv = process.env;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env = { ...originalEnv, CRON_SECRET };
+    vi.stubEnv('CRON_SECRET', CRON_SECRET);
     vi.mocked(runAllHealthChecks).mockResolvedValue({
       overall: 'healthy',
       timestamp: new Date().toISOString(),
@@ -42,7 +40,7 @@ describe('GET /api/cron/health-monitor', () => {
   });
 
   afterEach(() => {
-    process.env = originalEnv;
+    vi.unstubAllEnvs();
   });
 
   it('returns 401 without authorization header', async () => {
@@ -56,7 +54,7 @@ describe('GET /api/cron/health-monitor', () => {
   });
 
   it('returns 401 when CRON_SECRET is not configured', async () => {
-    delete process.env.CRON_SECRET;
+    vi.stubEnv('CRON_SECRET', '');
     const res = await GET(makeReq(`Bearer ${CRON_SECRET}`));
     expect(res.status).toBe(401);
   });

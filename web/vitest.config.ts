@@ -7,11 +7,10 @@ export default defineConfig({
     environment: 'jsdom',
     testTimeout: VITEST_TEST_TIMEOUT_MS,
     hookTimeout: VITEST_HOOK_TIMEOUT_MS,
-    // 'forks' is required because 14+ test files fully reassign process.env
-    // (e.g. process.env = { ...backup }). Under 'threads', this races across
-    // workers sharing the same process object. Switch to 'threads' only after
-    // migrating all process.env reassignments to vi.stubEnv().
-    pool: 'forks',
+    // 'threads' is safe now that all test files use vi.stubEnv() / vi.unstubAllEnvs()
+    // instead of directly reassigning process.env. Direct reassignment raced across
+    // workers sharing the same process object under 'threads'.
+    pool: 'threads',
     teardownTimeout: 5000,
     isolate: true,
     retry: process.env.CI ? 1 : 0,

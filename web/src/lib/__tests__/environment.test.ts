@@ -1,22 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 describe('environment module', () => {
-  const originalEnv = process.env;
-
   beforeEach(() => {
     vi.resetModules();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    process.env = { ...originalEnv } as any;
   });
 
   afterEach(() => {
-    process.env = originalEnv;
+    vi.unstubAllEnvs();
   });
 
   describe('environment constants', () => {
     it('detects development environment', async () => {
-      (process.env as Record<string, string>).NODE_ENV = 'development';
-      delete process.env.NEXT_PUBLIC_ENVIRONMENT;
+      vi.stubEnv('NODE_ENV', 'development');
+      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', '');
       const { environment } = await import('../environment');
       expect(environment.isDev).toBe(true);
     });
@@ -24,7 +20,7 @@ describe('environment module', () => {
 
   describe('validateEnvironment (re-exported from config/validateEnv)', () => {
     it('should skip validation in development', async () => {
-      (process.env as Record<string, string>).NODE_ENV = 'development';
+      vi.stubEnv('NODE_ENV', 'development');
       const { validateEnvironment } = await import('../environment');
       const result = validateEnvironment();
       expect(result.valid).toBe(true);
@@ -32,12 +28,12 @@ describe('environment module', () => {
     });
 
     it('should report missing vars in production', async () => {
-      (process.env as Record<string, string>).NODE_ENV = 'production';
-      delete process.env.DATABASE_URL;
-      delete process.env.STRIPE_SECRET_KEY;
-      delete process.env.STRIPE_WEBHOOK_SECRET;
-      delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-      delete process.env.CLERK_SECRET_KEY;
+      vi.stubEnv('NODE_ENV', 'production');
+      vi.stubEnv('DATABASE_URL', '');
+      vi.stubEnv('STRIPE_SECRET_KEY', '');
+      vi.stubEnv('STRIPE_WEBHOOK_SECRET', '');
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', '');
+      vi.stubEnv('CLERK_SECRET_KEY', '');
 
       const { validateEnvironment } = await import('../environment');
       const result = validateEnvironment();
@@ -47,16 +43,16 @@ describe('environment module', () => {
     });
 
     it('should pass when all required vars are set', async () => {
-      (process.env as Record<string, string>).NODE_ENV = 'production';
-      process.env.DATABASE_URL = 'postgresql://test';
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
-      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
-      process.env.STRIPE_SECRET_KEY = 'sk_test_xxx';
-      process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
-      process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
-      process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
-      process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
-      process.env.ENCRYPTION_MASTER_KEY = 'a'.repeat(64);
+      vi.stubEnv('NODE_ENV', 'production');
+      vi.stubEnv('DATABASE_URL', 'postgresql://test');
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_live_xxx');
+      vi.stubEnv('CLERK_SECRET_KEY', 'sk_live_xxx');
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_xxx');
+      vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_xxx');
+      vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://redis.upstash.io');
+      vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'test-token');
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test');
+      vi.stubEnv('ENCRYPTION_MASTER_KEY', 'a'.repeat(64));
 
       const { validateEnvironment } = await import('../environment');
       const result = validateEnvironment();

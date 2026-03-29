@@ -25,20 +25,18 @@ vi.mock('next/headers', () => ({
 }));
 
 describe('POST /api/auth/webhook', () => {
-  const env = process.env;
-
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    process.env.CLERK_WEBHOOK_SECRET = 'whsec_mock';
+    vi.stubEnv('CLERK_WEBHOOK_SECRET', 'whsec_mock');
   });
 
   afterEach(() => {
-    process.env = env;
+    vi.unstubAllEnvs();
   });
 
   it('returns 500 if WEBHOOK_SECRET is missing', async () => {
-    delete process.env.CLERK_WEBHOOK_SECRET;
+    vi.stubEnv('CLERK_WEBHOOK_SECRET', '');
     const req = new Request('http://localhost/api/auth/webhook', { method: 'POST' });
     const res = await POST(req);
     expect(res.status).toBe(500);
