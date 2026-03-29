@@ -300,7 +300,8 @@ export async function refundTokenAmount(
 
   const insertResult = await insertStmt;
   // If no rows were inserted, a refund already exists — skip credit update.
-  if (usageId && insertResult.rowCount === 0) return;
+  // neon-http returns an array; INSERT...WHERE NOT EXISTS returns 0 rows when skipped.
+  if (usageId && insertResult.length === 0) return;
 
   const updateStmt = source === 'monthly'
     ? neonSql`
