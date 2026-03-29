@@ -7,8 +7,8 @@ import type { User } from '../../db/schema';
 
 // Mutable state that individual tests override
 let mockUser: Partial<User> | null = null;
-// Updated balance that getBalance reads after a mutation
-let mockUserAfterUpdate: Partial<User> | null = null;
+// Rows returned by the atomic UPDATE...RETURNING (neonSql tagged template)
+let mockAtomicRows: Record<string, unknown>[] = [];
 
 const mockInsert = vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue([]) });
 const mockUpdate = vi.fn().mockReturnValue({
@@ -24,16 +24,13 @@ function buildSelectChain(rows: Partial<User>[]): unknown {
   return chain;
 }
 
-// selectCallCount tracks how many times select() has been called so the
-// second call (inside getBalance after update) can return the updated user.
-let selectCallCount = 0;
-
 const mockSelect = vi.fn().mockImplementation(() => {
-  const isFirstCall = selectCallCount === 0;
-  selectCallCount++;
-  const user = isFirstCall ? mockUser : (mockUserAfterUpdate ?? mockUser);
-  return buildSelectChain(user ? [user] : []);
+  return buildSelectChain(mockUser ? [mockUser] : []);
 });
+
+// Mock for getNeonSql() — returns a tagged-template function that resolves
+// to mockAtomicRows (simulating the atomic UPDATE...RETURNING result).
+const mockNeonSqlFn = vi.fn().mockImplementation(async () => mockAtomicRows);
 
 vi.mock('../../db/client', () => ({
   getDb: () => ({
@@ -41,6 +38,7 @@ vi.mock('../../db/client', () => ({
     insert: mockInsert,
     update: mockUpdate,
   }),
+  getNeonSql: () => mockNeonSqlFn,
 }));
 
 // Mock schema so eq/sql import paths resolve without a real DB
@@ -66,7 +64,7 @@ vi.mock('../../tokens/pricing', () => ({
 // ---------------------------------------------------------------------------
 // Import module under test AFTER mocks are registered
 // ---------------------------------------------------------------------------
-import { getBalance, deductCredits, grantMonthlyCredits, processRollover } from '../creditManager';
+import { getBalance, deductCredits, grantMonthlyCredits, processRollover, refundCredits } from '../creditManager';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -92,20 +90,35 @@ function makeUser(overrides: Partial<User> = {}): Partial<User> {
   };
 }
 
+/**
+ * Build the row shape returned by the atomic UPDATE...RETURNING.
+ * Column names are snake_case as returned by raw SQL.
+ */
+function makeAtomicRow(overrides: Partial<{
+  id: string;
+  monthly_tokens: number;
+  monthly_tokens_used: number;
+  addon_tokens: number;
+  earned_credits: number;
+}> = {}): Record<string, unknown> {
+  return {
+    id: 'user-uuid-1',
+    monthly_tokens: 1000,
+    monthly_tokens_used: 0,
+    addon_tokens: 0,
+    earned_credits: 0,
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
-  selectCallCount = 0;
   mockUser = null;
-  mockUserAfterUpdate = null;
+  mockAtomicRows = [];
 
-  // Re-wire the select mock after clearAllMocks
-  mockSelect.mockImplementation(() => {
-    const isFirstCall = selectCallCount === 0;
-    selectCallCount++;
-    const user = isFirstCall ? mockUser : (mockUserAfterUpdate ?? mockUser);
-    return buildSelectChain(user ? [user] : []);
-  });
-
+  // Re-wire mocks after clearAllMocks
+  mockSelect.mockImplementation(() => buildSelectChain(mockUser ? [mockUser] : []));
+  mockNeonSqlFn.mockImplementation(async () => mockAtomicRows);
   mockInsert.mockReturnValue({ values: vi.fn().mockResolvedValue([]) });
   mockUpdate.mockReturnValue({
     set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
@@ -153,92 +166,130 @@ describe('getBalance', () => {
 });
 
 // ---------------------------------------------------------------------------
-// deductCredits — happy paths (waterfall order)
+// deductCredits — happy paths (atomic SQL UPDATE)
 // ---------------------------------------------------------------------------
 
-describe('deductCredits — waterfall deduction', () => {
+describe('deductCredits — atomic deduction (regression for #8023)', () => {
   it('returns success=true immediately for amount=0 without touching DB', async () => {
     mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
-    // For the getBalance call inside the amount<=0 branch
-    selectCallCount = 0;
 
     const result = await deductCredits('user-uuid-1', 0, 'chat');
     expect(result.success).toBe(true);
-    // update should NOT be called because amount === 0
+    // The atomic neonSql path should NOT be called when amount === 0
+    expect(mockNeonSqlFn).not.toHaveBeenCalled();
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
   it('returns success=true immediately for negative amount without touching DB', async () => {
     mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0 });
-    selectCallCount = 0;
 
     const result = await deductCredits('user-uuid-1', -5, 'chat');
     expect(result.success).toBe(true);
+    expect(mockNeonSqlFn).not.toHaveBeenCalled();
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it('deducts entirely from monthly pool when monthly balance is sufficient', async () => {
-    mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
-    // After update, simulate used increasing
-    mockUserAfterUpdate = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 50, addonTokens: 0, earnedCredits: 0 });
+  it('uses the atomic neonSql tagged-template path (not getDb().update) for deduction', async () => {
+    // The atomic UPDATE returns the post-deduction row
+    mockAtomicRows = [makeAtomicRow({ monthly_tokens: 1000, monthly_tokens_used: 50, addon_tokens: 0, earned_credits: 0 })];
 
     const result = await deductCredits('user-uuid-1', 50, 'chat');
     expect(result.success).toBe(true);
 
-    // Verify the update was called (monthly deduction)
-    expect(mockUpdate).toHaveBeenCalledOnce();
-    const setCalls = mockUpdate.mock.results[0].value.set.mock.calls;
-    expect(setCalls.length).toBe(1);
+    // Must use the atomic neonSql path
+    expect(mockNeonSqlFn).toHaveBeenCalledOnce();
+    // Must NOT use the old getDb().update() path for the deduction itself
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it('spills into purchased tokens after exhausting monthly', async () => {
-    // Monthly has 30 remaining, need 50 — spills 20 into addon
-    mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 970, addonTokens: 100, earnedCredits: 0 });
-    mockUserAfterUpdate = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 1000, addonTokens: 80, earnedCredits: 0 });
+  it('returns correct balance from RETURNING row after deduction', async () => {
+    mockAtomicRows = [makeAtomicRow({
+      monthly_tokens: 1000,
+      monthly_tokens_used: 50,
+      addon_tokens: 0,
+      earned_credits: 0,
+    })];
+
+    const result = await deductCredits('user-uuid-1', 50, 'chat');
+    expect(result.success).toBe(true);
+    expect(result.balance.monthly).toBe(950); // 1000 - 50
+    expect(result.balance.purchased).toBe(0);
+    expect(result.balance.earned).toBe(0);
+    expect(result.balance.total).toBe(950);
+  });
+
+  it('returns correct balance when deduction spills into addon tokens', async () => {
+    // 30 monthly remaining + 20 from addon
+    mockAtomicRows = [makeAtomicRow({
+      monthly_tokens: 1000,
+      monthly_tokens_used: 1000,
+      addon_tokens: 80,
+      earned_credits: 0,
+    })];
 
     const result = await deductCredits('user-uuid-1', 50, 'texture');
     expect(result.success).toBe(true);
-    // Both monthly and addon should be touched in one update call
-    expect(mockUpdate).toHaveBeenCalledOnce();
+    expect(result.balance.monthly).toBe(0);
+    expect(result.balance.purchased).toBe(80);
   });
 
-  it('spills into earned credits as last resort', async () => {
-    // Monthly=0, addon=0, earned=200 — full deduction from earned
-    mockUser = makeUser({ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 200 });
-    mockUserAfterUpdate = makeUser({ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 100 });
+  it('returns correct balance when deduction uses earned credits', async () => {
+    mockAtomicRows = [makeAtomicRow({
+      monthly_tokens: 0,
+      monthly_tokens_used: 0,
+      addon_tokens: 0,
+      earned_credits: 100,
+    })];
 
     const result = await deductCredits('user-uuid-1', 100, 'skybox');
     expect(result.success).toBe(true);
-    expect(mockUpdate).toHaveBeenCalledOnce();
+    expect(result.balance.earned).toBe(100);
   });
 
-  it('deducts across all three pools when each is partially used', async () => {
-    // monthly=20 remaining, addon=10, earned=5 — deduct 35 total
-    mockUser = makeUser({ monthlyTokens: 100, monthlyTokensUsed: 80, addonTokens: 10, earnedCredits: 5 });
-    mockUserAfterUpdate = makeUser({ monthlyTokens: 100, monthlyTokensUsed: 100, addonTokens: 0, earnedCredits: 0 });
+  it('writes an audit transaction on successful deduction', async () => {
+    mockAtomicRows = [makeAtomicRow({ monthly_tokens: 100, monthly_tokens_used: 10, addon_tokens: 0, earned_credits: 0 })];
 
-    const result = await deductCredits('user-uuid-1', 35, 'voice');
-    expect(result.success).toBe(true);
-    expect(mockUpdate).toHaveBeenCalledOnce();
+    await deductCredits('user-uuid-1', 10, 'chat_standard');
+
+    expect(mockInsert).toHaveBeenCalledOnce();
+    const insertValues = mockInsert.mock.results[0].value.values.mock.calls[0][0];
+    expect(insertValues.transactionType).toBe('deduction');
+    expect(insertValues.amount).toBe(-10);
+    expect(insertValues.source).toBe('chat_standard');
+    expect(insertValues.userId).toBe('user-uuid-1');
   });
-});
 
-// ---------------------------------------------------------------------------
-// deductCredits — insufficient balance
-// ---------------------------------------------------------------------------
-
-describe('deductCredits — insufficient balance', () => {
-  it('returns success=false when total balance is less than amount', async () => {
+  it('does not write an audit transaction when balance is insufficient', async () => {
+    // Atomic UPDATE returns no rows → insufficient balance
+    mockAtomicRows = [];
     mockUser = makeUser({ monthlyTokens: 50, monthlyTokensUsed: 40, addonTokens: 0, earnedCredits: 0 });
 
     const result = await deductCredits('user-uuid-1', 100, 'music');
     expect(result.success).toBe(false);
-    // No DB mutation should happen when balance is insufficient
-    expect(mockUpdate).not.toHaveBeenCalled();
     expect(mockInsert).not.toHaveBeenCalled();
   });
+});
 
-  it('returns correct remaining balance in the failure response', async () => {
+// ---------------------------------------------------------------------------
+// deductCredits — TOCTOU race regression (#8023)
+// ---------------------------------------------------------------------------
+
+describe('deductCredits — TOCTOU race condition regression (#8023)', () => {
+  it('uses a single atomic SQL statement so concurrent calls cannot both pass balance check', async () => {
+    // The fix: deductCredits must use getNeonSql() tagged template for the UPDATE,
+    // NOT a separate SELECT then UPDATE. This test verifies the atomic path is taken.
+    mockAtomicRows = [makeAtomicRow({ monthly_tokens: 100, monthly_tokens_used: 50 })];
+
+    await deductCredits('user-uuid-1', 50, 'test');
+
+    // The atomic neon SQL path must be called
+    expect(mockNeonSqlFn).toHaveBeenCalledOnce();
+    // The old non-atomic Drizzle update must NOT be called for the deduction
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('returns success=false and correct balance when atomic UPDATE returns 0 rows (insufficient balance)', async () => {
+    mockAtomicRows = []; // No rows = balance check failed in the DB
     mockUser = makeUser({ monthlyTokens: 100, monthlyTokensUsed: 95, addonTokens: 3, earnedCredits: 0 });
 
     const result = await deductCredits('user-uuid-1', 20, 'chat');
@@ -250,21 +301,22 @@ describe('deductCredits — insufficient balance', () => {
   });
 
   it('returns success=false when all pools are zero', async () => {
+    mockAtomicRows = [];
     mockUser = makeUser({ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
 
     const result = await deductCredits('user-uuid-1', 1, 'chat');
     expect(result.success).toBe(false);
   });
 
-  it('boundary: exact balance equals amount — should succeed', async () => {
-    mockUser = makeUser({ monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
-    mockUserAfterUpdate = makeUser({ monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0, earnedCredits: 0 });
+  it('boundary: exact balance equals amount — atomic UPDATE returns row, success=true', async () => {
+    mockAtomicRows = [makeAtomicRow({ monthly_tokens: 50, monthly_tokens_used: 50 })];
 
     const result = await deductCredits('user-uuid-1', 50, 'chat');
     expect(result.success).toBe(true);
   });
 
-  it('boundary: amount exceeds total by one — should fail', async () => {
+  it('boundary: amount exceeds total by one — atomic UPDATE returns 0 rows, success=false', async () => {
+    mockAtomicRows = [];
     mockUser = makeUser({ monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
 
     const result = await deductCredits('user-uuid-1', 51, 'chat');
@@ -277,24 +329,11 @@ describe('deductCredits — insufficient balance', () => {
 // ---------------------------------------------------------------------------
 
 describe('deductCredits — error handling', () => {
-  it('throws when user not found', async () => {
-    mockUser = null;
+  it('throws when user not found (atomic UPDATE returns 0 rows and select confirms no user)', async () => {
+    mockAtomicRows = []; // No rows from UPDATE
+    mockUser = null; // No user in fallback select
 
     await expect(deductCredits('ghost', 10, 'chat')).rejects.toThrow('User not found: ghost');
-  });
-
-  it('writes an audit transaction on successful deduction', async () => {
-    mockUser = makeUser({ monthlyTokens: 100, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
-    mockUserAfterUpdate = makeUser({ monthlyTokens: 100, monthlyTokensUsed: 10, addonTokens: 0, earnedCredits: 0 });
-
-    await deductCredits('user-uuid-1', 10, 'chat_standard');
-
-    expect(mockInsert).toHaveBeenCalledOnce();
-    const insertValues = mockInsert.mock.results[0].value.values.mock.calls[0][0];
-    expect(insertValues.transactionType).toBe('deduction');
-    expect(insertValues.amount).toBe(-10);
-    expect(insertValues.source).toBe('chat_standard');
-    expect(insertValues.userId).toBe('user-uuid-1');
   });
 });
 
@@ -305,7 +344,14 @@ describe('deductCredits — error handling', () => {
 describe('grantMonthlyCredits', () => {
   it('sets monthlyTokens to tier allocation and resets used counter', async () => {
     mockUser = makeUser({ monthlyTokens: 300, monthlyTokensUsed: 150, addonTokens: 0, earnedCredits: 0 });
-    mockUserAfterUpdate = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
+    // After update, getBalance reads updated user
+    const updatedUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
+    let selectCallCount = 0;
+    mockSelect.mockImplementation(() => {
+      const user = selectCallCount === 0 ? mockUser : updatedUser;
+      selectCallCount++;
+      return buildSelectChain(user ? [user] : []);
+    });
 
     await grantMonthlyCredits('user-uuid-1', 'creator');
 
@@ -325,15 +371,8 @@ describe('grantMonthlyCredits', () => {
 
     for (const [tier, expected] of tiers) {
       vi.clearAllMocks();
-      selectCallCount = 0;
-      mockSelect.mockImplementation(() => {
-        const isFirstCall = selectCallCount === 0;
-        selectCallCount++;
-        const user = isFirstCall
-          ? makeUser({ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 })
-          : makeUser({ monthlyTokens: expected, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
-        return buildSelectChain([user]);
-      });
+      const user = makeUser({ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
+      mockSelect.mockImplementation(() => buildSelectChain([user]));
       mockUpdate.mockReturnValue({
         set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
       });
@@ -347,7 +386,7 @@ describe('grantMonthlyCredits', () => {
 
   it('uses 0 tokens for an unknown tier ID (graceful fallback)', async () => {
     mockUser = makeUser({ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
-    mockUserAfterUpdate = makeUser({ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
+    mockSelect.mockImplementation(() => buildSelectChain([mockUser!]));
 
     await grantMonthlyCredits('user-uuid-1', 'enterprise');
 
@@ -357,7 +396,13 @@ describe('grantMonthlyCredits', () => {
 
   it('writes a monthly_grant audit transaction', async () => {
     mockUser = makeUser({ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
-    mockUserAfterUpdate = makeUser({ monthlyTokens: 300, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
+    const updatedUser = makeUser({ monthlyTokens: 300, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
+    let selectCallCount = 0;
+    mockSelect.mockImplementation(() => {
+      const user = selectCallCount === 0 ? mockUser : updatedUser;
+      selectCallCount++;
+      return buildSelectChain(user ? [user] : []);
+    });
 
     await grantMonthlyCredits('user-uuid-1', 'hobbyist');
 
@@ -400,7 +445,13 @@ describe('processRollover', () => {
   it('rolls over unused tokens up to the tier cap', async () => {
     // Creator has 1000 monthly; 400 remaining — rollover capped at 1000, so 400 rolls over
     mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 600, addonTokens: 0, earnedCredits: 0 });
-    mockUserAfterUpdate = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 600, addonTokens: 400, earnedCredits: 0 });
+    const updatedUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 600, addonTokens: 400, earnedCredits: 0 });
+    let selectCallCount = 0;
+    mockSelect.mockImplementation(() => {
+      const user = selectCallCount === 0 ? mockUser : updatedUser;
+      selectCallCount++;
+      return buildSelectChain(user ? [user] : []);
+    });
 
     await processRollover('user-uuid-1', 'creator');
     expect(mockUpdate).toHaveBeenCalledOnce();
@@ -409,9 +460,14 @@ describe('processRollover', () => {
 
   it('caps rollover at the tier monthly allocation when remaining exceeds cap', async () => {
     // Pro tier cap is 3000, but user somehow has 5000 remaining — capped at 3000
-    // This tests the Math.min(monthlyRemaining, cap) branch
     mockUser = makeUser({ monthlyTokens: 5000, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
-    mockUserAfterUpdate = makeUser({ monthlyTokens: 5000, monthlyTokensUsed: 0, addonTokens: 3000, earnedCredits: 0 });
+    const updatedUser = makeUser({ monthlyTokens: 5000, monthlyTokensUsed: 0, addonTokens: 3000, earnedCredits: 0 });
+    let selectCallCount = 0;
+    mockSelect.mockImplementation(() => {
+      const user = selectCallCount === 0 ? mockUser : updatedUser;
+      selectCallCount++;
+      return buildSelectChain(user ? [user] : []);
+    });
 
     await processRollover('user-uuid-1', 'pro');
     expect(mockUpdate).toHaveBeenCalledOnce();
@@ -420,7 +476,13 @@ describe('processRollover', () => {
   it('writes a rollover audit transaction with correct amount', async () => {
     const monthlyRemaining = 200;
     mockUser = makeUser({ monthlyTokens: 300, monthlyTokensUsed: 100, addonTokens: 50, earnedCredits: 0 });
-    mockUserAfterUpdate = makeUser({ monthlyTokens: 300, monthlyTokensUsed: 100, addonTokens: 250, earnedCredits: 0 });
+    const updatedUser = makeUser({ monthlyTokens: 300, monthlyTokensUsed: 100, addonTokens: 250, earnedCredits: 0 });
+    let selectCallCount = 0;
+    mockSelect.mockImplementation(() => {
+      const user = selectCallCount === 0 ? mockUser : updatedUser;
+      selectCallCount++;
+      return buildSelectChain(user ? [user] : []);
+    });
 
     await processRollover('user-uuid-1', 'hobbyist');
 
@@ -440,9 +502,7 @@ describe('processRollover', () => {
 describe('refundCredits', () => {
   it('returns success=true immediately for amount=0 without DB writes', async () => {
     mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 100, earnedCredits: 0 });
-    selectCallCount = 0;
 
-    const { refundCredits } = await import('../creditManager');
     const result = await refundCredits('user-uuid-1', 0, 'txn-1');
     expect(result.success).toBe(true);
     expect(mockUpdate).not.toHaveBeenCalled();
@@ -451,9 +511,7 @@ describe('refundCredits', () => {
 
   it('returns success=true immediately for negative amount', async () => {
     mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 100, earnedCredits: 0 });
-    selectCallCount = 0;
 
-    const { refundCredits } = await import('../creditManager');
     const result = await refundCredits('user-uuid-1', -10, 'txn-2');
     expect(result.success).toBe(true);
     expect(mockUpdate).not.toHaveBeenCalled();
@@ -461,9 +519,14 @@ describe('refundCredits', () => {
 
   it('adds refund amount to addon tokens and records audit trail', async () => {
     mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 50, earnedCredits: 0 });
-    mockUserAfterUpdate = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 150, earnedCredits: 0 });
+    const updatedUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 150, earnedCredits: 0 });
+    let selectCallCount = 0;
+    mockSelect.mockImplementation(() => {
+      const user = selectCallCount === 0 ? mockUser : updatedUser;
+      selectCallCount++;
+      return buildSelectChain(user ? [user] : []);
+    });
 
-    const { refundCredits } = await import('../creditManager');
     const result = await refundCredits('user-uuid-1', 100, 'txn-3');
 
     expect(result.success).toBe(true);
@@ -482,7 +545,6 @@ describe('refundCredits', () => {
   it('throws when user does not exist', async () => {
     mockUser = null;
 
-    const { refundCredits } = await import('../creditManager');
     await expect(refundCredits('ghost', 50, 'txn-4')).rejects.toThrow('User not found: ghost');
   });
 });

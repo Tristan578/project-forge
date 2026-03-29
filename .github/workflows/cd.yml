@@ -1,5 +1,23 @@
 name: CD
 
+# Security: Preview URL deployment protection (#7994)
+#
+# Preview deployments created by this workflow are publicly accessible by
+# default. To prevent unauthenticated access to preview URLs (which may
+# expose unreleased features or BYOK key flows):
+#
+#   1. Go to Vercel Dashboard -> spawnforge project -> Settings -> Deployment Protection
+#   2. Set "Vercel Authentication" (or "Password Protection") to "All Deployments"
+#      so that every preview URL requires SSO / Vercel login before rendering.
+#   3. Repeat for spawnforge-staging, spawnforge-docs, and spawnforge-design projects.
+#
+# This CANNOT be configured via vercel.json or CLI flags -- it must be set in
+# the Vercel Dashboard (project settings) or via the REST API:
+#   PATCH /v9/projects/{id}?teamId={teamId}
+#   Body: { "ssoProtection": { "deploymentType": "preview" } }
+#
+# Reference: https://vercel.com/docs/security/deployment-protection
+
 on:
   push:
     branches: [main]
