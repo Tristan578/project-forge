@@ -5,6 +5,7 @@
   "engines": { "node": ">=20" },
   "overrides": {
     "dompurify": ">=3.3.2",
-    "esbuild": ">=0.25.0"
+    "esbuild": ">=0.25.0",
+    "fast-xml-parser": ">=5.5.9"
   }
 }
