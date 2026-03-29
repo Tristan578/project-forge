@@ -273,6 +273,7 @@ All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. E
 | `builder` | Implementation tasks, coding |
 | `validator` | QA gate, full validation suite |
 | `planner` | Architecture, spec creation |
+| `docs-guardian` | Documentation review — code comments, API docs, MCP docs, repo docs. Antagonistic: PASS/FAIL only. |
 | `dx-guardian` | DX audits, cross-IDE consistency |
 | `security-reviewer` | Auth, injection, encryption, dependency audits |
 | `test-writer` | Vitest + RTL tests, coverage gaps |
