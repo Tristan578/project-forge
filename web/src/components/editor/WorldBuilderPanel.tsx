@@ -280,9 +280,8 @@ export function WorldBuilderPanel() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    // Defer revocation so the browser's download manager can read the blob.
-    // 60s ensures Firefox's async download initiation completes before the URL is revoked.
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    // Defer revocation briefly so the browser's download manager can read the blob.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, [world]);
 
   return (

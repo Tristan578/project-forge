@@ -208,7 +208,7 @@ export function TutorialPanel() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, [plan]);
 
   const handleToggleStep = useCallback((index: number) => {
