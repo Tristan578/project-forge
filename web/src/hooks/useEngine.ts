@@ -409,6 +409,12 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
       .catch((err) => {
         if (cancelled) return;
         const loadError = err instanceof Error ? err : new Error(String(err));
+        // AbortError is raised when the user navigates away mid-load. It is not
+        // a real failure — suppress the error toast and Sentry capture. (#7689)
+        if (loadError.name === 'AbortError') {
+          initializedRef.current = false;
+          return;
+        }
         captureException(loadError, {
           phase: 'wasm_load',
           backend: detectWebGPU() ? 'webgpu' : 'webgl2',
