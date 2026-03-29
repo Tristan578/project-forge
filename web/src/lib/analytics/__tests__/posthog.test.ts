@@ -184,5 +184,9 @@ describe('posthog analytics wrapper', () => {
     expect(mod.AnalyticsEvent.GAME_EXPORTED).toBe('game_exported');
     expect(mod.AnalyticsEvent.TEMPLATE_USED).toBe('template_used');
     expect(mod.AnalyticsEvent.SUBSCRIPTION_STARTED).toBe('subscription_started');
+    expect(mod.AnalyticsEvent.EDITOR_SESSION_STARTED).toBe('editor_session_started');
+    expect(mod.AnalyticsEvent.FEATURE_FLAG_EVALUATED).toBe('feature_flag_evaluated');
+    expect(mod.AnalyticsEvent.TIER_UPGRADE_PROMPTED).toBe('tier_upgrade_prompted');
+    expect(mod.AnalyticsEvent.TEMPLATE_APPLIED).toBe('template_applied');
   });
 });

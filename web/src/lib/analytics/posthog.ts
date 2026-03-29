@@ -21,6 +21,10 @@ export enum AnalyticsEvent {
   GAME_EXPORTED = 'game_exported',
   TEMPLATE_USED = 'template_used',
   SUBSCRIPTION_STARTED = 'subscription_started',
+  EDITOR_SESSION_STARTED = 'editor_session_started',
+  FEATURE_FLAG_EVALUATED = 'feature_flag_evaluated',
+  TIER_UPGRADE_PROMPTED = 'tier_upgrade_prompted',
+  TEMPLATE_APPLIED = 'template_applied',
 }
 
 const POSTHOG_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY ?? '';

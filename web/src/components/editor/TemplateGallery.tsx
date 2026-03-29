@@ -76,6 +76,7 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
       // Load template
       await loadTemplate(templateId);
       trackEvent(AnalyticsEvent.TEMPLATE_USED, { templateId });
+      trackEvent(AnalyticsEvent.TEMPLATE_APPLIED, { templateId, source: 'gallery' });
     }
     onClose();
   };

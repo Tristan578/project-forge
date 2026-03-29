@@ -454,6 +454,12 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
           if (typeof window !== 'undefined') {
             (window as unknown as Record<string, unknown>).__FORGE_ENGINE_READY = true;
           }
+          // Track editor session start (non-critical analytics)
+          import('@/lib/analytics/posthog').then(({ trackEvent, AnalyticsEvent }) => {
+            trackEvent(AnalyticsEvent.EDITOR_SESSION_STARTED, {
+              backend: detectWebGPU() ? 'webgpu' : 'webgl2',
+            });
+          }).catch(() => { /* analytics non-critical */ });
           onReadyRef.current?.();
         } catch (err) {
           const engineError = err instanceof Error ? err : new Error(String(err));
