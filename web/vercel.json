@@ -1,7 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "nodeVersion": "20.x",
   "installCommand": "cd .. && npm ci && npm run build --workspace=packages/ui",
   "buildCommand": "npm run build",
   "outputDirectory": ".next",
