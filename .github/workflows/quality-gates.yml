@@ -556,7 +556,7 @@ jobs:
           PUPPETEER_CACHE_DIR: /home/runner/.cache/puppeteer
         run: |
           lhci collect \
-            --url=http://localhost:3001/dev \
+            --url=http://localhost:3001 \
             --number-of-runs=3 \
             --output=json \
             --output-path=.lhci-effects/ \
