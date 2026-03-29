@@ -172,6 +172,7 @@ function CollapsibleSection({ title, children, defaultOpen = false }: {
       <button
         className="mb-2 flex w-full items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 hover:text-zinc-400"
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
       >
         {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
         {title}
