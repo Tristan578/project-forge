@@ -44,8 +44,8 @@ describe('voiceProfileStore', () => {
 
       const profiles = useVoiceProfileStore.getState().profiles;
       expect(Object.keys(profiles)).toHaveLength(2);
-      expect(profiles['A']).toBeDefined();
-      expect(profiles['B']).toBeDefined();
+      expect(profiles['A']).toEqual(expect.objectContaining({ speaker: 'A' }));
+      expect(profiles['B']).toEqual(expect.objectContaining({ speaker: 'B' }));
     });
   });
 
@@ -58,7 +58,7 @@ describe('voiceProfileStore', () => {
 
       const profiles = useVoiceProfileStore.getState().profiles;
       expect(profiles['Hero']).toBeUndefined();
-      expect(profiles['Villain']).toBeDefined();
+      expect(profiles['Villain']).toEqual(expect.objectContaining({ speaker: 'Villain' }));
     });
 
     it('should be a no-op for non-existent profile', () => {
@@ -97,7 +97,7 @@ describe('voiceProfileStore', () => {
       const profiles = useVoiceProfileStore.getState().profiles;
       expect(Object.keys(profiles)).toHaveLength(2);
       expect(profiles['Old']).toBeUndefined();
-      expect(profiles['A']).toBeDefined();
+      expect(profiles['A']).toEqual(expect.objectContaining({ speaker: 'A' }));
     });
   });
 

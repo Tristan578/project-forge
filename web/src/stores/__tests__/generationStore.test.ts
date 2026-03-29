@@ -189,7 +189,7 @@ describe('generationStore', () => {
 
       const state = useGenerationStore.getState();
       expect(state.jobs.job1).toBeUndefined();
-      expect(state.jobs.job2).toBeDefined();
+      expect(state.jobs.job2).toEqual(expect.objectContaining({ id: 'job2', status: 'processing' }));
     });
 
     it('should remove failed jobs', () => {
@@ -202,7 +202,7 @@ describe('generationStore', () => {
 
       const state = useGenerationStore.getState();
       expect(state.jobs.job1).toBeUndefined();
-      expect(state.jobs.job2).toBeDefined();
+      expect(state.jobs.job2).toEqual(expect.objectContaining({ id: 'job2', status: 'pending' }));
     });
 
     it('should keep pending, processing, and downloading jobs', () => {
@@ -216,9 +216,9 @@ describe('generationStore', () => {
       clearCompleted();
 
       const state = useGenerationStore.getState();
-      expect(state.jobs.job1).toBeDefined();
-      expect(state.jobs.job2).toBeDefined();
-      expect(state.jobs.job3).toBeDefined();
+      expect(state.jobs.job1).toEqual(expect.objectContaining({ status: 'pending' }));
+      expect(state.jobs.job2).toEqual(expect.objectContaining({ status: 'processing' }));
+      expect(state.jobs.job3).toEqual(expect.objectContaining({ status: 'downloading' }));
       expect(state.jobs.job4).toBeUndefined();
     });
 
@@ -596,7 +596,7 @@ describe('generationStore', () => {
 
       const jobs = useGenerationStore.getState().jobs;
       expect(Object.keys(jobs)).toHaveLength(2);
-      expect(jobs['local-1']).toBeDefined();
+      expect(jobs['local-1']).toEqual(expect.objectContaining({ id: 'local-1' }));
     });
   });
 });
