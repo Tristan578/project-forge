@@ -98,15 +98,28 @@ describe('formatEstimatedTime', () => {
   });
 
   it('returns range string when no progress given', () => {
-    // model: 60-120s → "~1-2 min"
+    // model: 60-120s → "~1-2 min" (both divisible by 60)
     const result = formatEstimatedTime('model');
-    expect(result).toMatch(/~\d/);
+    expect(result).toBe('~1-2 min');
   });
 
   it('returns sub-60s range for fast operations', () => {
     // sfx: 5-15s
     const result = formatEstimatedTime('sfx');
     expect(result).toMatch(/~5-15s/);
+  });
+
+  it('formats mixed seconds/minutes range without overstating max (regression for PF-148)', () => {
+    // music: 30-90s — max is 1m 30s, NOT 2 min. Must not show "~30s-2 min".
+    const result = formatEstimatedTime('music');
+    expect(result).toBe('~30s-1m 30s');
+    expect(result).not.toContain('2 min');
+  });
+
+  it('formats all-minutes range with exact minutes when divisible', () => {
+    // skybox: 30-60s → min=0m30s, max=1m0s → "~30s-1 min"
+    const result = formatEstimatedTime('skybox');
+    expect(result).toBe('~30s-1 min');
   });
 
   it('returns "Almost done..." when computed remaining < 10s', () => {
