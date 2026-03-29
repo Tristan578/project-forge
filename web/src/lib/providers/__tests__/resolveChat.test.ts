@@ -3,15 +3,14 @@
  *
  * Covers:
  * - resolveChat returns ok:false when no backend is configured
- * - resolveChat routes to Anthropic SDK path when direct backend is used
- * - resolveChat routes to OpenAI-compat path when gateway backend is used
+ * - resolveChat routes through streamViaSdk for all backends
  * - resolveChatRoute returns null with no config, ResolvedRoute with config
- * - streamAnthropicDirect emits the expected event sequence
- * - streamOpenAICompat emits the expected event sequence
- * - error events are emitted on API failure
+ * - circuitBreakerWarning is surfaced in the result
+ * - options (systemPrompt, thinking, manifestTools) are forwarded to streamViaSdk
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { ResolveChatStreamEvent } from '@/lib/providers/resolveChat';
 
 // ---------------------------------------------------------------------------
 // Environment helpers
@@ -41,9 +40,6 @@ function clearAllProviderEnv(): void {
   for (const k of keys) {
     delete process.env[k];
   }
-  // Disable AI SDK adapter so legacy-path tests exercise the Anthropic SDK /
-  // fetch-based streams they mock (the SDK path is on by default in production).
-  process.env.USE_AI_SDK = 'false';
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +54,16 @@ async function collectEvents(
     events.push(event);
   }
   return events;
+}
+
+/**
+ * Build a minimal fake streamViaSdk generator that yields the given events.
+ * Used to mock @/lib/ai/aiSdkAdapter without needing real AI provider calls.
+ */
+async function* fakeStream(
+  events: ResolveChatStreamEvent[]
+): AsyncGenerator<ResolveChatStreamEvent> {
+  for (const event of events) yield event;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,10 +134,11 @@ describe('resolveChat — no backend configured', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests: resolveChat — Anthropic direct path
+// Tests: resolveChat — AI SDK adapter path
+// All backends now route through streamViaSdk; we mock it to avoid real calls.
 // ---------------------------------------------------------------------------
 
-describe('resolveChat — Anthropic direct path', () => {
+describe('resolveChat — AI SDK adapter path (direct backend)', () => {
   beforeEach(() => {
     clearAllProviderEnv();
     vi.resetModules();
@@ -142,32 +149,16 @@ describe('resolveChat — Anthropic direct path', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns ok:true with backendId direct when only platform key is set', async () => {
+  it('returns ok:true with backendId direct when only ANTHROPIC_API_KEY is set', async () => {
     setEnv({ ANTHROPIC_API_KEY: 'sk-platform' });
 
-    // Mock Anthropic SDK to yield a minimal streaming sequence
-    vi.doMock('@anthropic-ai/sdk', () => {
-      async function* fakeStream() {
-        yield {
-          type: 'message_start',
-          message: { usage: { input_tokens: 10 } },
-        };
-        yield { type: 'content_block_start', content_block: { type: 'text' } };
-        yield { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello' } };
-        yield { type: 'content_block_stop', index: 0 };
-        yield {
-          type: 'message_delta',
-          delta: { stop_reason: 'end_turn' },
-          usage: { output_tokens: 3 },
-        };
-        yield { type: 'message_stop' };
-      }
-      const mockCreate = vi.fn().mockResolvedValue(fakeStream());
-      class MockAnthropic {
-        messages = { create: mockCreate };
-      }
-      return { default: MockAnthropic };
-    });
+    vi.doMock('@/lib/ai/aiSdkAdapter', () => ({
+      streamViaSdk: vi.fn().mockReturnValue(fakeStream([
+        { type: 'text_start' },
+        { type: 'text_delta', text: 'Hello' },
+        { type: 'turn_complete', stop_reason: 'end_turn' },
+      ])),
+    }));
 
     const { resolveChat } = await import('@/lib/providers/resolveChat');
     const result = await resolveChat([{ role: 'user', content: 'hello' }]);
@@ -178,38 +169,24 @@ describe('resolveChat — Anthropic direct path', () => {
 
     const events = await collectEvents(result.stream as AsyncGenerator<Record<string, unknown>>);
     const types = events.map((e) => e.type);
-
-    expect(types).toContain('usage');
     expect(types).toContain('text_start');
     expect(types).toContain('text_delta');
-    expect(types).toContain('content_block_stop');
     expect(types).toContain('turn_complete');
 
-    const textDeltas = events.filter((e) => e.type === 'text_delta');
-    expect(textDeltas[0].text).toBe('Hello');
-
-    const usageEvents = events.filter((e) => e.type === 'usage');
-    const inputUsage = usageEvents.find((e) => e.inputTokens !== undefined);
-    expect(inputUsage).toBeDefined();
-    expect(inputUsage!.inputTokens).toBe(10);
+    const textDelta = events.find((e) => e.type === 'text_delta');
+    expect(textDelta!.text).toBe('Hello');
   });
 
   it('emits thinking events when thinking mode is enabled', async () => {
     setEnv({ ANTHROPIC_API_KEY: 'sk-platform' });
 
-    vi.doMock('@anthropic-ai/sdk', () => {
-      async function* fakeStream() {
-        yield { type: 'content_block_start', content_block: { type: 'thinking' } };
-        yield { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'I think...' } };
-        yield { type: 'content_block_stop', index: 0 };
-        yield { type: 'message_stop' };
-      }
-      const mockCreate = vi.fn().mockResolvedValue(fakeStream());
-      class MockAnthropic {
-        messages = { create: mockCreate };
-      }
-      return { default: MockAnthropic };
-    });
+    vi.doMock('@/lib/ai/aiSdkAdapter', () => ({
+      streamViaSdk: vi.fn().mockReturnValue(fakeStream([
+        { type: 'thinking_start' },
+        { type: 'thinking_delta', text: 'I think...' },
+        { type: 'turn_complete', stop_reason: 'end_turn' },
+      ])),
+    }));
 
     const { resolveChat } = await import('@/lib/providers/resolveChat');
     const result = await resolveChat(
@@ -222,9 +199,9 @@ describe('resolveChat — Anthropic direct path', () => {
 
     const events = await collectEvents(result.stream as AsyncGenerator<Record<string, unknown>>);
     const types = events.map((e) => e.type);
-
     expect(types).toContain('thinking_start');
     expect(types).toContain('thinking_delta');
+
     const thinkDelta = events.find((e) => e.type === 'thinking_delta');
     expect(thinkDelta!.text).toBe('I think...');
   });
@@ -232,25 +209,13 @@ describe('resolveChat — Anthropic direct path', () => {
   it('emits tool_start and tool_input_delta for tool use blocks', async () => {
     setEnv({ ANTHROPIC_API_KEY: 'sk-platform' });
 
-    vi.doMock('@anthropic-ai/sdk', () => {
-      async function* fakeStream() {
-        yield {
-          type: 'content_block_start',
-          content_block: { type: 'tool_use', id: 'tu_1', name: 'spawn_entity' },
-        };
-        yield {
-          type: 'content_block_delta',
-          delta: { type: 'input_json_delta', partial_json: '{"type":"cube"}' },
-        };
-        yield { type: 'content_block_stop', index: 0 };
-        yield { type: 'message_stop' };
-      }
-      const mockCreate = vi.fn().mockResolvedValue(fakeStream());
-      class MockAnthropic {
-        messages = { create: mockCreate };
-      }
-      return { default: MockAnthropic };
-    });
+    vi.doMock('@/lib/ai/aiSdkAdapter', () => ({
+      streamViaSdk: vi.fn().mockReturnValue(fakeStream([
+        { type: 'tool_start', id: 'tu_1', name: 'spawn_entity', input: {} },
+        { type: 'tool_input_delta', json: '{"type":"cube"}' },
+        { type: 'turn_complete', stop_reason: 'tool_use' },
+      ])),
+    }));
 
     const { resolveChat } = await import('@/lib/providers/resolveChat');
     const result = await resolveChat([{ role: 'user', content: 'spawn a cube' }]);
@@ -269,11 +234,7 @@ describe('resolveChat — Anthropic direct path', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Tests: resolveChat — OpenAI-compatible gateway path
-// ---------------------------------------------------------------------------
-
-describe('resolveChat — OpenAI-compatible gateway path', () => {
+describe('resolveChat — AI SDK adapter path (gateway backend)', () => {
   beforeEach(() => {
     clearAllProviderEnv();
     vi.resetModules();
@@ -287,22 +248,13 @@ describe('resolveChat — OpenAI-compatible gateway path', () => {
   it('returns ok:true with backendId vercel-gateway and emits text_delta', async () => {
     setEnv({ AI_GATEWAY_API_KEY: 'gw-key' });
 
-    // Build an SSE stream that mimics what the OpenAI-compat endpoint returns
-    function makeSSEStream(chunks: string[]): Response {
-      const body = chunks.join('\n') + '\n';
-      return new Response(body, {
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-      });
-    }
-
-    const sseChunks = [
-      'data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":null}]}',
-      'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}',
-      'data: [DONE]',
-    ];
-
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSSEStream(sseChunks)));
+    vi.doMock('@/lib/ai/aiSdkAdapter', () => ({
+      streamViaSdk: vi.fn().mockReturnValue(fakeStream([
+        { type: 'text_delta', text: 'Hi' },
+        { type: 'usage', inputTokens: 5, outputTokens: 2 },
+        { type: 'turn_complete', stop_reason: 'stop' },
+      ])),
+    }));
 
     const { resolveChat } = await import('@/lib/providers/resolveChat');
     const result = await resolveChat([{ role: 'user', content: 'hello' }]);
@@ -325,58 +277,14 @@ describe('resolveChat — OpenAI-compatible gateway path', () => {
     expect(usageEvent!.inputTokens).toBe(5);
   });
 
-  it('emits an error event when the fetch response is not ok', async () => {
-    setEnv({ AI_GATEWAY_API_KEY: 'gw-key' });
-
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response('{"error":"model not found"}', { status: 404 })
-    ));
-
-    const { resolveChat } = await import('@/lib/providers/resolveChat');
-    const result = await resolveChat([{ role: 'user', content: 'hello' }]);
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-
-    const events = await collectEvents(result.stream as AsyncGenerator<Record<string, unknown>>);
-    const errorEvent = events.find((e) => e.type === 'error');
-    expect(errorEvent).toBeDefined();
-  });
-
-  it('calls the correct OpenAI-compat endpoint URL', async () => {
-    setEnv({ AI_GATEWAY_API_KEY: 'gw-key' });
-
-    const mockFetch = vi.fn().mockResolvedValue(
-      new Response('data: [DONE]\n\n', {
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-      })
-    );
-    vi.stubGlobal('fetch', mockFetch);
-
-    const { resolveChat } = await import('@/lib/providers/resolveChat');
-    const result = await resolveChat([{ role: 'user', content: 'hello' }]);
-    expect(result.ok).toBe(true);
-
-    // Drain the stream
-    if (result.ok) {
-      for await (const _event of result.stream) { /* drain */ }
-    }
-
-    expect(mockFetch).toHaveBeenCalledOnce();
-    const calledUrl = mockFetch.mock.calls[0][0] as string;
-    expect(calledUrl).toBe('https://ai-gateway.vercel.sh/v1/chat/completions');
-  });
-
   it('falls back to OpenRouter when Vercel Gateway is not configured', async () => {
     setEnv({ OPENROUTER_API_KEY: 'or-key' });
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response('data: [DONE]\n\n', {
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-      })
-    ));
+    vi.doMock('@/lib/ai/aiSdkAdapter', () => ({
+      streamViaSdk: vi.fn().mockReturnValue(fakeStream([
+        { type: 'turn_complete', stop_reason: 'stop' },
+      ])),
+    }));
 
     const { resolveChat } = await import('@/lib/providers/resolveChat');
     const result = await resolveChat([{ role: 'user', content: 'hello' }]);
@@ -384,6 +292,29 @@ describe('resolveChat — OpenAI-compatible gateway path', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.backendId).toBe('openrouter');
+  });
+
+  it('passes options through to streamViaSdk', async () => {
+    setEnv({ AI_GATEWAY_API_KEY: 'gw-key' });
+
+    const mockStreamViaSdk = vi.fn().mockReturnValue(fakeStream([
+      { type: 'turn_complete', stop_reason: 'stop' },
+    ]));
+
+    vi.doMock('@/lib/ai/aiSdkAdapter', () => ({
+      streamViaSdk: mockStreamViaSdk,
+    }));
+
+    const { resolveChat } = await import('@/lib/providers/resolveChat');
+    await resolveChat(
+      [{ role: 'user', content: 'hello' }],
+      { systemPrompt: 'You are a game engine assistant.', thinking: true }
+    );
+
+    expect(mockStreamViaSdk).toHaveBeenCalledOnce();
+    const [, , options] = mockStreamViaSdk.mock.calls[0] as [unknown, unknown, { systemPrompt?: string; thinking?: boolean }];
+    expect(options.systemPrompt).toBe('You are a game engine assistant.');
+    expect(options.thinking).toBe(true);
   });
 });
 
@@ -405,7 +336,6 @@ describe('resolveChat — circuitBreakerWarning (PF-737)', () => {
   it('includes circuitBreakerWarning in result when resolver returns one', async () => {
     setEnv({ AI_GATEWAY_API_KEY: 'gw-key' });
 
-    // Override the registry to inject a warning — simulates a HALF_OPEN or OPEN state
     vi.doMock('@/lib/providers/registry', () => ({
       resolveBackend: vi.fn().mockReturnValue({
         backendId: 'vercel-gateway',
@@ -424,12 +354,11 @@ describe('resolveChat — circuitBreakerWarning (PF-737)', () => {
       }),
     }));
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response('data: [DONE]\n\n', {
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-      })
-    ));
+    vi.doMock('@/lib/ai/aiSdkAdapter', () => ({
+      streamViaSdk: vi.fn().mockReturnValue(fakeStream([
+        { type: 'turn_complete', stop_reason: 'stop' },
+      ])),
+    }));
 
     const { resolveChat } = await import('@/lib/providers/resolveChat');
     const result = await resolveChat([{ role: 'user', content: 'hello' }]);
@@ -463,12 +392,11 @@ describe('resolveChat — circuitBreakerWarning (PF-737)', () => {
       }),
     }));
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response('data: [DONE]\n\n', {
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-      })
-    ));
+    vi.doMock('@/lib/ai/aiSdkAdapter', () => ({
+      streamViaSdk: vi.fn().mockReturnValue(fakeStream([
+        { type: 'turn_complete', stop_reason: 'stop' },
+      ])),
+    }));
 
     const { resolveChat } = await import('@/lib/providers/resolveChat');
     const result = await resolveChat([{ role: 'user', content: 'hello' }]);
@@ -476,51 +404,5 @@ describe('resolveChat — circuitBreakerWarning (PF-737)', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.circuitBreakerWarning).toBeUndefined();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Tests: resolveChat — system prompt handling
-// ---------------------------------------------------------------------------
-
-describe('resolveChat — system prompt', () => {
-  beforeEach(() => {
-    clearAllProviderEnv();
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    Object.assign(process.env, envBackup);
-    vi.restoreAllMocks();
-  });
-
-  it('includes systemPrompt in the request body for OpenAI-compat path', async () => {
-    setEnv({ AI_GATEWAY_API_KEY: 'gw-key' });
-
-    const mockFetch = vi.fn().mockResolvedValue(
-      new Response('data: [DONE]\n\n', {
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-      })
-    );
-    vi.stubGlobal('fetch', mockFetch);
-
-    const { resolveChat } = await import('@/lib/providers/resolveChat');
-    const result = await resolveChat(
-      [{ role: 'user', content: 'hello' }],
-      { systemPrompt: 'You are a game engine assistant.' }
-    );
-    expect(result.ok).toBe(true);
-
-    if (result.ok) {
-      for await (const _event of result.stream) { /* drain */ }
-    }
-
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string) as {
-      messages: Array<{ role: string; content: string }>;
-    };
-    const systemMsg = body.messages.find((m) => m.role === 'system');
-    expect(systemMsg).toBeDefined();
-    expect(systemMsg!.content).toContain('game engine assistant');
   });
 });
