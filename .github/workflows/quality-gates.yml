@@ -499,6 +499,7 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: '1'
           NEXT_PUBLIC_EFFECTS: 'off'
+          SKIP_ENV_VALIDATION: 'true'
         run: npm run build
 
       - name: Start production server for baseline (effects off)
@@ -509,7 +510,11 @@ jobs:
           SKIP_ENV_VALIDATION: 'true'
         run: |
           npx next start -p 3000 &
-          npx wait-on http://localhost:3000 --timeout 30000
+          # Wait for server to be ready and serving content
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000 -o /dev/null 2>/dev/null; then break; fi
+            sleep 1
+          done
 
       - name: Collect baseline Lighthouse runs (effects off)
         env:
@@ -531,6 +536,7 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: '1'
           NEXT_PUBLIC_EFFECTS: 'on'
+          SKIP_ENV_VALIDATION: 'true'
         run: npm run build
 
       - name: Start production server for effects-on run
@@ -541,7 +547,10 @@ jobs:
           SKIP_ENV_VALIDATION: 'true'
         run: |
           npx next start -p 3001 &
-          npx wait-on http://localhost:3001 --timeout 30000
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001 -o /dev/null 2>/dev/null; then break; fi
+            sleep 1
+          done
 
       - name: Collect effects-on Lighthouse runs
         env:
