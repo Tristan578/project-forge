@@ -1,3 +1,13 @@
+/**
+ * Distributed rate limiting via Upstash Redis.
+ *
+ * `rateLimitPublicRoute()` — 30 req/5 min per IP for unauthenticated endpoints.
+ * `rateLimit()` — configurable per-key limiting for authenticated routes.
+ *
+ * GOTCHA: `rateLimitPublicRoute()` is async — always `await` it.
+ * Without `await`, the Promise is truthy and silently bypasses all limits.
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
 import {
   RATE_LIMIT_PUBLIC_WINDOW_MS,
