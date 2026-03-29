@@ -1,3 +1,10 @@
+//! Level-of-detail system — distance-based mesh decimation for performance.
+//!
+//! `LodData` stores per-entity distance thresholds and triangle reduction ratios.
+//! The `update_lod_levels` system computes camera distance each frame and emits
+//! `LOD_CHANGED` events when the active level changes. Mesh simplification uses
+//! QEM (Quadric Error Metric) or Fast (position-only) backends from `mesh_simplify`.
+
 use bevy::prelude::*;
 use bevy::mesh::Mesh;
 use serde::{Deserialize, Serialize};

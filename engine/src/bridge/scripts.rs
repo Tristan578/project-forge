@@ -1,3 +1,6 @@
+//! Script bridge — stores script metadata on ECS entities and handles play-tick input dispatch.
+//! Actual script execution happens in the JS Web Worker sandbox, not in Rust.
+
 use bevy::prelude::*;
 use std::collections::HashMap;
 use crate::core::{

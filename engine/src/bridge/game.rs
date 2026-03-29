@@ -1,3 +1,5 @@
+//! Game component bridge — applies game components, camera configs, and camera shake to ECS.
+
 use bevy::prelude::*;
 use crate::core::{
     entity_id::EntityId,

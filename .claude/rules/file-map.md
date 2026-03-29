@@ -109,7 +109,7 @@ EditorLayout, SceneHierarchy, InspectorPanel, MaterialInspector, LightInspector,
 - `db/` — Drizzle + Neon client, DB schema
 
 ### MCP Server (`mcp-server/`)
-- `manifest/commands.json` — 326 commands across 37 categories
+- `manifest/commands.json` — 350 commands across 41 categories
 - `src/manifest.test.ts` — Schema validation (update `validCategories` when adding categories)
 - `src/docs/` — Doc loader, BM25 search, MCP resource/tool registration
 
