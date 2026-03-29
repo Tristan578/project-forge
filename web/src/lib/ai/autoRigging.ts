@@ -435,8 +435,9 @@ export function rigToCommands(rig: RigTemplate, entityId: string): EngineCommand
   const bones = rig.bones.map((bone) => ({
     name: bone.name,
     parentBone: bone.parent ?? null,
-    // Project to 2D — set_skeleton_2d requires [x, y] only
-    localPosition: [bone.position.x, bone.position.y] as [number, number],
+    // Send all 3 coordinates — the engine preserves Z for round-trip fidelity
+    // even though only XY is used for 2D rendering.
+    localPosition: [bone.position.x, bone.position.y, bone.position.z] as [number, number, number],
     localRotation: bone.rotation ? bone.rotation.z : 0,
     localScale: [1, 1] as [number, number],
     length: bone.length,

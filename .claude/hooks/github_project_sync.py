@@ -1119,9 +1119,11 @@ def pull():
 
         # IMPORT FILTER: Accept tickets that are either:
         # (a) Have SPAWNFORGE_METADATA in body with matching syncRepo/projectId, OR
-        # (b) Are Issues with PF- prefix in title (SpawnForge convention)
-        # This fallback (b) is needed because tickets created via `gh issue create`
-        # don't have sync metadata. Without it, the sync skips all 348+ tickets.
+        # (b) Are Issues/DraftIssues with PF- prefix in title (SpawnForge convention), OR
+        # (c) Any Issue/DraftIssue in the project board with no conflicting syncRepo.
+        #     Since gh_get_project_items() fetches ONLY items from our configured project,
+        #     untagged items are still our tickets and must not be silently dropped
+        #     (PF-39 — fix: import all untagged project items).
         if parsed:
             sync_repo = parsed.get("syncRepo", "")
             if sync_repo and sync_repo != target_repo:
@@ -1129,17 +1131,10 @@ def pull():
                 continue
             meta_project = parsed.get("projectId", "")
             if not sync_repo and not meta_project:
-                # No syncRepo and no projectId in metadata.
-                # For v1 (old taskboard format) with PF- title, accept it — it's ours.
-                # For v2+ without projectId, reject.
-                version = parsed.get("version", 0)
-                if version <= 1 and title.startswith("PF-"):
-                    # Old format — accept as SpawnForge ticket, fill in missing fields
-                    parsed["syncRepo"] = target_repo
-                    parsed["projectId"] = str(project_id)
-                else:
-                    filtered += 1
-                    continue
+                # No syncRepo and no projectId in metadata — treat as ours since it
+                # came from our GitHub Project board.
+                parsed["syncRepo"] = target_repo
+                parsed["projectId"] = str(project_id)
             elif meta_project and meta_project != project_id:
                 # Also accept the canonical project ID from config (the ID may have
                 # changed if the local DB was recreated, but the GitHub issues still
@@ -1148,9 +1143,10 @@ def pull():
                 if meta_project != canonical_id:
                     filtered += 1
                     continue
-        elif title.startswith("PF-") and content_type in ("Issue", "DraftIssue", ""):
-            # Fallback: PF-prefixed issue/draft without metadata — create synthetic parsed data
-            # Extract priority from title prefix patterns like [urgent], [high]
+        elif content_type in ("Issue", "DraftIssue", ""):
+            # Fallback for items with no SPAWNFORGE_METADATA:
+            # Accept any Issue/DraftIssue from the project board — they are all ours.
+            # PF-prefix detection still used for priority extraction when available.
             priority_match = re.search(r'\[(urgent|high|medium|low)\]', title, re.IGNORECASE)
             fallback_priority = priority_match.group(1).lower() if priority_match else "medium"
             parsed = {

@@ -24,7 +24,8 @@ pub struct SkeletonData2d {
 pub struct Bone2dDef {
     pub name: String,
     pub parent_bone: Option<String>,
-    pub local_position: [f32; 2],
+    /// XY position used for 2D rendering; Z is preserved for round-trip fidelity with 3D rigs.
+    pub local_position: [f32; 3],
     pub local_rotation: f32, // degrees
     pub local_scale: [f32; 2],
     pub length: f32,
@@ -148,7 +149,7 @@ impl Default for SkeletonData2d {
             bones: vec![Bone2dDef {
                 name: "root".to_string(),
                 parent_bone: None,
-                local_position: [0.0, 0.0],
+                local_position: [0.0, 0.0, 0.0],
                 local_rotation: 0.0,
                 local_scale: [1.0, 1.0],
                 length: 50.0,

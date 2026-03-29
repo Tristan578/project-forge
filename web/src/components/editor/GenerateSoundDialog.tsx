@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Sparkles } from 'lucide-react';
+import { X, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
@@ -253,9 +253,17 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
           <button
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="flex-1 rounded bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50 disabled:hover:bg-purple-600"
+            aria-busy={isSubmitting}
+            className="flex flex-1 items-center justify-center gap-2 rounded bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50 disabled:hover:bg-purple-600"
           >
-            Generate
+            {isSubmitting ? (
+              <>
+                <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                Submitting...
+              </>
+            ) : (
+              'Generate'
+            )}
           </button>
         </div>
       </div>

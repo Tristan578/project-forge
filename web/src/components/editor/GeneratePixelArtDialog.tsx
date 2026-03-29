@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { X, Wand2 } from 'lucide-react';
+import { X, Wand2, Loader2 } from 'lucide-react';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useUserStore } from '@/stores/userStore';
 import { PALETTES, type PaletteId } from '@/lib/generate/palettes';
@@ -222,13 +222,21 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
             <button
               onClick={handleSubmit}
               disabled={!canSubmit}
-              className={`px-4 py-2 text-sm font-medium rounded ${
+              aria-busy={isSubmitting}
+              className={`flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded ${
                 canSubmit
                   ? 'bg-blue-600 hover:bg-blue-500 text-white'
                   : 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
               }`}
             >
-              {isSubmitting ? 'Generating...' : 'Generate'}
+              {isSubmitting ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                  Generating...
+                </>
+              ) : (
+                'Generate'
+              )}
             </button>
           </div>
         </div>

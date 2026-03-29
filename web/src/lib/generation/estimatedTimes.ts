@@ -86,16 +86,25 @@ export function formatEstimatedTime(
     return `~${min}-${max}s`;
   }
   if (min < 60 && max >= 60) {
-    // Mixed range: e.g. 30s-90s → "~30s-2 min"
-    const maxMins = Math.ceil(max / 60);
-    return `~${min}s-${maxMins} min`;
+    // Mixed range spanning seconds and minutes (e.g. 30s–90s).
+    // Format max accurately: use whole-minutes only when evenly divisible,
+    // otherwise include remaining seconds to avoid overstating the range.
+    const maxMins = Math.floor(max / 60);
+    const maxSecs = max % 60;
+    const maxLabel = maxSecs === 0 ? `${maxMins} min` : `${maxMins}m ${maxSecs}s`;
+    return `~${min}s-${maxLabel}`;
   }
   const minMins = Math.floor(min / 60);
-  const maxMins = Math.ceil(max / 60);
-  if (minMins === maxMins) {
+  // Use Math.floor for max as well so we never overstate the upper bound.
+  const maxMins = Math.floor(max / 60);
+  const maxSecs = max % 60;
+  if (minMins === maxMins && maxSecs === 0) {
     return `~${minMins} min`;
   }
-  return `~${minMins}-${maxMins} min`;
+  if (maxSecs === 0) {
+    return `~${minMins}-${maxMins} min`;
+  }
+  return `~${minMins}-${maxMins}m ${maxSecs}s`;
 }
 
 /**
