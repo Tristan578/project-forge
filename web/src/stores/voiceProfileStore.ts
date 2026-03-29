@@ -56,6 +56,7 @@ interface VoiceProfileState {
 }
 
 function loadFromStorage(): Record<string, VoiceProfile> {
+  if (typeof window === 'undefined') return {};
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
@@ -66,6 +67,7 @@ function loadFromStorage(): Record<string, VoiceProfile> {
 }
 
 function saveToStorage(profiles: Record<string, VoiceProfile>): void {
+  if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
   } catch {
