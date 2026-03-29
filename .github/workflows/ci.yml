@@ -271,3 +271,70 @@ jobs:
       - name: Run UI-only E2E tests
         working-directory: web
         run: npx playwright test --grep @ui --project=chromium
+
+  # ---- Doc Quality Gate ----
+  # Surfaces documentation quality issues as a visible PR status check.
+  # Non-blocking warnings (e.g. TODO without ticket ref) show in CI summary
+  # so they are visible to reviewers without failing the build.
+  doc-quality:
+    name: Doc Quality Check
+    needs: [ci-gate]
+    if: |
+      needs.ci-gate.outputs.needs-web == 'true' ||
+      needs.ci-gate.outputs.needs-mcp == 'true' ||
+      needs.ci-gate.outputs.needs-docs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check MCP commands have descriptions
+        # Fails (hard) if any public MCP command is missing a description field.
+        # An empty description is a documentation debt that blocks discoverability.
+        run: |
+          manifest=mcp-server/manifest/commands.json
+          # Find public commands (visibility != "internal") with missing or blank description
+          missing=$(jq -r '
+            (if type == "array" then . else .commands end)
+            | map(select(.visibility != "internal" and (.description == null or (.description | test("^\\s*$")))))
+            | .[].name
+          ' "$manifest")
+          if [ -n "$missing" ]; then
+            count=$(echo "$missing" | wc -l | tr -d ' ')
+            echo "ERROR: $count public MCP command(s) missing description:"
+            echo "$missing" | sed 's/^/  - /'
+            exit 1
+          fi
+          total=$(jq '(if type == "array" then . else .commands end) | map(select(.visibility != "internal")) | length' "$manifest")
+          echo "OK: all $total public commands have descriptions"
+
+      - name: Warn on TODO/FIXME without ticket reference
+        # Non-blocking: exits 0 always. Outputs a warning summary to CI logs
+        # so reviewers can see undocumented technical debt without failing the build.
+        run: |
+          echo "Scanning for TODO/FIXME without PF-XXX or #NNN ticket reference..."
+          matches=$(grep -rn --include="*.ts" --include="*.tsx" --include="*.rs" \
+            -E "TODO|FIXME" \
+            --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=target \
+            . | grep -vE "(PF-[0-9]+|#[0-9]{3,})" || true)
+          if [ -n "$matches" ]; then
+            count=$(echo "$matches" | wc -l | tr -d ' ')
+            echo "::warning::Found $count TODO/FIXME comment(s) without ticket reference. Link to a PF-XXX ticket or #NNN GitHub issue."
+            echo "$matches" | head -20
+            if [ "$(echo "$matches" | wc -l | tr -d ' ')" -gt 20 ]; then
+              echo "... (truncated, showing first 20)"
+            fi
+          else
+            echo "OK: all TODO/FIXME comments reference a ticket"
+          fi
