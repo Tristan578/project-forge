@@ -16,7 +16,9 @@ if (DSN) {
 
     integrations: [
       Sentry.browserTracingIntegration(),
-      Sentry.replayIntegration({ maskAllText: false, blockAllMedia: false }),
+      // maskAllText: true prevents BYOK API keys and other sensitive input
+      // values from being visible in Sentry session replays (#8001).
+      Sentry.replayIntegration({ maskAllText: true, blockAllMedia: false }),
     ],
 
     // Replay sampling
