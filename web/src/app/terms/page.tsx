@@ -1,7 +1,4 @@
-'use cache';
-
-import { cacheLife } from 'next/cache';
-import { cacheTag } from 'next/cache';
+import { cacheLife, cacheTag } from 'next/cache';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalLayout } from '@/components/legal/LegalLayout';
@@ -30,7 +27,8 @@ const tableOfContents = [
   { id: 'contact', label: 'Contact Information' },
 ];
 
-export default function TermsOfServicePage() {
+export default async function TermsOfServicePage() {
+  'use cache';
   cacheLife('days');
   cacheTag('terms');
   return (

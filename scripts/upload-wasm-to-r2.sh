@@ -37,7 +37,7 @@ for pkg_dir in "${WASM_SOURCE_DIR}"/engine-pkg-*; do
     --endpoint-url "${R2_ENDPOINT}" \
     --no-progress \
     --exclude "*.d.ts" \
-    --metadata "Cache-Control=max-age=31536000, immutable"
+    --cache-control "max-age=31536000, immutable"
   uploaded=$((uploaded + 1))
 done
 
@@ -57,7 +57,7 @@ for pkg_dir in "${WASM_SOURCE_DIR}"/engine-pkg-*; do
     --endpoint-url "${R2_ENDPOINT}" \
     --no-progress \
     --exclude "*.d.ts" \
-    --metadata "Cache-Control=max-age=60, must-revalidate"
+    --cache-control "max-age=60, must-revalidate"
 done
 
 echo "Also uploaded as 'latest'. Done."

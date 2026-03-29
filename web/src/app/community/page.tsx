@@ -1,7 +1,4 @@
-'use cache';
-
-import { cacheLife } from 'next/cache';
-import { cacheTag } from 'next/cache';
+import { cacheLife, cacheTag } from 'next/cache';
 import { GalleryPage } from '@/components/community/GalleryPage';
 
 export const metadata = {
@@ -9,7 +6,8 @@ export const metadata = {
   description: 'Discover and play games created by the community',
 };
 
-export default function CommunityPage() {
+export default async function CommunityPage() {
+  'use cache';
   cacheLife('days');
   cacheTag('community');
   return <GalleryPage />;
