@@ -316,7 +316,8 @@ describe('POST /api/bridges/aseprite/execute', () => {
     const res = await POST(makeRequest({ operation: 'createSprite', params: { width: 32, height: 32 } }));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Aseprite process crashed');
+    // Route returns generic error message (not err.message) to prevent internal info leakage
+    expect(data.error).toBe('Aseprite operation failed. Check Sentry for details.');
   });
 
   it('returns 500 with fallback message when error is not an Error instance', async () => {
@@ -338,6 +339,6 @@ describe('POST /api/bridges/aseprite/execute', () => {
     const res = await POST(makeRequest({ operation: 'createSprite', params: { width: 32, height: 32 } }));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Execution failed');
+    expect(data.error).toBe('Aseprite operation failed. Check Sentry for details.');
   });
 });

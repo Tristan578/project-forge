@@ -47,7 +47,7 @@ describe('CustomWgslEditor', () => {
   it('renders the WGSL editor heading', () => {
     setupStore();
     render(<CustomWgslEditor />);
-    expect(screen.getByText('Custom WGSL Shader')).toBeDefined();
+    expect(screen.getByText('Custom WGSL Shader')).toBeInTheDocument();
   });
 
   it('renders the shader name input with current name', () => {
@@ -67,7 +67,7 @@ describe('CustomWgslEditor', () => {
   it('renders the Compile Shader button', () => {
     setupStore();
     render(<CustomWgslEditor />);
-    expect(screen.getByText('Compile Shader')).toBeDefined();
+    expect(screen.getByText('Compile Shader')).toBeInTheDocument();
   });
 
   // ── Compile button ─────────────────────────────────────────────────────
@@ -135,15 +135,15 @@ describe('CustomWgslEditor', () => {
   it('shows template dropdown toggle button', () => {
     setupStore();
     render(<CustomWgslEditor />);
-    expect(screen.getByText('Insert template')).toBeDefined();
+    expect(screen.getByText('Insert template')).toBeInTheDocument();
   });
 
   it('opens template list on toggle button click', () => {
     setupStore();
     render(<CustomWgslEditor />);
     fireEvent.click(screen.getByText('Insert template'));
-    expect(screen.getByText('Passthrough')).toBeDefined();
-    expect(screen.getByText('Color Tint')).toBeDefined();
+    expect(screen.getByText('Passthrough')).toBeInTheDocument();
+    expect(screen.getByText('Color Tint')).toBeInTheDocument();
   });
 
   it('selects a template and closes the dropdown', () => {
@@ -196,7 +196,7 @@ describe('CustomWgslEditor', () => {
       },
     });
     render(<CustomWgslEditor />);
-    expect(screen.getByText('Undefined variable: foo')).toBeDefined();
+    expect(screen.getByText('Undefined variable: foo')).toBeInTheDocument();
   });
 
   it('shows pending clock icon when status is pending', () => {

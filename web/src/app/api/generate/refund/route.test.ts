@@ -1,12 +1,12 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { POST } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit } from '@/lib/rateLimit';
 import { refundTokens } from '@/lib/tokens/service';
+import type { User } from '@/lib/db/schema';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/rateLimit', () => ({
@@ -18,8 +18,8 @@ vi.mock('@/lib/tokens/service', () => ({
   refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
 }));
 
-function makeRequest(body: unknown) {
-  return new Request('http://test/api/generate/refund', {
+function makeRequest(body: unknown): NextRequest {
+  return new NextRequest('http://test/api/generate/refund', {
     method: 'POST',
     body: JSON.stringify(body),
   });
@@ -30,7 +30,7 @@ describe('POST /api/generate/refund', () => {
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
-      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
+      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as unknown as User },
     });
     vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 2, resetAt: Date.now() + 60000 });
     vi.mocked(refundTokens).mockResolvedValue({ refunded: true });
@@ -42,31 +42,31 @@ describe('POST /api/generate/refund', () => {
       response: new NextResponse('Unauthorized', { status: 401 }),
     });
 
-    const res = await POST(makeRequest({ usageId: 'usage-1' }) as any);
+    const res = await POST(makeRequest({ usageId: 'usage-1' }));
     expect(res.status).toBe(401);
   });
 
   it('returns 429 when rate limited', async () => {
     vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
-    const res = await POST(makeRequest({ usageId: 'usage-1' }) as any);
+    const res = await POST(makeRequest({ usageId: 'usage-1' }));
     expect(res.status).toBe(429);
   });
 
   it('returns 400 for invalid JSON', async () => {
-    const req = new Request('http://test/api/generate/refund', {
+    const req = new NextRequest('http://test/api/generate/refund', {
       method: 'POST',
       body: 'not json',
     });
 
-    const res = await POST(req as any);
+    const res = await POST(req);
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error).toBe('Invalid JSON');
   });
 
   it('returns 400 when usageId is missing', async () => {
-    const res = await POST(makeRequest({}) as any);
+    const res = await POST(makeRequest({}));
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error).toBe('usageId required');
@@ -75,14 +75,14 @@ describe('POST /api/generate/refund', () => {
   it('returns 500 when refund fails', async () => {
     vi.mocked(refundTokens).mockRejectedValue(new Error('Refund failed'));
 
-    const res = await POST(makeRequest({ usageId: 'usage-1' }) as any);
+    const res = await POST(makeRequest({ usageId: 'usage-1' }));
     expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.error).toBe('Refund failed');
   });
 
   it('returns 200 on successful refund', async () => {
-    const res = await POST(makeRequest({ usageId: 'usage-1' }) as any);
+    const res = await POST(makeRequest({ usageId: 'usage-1' }));
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.success).toBe(true);

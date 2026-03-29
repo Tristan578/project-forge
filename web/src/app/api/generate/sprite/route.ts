@@ -1,3 +1,8 @@
+/**
+ * POST /api/generate/sprite — generate a sprite image via DALL-E or SDXL.
+ * Returns a data URL and `usageId` for client-side refund on failure.
+ */
+
 export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -109,9 +114,14 @@ export async function POST(request: NextRequest) {
       removeBackground,
     });
 
-    // If background removal requested, queue it
+    // DALL-E 3 returns the result URL directly as taskId (synchronous).
+    // Prefix with "dalle3:" so the status route can identify synchronous jobs
+    // without fragile startsWith('http') pattern matching.
     let finalJobId = result.taskId;
-    if (removeBackground && result.status === 'completed') {
+    if (actualProvider === 'dalle3' && result.status === 'completed') {
+      finalJobId = `dalle3:${result.taskId}`;
+    }
+    if (removeBackground && result.status === 'completed' && actualProvider !== 'dalle3') {
       // Background removal will be handled by polling hook
       finalJobId = result.taskId;
     }

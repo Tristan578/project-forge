@@ -34,8 +34,19 @@ test.describe('Performance Budget @ui', () => {
 
     await editor.loadPage();
 
-    // Give the browser a moment to fire any pending LCP entries
-    await page.waitForTimeout(500);
+    // Give the browser a moment to fire any pending LCP entries.
+    // Wait until the window.__LCP_VALUES array is non-empty OR networkidle
+    // (whichever comes first), rather than using an arbitrary sleep.
+    await page.waitForFunction(
+      () => {
+        const vals = (window as unknown as Record<string, unknown>).__LCP_VALUES;
+        return Array.isArray(vals) && vals.length > 0;
+      },
+      { timeout: 3000 },
+    ).catch(async () => {
+      // LCP may not fire on some CI configs — fall back to networkidle
+      await page.waitForLoadState('networkidle').catch(() => undefined);
+    });
 
     const rawValues = await page.evaluate(
       () => (window as unknown as Record<string, unknown>).__LCP_VALUES,
@@ -48,6 +59,7 @@ test.describe('Performance Budget @ui', () => {
     if (lcpValues.length === 0) {
       // LCP may not fire when GPU/WASM is skipped — treat as not applicable
       // rather than failing the test (this only happens in certain CI configs)
+      console.warn('No LCP measurements collected — budget check skipped');
       return;
     }
 
@@ -81,8 +93,10 @@ test.describe('Performance Budget @ui', () => {
 
     await editor.loadPage();
 
-    // Wait for any deferred layout shifts (lazy-loaded panels etc.)
-    await page.waitForTimeout(1000);
+    // Wait for any deferred layout shifts (lazy-loaded panels etc.).
+    // Use networkidle rather than an arbitrary sleep so the wait is bounded
+    // by real browser activity instead of a hard-coded duration.
+    await page.waitForLoadState('networkidle').catch(() => undefined);
 
     const cls = await page.evaluate(
       () => (window as unknown as Record<string, number>).__CLS_SCORE ?? 0,

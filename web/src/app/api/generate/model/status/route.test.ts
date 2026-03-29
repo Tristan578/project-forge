@@ -1,12 +1,12 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { MeshyClient } from '@/lib/generate/meshyClient';
+import type { User } from '@/lib/db/schema';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
@@ -19,11 +19,11 @@ vi.mock('@/lib/generate/meshyClient', () => ({
   })),
 }));
 
-function makeRequest(jobId?: string) {
+function makeRequest(jobId?: string): NextRequest {
   const url = jobId
     ? `http://test/api/generate/model/status?jobId=${jobId}`
     : 'http://test/api/generate/model/status';
-  return new Request(url) as any;
+  return new NextRequest(url);
 }
 
 describe('GET /api/generate/model/status', () => {
@@ -31,7 +31,7 @@ describe('GET /api/generate/model/status', () => {
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
-      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
+      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as unknown as User },
     });
     vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
   });
@@ -65,16 +65,16 @@ describe('GET /api/generate/model/status', () => {
   });
 
   it('returns completed status for SUCCEEDED task', async () => {
-    vi.mocked(MeshyClient).mockImplementation(function () {
-      return {
-        getTaskStatus: vi.fn().mockResolvedValue({
+    vi.mocked(MeshyClient).mockImplementation(
+      function (this: InstanceType<typeof MeshyClient>) {
+        this.getTaskStatus = vi.fn().mockResolvedValue({
           status: 'SUCCEEDED',
           progress: 100,
           modelUrls: { glb: 'https://cdn.meshy.ai/model.glb' },
           thumbnailUrl: 'https://cdn.meshy.ai/thumb.png',
-        }),
-      } as any;
-    } as any);
+        });
+      } as unknown as typeof MeshyClient
+    );
 
     const res = await GET(makeRequest('job-123'));
     expect(res.status).toBe(200);
@@ -87,14 +87,14 @@ describe('GET /api/generate/model/status', () => {
   });
 
   it('returns failed status for FAILED task', async () => {
-    vi.mocked(MeshyClient).mockImplementation(function () {
-      return {
-        getTaskStatus: vi.fn().mockResolvedValue({
+    vi.mocked(MeshyClient).mockImplementation(
+      function (this: InstanceType<typeof MeshyClient>) {
+        this.getTaskStatus = vi.fn().mockResolvedValue({
           status: 'FAILED',
           progress: 0,
-        }),
-      } as any;
-    } as any);
+        });
+      } as unknown as typeof MeshyClient
+    );
 
     const res = await GET(makeRequest('job-123'));
     expect(res.status).toBe(200);
@@ -104,14 +104,14 @@ describe('GET /api/generate/model/status', () => {
   });
 
   it('returns processing status for IN_PROGRESS task', async () => {
-    vi.mocked(MeshyClient).mockImplementation(function () {
-      return {
-        getTaskStatus: vi.fn().mockResolvedValue({
+    vi.mocked(MeshyClient).mockImplementation(
+      function (this: InstanceType<typeof MeshyClient>) {
+        this.getTaskStatus = vi.fn().mockResolvedValue({
           status: 'IN_PROGRESS',
           progress: 50,
-        }),
-      } as any;
-    } as any);
+        });
+      } as unknown as typeof MeshyClient
+    );
 
     const res = await GET(makeRequest('job-123'));
     const data = await res.json();
@@ -120,14 +120,14 @@ describe('GET /api/generate/model/status', () => {
   });
 
   it('returns pending status for unknown status values', async () => {
-    vi.mocked(MeshyClient).mockImplementation(function () {
-      return {
-        getTaskStatus: vi.fn().mockResolvedValue({
+    vi.mocked(MeshyClient).mockImplementation(
+      function (this: InstanceType<typeof MeshyClient>) {
+        this.getTaskStatus = vi.fn().mockResolvedValue({
           status: 'QUEUED',
           progress: 0,
-        }),
-      } as any;
-    } as any);
+        });
+      } as unknown as typeof MeshyClient
+    );
 
     const res = await GET(makeRequest('job-123'));
     const data = await res.json();
@@ -135,11 +135,11 @@ describe('GET /api/generate/model/status', () => {
   });
 
   it('returns 500 when provider throws an error', async () => {
-    vi.mocked(MeshyClient).mockImplementation(function () {
-      return {
-        getTaskStatus: vi.fn().mockRejectedValue(new Error('Meshy API timeout')),
-      } as any;
-    } as any);
+    vi.mocked(MeshyClient).mockImplementation(
+      function (this: InstanceType<typeof MeshyClient>) {
+        this.getTaskStatus = vi.fn().mockRejectedValue(new Error('Meshy API timeout'));
+      } as unknown as typeof MeshyClient
+    );
 
     const res = await GET(makeRequest('job-123'));
     expect(res.status).toBe(500);

@@ -1,0 +1,7 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { forwardRef } from 'react';
+import { cn } from '../utils/cn';
+export const Select = forwardRef(({ className, options, placeholder, ...props }, ref) => {
+    return (_jsxs("div", { className: "relative", children: [_jsxs("select", { ref: ref, className: cn('flex h-9 w-full appearance-none', 'rounded-[var(--sf-radius-md)]', 'border border-[length:var(--sf-border-width)] border-[var(--sf-border)]', 'bg-[var(--sf-bg-surface)] text-[var(--sf-text)]', 'px-3 pr-8 py-1 text-sm', 'transition-colors duration-[var(--sf-transition)]', 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]', 'disabled:opacity-50 disabled:cursor-not-allowed', className), ...props, children: [placeholder && (_jsx("option", { value: "", disabled: true, children: placeholder })), options.map((opt) => (_jsx("option", { value: opt.value, disabled: opt.disabled, children: opt.label }, opt.value)))] }), _jsx("div", { className: "pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-[var(--sf-text-muted)]", children: _jsx("svg", { xmlns: "http://www.w3.org/2000/svg", width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", children: _jsx("path", { d: "m6 9 6 6 6-6" }) }) })] }));
+});
+Select.displayName = 'Select';

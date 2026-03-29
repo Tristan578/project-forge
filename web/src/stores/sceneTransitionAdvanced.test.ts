@@ -9,7 +9,7 @@ describe('sceneTransition - Advanced', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     useEditorStore.setState({
-      sceneTransition: { active: false, config: null, targetScene: null },
+      sceneTransition: { active: false, config: null, targetScene: null, transitionId: null },
       defaultTransition: { ...DEFAULT_TRANSITION },
       scenes: [
         { id: 'scene-1', name: 'Level1', isStartScene: true },
@@ -201,6 +201,7 @@ describe('sceneTransition - Advanced', () => {
           active: true,
           config: { type: 'wipe', duration: 300, color: '#ffffff', easing: 'linear', direction: 'right' },
           targetScene: 'Level2',
+          transitionId: null,
         },
       });
 
@@ -217,12 +218,13 @@ describe('sceneTransition - Advanced', () => {
           active: true,
           config: DEFAULT_TRANSITION,
           targetScene: 'BossRoom',
+          transitionId: null,
         },
       });
       expect(useEditorStore.getState().sceneTransition.active).toBe(true);
 
       useEditorStore.setState({
-        sceneTransition: { active: false, config: null, targetScene: null },
+        sceneTransition: { active: false, config: null, targetScene: null, transitionId: null },
       });
       expect(useEditorStore.getState().sceneTransition.active).toBe(false);
       expect(useEditorStore.getState().sceneTransition.config).toBeNull();

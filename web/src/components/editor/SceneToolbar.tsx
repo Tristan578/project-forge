@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import { downloadSceneFile, openSceneFilePicker } from '@/lib/sceneFile';
+import { saveSceneToCloud } from '@/lib/projects/cloudSave';
 import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, Redo2, Layers } from 'lucide-react';
 import { ExportDialog } from './ExportDialog';
 import { SceneBrowser } from './SceneBrowser';
@@ -48,26 +49,13 @@ export function SceneToolbar() {
       if (pendingCloudSaveRef.current && projectId) {
         pendingCloudSaveRef.current = false;
         const { json, name } = e.detail;
-        let sceneData: unknown;
-        try {
-          sceneData = JSON.parse(json) as unknown;
-        } catch {
-          setCloudSaveStatus('error');
-          return;
-        }
-        void fetch(`/api/projects/${projectId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, sceneData }),
-        }).then((res) => {
-          if (res.ok) {
+        void saveSceneToCloud(projectId, name, json).then((result) => {
+          if (result.ok && result.savedAt) {
             setCloudSaveStatus('saved');
-            setLastCloudSave(new Date().toISOString());
+            setLastCloudSave(result.savedAt);
           } else {
             setCloudSaveStatus('error');
           }
-        }).catch(() => {
-          setCloudSaveStatus('error');
         });
       }
     };
@@ -99,6 +87,9 @@ export function SceneToolbar() {
 
   const handleNew = useCallback(() => {
     if (sceneModified) {
+      // TODO(PF): Replace window.confirm() with an inline confirmation dialog.
+      // confirm() blocks the main thread, is inaccessible to screen readers, and
+      // cannot be styled to match the SpawnForge design system. Tracked in PF-XXX.
       if (!confirm('Discard unsaved changes and create a new scene?')) return;
     }
     newScene();
@@ -153,7 +144,7 @@ export function SceneToolbar() {
             }
             if (e.key === 'Escape') setEditing(false);
           }}
-          className="w-28 rounded border border-zinc-600 bg-zinc-800 px-1 py-0.5 text-xs text-zinc-200 outline-none focus:border-blue-500"
+          className="w-28 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1 py-0.5 text-xs text-zinc-200 outline-none focus:border-blue-500"
           autoFocus
         />
       ) : (
@@ -162,7 +153,7 @@ export function SceneToolbar() {
             setEditValue(sceneName);
             setEditing(true);
           }}
-          className="max-w-[160px] truncate rounded px-1 py-0.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+          className="max-w-[160px] truncate rounded px-1 py-0.5 text-xs text-zinc-400 hover:bg-[var(--sf-bg-elevated)] hover:text-zinc-200"
           title="Click to rename scene"
         >
           {sceneName}
@@ -174,7 +165,7 @@ export function SceneToolbar() {
       <button
         onClick={undo}
         disabled={!isEdit || !canUndo}
-        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-30"
+        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-[var(--sf-bg-elevated)] hover:text-zinc-200 disabled:opacity-30"
         title={canUndo && undoDescription ? `Undo: ${undoDescription} (Ctrl+Z)` : 'Undo (Ctrl+Z)'}
         aria-label={canUndo && undoDescription ? `Undo: ${undoDescription}` : 'Undo'}
       >
@@ -185,20 +176,20 @@ export function SceneToolbar() {
       <button
         onClick={redo}
         disabled={!isEdit || !canRedo}
-        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-30"
+        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-[var(--sf-bg-elevated)] hover:text-zinc-200 disabled:opacity-30"
         title={canRedo && redoDescription ? `Redo: ${redoDescription} (Ctrl+Shift+Z)` : 'Redo (Ctrl+Shift+Z)'}
         aria-label={canRedo && redoDescription ? `Redo: ${redoDescription}` : 'Redo'}
       >
         <Redo2 size={13} />
       </button>
 
-      <div className="mx-0.5 h-4 w-px bg-zinc-700" />
+      <div className="mx-0.5 h-4 w-px bg-[var(--sf-border)]" />
 
       {/* Save button */}
       <button
         onClick={handleSave}
         disabled={!isEdit}
-        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-30"
+        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-[var(--sf-bg-elevated)] hover:text-zinc-200 disabled:opacity-30"
         title="Save (Ctrl+S)"
         aria-label="Save"
       >
@@ -237,7 +228,7 @@ export function SceneToolbar() {
       <button
         onClick={handleLoad}
         disabled={!isEdit}
-        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-30"
+        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-[var(--sf-bg-elevated)] hover:text-zinc-200 disabled:opacity-30"
         title="Load Scene"
         aria-label="Load scene"
       >
@@ -248,7 +239,7 @@ export function SceneToolbar() {
       <button
         onClick={handleNew}
         disabled={!isEdit}
-        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-30"
+        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-[var(--sf-bg-elevated)] hover:text-zinc-200 disabled:opacity-30"
         title="New Scene (Ctrl+Shift+N)"
         aria-label="New scene"
       >
@@ -258,7 +249,7 @@ export function SceneToolbar() {
       {/* Scenes browser button */}
       <button
         onClick={() => setShowSceneBrowser(true)}
-        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-[var(--sf-bg-elevated)] hover:text-zinc-200"
         title="Browse Scenes"
         aria-label="Browse scenes"
       >
@@ -269,7 +260,7 @@ export function SceneToolbar() {
       <button
         onClick={handleExport}
         disabled={!isEdit}
-        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-30"
+        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-[var(--sf-bg-elevated)] hover:text-zinc-200 disabled:opacity-30"
         title="Export Game"
         aria-label="Export game"
       >

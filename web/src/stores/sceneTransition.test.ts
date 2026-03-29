@@ -9,7 +9,7 @@ import { DEFAULT_TRANSITION } from './editorStore';
 describe('sceneTransition', () => {
   beforeEach(() => {
     useEditorStore.setState({
-      sceneTransition: { active: false, config: null, targetScene: null },
+      sceneTransition: { active: false, config: null, targetScene: null, transitionId: null },
       defaultTransition: { ...DEFAULT_TRANSITION },
       scenes: [
         { id: 'scene-1', name: 'Level1', isStartScene: true },
@@ -70,6 +70,7 @@ describe('sceneTransition', () => {
           active: true,
           config: { type: 'fade', duration: 500, color: '#000000', easing: 'ease-in-out' },
           targetScene: 'Level2',
+          transitionId: null,
         },
       });
       const state = useEditorStore.getState();
@@ -84,10 +85,11 @@ describe('sceneTransition', () => {
           active: true,
           config: { type: 'wipe', duration: 300, color: '#ffffff', easing: 'linear', direction: 'left' },
           targetScene: 'BossRoom',
+          transitionId: null,
         },
       });
       useEditorStore.setState({
-        sceneTransition: { active: false, config: null, targetScene: null },
+        sceneTransition: { active: false, config: null, targetScene: null, transitionId: null },
       });
       const state = useEditorStore.getState();
       expect(state.sceneTransition.active).toBe(false);

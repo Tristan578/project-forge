@@ -44,6 +44,9 @@ if (typeof globalThis.localStorage?.clear !== 'function') {
   });
 }
 
+// jest-dom matchers (toBeInTheDocument, toHaveTextContent, etc.)
+import '@testing-library/jest-dom/vitest';
+
 // Global test isolation — prevent state leaks between tests
 // ---------------------------------------------------------------------------
 import { afterEach, vi } from 'vitest';

@@ -1,9 +1,18 @@
 //! Physics command handlers (3D physics, joints, 2D physics).
 
 use serde::Deserialize;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::core::pending_commands::*;
 use crate::core::physics::{PhysicsData, JointData, JointType, JointLimits, JointMotor};
+
+/// Monotonic counter for request IDs — avoids `SystemTime::now()` which panics on WASM.
+static RAYCAST_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn next_request_id() -> String {
+    let id = RAYCAST_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("ray_{}", id)
+}
 use crate::core::physics_2d::{
     Physics2dData, ColliderShape2d, BodyType2d, PhysicsJoint2d,
 };
@@ -45,6 +54,44 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
             let entity_id = payload.get("entityId")?.as_str()?.to_string();
             Some(super::handle_query(QueryRequest::Physics2dState { entity_id }))
         }
+
+        // Stub handlers for legacy / aliased command names not yet implemented
+        "set_physics" => Some(Err("Not yet implemented: set_physics (use update_physics)".to_string())),
+        "remove_physics" => Some(Err("Not yet implemented: remove_physics (use toggle_physics with enabled=false)".to_string())),
+        "set_physics_enabled" => Some(Err("Not yet implemented: set_physics_enabled (use toggle_physics)".to_string())),
+        "enable_physics_debug" => Some(handle_set_debug_physics(true)),
+        "disable_physics_debug" => Some(handle_set_debug_physics(false)),
+        "apply_impulse" => {
+            // Force is_impulse=true regardless of payload — this is an impulse command.
+            let mut p = payload.clone();
+            if let Some(obj) = p.as_object_mut() {
+                obj.insert("isImpulse".to_string(), serde_json::Value::Bool(true));
+            }
+            Some(handle_apply_force(p))
+        }
+        "set_linear_velocity" => Some(Err("Not yet implemented: set_linear_velocity".to_string())),
+        "set_angular_velocity" => Some(Err("Not yet implemented: set_angular_velocity".to_string())),
+        "get_velocity" => Some(Err("Not yet implemented: get_velocity".to_string())),
+        "raycast" => Some(handle_raycast_query(payload.clone())),
+        "get_joint" => Some(super::handle_query(QueryRequest::ListJoints)),
+        "set_physics_2d" => Some(handle_set_physics2d(payload.clone())),
+        "remove_physics_2d" => Some(handle_remove_physics2d(payload.clone())),
+        "set_physics_2d_enabled" => Some(Err("Not yet implemented: set_physics_2d_enabled".to_string())),
+        "get_physics_2d" => {
+            let entity_id = payload.get("entityId")?.as_str()?.to_string();
+            Some(super::handle_query(QueryRequest::Physics2dState { entity_id }))
+        }
+        "set_joint_2d" => Some(handle_create_2d_joint(payload.clone())),
+        "remove_joint_2d" => Some(handle_remove_2d_joint(payload.clone())),
+        "get_joint_2d" => Some(Err("Not yet implemented: get_joint_2d".to_string())),
+        "list_joints_2d" => Some(Err("Not yet implemented: list_joints_2d".to_string())),
+        "apply_force_2d" => Some(handle_apply_force2d(payload.clone())),
+        "apply_impulse_2d" => Some(handle_apply_impulse2d(payload.clone())),
+        "set_linear_velocity_2d" => Some(Err("Not yet implemented: set_linear_velocity_2d".to_string())),
+        "set_angular_velocity_2d" => Some(Err("Not yet implemented: set_angular_velocity_2d".to_string())),
+        "get_velocity_2d" => Some(Err("Not yet implemented: get_velocity_2d".to_string())),
+        "get_collisions" => Some(Err("Not yet implemented: get_collisions".to_string())),
+        "get_collisions_2d" => Some(Err("Not yet implemented: get_collisions_2d".to_string())),
 
         _ => None,
     }
@@ -107,10 +154,20 @@ fn handle_toggle_physics(payload: serde_json::Value) -> super::CommandResult {
     }
 }
 
-/// Handle toggle_debug_physics command.
+/// Handle toggle_debug_physics command — toggles the current state.
 fn handle_toggle_debug_physics(_payload: serde_json::Value) -> super::CommandResult {
-    if queue_debug_physics_toggle_from_bridge() {
+    if queue_debug_physics_toggle_from_bridge(DebugPhysicsToggle { enabled: None }) {
         tracing::info!("Queued debug physics toggle");
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle enable_physics_debug / disable_physics_debug — sets explicit state.
+fn handle_set_debug_physics(enabled: bool) -> super::CommandResult {
+    if queue_debug_physics_toggle_from_bridge(DebugPhysicsToggle { enabled: Some(enabled) }) {
+        tracing::info!("Queued debug physics set enabled={}", enabled);
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
@@ -164,10 +221,7 @@ fn handle_raycast_query(payload: serde_json::Value) -> super::CommandResult {
     let data: RaycastPayload = serde_json::from_value(payload)
         .map_err(|e| format!("Invalid raycast_query payload: {}", e))?;
 
-    let request_id = data.request_id.unwrap_or_else(|| format!("ray_{}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis()));
+    let request_id = data.request_id.unwrap_or_else(next_request_id);
     let max_distance = data.max_distance.unwrap_or(100.0);
 
     let request = RaycastRequest {
@@ -257,18 +311,22 @@ fn handle_create_joint(payload: serde_json::Value) -> super::CommandResult {
 
     let limits = payload.get("limits").and_then(|v| {
         let obj = v.as_object()?;
-        Some(JointLimits {
-            min: obj.get("min")?.as_f64()? as f32,
-            max: obj.get("max")?.as_f64()? as f32,
-        })
+        let min = obj.get("min")?.as_f64()? as f32;
+        let max = obj.get("max")?.as_f64()? as f32;
+        if !min.is_finite() || !max.is_finite() || min > max {
+            return None;
+        }
+        Some(JointLimits { min, max })
     });
 
     let motor = payload.get("motor").and_then(|v| {
         let obj = v.as_object()?;
-        Some(JointMotor {
-            target_velocity: obj.get("targetVelocity")?.as_f64()? as f32,
-            max_force: obj.get("maxForce")?.as_f64()? as f32,
-        })
+        let target_velocity = obj.get("targetVelocity")?.as_f64()? as f32;
+        let max_force = obj.get("maxForce")?.as_f64()? as f32;
+        if !target_velocity.is_finite() || !max_force.is_finite() {
+            return None;
+        }
+        Some(JointMotor { target_velocity, max_force })
     });
 
     let joint_data = JointData {
@@ -352,27 +410,47 @@ fn handle_update_joint(payload: serde_json::Value) -> super::CommandResult {
     });
 
     // Limits: None means "no update", Some(None) means "clear limits", Some(Some(limits)) means "set limits"
-    let limits = if payload.get("limits").is_some() {
-        Some(payload.get("limits").and_then(|v| {
-            let obj = v.as_object()?;
-            Some(JointLimits {
-                min: obj.get("min")?.as_f64()? as f32,
-                max: obj.get("max")?.as_f64()? as f32,
-            })
-        }))
+    let limits = if let Some(limits_val) = payload.get("limits") {
+        if limits_val.is_null() {
+            // Explicit null: clear limits
+            Some(None)
+        } else {
+            let obj = limits_val.as_object()
+                .ok_or("Invalid joint limits: expected object")?;
+            let min = obj.get("min").and_then(|v| v.as_f64()).map(|v| v as f32)
+                .ok_or("Invalid joint limits: missing or non-numeric min")?;
+            let max = obj.get("max").and_then(|v| v.as_f64()).map(|v| v as f32)
+                .ok_or("Invalid joint limits: missing or non-numeric max")?;
+            if !min.is_finite() || !max.is_finite() || min > max {
+                return Err("Invalid joint limits: min must be <= max and both must be finite".to_string());
+            }
+            Some(Some(JointLimits { min, max }))
+        }
     } else {
         None
     };
 
     // Motor: None means "no update", Some(None) means "clear motor", Some(Some(motor)) means "set motor"
-    let motor = if payload.get("motor").is_some() {
-        Some(payload.get("motor").and_then(|v| {
-            let obj = v.as_object()?;
-            Some(JointMotor {
-                target_velocity: obj.get("targetVelocity")?.as_f64()? as f32,
-                max_force: obj.get("maxForce")?.as_f64()? as f32,
-            })
-        }))
+    let motor = if let Some(motor_val) = payload.get("motor") {
+        if motor_val.is_null() {
+            Some(None) // Explicit null = clear motor
+        } else if let Some(obj) = motor_val.as_object() {
+            // Both fields required — a motor with max_force=0 can't apply force (silent failure)
+            let target_velocity = match obj.get("targetVelocity").and_then(|v| v.as_f64()) {
+                Some(v) => v as f32,
+                None => return Err("Motor requires targetVelocity".into()),
+            };
+            let max_force = match obj.get("maxForce").and_then(|v| v.as_f64()) {
+                Some(v) => v as f32,
+                None => return Err("Motor requires maxForce".into()),
+            };
+            if !target_velocity.is_finite() || !max_force.is_finite() {
+                return Err("Motor values must be finite".into());
+            }
+            Some(Some(JointMotor { target_velocity, max_force }))
+        } else {
+            None // Invalid motor shape, ignore
+        }
     } else {
         None
     };

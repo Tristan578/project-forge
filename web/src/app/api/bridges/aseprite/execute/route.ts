@@ -75,8 +75,10 @@ export async function POST(req: Request) {
     return NextResponse.json(result);
   } catch (err) {
     captureException(err, { route: '/api/bridges/aseprite/execute' });
+    // Return a generic error message to avoid leaking internal paths or system details.
+    // The full error is captured by Sentry above for debugging.
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Execution failed' },
+      { error: 'Aseprite operation failed. Check Sentry for details.' },
       { status: 500 }
     );
   }

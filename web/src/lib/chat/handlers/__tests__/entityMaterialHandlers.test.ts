@@ -323,12 +323,21 @@ describe('entityHandlers', () => {
   // set_visibility
   // -----------------------------------------------------------------------
   describe('set_visibility', () => {
-    it('calls toggleVisibility with the entity id', async () => {
+    it('calls toggleVisibility when visibility state differs', async () => {
       const { result, store } = await invokeHandler(transformHandlers, 'set_visibility', {
         entityId: 'ent1',
+        visible: false,
       });
       expect(result.success).toBe(true);
+      // Default visible is true (no sceneGraph node), requesting false triggers toggle
       expect(store.toggleVisibility).toHaveBeenCalledWith('ent1');
+    });
+
+    it('rejects missing visible parameter', async () => {
+      const { result } = await invokeHandler(transformHandlers, 'set_visibility', {
+        entityId: 'ent1',
+      });
+      expect(result.success).toBe(false);
     });
   });
 

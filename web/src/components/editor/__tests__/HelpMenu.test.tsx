@@ -59,7 +59,7 @@ describe('HelpMenu', () => {
   it('renders help button', () => {
     setupStore();
     render(<HelpMenu onOpenShortcuts={mockOnOpenShortcuts} onOpenFeedback={mockOnOpenFeedback} />);
-    expect(screen.getByLabelText('Help menu')).toBeDefined();
+    expect(screen.getByLabelText('Help menu')).toBeInTheDocument();
   });
 
   it('does not show menu initially', () => {
@@ -72,35 +72,35 @@ describe('HelpMenu', () => {
     setupStore();
     render(<HelpMenu onOpenShortcuts={mockOnOpenShortcuts} onOpenFeedback={mockOnOpenFeedback} />);
     fireEvent.click(screen.getByLabelText('Help menu'));
-    expect(screen.getByRole('menu')).toBeDefined();
+    expect(screen.getByRole('menu')).toBeInTheDocument();
   });
 
   it('shows Keyboard Shortcuts menu item', () => {
     setupStore();
     render(<HelpMenu onOpenShortcuts={mockOnOpenShortcuts} onOpenFeedback={mockOnOpenFeedback} />);
     fireEvent.click(screen.getByLabelText('Help menu'));
-    expect(screen.getByText('Keyboard Shortcuts')).toBeDefined();
+    expect(screen.getByText('Keyboard Shortcuts')).toBeInTheDocument();
   });
 
   it('shows Documentation menu item', () => {
     setupStore();
     render(<HelpMenu onOpenShortcuts={mockOnOpenShortcuts} onOpenFeedback={mockOnOpenFeedback} />);
     fireEvent.click(screen.getByLabelText('Help menu'));
-    expect(screen.getByText('Documentation')).toBeDefined();
+    expect(screen.getByText('Documentation')).toBeInTheDocument();
   });
 
   it('shows Restart Tutorial menu item', () => {
     setupStore();
     render(<HelpMenu onOpenShortcuts={mockOnOpenShortcuts} onOpenFeedback={mockOnOpenFeedback} />);
     fireEvent.click(screen.getByLabelText('Help menu'));
-    expect(screen.getByText('Restart Tutorial')).toBeDefined();
+    expect(screen.getByText('Restart Tutorial')).toBeInTheDocument();
   });
 
   it('shows Send Feedback menu item', () => {
     setupStore();
     render(<HelpMenu onOpenShortcuts={mockOnOpenShortcuts} onOpenFeedback={mockOnOpenFeedback} />);
     fireEvent.click(screen.getByLabelText('Help menu'));
-    expect(screen.getByText('Send Feedback')).toBeDefined();
+    expect(screen.getByText('Send Feedback')).toBeInTheDocument();
   });
 
   it('calls onOpenShortcuts when Keyboard Shortcuts is clicked', () => {

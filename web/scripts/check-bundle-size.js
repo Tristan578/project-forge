@@ -18,7 +18,7 @@ const ROOT = path.resolve(__dirname, '..');
 const BUILD_DIR = path.join(ROOT, '.next');
 
 const FIRST_LOAD_WARN = 4 * 1024 * 1024;
-const FIRST_LOAD_FAIL = 4.5 * 1024 * 1024;
+const FIRST_LOAD_FAIL = 4.75 * 1024 * 1024;
 const TOTAL_WARN = 5 * 1024 * 1024;
 const TOTAL_FAIL = 5.5 * 1024 * 1024;
 

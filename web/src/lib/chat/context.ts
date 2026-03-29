@@ -1,3 +1,11 @@
+/**
+ * Scene context builder for AI chat.
+ *
+ * Builds a structured summary of the current editor state (entities, materials,
+ * physics, scripts, etc.) to inject into each AI request. This lets the AI make
+ * informed decisions about what already exists in the scene.
+ */
+
 import type { SceneGraph, SceneNode, TransformData, MaterialData, LightData, PhysicsData, AmbientLightData, EnvironmentData, EngineMode, InputBinding, InputPreset, AssetMetadata, ScriptData, AudioData, ParticleData, PostProcessingData, AudioBusDef, AnimationPlaybackState, AnimationClipData, ShaderEffectData, JointData } from '@/stores/editorStore';
 import type { GenerationJob } from '@/stores/generationStore';
 import { loadScripts as loadLibraryScripts } from '@/stores/scriptLibraryStore';

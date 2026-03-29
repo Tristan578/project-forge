@@ -4,10 +4,17 @@
  * Renders UI screens as DOM elements, evaluates bindings, handles interactions.
  */
 
+import { escapeScriptContent } from './exportUtils';
+
 export function generateUIRuntimeCode(uiData: string): string {
+  try {
+    JSON.parse(uiData);
+  } catch {
+    throw new Error('uiData must be valid JSON');
+  }
   return `
 (function() {
-  const uiData = ${uiData};
+  const uiData = ${escapeScriptContent(uiData)};
   if (!uiData || !uiData.screens) return;
 
   const uiRoot = document.getElementById('forge-ui-root');

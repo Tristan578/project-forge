@@ -72,12 +72,18 @@ export function SettingsPage() {
       <div className="mx-auto max-w-5xl px-6 py-8">
         {/* Desktop: two-column layout */}
         <div className="hidden md:flex md:gap-8">
-          {/* Sidebar tabs */}
+          {/* Sidebar tabs
+               Note: These use <button> elements rather than <a> tags because the
+               Settings page is a single-page component where tab changes update
+               the URL via router.replace() (no full page navigation). The tabs
+               are wrapped in a <nav> with aria-label for landmark semantics, and
+               each button has visible focus styles and keyboard accessibility. */}
           <nav className="w-48 shrink-0 space-y-1" aria-label="Settings navigation">
             {TABS.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => handleTabChange(tab.id)}
+                aria-current={activeTab === tab.id ? 'page' : undefined}
                 className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                   activeTab === tab.id
                     ? 'bg-zinc-800 text-zinc-100'
@@ -103,6 +109,7 @@ export function SettingsPage() {
               <button
                 key={tab.id}
                 onClick={() => handleTabChange(tab.id)}
+                aria-current={activeTab === tab.id ? 'page' : undefined}
                 className={`flex shrink-0 items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors ${
                   activeTab === tab.id
                     ? 'border-b-2 border-blue-500 text-zinc-100'

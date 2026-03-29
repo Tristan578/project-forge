@@ -4,13 +4,7 @@
 
 import { StateCreator } from 'zustand';
 import type { SceneTransitionConfig, TerrainDataState } from './types';
-
-const DEFAULT_TRANSITION: SceneTransitionConfig = {
-  type: 'fade',
-  duration: 500,
-  color: '#000000',
-  easing: 'ease-in-out',
-};
+import { DEFAULT_TRANSITION } from './types';
 
 export interface SceneSlice {
   sceneName: string;
@@ -23,6 +17,7 @@ export interface SceneSlice {
     active: boolean;
     config: SceneTransitionConfig | null;
     targetScene: string | null;
+    transitionId: string | null;
   };
   defaultTransition: SceneTransitionConfig;
   terrainData: Record<string, TerrainDataState>;
@@ -78,7 +73,7 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
   scenes: [],
   activeSceneId: null,
   sceneSwitching: false,
-  sceneTransition: { active: false, config: null, targetScene: null },
+  sceneTransition: { active: false, config: null, targetScene: null, transitionId: null },
   defaultTransition: DEFAULT_TRANSITION,
   terrainData: {},
   isExporting: false,
@@ -111,10 +106,14 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
     }
 
     const config = { ...state.defaultTransition, ...(configOverride || {}) };
-    set({ sceneTransition: { active: true, config, targetScene } });
-    // Simulate transition
+    // Use a per-call ID so concurrent calls don't clobber each other.
+    const transitionId = crypto.randomUUID();
+    set({ sceneTransition: { active: true, config, targetScene, transitionId } });
     await new Promise(resolve => setTimeout(resolve, config.duration));
-    set({ sceneTransition: { active: false, config: null, targetScene: null } });
+    // Only clear if this specific transition is still the active one.
+    if (get().sceneTransition.transitionId === transitionId) {
+      set({ sceneTransition: { active: false, config: null, targetScene: null, transitionId: null } });
+    }
   },
   setDefaultTransition: (config) => {
     const state = get();
@@ -167,7 +166,8 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
   setCloudSaveStatus: (status) => set({ cloudSaveStatus: status }),
   setLastCloudSave: (timestamp) => set({ lastCloudSave: timestamp }),
   loadTemplate: async (_templateId) => {
-    // Template loading implementation
+    // Not yet implemented — log warning instead of throwing to avoid crashing callers
+    console.warn('loadTemplate: not yet implemented');
   },
   switchScene: (sceneId) => {
     if (dispatchCommand) dispatchCommand('switch_scene', { sceneId });

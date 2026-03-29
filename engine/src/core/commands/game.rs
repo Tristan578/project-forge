@@ -99,10 +99,14 @@ fn handle_remove_game_component(payload: serde_json::Value) -> super::CommandRes
 }
 
 /// Handle list_game_component_types command.
-/// Returns static list of available types with default data.
+/// Queues a static query response with all available game component type names.
+/// The query system will emit a QUERY_GAME_COMPONENT_TYPES event with the full list.
 fn handle_list_game_component_types(_payload: serde_json::Value) -> super::CommandResult {
-    // This is a synchronous query, handled directly via handle_query in dispatch
-    // But we need to return data immediately here
+    use crate::core::pending_commands::{queue_query_from_bridge, QueryRequest};
+    // Best-effort queue — may fail in test context (no PendingCommands resource).
+    // The command itself always succeeds; the event fires on the next frame if the
+    // engine is running.
+    let _ = queue_query_from_bridge(QueryRequest::GameComponentTypes);
     Ok(())
 }
 
@@ -166,6 +170,13 @@ fn handle_camera_shake(payload: serde_json::Value) -> super::CommandResult {
         .and_then(|v| v.as_f64())
         .ok_or("Missing duration")? as f32;
 
+    if !intensity.is_finite() || !duration.is_finite() {
+        return Err("camera_shake: intensity and duration must be finite numbers".to_string());
+    }
+
+    let intensity = intensity.clamp(0.0, 100.0);
+    let duration = duration.clamp(0.0, 30.0);
+
     if queue_camera_shake_from_bridge(CameraShakeRequest {
         intensity,
         duration,
@@ -181,6 +192,10 @@ fn handle_camera_shake(payload: serde_json::Value) -> super::CommandResult {
 fn handle_mouse_delta(payload: serde_json::Value) -> super::CommandResult {
     let dx = payload.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
     let dy = payload.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+
+    if !dx.is_finite() || !dy.is_finite() {
+        return Err("mouse_delta values must be finite".into());
+    }
 
     if queue_mouse_delta_from_bridge(dx, dy) {
         Ok(())

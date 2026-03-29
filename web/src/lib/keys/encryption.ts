@@ -1,6 +1,10 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
+// IV_LENGTH = 16 (128-bit). NIST SP 800-38D recommends 96-bit (12-byte) IVs for
+// AES-GCM, but changing this requires a key re-encryption migration for existing
+// stored keys. The current 16-byte IV is functionally secure — GCM handles non-96-bit
+// IVs via GHASH with a negligible theoretical collision risk at current scale.
 const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 

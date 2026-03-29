@@ -24,6 +24,7 @@ use super::scripting::ScriptData;
 use super::selection::Selection;
 use super::shader_effects::ShaderEffectData;
 use super::lod::LodData;
+use super::physics_2d::{Physics2dData, Physics2dEnabled, PhysicsJoint2d};
 use super::tilemap::{TilemapData, TilemapEnabled};
 
 /// The current engine mode.
@@ -126,7 +127,7 @@ pub fn snapshot_scene(
     )>,
     script_audio_query: &Query<(&EntityId, Option<&ScriptData>, Option<&AudioData>)>,
     reverb_particle_shader_query: &Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>, Option<&ParticleData>, Option<&ParticleEnabled>, Option<&ShaderEffectData>)>,
-    csg_sprite_query: &Query<(&EntityId, Option<&CsgMeshData>, Option<&super::sprite::SpriteData>)>,
+    csg_sprite_physics2d_query: &Query<(&EntityId, Option<&CsgMeshData>, Option<&super::sprite::SpriteData>, Option<&Physics2dData>, Option<&Physics2dEnabled>, Option<&PhysicsJoint2d>)>,
     procedural_joint_gc_camera_query: &Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>, Option<&JointData>, Option<&super::game_components::GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
     tilemap_skeleton2d_query: &Query<(&EntityId, Option<&TilemapData>, Option<&TilemapEnabled>, Option<&super::skeleton2d::SkeletonData2d>, Option<&super::skeleton2d::SkeletonEnabled2d>, Option<&super::skeletal_animation2d::SkeletalAnimation2d>, Option<&LodData>)>,
     selection: &Selection,
@@ -145,9 +146,9 @@ pub fn snapshot_scene(
         .map(|(eid, rzd, rze, pd, pe, sed)| (eid.0.as_str(), (rzd.cloned(), rze.is_some(), pd.cloned(), pe.is_some(), sed.cloned())))
         .collect();
 
-    type CsgSpriteRow = (Option<CsgMeshData>, Option<super::sprite::SpriteData>);
-    let csg_sprite_map: HashMap<&str, CsgSpriteRow> = csg_sprite_query.iter()
-        .map(|(eid, cmd, sd)| (eid.0.as_str(), (cmd.cloned(), sd.cloned())))
+    type CsgSpritePhysics2dRow = (Option<CsgMeshData>, Option<super::sprite::SpriteData>, Option<Physics2dData>, bool, Option<PhysicsJoint2d>);
+    let csg_sprite_physics2d_map: HashMap<&str, CsgSpritePhysics2dRow> = csg_sprite_physics2d_query.iter()
+        .map(|(eid, cmd, sd, p2d, p2e, j2d)| (eid.0.as_str(), (cmd.cloned(), sd.cloned(), p2d.cloned(), p2e.is_some(), j2d.cloned())))
         .collect();
 
     type ProceduralJointGcCameraRow = (Option<super::procedural_mesh::ProceduralMeshData>, Option<JointData>, Option<super::game_components::GameComponents>, Option<GameCameraData>, bool);
@@ -187,9 +188,9 @@ pub fn snapshot_scene(
             .map(|(rzd, rze, pd, pe, sed)| (rzd.clone(), *rze, pd.clone(), *pe, sed.clone()))
             .unwrap_or((None, false, None, false, None));
 
-        let (csg_mesh_data, sprite_data) = csg_sprite_map.get(eid.0.as_str())
-            .map(|(cmd, sd)| (cmd.clone(), sd.clone()))
-            .unwrap_or((None, None));
+        let (csg_mesh_data, sprite_data, physics2d_data_pre, physics2d_enabled_pre, joint2d_data_pre) = csg_sprite_physics2d_map.get(eid.0.as_str())
+            .map(|(cmd, sd, p2d, p2e, j2d)| (cmd.clone(), sd.clone(), p2d.clone(), *p2e, j2d.clone()))
+            .unwrap_or((None, None, None, false, None));
 
         let (procedural_mesh_data, joint_data, game_components, game_camera_data, active_game_camera) = procedural_joint_gc_camera_map.get(eid.0.as_str())
             .map(|(pmd, jd, gc, gcd, agc)| (pmd.clone(), jd.clone(), gc.clone(), gcd.clone(), *agc))
@@ -231,6 +232,9 @@ pub fn snapshot_scene(
         snap.skeleton2d_enabled = skeleton2d_enabled;
         snap.skeletal_animations = skeletal_animations;
         snap.lod_data = lod_data;
+        snap.physics2d_data = physics2d_data_pre;
+        snap.physics2d_enabled = physics2d_enabled_pre;
+        snap.joint2d_data = joint2d_data_pre;
         entities.push(snap);
     }
 
@@ -246,7 +250,7 @@ pub fn snapshot_scene(
 pub fn restore_scene(
     commands: &mut Commands,
     snapshot: &SceneSnapshot,
-    entity_query: &Query<(
+    entity_query: &mut Query<(
         Entity,
         &EntityId,
         &mut Transform,
@@ -277,10 +281,107 @@ pub fn restore_scene(
         }
     }
 
-    // 4. Restore transforms for entities that still exist
-    // Note: We can't mutate through the immutable query reference here.
-    // The actual restoration happens in the system that calls this, using commands.
-    // For now, we queue transform/state restoration via commands.
+    // 4. Restore transforms and base component data for entities that still exist.
+    // Build a map from entity_id -> snapshot for O(1) lookups.
+    let snapshot_map: std::collections::HashMap<&str, &EntitySnapshot> = snapshot.entities.iter()
+        .map(|s| (s.entity_id.as_str(), s))
+        .collect();
+
+    for (entity, eid, mut transform, mut name, mut visible, mat_data, light_data, phys_data) in entity_query.iter_mut() {
+        if let Some(snap) = snapshot_map.get(eid.0.as_str()) {
+            // Restore transform
+            *transform = snap.transform.to_transform();
+            // Restore name
+            name.0 = snap.name.clone();
+            // Restore visibility
+            visible.0 = snap.visible;
+
+            // Restore material data if present on entity and in snapshot
+            if let (Some(mut mat), Some(ref snap_mat)) = (mat_data, &snap.material_data) {
+                *mat = snap_mat.clone();
+            }
+            // Restore light data if present on entity and in snapshot
+            if let (Some(mut light), Some(ref snap_light)) = (light_data, &snap.light_data) {
+                *light = snap_light.clone();
+            }
+            // Restore physics data if present on entity and in snapshot
+            if let (Some(mut phys), Some(ref snap_phys)) = (phys_data, &snap.physics_data) {
+                *phys = snap_phys.clone();
+            }
+            // For components not in the query (script, audio, particles, etc.),
+            // commands.entity().insert() is used to queue the restore.
+            if let Some(ref snap_script) = snap.script_data {
+                commands.entity(entity).insert(snap_script.clone());
+            }
+            if let Some(ref snap_audio) = snap.audio_data {
+                commands.entity(entity).insert(snap_audio.clone());
+            }
+            if let Some(ref snap_particle) = snap.particle_data {
+                commands.entity(entity).insert(snap_particle.clone());
+            }
+            // Restore ParticleEnabled marker (was missing — particles stopped after Play→Stop)
+            if snap.particle_enabled {
+                commands.entity(entity).insert(ParticleEnabled);
+            } else {
+                commands.entity(entity).remove::<ParticleEnabled>();
+            }
+            if let Some(ref rzd) = snap.reverb_zone_data {
+                commands.entity(entity).insert(rzd.clone());
+            }
+            // Restore marker components — insert when enabled, REMOVE when disabled
+            // (without remove, components enabled before play but disabled during play
+            // would remain enabled after stop, corrupting scene state)
+            if snap.reverb_zone_enabled {
+                commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
+            } else {
+                commands.entity(entity).remove::<super::reverb_zone::ReverbZoneEnabled>();
+            }
+            if let Some(ref sed) = snap.shader_effect_data {
+                commands.entity(entity).insert(sed.clone());
+            }
+            if let Some(ref jd) = snap.joint_data {
+                commands.entity(entity).insert(jd.clone());
+            }
+            if let Some(ref gc) = snap.game_components {
+                commands.entity(entity).insert(gc.clone());
+            }
+            if let Some(ref gcd) = snap.game_camera_data {
+                commands.entity(entity).insert(gcd.clone());
+            }
+            if snap.active_game_camera {
+                commands.entity(entity).insert(ActiveGameCamera);
+            } else {
+                commands.entity(entity).remove::<ActiveGameCamera>();
+            }
+            if let Some(ref sd) = snap.sprite_data {
+                commands.entity(entity).insert(sd.clone());
+            }
+            if let Some(ref tmd) = snap.tilemap_data {
+                commands.entity(entity).insert(tmd.clone());
+            }
+            if snap.tilemap_enabled {
+                commands.entity(entity).insert(TilemapEnabled);
+            } else {
+                commands.entity(entity).remove::<TilemapEnabled>();
+            }
+            if let Some(ref s2d) = snap.skeleton2d_data {
+                commands.entity(entity).insert(s2d.clone());
+            }
+            if snap.skeleton2d_enabled {
+                commands.entity(entity).insert(super::skeleton2d::SkeletonEnabled2d);
+            } else {
+                commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
+            }
+            if let Some(ref ld) = snap.lod_data {
+                commands.entity(entity).insert(ld.clone());
+            }
+            if snap.physics_enabled {
+                commands.entity(entity).insert(PhysicsEnabled);
+            } else {
+                commands.entity(entity).remove::<PhysicsEnabled>();
+            }
+        }
+    }
 
     // 5. Respawn entities that were deleted during play
     for snap in &snapshot.entities {

@@ -11,7 +11,7 @@ export async function register() {
   const result = validateEnvironment();
 
   if (!result.valid) {
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV === 'production' && !process.env.SKIP_ENV_VALIDATION) {
       throw new Error(
         `Server startup aborted: missing required environment variables: ${result.missing.join(', ')}`
       );

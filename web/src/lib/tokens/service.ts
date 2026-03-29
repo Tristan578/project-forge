@@ -275,32 +275,47 @@ export async function refundTokenAmount(
     if (record) source = record.source as 'monthly' | 'addon' | 'mixed';
   }
 
-  if (source === 'monthly') {
-    await db
-      .update(users)
-      .set({
-        monthlyTokensUsed: sql`GREATEST(0, ${users.monthlyTokensUsed} - ${tokens})`,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, userId));
-  } else {
-    // addon or mixed — refund to addonTokens (consistent with full refundTokens for mixed)
-    await db
-      .update(users)
-      .set({
-        addonTokens: sql`${users.addonTokens} + ${tokens}`,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, userId));
-  }
-
-  await db.insert(tokenUsage).values({
-    userId,
-    operation: 'partial_refund',
-    tokens: -tokens,
-    source,
-    metadata: { reason, ...(usageId ? { refundedUsageId: usageId } : {}) },
+  // Atomic idempotent refund: INSERT only if no partial_refund for this usageId
+  // exists yet. This eliminates the TOCTOU race where two concurrent requests
+  // both pass a SELECT check before either inserts.
+  const neonSql = getNeonSql();
+  const metadata = JSON.stringify({
+    reason,
+    ...(usageId ? { refundedUsageId: usageId } : {}),
   });
+
+  const insertStmt = usageId
+    ? neonSql`
+        INSERT INTO token_usage (user_id, operation, tokens, source, metadata)
+        SELECT ${userId}, 'partial_refund', ${-tokens}, ${source}, ${metadata}::jsonb
+        WHERE NOT EXISTS (
+          SELECT 1 FROM token_usage
+          WHERE user_id = ${userId}
+            AND operation = 'partial_refund'
+            AND metadata->>'refundedUsageId' = ${usageId}
+        )`
+    : neonSql`
+        INSERT INTO token_usage (user_id, operation, tokens, source, metadata)
+        VALUES (${userId}, 'partial_refund', ${-tokens}, ${source}, ${metadata}::jsonb)`;
+
+  const insertResult = await insertStmt;
+  // If no rows were inserted, a refund already exists — skip credit update.
+  // neon-http returns an array; INSERT...WHERE NOT EXISTS returns 0 rows when skipped.
+  if (usageId && insertResult.length === 0) return;
+
+  const updateStmt = source === 'monthly'
+    ? neonSql`
+        UPDATE users
+        SET monthly_tokens_used = GREATEST(0, monthly_tokens_used - ${tokens}),
+            updated_at = NOW()
+        WHERE id = ${userId}`
+    : neonSql`
+        UPDATE users
+        SET addon_tokens = addon_tokens + ${tokens},
+            updated_at = NOW()
+        WHERE id = ${userId}`;
+
+  await updateStmt;
 }
 
 /** Credit tokens from an add-on purchase (atomic: balance update + purchase record) */

@@ -1,4 +1,4 @@
-// Animation system integration for bridge layer
+//! GLTF animation bridge — registers clips, drives playback, and polls state back to JS.
 
 use bevy::prelude::*;
 use crate::core::{

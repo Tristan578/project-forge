@@ -366,7 +366,7 @@ function generateZipIndexHtml(options: {
       wasm.init_engine('game-canvas');
 
       // Orientation lock
-      ${orientationLock && orientationLock !== 'none'
+      ${orientationLock && ['landscape', 'portrait'].includes(orientationLock)
         ? `if (screen.orientation && screen.orientation.lock) { screen.orientation.lock('${orientationLock}').catch(function() {}); }`
         : '// No orientation lock requested'
       }

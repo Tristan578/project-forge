@@ -28,7 +28,7 @@ import type {
   Choice,
 } from '@/lib/ai/narrativeGenerator';
 import { useDialogueStore } from '@/stores/dialogueStore';
-import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
+import { fetchAI } from '@/lib/ai/client';
 
 // ============================================================================
 // Sub-components
@@ -305,18 +305,10 @@ function BranchingVisualizer({ arc }: { arc: NarrativeArc }) {
 // Main Panel
 // ============================================================================
 
+// Delegate to the shared lib/ai/client.ts fetchAI helper so narrative generation
+// goes through the same queue, cache, and analytics as all other AI calls.
 async function defaultFetchFn(prompt: string): Promise<string> {
-  const resp = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messages: [{ role: 'user', content: prompt }],
-      model: AI_MODEL_PRIMARY,
-    }),
-  });
-  if (!resp.ok) throw new Error(`API error: ${resp.status}`);
-  const data = await resp.json();
-  return data.content ?? data.text ?? JSON.stringify(data);
+  return fetchAI(prompt);
 }
 
 export function NarrativePanel() {

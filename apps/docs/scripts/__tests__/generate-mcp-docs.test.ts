@@ -210,20 +210,22 @@ describe('command name validation', () => {
 });
 
 describe('YAML frontmatter injection prevention', () => {
-  it('escapes HTML in command name in frontmatter', () => {
-    // Name will fail validation, but we test via category injection
+  it('rejects commands with invalid category (injection prevention)', () => {
+    // Generator validates category with /^[a-z0-9_-]+$/ before writing any file.
+    // A category containing quotes or newlines fails validation → command is skipped,
+    // no MDX is written, preventing YAML frontmatter injection entirely.
     const injectionCommand = {
       ...publicCommand,
       name: 'safe_name',
       category: 'scene"injected: true\nfoo',
     };
     fs.writeFileSync(manifestPath, makeManifest([injectionCommand]));
-    generateMcpDocs(manifestPath, outputDir);
+    const result = generateMcpDocs(manifestPath, outputDir);
 
-    const content = fs.readFileSync(path.join(outputDir, 'safe_name.mdx'), 'utf-8');
-    // The injected newline + key must not appear as a separate frontmatter field
-    expect(content).not.toMatch(/^foo:/m);
-    expect(content).not.toMatch(/^injected: true/m);
+    // Command is rejected, no file written
+    expect(result.generatedCount).toBe(0);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toContain('invalid category');
   });
 
   it('escapes HTML special chars in param type in table', () => {

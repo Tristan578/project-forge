@@ -19,13 +19,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Run doc freshness validation
+      - name: Run doc freshness validation and capture output
+        id: freshness
         run: |
           chmod +x .claude/tools/validate-docs-freshness.sh
-          bash .claude/tools/validate-docs-freshness.sh
+          # Run once, capture output for both the job result and the step summary.
+          # Use a heredoc-style delimiter to safely store multi-line output as a
+          # GitHub Actions output variable — avoids double-execution of the script.
+          OUTPUT=$(bash .claude/tools/validate-docs-freshness.sh 2>&1 || true)
+          echo "$OUTPUT"
+          {
+            echo "output<<FRESHNESS_EOF"
+            echo "$OUTPUT"
+            echo "FRESHNESS_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Write job summary
         if: always()
+        env:
+          FRESHNESS_OUTPUT: ${{ steps.freshness.outputs.output }}
         run: |
           echo "## Doc Freshness Report" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -33,12 +45,11 @@ jobs:
           echo "references source files changed in this push." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          OUTPUT=$(bash .claude/tools/validate-docs-freshness.sh 2>&1 || true)
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "$OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+          echo "$FRESHNESS_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-          if echo "$OUTPUT" | grep -q "DOC UPDATE NEEDED"; then
+          if echo "$FRESHNESS_OUTPUT" | grep -q "DOC UPDATE NEEDED"; then
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "> **Note:** One or more docs may be stale. This check is non-blocking." >> "$GITHUB_STEP_SUMMARY"
             echo "> Update the relevant docs/features/ files and bump their lastVerified date." >> "$GITHUB_STEP_SUMMARY"

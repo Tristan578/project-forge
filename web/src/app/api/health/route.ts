@@ -1,3 +1,11 @@
+/**
+ * GET /api/health — service health endpoint.
+ *
+ * Runs 8 checks (DB, Clerk, Stripe, Sentry, R2, Engine CDN, Upstash, Anthropic).
+ * Only DB and Clerk failures produce HTTP 503 — all other services degrade gracefully.
+ * Sensitive details are stripped from the public response; internal details are logged.
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
 import {
   runAllHealthChecks,

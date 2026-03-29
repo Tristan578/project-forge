@@ -3,7 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { gameComments, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { rateLimit, rateLimitResponse, rateLimitPublicRoute } from '@/lib/rateLimit';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 import { containsBlockedKeyword } from '@/lib/moderation/keywords';
 import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
@@ -13,9 +13,12 @@ export const dynamic = 'force-dynamic';
 
 // Get comments for a game
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const limited = await rateLimitPublicRoute(req, 'community-game-comments', 30, 60_000);
+  if (limited) return limited;
+
   try {
     const db = getDb();
     const { id: gameId } = await params;
@@ -84,8 +87,12 @@ export async function POST(
     const parentResult = optionalString(parsed.body.parentId, 'Parent ID', { maxLength: 100 });
     if (!parentResult.ok) return parentResult.response;
 
-    // Sanitize content (remove angle brackets to prevent tag injection)
-    const sanitized = contentResult.value.replace(/[<>]/g, '');
+    // Sanitize content: remove ASCII angle brackets and their Unicode lookalikes
+    // to prevent tag injection. Unicode alternatives include single/double angle
+    // quotation marks, mathematical angle brackets, and CJK angle brackets.
+    const sanitized = contentResult.value
+      .replace(/[<>]/g, '')
+      .replace(/[\u2039\u203A\u00AB\u00BB\u2329\u232A\u3008\u3009]/g, '');
 
     if (sanitized.length === 0) {
       return NextResponse.json(

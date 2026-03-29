@@ -8,22 +8,16 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-const envBackup = { ...process.env };
-
-function clearVercelEnv(): void {
-  delete process.env.AI_GATEWAY_API_KEY;
-  delete process.env.VERCEL;
-  delete process.env.VERCEL_ENV;
-}
-
 describe('vercelGatewayBackend', () => {
   beforeEach(() => {
     vi.resetModules();
-    clearVercelEnv();
+    vi.stubEnv('AI_GATEWAY_API_KEY', '');
+    vi.stubEnv('VERCEL', '');
+    vi.stubEnv('VERCEL_ENV', '');
   });
 
   afterEach(() => {
-    process.env = { ...envBackup };
+    vi.unstubAllEnvs();
   });
 
   describe('isConfigured', () => {
@@ -33,38 +27,38 @@ describe('vercelGatewayBackend', () => {
     });
 
     it('returns true when AI_GATEWAY_API_KEY is set', async () => {
-      process.env.AI_GATEWAY_API_KEY = 'gw-test-key';
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-test-key');
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
       expect(vercelGatewayBackend.isConfigured()).toBe(true);
     });
 
     it('returns true when VERCEL env is set (OIDC auto-auth)', async () => {
-      process.env.VERCEL = '1';
+      vi.stubEnv('VERCEL', '1');
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
       expect(vercelGatewayBackend.isConfigured()).toBe(true);
     });
 
     it('returns true when VERCEL_ENV is set', async () => {
-      process.env.VERCEL_ENV = 'production';
+      vi.stubEnv('VERCEL_ENV', 'production');
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
       expect(vercelGatewayBackend.isConfigured()).toBe(true);
     });
 
     it('returns true when VERCEL_ENV is preview', async () => {
-      process.env.VERCEL_ENV = 'preview';
+      vi.stubEnv('VERCEL_ENV', 'preview');
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
       expect(vercelGatewayBackend.isConfigured()).toBe(true);
     });
 
     it('returns true when both API key and VERCEL env are set', async () => {
-      process.env.AI_GATEWAY_API_KEY = 'gw-key';
-      process.env.VERCEL = '1';
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-key');
+      vi.stubEnv('VERCEL', '1');
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
       expect(vercelGatewayBackend.isConfigured()).toBe(true);
     });
 
     it('returns false when AI_GATEWAY_API_KEY is empty string', async () => {
-      process.env.AI_GATEWAY_API_KEY = '';
+      vi.stubEnv('AI_GATEWAY_API_KEY', '');
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
       expect(vercelGatewayBackend.isConfigured()).toBe(false);
     });
@@ -72,13 +66,13 @@ describe('vercelGatewayBackend', () => {
 
   describe('getApiKey', () => {
     it('returns the gateway API key when set', async () => {
-      process.env.AI_GATEWAY_API_KEY = 'gw-abc123';
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-abc123');
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
       expect(vercelGatewayBackend.getApiKey()).toBe('gw-abc123');
     });
 
     it('returns empty string when no API key (OIDC path)', async () => {
-      process.env.VERCEL = '1';
+      vi.stubEnv('VERCEL', '1');
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
       expect(vercelGatewayBackend.getApiKey()).toBe('');
     });

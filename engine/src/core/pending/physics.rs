@@ -18,8 +18,13 @@ pub struct PhysicsToggle {
     pub enabled: bool,
 }
 
+/// Request to change the physics debug rendering state.
+/// `enabled = None` means toggle the current state.
+/// `enabled = Some(true/false)` sets the state explicitly.
 #[derive(Debug, Clone)]
-pub struct DebugPhysicsToggle;
+pub struct DebugPhysicsToggle {
+    pub enabled: Option<bool>,
+}
 
 #[derive(Debug, Clone)]
 pub struct CreateJointRequest {
@@ -136,8 +141,8 @@ impl PendingCommands {
         self.physics_toggles.push(toggle);
     }
 
-    pub fn queue_debug_physics_toggle(&mut self) {
-        self.debug_physics_toggles.push(DebugPhysicsToggle);
+    pub fn queue_debug_physics_toggle(&mut self, toggle: DebugPhysicsToggle) {
+        self.debug_physics_toggles.push(toggle);
     }
 
     pub fn queue_create_joint(&mut self, request: CreateJointRequest) {
@@ -211,8 +216,8 @@ pub fn queue_physics_toggle_from_bridge(toggle: PhysicsToggle) -> bool {
     super::with_pending(|pc| pc.queue_physics_toggle(toggle)).is_some()
 }
 
-pub fn queue_debug_physics_toggle_from_bridge() -> bool {
-    super::with_pending(|pc| pc.queue_debug_physics_toggle()).is_some()
+pub fn queue_debug_physics_toggle_from_bridge(toggle: DebugPhysicsToggle) -> bool {
+    super::with_pending(|pc| pc.queue_debug_physics_toggle(toggle)).is_some()
 }
 
 pub fn queue_create_joint_from_bridge(request: CreateJointRequest) -> bool {

@@ -1,3 +1,10 @@
+/**
+ * Drizzle ORM schema — single source of truth for all database tables.
+ *
+ * Any change here requires a migration: `npm run db:generate` (production) or
+ * `npm run db:push` (dev only). See CLAUDE.md gotcha: "Schema changes need migrations".
+ */
+
 import {
   pgTable,
   uuid,

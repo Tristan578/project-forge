@@ -188,27 +188,10 @@ test.describe('Group 1: Transform Editing @engine', () => {
   }) => {
     await spawnCubeAndSelect(page, editor);
 
-    const transformSection = page.getByText('Transform', { exact: false }).first().locator('..');
-
-    // Locate the rotation row by label, then find X input within it
-    const rotationRow = transformSection.locator('text=Rotation').first().locator('..').locator('..');
-    const rotationRowInputCount = await rotationRow.locator('input').count().catch(() => 0);
-
-    let rotXInput: ReturnType<Page['locator']>;
-
-    if (rotationRowInputCount >= 1) {
-      // Within the rotation row: X is the first input
-      rotXInput = rotationRow.locator('input').first();
-    } else {
-      // Fallback: position(0-2) + rotation starts at index 3
-      const inputs = transformSection.locator('input');
-      const inputCount = await inputs.count();
-      if (inputCount < 4) {
-        test.skip(true, 'SKIP: rotation inputs not found in inspector (fewer than 4 inputs in transform section)');
-        return;
-      }
-      rotXInput = inputs.nth(3);
-    }
+    // Use the data-testid added to the Rotation Vec3Input for reliable targeting
+    const rotationRow = page.locator('[data-testid="vec3-rotation"]');
+    await expect(rotationRow).toBeVisible({ timeout: 8_000 });
+    const rotXInput = rotationRow.locator('input').first();
 
     // Capture the rotation value BEFORE editing so we can detect a real change.
     const beforeRotState = await getStoreState(page) as { primaryTransform?: { rotation?: number[] } } | undefined;
@@ -257,27 +240,10 @@ test.describe('Group 1: Transform Editing @engine', () => {
   }) => {
     await spawnCubeAndSelect(page, editor);
 
-    const transformSection = page.getByText('Transform', { exact: false }).first().locator('..');
-
-    // Locate the scale row by label, then find X input within it
-    const scaleRow = transformSection.locator('text=Scale').first().locator('..').locator('..');
-    const scaleRowInputCount = await scaleRow.locator('input').count().catch(() => 0);
-
-    let scaleXInput: ReturnType<Page['locator']>;
-
-    if (scaleRowInputCount >= 1) {
-      // Within the scale row: X is the first input
-      scaleXInput = scaleRow.locator('input').first();
-    } else {
-      // Fallback: position(0-2) + rotation(3-5) + scale starts at index 6
-      const inputs = transformSection.locator('input');
-      const inputCount = await inputs.count();
-      if (inputCount < 7) {
-        test.skip(true, 'SKIP: scale inputs not found in inspector (fewer than 7 inputs in transform section)');
-        return;
-      }
-      scaleXInput = inputs.nth(6);
-    }
+    // Use the data-testid added to the Scale Vec3Input for reliable targeting
+    const scaleRow = page.locator('[data-testid="vec3-scale"]');
+    await expect(scaleRow).toBeVisible({ timeout: 8_000 });
+    const scaleXInput = scaleRow.locator('input').first();
 
     await scaleXInput.click({ clickCount: 3 });
     await scaleXInput.fill('2.0');
@@ -335,21 +301,10 @@ test.describe('Group 2: Material Editing @engine', () => {
 
     // Find the metallic label and its sibling input
     const metallicLabel = page.locator('text=/metallic/i').first();
-    const metallicLabelVisible = await metallicLabel.isVisible().catch(() => false);
-
-    if (!metallicLabelVisible) {
-      test.skip(true, 'SKIP: metallic label not found in inspector — UI layout may differ');
-      return;
-    }
+    await expect(metallicLabel).toBeVisible({ timeout: 8_000 });
 
     const metallicInput = metallicLabel.locator('..').locator('input').first();
-    const hasInput = (await metallicInput.count()) > 0;
-    const inputVisible = hasInput && await metallicInput.isVisible().catch(() => false);
-
-    if (!inputVisible) {
-      test.skip(true, 'SKIP: metallic input element not found — UI layout may differ');
-      return;
-    }
+    await expect(metallicInput).toBeVisible({ timeout: 5_000 });
 
     await metallicInput.click({ clickCount: 3 });
     await metallicInput.fill('0.85');
@@ -394,21 +349,10 @@ test.describe('Group 2: Material Editing @engine', () => {
     );
 
     const roughnessLabel = page.locator('text=/roughness/i').first();
-    const roughnessVisible = await roughnessLabel.isVisible().catch(() => false);
-
-    if (!roughnessVisible) {
-      test.skip(true, 'SKIP: roughness label not found in inspector — UI layout may differ');
-      return;
-    }
+    await expect(roughnessLabel).toBeVisible({ timeout: 8_000 });
 
     const roughnessInput = roughnessLabel.locator('..').locator('input').first();
-    const hasInput = (await roughnessInput.count()) > 0;
-    const inputVisible = hasInput && await roughnessInput.isVisible().catch(() => false);
-
-    if (!inputVisible) {
-      test.skip(true, 'SKIP: roughness input element not found — UI layout may differ');
-      return;
-    }
+    await expect(roughnessInput).toBeVisible({ timeout: 5_000 });
 
     await roughnessInput.click({ clickCount: 3 });
     await roughnessInput.fill('0.25');
@@ -446,12 +390,7 @@ test.describe('Group 2: Material Editing @engine', () => {
 
     // Look for a material preset button — the material library uses named presets
     const presetBtn = page.locator('button').filter({ hasText: /metal|plastic|wood|glass|stone/i }).first();
-    const presetVisible = await presetBtn.isVisible({ timeout: 5_000 }).catch(() => false);
-
-    if (!presetVisible) {
-      test.skip(true, 'SKIP: material preset buttons not found — material library panel may not be open');
-      return;
-    }
+    await expect(presetBtn).toBeVisible({ timeout: 8_000 });
 
     await presetBtn.click();
 
@@ -520,12 +459,7 @@ test.describe('Group 3: Physics Toggle @engine', () => {
     const physicsToggle = physicsSectionContainer
       .locator('[role="checkbox"], input[type="checkbox"]')
       .first();
-    const toggleVisible = await physicsToggle.isVisible({ timeout: 5_000 }).catch(() => false);
-
-    if (!toggleVisible) {
-      test.skip(true, 'SKIP: physics toggle checkbox not found in inspector — UI layout may differ');
-      return;
-    }
+    await expect(physicsToggle).toBeVisible({ timeout: 8_000 });
 
     const wasChecked = await physicsToggle.isChecked();
     await physicsToggle.click();

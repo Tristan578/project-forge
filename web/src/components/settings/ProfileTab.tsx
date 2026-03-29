@@ -91,12 +91,13 @@ export function ProfileTab() {
 
       {/* Display Name */}
       <div className="rounded-lg border border-zinc-700 bg-zinc-800 p-4">
-        <label className="mb-2 block text-sm font-semibold text-zinc-200">
+        <label htmlFor="display-name-input" className="mb-2 block text-sm font-semibold text-zinc-200">
           Display Name
         </label>
         {editing ? (
           <div className="flex items-center gap-2">
             <input
+              id="display-name-input"
               type="text"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -148,9 +149,9 @@ export function ProfileTab() {
 
       {/* Email (read-only) */}
       <div className="rounded-lg border border-zinc-700 bg-zinc-800 p-4">
-        <label className="mb-2 block text-sm font-semibold text-zinc-200">
+        <p className="mb-2 block text-sm font-semibold text-zinc-200">
           Email
-        </label>
+        </p>
         <span className="text-sm text-zinc-400">
           {email ?? 'Loading...'}
         </span>
@@ -158,9 +159,9 @@ export function ProfileTab() {
 
       {/* Tier */}
       <div className="rounded-lg border border-zinc-700 bg-zinc-800 p-4">
-        <label className="mb-2 block text-sm font-semibold text-zinc-200">
+        <p className="mb-2 block text-sm font-semibold text-zinc-200">
           Plan
-        </label>
+        </p>
         <span className={`inline-block rounded px-2.5 py-1 text-xs font-semibold uppercase text-white ${getTierColor(tier)}`}>
           {tier}
         </span>
@@ -168,9 +169,9 @@ export function ProfileTab() {
 
       {/* Member Since */}
       <div className="rounded-lg border border-zinc-700 bg-zinc-800 p-4">
-        <label className="mb-2 block text-sm font-semibold text-zinc-200">
+        <p className="mb-2 block text-sm font-semibold text-zinc-200">
           Member Since
-        </label>
+        </p>
         <span className="text-sm text-zinc-400">
           {formatDate(createdAt)}
         </span>

@@ -18,13 +18,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing jobId parameter' }, { status: 400 });
   }
 
-  // DALL-E jobs return a URL directly (synchronous completion)
-  if (jobId.startsWith('http')) {
+  // DALL-E 3 jobs use a "dalle3:" prefix to signal synchronous completion.
+  // Contract: the /generate/sprite POST route sets jobId = "dalle3:<result-url>"
+  // when the provider returns an image URL synchronously (no async polling needed).
+  if (jobId.startsWith('dalle3:')) {
+    const resultUrl = jobId.slice('dalle3:'.length);
     return NextResponse.json({
       jobId,
       status: 'completed',
       progress: 100,
-      resultUrl: jobId,
+      resultUrl,
     });
   }
 

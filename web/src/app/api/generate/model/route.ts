@@ -1,3 +1,12 @@
+/**
+ * POST /api/generate/model — submit a Meshy 3D model generation job.
+ * GET  /api/generate/model — poll job status by ?jobId=.
+ *
+ * Deducts tokens upfront on POST. On failure or client-side cancellation,
+ * tokens are refunded via the returned `usageId`. Status is also available
+ * via POST /api/generate/model/status.
+ */
+
 export const maxDuration = 180; // API_MAX_DURATION_HEAVY_GEN_S
 
 import { NextRequest, NextResponse } from 'next/server';

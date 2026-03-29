@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm install --install-links",
+  "buildCommand": "npx storybook build -o storybook-static",
+  "outputDirectory": "storybook-static",
+  "git": {
+    "deploymentEnabled": false
+  }
+}

@@ -80,6 +80,31 @@ if echo "$TARGET" | grep -qiE "tokens/|billing|pricing|credit"; then
   KEYWORDS="$KEYWORDS|refund|addon|monthly|transaction|atomic"
 fi
 
+# Database schema
+if echo "$TARGET" | grep -qiE "db/schema|schema\.ts|migration|drizzle"; then
+  KEYWORDS="$KEYWORDS|migration|schema|ALTER.TABLE|db\.push|transaction|neon-http"
+fi
+
+# Encryption / crypto
+if echo "$TARGET" | grep -qiE "encryption|keys/|crypto"; then
+  KEYWORDS="$KEYWORDS|IV_LENGTH|migration|backwards.compatible|decrypt"
+fi
+
+# Worktree / git operations
+if echo "$TARGET" | grep -qiE "worktree|git.checkout|git.branch"; then
+  KEYWORDS="$KEYWORDS|rebase.onto.main|nested.worktree|one.level.only|branch.from.feature"
+fi
+
+# Git push (PR validation)
+if echo "$TARGET" | grep -qiE "git.push"; then
+  KEYWORDS="$KEYWORDS|local.CI.validation|eslint.*tsc.*vitest|before.ANY.PR|consolidate.reviews"
+fi
+
+# Vercel CLI commands
+if echo "$TARGET" | grep -qiE "vercel|deploy.*prod|vercel.link|vercel.project"; then
+  KEYWORDS="$KEYWORDS|scope.tnolan|hobby.account|nolantj-livecoms|team_5SxqWz8y|NEVER.use.*hobby"
+fi
+
 # Export pipeline
 if echo "$TARGET" | grep -qiE "export/"; then
   KEYWORDS="$KEYWORDS|injection|sanitize|bgColor|script.tag|loop.guard"
@@ -137,7 +162,7 @@ CURRENT_TITLE=""
 CURRENT_PREVENT=""
 CURRENT_BLOCK=""
 MATCH_COUNT=0
-MAX_MATCHES=8  # Cap to avoid overwhelming context
+MAX_MATCHES=12  # Cap to avoid overwhelming context
 
 while IFS= read -r line; do
   if echo "$line" | grep -qE "^### [0-9]+\. "; then

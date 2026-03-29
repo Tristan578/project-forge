@@ -2,7 +2,7 @@
 
 Manual verification checklist for user-facing features. Run these after major changes to ensure end-to-end functionality.
 
-> **Automated tests:** 13,600+ unit tests (`cd web && npx vitest run`), 81 E2E tests (`cd web && npx playwright test`), 25 MCP tests (`cd mcp-server && npx vitest run`)
+> **Automated tests:** 14,200+ unit tests (`cd web && npx vitest run`), 63 E2E spec files (`cd web && npx playwright test`), 400 MCP tests (`cd mcp-server && npx vitest run`)
 
 ## Prerequisites
 

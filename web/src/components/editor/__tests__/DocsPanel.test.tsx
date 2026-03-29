@@ -162,7 +162,7 @@ describe('DocsPanel', () => {
     fireEvent.click(screen.getByText('Materials'));
     // Should show document view with back button
     await waitFor(() => {
-      expect(screen.getByTitle('Back')).toBeDefined();
+      expect(screen.getByTitle('Back')).toBeInTheDocument();
     });
   });
 
@@ -175,7 +175,7 @@ describe('DocsPanel', () => {
     });
     fireEvent.click(screen.getByText('Materials'));
     await waitFor(() => {
-      expect(screen.getByTitle('Back')).toBeDefined();
+      expect(screen.getByTitle('Back')).toBeInTheDocument();
     });
     fireEvent.click(screen.getByTitle('Back'));
     await waitFor(() => {
@@ -206,7 +206,7 @@ describe('DocsPanel', () => {
       target: { value: 'xyznonexistent' },
     });
     await waitFor(() => {
-      expect(screen.getByText(/No results for/)).toBeDefined();
+      expect(screen.getByText(/No results for/)).toBeInTheDocument();
     });
   });
 
@@ -235,7 +235,7 @@ describe('DocsPanel', () => {
     setupDocsLoaded();
     render(<DocsPanel />);
     await waitFor(() => {
-      expect(screen.getByTitle('Back')).toBeDefined();
+      expect(screen.getByTitle('Back')).toBeInTheDocument();
     });
   });
 });

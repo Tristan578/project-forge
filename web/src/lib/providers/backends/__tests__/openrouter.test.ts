@@ -7,16 +7,14 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-const envBackup = { ...process.env };
-
 describe('openrouterBackend', () => {
   beforeEach(() => {
     vi.resetModules();
-    delete process.env.OPENROUTER_API_KEY;
+    vi.stubEnv('OPENROUTER_API_KEY', '');
   });
 
   afterEach(() => {
-    process.env = { ...envBackup };
+    vi.unstubAllEnvs();
   });
 
   describe('isConfigured', () => {
@@ -26,13 +24,13 @@ describe('openrouterBackend', () => {
     });
 
     it('returns true when OPENROUTER_API_KEY is set', async () => {
-      process.env.OPENROUTER_API_KEY = 'sk-or-test-123';
+      vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-test-123');
       const { openrouterBackend } = await import('@/lib/providers/backends/openrouter');
       expect(openrouterBackend.isConfigured()).toBe(true);
     });
 
     it('returns false when OPENROUTER_API_KEY is empty string', async () => {
-      process.env.OPENROUTER_API_KEY = '';
+      vi.stubEnv('OPENROUTER_API_KEY', '');
       const { openrouterBackend } = await import('@/lib/providers/backends/openrouter');
       expect(openrouterBackend.isConfigured()).toBe(false);
     });
@@ -40,7 +38,7 @@ describe('openrouterBackend', () => {
 
   describe('getApiKey', () => {
     it('returns the API key when set', async () => {
-      process.env.OPENROUTER_API_KEY = 'sk-or-abc123';
+      vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-abc123');
       const { openrouterBackend } = await import('@/lib/providers/backends/openrouter');
       expect(openrouterBackend.getApiKey()).toBe('sk-or-abc123');
     });

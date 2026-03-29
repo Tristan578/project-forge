@@ -3,7 +3,7 @@
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { CollapsibleSection } from '../CollapsibleSection';
 
@@ -13,6 +13,8 @@ vi.mock('lucide-react', () => ({
 }));
 
 describe('CollapsibleSection', () => {
+  beforeEach(() => vi.clearAllMocks());
+
   afterEach(() => {
     cleanup();
     localStorage.clear();
@@ -24,7 +26,7 @@ describe('CollapsibleSection', () => {
         <div>Content</div>
       </CollapsibleSection>
     );
-    expect(screen.getByText('Transform')).toBeDefined();
+    expect(screen.getByText('Transform')).toBeInTheDocument();
   });
 
   it('renders children when expanded (default)', () => {
@@ -33,7 +35,7 @@ describe('CollapsibleSection', () => {
         <div>My Content</div>
       </CollapsibleSection>
     );
-    expect(screen.getByText('My Content')).toBeDefined();
+    expect(screen.getByText('My Content')).toBeInTheDocument();
   });
 
   it('shows ChevronDown when expanded', () => {
@@ -42,7 +44,7 @@ describe('CollapsibleSection', () => {
         <div>Content</div>
       </CollapsibleSection>
     );
-    expect(screen.getByTestId('chevron-down')).toBeDefined();
+    expect(screen.getByTestId('chevron-down')).toBeInTheDocument();
   });
 
   it('collapses content when header is clicked', () => {
@@ -62,7 +64,7 @@ describe('CollapsibleSection', () => {
       </CollapsibleSection>
     );
     fireEvent.click(screen.getByText('Transform'));
-    expect(screen.getByTestId('chevron-right')).toBeDefined();
+    expect(screen.getByTestId('chevron-right')).toBeInTheDocument();
   });
 
   it('expands again after second click', () => {
@@ -73,7 +75,7 @@ describe('CollapsibleSection', () => {
     );
     fireEvent.click(screen.getByText('Transform'));
     fireEvent.click(screen.getByText('Transform'));
-    expect(screen.getByText('My Content')).toBeDefined();
+    expect(screen.getByText('My Content')).toBeInTheDocument();
   });
 
   it('renders headerRight when provided', () => {
@@ -82,7 +84,7 @@ describe('CollapsibleSection', () => {
         <div>Content</div>
       </CollapsibleSection>
     );
-    expect(screen.getByText('Badge')).toBeDefined();
+    expect(screen.getByText('Badge')).toBeInTheDocument();
   });
 
   it('starts collapsed when localStorage has the id', () => {

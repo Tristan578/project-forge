@@ -27,7 +27,17 @@ export async function PUT(request: NextRequest) {
   try {
     const db = getDb();
 
+    if (typeof body.id !== 'string' || !body.id) {
+      return NextResponse.json({ error: 'id is required' }, { status: 400 });
+    }
+
     if (body.type === 'token_config') {
+      if (typeof body.tokenCost !== 'number' || !Number.isFinite(body.tokenCost) || body.tokenCost < 0) {
+        return NextResponse.json({ error: 'tokenCost must be a non-negative finite number' }, { status: 400 });
+      }
+      if (typeof body.estimatedCostCents !== 'number' || !Number.isFinite(body.estimatedCostCents) || body.estimatedCostCents < 0) {
+        return NextResponse.json({ error: 'estimatedCostCents must be a non-negative finite number' }, { status: 400 });
+      }
       await db.update(tokenConfig)
         .set({
           tokenCost: body.tokenCost,
@@ -37,6 +47,12 @@ export async function PUT(request: NextRequest) {
         })
         .where(eq(tokenConfig.id, body.id));
     } else if (body.type === 'tier_config') {
+      const numFields = ['monthlyTokens', 'maxProjects', 'maxPublished', 'priceCentsMonthly'] as const;
+      for (const field of numFields) {
+        if (typeof body[field] !== 'number' || !Number.isFinite(body[field]) || body[field] < 0) {
+          return NextResponse.json({ error: `${field} must be a non-negative finite number` }, { status: 400 });
+        }
+      }
       await db.update(tierConfig)
         .set({
           monthlyTokens: body.monthlyTokens,
@@ -46,6 +62,8 @@ export async function PUT(request: NextRequest) {
           updatedAt: new Date(),
         })
         .where(eq(tierConfig.id, body.id));
+    } else {
+      return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
     }
 
     return NextResponse.json({ success: true });

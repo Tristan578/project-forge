@@ -56,7 +56,7 @@ fi
 # 4. Check for stale version references
 echo ""
 echo "--- Version References ---"
-BEVY_REFS=$(grep -rn "Bevy 0\." "$PROJECT_ROOT/README.md" "$PROJECT_ROOT/.claude/CLAUDE.md" "$PROJECT_ROOT/docs/known-limitations.md" 2>/dev/null | grep -v "0\.18" | head -5)
+BEVY_REFS=$(grep -rn "Bevy 0\." "$PROJECT_ROOT/README.md" "$PROJECT_ROOT/.claude/CLAUDE.md" "$PROJECT_ROOT/docs/known-limitations.md" 2>/dev/null | grep -v "0\.18" | head -5 || true)
 if [ -n "$BEVY_REFS" ]; then
   warn "Stale Bevy version references found (not 0.18):"
   echo "$BEVY_REFS"

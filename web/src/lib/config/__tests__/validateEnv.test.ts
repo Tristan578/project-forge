@@ -1,21 +1,30 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-describe('validateEnv', () => {
-  const originalEnv = process.env;
+/** Stub all required env vars to valid production values. */
+function stubAllRequired(): void {
+  vi.stubEnv('NODE_ENV', 'production');
+  vi.stubEnv('DATABASE_URL', 'postgresql://test');
+  vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_live_xxx');
+  vi.stubEnv('CLERK_SECRET_KEY', 'sk_live_xxx');
+  vi.stubEnv('STRIPE_SECRET_KEY', 'sk_live_xxx');
+  vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_xxx');
+  vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://redis.upstash.io');
+  vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'test-token');
+  vi.stubEnv('ENCRYPTION_MASTER_KEY', 'a'.repeat(64));
+}
 
+describe('validateEnv', () => {
   beforeEach(() => {
     vi.resetModules();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    process.env = { ...originalEnv } as any;
   });
 
   afterEach(() => {
-    process.env = originalEnv;
+    vi.unstubAllEnvs();
   });
 
   describe('validateEnvironment', () => {
     it('skips validation in development and returns valid', async () => {
-      (process.env as Record<string, string>).NODE_ENV = 'development';
+      vi.stubEnv('NODE_ENV', 'development');
       const { validateEnvironment } = await import('../validateEnv');
       const result = validateEnvironment();
       expect(result.valid).toBe(true);
@@ -24,15 +33,15 @@ describe('validateEnv', () => {
     });
 
     it('reports all missing required vars in production', async () => {
-      (process.env as Record<string, string>).NODE_ENV = 'production';
-      delete process.env.DATABASE_URL;
-      delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-      delete process.env.CLERK_SECRET_KEY;
-      delete process.env.STRIPE_SECRET_KEY;
-      delete process.env.STRIPE_WEBHOOK_SECRET;
-      delete process.env.UPSTASH_REDIS_REST_URL;
-      delete process.env.UPSTASH_REDIS_REST_TOKEN;
-      delete process.env.ENCRYPTION_MASTER_KEY;
+      vi.stubEnv('NODE_ENV', 'production');
+      vi.stubEnv('DATABASE_URL', '');
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', '');
+      vi.stubEnv('CLERK_SECRET_KEY', '');
+      vi.stubEnv('STRIPE_SECRET_KEY', '');
+      vi.stubEnv('STRIPE_WEBHOOK_SECRET', '');
+      vi.stubEnv('UPSTASH_REDIS_REST_URL', '');
+      vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', '');
+      vi.stubEnv('ENCRYPTION_MASTER_KEY', '');
 
       const { validateEnvironment } = await import('../validateEnv');
       const result = validateEnvironment();
@@ -50,16 +59,7 @@ describe('validateEnv', () => {
     });
 
     it('passes when all required vars are set', async () => {
-      (process.env as Record<string, string>).NODE_ENV = 'production';
-      process.env.DATABASE_URL = 'postgresql://test';
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
-      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
-      process.env.STRIPE_SECRET_KEY = 'sk_live_xxx';
-      process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
-      process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
-      process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
-
-      process.env.ENCRYPTION_MASTER_KEY = 'a'.repeat(64);
+      stubAllRequired();
 
       const { validateEnvironment } = await import('../validateEnv');
       const result = validateEnvironment();
@@ -69,20 +69,11 @@ describe('validateEnv', () => {
     });
 
     it('reports warnings for missing optional vars', async () => {
-      (process.env as Record<string, string>).NODE_ENV = 'production';
-      process.env.DATABASE_URL = 'postgresql://test';
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
-      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
-      process.env.STRIPE_SECRET_KEY = 'sk_live_xxx';
-      process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
-      process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
-      process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
-
-      process.env.ENCRYPTION_MASTER_KEY = 'a'.repeat(64);
-      delete process.env.NEXT_PUBLIC_APP_URL;
-      delete process.env.NEXT_PUBLIC_ENGINE_CDN_URL;
-      delete process.env.SENTRY_DSN;
-      delete process.env.NEXT_PUBLIC_SENTRY_DSN;
+      stubAllRequired();
+      vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', '');
+      vi.stubEnv('SENTRY_DSN', '');
+      vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', '');
 
       const { validateEnvironment } = await import('../validateEnv');
       const result = validateEnvironment();
@@ -94,23 +85,14 @@ describe('validateEnv', () => {
     });
 
     it('does not warn for optional vars that are set', async () => {
-      (process.env as Record<string, string>).NODE_ENV = 'production';
-      process.env.DATABASE_URL = 'postgresql://test';
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
-      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
-      process.env.STRIPE_SECRET_KEY = 'sk_live_xxx';
-      process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
-      process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
-      process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
-
-      process.env.ENCRYPTION_MASTER_KEY = 'a'.repeat(64);
-      process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
-      process.env.NEXT_PUBLIC_APP_URL = 'https://spawnforge.ai';
-      process.env.NEXT_PUBLIC_ENGINE_CDN_URL = 'https://cdn.spawnforge.ai';
-      process.env.SENTRY_DSN = 'https://xxx@sentry.io/123';
-      process.env.NEXT_PUBLIC_SENTRY_DSN = 'https://xxx@sentry.io/123';
-      process.env.NEXT_PUBLIC_POSTHOG_KEY = 'phc_test';
-      process.env.CLOUDFLARE_ACCOUNT_ID = '0b949ff499d179e24dde841f71d6134f';
+      stubAllRequired();
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test');
+      vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://spawnforge.ai');
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', 'https://cdn.spawnforge.ai');
+      vi.stubEnv('SENTRY_DSN', 'https://xxx@sentry.io/123');
+      vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://xxx@sentry.io/123');
+      vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test');
+      vi.stubEnv('CLOUDFLARE_ACCOUNT_ID', '0b949ff499d179e24dde841f71d6134f');
 
       const { validateEnvironment } = await import('../validateEnv');
       const result = validateEnvironment();
@@ -121,16 +103,15 @@ describe('validateEnv', () => {
     });
 
     it('logs error to console when required vars are missing', async () => {
-      (process.env as Record<string, string>).NODE_ENV = 'production';
-      delete process.env.DATABASE_URL;
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
-      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
-      process.env.STRIPE_SECRET_KEY = 'sk_live_xxx';
-      process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
-      process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
-      process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
-
-      process.env.ENCRYPTION_MASTER_KEY = 'a'.repeat(64);
+      vi.stubEnv('NODE_ENV', 'production');
+      vi.stubEnv('DATABASE_URL', '');
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_live_xxx');
+      vi.stubEnv('CLERK_SECRET_KEY', 'sk_live_xxx');
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_live_xxx');
+      vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_xxx');
+      vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://redis.upstash.io');
+      vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'test-token');
+      vi.stubEnv('ENCRYPTION_MASTER_KEY', 'a'.repeat(64));
 
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const { validateEnvironment } = await import('../validateEnv');
@@ -143,16 +124,15 @@ describe('validateEnv', () => {
     });
 
     it('reports partial missing — only missing vars appear', async () => {
-      (process.env as Record<string, string>).NODE_ENV = 'production';
-      process.env.DATABASE_URL = 'postgresql://test';
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
-      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
-      delete process.env.STRIPE_SECRET_KEY;
-      delete process.env.STRIPE_WEBHOOK_SECRET;
-      process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
-      process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
-
-      process.env.ENCRYPTION_MASTER_KEY = 'a'.repeat(64);
+      vi.stubEnv('NODE_ENV', 'production');
+      vi.stubEnv('DATABASE_URL', 'postgresql://test');
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_live_xxx');
+      vi.stubEnv('CLERK_SECRET_KEY', 'sk_live_xxx');
+      vi.stubEnv('STRIPE_SECRET_KEY', '');
+      vi.stubEnv('STRIPE_WEBHOOK_SECRET', '');
+      vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://redis.upstash.io');
+      vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'test-token');
+      vi.stubEnv('ENCRYPTION_MASTER_KEY', 'a'.repeat(64));
 
       const { validateEnvironment } = await import('../validateEnv');
       const result = validateEnvironment();
@@ -164,15 +144,9 @@ describe('validateEnv', () => {
 
   describe('Clerk key format validation', () => {
     it('flags pk_test_ Clerk key as invalid in production', async () => {
-      (process.env as Record<string, string>).NODE_ENV = 'production';
-      process.env.DATABASE_URL = 'postgresql://test';
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_xxx';
-      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
-      process.env.STRIPE_SECRET_KEY = 'sk_test_stripe';
-      process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
-      process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
-      process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
-      process.env.ENCRYPTION_MASTER_KEY = 'a'.repeat(64);
+      stubAllRequired();
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_xxx');
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_stripe');
 
       const { validateEnvironment } = await import('../validateEnv');
       const result = validateEnvironment();
@@ -182,15 +156,9 @@ describe('validateEnv', () => {
     });
 
     it('warns on sk_test_ Clerk secret key in production', async () => {
-      (process.env as Record<string, string>).NODE_ENV = 'production';
-      process.env.DATABASE_URL = 'postgresql://test';
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
-      process.env.CLERK_SECRET_KEY = 'sk_test_xxx';
-      process.env.STRIPE_SECRET_KEY = 'sk_test_stripe';
-      process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
-      process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
-      process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
-      process.env.ENCRYPTION_MASTER_KEY = 'a'.repeat(64);
+      stubAllRequired();
+      vi.stubEnv('CLERK_SECRET_KEY', 'sk_test_xxx');
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_stripe');
 
       const { validateEnvironment } = await import('../validateEnv');
       const result = validateEnvironment();
@@ -199,15 +167,8 @@ describe('validateEnv', () => {
     });
 
     it('accepts pk_live_ and sk_live_ keys in production', async () => {
-      (process.env as Record<string, string>).NODE_ENV = 'production';
-      process.env.DATABASE_URL = 'postgresql://test';
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
-      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
-      process.env.STRIPE_SECRET_KEY = 'sk_test_stripe';
-      process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
-      process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
-      process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
-      process.env.ENCRYPTION_MASTER_KEY = 'a'.repeat(64);
+      stubAllRequired();
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_stripe');
 
       const { validateEnvironment } = await import('../validateEnv');
       const result = validateEnvironment();
@@ -219,13 +180,13 @@ describe('validateEnv', () => {
 
   describe('getOptionalEnv', () => {
     it('returns the env value when set', async () => {
-      process.env.NEXT_PUBLIC_APP_URL = 'https://spawnforge.ai';
+      vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://spawnforge.ai');
       const { getOptionalEnv } = await import('../validateEnv');
       expect(getOptionalEnv('NEXT_PUBLIC_APP_URL')).toBe('https://spawnforge.ai');
     });
 
     it('returns the configured default when env var is not set', async () => {
-      delete process.env.NEXT_PUBLIC_APP_URL;
+      vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
       const { getOptionalEnv } = await import('../validateEnv');
       expect(getOptionalEnv('NEXT_PUBLIC_APP_URL')).toBe('http://localhost:3000');
     });
@@ -236,7 +197,7 @@ describe('validateEnv', () => {
     });
 
     it('returns empty string default for optional vars with empty default', async () => {
-      delete process.env.NEXT_PUBLIC_ENGINE_CDN_URL;
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', '');
       const { getOptionalEnv } = await import('../validateEnv');
       expect(getOptionalEnv('NEXT_PUBLIC_ENGINE_CDN_URL')).toBe('');
     });

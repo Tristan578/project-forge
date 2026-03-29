@@ -48,7 +48,7 @@ describe('escapeScriptContent', () => {
   });
 
   it('escapes <!-- to prevent HTML comment interpretation', () => {
-    expect(escapeScriptContent('<!-- comment -->')).toBe('<\\!-- comment -->');
+    expect(escapeScriptContent('<!-- comment -->')).toBe('\\x3C!-- comment -->');
   });
 
   it('handles nested </script> sequences', () => {
@@ -69,7 +69,7 @@ describe('escapeScriptContent', () => {
     const result = escapeScriptContent(input);
     expect(result).not.toContain('<!--');
     expect(result).not.toContain('</script>');
-    expect(result.match(/<\\!--/g)?.length).toBe(2);
+    expect(result.match(/\\x3C!--/g)?.length).toBe(2);
     expect(result.match(/<\\\/script/g)?.length).toBe(2);
   });
 
@@ -93,6 +93,10 @@ describe('validateCssColor', () => {
   describe('valid hex colors', () => {
     it('accepts 3-digit hex', () => {
       expect(validateCssColor('#abc')).toBe('#abc');
+    });
+
+    it('accepts 4-digit hex (CSS4 #rgba shorthand)', () => {
+      expect(validateCssColor('#f00a')).toBe('#f00a');
     });
 
     it('accepts 6-digit hex', () => {

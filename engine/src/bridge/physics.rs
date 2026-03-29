@@ -91,8 +91,11 @@ pub(super) fn apply_debug_physics_toggle(
     mut pending: ResMut<PendingCommands>,
     mut debug_enabled: ResMut<DebugPhysicsEnabled>,
 ) {
-    for _ in pending.debug_physics_toggles.drain(..) {
-        debug_enabled.0 = !debug_enabled.0;
+    for req in pending.debug_physics_toggles.drain(..) {
+        debug_enabled.0 = match req.enabled {
+            Some(state) => state,
+            None => !debug_enabled.0,
+        };
         events::emit_debug_physics_changed(debug_enabled.0);
         tracing::info!("Debug physics rendering: {}", debug_enabled.0);
     }

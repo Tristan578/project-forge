@@ -57,12 +57,12 @@ describe('MobileToolbar', () => {
 
   it('renders Scene Hierarchy toggle button', () => {
     render(<MobileToolbar onToggleLeft={mockOnToggleLeft} onToggleRight={mockOnToggleRight} />);
-    expect(screen.getByTitle('Scene Hierarchy')).toBeDefined();
+    expect(screen.getByTitle('Scene Hierarchy')).toBeInTheDocument();
   });
 
   it('renders Inspector toggle button', () => {
     render(<MobileToolbar onToggleLeft={mockOnToggleLeft} onToggleRight={mockOnToggleRight} />);
-    expect(screen.getByTitle('Inspector')).toBeDefined();
+    expect(screen.getByTitle('Inspector')).toBeInTheDocument();
   });
 
   it('calls onToggleLeft when left panel button clicked', () => {
@@ -79,17 +79,17 @@ describe('MobileToolbar', () => {
 
   it('renders Move gizmo button', () => {
     render(<MobileToolbar onToggleLeft={mockOnToggleLeft} onToggleRight={mockOnToggleRight} />);
-    expect(screen.getByTitle('Move')).toBeDefined();
+    expect(screen.getByTitle('Move')).toBeInTheDocument();
   });
 
   it('renders Rotate gizmo button', () => {
     render(<MobileToolbar onToggleLeft={mockOnToggleLeft} onToggleRight={mockOnToggleRight} />);
-    expect(screen.getByTitle('Rotate')).toBeDefined();
+    expect(screen.getByTitle('Rotate')).toBeInTheDocument();
   });
 
   it('renders Scale gizmo button', () => {
     render(<MobileToolbar onToggleLeft={mockOnToggleLeft} onToggleRight={mockOnToggleRight} />);
-    expect(screen.getByTitle('Scale')).toBeDefined();
+    expect(screen.getByTitle('Scale')).toBeInTheDocument();
   });
 
   it('calls setGizmoMode when Rotate clicked', () => {
@@ -106,7 +106,7 @@ describe('MobileToolbar', () => {
 
   it('renders AddEntityMenu', () => {
     render(<MobileToolbar onToggleLeft={mockOnToggleLeft} onToggleRight={mockOnToggleRight} />);
-    expect(screen.getByTestId('add-entity-menu')).toBeDefined();
+    expect(screen.getByTestId('add-entity-menu')).toBeInTheDocument();
   });
 
   it('calls spawnEntity when AddEntityMenu triggers spawn', () => {

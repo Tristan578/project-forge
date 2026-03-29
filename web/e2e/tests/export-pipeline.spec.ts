@@ -153,7 +153,7 @@ test.describe('Export Pipeline @engine', () => {
 
 
     // Dialog should be closed
-    const dialog = page.locator('[class*="fixed"]').filter({ hasText: /export.*game/i });
+    const dialog = page.locator('[data-testid="export-dialog"]');
     const visible = await dialog.isVisible().catch(() => false);
     expect(visible).toBe(false);
   });
