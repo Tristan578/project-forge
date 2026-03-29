@@ -7,7 +7,7 @@ import { Settings, Plus } from 'lucide-react';
 import { ProjectCard } from './ProjectCard';
 import { NewProjectDialog } from './NewProjectDialog';
 
-interface Project {
+export interface Project {
   id: string;
   name: string;
   thumbnail: string | null;
@@ -15,10 +15,15 @@ interface Project {
   updatedAt: string;
 }
 
-export function DashboardLayout() {
+interface DashboardLayoutProps {
+  /** Server-prefetched projects. When provided, skips the initial client fetch. */
+  initialProjects?: Project[];
+}
+
+export function DashboardLayout({ initialProjects }: DashboardLayoutProps = {}) {
   const router = useRouter();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState<Project[]>(initialProjects ?? []);
+  const [loading, setLoading] = useState(initialProjects === undefined);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [showNewDialog, setShowNewDialog] = useState(false);
   // Settings page is at /settings (full page, not modal)
@@ -44,8 +49,12 @@ export function DashboardLayout() {
     }
   }, [router]);
 
+  // Only fetch on mount if the server did not pre-populate the list.
   useEffect(() => {
+    if (initialProjects !== undefined) return;
     fetchProjects();
+  // initialProjects is a stable server prop — omitting from deps is intentional.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchProjects]);
 
   const handleCreate = async (name: string): Promise<string | null> => {
