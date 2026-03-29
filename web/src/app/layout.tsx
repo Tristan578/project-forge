@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Suspense } from "react";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { SpeedInsights } from "@vercel/speed-insights/next";
@@ -105,7 +106,7 @@ export default async function RootLayout({
         dangerouslySetInnerHTML={{ __html: jsonLdString }}
       />
       <NextIntlClientProvider locale={defaultLocale} messages={messages}>
-        {children}
+        <Suspense>{children}</Suspense>
       </NextIntlClientProvider>
       <AnalyticsProvider />
       <SpeedInsights />
