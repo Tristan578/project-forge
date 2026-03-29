@@ -47,6 +47,7 @@ export interface WorkspaceState {
 }
 
 function loadCustomPresets(): CustomPreset[] {
+  if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(CUSTOM_PRESETS_KEY);
     if (raw) return JSON.parse(raw) as CustomPreset[];
@@ -58,10 +59,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   api: null,
   activePreset: 'default',
   chatOverlayOpen: false,
-  customPresets: typeof localStorage !== 'undefined' ? loadCustomPresets() : [],
+  // Always start with [] so server and client initial renders match (fix #7615).
+  // customPresets are loaded lazily from localStorage once the dockview API
+  // mounts client-side (in setApi), avoiding SSR hydration mismatch.
+  customPresets: [],
   docsPath: null,
 
-  setApi: (api) => set({ api }),
+  setApi: (api) => {
+    // Load persisted custom presets now that we are definitely client-side.
+    set({ api, customPresets: loadCustomPresets() });
+  },
 
   applyPreset: (presetId) => {
     const { api } = get();
