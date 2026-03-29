@@ -98,7 +98,7 @@ All three contributors see the same board on GitHub regardless of which AI tool 
 
 | Feature | Config | Purpose |
 |---------|--------|---------|
-| Subresource Integrity | `experimental.sri = { algorithm: 'sha256' }` | sha256 integrity hashes injected into `<script>` tags to prevent unauthorized script injection |
+| ~~Subresource Integrity~~ | **REMOVED** (2026-03-29) | Vercel CDN post-processes chunks after build, invalidating build-time sha256 hashes. Caused blank pages on `/sign-in`. CSP `script-src 'self'` + allowlist is the compensating control. See CLAUDE.md gotchas. |
 
 ### WASM Worker Loading
 

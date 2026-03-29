@@ -38,6 +38,35 @@ test.describe('Production Smoke Tests @smoke @production', () => {
     expect(res.status()).toBe(200);
   });
 
+  /**
+   * Regression test for SRI blank-page bug (PR #7985).
+   * Vercel CDN post-processes JS chunks, invalidating build-time sha256 hashes.
+   * This caused /sign-in to render blank because all client JS was blocked.
+   * Uses a real browser (not request.get) to catch SRI integrity failures.
+   */
+  test('sign-in page renders content (not blank)', async ({ page }) => {
+    const integrityErrors: string[] = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'error' && msg.text().match(/integrity|Failed to find a valid digest/i)) {
+        integrityErrors.push(msg.text());
+      }
+    });
+    page.on('pageerror', (err) => {
+      if (err.message.match(/integrity|digest/i)) {
+        integrityErrors.push(err.message);
+      }
+    });
+
+    await page.goto(`${PROD_URL}/sign-in`, { waitUntil: 'networkidle' });
+
+    // Page must not be blank — body must have visible content
+    const bodyText = await page.evaluate(() => document.body.innerText.trim());
+    expect(bodyText.length).toBeGreaterThan(0);
+
+    // No SRI integrity mismatch errors in console
+    expect(integrityErrors).toEqual([]);
+  });
+
   test('community page loads', async ({ request }) => {
     const res = await request.get(`${PROD_URL}/community`);
     expect(res.status()).toBe(200);

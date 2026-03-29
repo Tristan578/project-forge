@@ -50,9 +50,12 @@ const nextConfig: NextConfig = {
     browserToTerminal: true,
   },
   experimental: {
-    // Subresource Integrity: inject sha256 integrity hashes into <script> tags
-    // to prevent injection of unauthorized scripts in production.
-    sri: { algorithm: 'sha256' },
+    // SRI removed (2026-03-29): Vercel's CDN post-processes JS chunks after
+    // build (edge compression, immutable cache rewriting), invalidating the
+    // build-time sha256 hashes. Every script fails browser integrity checks,
+    // producing a blank page on routes requiring client JS (e.g. /sign-in).
+    // Compensating control: strict CSP script-src 'self' + named allowlist.
+    // Revisit if Vercel adds SRI-compatible delivery mode.
     // Inline prefetch payloads into the page HTML to reduce waterfall requests
     // on navigation, improving LCP for App Router navigations (16.2+).
     prefetchInlining: true,
