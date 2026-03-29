@@ -16,7 +16,16 @@
   ],
   "headers": [
     {
-      "source": "/engine-pkg-webgl2/(.*)",
+      "source": "/engine-pkg-webgl2/(.*\\.wasm)",
+      "headers": [
+        { "key": "Content-Type", "value": "application/wasm" },
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" },
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
+      ]
+    },
+    {
+      "source": "/engine-pkg-webgl2/(.*\\.js)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" },
         { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
@@ -24,7 +33,50 @@
       ]
     },
     {
-      "source": "/engine-pkg-webgpu/(.*)",
+      "source": "/engine-pkg-webgpu/(.*\\.wasm)",
+      "headers": [
+        { "key": "Content-Type", "value": "application/wasm" },
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" },
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
+      ]
+    },
+    {
+      "source": "/engine-pkg-webgpu/(.*\\.js)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" },
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
+      ]
+    },
+    {
+      "source": "/engine-pkg-webgl2-runtime/(.*\\.wasm)",
+      "headers": [
+        { "key": "Content-Type", "value": "application/wasm" },
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" },
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
+      ]
+    },
+    {
+      "source": "/engine-pkg-webgl2-runtime/(.*\\.js)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" },
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
+      ]
+    },
+    {
+      "source": "/engine-pkg-webgpu-runtime/(.*\\.wasm)",
+      "headers": [
+        { "key": "Content-Type", "value": "application/wasm" },
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" },
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
+      ]
+    },
+    {
+      "source": "/engine-pkg-webgpu-runtime/(.*\\.js)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" },
         { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
