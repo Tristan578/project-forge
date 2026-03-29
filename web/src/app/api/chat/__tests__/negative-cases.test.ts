@@ -136,7 +136,7 @@ function makeRawRequest(rawBody: string): NextRequest {
   });
 }
 
-async function* makeStreamEvents() {
+async function* _makeStreamEvents() {
   yield { type: 'message_start' as const, message: { usage: { input_tokens: 10 } } };
   yield { type: 'message_stop' as const };
 }
