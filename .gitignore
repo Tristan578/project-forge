@@ -130,3 +130,4 @@ autoforge/node_modules/
 
 # Generated MCP command pages (regenerated on every build)
 apps/docs/content/mcp/*.mdx
+.vercel
