@@ -64,13 +64,45 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
 
-const mockCreate = vi.fn();
+// Keep @anthropic-ai/sdk mock for modules that still import it indirectly
 vi.mock('@anthropic-ai/sdk', () => {
   class MockAnthropic {
-    messages = { create: mockCreate };
+    messages = { create: vi.fn() };
   }
   return { default: MockAnthropic };
 });
+
+// Mock AI SDK streamText — route.ts calls streamText().toUIMessageStreamResponse()
+// Use importOriginal to preserve 'tool' and other exports used by toolAdapter.ts
+vi.mock('ai', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('ai')>();
+  return {
+    ...actual,
+    streamText: vi.fn().mockReturnValue({
+      toUIMessageStreamResponse: vi.fn().mockReturnValue(
+        new Response('f:{"messageId":"msg-1"}\n0:"Hello"\n', {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+          },
+        }),
+      ),
+    }),
+    stepCountIs: vi.fn().mockReturnValue(() => false),
+  };
+});
+
+vi.mock('@ai-sdk/gateway', () => ({
+  gateway: vi.fn().mockReturnValue({ provider: 'gateway' }),
+}));
+vi.mock('@ai-sdk/anthropic', () => ({
+  anthropic: vi.fn().mockReturnValue({ provider: 'anthropic' }),
+}));
+
+vi.mock('@/lib/costs/costLogger', () => ({
+  logCost: vi.fn().mockResolvedValue('log-id-1'),
+}));
 
 // ---------------------------------------------------------------------------
 // Imports (after mocks)
@@ -80,6 +112,7 @@ import { rateLimit } from '@/lib/rateLimit';
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { validateBodySize, detectPromptInjection } from '@/lib/chat/sanitizer';
 import { refundTokens } from '@/lib/tokens/service';
+import { streamText } from 'ai';
 // captureException mock kept in vi.mock above for module resolution;
 // import removed because the tests that used it were deleted (CI-flaky).
 
@@ -143,7 +176,22 @@ describe('POST /api/chat — negative cases', () => {
       metered: true,
       usageId: 'usage-neg',
     } as Awaited<ReturnType<typeof resolveApiKey>>);
-    mockCreate.mockImplementation(() => makeStreamEvents());
+
+    // Re-setup streamText after vi.clearAllMocks() wipes the module-level mock
+    vi.mocked(streamText).mockReturnValue({
+      toUIMessageStreamResponse: vi.fn().mockReturnValue(
+        new Response('f:{"messageId":"msg-1"}\n0:"Hello"\n', {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+          },
+        }),
+      ),
+    } as unknown as ReturnType<typeof streamText>);
+
+    // Default: refundTokens returns a Promise (vi.clearAllMocks wipes mockResolvedValue)
+    vi.mocked(refundTokens).mockResolvedValue({ refunded: true });
 
     const mod = await import('../route');
     POST = mod.POST;
@@ -213,7 +261,7 @@ describe('POST /api/chat — negative cases', () => {
 
       const res = await POST(makeRequest({
         messages,
-        model: 'claude-sonnet-4-5-20250929',
+        model: 'claude-sonnet-4.5-20250929',
         sceneContext: '',
       }));
       expect(res.status).toBe(413);
@@ -230,7 +278,7 @@ describe('POST /api/chat — negative cases', () => {
 
       const res = await POST(makeRequest({
         messages,
-        model: 'claude-sonnet-4-5-20250929',
+        model: 'claude-sonnet-4.5-20250929',
         sceneContext: '',
       }));
       expect(res.status).toBe(413);
@@ -335,11 +383,22 @@ describe('POST /api/chat — negative cases', () => {
     it('returns 200 SSE stream even when API call will fail (error is inside stream)', async () => {
       // The route always returns a 200 SSE stream; errors are sent as SSE
       // events inside the stream rather than HTTP error codes.
-      mockCreate.mockRejectedValue(new Error('API overloaded'));
+      // streamText itself succeeds — errors surface inside the stream body.
+      vi.mocked(streamText).mockReturnValue({
+        toUIMessageStreamResponse: vi.fn().mockReturnValue(
+          new Response('f:{"messageId":"msg-err"}\n3:"API overloaded"\n', {
+            status: 200,
+            headers: {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+            },
+          }),
+        ),
+      } as unknown as ReturnType<typeof streamText>);
 
       const res = await POST(makeRequest({
         messages: [{ role: 'user', content: 'test' }],
-        model: 'test',
+        model: 'claude-sonnet-4.6',
         sceneContext: '',
       }));
       // HTTP status is always 200 for streaming
@@ -363,14 +422,22 @@ describe('POST /api/chat — negative cases', () => {
         usageId: undefined,
       } as unknown as Awaited<ReturnType<typeof resolveApiKey>>);
 
-      async function* throwingStream() {
-        throw new Error('fail');
-      }
-      mockCreate.mockImplementation(() => throwingStream());
+      // BYOK path: streamText returns a normal stream (no usageId to refund)
+      vi.mocked(streamText).mockReturnValue({
+        toUIMessageStreamResponse: vi.fn().mockReturnValue(
+          new Response('f:{"messageId":"msg-byok"}\n0:"done"\n', {
+            status: 200,
+            headers: {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+            },
+          }),
+        ),
+      } as unknown as ReturnType<typeof streamText>);
 
       const res = await POST(makeRequest({
         messages: [{ role: 'user', content: 'test' }],
-        model: 'test',
+        model: 'claude-sonnet-4.6',
         sceneContext: '',
       }));
       await res.text();
