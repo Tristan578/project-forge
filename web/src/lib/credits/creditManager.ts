@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import { getDb } from '../db/client';
+import { getDb, getNeonSql } from '../db/client';
 import { users, creditTransactions } from '../db/schema';
 import { TIER_MONTHLY_TOKENS } from '../tokens/pricing';
 
@@ -26,7 +26,12 @@ export async function getBalance(userId: string): Promise<CreditBalance> {
 }
 
 /**
- * Deduct credits using waterfall: monthly → purchased → earned.
+ * Deduct credits using an atomic SQL UPDATE with waterfall: monthly → purchased → earned.
+ *
+ * Uses a single UPDATE...WHERE...RETURNING to atomically check balance and apply
+ * the deduction. If no rows are returned the balance was insufficient — concurrent
+ * requests cannot both pass the balance check (fixes #8023 TOCTOU race condition).
+ *
  * Records a credit transaction for audit.
  */
 export async function deductCredits(
@@ -38,52 +43,92 @@ export async function deductCredits(
     return { success: true, balance: await getBalance(userId) };
   }
 
+  const neonSql = getNeonSql();
+
+  // Atomic waterfall deduction via a single UPDATE...RETURNING.
+  //
+  // The WHERE clause includes the balance check so concurrent requests cannot
+  // both pass: only one UPDATE succeeds when balance is at the limit.
+  //
+  // Waterfall logic (all in SQL):
+  //   1. Deduct from monthly first (monthly_tokens - monthly_tokens_used)
+  //   2. Then from addon_tokens
+  //   3. Then from earned_credits
+  //
+  // The LEAST/GREATEST expressions compute each pool's contribution safely.
+  const rows = await neonSql`
+    UPDATE users
+    SET
+      monthly_tokens_used = monthly_tokens_used
+        + LEAST(
+            ${amount},
+            GREATEST(0, monthly_tokens - monthly_tokens_used)
+          ),
+      addon_tokens = addon_tokens
+        - LEAST(
+            GREATEST(0, ${amount} - GREATEST(0, monthly_tokens - monthly_tokens_used)),
+            addon_tokens
+          ),
+      earned_credits = earned_credits
+        - LEAST(
+            GREATEST(0,
+              ${amount}
+              - GREATEST(0, monthly_tokens - monthly_tokens_used)
+              - addon_tokens
+            ),
+            earned_credits
+          ),
+      updated_at = NOW()
+    WHERE
+      id = ${userId}
+      AND GREATEST(0, monthly_tokens - monthly_tokens_used)
+            + addon_tokens
+            + earned_credits >= ${amount}
+    RETURNING
+      id,
+      monthly_tokens,
+      monthly_tokens_used,
+      addon_tokens,
+      earned_credits
+  `;
+
+  if (rows.length === 0) {
+    // Either user not found or insufficient balance.
+    // Check which it is so we can give a correct response.
+    const db = getDb();
+    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!user) throw new Error(`User not found: ${userId}`);
+
+    const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
+    const totalAvailable = monthlyRemaining + user.addonTokens + user.earnedCredits;
+    return {
+      success: false,
+      balance: {
+        monthly: monthlyRemaining,
+        purchased: user.addonTokens,
+        earned: user.earnedCredits,
+        total: totalAvailable,
+      },
+    };
+  }
+
+  const updated = rows[0] as {
+    monthly_tokens: number;
+    monthly_tokens_used: number;
+    addon_tokens: number;
+    earned_credits: number;
+  };
+
+  const monthlyRemaining = Math.max(0, updated.monthly_tokens - updated.monthly_tokens_used);
+  const balance: CreditBalance = {
+    monthly: monthlyRemaining,
+    purchased: updated.addon_tokens,
+    earned: updated.earned_credits,
+    total: monthlyRemaining + updated.addon_tokens + updated.earned_credits,
+  };
+
+  // Audit trail — separate insert after the atomic deduction
   const db = getDb();
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-  if (!user) throw new Error(`User not found: ${userId}`);
-
-  const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
-  const totalAvailable = monthlyRemaining + user.addonTokens + user.earnedCredits;
-
-  if (totalAvailable < amount) {
-    return { success: false, balance: { monthly: monthlyRemaining, purchased: user.addonTokens, earned: user.earnedCredits, total: totalAvailable } };
-  }
-
-  // Waterfall deduction
-  let remaining = amount;
-  let monthlyDeduct = 0;
-  let addonDeduct = 0;
-  let earnedDeduct = 0;
-
-  // 1. Monthly first
-  if (remaining > 0 && monthlyRemaining > 0) {
-    monthlyDeduct = Math.min(remaining, monthlyRemaining);
-    remaining -= monthlyDeduct;
-  }
-  // 2. Purchased second
-  if (remaining > 0 && user.addonTokens > 0) {
-    addonDeduct = Math.min(remaining, user.addonTokens);
-    remaining -= addonDeduct;
-  }
-  // 3. Earned last
-  if (remaining > 0 && user.earnedCredits > 0) {
-    earnedDeduct = Math.min(remaining, user.earnedCredits);
-    remaining -= earnedDeduct;
-  }
-
-  await db
-    .update(users)
-    .set({
-      monthlyTokensUsed: sql`${users.monthlyTokensUsed} + ${monthlyDeduct}`,
-      addonTokens: sql`${users.addonTokens} - ${addonDeduct}`,
-      earnedCredits: sql`${users.earnedCredits} - ${earnedDeduct}`,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
-
-  const balance = await getBalance(userId);
-
-  // Audit trail
   await db.insert(creditTransactions).values({
     userId,
     transactionType: 'deduction',
