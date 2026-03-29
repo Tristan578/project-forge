@@ -134,7 +134,9 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
     .filter((c) => !c.available)
     .map((c) => c.capability);
 
-  return NextResponse.json({ capabilities, available, unavailable });
+  const response = NextResponse.json({ capabilities, available, unavailable });
+  response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
+  return response;
 }
 
 export const dynamic = 'force-dynamic';

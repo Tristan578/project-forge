@@ -74,7 +74,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json(cachedReport.body, {
       status: cachedReport.httpStatus,
       headers: {
-        'Cache-Control': 'public, max-age=30',
+        'Cache-Control': 'public, max-age=60, s-maxage=300',
         'X-Cache': 'HIT',
       },
     });
@@ -134,7 +134,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   return NextResponse.json(body, {
       status: httpStatus,
       headers: {
-        'Cache-Control': 'public, max-age=30',
+        'Cache-Control': 'public, max-age=60, s-maxage=300',
         'X-Cache': 'MISS',
       },
     });
