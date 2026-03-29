@@ -1,3 +1,11 @@
+/**
+ * POST /api/auth/webhook — Clerk webhook handler (svix signature verification).
+ *
+ * Processes user.created, user.updated, and user.deleted events.
+ * On user.created/updated, upserts the user row in the database.
+ * On user.deleted, removes user data and cancels any active subscriptions.
+ */
+
 import { Webhook } from 'svix';
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';

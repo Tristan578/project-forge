@@ -1,3 +1,12 @@
+/**
+ * POST /api/stripe/webhook — Stripe webhook handler.
+ *
+ * Verifies Stripe signature, processes subscription lifecycle events
+ * (checkout completed, subscription updated/deleted, invoice paid/failed),
+ * and syncs billing state to the database. Uses event-level idempotency
+ * via claimEvent() — safe to replay on webhook redelivery.
+ */
+
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { eq } from 'drizzle-orm';

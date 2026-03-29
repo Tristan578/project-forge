@@ -1,3 +1,8 @@
+/**
+ * POST /api/generate/sprite — generate a sprite image via DALL-E or SDXL.
+ * Returns a data URL and `usageId` for client-side refund on failure.
+ */
+
 export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 
 import { NextRequest, NextResponse } from 'next/server';
