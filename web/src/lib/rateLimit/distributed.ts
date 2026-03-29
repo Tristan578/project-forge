@@ -5,13 +5,14 @@
  * Falls back to in-memory limiting if Upstash is not configured.
  */
 
-import { rateLimit } from '../rateLimit';
+import { rateLimit, type RateLimitResult } from '../rateLimit';
 
-export interface DistributedRateLimitResult {
-  allowed: boolean;
-  remaining: number;
-  resetAt: number;
-}
+/**
+ * Alias of the canonical RateLimitResult from rateLimit.ts.
+ * Both in-memory and distributed rate limiters return this shape,
+ * so callers can use either interchangeably (PF-39).
+ */
+export type DistributedRateLimitResult = RateLimitResult;
 
 /**
  * Check whether the Upstash Redis environment is configured.
