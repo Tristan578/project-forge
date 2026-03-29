@@ -166,7 +166,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const assets = api.getPanel('asset-browser');
 
     // Right-side panels go with inspector
-    if (['scene-settings', 'ui-builder', 'effect-bindings', 'review'].includes(panelId) && inspector) {
+    if (['scene-settings', 'ui-builder', 'effect-bindings', 'review', 'auto-iteration'].includes(panelId) && inspector) {
       api.addPanel({
         id: panelId,
         component: def.component,
