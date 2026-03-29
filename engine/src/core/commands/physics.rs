@@ -428,8 +428,15 @@ fn handle_update_joint(payload: serde_json::Value) -> super::CommandResult {
         if motor_val.is_null() {
             Some(None) // Explicit null = clear motor
         } else if let Some(obj) = motor_val.as_object() {
-            let target_velocity = obj.get("targetVelocity").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-            let max_force = obj.get("maxForce").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            // Both fields required — a motor with max_force=0 can't apply force (silent failure)
+            let target_velocity = match obj.get("targetVelocity").and_then(|v| v.as_f64()) {
+                Some(v) => v as f32,
+                None => return Err("Motor requires targetVelocity".into()),
+            };
+            let max_force = match obj.get("maxForce").and_then(|v| v.as_f64()) {
+                Some(v) => v as f32,
+                None => return Err("Motor requires maxForce".into()),
+            };
             if !target_velocity.is_finite() || !max_force.is_finite() {
                 return Err("Motor values must be finite".into());
             }
