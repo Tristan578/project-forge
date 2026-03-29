@@ -44,6 +44,42 @@ export async function POST(request: NextRequest) {
 
   const { text, voiceId, stability, similarityBoost } = body;
 
+  // Validate voiceId: alphanumeric with optional hyphens/underscores, 1–64 chars
+  if (voiceId !== undefined) {
+    if (typeof voiceId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(voiceId)) {
+      return NextResponse.json(
+        { error: 'voiceId must be an alphanumeric string up to 64 characters' },
+        { status: 422 }
+      );
+    }
+  }
+
+  // Validate numeric voice params: stability and similarityBoost must be 0.0–1.0
+  if (stability !== undefined) {
+    if (typeof stability !== 'number' || !Number.isFinite(stability) || stability < 0 || stability > 1) {
+      return NextResponse.json(
+        { error: 'stability must be a number between 0.0 and 1.0' },
+        { status: 422 }
+      );
+    }
+  }
+  if (similarityBoost !== undefined) {
+    if (typeof similarityBoost !== 'number' || !Number.isFinite(similarityBoost) || similarityBoost < 0 || similarityBoost > 1) {
+      return NextResponse.json(
+        { error: 'similarityBoost must be a number between 0.0 and 1.0' },
+        { status: 422 }
+      );
+    }
+  }
+  if (body.style !== undefined) {
+    if (typeof body.style !== 'number' || !Number.isFinite(body.style) || body.style < 0 || body.style > 1) {
+      return NextResponse.json(
+        { error: 'style must be a number between 0.0 and 1.0' },
+        { status: 422 }
+      );
+    }
+  }
+
   // Map voice style strings to ElevenLabs numeric style values (0.0–1.0)
   const voiceStyleMap: Record<string, number> = {
     neutral: 0,
