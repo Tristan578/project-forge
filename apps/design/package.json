@@ -18,6 +18,8 @@
     "@storybook/addon-a11y": "^8.6",
     "@storybook/addon-essentials": "^8.6",
     "@storybook/test": "^8.6",
-    "chromatic": "^11"
+    "@vitejs/plugin-react": "^4",
+    "chromatic": "^11",
+    "vite": "^6"
   }
 }
