@@ -13,8 +13,8 @@ import {
 import type { RigType, RigTemplate, BoneDefinition } from '@/lib/ai/autoRigging';
 
 const RIG_TYPE_LABELS: Record<RigType, string> = {
-  humanoid: 'Humanoid (22 bones)',
-  quadruped: 'Quadruped (18 bones)',
+  humanoid: 'Humanoid (23 bones)',
+  quadruped: 'Quadruped (19 bones)',
   bird: 'Bird (14 bones)',
   fish: 'Fish (8 bones)',
   serpent: 'Serpent (12 bones)',
