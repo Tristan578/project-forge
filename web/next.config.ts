@@ -50,9 +50,16 @@ const nextConfig: NextConfig = {
     browserToTerminal: true,
   },
   experimental: {
-    // Subresource Integrity: inject sha256 integrity hashes into <script> tags
-    // to prevent injection of unauthorized scripts in production.
-    sri: { algorithm: 'sha256' },
+    // NOTE: experimental.sri was removed (2026-03-29, P0 fix).
+    // Next.js SRI embeds sha256 hashes in HTML at build time, but Vercel's CDN
+    // post-processes chunks after the build (edge compression, immutable caching)
+    // in ways that alter the byte content without updating the embedded hash.
+    // The result: every _next/static/chunks/*.js resource fails the browser's
+    // integrity check and is blocked, producing a completely blank white page on
+    // all routes that need client-side JS (sign-in, editor, etc.).
+    // The CSP already restricts script-src to 'self' + explicit allowlist which
+    // provides the core security guarantee without SRI's hash-pinning brittleness.
+    //
     // Inline prefetch payloads into the page HTML to reduce waterfall requests
     // on navigation, improving LCP for App Router navigations (16.2+).
     prefetchInlining: true,
