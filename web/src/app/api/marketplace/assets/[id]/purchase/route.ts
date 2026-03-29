@@ -65,10 +65,11 @@ export async function POST(
         license: asset.license,
       });
 
-      // Increment download count
+      // Increment download count atomically to avoid lost updates under
+      // concurrent free-asset purchases (PF-111).
       await db
         .update(marketplaceAssets)
-        .set({ downloadCount: asset.downloadCount + 1 })
+        .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
         .where(eq(marketplaceAssets.id, assetId));
 
       return NextResponse.json({ success: true, downloadUrl: asset.assetFileUrl });

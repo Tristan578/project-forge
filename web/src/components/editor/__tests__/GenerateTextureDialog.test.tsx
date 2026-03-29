@@ -20,6 +20,7 @@ vi.mock('@/stores/editorStore', () => ({
 vi.mock('lucide-react', () => ({
   X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
   Sparkles: (props: Record<string, unknown>) => <span data-testid="sparkles-icon" {...props} />,
+  Loader2: (props: Record<string, unknown>) => <span data-testid="loader-icon" {...props} />,
 }));
 
 describe('GenerateTextureDialog', () => {
@@ -118,5 +119,29 @@ describe('GenerateTextureDialog', () => {
     render(<GenerateTextureDialog isOpen={true} onClose={mockOnClose} entityId="entity-1" />);
     expect(screen.getByText(/Apply to:/)).toBeInTheDocument();
     expect(screen.getByText('Cube')).toBeInTheDocument();
+  });
+
+  it('shows Submitting spinner and aria-busy on submit button while fetch is pending (PF-176 loading states)', async () => {
+    // Freeze fetch so the submitting state is held open
+    let resolveFetch!: () => void;
+    const pendingFetch = new Promise<Response>((resolve) => {
+      resolveFetch = () => resolve(new Response(JSON.stringify({ jobId: 'j1' }), { status: 200 }));
+    });
+    vi.spyOn(globalThis, 'fetch').mockReturnValueOnce(pendingFetch);
+
+    render(<GenerateTextureDialog isOpen={true} onClose={mockOnClose} entityId="entity-1" />);
+    const textarea = screen.getByPlaceholderText('Weathered red brick wall with moss');
+    fireEvent.change(textarea, { target: { value: 'Rocky cliff face texture' } });
+    const generateBtn = screen.getByRole('button', { name: /generate/i });
+    fireEvent.click(generateBtn);
+
+    // While in-flight the spinner icon must be visible and the button aria-busy
+    expect(screen.getByTestId('loader-icon')).toBeInTheDocument();
+    const submitBtn = screen.getByRole('button', { name: /submitting/i });
+    expect(submitBtn.getAttribute('aria-busy')).toBe('true');
+
+    // Resolve to avoid open handles
+    resolveFetch();
+    vi.restoreAllMocks();
   });
 });

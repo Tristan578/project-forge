@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useGenerationHistoryStore, type HistoryEntry } from '../generationHistoryStore';
 
+let _idCounter = 0;
 function makeEntry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
-    id: `test-${Math.random().toString(36).slice(2, 8)}`,
+    id: `test-entry-${++_idCounter}`,
     type: 'model',
     prompt: 'a treasure chest',
     provider: 'meshy',
@@ -15,6 +16,8 @@ function makeEntry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
 
 describe('generationHistoryStore', () => {
   beforeEach(() => {
+    // Reset deterministic ID counter so each test starts from a clean sequence
+    _idCounter = 0;
     // Reset store and localStorage between tests
     useGenerationHistoryStore.setState({
       entries: [],

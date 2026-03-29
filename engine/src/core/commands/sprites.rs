@@ -259,7 +259,7 @@ fn handle_add_bone2d(payload: serde_json::Value) -> super::CommandResult {
     let bone = crate::core::skeleton2d::Bone2dDef {
         name: bone_name,
         parent_bone,
-        local_position: [position_x, position_y],
+        local_position: [position_x, position_y, 0.0],
         local_rotation: rotation,
         local_scale: [1.0, 1.0],
         length,
@@ -313,7 +313,10 @@ fn handle_update_bone2d(payload: serde_json::Value) -> super::CommandResult {
         payload.get("positionX").and_then(|v| v.as_f64()),
         payload.get("positionY").and_then(|v| v.as_f64()),
     ) {
-        (Some(x), Some(y)) => Some([x as f32, y as f32]),
+        (Some(x), Some(y)) => {
+            let z = payload.get("positionZ").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            Some([x as f32, y as f32, z])
+        },
         _ => None,
     };
 

@@ -98,9 +98,29 @@
             "timeout": 3000
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/check-vercel-json.sh\"",
+            "timeout": 3000
+          }
+        ]
       }
     ],
     "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/auto-lockfile-sync.sh\"",
+            "timeout": 30000
+          }
+        ]
+      },
       {
         "matcher": "Edit|Write",
         "hooks": [

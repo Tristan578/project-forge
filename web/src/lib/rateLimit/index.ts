@@ -15,6 +15,7 @@ export {
   rateLimitAdminRoute,
   getClientIp,
 } from '../rateLimit';
+export type { RateLimitResult } from '../rateLimit';
 
 export { distributedRateLimit } from './distributed';
 export type { DistributedRateLimitResult } from './distributed';
