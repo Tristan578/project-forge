@@ -518,14 +518,13 @@ jobs:
 
       - name: Collect baseline Lighthouse runs (effects off)
         env:
-          CHROME_PATH: /usr/bin/google-chrome
+          PUPPETEER_CACHE_DIR: /home/runner/.cache/puppeteer
         run: |
           lhci collect \
             --url=http://localhost:3000 \
             --number-of-runs=3 \
             --output=json \
             --output-path=.lhci-baseline/ \
-            --chromePath=/usr/bin/google-chrome \
             --chrome-flags="--headless --no-sandbox --disable-gpu"
 
       - name: Stop baseline server
@@ -554,14 +553,13 @@ jobs:
 
       - name: Collect effects-on Lighthouse runs
         env:
-          CHROME_PATH: /usr/bin/google-chrome
+          PUPPETEER_CACHE_DIR: /home/runner/.cache/puppeteer
         run: |
           lhci collect \
             --url=http://localhost:3001/dev \
             --number-of-runs=3 \
             --output=json \
             --output-path=.lhci-effects/ \
-            --chromePath=/usr/bin/google-chrome \
             --chrome-flags="--headless --no-sandbox --disable-gpu"
 
       - name: Assert effects delta less than 5 performance points
