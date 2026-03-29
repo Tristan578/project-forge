@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # upload-wasm-to-r2.sh
 # Uploads WASM engine artifacts to Cloudflare R2 via S3-compatible API.
+#
+# Versioned paths (/<sha>/engine-pkg-*/) get immutable cache headers so
+# browsers and CDN edge nodes cache them forever — the SHA guarantees
+# uniqueness.  The /latest/ alias uses a short-lived header so clients
+# always pick up the newest version pointer.
 set -euo pipefail
 
 : "${WASM_SOURCE_DIR:?WASM_SOURCE_DIR is required}"
@@ -23,14 +28,16 @@ export AWS_DEFAULT_REGION="auto"
 
 uploaded=0
 
+# --- Versioned upload (immutable cache) ---
 for pkg_dir in "${WASM_SOURCE_DIR}"/engine-pkg-*; do
   [ -d "${pkg_dir}" ] || continue
   pkg_name="$(basename "${pkg_dir}")"
-  echo "  Uploading ${pkg_name}..."
+  echo "  Uploading ${pkg_name} (versioned)..."
   aws s3 sync "${pkg_dir}" "s3://${R2_BUCKET}/${ENGINE_VERSION}/${pkg_name}/" \
     --endpoint-url "${R2_ENDPOINT}" \
     --no-progress \
-    --exclude "*.d.ts"
+    --exclude "*.d.ts" \
+    --cache-control "max-age=31536000, immutable"
   uploaded=$((uploaded + 1))
 done
 
@@ -41,14 +48,16 @@ fi
 
 echo "Uploaded ${uploaded} packages to R2 at version ${ENGINE_VERSION}"
 
-# Also upload as "latest"
+# --- Latest alias (short-lived cache so clients always resolve to newest) ---
 for pkg_dir in "${WASM_SOURCE_DIR}"/engine-pkg-*; do
   [ -d "${pkg_dir}" ] || continue
   pkg_name="$(basename "${pkg_dir}")"
+  echo "  Uploading ${pkg_name} (latest alias)..."
   aws s3 sync "${pkg_dir}" "s3://${R2_BUCKET}/latest/${pkg_name}/" \
     --endpoint-url "${R2_ENDPOINT}" \
     --no-progress \
-    --exclude "*.d.ts"
+    --exclude "*.d.ts" \
+    --cache-control "max-age=60, must-revalidate"
 done
 
 echo "Also uploaded as 'latest'. Done."

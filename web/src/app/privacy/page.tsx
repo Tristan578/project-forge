@@ -1,4 +1,4 @@
-
+import { cacheLife, cacheTag } from 'next/cache';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalLayout } from '@/components/legal/LegalLayout';
@@ -23,7 +23,10 @@ const tableOfContents = [
   { id: 'contact', label: 'Contact Information' },
 ];
 
-export default function PrivacyPolicyPage() {
+export default async function PrivacyPolicyPage() {
+  'use cache';
+  cacheLife('days');
+  cacheTag('privacy');
   return (
     <LegalLayout
       title="Privacy Policy"
