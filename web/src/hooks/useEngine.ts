@@ -166,10 +166,23 @@ export async function probeWebGPU(): Promise<boolean> {
 
 /**
  * Base URL for WASM engine files. When NEXT_PUBLIC_ENGINE_CDN_URL is set
- * (e.g. "https://cdn.spawnforge.ai"), files are loaded from the CDN.
+ * (e.g. "https://engine.spawnforge.ai"), files are loaded from the CDN.
  * Otherwise falls back to same-origin paths (local dev / self-hosted).
+ *
+ * When NEXT_PUBLIC_ENGINE_VERSION is also set (a git SHA injected at build
+ * time), files are served from a versioned path
+ * (e.g. "https://engine.spawnforge.ai/<sha>/engine-pkg-webgpu/") which
+ * carries immutable Cache-Control headers uploaded by upload-wasm-to-r2.sh.
+ * Without a version the /latest/ alias is used, which has a short TTL.
  */
 const ENGINE_CDN_BASE = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '').replace(/\/+$/, '');
+const ENGINE_VERSION = (process.env.NEXT_PUBLIC_ENGINE_VERSION || '').trim();
+/** Resolved prefix: "<cdn>/<version>" or "<cdn>/latest" or "" for same-origin. */
+const ENGINE_CDN_ROOT = ENGINE_CDN_BASE
+  ? ENGINE_VERSION
+    ? `${ENGINE_CDN_BASE}/${ENGINE_VERSION}`
+    : `${ENGINE_CDN_BASE}/latest`
+  : '';
 
 /**
  * Fetch the wasm-manifest.json from the given base path and return the
@@ -279,7 +292,7 @@ async function loadWasm(): Promise<WasmModule> {
     setLoadingState({ phase: 'downloading', progress: 0 });
     emitEvent('wasm_loading', `Fetching WASM module (${backend})...`);
 
-    const basePath = `${ENGINE_CDN_BASE}/engine-pkg-${backend}/`;
+    const basePath = `${ENGINE_CDN_ROOT}/engine-pkg-${backend}/`;
     const jsFile = 'forge_engine.js';
     const wasmFile = 'forge_engine_bg.wasm';
 
@@ -299,7 +312,7 @@ async function loadWasm(): Promise<WasmModule> {
       if (useWebGPU) {
         emitEvent('wasm_loading', 'WebGPU load failed, falling back to WebGL2...');
         setLoadingState({ phase: 'downloading', progress: 25 });
-        const fallbackPath = `${ENGINE_CDN_BASE}/engine-pkg-webgl2/`;
+        const fallbackPath = `${ENGINE_CDN_ROOT}/engine-pkg-webgl2/`;
         try {
           wasmModule = await loadWasmFromPath(fallbackPath, jsFile, wasmFile, signal);
           setLoadingState({ phase: 'initializing', progress: 0 });
@@ -412,7 +425,8 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         captureException(loadError, {
           phase: 'wasm_load',
           backend: detectWebGPU() ? 'webgpu' : 'webgl2',
-          cdnBase: ENGINE_CDN_BASE || '(same-origin)',
+          cdnBase: ENGINE_CDN_ROOT || '(same-origin)',
+          engineVersion: ENGINE_VERSION || 'latest',
         });
         if (!loadError.message.includes('__SKIP_ENGINE')) {
           showError('Engine failed to load. Please refresh the page.');
