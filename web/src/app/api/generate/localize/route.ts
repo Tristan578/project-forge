@@ -13,9 +13,16 @@ import {
   type TranslatableString,
   type LocaleBundle,
 } from '@/lib/i18n/gameLocalization';
-import { generateText } from 'ai';
+import { generateText, Output } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
+import { z } from 'zod';
+
+// Zod schema for a translation chunk: record of stringId -> translated string.
+// Output.object enforces valid JSON structure, eliminating JSON.parse failures.
+const translationChunkSchema = z.object({
+  translations: z.record(z.string()),
+});
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
@@ -181,14 +188,22 @@ export async function POST(request: NextRequest) {
       for (const chunk of chunks) {
         const prompt = buildTranslationPrompt(chunk, sourceLocale, targetLocale);
 
-        const { text: raw } = await generateText({
+        const { output } = await generateText({
           model: anthropicProvider(AI_MODEL_FAST),
-          system: 'You are a professional video game localizer. Return only valid JSON.',
+          output: Output.object({ schema: translationChunkSchema }),
+          system: 'You are a professional video game localizer. Return only valid JSON with a "translations" object mapping string IDs to translated strings.',
           prompt,
           maxOutputTokens: 4096,
         });
 
-        const { translations } = parseTranslationResponse(raw, chunk);
+        // Pass structured output through parseTranslationResponse for per-string
+        // validation (missing key fallback, length cap, variable preservation).
+        // Output.object guarantees valid JSON structure; we stringify the inner
+        // translations map (flat Record<id, text>) which parseTranslationResponse expects.
+        const { translations } = parseTranslationResponse(
+          JSON.stringify(output?.translations ?? {}),
+          chunk,
+        );
         Object.assign(allTranslations, translations);
       }
 

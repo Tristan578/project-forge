@@ -34,7 +34,12 @@ vi.mock('@/lib/keys/resolver', () => ({
 }));
 vi.mock('@/lib/tokens/service', () => ({ refundTokens: vi.fn() }));
 vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
-vi.mock('ai', () => ({ generateText: mockGenerateText }));
+vi.mock('ai', () => ({
+  generateText: mockGenerateText,
+  Output: {
+    object: vi.fn().mockReturnValue({ type: 'object' }),
+  },
+}));
 vi.mock('@ai-sdk/anthropic', () => ({
   createAnthropic: vi.fn(() => mockAnthropicModel),
 }));
@@ -52,10 +57,12 @@ const validStrings = [
   { id: 'ui.quit', text: 'Quit', context: 'Main menu quit button' },
 ];
 
-const translationResponseJson = JSON.stringify({
-  'ui.start': 'Spiel starten',
-  'ui.quit': 'Beenden',
-});
+const translationOutput = {
+  translations: {
+    'ui.start': 'Spiel starten',
+    'ui.quit': 'Beenden',
+  },
+};
 
 const validBody = {
   strings: validStrings,
@@ -91,7 +98,7 @@ describe('POST /api/generate/localize', () => {
       NextResponse.json({ error: 'Too many requests' }, { status: 429 }),
     );
     vi.mocked(refundTokens).mockResolvedValue({ refunded: true });
-    mockGenerateText.mockResolvedValue({ text: translationResponseJson });
+    mockGenerateText.mockResolvedValue({ output: translationOutput });
   });
 
   it('returns 401 when unauthenticated', async () => {
@@ -241,7 +248,7 @@ describe('POST /api/generate/localize', () => {
   });
 
   it('includes all requested target locales in the response', async () => {
-    mockGenerateText.mockResolvedValue({ text: translationResponseJson });
+    mockGenerateText.mockResolvedValue({ output: translationOutput });
 
     const res = await POST(
       makeRequest({ ...validBody, targetLocales: ['de', 'fr'] }),
