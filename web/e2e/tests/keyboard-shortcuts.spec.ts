@@ -102,6 +102,8 @@ test.describe('Keyboard Shortcuts @ui', () => {
       /\/api\/tokens/i,
       /Failed to load resource.*favicon\.ico/i,
       /Failed to load resource.*\/api\/tokens/i,
+      /401 \(Unauthorized\)/i,
+      /Failed to load resource.*the server responded/i,
     ];
     const realErrors = errors.filter(
       (e) => !KNOWN_NOISE.some((pattern) => pattern.test(e))

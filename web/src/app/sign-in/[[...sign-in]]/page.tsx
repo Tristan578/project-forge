@@ -1,14 +1,10 @@
 import type { Metadata } from 'next';
-import { SignIn } from '@clerk/nextjs';
+import { SignInClient } from './SignInClient';
 
 export const metadata: Metadata = {
   title: 'Sign In — SpawnForge',
 };
 
 export default function SignInPage() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-950">
-      <SignIn fallbackRedirectUrl="/" />
-    </div>
-  );
+  return <SignInClient />;
 }
