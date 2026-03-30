@@ -117,7 +117,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
     if (!isAvailable) {
       // Tell the user which providers they could configure
       const providerNames = envVars.map(
-        (envVar) => ENV_VAR_PROVIDER_NAMES[envVar] || envVar
+        (envVar) => ENV_VAR_PROVIDER_NAMES[envVar] || 'Unknown Provider'
       );
       const uniqueProviders = [...new Set(providerNames)];
       status.requiredProviders = uniqueProviders;

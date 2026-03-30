@@ -53,9 +53,7 @@ export function DashboardLayout({ initialProjects }: DashboardLayoutProps = {}) 
   useEffect(() => {
     if (initialProjects !== undefined) return;
     fetchProjects();
-  // initialProjects is a stable server prop — omitting from deps is intentional.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchProjects]);
+  }, [fetchProjects, initialProjects]);
 
   const handleCreate = async (name: string): Promise<string | null> => {
     try {
