@@ -6,18 +6,34 @@
   },
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", ".env*"],
-      "outputs": [".next/**", "!.next/cache/**", "dist/**", "storybook-static/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "dist/**",
+        "storybook-static/**"
+      ]
     },
     "lint": {
-      "dependsOn": ["^build"],
       "outputs": []
     },
     "test": {
-      "dependsOn": ["^build"],
-      "outputs": ["coverage/**"],
-      "env": ["NODE_ENV", "CI"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "coverage/**"
+      ],
+      "env": [
+        "NODE_ENV",
+        "CI"
+      ]
     },
     "dev": {
       "cache": false,
@@ -25,7 +41,9 @@
     },
     "db:generate": {
       "cache": false,
-      "outputs": ["drizzle/**"]
+      "outputs": [
+        "drizzle/**"
+      ]
     },
     "db:migrate": {
       "cache": false
@@ -34,7 +52,9 @@
       "cache": false
     },
     "check:bundle-size": {
-      "dependsOn": ["build"],
+      "dependsOn": [
+        "build"
+      ],
       "outputs": []
     },
     "check:command-parity": {
