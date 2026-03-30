@@ -570,17 +570,16 @@ jobs:
 
       # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
       # Adding working-directory:web here causes web/web path doubling on remote builds.
+      # Remote build avoids `spawn npm ENOENT` bug with `vercel build` on GHA runners.
+      # WASM files are served from R2 CDN (engine.spawnforge.ai), not bundled in the deploy.
+      # NEXT_PUBLIC_ENGINE_VERSION pins the CDN path to the immutable versioned upload so
+      # browsers receive Cache-Control: max-age=31536000, immutable for WASM assets.
       - name: Deploy to staging (remote build)
         id: deploy
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        # Remote build avoids `spawn npm ENOENT` bug with `vercel build` on GHA runners.
-        # WASM files are served from R2 CDN (engine.spawnforge.ai), not bundled in the deploy.
-        # NEXT_PUBLIC_ENGINE_VERSION pins the CDN path to the immutable versioned upload so
-        # browsers receive Cache-Control: max-age=31536000, immutable for WASM assets.
-        env:
           ENGINE_VERSION: ${{ github.sha }}
         run: |
           url=$(vercel deploy --token="$VERCEL_TOKEN" \
@@ -695,17 +694,16 @@ jobs:
 
       # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
       # Adding working-directory:web here causes web/web path doubling on remote builds.
+      # Remote build avoids `spawn npm ENOENT` bug with `vercel build` on GHA runners.
+      # WASM files are served from R2 CDN (engine.spawnforge.ai), not bundled in the deploy.
+      # NEXT_PUBLIC_ENGINE_VERSION pins the CDN path to the immutable versioned upload so
+      # browsers receive Cache-Control: max-age=31536000, immutable for WASM assets.
       - name: Deploy to production (remote build)
         id: deploy
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        # Remote build avoids `spawn npm ENOENT` bug with `vercel build` on GHA runners.
-        # WASM files are served from R2 CDN (engine.spawnforge.ai), not bundled in the deploy.
-        # NEXT_PUBLIC_ENGINE_VERSION pins the CDN path to the immutable versioned upload so
-        # browsers receive Cache-Control: max-age=31536000, immutable for WASM assets.
-        env:
           ENGINE_VERSION: ${{ github.sha }}
         run: |
           url=$(vercel deploy --prod --token="$VERCEL_TOKEN" \
