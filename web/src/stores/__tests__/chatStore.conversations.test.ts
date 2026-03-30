@@ -144,7 +144,7 @@ describe('chatStore — conversation management', () => {
       flushConversationSaveForTesting();
 
       const stored = localStorage.getItem(CONVERSATIONS_KEY);
-      expect(stored).toBeTruthy();
+      expect(stored).not.toBeNull();
       const parsed = JSON.parse(stored!);
       expect(parsed[0].name).toBe('Persisted');
     });
@@ -449,7 +449,7 @@ describe('chatStore — conversation management', () => {
       flushConversationSaveForTesting();
 
       const stored = localStorage.getItem(CONVERSATIONS_KEY);
-      expect(stored).toBeTruthy();
+      expect(stored).not.toBeNull();
       const parsed = JSON.parse(stored!);
       expect(parsed[0].name).toBe('After');
     });

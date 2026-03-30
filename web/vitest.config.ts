@@ -33,12 +33,12 @@ export default defineConfig({
         'src/app/**/page.tsx',
       ],
       // Ratcheted up per sprint — see docs/coverage-plan.md
-      // Tier-2 target: 70/60/65/72 (actual coverage ~76/67/70/78, leaving ~5pp headroom)
+      // Tier-3 target: 75/65/70/77 (actual coverage ~76/67/70/78, leaving ~1-2pp headroom)
       thresholds: {
-        statements: 70,
-        branches: 60,
-        functions: 65,
-        lines: 72,
+        statements: 75,
+        branches: 65,
+        functions: 70,
+        lines: 77,
       },
     },
   },

@@ -336,7 +336,7 @@ describe('audioSlice', () => {
 
     it('should remove reverb zone', () => {
       store.getState().setReverbZone('entity-1', reverbData, true);
-      expect(store.getState().reverbZones['entity-1']).toBeDefined();
+      expect(store.getState().reverbZones['entity-1']).toEqual(expect.objectContaining(reverbData));
 
       store.getState().removeReverbZone('entity-1');
 
@@ -444,7 +444,7 @@ describe('audioSlice', () => {
       expect(audioManager.saveSnapshot).toHaveBeenCalledWith('calm', 500);
 
       const state = store.getState();
-      expect(state.audioSnapshots['calm']).toBeDefined();
+      expect(state.audioSnapshots['calm']).toEqual(expect.objectContaining({ name: 'calm' }));
       expect(state.audioSnapshots['calm'].name).toBe('calm');
       expect(state.audioSnapshots['calm'].crossfadeDurationMs).toBe(500);
     });
@@ -455,7 +455,7 @@ describe('audioSlice', () => {
       expect(audioManager.saveSnapshot).toHaveBeenCalledWith('default-dur', 1000);
 
       const state = store.getState();
-      expect(state.audioSnapshots['default-dur']).toBeDefined();
+      expect(state.audioSnapshots['default-dur']).toEqual(expect.objectContaining({ name: 'default-dur' }));
     });
 
     it('should load snapshot via audioManager', () => {
@@ -478,7 +478,7 @@ describe('audioSlice', () => {
 
     it('should delete snapshot from Zustand and audioManager', () => {
       store.getState().saveAudioSnapshot('temp');
-      expect(store.getState().audioSnapshots['temp']).toBeDefined();
+      expect(store.getState().audioSnapshots['temp']).toEqual(expect.objectContaining({ name: 'temp' }));
 
       store.getState().deleteAudioSnapshot('temp');
 

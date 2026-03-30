@@ -598,7 +598,7 @@ describe('uiBuilderStore', () => {
       expect(screen.widgets.length).toBeGreaterThanOrEqual(3);
 
       const gridWidget = screen.widgets.find(w => w.type === 'grid');
-      expect(gridWidget).toBeDefined();
+      expect(gridWidget).toEqual(expect.objectContaining({ type: 'grid' }));
     });
 
     it('should create dialog preset with speaker and text', () => {

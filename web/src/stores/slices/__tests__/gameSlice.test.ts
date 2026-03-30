@@ -193,7 +193,7 @@ describe('gameSlice', () => {
 
     it('should remove game camera', () => {
       store.getState().setGameCamera('entity-1', thirdPersonCamera);
-      expect(store.getState().allGameCameras['entity-1']).toBeDefined();
+      expect(store.getState().allGameCameras['entity-1']).toEqual(expect.objectContaining({ mode: thirdPersonCamera.mode }));
 
       store.getState().removeGameCamera('entity-1');
 

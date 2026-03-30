@@ -431,7 +431,7 @@ describe('chatStore', () => {
       await vi.runAllTimersAsync();
 
       const stored = localStorage.getItem('forge-chat-project-123');
-      expect(stored).toBeTruthy();
+      expect(stored).not.toBeNull();
       const parsed = JSON.parse(stored!);
       expect(parsed).toHaveLength(2);
       expect(parsed[0].content).toBe('Hello');

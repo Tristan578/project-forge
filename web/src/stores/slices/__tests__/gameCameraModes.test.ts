@@ -234,9 +234,9 @@ describe('gameCameraModes', () => {
 
       const cameras = store.getState().allGameCameras;
       expect(Object.keys(cameras)).toHaveLength(2);
-      expect(cameras['cam-1']).toBeDefined();
+      expect(cameras['cam-1']).toEqual(expect.objectContaining({ mode: 'firstPerson' }));
       expect(cameras['cam-2']).toBeUndefined();
-      expect(cameras['cam-3']).toBeDefined();
+      expect(cameras['cam-3']).toEqual(expect.objectContaining({ mode: 'orbital' }));
     });
   });
 
