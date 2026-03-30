@@ -368,6 +368,7 @@ async function loadWasm(): Promise<WasmModule> {
           wasmModule = await loadWasmFromPath(fallbackPath, jsFile, wasmFile, signal, (pct) => {
             setLoadingState({ phase: 'downloading', progress: pct });
           });
+          resolvedBackend = 'webgl2';
           setLoadingState({ phase: 'initializing', progress: 0 });
           return wasmModule;
         } catch (fallbackErr) {
