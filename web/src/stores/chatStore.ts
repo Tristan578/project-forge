@@ -388,9 +388,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const { useEditorStore } = await import('./editorStore');
-      const editorState = useEditorStore.getState();
       const { buildSceneContext } = await import('../lib/chat/context');
-      const sceneContext = buildSceneContext(editorState);
 
       // Build initial API messages from conversation history (with context truncation)
       const allMessages = [...messages, userMessage];
