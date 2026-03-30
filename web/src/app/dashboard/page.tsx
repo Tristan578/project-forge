@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 export default async function DashboardPage() {
   const { userId } = await safeAuth();
 
-  let initialProjects: Project[] = [];
+  let initialProjects: Project[] | undefined;
   if (userId) {
     try {
       const rows = await listProjects(userId);
@@ -35,10 +35,9 @@ export default async function DashboardPage() {
           : String(p.updatedAt),
       }));
     } catch {
-      // DB unavailable — fall back to client-side fetch
-      initialProjects = [];
+      // DB unavailable — leave undefined so DashboardLayout falls back to client-side fetch
     }
   }
 
-  return <DashboardLayout initialProjects={userId ? initialProjects : undefined} />;
+  return <DashboardLayout initialProjects={initialProjects} />;
 }

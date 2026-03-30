@@ -98,12 +98,14 @@ export default async function RootLayout({
       <NextIntlClientProvider locale={defaultLocale} messages={messages}>
         <Suspense>{children}</Suspense>
       </NextIntlClientProvider>
-      <AnalyticsProvider />
+      <Suspense fallback={null}>
+        <AnalyticsProvider />
+        <PostHogProvider />
+        <CookieConsent />
+      </Suspense>
       <SpeedInsights />
       <Toaster theme="dark" position="bottom-right" richColors />
       <ServiceWorkerRegistration />
-      <PostHogProvider />
-      <CookieConsent />
     </>
   );
 
