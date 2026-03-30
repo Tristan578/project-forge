@@ -2,23 +2,23 @@
  * Production smoke tests — verify the LIVE site works.
  *
  * These tests run against the actual production URL (PRODUCTION_URL env var
- * or https://spawnforge.ai by default). They verify critical user journeys
+ * or https://www.spawnforge.ai by default). They verify critical user journeys
  * that CI localhost tests cannot catch:
  *
  * - Public pages load (not 404, not redirect loop)
  * - Clerk auth keys are production-grade (not pk_test_)
  * - WASM engine files are accessible on CDN
- * - /dev route is NOT publicly accessible in production
- * - Authenticated routes return proper responses (not 404)
+ * - Protected routes don't 404 or 500 (Clerk v7 handles auth client-side)
+ * - Auth flow routes render correctly
  *
- * Run manually: PRODUCTION_URL=https://spawnforge.ai npx playwright test e2e/tests/production-smoke.spec.ts
- * Run in CD: triggered as post-deploy step in cd.yml
+ * Run manually: PRODUCTION_URL=https://www.spawnforge.ai npx playwright test --config playwright.smoke.config.ts
+ * Run in CD: triggered as post-deploy step in cd.yml via playwright.smoke.config.ts
  *
  * @tags @smoke @production
  */
 import { test, expect } from '@playwright/test';
 
-const PROD_URL = process.env.PRODUCTION_URL || 'https://spawnforge.ai';
+const PROD_URL = process.env.PRODUCTION_URL || 'https://www.spawnforge.ai';
 
 test.describe('Production Smoke Tests @smoke @production', () => {
   test('landing page loads with 200', async ({ request }) => {
