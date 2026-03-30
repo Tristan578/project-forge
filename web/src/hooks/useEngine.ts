@@ -460,7 +460,7 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
           // Track editor session start (non-critical analytics)
           import('@/lib/analytics/posthog').then(({ trackEvent, AnalyticsEvent }) => {
             trackEvent(AnalyticsEvent.EDITOR_SESSION_STARTED, {
-              backend: detectWebGPU() ? 'webgpu' : 'webgl2',
+              backend: resolvedBackend,
             });
           }).catch(() => { /* analytics non-critical */ });
           onReadyRef.current?.();
