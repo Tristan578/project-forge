@@ -201,10 +201,10 @@ describe('GET /api/health — negative cases', () => {
       expect(res2.headers.get('X-Cache')).toBe('HIT');
     });
 
-    it('sets Cache-Control: public, max-age=30', async () => {
+    it('sets Cache-Control: public, max-age=60, s-maxage=300', async () => {
       resetHealthCache();
       const res = await GET(makeReq());
-      expect(res.headers.get('Cache-Control')).toBe('public, max-age=30');
+      expect(res.headers.get('Cache-Control')).toBe('public, max-age=60, s-maxage=300');
     });
 
     it('does not call health checks on cached hit', async () => {
