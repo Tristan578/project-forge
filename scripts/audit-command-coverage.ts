@@ -94,16 +94,28 @@ function extractHandlerKeys(handlerFile: string): string[] {
   const src = fs.readFileSync(filePath, 'utf8');
   const keys = new Set<string>();
 
-  // Match object literal keys that look like command names, e.g.:
-  //   spawn_entity: async (args, ctx) => {
-  //   'spawn_entity': async (args, ctx) => {
-  const objectKeyRe = /^\s+['"]?([a-z][a-z0-9_]*)['"]?\s*:/gm;
-  let m: RegExpExecArray | null;
-  while ((m = objectKeyRe.exec(src)) !== null) {
-    const key = m[1];
-    // Filter out TypeScript/JS reserved words and common non-handler keys
-    if (!['import', 'export', 'const', 'let', 'async', 'return', 'function'].includes(key)) {
-      keys.add(key);
+  // Find the exported handlers object: `export const xxxHandlers = {` ... `}`
+  // Then extract keys only within that block to avoid false positives from
+  // local variables, types, and helper functions.
+  const exportBlockRe = /export\s+const\s+\w+Handlers\s*(?::\s*[^=]+)?\s*=\s*\{/g;
+  let blockMatch: RegExpExecArray | null;
+  while ((blockMatch = exportBlockRe.exec(src)) !== null) {
+    // Find matching closing brace by counting depth
+    let depth = 1;
+    let i = blockMatch.index + blockMatch[0].length;
+    const blockStart = i;
+    while (i < src.length && depth > 0) {
+      if (src[i] === '{') depth++;
+      else if (src[i] === '}') depth--;
+      i++;
+    }
+    const blockContent = src.slice(blockStart, i - 1);
+
+    // Extract top-level keys within the block
+    const keyRe = /^\s{2,4}['"]?([a-z][a-z0-9_]*)['"]?\s*:/gm;
+    let m: RegExpExecArray | null;
+    while ((m = keyRe.exec(blockContent)) !== null) {
+      keys.add(m[1]);
     }
   }
 

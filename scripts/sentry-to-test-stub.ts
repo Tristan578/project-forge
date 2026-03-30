@@ -93,7 +93,7 @@ async function fetchSentryIssue(issueId: string): Promise<SentryEvent> {
   }
 
   const org = process.env.SENTRY_ORG ?? 'tristan-nolan';
-  const project = process.env.SENTRY_PROJECT ?? 'spawnforge-ai';
+  const _project = process.env.SENTRY_PROJECT ?? 'spawnforge-ai';
 
   return new Promise((resolve, reject) => {
     const options: https.RequestOptions = {
