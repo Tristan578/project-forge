@@ -181,7 +181,7 @@ export async function GET(req: NextRequest) {
     }));
 
     const response = NextResponse.json({ games: formattedGames, hasMore });
-    response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+    response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
     return response;
   } catch (error) {
     captureException(error, { route: '/api/community/games' });

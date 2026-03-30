@@ -226,13 +226,13 @@ describe('GET /api/health', () => {
       vi.useRealTimers();
     });
 
-    it('returns Cache-Control: public, max-age=30 header', async () => {
+    it('returns Cache-Control: public, max-age=60, s-maxage=300 header', async () => {
       vi.resetModules();
       const { GET, resetHealthCache } = await import('./route');
       resetHealthCache();
 
       const res = await GET(makeReq('10.10.0.3'));
-      expect(res.headers.get('Cache-Control')).toBe('public, max-age=30');
+      expect(res.headers.get('Cache-Control')).toBe('public, max-age=60, s-maxage=300');
     });
 
     it('fetches fresh data after cache TTL expires', async () => {

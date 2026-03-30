@@ -203,7 +203,53 @@ export async function fetchWasmHash(basePath: string, signal?: AbortSignal): Pro
   }
 }
 
-async function loadWasmFromPath(basePath: string, jsFile: string, wasmFile: string, signal?: AbortSignal): Promise<WasmModule> {
+/**
+ * Wrap a Response body in a ReadableStream that tracks download progress.
+ * Emits progress callbacks with 0–100 integer values as bytes arrive.
+ * Falls back to the original Response when the body is unavailable or
+ * Content-Length is missing (progress will remain at 0).
+ */
+function wrapResponseWithProgress(
+  response: Response,
+  onProgress: (pct: number) => void,
+): Response {
+  const contentLength = Number(response.headers.get('content-length') ?? '0');
+  if (!response.body || !contentLength) return response;
+
+  let received = 0;
+  const reader = response.body.getReader();
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+        onProgress(100);
+        return;
+      }
+      received += value.byteLength;
+      onProgress(Math.min(Math.round((received / contentLength) * 100), 99));
+      controller.enqueue(value);
+    },
+    cancel() {
+      void reader.cancel();
+    },
+  });
+
+  // Clone headers but reconstruct a new Response around the tracked stream.
+  return new Response(stream, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
+async function loadWasmFromPath(
+  basePath: string,
+  jsFile: string,
+  wasmFile: string,
+  signal?: AbortSignal,
+  onProgress?: (pct: number) => void,
+): Promise<WasmModule> {
   const wasm = await import(/* webpackIgnore: true */ `${basePath}${jsFile}`);
 
   // Append content hash as a query param so browsers re-fetch after deployments.
@@ -218,12 +264,12 @@ async function loadWasmFromPath(basePath: string, jsFile: string, wasmFile: stri
   // and wrap with a timeout to prevent infinite stalls.
   // Use fetchWasmWithMetrics to track CDN cache status and load timing.
   const fetchStart = performance.now();
-  let wasmInput: Response | string;
-  if (signal) {
-    wasmInput = await fetchWasmWithMetrics(wasmUrl, backend, fetchStart, signal);
-  } else {
-    wasmInput = await fetchWasmWithMetrics(wasmUrl, backend, fetchStart);
-  }
+  const rawResponse = await fetchWasmWithMetrics(wasmUrl, backend, fetchStart, signal);
+
+  // Wrap the response body to stream real download progress percentages.
+  const wasmInput = onProgress
+    ? wrapResponseWithProgress(rawResponse, onProgress)
+    : rawResponse;
 
   await withTimeout(
     wasm.default(wasmInput),
@@ -297,8 +343,10 @@ async function loadWasm(): Promise<WasmModule> {
     const wasmFile = 'forge_engine_bg.wasm';
 
     try {
-      setLoadingState({ phase: 'downloading', progress: 50 });
-      wasmModule = await loadWasmFromPath(basePath, jsFile, wasmFile, signal);
+      setLoadingState({ phase: 'downloading', progress: 0 });
+      wasmModule = await loadWasmFromPath(basePath, jsFile, wasmFile, signal, (pct) => {
+        setLoadingState({ phase: 'downloading', progress: pct });
+      });
       setLoadingState({ phase: 'downloading', progress: 100 });
       emitEvent('wasm_loaded', `WASM JS module loaded (${backend}), initializing...`);
 
@@ -311,10 +359,12 @@ async function loadWasm(): Promise<WasmModule> {
       // If WebGPU failed, try falling back to WebGL2
       if (useWebGPU) {
         emitEvent('wasm_loading', 'WebGPU load failed, falling back to WebGL2...');
-        setLoadingState({ phase: 'downloading', progress: 25 });
+        setLoadingState({ phase: 'downloading', progress: 0 });
         const fallbackPath = `${ENGINE_CDN_ROOT}/engine-pkg-webgl2/`;
         try {
-          wasmModule = await loadWasmFromPath(fallbackPath, jsFile, wasmFile, signal);
+          wasmModule = await loadWasmFromPath(fallbackPath, jsFile, wasmFile, signal, (pct) => {
+            setLoadingState({ phase: 'downloading', progress: pct });
+          });
           setLoadingState({ phase: 'initializing', progress: 0 });
           return wasmModule;
         } catch (fallbackErr) {

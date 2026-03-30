@@ -415,12 +415,13 @@ export function DesignTeacherPanel() {
   const critique = useMemo(() => generateDesignCritique(ctx), [ctx]);
 
   // Reference tab — filtered principles
+  // Use a Set of ids for O(1) intersection instead of Array.includes (O(n) per node).
   const filteredPrinciples = useMemo(() => {
     if (selectedCategory) {
       const byCategory = getPrinciplesByCategory(selectedCategory);
       if (searchQuery.trim()) {
-        const searched = searchPrinciples(searchQuery);
-        return byCategory.filter((p) => searched.includes(p));
+        const searchedIds = new Set(searchPrinciples(searchQuery).map((p) => p.id));
+        return byCategory.filter((p) => searchedIds.has(p.id));
       }
       return byCategory;
     }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { injectWasmPreloadHint } from '@/lib/wasm/preloadHint';
 import dynamic from 'next/dynamic';
 
 const EditorLayout = dynamic(
@@ -24,6 +25,13 @@ export default function EditorPage() {
   const loadScene = useEditorStore((s) => s.loadScene);
   const setSceneName = useEditorStore((s) => s.setSceneName);
   const setLastCloudSave = useEditorStore((s) => s.setLastCloudSave);
+
+  // Inject <link rel="preload"> for the WASM JS glue file as early as possible
+  // so the browser can start fetching it while the page is still loading.
+  // Called once on first mount — safe to call before GPU detection completes.
+  useEffect(() => {
+    injectWasmPreloadHint();
+  }, []);
 
   // Prefetch Monaco editor chunks so the script panel opens instantly
   useEffect(() => {
