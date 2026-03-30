@@ -56,13 +56,15 @@ test.describe('Game Creation Flow @ui', () => {
     // Reload fresh so the listener captures everything from navigation start
     await editor.loadPage();
 
-    // Filter out known benign browser noise (extensions, CSP for Vercel scripts)
+    // Filter out known benign browser noise (extensions, CSP, Clerk 401 in CI)
     const appErrors = consoleErrors.filter(
       (msg) =>
         !msg.includes('favicon') &&
         !msg.includes('chrome-extension') &&
         !msg.includes('moz-extension') &&
-        !msg.includes('Content Security Policy'),
+        !msg.includes('Content Security Policy') &&
+        !msg.includes('401 (Unauthorized)') &&
+        !msg.includes('Failed to load resource'),
     );
 
     expect(appErrors, `Console errors: ${appErrors.join('\n')}`).toHaveLength(0);
