@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { SpeedInsights } from "@vercel/speed-insights/next";
-import dynamic from "next/dynamic";
+import nextDynamic from "next/dynamic";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, setRequestLocale } from "next-intl/server";
 import { defaultLocale } from "@/i18n/config";
@@ -15,15 +15,15 @@ import "./globals.css";
 // Lazy-load analytics and consent providers — they rely on browser APIs
 // (localStorage, window) and are not needed for the initial HTML render.
 // Deferring them reduces the client JS parsed on the critical path.
-const AnalyticsProvider = dynamic(
+const AnalyticsProvider = nextDynamic(
   () => import("@/components/AnalyticsProvider").then((m) => m.AnalyticsProvider),
   { ssr: false }
 );
-const PostHogProvider = dynamic(
+const PostHogProvider = nextDynamic(
   () => import("@/components/providers/PostHogProvider").then((m) => m.PostHogProvider),
   { ssr: false }
 );
-const CookieConsent = dynamic(
+const CookieConsent = nextDynamic(
   () => import("@/components/CookieConsent").then((m) => m.CookieConsent),
   { ssr: false }
 );
