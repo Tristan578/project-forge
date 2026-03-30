@@ -218,7 +218,7 @@ test.describe('Game Creation Flow @ui', () => {
   // 4. Inspector shows entity properties
   // ---------------------------------------------------------------------------
   test('selecting an entity via store shows inspector panel', async ({ page, editor }) => {
-    const strict = await isStrictMode(page);
+    const strict = isStrictMode;
     await editor.waitForEditorStore();
 
     // Add an entity to the graph and select it
