@@ -79,8 +79,8 @@ describe('useT', () => {
     mockUseTranslations.mockReturnValue(mockT);
 
     const { useT } = await import('@/lib/i18n/useTranslation');
-    useT('my.custom.namespace');
+    useT('editor');
 
-    expect(mockUseTranslations).toHaveBeenCalledWith('my.custom.namespace');
+    expect(mockUseTranslations).toHaveBeenCalledWith('editor');
   });
 });

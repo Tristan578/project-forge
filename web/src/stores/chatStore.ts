@@ -388,9 +388,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const { useEditorStore } = await import('./editorStore');
-      const editorState = useEditorStore.getState();
       const { buildSceneContext } = await import('../lib/chat/context');
-      const sceneContext = buildSceneContext(editorState);
 
       // Build initial API messages from conversation history (with context truncation)
       const allMessages = [...messages, userMessage];
@@ -420,25 +418,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // --- Agentic loop ---
       let iteration = 0;
       let currentApiMessages = apiMessages;
-      const { approvalMode } = get();
 
       while (iteration < MAX_LOOP_ITERATIONS) {
         set({ loopIteration: iteration });
 
+        // Re-read approval mode and scene context each iteration so changes
+        // mid-loop take effect immediately (#7516, #7515).
+        const currentApprovalMode = get().approvalMode;
+        const currentEditorState = useEditorStore.getState();
+        const currentSceneContext = buildSceneContext(currentEditorState);
+
         const { stopReason, deferredTools } = await streamOneTurn(
           currentApiMessages,
           activeModel,
-          sceneContext,
+          currentSceneContext,
           thinkingEnabled,
           abortController.signal,
           updateAssistant,
           handleUsage,
           handleError,
-          approvalMode, // defer tool execution in approval mode
+          currentApprovalMode,
         );
 
         // In approval mode with deferred tools:
-        if (approvalMode && deferredTools.length > 0) {
+        if (currentApprovalMode && deferredTools.length > 0) {
           if (stopReason === 'end_turn') {
             // Final turn — set tools to 'preview' for user approval
             updateAssistant((msg) => ({

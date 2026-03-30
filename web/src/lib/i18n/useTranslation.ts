@@ -7,7 +7,8 @@ import { useTranslations } from 'next-intl';
  * @param namespace - Optional message namespace (e.g. 'common', 'editor', 'auth')
  * @returns Translation function `t` scoped to the given namespace
  */
-export function useT(namespace?: string) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return useTranslations(namespace as any);
+type MessageNamespace = 'common' | 'editor' | 'auth';
+
+export function useT(namespace?: MessageNamespace) {
+  return useTranslations(namespace);
 }

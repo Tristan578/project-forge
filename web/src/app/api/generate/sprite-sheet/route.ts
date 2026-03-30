@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
   } = body;
 
   // Validate
-  if (!prompt || prompt.trim().length < 3) {
+  if (typeof prompt !== 'string' || !prompt || prompt.trim().length < 3) {
     return NextResponse.json(
       { error: 'prompt is required (min 3 characters)' },
       { status: 422 }
