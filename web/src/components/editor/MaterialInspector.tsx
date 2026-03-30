@@ -23,14 +23,16 @@ interface SliderRowProps {
 }
 
 function SliderRow({ label, value, min = 0, max = 1, step = 0.01, onChange, tooltipTerm, tooltipText }: SliderRowProps) {
+  const inputId = `slider-${label.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`;
   return (
     <div className="flex items-center gap-2">
-      <label className="w-20 shrink-0 text-xs text-zinc-400">
+      <label htmlFor={inputId} className="w-20 shrink-0 text-xs text-zinc-400">
         {label}
         {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
         {tooltipText && <InfoTooltip text={tooltipText} />}
       </label>
       <input
+        id={inputId}
         type="range"
         min={min}
         max={max}
@@ -172,6 +174,7 @@ function CollapsibleSection({ title, children, defaultOpen = false }: {
       <button
         className="mb-2 flex w-full items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 hover:text-zinc-400"
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
       >
         {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
         {title}

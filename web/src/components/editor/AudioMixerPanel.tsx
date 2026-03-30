@@ -2,7 +2,7 @@
 
 import { useState, memo } from 'react';
 import { useEditorStore, type AudioBusDef, type AudioEffectDef } from '@/stores/editorStore';
-import { SlidersHorizontal, Plus, Volume2 } from 'lucide-react';
+import { SlidersHorizontal, Plus, Volume2, X } from 'lucide-react';
 import { EmptyState } from '@/components/ui/EmptyState';
 
 interface MixerStripProps {
@@ -114,19 +114,24 @@ function MixerStrip({ bus, isMaster, onVolumeChange, onMuteToggle, onSoloToggle,
       <div className="space-y-1">
         {bus.effects.map((fx, index) => (
           <div key={index} className="relative">
-            <button
-              onClick={() => setEditingEffect(editingEffect === index ? null : index)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                handleRemoveEffect(index);
-              }}
-              aria-label={`Edit ${fx.effectType} effect`}
-              aria-expanded={editingEffect === index}
-              className="w-full px-2 py-1 text-[10px] font-mono rounded bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300 truncate"
-              title={`${fx.effectType} (right-click to remove)`}
-            >
-              {fx.effectType.slice(0, 4)}
-            </button>
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={() => setEditingEffect(editingEffect === index ? null : index)}
+                aria-label={`Edit ${fx.effectType} effect`}
+                aria-expanded={editingEffect === index}
+                className="flex-1 px-2 py-1 text-[10px] font-mono rounded-l bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300 truncate"
+                title={fx.effectType}
+              >
+                {fx.effectType.slice(0, 4)}
+              </button>
+              <button
+                onClick={() => handleRemoveEffect(index)}
+                aria-label={`Remove ${fx.effectType} effect`}
+                className="px-1 py-1 text-[10px] rounded-r bg-zinc-800 text-zinc-600 hover:bg-red-900/50 hover:text-red-400 transition-colors"
+              >
+                <X size={10} />
+              </button>
+            </div>
 
             {/* Effect Param Editor Popover */}
             {editingEffect === index && (
