@@ -27,7 +27,7 @@ enum_dispatch = "0.3"
 ahash = "0.8"
 enumset = "1.1"
 bytemuck = "1.23"
-uuid = "1.22"
+uuid = "1.23"
 bevy = "0.18"
 
 bevy_app = { version = "0.18", default-features = false }
