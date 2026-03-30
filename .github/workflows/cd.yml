@@ -733,7 +733,8 @@ jobs:
         working-directory: web
         env:
           PRODUCTION_URL: https://www.spawnforge.ai
-        run: npx playwright test e2e/tests/production-smoke.spec.ts --project=chromium
+        # Use dedicated smoke config — no local webServer, hits live URL directly
+        run: npx playwright test --config playwright.smoke.config.ts --project=chromium
 
       - name: Rollback production on health check or smoke test failure
         if: ${{ failure() && (steps.health-check-production.outcome == 'failure' || steps.smoke-tests.outcome == 'failure') && steps.prev-deploy.outputs.prev_url != '' }}
