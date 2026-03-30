@@ -105,7 +105,7 @@ function installPanicInterceptor(): void {
       captureException(new Error(`WASM panic: ${msg.slice(0, 500)}`), {
         source: 'console_error_panic_hook',
         fullMessage: msg.slice(0, 2000),
-        engineBackend: detectWebGPU() ? 'webgpu' : 'webgl2',
+        engineBackend: resolvedBackend,
       });
       setEngineCrashed(msg.slice(0, 500));
     }
@@ -301,6 +301,8 @@ export function setPreferredBackend(backend: string): void {
 }
 
 let loadAbortController: AbortController | null = null;
+/** Actual rendering backend chosen by loadWasm (not just capability detection). */
+let resolvedBackend: 'webgpu' | 'webgl2' = 'webgl2';
 
 async function loadWasm(): Promise<WasmModule> {
   // Skip WASM loading when engine is explicitly disabled (CI E2E @ui tests)
@@ -331,6 +333,7 @@ async function loadWasm(): Promise<WasmModule> {
     const useWebGPU =
       preferredBackend === 'webgl2' ? false : await probeWebGPU();
     const backend = useWebGPU ? 'webgpu' : 'webgl2';
+    resolvedBackend = backend;
 
     setLoadingState({ phase: 'detecting', progress: 100 });
 
@@ -365,6 +368,7 @@ async function loadWasm(): Promise<WasmModule> {
           wasmModule = await loadWasmFromPath(fallbackPath, jsFile, wasmFile, signal, (pct) => {
             setLoadingState({ phase: 'downloading', progress: pct });
           });
+          resolvedBackend = 'webgl2';
           setLoadingState({ phase: 'initializing', progress: 0 });
           return wasmModule;
         } catch (fallbackErr) {
@@ -441,7 +445,7 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         emitEvent('engine_starting', `Calling init_engine("${canvasId}")`);
 
         // Set Sentry context for all subsequent errors in this session
-        setTag('engine.backend', detectWebGPU() ? 'webgpu' : 'webgl2');
+        setTag('engine.backend', resolvedBackend);
         setTag('engine.canvas', canvasId);
 
         try {
@@ -454,6 +458,12 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
           if (typeof window !== 'undefined') {
             (window as unknown as Record<string, unknown>).__FORGE_ENGINE_READY = true;
           }
+          // Track editor session start (non-critical analytics)
+          import('@/lib/analytics/posthog').then(({ trackEvent, AnalyticsEvent }) => {
+            trackEvent(AnalyticsEvent.EDITOR_SESSION_STARTED, {
+              backend: resolvedBackend,
+            });
+          }).catch(() => { /* analytics non-critical */ });
           onReadyRef.current?.();
         } catch (err) {
           const engineError = err instanceof Error ? err : new Error(String(err));
@@ -462,7 +472,7 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
           captureException(engineError, {
             phase: 'init_engine',
             canvasId,
-            backend: detectWebGPU() ? 'webgpu' : 'webgl2',
+            backend: resolvedBackend,
           });
           setError(engineError);
           onErrorRef.current?.(engineError);
@@ -480,7 +490,7 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         }
         captureException(loadError, {
           phase: 'wasm_load',
-          backend: detectWebGPU() ? 'webgpu' : 'webgl2',
+          backend: resolvedBackend,
           cdnBase: ENGINE_CDN_ROOT || '(same-origin)',
           engineVersion: ENGINE_VERSION || 'latest',
         });

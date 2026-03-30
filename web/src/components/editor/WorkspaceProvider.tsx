@@ -1,7 +1,7 @@
 'use client';
 
 import type React from 'react';
-import { lazy, Suspense, useCallback, useMemo } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo } from 'react';
 import {
   DockviewReact,
   type DockviewReadyEvent,
@@ -166,7 +166,21 @@ function withTierGate(
 ): React.FunctionComponent<IDockviewPanelProps> {
   return function TierGatedPanel(_props: IDockviewPanelProps) {
     const tier = useUserStore((s) => s.tier);
-    if (!canAccessPanel(panelId, tier)) {
+    const hasAccess = canAccessPanel(panelId, tier);
+
+    // Track feature flag evaluation once on mount (non-critical analytics)
+    useEffect(() => {
+      import('@/lib/analytics/posthog').then(({ trackEvent, AnalyticsEvent }) => {
+        trackEvent(AnalyticsEvent.FEATURE_FLAG_EVALUATED, {
+          flag: `panel_access_${panelId}`,
+          value: hasAccess,
+          tier,
+        });
+      }).catch(() => { /* analytics non-critical */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    if (!hasAccess) {
       return (
         <div className="h-full w-full overflow-hidden bg-zinc-900">
           <LockedPanelOverlay panelId={panelId} />

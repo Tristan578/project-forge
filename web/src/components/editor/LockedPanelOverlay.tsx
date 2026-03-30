@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Lock } from 'lucide-react';
 import { TIER_LABELS, getRequiredTier } from '@/lib/ai/tierAccess';
 import type { Tier } from '@/stores/userStore';
@@ -18,6 +19,13 @@ interface LockedPanelOverlayProps {
 export function LockedPanelOverlay({ panelId, requiredTier }: LockedPanelOverlayProps) {
   const required = requiredTier ?? getRequiredTier(panelId);
   const tierLabel = required ? TIER_LABELS[required] : 'a higher plan';
+
+  // Fire once when this overlay is shown — tracks that a user hit a tier gate
+  useEffect(() => {
+    import('@/lib/analytics/posthog').then(({ trackEvent, AnalyticsEvent }) => {
+      trackEvent(AnalyticsEvent.TIER_UPGRADE_PROMPTED, { panelId, requiredTier: required });
+    }).catch(() => { /* analytics non-critical */ });
+  }, [panelId, required]);
 
   return (
     <div
