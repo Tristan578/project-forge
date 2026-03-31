@@ -149,8 +149,8 @@ if [ -n "$CHANGED_FILES" ]; then
   done <<< "$CHANGED_FILES"
 
   if [ -n "$TEST_DIRS" ]; then
-    # Deduplicate dirs
-    UNIQUE_DIRS=$(echo "$TEST_DIRS" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+    # Deduplicate dirs and strip web/ prefix (we cd into web/ before running vitest)
+    UNIQUE_DIRS=$(echo "$TEST_DIRS" | tr ' ' '\n' | sed 's|^web/||' | sort -u | tr '\n' ' ')
     echo "  Running targeted tests for changed directories..."
     set +e
     VITEST_OUTPUT=$(cd "$WEB_DIR" && npx vitest run $UNIQUE_DIRS 2>&1)
