@@ -13,11 +13,11 @@
     },
     "playwright": {
       "command": "npx",
-      "args": ["-y", "@anthropic-ai/playwright-mcp@latest"]
+      "args": ["-y", "@playwright/mcp@latest"]
     },
     "github": {
       "command": "npx",
-      "args": ["-y", "@anthropic-ai/github-mcp@latest"]
+      "args": ["-y", "@modelcontextprotocol/server-github"]
     }
   }
 }

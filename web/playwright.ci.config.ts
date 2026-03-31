@@ -8,9 +8,12 @@
  */
 import { defineConfig, devices } from '@playwright/test';
 import {
-  E2E_TEST_TIMEOUT_MS,
   E2E_NAVIGATION_TIMEOUT_MS,
 } from './src/lib/config/timeouts';
+
+/** CI-specific: tighter than the default E2E_TEST_TIMEOUT_MS (60s) since UI-only tests don't need WASM load time */
+const CI_TEST_TIMEOUT_MS = 30_000;
+const CI_EXPECT_TIMEOUT_MS = 10_000;
 
 export default defineConfig({
   testDir: './e2e',
@@ -21,8 +24,8 @@ export default defineConfig({
   workers: 4,
   maxFailures: 10,
   reporter: [['github'], ['html', { open: 'never' }]],
-  timeout: 30_000,
-  expect: { timeout: 10_000 },
+  timeout: CI_TEST_TIMEOUT_MS,
+  expect: { timeout: CI_EXPECT_TIMEOUT_MS },
 
   use: {
     baseURL: 'http://localhost:3000',
