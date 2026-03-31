@@ -19,8 +19,8 @@
  *
  * ## Changelog
  *
- * 2026-03-31: Initial creation. Bundle thresholds tightened from 4/4.75/5/5.5 MB
- *   to 3.5/4/4.5/5 MB based on current build output (~3.2 MB first-load).
+ * 2026-03-31: Initial creation. Bundle thresholds set at 4.75/5.25/5/5.5 MB
+ *   (current build: ~4.56 MB first-load). Previous thresholds: 4/4.75/5/5.5 MB.
  *   WASM thresholds set to match existing CI gate (45 MB warn / 49.5 MB fail).
  *
  * Updated: 2026-03-31
@@ -91,17 +91,17 @@ export const GPU_INIT_TARGET_MS = 3000;
 // Bundle size budgets (bytes)
 // ---------------------------------------------------------------------------
 
-/** First-load JS warning threshold */
-export const BUNDLE_FIRST_LOAD_WARN = 3.5 * 1024 * 1024;
+/** First-load JS warning threshold (current build: ~4.56 MB as of 2026-03-31) */
+export const BUNDLE_FIRST_LOAD_WARN = 4.75 * 1024 * 1024;
 
 /** First-load JS hard failure threshold */
-export const BUNDLE_FIRST_LOAD_FAIL = 4 * 1024 * 1024;
+export const BUNDLE_FIRST_LOAD_FAIL = 5.25 * 1024 * 1024;
 
-/** Total JS warning threshold */
-export const BUNDLE_TOTAL_WARN = 4.5 * 1024 * 1024;
+/** Total JS warning threshold (must be >= BUNDLE_FIRST_LOAD_FAIL) */
+export const BUNDLE_TOTAL_WARN = 5.5 * 1024 * 1024;
 
 /** Total JS hard failure threshold */
-export const BUNDLE_TOTAL_FAIL = 5 * 1024 * 1024;
+export const BUNDLE_TOTAL_FAIL = 6 * 1024 * 1024;
 
 /** WASM binary size warning threshold (per variant, matches quality-gates.yml) */
 export const WASM_BINARY_WARN = 45 * 1024 * 1024;

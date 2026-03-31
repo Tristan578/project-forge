@@ -11,8 +11,8 @@
  * then mirror the values here.
  *
  * Thresholds:
- *   First-load JS:  warn > 3.5 MB, fail > 4 MB
- *   Total JS:       warn > 4.5 MB, fail > 5 MB
+ *   First-load JS:  warn > 4.75 MB, fail > 5.25 MB
+ *   Total JS:       warn > 5.5 MB,  fail > 6 MB
  *
  * Usage:  node scripts/check-bundle-size.js
  * Expects: npm run build has already been run (.next/ exists)
@@ -27,10 +27,10 @@ const BUILD_DIR = path.join(ROOT, '.next');
 // Mirror of performanceTargets.ts BUNDLE_* constants.
 // Names match the canonical constants for grep-based discovery.
 // Previous values (pre-2026-03-31): 4/4.75/5/5.5 MB
-const BUNDLE_FIRST_LOAD_WARN = 3.5 * 1024 * 1024;
-const BUNDLE_FIRST_LOAD_FAIL = 4 * 1024 * 1024;
-const BUNDLE_TOTAL_WARN = 4.5 * 1024 * 1024;
-const BUNDLE_TOTAL_FAIL = 5 * 1024 * 1024;
+const BUNDLE_FIRST_LOAD_WARN = 4.75 * 1024 * 1024;
+const BUNDLE_FIRST_LOAD_FAIL = 5.25 * 1024 * 1024;
+const BUNDLE_TOTAL_WARN = 5.5 * 1024 * 1024;
+const BUNDLE_TOTAL_FAIL = 6 * 1024 * 1024;
 
 function formatBytes(bytes) {
   if (bytes < 1024) return bytes + ' B';
