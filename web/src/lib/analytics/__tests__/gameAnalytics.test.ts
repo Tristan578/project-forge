@@ -441,6 +441,31 @@ describe('sessionsToCSV', () => {
     expect(lines[1]).toContain('s1');
   });
 
+  it('zero-event rows have the same column count as the header (regression #7100)', () => {
+    const csv = sessionsToCSV([makeSession('s1', 1000, 0, [])]);
+    const lines = csv.split('\n');
+    const headerCols = lines[0].split(',').length;
+    const dataRowCols = lines[1].split(',').length;
+    expect(dataRowCols).toBe(headerCols);
+    expect(headerCols).toBe(9);
+  });
+
+  it('all row types produce the same column count (regression #7100)', () => {
+    const sessions = [
+      makeSession('s1', 1000, 0, []),
+      makeSession('s2', 2000, 3000, [
+        makeEvent('PLAYER_SPAWN', 2001, { x: 1, y: 2, z: 3 }),
+        makeEvent('PLAYER_DEATH', 2500),
+      ]),
+    ];
+    const csv = sessionsToCSV(sessions);
+    const lines = csv.split('\n');
+    const headerCols = lines[0].split(',').length;
+    for (let i = 1; i < lines.length; i++) {
+      expect(lines[i].split(',').length, `row ${i} column count`).toBe(headerCols);
+    }
+  });
+
   it('handles events without positions', () => {
     const csv = sessionsToCSV([
       makeSession('s1', 1000, 2000, [makeEvent('LEVEL_START', 1001)]),
