@@ -1005,12 +1005,16 @@ def pull():
         print("[SYNC] Taskboard API unavailable — skipping pull")
         return
 
-    # PRIMARY: Fetch open issues via REST API (cheap, no GraphQL budget).
+    # PRIMARY: Fetch issues via REST API (cheap, no GraphQL budget).
     # This replaced the project-board fetch which returned 8000+ items
     # (mostly closed PRs) and exhausted GraphQL rate limits.
+    # Fetch both open issues AND recently closed issues so that local
+    # tickets are marked "done" when their GitHub issue is closed.
     try:
-        repo_issues = gh_get_repo_issues(config, state="open", limit=500)
-        print(f"  [pull] Fetched {len(repo_issues)} open issues via REST API")
+        open_issues = gh_get_repo_issues(config, state="open", limit=500)
+        closed_issues = gh_get_repo_issues(config, state="closed", limit=100)
+        repo_issues = open_issues + closed_issues
+        print(f"  [pull] Fetched {len(open_issues)} open + {len(closed_issues)} recently closed issues via REST API")
     except Exception as e:
         print(f"[SYNC] GitHub issue fetch failed: {e}", file=sys.stderr)
         return
