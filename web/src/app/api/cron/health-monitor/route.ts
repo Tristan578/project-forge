@@ -69,12 +69,31 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   if (failedServices.length > 0) {
     reportFailuresToSentry(failedServices, report.overall);
-    logger.error('Synthetic health monitor detected failures', {
-      endpoint: 'GET /api/cron/health-monitor',
-      failureCount: failedServices.length,
-      criticalFailureCount: criticalFailures.length,
-      failures: failedServices.map((s) => ({ name: s.name, status: s.status })),
-    });
+
+    // Critical failures (Database, Clerk) or any 'down' status → error
+    // Non-critical degraded services → warn to reduce alert noise (#7075)
+    const criticalOrDown = failedServices.filter(
+      (s) => criticalFailures.some((c) => c.name === s.name) || s.status === 'down',
+    );
+    const nonCriticalDegraded = failedServices.filter(
+      (s) => !criticalOrDown.includes(s),
+    );
+
+    if (criticalOrDown.length > 0) {
+      logger.error('Synthetic health monitor detected critical failures', {
+        endpoint: 'GET /api/cron/health-monitor',
+        failureCount: failedServices.length,
+        criticalFailureCount: criticalFailures.length,
+        failures: criticalOrDown.map((s) => ({ name: s.name, status: s.status })),
+      });
+    }
+    if (nonCriticalDegraded.length > 0) {
+      logger.warn('Synthetic health monitor detected non-critical outages', {
+        endpoint: 'GET /api/cron/health-monitor',
+        failureCount: nonCriticalDegraded.length,
+        failures: nonCriticalDegraded.map((s) => ({ name: s.name, status: s.status })),
+      });
+    }
   }
 
   const summary = {
