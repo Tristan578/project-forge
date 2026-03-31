@@ -625,6 +625,31 @@ def gh_get_project_items(config):
     return json.loads(output)
 
 
+def gh_get_repo_issues(config, state="open", limit=500):
+    """Fetch issues directly from the repo via REST API (not the project board).
+
+    This avoids the GraphQL project-items endpoint which is bloated with PRs
+    and costs ~1 GraphQL token per item. The REST issues endpoint is cheaper
+    and returns only issues (not PRs).
+    """
+    owner = config["owner"]
+    repo = config["repo"]
+    result = subprocess.run(
+        [
+            "gh", "issue", "list",
+            "--repo", f"{owner}/{repo}",
+            "--state", state,
+            "--limit", str(limit),
+            "--json", "number,title,body,state,labels,createdAt,closedAt",
+        ],
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=60,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"gh issue list failed: {result.stderr.strip()}")
+    return json.loads(result.stdout)
+
+
 def gh_create_issue_and_add_to_project(config, title, body="", labels=None):
     owner = config["owner"]
     repo = config["repo"]
@@ -980,13 +1005,35 @@ def pull():
         print("[SYNC] Taskboard API unavailable — skipping pull")
         return
 
+    # PRIMARY: Fetch issues via REST API (cheap, no GraphQL budget).
+    # This replaced the project-board fetch which returned 8000+ items
+    # (mostly closed PRs) and exhausted GraphQL rate limits.
+    # Fetch both open issues AND recently closed issues so that local
+    # tickets are marked "done" when their GitHub issue is closed.
     try:
-        gh_data = gh_get_project_items(config)
+        open_issues = gh_get_repo_issues(config, state="open", limit=500)
+        closed_issues = gh_get_repo_issues(config, state="closed", limit=100)
+        repo_issues = open_issues + closed_issues
+        print(f"  [pull] Fetched {len(open_issues)} open + {len(closed_issues)} recently closed issues via REST API")
     except Exception as e:
-        print(f"[SYNC] GitHub fetch failed: {e}", file=sys.stderr)
+        print(f"[SYNC] GitHub issue fetch failed: {e}", file=sys.stderr)
         return
 
-    items = gh_data.get("items", [])
+    # Normalize repo issues into the same shape as project board items
+    # so the rest of the pull logic works unchanged.
+    items = []
+    for issue in repo_issues:
+        items.append({
+            "id": f"issue-{issue['number']}",
+            "title": issue.get("title", ""),
+            "status": "Done" if issue.get("state") == "closed" else "",
+            "content": {
+                "type": "Issue",
+                "number": issue["number"],
+                "title": issue.get("title", ""),
+                "body": issue.get("body", "") or "",
+            },
+        })
 
     # Build reverse map: GitHub item ID → local ticket ID
     reverse_item = {e["githubItemId"]: tid for tid, e in tmap.items() if e.get("githubItemId")}
