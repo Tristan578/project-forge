@@ -22,12 +22,12 @@ is_safe() {
   local cmd="$1"
 
   # npm — only specific safe subcommands
-  if echo "$cmd" | grep -qE '^npm (install|ci|run|test|ls|outdated|view|explain|exec|why|pkg|cache clean|audit) '; then
+  if echo "$cmd" | grep -qE '^npm (install|ci|run|test|ls|outdated|view|explain|exec|why|pkg|cache clean|audit)( |$)'; then
     return 0
   fi
 
   # npx — only known-safe tools (vitest, eslint, tsc, playwright, drizzle-kit, skills)
-  if echo "$cmd" | grep -qE '^npx (vitest|eslint|tsc|playwright|drizzle-kit|skills|@axe-core) '; then
+  if echo "$cmd" | grep -qE '^npx (vitest|eslint|tsc|playwright|drizzle-kit|skills|@axe-core)( |$)'; then
     return 0
   fi
 
