@@ -490,7 +490,22 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return result.toUIMessageStreamResponse();
+    // Handle mid-stream errors: refund tokens when the LLM API fails after
+    // the HTTP 200 response is sent. The onFinish callback on the UI message
+    // stream fires after the stream completes (success or failure). We check
+    // the finish reason to detect errors and issue refunds.
+    return result.toUIMessageStreamResponse({
+      onFinish: async ({ finishReason }) => {
+        if (finishReason === 'error' && usageId) {
+          captureException(new Error('Stream finished with error'), {
+            route: '/api/chat', model, phase: 'mid-stream',
+          });
+          await refundTokens(auth.ctx.user.id, usageId).catch((refundErr: unknown) => {
+            captureException(refundErr, { route: '/api/chat', phase: 'refund_mid_stream', usageId });
+          });
+        }
+      },
+    });
   } catch (err) {
     captureException(err, { route: '/api/chat', model });
 
