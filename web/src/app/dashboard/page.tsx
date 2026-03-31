@@ -4,6 +4,8 @@ import type { Project } from '@/components/dashboard/DashboardLayout';
 import { safeAuth } from '@/lib/auth/safe-auth';
 import { listProjects } from '@/lib/projects/service';
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: 'Dashboard — SpawnForge',
 };

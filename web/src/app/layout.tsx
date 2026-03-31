@@ -5,8 +5,8 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { NextIntlClientProvider } from "next-intl";
-import { getMessages, setRequestLocale } from "next-intl/server";
 import { defaultLocale } from "@/i18n/config";
+import messages from "@/i18n/messages/en.json";
 import { Toaster } from "sonner";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 import "./globals.css";
@@ -18,8 +18,9 @@ const AnalyticsProvider = lazy(() => import("@/components/AnalyticsProvider").th
 const PostHogProvider = lazy(() => import("@/components/providers/PostHogProvider").then((m) => ({ default: m.PostHogProvider })));
 const CookieConsent = lazy(() => import("@/components/CookieConsent").then((m) => ({ default: m.CookieConsent })));
 
-// Root layout calls getMessages() (next-intl) which reads from request context — must be dynamic
-export const dynamic = "force-dynamic";
+// Root layout was previously force-dynamic because getMessages() reads request context.
+// Replaced with static import of en.json (single locale) to allow static rendering
+// of marketing pages — improves LCP by ~1s on cold loads.
 
 // Clerk validates key format at runtime — skip wrapping when key is missing/invalid (CI E2E tests)
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
@@ -75,13 +76,12 @@ const jsonLdString = JSON.stringify({
   sameAs: [],
 });
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  setRequestLocale(defaultLocale);
-  const messages = await getMessages();
+  // messages imported statically from en.json (single locale — no getMessages() needed)
 
   // Clerk v7 requires ClerkProvider to be inside <body>, not wrapping <html>.
   const bodyContent = (

@@ -94,7 +94,7 @@ describe('buildTruncatedApiMessages', () => {
         if (hasToolResult) {
           // Must have a preceding assistant message with tool_use
           const prev = result[idx - 1];
-          expect(prev).toBeTruthy();
+          expect(prev).toBeDefined();
           expect(prev.role).toBe('assistant');
         }
       }

@@ -86,7 +86,7 @@ describe('milestones', () => {
     it('persists celebration to localStorage', () => {
       checkMilestone('FIRST_ENTITY');
       const raw = localStorageStore[MILESTONE_STORAGE_KEY];
-      expect(raw).toBeTruthy();
+      expect(raw).toBeTypeOf('string');
       const parsed = JSON.parse(raw) as string[];
       expect(parsed).toContain('FIRST_ENTITY');
     });
