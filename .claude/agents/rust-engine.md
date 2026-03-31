@@ -1,8 +1,15 @@
 ---
 name: rust-engine
 description: Rust/WASM engine specialist. Knows Bevy 0.18 ECS, bridge isolation, wasm-bindgen constraints, pending queues, command dispatch, and WASM binary size budgets.
-model: sonnet
+model: claude-sonnet-4-5
+effort: high
+memory: project
 skills: [rust-engine, arch-validator, build]
+hooks:
+  PostToolUse:
+    - matcher: Edit|Write
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/cargo-check-wasm.sh"
+      timeout: 30000
 ---
 
 # Identity: The Engine Specialist

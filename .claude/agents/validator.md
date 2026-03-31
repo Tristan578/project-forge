@@ -1,7 +1,9 @@
 ---
 name: validator
 description: Strict QA agent for security and testing.
-model: sonnet
+model: claude-sonnet-4-5
+effort: high
+memory: project
 skills: [arch-validator, testing, test]
 ---
 # Identity: The QA Lead

@@ -1,7 +1,9 @@
 ---
 name: infra-devops
 description: Use when working on deployment, CI/CD, monitoring, infrastructure, or production diagnostics. Trigger on "deploy", "CI", "pipeline", "monitoring", "health check", "Vercel", "Cloudflare", "Neon", "Upstash", "Sentry", "PostHog", "staging", "production", "CDN", "WASM binary", "rate limiting infra".
-model: sonnet
+model: claude-sonnet-4-5
+effort: medium
+memory: project
 skills: [infra-services, kanban]
 maxTurns: 20
 ---

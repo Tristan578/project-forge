@@ -1,8 +1,18 @@
 ---
 name: builder
 description: Specialized implementation agent optimized for Rust/WASM coding speed and accuracy.
-model: sonnet
+model: claude-sonnet-4-5
+effort: high
+memory: user
 skills: [arch-validator, rust-engine, frontend, mcp-commands, testing]
+hooks:
+  PostToolUse:
+    - matcher: Edit|Write
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/post-edit-lint.sh"
+      timeout: 15000
+  Stop:
+    - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/builder-quality-gate.sh"
+      timeout: 10000
 ---
 # Identity: The Senior Engineer
 
