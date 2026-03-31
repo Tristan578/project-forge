@@ -21,12 +21,13 @@ COMMAND_TRIMMED="${COMMAND#"${COMMAND%%[![:space:]]*}"}"
 is_safe() {
   local cmd="$1"
 
-  # npm/npx install, run, test commands
-  if echo "$cmd" | grep -qE '^(npm|npx) '; then
-    # Block npm publish and npm adduser
-    if echo "$cmd" | grep -qE 'npm (publish|adduser|owner|access|deprecate|unpublish)'; then
-      return 1
-    fi
+  # npm — only specific safe subcommands
+  if echo "$cmd" | grep -qE '^npm (install|ci|run|test|ls|outdated|view|explain|exec|why|pkg|cache clean|audit) '; then
+    return 0
+  fi
+
+  # npx — only known-safe tools (vitest, eslint, tsc, playwright, drizzle-kit, skills)
+  if echo "$cmd" | grep -qE '^npx (vitest|eslint|tsc|playwright|drizzle-kit|skills|@axe-core) '; then
     return 0
   fi
 
