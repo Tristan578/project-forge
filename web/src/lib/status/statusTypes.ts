@@ -120,13 +120,14 @@ export function mapHealthStatusToServiceStatus(
  *
  * Priority order: `major_outage` > `partial_outage` > `maintenance` > `operational`.
  *
- * Critical vs. non-critical resolution (in priority order):
- *  1. If `criticalServiceIds` is provided, an outage on any ID in that set
- *     → `major_outage`. Outages on other IDs → `partial_outage`.
- *  2. Otherwise if `ServiceStatusEntry.critical` is `true` on an outage entry,
- *     → `major_outage`. Outages on entries with `critical: false` → `partial_outage`.
- *  3. When neither source of critical information is available (legacy entries that
- *     predate the `critical` field), all outages are treated as `major_outage`.
+ * When `criticalServiceIds` is provided, only outages on services whose ID is
+ * in that set result in `major_outage`. Outages on other services are treated
+ * as `partial_outage`. When omitted, ALL outages are treated as `major_outage`
+ * (legacy behaviour preserved for backward compatibility).
+ *
+ * The `ServiceStatusEntry.critical` field is informational — it allows API
+ * consumers to display a service's criticality badge — but it does NOT
+ * affect the derivation logic. Only the explicit `criticalServiceIds` set does.
  */
 export function deriveOverallStatus(
   services: ServiceStatusEntry[],
@@ -139,26 +140,13 @@ export function deriveOverallStatus(
 
   for (const s of services) {
     switch (s.status) {
-      case 'outage': {
-        // Determine criticality: explicit set takes precedence, then entry field,
-        // then fall back to treating all outages as critical (legacy behaviour).
-        let isCritical: boolean;
-        if (criticalServiceIds) {
-          isCritical = criticalServiceIds.has(s.id);
-        } else {
-          // Use the entry's own critical flag when available.
-          // Entries created before this field was added default to true so that
-          // the legacy behaviour (all outages = major_outage) is preserved.
-          isCritical = s.critical !== false;
-        }
-
-        if (isCritical) {
+      case 'outage':
+        if (!criticalServiceIds || criticalServiceIds.has(s.id)) {
           hasCriticalOutage = true;
         } else {
           hasNonCriticalOutage = true;
         }
         break;
-      }
       case 'degraded':
         hasDegraded = true;
         break;
