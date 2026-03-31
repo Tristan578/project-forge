@@ -13,6 +13,7 @@ import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { logger } from '@/lib/logging/logger';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { badRequest, validationError, internalError } from '@/lib/api/errors';
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -48,24 +49,18 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return badRequest('Invalid JSON body');
   }
   const { tier } = body as { tier?: string };
 
   if (!tier || !['hobbyist', 'creator', 'pro'].includes(tier)) {
-    return NextResponse.json(
-      { error: 'Invalid tier. Choose: hobbyist, creator, or pro' },
-      { status: 400 }
-    );
+    return validationError('Invalid tier. Choose: hobbyist, creator, or pro');
   }
 
   const priceId = PRICE_IDS[tier];
   if (!priceId) {
     reqLog.error('Stripe price not configured', { tier });
-    return NextResponse.json(
-      { error: 'Stripe price not configured for this tier' },
-      { status: 500 }
-    );
+    return internalError('Stripe price not configured for this tier');
   }
 
   try {
@@ -106,6 +101,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ url: session.url });
   } catch (error) {
     captureException(error, { route: '/api/billing/checkout' });
-    return NextResponse.json({ error: 'Failed to create checkout session' }, { status: 500 });
+    return internalError('Failed to create checkout session');
   }
 }

@@ -5,6 +5,7 @@ import { users, marketplaceAssets, assetPurchases, creditTransactions } from '@/
 import { eq, and, sql } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { validationError, conflict, forbidden, paymentRequired, internalError } from '@/lib/api/errors';
 
 export async function POST(
   _req: NextRequest,
@@ -35,7 +36,7 @@ export async function POST(
     }
 
     if (asset.status !== 'published') {
-      return NextResponse.json({ error: 'Asset not available' }, { status: 400 });
+      return validationError('Asset not available');
     }
 
     // Check if already purchased
@@ -46,12 +47,12 @@ export async function POST(
       .limit(1);
 
     if (existing) {
-      return NextResponse.json({ error: 'Already purchased' }, { status: 400 });
+      return conflict('Already purchased');
     }
 
     // Check if user is trying to buy their own asset
     if (asset.sellerId === user.id) {
-      return NextResponse.json({ error: 'Cannot purchase your own asset' }, { status: 400 });
+      return forbidden('Cannot purchase your own asset');
     }
 
     const price = asset.priceTokens;
@@ -78,7 +79,7 @@ export async function POST(
     // Check user balance
     const totalBalance = user.monthlyTokens - user.monthlyTokensUsed + user.addonTokens + user.earnedCredits;
     if (totalBalance < price) {
-      return NextResponse.json({ error: 'Insufficient tokens' }, { status: 400 });
+      return paymentRequired('Insufficient tokens');
     }
 
     // Deduct tokens (use earned credits first, then addon, then monthly)
@@ -104,7 +105,7 @@ export async function POST(
     }
 
     if (remaining > 0) {
-      return NextResponse.json({ error: 'Insufficient tokens' }, { status: 400 });
+      return paymentRequired('Insufficient tokens');
     }
 
     // 70% to seller, 30% platform fee
@@ -205,6 +206,6 @@ export async function POST(
   } catch (error) {
     captureException(error, { route: '/api/marketplace/assets/[id]/purchase' });
     console.error('Error purchasing asset:', error);
-    return NextResponse.json({ error: 'Failed to purchase asset' }, { status: 500 });
+    return internalError('Failed to purchase asset');
   }
 }

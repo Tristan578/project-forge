@@ -284,7 +284,7 @@ describe('POST /api/publish', () => {
     it('rejects SVG thumbnails to prevent XSS', async () => {
       const svgDataUrl = 'data:image/svg+xml;base64,PHN2Zz48c2NyaXB0PmFsZXJ0KDEpPC9zY3JpcHQ+PC9zdmc+';
       const res = await POST(makeRequest(validBody({ thumbnail: svgDataUrl })));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
       const body = await res.json();
       expect(body.error).toContain('Unsupported thumbnail type');
     });
@@ -292,7 +292,7 @@ describe('POST /api/publish', () => {
     it('rejects image/gif thumbnails', async () => {
       const gifDataUrl = 'data:image/gif;base64,R0lGODlhAQABAA==';
       const res = await POST(makeRequest(validBody({ thumbnail: gifDataUrl })));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
       const body = await res.json();
       expect(body.error).toContain('Unsupported thumbnail type');
     });
@@ -321,7 +321,7 @@ describe('POST /api/publish', () => {
     it('rejects thumbnail with crafted SVG MIME containing charset', async () => {
       const craftedUrl = 'data:image/svg+xml;charset=utf-8,<svg onload="alert(1)"/>';
       const res = await POST(makeRequest(validBody({ thumbnail: craftedUrl })));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
   });
 

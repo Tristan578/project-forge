@@ -6,6 +6,7 @@ import { TOKEN_PACKAGES } from '@/lib/tokens/pricing';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { badRequest, validationError, internalError } from '@/lib/api/errors';
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -35,23 +36,17 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return badRequest('Invalid JSON body');
   }
   const pkg = body.package as string;
 
   if (!pkg || !(pkg in TOKEN_PACKAGES)) {
-    return NextResponse.json(
-      { error: 'Invalid package. Choose: spark, blaze, or inferno' },
-      { status: 400 }
-    );
+    return validationError('Invalid package. Choose: spark, blaze, or inferno');
   }
 
   const priceId = PACKAGE_PRICE_IDS[pkg];
   if (!priceId) {
-    return NextResponse.json(
-      { error: 'Stripe price not configured for this package' },
-      { status: 500 }
-    );
+    return internalError('Stripe price not configured for this package');
   }
 
   try {
@@ -76,6 +71,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ checkoutUrl: session.url });
   } catch (error) {
     captureException(error, { route: '/api/tokens/purchase' });
-    return NextResponse.json({ error: 'Failed to create checkout session' }, { status: 500 });
+    return internalError('Failed to create checkout session');
   }
 }

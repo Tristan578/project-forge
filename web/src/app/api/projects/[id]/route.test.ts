@@ -131,24 +131,24 @@ describe('PUT /api/projects/[id]', () => {
     expect(res.status).toBe(400);
   });
 
-  it('should return 400 for non-integer entityCount', async () => {
+  it('should return 422 for non-integer entityCount (regression: was 400, valid JSON with invalid numeric value)', async () => {
     const { PUT } = await import('./route');
     const req = new Request('http://localhost:3000/api/projects/p1', {
       method: 'PUT',
       body: JSON.stringify({ entityCount: 3.5 }),
     });
     const res = await PUT(req, { params: Promise.resolve({ id: 'p1' }) });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
-  it('should return 400 for negative entityCount', async () => {
+  it('should return 422 for negative entityCount (regression: was 400, valid JSON with invalid numeric value)', async () => {
     const { PUT } = await import('./route');
     const req = new Request('http://localhost:3000/api/projects/p1', {
       method: 'PUT',
       body: JSON.stringify({ entityCount: -1 }),
     });
     const res = await PUT(req, { params: Promise.resolve({ id: 'p1' }) });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
   it('should allow thumbnail: null to clear thumbnail', async () => {

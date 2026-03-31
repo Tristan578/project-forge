@@ -3,6 +3,7 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { listProjects, createProject } from '@/lib/projects/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { parseJsonBody, requireString, requireObject } from '@/lib/apiValidation';
+import { apiError, internalError } from '@/lib/api/errors';
 
 /**
  * GET /api/projects
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(projectsList);
   } catch (error) {
     captureException(error, { route: '/api/projects', method: 'GET' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return internalError();
   }
 }
 
@@ -53,16 +54,14 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     const err = error as Error & { limit?: number };
     if (err.message === 'Project limit exceeded') {
-      return NextResponse.json(
-        {
-          error: 'PROJECT_LIMIT',
-          message: `Your plan allows ${err.limit} project${err.limit === 1 ? '' : 's'}. Upgrade to create more.`,
-          limit: err.limit,
-        },
-        { status: 403 }
+      return apiError(
+        403,
+        `Your plan allows ${err.limit} project${err.limit === 1 ? '' : 's'}. Upgrade to create more.`,
+        'PROJECT_LIMIT',
+        { limit: err.limit },
       );
     }
     captureException(error, { route: '/api/projects', action: 'create' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return internalError();
   }
 }

@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     if (!mime || !ALLOWED_THUMBNAIL_TYPES.includes(mime)) {
       return NextResponse.json(
         { error: `Unsupported thumbnail type. Allowed: ${ALLOWED_THUMBNAIL_TYPES.join(', ')}` },
-        { status: 400 },
+        { status: 422 },
       );
     }
     const MAX_THUMBNAIL_BYTES = 200 * 1024;
