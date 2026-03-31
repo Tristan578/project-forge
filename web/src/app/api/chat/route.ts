@@ -26,13 +26,8 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { logCost } from '@/lib/costs/costLogger';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
+import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
 import { resolveChatRoute } from '@/lib/providers/resolveChat';
-import { streamText, stepCountIs } from 'ai';
-import { gateway } from '@ai-sdk/gateway';
-import { anthropic } from '@ai-sdk/anthropic';
-import { convertManifestToolsToSdkTools } from '@/lib/ai/toolAdapter';
-import { AI_MODEL_PRIMARY, AI_MODELS } from '@/lib/ai/models';
-import manifestJson from '@/data/commands.json';
 import type { UserModelMessage, AssistantModelMessage } from '@ai-sdk/provider-utils';
 
 // ---------------------------------------------------------------------------
@@ -112,7 +107,7 @@ async function getDocsEntries(): Promise<DocEntry[]> {
 const SYSTEM_PROMPT = `You are an expert game creation assistant for SpawnForge, an AI-powered 3D game engine that runs in the browser. You help users create games by orchestrating scene setup, materials, physics, scripting, audio, and more through MCP commands.
 
 ## What You Can Do
-You have access to 118 MCP commands across 19 categories:
+You have access to 350 MCP commands across 41 categories. Key categories include:
 - **scene**: spawn_entity, delete_entities, duplicate_entity, rename_entity, set_parent, get_scene_graph
 - **materials**: update_material (PBR: baseColor, metallic, roughness, emissive, textures, alpha modes, clearcoat, transmission)
 - **lighting**: update_light, set_ambient_light (point, directional, spot lights with shadows)
@@ -268,37 +263,6 @@ function buildModelMessages(
 // ---------------------------------------------------------------------------
 // Load manifest tools for AI SDK
 // ---------------------------------------------------------------------------
-
-interface ManifestCommand {
-  name: string;
-  description: string;
-  category: string;
-  parameters: {
-    type: string;
-    properties?: Record<string, unknown>;
-    required?: string[];
-  };
-  tokenCost: number;
-  requiredScope: string;
-}
-
-const manifest = manifestJson as { version: string; commands: ManifestCommand[] };
-
-function getSdkTools() {
-  const writeTools = manifest.commands
-    .filter((cmd) => cmd.requiredScope.endsWith(':write') || cmd.category === 'query')
-    .map((cmd) => ({
-      name: cmd.name,
-      description: cmd.description,
-      parameters: {
-        type: cmd.parameters.type || 'object',
-        properties: cmd.parameters.properties || {},
-        required: cmd.parameters.required || [],
-      },
-    }));
-
-  return convertManifestToolsToSdkTools(writeTools);
-}
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate + rate-limit via shared middleware pipeline
@@ -457,8 +421,14 @@ export async function POST(request: NextRequest) {
   }
 
   let systemText = effectiveSystemPrompt;
-  if (sceneContext) {
-    systemText += '\n\n' + sceneContext;
+  if (sceneContext && typeof sceneContext === 'string') {
+    // sceneContext is client-supplied structured data (engine scene state).
+    // Strip control characters (security) but do NOT apply the 10k system
+    // prompt length cap — scene context for complex scenes can legitimately
+    // be 50k+ chars. The total input budget (MAX_INPUT_CHARS = 600k) at
+    // step 5b is the real size guard for the entire conversation.
+    const sanitizedContext = sceneContext.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    systemText += '\n\n' + sanitizedContext;
   }
 
   // Inject relevant documentation when the user appears to be asking a how-to question
@@ -477,53 +447,37 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 7. Select AI SDK model based on resolved backend
-  const canonicalModel = model || AI_MODEL_PRIMARY;
-  const isDirectBackend = !chatRoute || chatRoute.backendId === 'direct';
+  // 7. Create agent with resolved model backend + instructions
+  // resolveChatRoute is called once here (also used in step 5 for billing);
+  // the result determines whether we use direct Anthropic or gateway.
+  const usingDirect = usingDirectBackend;
+  // Tier gate: thinking mode (10k extra tokens per step) restricted to creator/pro,
+  // consistent with the systemOverride gate. Prevents amplified token burn on free tiers.
+  const canUseThinking = auth.ctx.user.tier === 'creator' || auth.ctx.user.tier === 'pro';
+  const agent = createSpawnforgeAgent({
+    isDirectBackend: usingDirect,
+    model: model || '',
+    instructions: systemText,
+    thinking: canUseThinking && thinking === true,
+  });
 
-  let modelInstance: ReturnType<typeof gateway> | ReturnType<typeof anthropic>;
-  if (isDirectBackend) {
-    // Direct Anthropic path — preserves thinking mode and prompt caching
-    modelInstance = anthropic(canonicalModel);
-  } else {
-    // Gateway path — model ID must be in provider/model format
-    const gatewayModel = canonicalModel.includes('/')
-      ? canonicalModel
-      : AI_MODELS.gatewayChat;
-    modelInstance = gateway(gatewayModel);
-  }
-
-  // 8. Provider options for thinking mode (Anthropic only)
-  const providerOptions = thinking && isDirectBackend ? {
-    anthropic: { thinking: { type: 'enabled' as const, budgetTokens: 10000 } },
-  } : undefined;
-
-  // 9. Convert messages and tools
+  // 8. Convert messages
   const modelMessages = buildModelMessages(messages);
-  const tools = getSdkTools();
 
-  // 10. Stream via AI SDK and return UI message stream response
+  // 9. Stream via Agent and return UI message stream response
   try {
-    const result = streamText({
-      model: modelInstance,
-      system: systemText,
+    const result = await agent.stream({
       messages: modelMessages,
-      tools,
-      stopWhen: stepCountIs(10),
-      experimental_telemetry: { isEnabled: true },
-      ...(providerOptions ? { providerOptions } : {}),
-      // Log actual LLM token usage to the cost ledger once the stream completes.
-      // usage.inputTokens and usage.outputTokens are the actual values from
-      // the model (not the estimated cost charged upfront via resolveApiKey).
-      onFinish: async ({ usage }) => {
-        // Only log cost when tokens were actually metered (direct backend with usageId).
-        // Gateway/BYOK requests don't have a usageId and should not be logged here.
+      onStepFinish: async ({ usage }) => {
+        // Log actual LLM token usage to the cost ledger once each step completes.
+        // usage.inputTokens and usage.outputTokens are the actual values from
+        // the model (not the estimated cost charged upfront via resolveApiKey).
         if (auth.ctx.user.id && usageId && usage) {
           const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
           logCost(
             auth.ctx.user.id,
             'chat_message',
-            isDirectBackend ? 'anthropic' : 'gateway',
+            usingDirect ? 'anthropic' : 'gateway',
             null,
             totalTokens,
             {
@@ -537,25 +491,30 @@ export async function POST(request: NextRequest) {
           });
         }
       },
-      // Handle mid-stream errors: refund tokens when the stream fails after starting
-      onError: async ({ error }) => {
-        captureException(error, { route: '/api/chat', model, phase: 'mid-stream' });
-        if (usageId) {
+    });
+
+    // Handle mid-stream errors: refund tokens when the LLM API fails after
+    // the HTTP 200 response is sent. The onFinish callback on the UI message
+    // stream fires after the stream completes (success or failure). We check
+    // the finish reason to detect errors and issue refunds.
+    return result.toUIMessageStreamResponse({
+      onFinish: async ({ finishReason }) => {
+        if (finishReason === 'error' && usageId) {
+          captureException(new Error('Stream finished with error'), {
+            route: '/api/chat', model, phase: 'mid-stream',
+          });
           await refundTokens(auth.ctx.user.id, usageId).catch((refundErr: unknown) => {
             captureException(refundErr, { route: '/api/chat', phase: 'refund_mid_stream', usageId });
           });
         }
       },
     });
-
-    return result.toUIMessageStreamResponse();
   } catch (err) {
-    // Handles synchronous errors (invalid params, model not found, etc.)
     captureException(err, { route: '/api/chat', model });
 
     if (usageId) {
       await refundTokens(auth.ctx.user.id, usageId).catch((refundErr: unknown) => {
-        captureException(refundErr, { route: '/api/chat', phase: 'refund_sync_error', usageId });
+        captureException(refundErr, { route: '/api/chat', phase: 'refund', usageId });
       });
     }
 
