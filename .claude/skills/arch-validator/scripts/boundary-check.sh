@@ -54,7 +54,7 @@ if [[ -d "$ENGINE_CORE" ]]; then
           violations+=("UNSAFE: $file:$line_num — unsafe block without preceding // SAFETY: comment")
         fi
         in_block=0
-      elif ! echo "$line" | grep -qE '^\s*$|^\s*//'; then
+      elif ! echo "$line" | grep -qE '^\s*$|^\s*//|^\s*#\['; then
         in_block=0
       fi
     done < "$file"

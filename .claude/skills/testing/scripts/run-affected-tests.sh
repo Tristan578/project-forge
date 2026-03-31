@@ -55,4 +55,11 @@ done
 echo ""
 
 cd "${REPO_ROOT}/web"
-npx vitest run "${test_files_to_run[@]}"
+
+# Strip the leading "web/" prefix since we've already cd'd into web/
+stripped_files=()
+for f in "${test_files_to_run[@]}"; do
+  stripped_files+=("${f#web/}")
+done
+
+npx vitest run "${stripped_files[@]}"

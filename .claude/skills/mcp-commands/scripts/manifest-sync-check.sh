@@ -54,7 +54,7 @@ echo "  Copy  : $COPY" >&2
 echo "" >&2
 
 # Show which commands exist in one but not the other
-python3 - <<'PYEOF'
+python3 - "$SOURCE" "$COPY" <<'PYEOF'
 import json, sys
 
 source = json.load(open(sys.argv[1]))
@@ -78,7 +78,7 @@ if only_in_copy:
 
 if not only_in_source and not only_in_copy:
     print("Command names match but content differs (description, parameters, or visibility).")
-PYEOF "$SOURCE" "$COPY" >&2
+PYEOF
 
 echo "" >&2
 echo "Fix: after editing the source manifest, run:" >&2
