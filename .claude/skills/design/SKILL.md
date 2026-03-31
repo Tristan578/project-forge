@@ -1,6 +1,7 @@
 ---
 name: design
-description: Architecture and system design specialist. Use when designing new features, reviewing specs, evaluating trade-offs, or planning multi-system changes.
+description: Design feature architecture for SpawnForge with specs in specs/. Use when planning new features, evaluating trade-offs between ECS/store/MCP approaches, or designing cross-layer changes that touch Rust engine + React + MCP simultaneously.
+paths: "specs/**"
 ---
 
 # Role: Architecture & System Design Specialist

@@ -1,6 +1,6 @@
 ---
 name: developer-experience
-description: Developer experience guardian. Enforces documentation freshness, cross-IDE consistency, quality standards, and smooth onboarding. Invoke after completing features, on session start/stop, or when another agent needs a DX audit.
+description: DX audit for SpawnForge — checks documentation freshness, cross-IDE consistency, CLAUDE.md accuracy, and onboarding quality. Use when completing features, auditing DX quality, or when documentation may be out of sync with code.
 user-invocable: true
 allowed-tools: Bash, Read, Glob, Grep, Edit, Write
 argument-hint: "[audit|doq|dod|onboard|refresh]"

@@ -1,9 +1,10 @@
 ---
 name: build
-description: Build the WASM engine (WebGL2 + WebGPU variants) and copy to web/public/
+description: Build WebGL2 + WebGPU WASM engine variants and copy to web/public/. Use when engine/ Rust code changes, before E2E tests, or when lockfile drift is detected after cherry-picks or package.json edits.
 user-invocable: true
 allowed-tools: Bash, Read, Glob, Grep
 argument-hint: "[variant: all|webgl2|webgpu]"
+paths: "engine/**, build_wasm.ps1, Cargo.toml, Cargo.lock"
 ---
 
 # Build WASM Engine
@@ -63,3 +64,31 @@ ls -la web/public/engine-pkg-webgpu/forge_engine_bg.wasm
 - **wasm-bindgen version mismatch**: Must be 0.2.108. Install with `cargo install wasm-bindgen-cli --version 0.2.108`
 - **Missing LIB env**: Proc-macro crates (e.g., doc-image-embed) need Windows SDK libs for native host compilation
 - **Build time**: Full build takes ~5-10 minutes depending on hardware
+
+## Lockfile Consistency
+
+Verify `package-lock.json` is consistent with all `package.json` files. Run after cherry-picks, rebases, or manual `package.json` edits. A stale lockfile fails ALL CI jobs simultaneously (`npm ci` requires exact match).
+
+### Check for drift
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+npm install --dry-run 2>&1 | grep -E "added|removed|changed"
+```
+
+If the dry-run shows changes, the lockfile is stale.
+
+### Fix stale lockfile
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+npm install
+git add package-lock.json
+git commit -m "fix: regenerate lockfile after dependency changes"
+```
+
+### When to run
+
+- After `git cherry-pick` that touches any `package.json`
+- After `git rebase` across commits that modified dependencies
+- After manually editing any `package.json`

@@ -1,6 +1,6 @@
 ---
 name: changelog-review
-description: Check changelogs and release notes for all primary systems, frameworks, and libraries used in SpawnForge. Prevents stale training data from producing invalid recommendations. Run at session start or before major work.
+description: Check changelogs for Bevy, Next.js, Zustand, wasm-bindgen, Rapier, and all SpawnForge deps. Use when training data may be stale, before major upgrades, or when a library API behaves unexpectedly.
 ---
 
 # Changelog & Release Review

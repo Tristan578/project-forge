@@ -1,6 +1,6 @@
 ---
 name: multiplayer-readiness
-description: Flag changes that make future multiplayer networking harder to implement. Use when reviewing PRs, designing features, or modifying state management, entity systems, or the command pipeline.
+description: Audit SpawnForge code for changes that block future multiplayer networking. Use when modifying state management, entity systems, or the command pipeline — flags non-deterministic state, client-authoritative patterns, and unsyncable mutations.
 user-invocable: true
 allowed-tools: Read, Glob, Grep, Agent
 argument-hint: "[scope: pr|file <path>|store|commands|all]"

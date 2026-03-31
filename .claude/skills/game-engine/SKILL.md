@@ -1,6 +1,6 @@
 ---
 name: game-engine
-description: 'Expert skill for building web-based game engines and games using HTML5, Canvas, WebGL, and JavaScript. Use when asked to create games, build game engines, implement game physics, handle collision detection, set up game loops, manage sprites, add game controls, or work with 2D/3D rendering. Covers techniques for platformers, breakout-style games, maze games, tilemaps, audio, multiplayer via WebRTC, and publishing games.'
+description: Web game engine patterns — game loops, physics, collision, sprites, tilemaps, audio, 2D/3D rendering, WebGL, Canvas. Use when implementing game mechanics, SpawnForge engine features, or game system architecture (platformers, physics, input, camera).
 ---
 
 # Game Engine Skill

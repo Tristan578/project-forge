@@ -1,6 +1,6 @@
 ---
 name: pr-code-review
-description: Use when reviewing a pull request for bugs, security issues, and regressions. Analyzes the full diff with codebase context and posts inline GitHub comments with severity markers. Modeled after Claude Code Review's multi-agent approach. Invoke with /pr-code-review <PR number>.
+description: Review a PR for SpawnForge bugs, security issues, and regressions. Posts inline GitHub comments with severity markers. Use when asked to "review PR", "code review", or "check this PR". Invoke with /pr-code-review <PR number>.
 ---
 
 # PR Code Review

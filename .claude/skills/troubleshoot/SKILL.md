@@ -1,6 +1,6 @@
 ---
 name: troubleshoot
-description: Diagnose failures across the SpawnForge stack — WASM build, CI pipeline, dev server, production, E2E tests, engine panics, and external services. Use when something is broken and you need structured triage.
+description: Diagnose SpawnForge failures — WASM build errors, CI pipeline breakage, dev server crashes, E2E test failures, Bevy ECS panics, external service outages. Use when something is broken and the cause is unclear.
 user-invocable: true
 allowed-tools: Bash, Read, Glob, Grep, Agent, WebFetch
 argument-hint: "[area: wasm|ci|dev|prod|e2e|engine|services|auto]"

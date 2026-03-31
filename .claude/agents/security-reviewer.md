@@ -4,6 +4,7 @@ description: Security and compliance specialist. Reviews code for prompt injecti
 model: claude-sonnet-4-5
 effort: high
 memory: project
+background: true
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
 skills: [testing, test]
 hooks:

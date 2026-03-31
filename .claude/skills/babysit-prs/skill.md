@@ -1,6 +1,6 @@
 ---
 name: babysit-prs
-description: Check all open PRs for CI failures and review comments, then fix issues automatically. Use when you need to monitor and clean up pull requests.
+description: Monitor open PRs for CI failures and review comments, then fix issues automatically. Use when PRs need to be driven to green — checks CI status, Sentry comments, merge conflicts, and applies fixes.
 user-invocable: true
 allowed-tools: Bash, Read, Edit, Write, Glob, Grep, Agent
 argument-hint: "[pr_number | 'all']"

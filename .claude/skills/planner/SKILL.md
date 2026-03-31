@@ -1,7 +1,8 @@
 ---
 name: planner
-description: Acts as the Senior Architect. Creates detailed specs in specs/ that reference domain-specific patterns. usage: /planner [feature request]
+description: Create a detailed spec in specs/ for a SpawnForge feature. Use when starting any new feature, asked to plan a complex change, or when "spec", "design", or "architect" appears in a request. Produces implementation-ready specs with acceptance criteria.
 is_daemon: false
+paths: "specs/**"
 ---
 
 # Role: The Architect

@@ -1,6 +1,6 @@
 ---
 name: env-health-check
-description: Validate that all production environments are operable — CD pipeline, Vercel deployments, health APIs, Sentry, and GitHub Actions. Run at session start or after deploys to catch silent failures like broken CD workflows.
+description: Validate SpawnForge production environments — Vercel deployments, health APIs, Sentry, CD pipeline. Run after deploys or at session start when a silent breakage is suspected (broken CD, health endpoint down, env var missing).
 ---
 
 # Environment Health Check

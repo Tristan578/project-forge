@@ -1,6 +1,7 @@
 ---
 name: docs
-description: Documentation specialist. Use when writing or updating docs, README, known-limitations, API references, user-facing copy, or CLAUDE.md context files.
+description: Write, update, and review SpawnForge docs — README, known-limitations, API references, user-facing copy, CLAUDE.md, and MCP command descriptions. Use when writing docs, reviewing doc quality (PASS/FAIL), or auditing for stale references.
+paths: "docs/**, README.md, TESTING.md, .claude/rules/**, apps/docs/**"
 ---
 
 # Role: Documentation Specialist
@@ -124,3 +125,44 @@ Before declaring documentation work complete:
 5. Grammar and spelling checked
 6. Scannable in 30 seconds (headers, tables, bullet points)
 7. No orphaned references to removed features
+
+## Documentation Review
+
+Review documentation quality for changed files. Outputs PASS or FAIL with action items. No praise — findings only.
+
+### Step 1: Identify changed files
+
+```bash
+git diff --name-only main...HEAD 2>/dev/null || git diff --name-only HEAD~5
+```
+
+### Step 2: Review by domain
+
+| File Pattern | What to Check |
+|---|---|
+| `*.ts`, `*.tsx`, `*.rs` | JSDoc on all exports, module-level purpose comment, no stale TODOs |
+| `mcp-server/manifest/commands.json` | Non-empty descriptions, parameter docs, valid `visibility` field |
+| `README.md`, `CLAUDE.md`, `TESTING.md` | Accuracy, stale references, counts match reality |
+| `.claude/rules/*.md` | File paths exist on disk, patterns are current |
+| `apps/docs/**` | Internal gating, generated content freshness |
+
+For each code file: does every exported function have a JSDoc? Can a junior dev understand each function in 30 seconds? Are there stale comments, TODOs without tickets, commented-out code?
+
+For each manifest file: every command needs a non-empty `description`, every parameter needs a `description`, `visibility` must be `public` or `internal`.
+
+### Output format
+
+```
+## Documentation Review — [branch name]
+
+**Files reviewed:** N
+**Verdict:** PASS | FAIL
+
+### Findings (if FAIL)
+
+1. **[file:line]** Issue. Fix: Action.
+```
+
+### Quick mode
+
+When invoked with a specific file path, review only that file. Used by the pre-push hook for targeted validation.

@@ -1,6 +1,6 @@
 ---
 name: pr-green-machine
-description: Sequential PR remediation pipeline — drives each open PR through code review, root-cause analysis, planning, multi-domain validation, fix, re-validation, and babysitting until CI is fully green, all Sentry comments are resolved, and merge conflicts are gone. Use when multiple PRs need to reach merge-ready state. Processes oldest to newest, one at a time, with zero assumptions.
+description: Drive all open PRs to merge-ready state — fixes CI failures, resolves Sentry comments, clears merge conflicts. Use when multiple PRs need to go green or when asked to "clean up PRs", "fix all PRs", or "make PRs mergeable".
 ---
 
 # PR Green Machine

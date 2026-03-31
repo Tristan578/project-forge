@@ -1,6 +1,7 @@
 ---
 name: arch-validator
-description: Run this skill AFTER writing any Rust code to ensure you haven't violated the architectural boundaries.
+description: Validate Rust engine architecture boundaries — ensure core/ has no browser deps, bridge/ is properly isolated. Run after any engine/ changes or when "architecture violation", "import boundary", or "bridge isolation" is mentioned.
+paths: "engine/src/**"
 ---
 
 # Architecture Validator
