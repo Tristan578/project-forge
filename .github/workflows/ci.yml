@@ -331,4 +331,5 @@ jobs:
         # Use production server (next start) instead of dev server (next dev).
         # next dev compiles on-demand — too slow for CI (2-3 min cold start).
         # next start boots in <5s after build, saving ~3 min per run.
-        run: npx playwright test --grep @ui --project=chromium --config playwright.ci.config.ts
+        # Exclude @dev tests — /dev route redirects to /sign-in under next start (production mode).
+        run: npx playwright test --grep '@ui' --grep-invert '@dev' --project=chromium --config playwright.ci.config.ts
