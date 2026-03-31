@@ -345,12 +345,14 @@ describe('character_setup executor', () => {
     expect(result.error?.code).toBe('MISSING_ENTITY');
   });
 
-  it('fails with INVALID_INPUT when entity missing', async () => {
+  it('uses default player entity when entity not provided', async () => {
     const ctx = makeMockCtx();
     const result = await executor.execute({ projectType: '3d', entityId: 'e1' }, ctx);
 
-    expect(result.success).toBe(false);
-    expect(result.error?.code).toBe('INVALID_INPUT');
+    // When called from system registry (no explicit entity), uses default player
+    expect(result.success).toBe(true);
+    expect(result.output?.entityId).toBe('e1');
+    expect(result.output?.projectType).toBe('3d');
   });
 });
 

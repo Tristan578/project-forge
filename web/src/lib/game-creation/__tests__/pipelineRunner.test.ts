@@ -12,6 +12,7 @@ import type {
   ExecutorDefinition,
   ExecutorContext,
   ExecutorResult,
+  ExecutorName,
   ApprovalGate,
   OrchestratorGDD,
   TokenEstimate,
@@ -131,8 +132,8 @@ const verifyExecutor: ExecutorDefinition = {
   userFacingErrorMessage: 'Verify failed',
 };
 
-function makeRegistry(...defs: ExecutorDefinition[]): Map<string, ExecutorDefinition> {
-  const map = new Map<string, ExecutorDefinition>();
+function makeRegistry(...defs: ExecutorDefinition[]): Map<ExecutorName, ExecutorDefinition> {
+  const map = new Map<ExecutorName, ExecutorDefinition>();
   for (const def of defs) {
     map.set(def.name, def);
   }
@@ -159,7 +160,7 @@ describe('runPipeline', () => {
 
   it('executes steps in array order', async () => {
     const order: string[] = [];
-    const orderedRegistry = new Map<string, ExecutorDefinition>([
+    const orderedRegistry = new Map<ExecutorName, ExecutorDefinition>([
       ['scene_create', {
         name: 'scene_create',
         inputSchema: z.object({}),
@@ -192,7 +193,7 @@ describe('runPipeline', () => {
 
   it('transitions step status: pending -> running -> completed', async () => {
     const statuses: string[] = [];
-    const trackingRegistry = new Map<string, ExecutorDefinition>([
+    const trackingRegistry = new Map<ExecutorName, ExecutorDefinition>([
       ['scene_create', {
         name: 'scene_create',
         inputSchema: z.object({}),
@@ -221,7 +222,7 @@ describe('runPipeline', () => {
 
   it('retries a failing step up to maxRetries times', async () => {
     let callCount = 0;
-    const flakyRegistry = new Map<string, ExecutorDefinition>([
+    const flakyRegistry = new Map<ExecutorName, ExecutorDefinition>([
       ['scene_create', {
         name: 'scene_create',
         inputSchema: z.object({}),
@@ -352,7 +353,7 @@ describe('runPipeline', () => {
   it('resolveStepOutput accepts step ID (e.g. step_0)', async () => {
     let resolvedById: Record<string, unknown> | undefined;
 
-    const probeRegistry = new Map<string, ExecutorDefinition>([
+    const probeRegistry = new Map<ExecutorName, ExecutorDefinition>([
       ['scene_create', {
         name: 'scene_create',
         inputSchema: z.object({}),
@@ -381,7 +382,7 @@ describe('runPipeline', () => {
   it('resolveStepOutput falls back to executor name lookup', async () => {
     let resolvedByName: Record<string, unknown> | undefined;
 
-    const probeRegistry = new Map<string, ExecutorDefinition>([
+    const probeRegistry = new Map<ExecutorName, ExecutorDefinition>([
       ['scene_create', {
         name: 'scene_create',
         inputSchema: z.object({}),
@@ -411,7 +412,7 @@ describe('runPipeline', () => {
     const localController = new AbortController();
     let step1Started = false;
 
-    const slowRegistry = new Map<string, ExecutorDefinition>([
+    const slowRegistry = new Map<ExecutorName, ExecutorDefinition>([
       ['scene_create', {
         name: 'scene_create',
         inputSchema: z.object({}),
@@ -459,7 +460,7 @@ describe('runPipeline', () => {
   it('plan status is executing while steps run', async () => {
     let statusDuringExecution: string | undefined;
 
-    const trackingRegistry = new Map<string, ExecutorDefinition>([
+    const trackingRegistry = new Map<ExecutorName, ExecutorDefinition>([
       ['scene_create', {
         name: 'scene_create',
         inputSchema: z.object({}),

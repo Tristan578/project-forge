@@ -226,7 +226,7 @@ describe('decomposeIntoSystems', () => {
 
     // All string fields should be passed through sanitizePrompt
     const calls = sanitizePrompt.mock.calls.map(
-      (c: [string, ...unknown[]]) => c[0],
+      (c: unknown[]) => c[0] as string,
     );
 
     expect(calls).toContain('Test Game'); // title
@@ -346,7 +346,7 @@ describe('decomposeIntoSystems', () => {
     await decomposeIntoSystems('make a game', '3d');
 
     const calls = sanitizePrompt.mock.calls.map(
-      (c: [string, ...unknown[]]) => c[0],
+      (c: unknown[]) => c[0] as string,
     );
 
     // The asset styleDirective should be sanitized

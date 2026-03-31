@@ -3,15 +3,25 @@ import { generateRig, rigToCommands } from '@/lib/ai/autoRigging';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 
+const DEFAULT_PLAYER_ENTITY = {
+  name: 'Player',
+  role: 'player',
+  appearance: 'default character',
+  behaviors: ['move'],
+};
+
 const inputSchema = z.object({
   entity: z.object({
     name: z.string(),
     role: z.string(),
     appearance: z.string(),
     behaviors: z.array(z.string()),
-  }),
+  }).optional().default(DEFAULT_PLAYER_ENTITY),
   projectType: z.enum(['2d', '3d']),
   entityId: z.string().optional(),
+  // Accepted from system registry but not required
+  movementType: z.string().optional(),
+  systemConfig: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const characterSetupExecutor: ExecutorDefinition = {

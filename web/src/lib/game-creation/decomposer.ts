@@ -242,12 +242,18 @@ export async function decomposeIntoSystems(
       description: cleanPrompt,
       systems: data.systems,
       scenes: data.scenes,
-      assetManifest: data.assetManifest.map(a => ({
-        ...a,
+      assetManifest: data.assetManifest.map(a => {
         // [S4] Sanitize styleDirective on each asset
-        styleDirective: sanitizePrompt(a.styleDirective, 300).filtered
-          ?? a.styleDirective.slice(0, 300),
-      })),
+        const assetStyle = sanitizePrompt(a.styleDirective, 300);
+        return {
+          ...a,
+          // If unsafe, fall back to generic description — never pass raw unsanitized
+          // LLM output to downstream asset generation prompts
+          styleDirective: assetStyle.safe
+            ? (assetStyle.filtered ?? a.styleDirective.slice(0, 300))
+            : 'default style',
+        };
+      }),
       estimatedScope: data.estimatedScope,
       styleDirective: sanitizedStyle.safe
         ? sanitizedStyle.filtered!
