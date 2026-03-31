@@ -9,7 +9,7 @@ import { agentTest as test } from '../fixtures/agent.fixture';
 import { expect } from '@playwright/test';
 
 test.describe('AgentViewport — error handling', () => {
-  test('@ui sendCommand with unknown command returns structured result', async ({ agentViewport: av }) => {
+  test('@ui @dev sendCommand with unknown command returns structured result', async ({ agentViewport: av }) => {
     await av.bootPage();
     const result = await av.sendCommand('this_command_does_not_exist', {});
     // Should return a CommandResult, not throw
@@ -18,7 +18,7 @@ test.describe('AgentViewport — error handling', () => {
     expect(typeof result.success).toBe('boolean');
   });
 
-  test('@ui verifyEntityExists with empty name returns a result', async ({ agentViewport: av }) => {
+  test('@ui @dev verifyEntityExists with empty name returns a result', async ({ agentViewport: av }) => {
     await av.bootPage();
     const result = await av.verifyEntityExists('');
     // Empty name matches all entities (includes in '' is always true)
@@ -28,7 +28,7 @@ test.describe('AgentViewport — error handling', () => {
     expect(result).toHaveProperty('evidence');
   });
 
-  test('@ui observe returns non-negative capturedAt timestamp', async ({ agentViewport: av }) => {
+  test('@ui @dev observe returns non-negative capturedAt timestamp', async ({ agentViewport: av }) => {
     await av.bootPage();
     const before = Date.now();
     const obs = await av.observe();
@@ -37,7 +37,7 @@ test.describe('AgentViewport — error handling', () => {
     expect(obs.capturedAt).toBeLessThanOrEqual(after + 100);
   });
 
-  test('@ui multiple observe calls each have a unique timestamp', async ({ agentViewport: av }) => {
+  test('@ui @dev multiple observe calls each have a unique timestamp', async ({ agentViewport: av }) => {
     await av.bootPage();
     const obs1 = await av.observe('first');
     await av.page.waitForTimeout(10); // ensure time progresses
@@ -45,7 +45,7 @@ test.describe('AgentViewport — error handling', () => {
     expect(obs2.capturedAt).toBeGreaterThanOrEqual(obs1.capturedAt);
   });
 
-  test('@ui clearConsoleErrors followed by observe shows no stale errors', async ({ agentViewport: av }) => {
+  test('@ui @dev clearConsoleErrors followed by observe shows no stale errors', async ({ agentViewport: av }) => {
     await av.bootPage();
     av.clearConsoleErrors();
     const obs = await av.observe();

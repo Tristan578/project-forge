@@ -243,7 +243,7 @@ test.describe('Template Gallery @ui @dev', () => {
   });
 });
 
-test.describe('Template selection flow @ui', () => {
+test.describe('Template selection flow @ui @dev', () => {
   /**
    * Helper: navigate to /dev with WelcomeModal visible and TemplateGallery open.
    * Returns when the gallery dialog is visible.
@@ -374,7 +374,7 @@ test.describe('Template selection flow @ui', () => {
   });
 });
 
-test.describe('Welcome modal onboarding gate @ui', () => {
+test.describe('Welcome modal onboarding gate @ui @dev', () => {
   test('welcome modal appears on first visit when forge-welcomed is absent', async ({ page }) => {
     await page.addInitScript(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -574,7 +574,7 @@ test.describe('Welcome modal onboarding gate @ui', () => {
   });
 });
 
-test.describe('Template gallery ARIA structure @ui', () => {
+test.describe('Template gallery ARIA structure @ui @dev', () => {
   test('template gallery dialog has correct ARIA attributes', async ({ page }) => {
     await page.addInitScript(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
