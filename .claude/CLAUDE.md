@@ -302,6 +302,8 @@ All agents have: `memory`, `effort`, `model`, `tools`, `skills`, and agent-scope
 **Testing:** `/testing` (merged vitest+test), `/playwright-best-practices` (marketplace, 57 rules), `/tdd` (marketplace)
 **Infrastructure:** `/infra-services` (merged ci-status), `/troubleshoot`, `/kanban` (merged sync-push/pull), `/babysit-prs`, `/pr-code-review` (context: fork), `/pr-green-machine` (context: fork), `/env-health-check`, `/changelog-review`, `/deploy-to-vercel` (marketplace)
 **Database:** `/db-migrate`, `/neon-postgres` (marketplace), `/claimable-postgres` (marketplace)
+**Deployment:** `/deploy-engine` (user-only — build WASM + upload to R2 CDN)
+**Billing:** `stripe-webhooks` (background — auto-loads on `web/src/lib/billing/**` edits, documents CTE claims + transaction ordering)
 **Features:** `/game-engine`, `/multiplayer-readiness`, `/viewport`
 **Workflow:** `/design`, `/architect-flow`, `/docs` (merged doc-review), `/developer-experience`
 
