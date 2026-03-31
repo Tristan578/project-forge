@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useEditorStore, type GameComponentData, type DialogueTriggerData, GAME_COMPONENT_TYPES } from '@/stores/editorStore';
 import { useDialogueStore } from '@/stores/dialogueStore';
 import { ChevronDown, ChevronRight, Trash2, Plus } from 'lucide-react';
@@ -165,8 +165,8 @@ interface ComponentSectionProps {
 function ComponentSection({ title, onRemove, children }: ComponentSectionProps) {
   const [collapsed, setCollapsed] = useState(false);
 
-  // Map title to term for tooltip
-  const tooltipTerm = (() => {
+  // Map title to term for tooltip — memoised because the switch is pure over `title`.
+  const tooltipTerm = useMemo(() => {
     switch (title) {
       case 'Character Controller': return 'characterController';
       case 'Health': return 'health';
@@ -182,7 +182,7 @@ function ComponentSection({ title, onRemove, children }: ComponentSectionProps) 
       case 'Win Condition': return 'winCondition';
       default: return undefined;
     }
-  })();
+  }, [title]);
 
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900/50">

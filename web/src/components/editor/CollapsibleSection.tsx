@@ -67,6 +67,8 @@ export function CollapsibleSection({
     });
   }, [id]);
 
+  const panelId = `collapsible-panel-${id}`;
+
   return (
     <div className={`border-t border-zinc-800 pt-3 mt-3 ${className}`}>
       <button
@@ -74,6 +76,7 @@ export function CollapsibleSection({
         onClick={toggle}
         className="flex w-full items-center gap-1.5 text-left group"
         aria-expanded={!isCollapsed}
+        aria-controls={panelId}
       >
         {isCollapsed ? (
           <ChevronRight className="w-3 h-3 text-zinc-400 group-hover:text-zinc-300" />
@@ -85,7 +88,7 @@ export function CollapsibleSection({
         </h3>
         {headerRight && <div className="ml-auto">{headerRight}</div>}
       </button>
-      {!isCollapsed && <div className="mt-2">{children}</div>}
+      {!isCollapsed && <div id={panelId} className="mt-2">{children}</div>}
     </div>
   );
 }

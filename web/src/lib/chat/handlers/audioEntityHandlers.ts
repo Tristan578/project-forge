@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { ToolHandler } from './types';
 import { zEntityId, parseArgs } from './types';
 
-export const audioLegacyHandlers: Record<string, ToolHandler> = {
+export const audioEntityHandlers: Record<string, ToolHandler> = {
   set_audio: async (args, { store }) => {
     const p = parseArgs(z.object({ entityId: zEntityId }), args);
     if (p.error) return p.error;

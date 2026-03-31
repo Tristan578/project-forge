@@ -39,7 +39,7 @@ import {
   readTransformFromClipboard,
 } from '@/lib/transformClipboard';
 import { radToDeg, degToRad } from '@/lib/colorUtils';
-import { useComplexityStore } from '@/stores/slices/complexitySlice';
+import { useComplexityStore } from '@/stores/complexitySlice';
 
 const EMPTY_COMPONENTS: string[] = [];
 

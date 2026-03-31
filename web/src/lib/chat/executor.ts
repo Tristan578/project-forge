@@ -28,7 +28,7 @@ import { physicsJointHandlers } from './handlers/physicsJointHandlers';
 import { animationParticleHandlers } from './handlers/animationParticleHandlers';
 import { gameplayHandlers } from './handlers/gameplayHandlers';
 import { assetHandlers } from './handlers/assetHandlers';
-import { audioLegacyHandlers } from './handlers/audioLegacyHandlers';
+import { audioEntityHandlers } from './handlers/audioEntityHandlers';
 import { pixelArtHandlers } from './handlers/pixelArtHandlers';
 import { compoundHandlers } from './handlers/compoundHandlers';
 import { leaderboardHandlers } from './handlers/leaderboardHandlers';
@@ -62,7 +62,7 @@ const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx: ToolC
   ...animationParticleHandlers,
   ...gameplayHandlers,
   ...assetHandlers,
-  ...audioLegacyHandlers,
+  ...audioEntityHandlers,
   ...pixelArtHandlers,
   ...compoundHandlers,
   ...leaderboardHandlers,
