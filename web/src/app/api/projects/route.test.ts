@@ -130,7 +130,7 @@ describe('POST /api/projects', () => {
     expect(body.name).toBe('New Project');
   });
 
-  it('should return 403 when project limit exceeded', async () => {
+  it('should return 403 when project limit exceeded (regression: error field now contains human-readable message, not code)', async () => {
     const error = new Error('Project limit exceeded') as Error & { limit?: number };
     error.limit = 3;
     vi.mocked(createProject).mockRejectedValue(error);
@@ -140,7 +140,7 @@ describe('POST /api/projects', () => {
     const body = await res.json();
 
     expect(res.status).toBe(403);
-    expect(body.error).toBe('PROJECT_LIMIT');
-    expect(body.limit).toBe(3);
+    expect(body.error).toContain('Your plan allows 3 project');
+    expect(body.error).toContain('Upgrade to create more');
   });
 });

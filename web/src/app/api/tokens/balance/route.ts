@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getTokenBalance } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { internalError } from '@/lib/api/errors';
 
 export async function GET(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
@@ -16,6 +17,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(balance);
   } catch (error) {
     captureException(error, { route: '/api/tokens/balance', method: 'GET' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return internalError();
   }
 }

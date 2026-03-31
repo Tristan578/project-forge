@@ -11,6 +11,7 @@ import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLi
 import { refundTokens } from '@/lib/tokens/service';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { DB_PROVIDER } from '@/lib/config/providers';
+import { badRequest, validationError, internalError } from '@/lib/api/errors';
 
 
 export async function POST(request: NextRequest) {
@@ -36,33 +37,24 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+    return badRequest('Invalid JSON');
   }
 
   const { prompt, durationSeconds = 30, instrumental = true } = body;
 
   // Validate
   if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
-    return NextResponse.json(
-      { error: 'Prompt must be between 3 and 500 characters' },
-      { status: 422 }
-    );
+    return validationError('Prompt must be between 3 and 500 characters');
   }
 
   if (!(typeof durationSeconds === 'number' && Number.isFinite(durationSeconds)) || durationSeconds < 15 || durationSeconds > 120) {
-    return NextResponse.json(
-      { error: 'Duration must be between 15 and 120 seconds' },
-      { status: 422 }
-    );
+    return validationError('Duration must be between 15 and 120 seconds');
   }
 
   // 2b. Content safety filter
   const safety = sanitizePrompt(prompt);
   if (!safety.safe) {
-    return NextResponse.json(
-      { error: safety.reason ?? 'Content rejected by safety filter' },
-      { status: 422 }
-    );
+    return validationError(safety.reason ?? 'Content rejected by safety filter');
   }
   const safePrompt = safety.filtered ?? prompt;
 
@@ -116,6 +108,6 @@ export async function POST(request: NextRequest) {
     }
     captureException(err, { route: '/api/generate/music', prompt: safePrompt });
     const message = err instanceof Error ? err.message : 'Provider error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalError(message);
   }
 }

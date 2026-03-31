@@ -105,7 +105,7 @@ describe('POST /api/tokens/purchase', () => {
     expect(res.status).toBe(403);
   });
 
-  it('should return 400 for invalid package', async () => {
+  it('should return 422 for invalid package (regression: was 400, valid JSON with invalid business value)', async () => {
     const { POST } = await import('./route');
     const req = new Request('http://localhost:3000/api/tokens/purchase', {
       method: 'POST',
@@ -114,7 +114,7 @@ describe('POST /api/tokens/purchase', () => {
     const res = await POST(req);
     const body = await res.json();
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     expect(body.error).toContain('Invalid package');
   });
 

@@ -106,14 +106,14 @@ describe('POST /api/billing/checkout', () => {
     expect(res.status).toBe(429);
   });
 
-  it('returns 400 for invalid tier', async () => {
+  it('returns 422 for invalid tier (regression: was 400, valid JSON with invalid business value)', async () => {
     mockMiddlewareSuccess();
 
     const { POST } = await import('./route');
     const res = await POST(makeReq({ tier: 'invalid_tier' }));
     const data = await res.json();
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     expect(data.error).toContain('Invalid tier');
   });
 
