@@ -75,6 +75,7 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const loadTemplate = useEditorStore((s) => s.loadTemplate);
@@ -95,10 +96,14 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
     if (!card) return;
 
     setIsGenerating(true);
+    setGenerateError(null);
     try {
       await loadTemplate(card.templateId);
       setIsReady(true);
       setStep(3);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load template. Please try again.';
+      setGenerateError(message);
     } finally {
       setIsGenerating(false);
     }
@@ -238,6 +243,12 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
                   AI will use a pre-built template to build your game — you can customize everything afterwards.
                 </p>
               </div>
+
+              {generateError && (
+                <p role="alert" className="rounded-md border border-red-800 bg-red-950/50 px-3 py-2 text-sm text-red-400">
+                  {generateError}
+                </p>
+              )}
 
               <button
                 onClick={handleGenerate}
