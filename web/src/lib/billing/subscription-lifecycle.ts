@@ -407,42 +407,60 @@ export async function reverseAddonTokens(
       .limit(1);
 
     if (purchase) {
-      // Idempotency: calculate only the *new* refund increment.
-      // Stripe sends cumulative amount_refunded, so we subtract what
-      // we've already processed.
-      const newRefundCents = amountRefunded - purchase.refundedCents;
-      if (newRefundCents <= 0) return; // Already fully processed
+      // TOCTOU fix (PF-7514): the old code read purchase.refundedCents outside
+      // the transaction and used that snapshot to compute newRefundCents.
+      // Two concurrent webhooks could both read the same stale refundedCents,
+      // both compute newRefundCents > 0, and both proceed to deduct tokens.
+      //
+      // Fix: atomically advance refunded_cents with WHERE refunded_cents < amountRefunded.
+      // The UPDATE returns the pre-update refunded_cents (via RETURNING + arithmetic)
+      // so we can compute the exact increment this caller is responsible for.
+      // If another request already set refunded_cents = amountRefunded, the WHERE
+      // guard fails and 0 rows are returned — we exit without double-deducting.
+      const now = new Date().toISOString();
+      // Use a CTE to capture the pre-update refunded_cents value.
+      // In a plain UPDATE...RETURNING, column values are the NEW values, so
+      // we cannot recover the old refunded_cents from RETURNING alone.
+      // The CTE snapshots the old row first; the UPDATE then joins against it
+      // so we can compute the exact increment this caller is responsible for.
+      const claimResult = await neonSql`
+        WITH old AS (
+          SELECT id, refunded_cents, tokens, amount_cents
+          FROM token_purchases
+          WHERE id = ${purchase.id}
+        )
+        UPDATE token_purchases
+        SET refunded_cents = ${amountRefunded}
+        FROM old
+        WHERE token_purchases.id = ${purchase.id}
+          AND old.refunded_cents < ${amountRefunded}
+        RETURNING old.tokens,
+                  old.amount_cents,
+                  (${amountRefunded} - old.refunded_cents) AS increment_cents
+      `;
 
-      // Proportional tokens based on the purchase's token count
-      const refundRatio = Math.min(newRefundCents / purchase.amountCents, 1);
-      const tokensToDeduct = Math.floor(purchase.tokens * refundRatio);
+      // If 0 rows returned, a concurrent request already claimed this exact
+      // amountRefunded value — nothing to do.
+      if (claimResult.length === 0) return;
+
+      const incrementCents = claimResult[0].increment_cents as number;
+      const purchaseTokens = claimResult[0].tokens as number;
+      const purchaseAmountCents = claimResult[0].amount_cents as number;
+
+      if (incrementCents <= 0 || purchaseAmountCents <= 0) return;
+
+      const refundRatio = Math.min(incrementCents / purchaseAmountCents, 1);
+      const tokensToDeduct = Math.floor(purchaseTokens * refundRatio);
 
       if (tokensToDeduct <= 0) return;
 
-      // Read current user state for clamping and balance computation
-      const [user] = await db
-        .select({
-          addonTokens: users.addonTokens,
-          monthlyTokens: users.monthlyTokens,
-          monthlyTokensUsed: users.monthlyTokensUsed,
-          earnedCredits: users.earnedCredits,
-        })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-      if (!user) return;
+      // Now perform the token deduction atomically. The UPDATE token_purchases
+      // above already claimed this increment so no further idempotency guard is
+      // needed here — but we clamp to the user's actual addon balance in SQL.
+      const clampedDeduction = tokensToDeduct;
 
-      const clampedDeduction = Math.min(tokensToDeduct, user.addonTokens);
-      const now = new Date().toISOString();
-
-      // INSERT before UPDATE so balance_after reads pre-deduction state.
-      // balance_after = monthly_remaining + (addon_tokens - deduction) + earned_credits
-      const statements: ReturnType<typeof neonSql>[] = [
-        neonSql`
-          UPDATE token_purchases
-          SET refunded_cents = ${amountRefunded}
-          WHERE id = ${purchase.id}
-        `,
+      // INSERT before UPDATE so balance_after reads pre-deduction addon_tokens.
+      await neonSql.transaction([
         neonSql`
           INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
           SELECT ${userId}, 'adjustment', ${-clampedDeduction},
@@ -450,18 +468,13 @@ export async function reverseAddonTokens(
                  ${`charge_refunded:${chargeId}`}, ${chargeId}
           FROM users WHERE id = ${userId}
         `,
-      ];
-
-      if (clampedDeduction > 0) {
-        statements.push(neonSql`
+        neonSql`
           UPDATE users
           SET addon_tokens = GREATEST(0, addon_tokens - ${clampedDeduction}),
               updated_at   = ${now}
           WHERE id = ${userId}
-        `);
-      }
-
-      await neonSql.transaction(statements);
+        `,
+      ]);
       return;
     }
   }
