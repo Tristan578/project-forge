@@ -88,7 +88,7 @@ export function CollapsibleSection({
         </h3>
         {headerRight && <div className="ml-auto">{headerRight}</div>}
       </button>
-      {!isCollapsed && <div id={panelId} className="mt-2">{children}</div>}
+      <div id={panelId} className="mt-2" hidden={isCollapsed}>{children}</div>
     </div>
   );
 }
