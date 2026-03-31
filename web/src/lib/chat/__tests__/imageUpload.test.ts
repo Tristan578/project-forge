@@ -40,14 +40,14 @@ describe('validateImageFile', () => {
   it('rejects unsupported file types', () => {
     const file = makeFile('test.bmp', 'image/bmp', 1000);
     const error = validateImageFile(file);
-    expect(error).toBeTruthy();
+    expect(error).toBeTypeOf('string');
     expect(error).toContain('Unsupported file type');
   });
 
   it('rejects files over 5MB', () => {
     const file = makeFile('large.png', 'image/png', IMAGE_MAX_SIZE_BYTES + 1);
     const error = validateImageFile(file);
-    expect(error).toBeTruthy();
+    expect(error).toBeTypeOf('string');
     expect(error).toContain('too large');
   });
 

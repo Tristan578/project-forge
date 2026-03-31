@@ -84,14 +84,14 @@ describe('CRUD Operations', () => {
   it('getPrefab finds by ID', () => {
     const prefab = savePrefab('FindMe', 'cat', '', mockSnapshot);
     const found = getPrefab(prefab.id);
-    expect(found).toBeTruthy();
+    expect(found).toBeDefined();
     expect(found?.name).toBe('FindMe');
   });
 
   it('getPrefab finds by name', () => {
     savePrefab('UniqueName', 'cat', '', mockSnapshot);
     const found = getPrefab('UniqueName');
-    expect(found).toBeTruthy();
+    expect(found).toBeDefined();
     expect(found?.name).toBe('UniqueName');
   });
 
@@ -153,7 +153,7 @@ describe('Built-in Prefabs', () => {
 
   it('getPrefab finds built-in by name', () => {
     const found = getPrefab('Basic Player');
-    expect(found).toBeTruthy();
+    expect(found).toBeDefined();
     expect(found?.id).toBe('builtin_player');
   });
 
@@ -228,7 +228,7 @@ describe('Import/Export', () => {
   it('exportPrefab returns JSON string', () => {
     const prefab = savePrefab('ExportTest', 'cat', 'desc', mockSnapshot);
     const json = exportPrefab(prefab.id);
-    expect(json).toBeTruthy();
+    expect(json).toBeTypeOf('string');
     expect(() => JSON.parse(json!)).not.toThrow();
     const parsed = JSON.parse(json!);
     expect(parsed.name).toBe('ExportTest');
@@ -247,7 +247,7 @@ describe('Import/Export', () => {
     // Clear storage and re-import
     storage = {};
     const imported = importPrefab(json!);
-    expect(imported).toBeTruthy();
+    expect(imported).toBeDefined();
     expect(imported?.name).toBe('Original');
     // Should preserve the original category from the JSON
     expect(imported?.category).toBe('TestCat');
