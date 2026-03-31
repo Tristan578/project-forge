@@ -19,8 +19,15 @@ module.exports = {
       numberOfRuns: 3,
     },
     assert: {
-      // No absolute floor — the delta script handles the gate.
-      assertions: {},
+      // Absolute floors for Core Web Vitals on marketing pages.
+      // Values sourced from performanceTargets.ts CWV_MARKETING_* constants.
+      // The delta script (quality-gates.yml) handles theme effects regression.
+      assertions: {
+        'largest-contentful-paint': ['warn', { maxNumericValue: 2500 }],
+        'interactive': ['warn', { maxNumericValue: 3500 }],
+        'cumulative-layout-shift': ['warn', { maxNumericValue: 0.1 }],
+        'total-blocking-time': ['warn', { maxNumericValue: 200 }],
+      },
     },
     upload: {
       target: 'temporary-public-storage',
