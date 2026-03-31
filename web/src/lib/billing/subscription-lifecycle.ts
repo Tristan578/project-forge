@@ -423,20 +423,28 @@ export async function reverseAddonTokens(
       // we cannot recover the old refunded_cents from RETURNING alone.
       // The CTE snapshots the old row first; the UPDATE then joins against it
       // so we can compute the exact increment this caller is responsible for.
+      // Atomic claim-and-advance: uses a CTE to capture the old row, then
+      // the UPDATE's WHERE checks the LIVE row value (not the CTE snapshot).
+      // Key: the CTE is only used for RETURNING the old values — the guard
+      // condition `token_purchases.refunded_cents < amountRefunded` runs on
+      // the actual locked row, so concurrent requests correctly serialize.
+      // After Request A commits (setting refunded_cents = amountRefunded),
+      // Request B's WHERE sees the NEW refunded_cents and fails the < check.
       const claimResult = await neonSql`
-        WITH old AS (
-          SELECT id, refunded_cents, tokens, amount_cents
+        WITH pre AS (
+          SELECT id, refunded_cents AS old_refunded, tokens, amount_cents
           FROM token_purchases
           WHERE id = ${purchase.id}
+          FOR UPDATE
         )
-        UPDATE token_purchases
+        UPDATE token_purchases tp
         SET refunded_cents = ${amountRefunded}
-        FROM old
-        WHERE token_purchases.id = ${purchase.id}
-          AND old.refunded_cents < ${amountRefunded}
-        RETURNING old.tokens,
-                  old.amount_cents,
-                  (${amountRefunded} - old.refunded_cents) AS increment_cents
+        FROM pre
+        WHERE tp.id = pre.id
+          AND tp.refunded_cents < ${amountRefunded}
+        RETURNING pre.tokens,
+                  pre.amount_cents,
+                  (${amountRefunded} - pre.old_refunded) AS increment_cents
       `;
 
       // If 0 rows returned, a concurrent request already claimed this exact
