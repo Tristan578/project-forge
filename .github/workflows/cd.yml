@@ -794,15 +794,23 @@ jobs:
       - name: Install Vercel CLI
         run: npm i -g vercel@50.34.3
 
+      # Run from repo root — Vercel rootDirectory=apps/docs handles the subdirectory.
+      # Same pattern as the main web deploy. Do NOT cd into apps/docs — that causes
+      # the remote build to only receive the subdirectory, breaking install commands
+      # that reference the monorepo root (packages/ui build).
+      - name: Pull Vercel environment (docs)
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
       - name: Deploy docs to production
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          cd apps/docs
-          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-          vercel deploy --prod --token="$VERCEL_TOKEN"
+        run: vercel deploy --prod --archive=tgz --token="$VERCEL_TOKEN"
 
   # ---- Design Workbench Deploy ----
   # Deploys apps/design (Storybook) to the Vercel design project when UI or design files changed.
@@ -832,12 +840,20 @@ jobs:
       - name: Install Vercel CLI
         run: npm i -g vercel@50.34.3
 
+      # Run from repo root — Vercel rootDirectory=apps/design handles the subdirectory.
+      # Same pattern as the main web deploy. Do NOT cd into apps/design — that causes
+      # the remote build to only receive the subdirectory, breaking install commands
+      # that reference the monorepo root (packages/ui build).
+      - name: Pull Vercel environment (design)
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DESIGN_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
       - name: Deploy design workbench to production
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DESIGN_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          cd apps/design
-          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-          vercel deploy --prod --token="$VERCEL_TOKEN"
+        run: vercel deploy --prod --archive=tgz --token="$VERCEL_TOKEN"

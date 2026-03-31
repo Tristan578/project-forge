@@ -1,0 +1,6 @@
+# Ignore heavy directories for faster deploys from repo root
+# Vercel's remote build uses the installCommand to set up deps
+engine/target/
+.transform-gizmo-fork/
+web/public/engine-pkg-*
+.git/
