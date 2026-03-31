@@ -38,7 +38,7 @@ BLOCKED_PATTERNS=(
   'wrangler deploy'
   'rm -rf'
   'rm -f'
-  '> [^/]'    # stdout redirect to file
+  '>[^/]|> [^/]'    # stdout redirect to file (with or without space)
   'tee '
   'cp '
   'mv '
