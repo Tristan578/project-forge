@@ -168,7 +168,7 @@ jobs:
         # after tests already completed successfully -- treat as warning, not failure.
         run: |
           set +e
-          timeout 600 npx vitest run 2>&1 | tee /tmp/vitest-output.txt
+          timeout 600 npx vitest run --workspace vitest.workspace.ts 2>&1 | tee /tmp/vitest-output.txt
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
           if [ $EXIT_CODE -eq 124 ]; then
