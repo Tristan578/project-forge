@@ -85,6 +85,7 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
 
   const handleSelectType = useCallback((type: QuickStartGameType) => {
     setSelectedType(type);
+    setGenerateError(null);
     const card = GAME_TYPE_CARDS.find((c) => c.id === type);
     if (card) setPrompt(card.placeholder);
     setStep(2);
