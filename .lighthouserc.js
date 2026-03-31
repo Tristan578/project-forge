@@ -19,8 +19,20 @@ module.exports = {
       numberOfRuns: 3,
     },
     assert: {
-      // No absolute floor — the delta script handles the gate.
-      assertions: {},
+      // Absolute floors for Core Web Vitals on marketing pages.
+      // These values MUST match performanceTargets.ts CWV_MARKETING_* constants.
+      // Lighthouse does not measure INP (lab-only metric); TBT is the lab proxy.
+      // The delta script (quality-gates.yml) handles theme effects regression.
+      //
+      // Source of truth: web/src/lib/config/performanceTargets.ts
+      //   LCP 2500 = CWV_MARKETING_LCP_MS
+      //   CLS 0.1  = CWV_MARKETING_CLS
+      //   TBT 200  = proxy for CWV_MARKETING_INP_MS (lab equivalent)
+      assertions: {
+        'largest-contentful-paint': ['warn', { maxNumericValue: 2500 }],
+        'cumulative-layout-shift': ['warn', { maxNumericValue: 0.1 }],
+        'total-blocking-time': ['warn', { maxNumericValue: 200 }],
+      },
     },
     upload: {
       target: 'temporary-public-storage',

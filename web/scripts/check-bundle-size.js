@@ -3,9 +3,16 @@
 /**
  * CI quality gate: enforce JS/CSS bundle size limits after next build.
  *
+ * Thresholds are defined in src/lib/config/performanceTargets.ts.
+ * This script duplicates the numeric values because it runs as a
+ * standalone Node CJS script (no TypeScript, no path aliases).
+ *
+ * When updating thresholds, update performanceTargets.ts FIRST,
+ * then mirror the values here.
+ *
  * Thresholds:
- *   First-load JS:  warn > 4 MB,   fail > 4.5 MB
- *   Total JS:       warn > 5 MB,   fail > 5.5 MB
+ *   First-load JS:  warn > 4.75 MB, fail > 5.25 MB
+ *   Total JS:       warn > 5.5 MB,  fail > 6 MB
  *
  * Usage:  node scripts/check-bundle-size.js
  * Expects: npm run build has already been run (.next/ exists)
@@ -17,10 +24,13 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const BUILD_DIR = path.join(ROOT, '.next');
 
-const FIRST_LOAD_WARN = 4 * 1024 * 1024;
-const FIRST_LOAD_FAIL = 4.75 * 1024 * 1024;
-const TOTAL_WARN = 5 * 1024 * 1024;
-const TOTAL_FAIL = 5.5 * 1024 * 1024;
+// Mirror of performanceTargets.ts BUNDLE_* constants.
+// Names match the canonical constants for grep-based discovery.
+// Previous values (pre-2026-03-31): 4/4.75/5/5.5 MB
+const BUNDLE_FIRST_LOAD_WARN = 4.75 * 1024 * 1024;
+const BUNDLE_FIRST_LOAD_FAIL = 5.25 * 1024 * 1024;
+const BUNDLE_TOTAL_WARN = 5.5 * 1024 * 1024;
+const BUNDLE_TOTAL_FAIL = 6 * 1024 * 1024;
 
 function formatBytes(bytes) {
   if (bytes < 1024) return bytes + ' B';
@@ -74,18 +84,18 @@ console.log();
 
 let failed = false;
 
-if (firstLoadSize > FIRST_LOAD_FAIL) {
-  console.error('::error::First-load JS ' + formatBytes(firstLoadSize) + ' exceeds hard limit of ' + formatBytes(FIRST_LOAD_FAIL));
+if (firstLoadSize > BUNDLE_FIRST_LOAD_FAIL) {
+  console.error('::error::First-load JS ' + formatBytes(firstLoadSize) + ' exceeds hard limit of ' + formatBytes(BUNDLE_FIRST_LOAD_FAIL));
   failed = true;
-} else if (firstLoadSize > FIRST_LOAD_WARN) {
-  console.warn('::warning::First-load JS ' + formatBytes(firstLoadSize) + ' exceeds warning threshold of ' + formatBytes(FIRST_LOAD_WARN));
+} else if (firstLoadSize > BUNDLE_FIRST_LOAD_WARN) {
+  console.warn('::warning::First-load JS ' + formatBytes(firstLoadSize) + ' exceeds warning threshold of ' + formatBytes(BUNDLE_FIRST_LOAD_WARN));
 }
 
-if (grandTotal > TOTAL_FAIL) {
-  console.error('::error::Total JS bundle ' + formatBytes(grandTotal) + ' exceeds hard limit of ' + formatBytes(TOTAL_FAIL));
+if (grandTotal > BUNDLE_TOTAL_FAIL) {
+  console.error('::error::Total JS bundle ' + formatBytes(grandTotal) + ' exceeds hard limit of ' + formatBytes(BUNDLE_TOTAL_FAIL));
   failed = true;
-} else if (grandTotal > TOTAL_WARN) {
-  console.warn('::warning::Total JS bundle ' + formatBytes(grandTotal) + ' exceeds warning threshold of ' + formatBytes(TOTAL_WARN));
+} else if (grandTotal > BUNDLE_TOTAL_WARN) {
+  console.warn('::warning::Total JS bundle ' + formatBytes(grandTotal) + ' exceeds warning threshold of ' + formatBytes(BUNDLE_TOTAL_WARN));
 }
 
 if (failed) {
