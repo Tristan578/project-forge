@@ -1,0 +1,1 @@
+../../../rules/bevy-api.md
