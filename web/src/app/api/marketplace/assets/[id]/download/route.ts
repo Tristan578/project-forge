@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { marketplaceAssets, assetPurchases } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { getSignedDownloadUrl } from '@/lib/storage/r2';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
@@ -65,6 +65,15 @@ export async function GET(
     if (!asset.assetFileUrl) {
       return NextResponse.json({ error: 'No file available' }, { status: 404 });
     }
+
+    // Atomic download count increment (PF-7507).
+    // Uses SQL expression SET download_count = download_count + 1 so concurrent
+    // downloads never lose an update (no stale read-increment-write pattern).
+    // Fire-and-forget: a failure here does not block the user's download.
+    db.update(marketplaceAssets)
+      .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
+      .where(eq(marketplaceAssets.id, assetId))
+      .catch(() => {});
 
     // If the URL is a CDN URL, generate a signed download URL from R2.
     // Compare parsed hostnames explicitly to avoid substring false positives

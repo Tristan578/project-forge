@@ -27,13 +27,18 @@ describe('mapHealthStatusToServiceStatus', () => {
 // deriveOverallStatus
 // ---------------------------------------------------------------------------
 
-function makeEntry(id: string, status: ServiceStatusEntry['status']): ServiceStatusEntry {
+function makeEntry(
+  id: string,
+  status: ServiceStatusEntry['status'],
+  critical = false,
+): ServiceStatusEntry {
   return {
     id,
     name: id,
     status,
     lastCheckedAt: '2026-03-16T12:00:00.000Z',
     latencyMs: 0,
+    critical,
   };
 }
 
@@ -194,6 +199,55 @@ describe('deriveOverallStatus', () => {
 
     it('returns operational for empty service list', () => {
       expect(deriveOverallStatus([], CRITICAL)).toBe('operational');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // ServiceStatusEntry.critical field — regression for #7608
+  //
+  // The critical field is added to ServiceStatusEntry so API consumers can
+  // display criticality badges. It does NOT affect derivation — only the
+  // explicit criticalServiceIds set does.
+  // -----------------------------------------------------------------------
+  describe('ServiceStatusEntry.critical field is informational only (regression for #7608)', () => {
+    it('exposes the critical flag on entries for API consumers', () => {
+      // Verify the field is serialisable on the entry type
+      const entry = makeEntry('database', 'operational', true);
+      expect(entry.critical).toBe(true);
+
+      const nonCritical = makeEntry('ai', 'operational', false);
+      expect(nonCritical.critical).toBe(false);
+    });
+
+    it('critical=true entry in outage → still major_outage (legacy path, no set)', () => {
+      // Without criticalServiceIds: all outages are major_outage regardless of the field
+      const services = [makeEntry('database', 'outage', true)];
+      expect(deriveOverallStatus(services)).toBe('major_outage');
+    });
+
+    it('critical=false entry in outage → still major_outage (legacy path, no set)', () => {
+      // Without criticalServiceIds: all outages remain major_outage even when
+      // the entry says critical=false — legacy behaviour is preserved.
+      const services = [makeEntry('ai', 'outage', false)];
+      expect(deriveOverallStatus(services)).toBe('major_outage');
+    });
+
+    it('correctly routes critical vs non-critical when criticalServiceIds is provided', () => {
+      const CRIT = new Set(['database']);
+      const services = [
+        makeEntry('database', 'outage', true),
+        makeEntry('ai', 'operational', false),
+      ];
+      expect(deriveOverallStatus(services, CRIT)).toBe('major_outage');
+    });
+
+    it('correctly routes non-critical to partial_outage when criticalServiceIds is provided', () => {
+      const CRIT = new Set(['database']);
+      const services = [
+        makeEntry('database', 'operational', true),
+        makeEntry('ai', 'outage', false),
+      ];
+      expect(deriveOverallStatus(services, CRIT)).toBe('partial_outage');
     });
   });
 });

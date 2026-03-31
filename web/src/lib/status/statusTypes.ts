@@ -37,6 +37,12 @@ export interface ServiceStatusEntry {
    * 0 for config-only checks that do not make network calls.
    */
   latencyMs: number;
+  /**
+   * Whether this service is critical to core platform functionality.
+   * An outage on a critical service raises the overall status to `major_outage`.
+   * An outage on a non-critical service results in `partial_outage`.
+   */
+  critical: boolean;
 }
 
 /**
@@ -112,10 +118,16 @@ export function mapHealthStatusToServiceStatus(
 /**
  * Derive the overall platform status from the list of service statuses.
  *
- * When `criticalServiceIds` is provided, only outages on critical services
- * result in `major_outage`. Outages on non-critical services are treated as
- * `partial_outage`. When omitted, all outages are treated as `major_outage`
- * (legacy behaviour).
+ * Priority order: `major_outage` > `partial_outage` > `maintenance` > `operational`.
+ *
+ * When `criticalServiceIds` is provided, only outages on services whose ID is
+ * in that set result in `major_outage`. Outages on other services are treated
+ * as `partial_outage`. When omitted, ALL outages are treated as `major_outage`
+ * (legacy behaviour preserved for backward compatibility).
+ *
+ * The `ServiceStatusEntry.critical` field is informational — it allows API
+ * consumers to display a service's criticality badge — but it does NOT
+ * affect the derivation logic. Only the explicit `criticalServiceIds` set does.
  */
 export function deriveOverallStatus(
   services: ServiceStatusEntry[],

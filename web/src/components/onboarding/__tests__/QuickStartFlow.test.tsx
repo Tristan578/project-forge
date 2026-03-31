@@ -73,6 +73,30 @@ describe('QuickStartFlow', () => {
     expect(textarea.value.length).toBeGreaterThan(0);
   });
 
+  it('shows error message and stays on step 2 when loadTemplate fails (regression for #7126)', async () => {
+    mockLoadTemplate.mockRejectedValueOnce(new Error('Template not found'));
+    render(<QuickStartFlow onComplete={onComplete} onSkip={onSkip} />);
+
+    const shooterBtn = screen.getAllByRole('button').find(
+      (b) => b.textContent?.includes('Shooter') && b.textContent?.includes('Aim, shoot'),
+    )!;
+    fireEvent.click(shooterBtn);
+
+    const generateBtn = screen.getByRole('button', { name: /generate game/i });
+    fireEvent.click(generateBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeDefined();
+    });
+
+    expect(screen.getByRole('alert').textContent).toContain('Template not found');
+    // Must remain on step 2 — not advance to step 3
+    expect(screen.getByText('Describe your game')).toBeDefined();
+    expect(screen.queryByText('Your game is ready!')).toBeNull();
+    // onComplete must NOT have been called
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
   it('generates the game and advances to step 3 when Generate is clicked', async () => {
     render(<QuickStartFlow onComplete={onComplete} onSkip={onSkip} />);
 
