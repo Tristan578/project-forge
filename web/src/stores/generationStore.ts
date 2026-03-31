@@ -90,20 +90,25 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         parameters,
       }),
     })
-      .then((res) => res.json())
-      .then((data) => {
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`POST /api/jobs failed: ${res.status} ${res.statusText}`);
+        }
+        return res.json();
+      })
+      .then((data: { job?: { id?: string } }) => {
         if (data.job?.id) {
           // Store the DB id for future syncs
           set((state) => {
             const existing = state.jobs[job.id];
             if (!existing) return state;
             return {
-              jobs: { ...state.jobs, [job.id]: { ...existing, dbId: data.job.id } },
+              jobs: { ...state.jobs, [job.id]: { ...existing, dbId: data.job!.id } },
             };
           });
         }
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         captureException(err, { context: 'generationStore.addJob', jobId: job.id });
       });
   },
@@ -145,9 +150,15 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
             errorMessage: updates.error,
             imported: updates.status === 'completed',
           }),
-        }).catch((err) => {
-          captureException(err, { context: 'generationStore.updateJob', dbId });
-        });
+        })
+          .then((res) => {
+            if (!res.ok) {
+              throw new Error(`PATCH /api/jobs/${dbId} failed: ${res.status} ${res.statusText}`);
+            }
+          })
+          .catch((err: unknown) => {
+            captureException(err, { context: 'generationStore.updateJob', dbId });
+          });
       }
 
       return {

@@ -7,8 +7,25 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useGenerationStore, type GenerationJob } from '../generationStore';
+
+// Mock Sentry client so captureException calls are trackable in tests
+vi.mock('@/lib/monitoring/sentry-client', () => ({
+  captureException: vi.fn(),
+}));
+
+// Mock analytics to prevent side-effects in tests
+vi.mock('@/lib/analytics/posthog', () => ({
+  trackEvent: vi.fn(),
+  AnalyticsEvent: {
+    AI_GENERATION_STARTED: 'ai_generation_started',
+    AI_GENERATION_COMPLETED: 'ai_generation_completed',
+  },
+}));
+vi.mock('@/lib/analytics/events', () => ({
+  trackAIAssetGenerated: vi.fn(),
+}));
 
 describe('generationStore', () => {
   const mockJob: GenerationJob = {
@@ -33,6 +50,11 @@ describe('generationStore', () => {
       jobs: {},
       hydrated: false,
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
   });
 
   describe('Initial State', () => {
@@ -597,6 +619,76 @@ describe('generationStore', () => {
       const jobs = useGenerationStore.getState().jobs;
       expect(Object.keys(jobs)).toHaveLength(2);
       expect(jobs['local-1']).toEqual(expect.objectContaining({ id: 'local-1' }));
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Regression tests for #7489 — HTTP errors swallowed in fire-and-forget fetches
+  // ---------------------------------------------------------------------------
+  describe('HTTP error handling in fire-and-forget fetches (#7489)', () => {
+    it('captures exception when POST /api/jobs returns non-ok status', async () => {
+      const sentryClient = await import('@/lib/monitoring/sentry-client');
+      const captureException = vi.mocked(sentryClient.captureException);
+
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: async () => ({ error: 'db error' }),
+      } as Response);
+
+      const { addJob } = useGenerationStore.getState();
+      addJob(mockJob);
+
+      await vi.waitFor(() => {
+        expect(captureException).toHaveBeenCalledWith(
+          expect.objectContaining({ message: expect.stringContaining('POST /api/jobs failed: 500') }),
+          expect.objectContaining({ context: 'generationStore.addJob', jobId: 'client-123' }),
+        );
+      });
+    });
+
+    it('does not store dbId when server responds with non-ok status (regression for #7489)', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        statusText: 'Unprocessable Entity',
+      } as Response);
+
+      const { addJob } = useGenerationStore.getState();
+      addJob(mockJob);
+
+      // Wait for the fetch promise chain to settle
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+      const state = useGenerationStore.getState();
+      expect(state.jobs['client-123'].dbId).toBeUndefined();
+    });
+
+    it('captures exception when PATCH /api/jobs/:id returns non-ok status', async () => {
+      const sentryClient = await import('@/lib/monitoring/sentry-client');
+      const captureException = vi.mocked(sentryClient.captureException);
+
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+      } as Response);
+
+      useGenerationStore.setState({
+        jobs: { 'client-123': { ...mockJob, dbId: 'db-xyz' } },
+      });
+
+      useGenerationStore.getState().updateJob('client-123', { status: 'completed', progress: 100 });
+
+      await vi.waitFor(() => {
+        expect(captureException).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: expect.stringContaining('PATCH /api/jobs/db-xyz failed: 503'),
+          }),
+          expect.objectContaining({ context: 'generationStore.updateJob', dbId: 'db-xyz' }),
+        );
+      });
     });
   });
 });
