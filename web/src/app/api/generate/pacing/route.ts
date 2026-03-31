@@ -7,11 +7,13 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
-import { generateText } from 'ai';
+import { generateText, Output } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
+import { z } from 'zod';
+
 // Inline types — the pacing analysis route receives these from the client.
 interface PacingSegment {
   sceneIndex: number;
@@ -39,6 +41,13 @@ interface PacingReport {
   suggestions: PacingSuggestion[];
 }
 
+const PacingSuggestionSchema = z.array(z.object({
+  title: z.string(),
+  description: z.string(),
+  targetSceneIndex: z.number().nullable().optional(),
+  priority: z.enum(['low', 'medium', 'high']),
+}));
+
 // ---------------------------------------------------------------------------
 // Request body type
 // ---------------------------------------------------------------------------
@@ -56,10 +65,7 @@ You will receive a pacing analysis report for a game project.
 Your task is to:
 1. Review the existing local suggestions in the report.
 2. Add 2–4 additional AI-generated suggestions that are specific, actionable, and grounded in established game design theory.
-3. Each suggestion must include: title (max 10 words), description (2-3 sentences), targetSceneIndex (null or 0-based integer), priority ("low" | "medium" | "high").
-
-Respond with ONLY a JSON array of suggestion objects. No preamble, no code fences, no markdown. Example format:
-[{"title":"Add a midpoint rest","description":"...","targetSceneIndex":2,"priority":"medium"}]`;
+3. Each suggestion must include: title (max 10 words), description (2-3 sentences), targetSceneIndex (null or 0-based integer), priority ("low" | "medium" | "high").`;
 
 // ---------------------------------------------------------------------------
 // Route handler
@@ -162,27 +168,16 @@ Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
       prompt,
       maxOutputTokens: 800,
       temperature: 0.4,
+      output: Output.object({ schema: PacingSuggestionSchema }),
     });
 
-    // 7. Parse AI suggestions
-    let aiSuggestions: PacingSuggestion[] = [];
-    try {
-      const parsed = JSON.parse(aiResult.text) as unknown[];
-      if (Array.isArray(parsed)) {
-        aiSuggestions = parsed.filter(
-          (s): s is PacingSuggestion =>
-            typeof s === 'object' &&
-            s !== null &&
-            typeof (s as Record<string, unknown>).title === 'string' &&
-            typeof (s as Record<string, unknown>).description === 'string' &&
-            ['low', 'medium', 'high'].includes(
-              (s as Record<string, unknown>).priority as string,
-            ),
-        );
-      }
-    } catch {
-      // AI returned non-JSON — return report with local suggestions only
-    }
+    // 7. Map AI suggestions — Output.object() guarantees schema-valid data
+    const aiSuggestions: PacingSuggestion[] = (aiResult.output ?? []).map((s) => ({
+      title: s.title,
+      description: s.description,
+      priority: s.priority,
+      ...(s.targetSceneIndex != null ? { sceneIndex: s.targetSceneIndex } : {}),
+    }));
 
     const enrichedReport: PacingReport = {
       ...report,
