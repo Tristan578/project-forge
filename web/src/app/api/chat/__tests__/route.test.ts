@@ -9,13 +9,10 @@ vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
-import { makeUser } from '@/test/utils/apiTestUtils';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
-
-const mockUser = makeUser({ id: 'user-1', clerkId: 'clerk_1' });
 
 vi.mock('@/lib/auth/api-auth', () => ({
   authenticateRequest: vi.fn(),
