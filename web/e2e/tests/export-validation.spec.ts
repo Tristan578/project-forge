@@ -8,7 +8,7 @@ import { test, expect } from '../fixtures/editor.fixture';
  * output structure, store actions, and HTML escaping without requiring
  * a full engine build.
  */
-test.describe('Export Validation @ui', () => {
+test.describe('Export Validation @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });
