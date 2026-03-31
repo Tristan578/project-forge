@@ -172,4 +172,28 @@ describe('SaveSystemPanel', () => {
     fireEvent.click(screen.getByText('Generate Save System'));
     expect(screen.getByText('Copy Script to Clipboard')).toBeInTheDocument();
   });
+
+  // Regression: #7097 — addCheckpoint generates duplicate IDs after deletion
+  it('checkpoint IDs are unique after delete-then-add cycle (regression #7097)', () => {
+    render(<SaveSystemPanel />);
+    const addBtn = screen.getByLabelText('Add checkpoint');
+
+    // Add two checkpoints
+    fireEvent.click(addBtn);
+    fireEvent.click(addBtn);
+    expect(screen.getByText('Checkpoint 1')).toBeInTheDocument();
+    expect(screen.getByText('Checkpoint 2')).toBeInTheDocument();
+
+    // Remove checkpoint 1
+    fireEvent.click(screen.getByLabelText('Remove checkpoint Checkpoint 1'));
+    expect(screen.queryByText('Checkpoint 1')).toBeNull();
+    expect(screen.getByText('Checkpoint 2')).toBeInTheDocument();
+
+    // Add a new checkpoint — must NOT reuse "Checkpoint 1" ID (which would be cp_1 if array-length based)
+    fireEvent.click(addBtn);
+    // The new checkpoint must have a different name from any previously deleted checkpoint
+    // With monotonic counter it becomes Checkpoint 3, not Checkpoint 1
+    expect(screen.queryByText('Checkpoint 1')).toBeNull();
+    expect(screen.getByText('Checkpoint 3')).toBeInTheDocument();
+  });
 });
