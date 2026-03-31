@@ -27,10 +27,10 @@ const BUILD_DIR = path.join(ROOT, '.next');
 // Mirror of performanceTargets.ts BUNDLE_* constants.
 // Names match the canonical constants for grep-based discovery.
 // Previous values (pre-2026-03-31): 4/4.75/5/5.5 MB
-const BUNDLE_BUNDLE_FIRST_LOAD_WARN = 3.5 * 1024 * 1024;
-const BUNDLE_BUNDLE_FIRST_LOAD_FAIL = 4 * 1024 * 1024;
-const BUNDLE_BUNDLE_TOTAL_WARN = 4.5 * 1024 * 1024;
-const BUNDLE_BUNDLE_TOTAL_FAIL = 5 * 1024 * 1024;
+const BUNDLE_FIRST_LOAD_WARN = 3.5 * 1024 * 1024;
+const BUNDLE_FIRST_LOAD_FAIL = 4 * 1024 * 1024;
+const BUNDLE_TOTAL_WARN = 4.5 * 1024 * 1024;
+const BUNDLE_TOTAL_FAIL = 5 * 1024 * 1024;
 
 function formatBytes(bytes) {
   if (bytes < 1024) return bytes + ' B';
