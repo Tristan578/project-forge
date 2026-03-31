@@ -254,6 +254,18 @@
         ]
       }
     ],
+    "FileChanged": [
+      {
+        "matcher": ".env",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/env-change-warning.sh\"",
+            "timeout": 3000
+          }
+        ]
+      }
+    ],
     "WorktreeCreate": [
       {
         "hooks": [
