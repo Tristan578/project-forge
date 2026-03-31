@@ -1,15 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
-
-/**
- * Docs site auth gate using Clerk.
- *
- * All pages require Clerk authentication. Unauthenticated users are
- * redirected to the Clerk sign-in page. In local dev without Clerk keys,
- * the site is open (clerkMiddleware passes through gracefully).
- *
- * Future: add admin/internal role check to restrict to SpawnForge team members.
- */
+import type { NextRequest } from 'next/server';
 
 const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
@@ -17,16 +8,30 @@ const isPublicRoute = createRouteMatcher([
   '/api/webhooks(.*)',
 ]);
 
-export default clerkMiddleware(async (auth, request) => {
-  // In development without Clerk keys, allow all access
-  if (!process.env.CLERK_SECRET_KEY) {
-    return NextResponse.next();
-  }
+function passThrough() {
+  return NextResponse.next();
+}
 
-  if (!isPublicRoute(request)) {
+const clerkHandler = clerkMiddleware(async (auth, req) => {
+  if (!isPublicRoute(req)) {
     await auth.protect();
   }
 });
+
+export default async function proxy(request: NextRequest) {
+  // Without Clerk keys, allow all access (dev/CI)
+  if (!process.env.CLERK_SECRET_KEY) {
+    return passThrough();
+  }
+
+  // Wrap clerkMiddleware so a misconfigured Clerk instance doesn't 500 the entire site
+  try {
+    return await clerkHandler(request, {} as any);
+  } catch (err) {
+    console.error('[proxy] clerkMiddleware threw — allowing request through:', err);
+    return passThrough();
+  }
+}
 
 export const config = {
   matcher: [
