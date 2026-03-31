@@ -51,6 +51,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       status: mapHealthStatusToServiceStatus(health.status),
       lastCheckedAt: health.lastChecked,
       latencyMs: health.latencyMs,
+      critical: config.critical,
     };
     return [entry];
   });

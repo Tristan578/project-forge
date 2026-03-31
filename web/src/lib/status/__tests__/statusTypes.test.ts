@@ -27,13 +27,18 @@ describe('mapHealthStatusToServiceStatus', () => {
 // deriveOverallStatus
 // ---------------------------------------------------------------------------
 
-function makeEntry(id: string, status: ServiceStatusEntry['status']): ServiceStatusEntry {
+function makeEntry(
+  id: string,
+  status: ServiceStatusEntry['status'],
+  critical = false,
+): ServiceStatusEntry {
   return {
     id,
     name: id,
     status,
     lastCheckedAt: '2026-03-16T12:00:00.000Z',
     latencyMs: 0,
+    critical,
   };
 }
 
@@ -194,6 +199,51 @@ describe('deriveOverallStatus', () => {
 
     it('returns operational for empty service list', () => {
       expect(deriveOverallStatus([], CRITICAL)).toBe('operational');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Via ServiceStatusEntry.critical field — regression for #7608
+  // -----------------------------------------------------------------------
+  describe('with ServiceStatusEntry.critical field (no criticalServiceIds)', () => {
+    it('returns major_outage when a critical entry is in outage (regression for #7608)', () => {
+      const services = [
+        makeEntry('database', 'outage', true),
+        makeEntry('ai', 'operational', false),
+      ];
+      expect(deriveOverallStatus(services)).toBe('major_outage');
+    });
+
+    it('returns partial_outage when only non-critical entries are in outage', () => {
+      const services = [
+        makeEntry('database', 'operational', true),
+        makeEntry('ai', 'outage', false),
+      ];
+      expect(deriveOverallStatus(services)).toBe('partial_outage');
+    });
+
+    it('returns major_outage when both critical and non-critical entries are in outage', () => {
+      const services = [
+        makeEntry('database', 'outage', true),
+        makeEntry('ai', 'outage', false),
+      ];
+      expect(deriveOverallStatus(services)).toBe('major_outage');
+    });
+
+    it('returns partial_outage for non-critical outage mixed with degraded services', () => {
+      const services = [
+        makeEntry('database', 'degraded', true),
+        makeEntry('ai', 'outage', false),
+      ];
+      expect(deriveOverallStatus(services)).toBe('partial_outage');
+    });
+
+    it('falls back to treating all outages as critical when critical field is absent (legacy behaviour)', () => {
+      // Entries without critical field — treated as true to preserve legacy behaviour
+      const services: ServiceStatusEntry[] = [
+        { id: 'db', name: 'db', status: 'outage', lastCheckedAt: '2026-03-16T12:00:00.000Z', latencyMs: 0, critical: true },
+      ];
+      expect(deriveOverallStatus(services)).toBe('major_outage');
     });
   });
 });
