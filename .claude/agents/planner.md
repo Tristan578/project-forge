@@ -10,6 +10,12 @@ hooks:
   Stop:
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/spec-completeness-check.sh"
       timeout: 5000
+hooks:
+  PreToolUse:
+    - matcher: Read|Grep|Glob|Bash
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
+      timeout: 5000
+      once: true
 ---
 # Identity: The Architect
 

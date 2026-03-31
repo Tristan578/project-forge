@@ -12,6 +12,10 @@ hooks:
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/review-quality-gate.sh"
       timeout: 5000
   PreToolUse:
+    - matcher: Read|Grep|Glob|Bash
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
+      timeout: 5000
+      once: true
     - matcher: Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/block-writes.sh"
       timeout: 3000
