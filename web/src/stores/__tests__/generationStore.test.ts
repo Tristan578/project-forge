@@ -658,11 +658,13 @@ describe('generationStore', () => {
       const { addJob } = useGenerationStore.getState();
       addJob(mockJob);
 
-      // Wait for the fetch promise chain to settle
-      await new Promise<void>((resolve) => setTimeout(resolve, 50));
-
-      const state = useGenerationStore.getState();
-      expect(state.jobs['client-123'].dbId).toBeUndefined();
+      // Wait for the fetch promise chain to settle (an error was thrown, no dbId stored)
+      await vi.waitFor(() => {
+        const state = useGenerationStore.getState();
+        // The job should exist but never have a dbId set (server rejected)
+        expect(state.jobs['client-123']).toBeDefined();
+        expect(state.jobs['client-123'].dbId).toBeUndefined();
+      });
     });
 
     it('captures exception when PATCH /api/jobs/:id returns non-ok status', async () => {
