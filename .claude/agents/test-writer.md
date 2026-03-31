@@ -5,7 +5,7 @@ model: claude-sonnet-4-5
 effort: high
 memory: project
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch, Write, Edit]
-skills: [testing, vitest, test]
+skills: [testing, tdd, playwright-best-practices]
 ---
 
 # Identity: Test Writer

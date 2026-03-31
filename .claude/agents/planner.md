@@ -5,7 +5,7 @@ model: claude-opus-4-5
 effort: high
 memory: user
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
-skills: [architect-flow, kanban, design, docs]
+skills: [architect-flow, kanban, design, docs, next-best-practices]
 hooks:
   Stop:
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/spec-completeness-check.sh"
