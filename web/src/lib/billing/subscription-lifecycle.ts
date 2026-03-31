@@ -468,10 +468,13 @@ export async function reverseAddonTokens(
       const clampedDeduction = tokensToDeduct;
 
       // INSERT before UPDATE so balance_after reads pre-deduction addon_tokens.
+      // Clamp the audit amount to what's actually deducted — if user has fewer
+      // addon_tokens than the computed deduction, record only the actual loss.
+      // LEAST(clampedDeduction, addon_tokens) in SQL reads the live balance.
       await neonSql.transaction([
         neonSql`
           INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-          SELECT ${userId}, 'adjustment', ${-clampedDeduction},
+          SELECT ${userId}, 'adjustment', -LEAST(${clampedDeduction}, addon_tokens),
                  GREATEST(0, monthly_tokens - monthly_tokens_used) + GREATEST(0, addon_tokens - ${clampedDeduction}) + earned_credits,
                  ${`charge_refunded:${chargeId}`}, ${chargeId}
           FROM users WHERE id = ${userId}

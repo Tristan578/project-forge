@@ -97,10 +97,11 @@ describe('reverseAddonTokens (PF-734, PF-7514)', () => {
 
       // Token deduction written via neonSql.transaction()
       expect(mockNeonTransaction).toHaveBeenCalledOnce();
-      // The INSERT in the transaction should use -5000 (floor(5000 * 4900/4900))
+      // The INSERT uses -LEAST(${deduction}, addon_tokens) in SQL — the JS
+      // interpolated value is the positive deduction amount (negation is in SQL).
       const txStatements = mockNeonTransaction.mock.calls[0][0] as MockStatement[];
       const insertStmt = txStatements[0];
-      expect(insertStmt.values).toContain(-5000);
+      expect(insertStmt.values).toContain(5000);
       expect(insertStmt.values).toContain('charge_refunded:ch_abc');
     });
 
@@ -114,8 +115,8 @@ describe('reverseAddonTokens (PF-734, PF-7514)', () => {
       expect(mockNeonTransaction).toHaveBeenCalledOnce();
       const txStatements = mockNeonTransaction.mock.calls[0][0] as MockStatement[];
       const insertStmt = txStatements[0];
-      // floor(5000 * 2450/4900) = floor(2500) = 2500
-      expect(insertStmt.values).toContain(-2500);
+      // floor(5000 * 2450/4900) = floor(2500) = 2500 (positive — negation in SQL)
+      expect(insertStmt.values).toContain(2500);
     });
 
     it('skips processing when CTE claim returns 0 rows (idempotency / concurrent webhook)', async () => {
@@ -143,8 +144,8 @@ describe('reverseAddonTokens (PF-734, PF-7514)', () => {
       expect(mockNeonTransaction).toHaveBeenCalledOnce();
       const txStatements = mockNeonTransaction.mock.calls[0][0] as MockStatement[];
       const insertStmt = txStatements[0];
-      // New increment: 2450 cents / 4900 total cents * 5000 tokens = 2500
-      expect(insertStmt.values).toContain(-2500);
+      // New increment: 2450 cents / 4900 total cents * 5000 tokens = 2500 (positive — negation in SQL)
+      expect(insertStmt.values).toContain(2500);
     });
 
     it('skips when token deduction rounds to 0', async () => {
