@@ -63,7 +63,7 @@ function configureSelectSequence(responses: unknown[][]) {
 }
 
 // Helper to set the return value for the next raw neonSql`` call (the CTE claim query)
-function configureNeonSqlClaim(result: unknown[]) {
+function _configureNeonSqlClaim(result: unknown[]) {
   mockNeonSqlCallResults.push(result);
 }
 
