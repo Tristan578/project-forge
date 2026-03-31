@@ -8,6 +8,10 @@ mcpServers:
   - context7
 skills: [rust-engine, arch-validator, build]
 hooks:
+  PreToolUse:
+    - matcher: Edit|Write
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
+      timeout: 5000
   PostToolUse:
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/cargo-check-wasm.sh"

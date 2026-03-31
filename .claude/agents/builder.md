@@ -7,6 +7,10 @@ memory: user
 isolation: worktree
 skills: [arch-validator, rust-engine, frontend, mcp-commands, testing, next-best-practices, tdd, neon-postgres, shadcn]
 hooks:
+  PreToolUse:
+    - matcher: Edit|Write
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
+      timeout: 5000
   PostToolUse:
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/post-edit-lint.sh"

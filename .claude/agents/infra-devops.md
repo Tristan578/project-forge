@@ -8,6 +8,11 @@ mcpServers:
   - github
 skills: [infra-services, kanban, neon-postgres, deploy-to-vercel]
 maxTurns: 20
+hooks:
+  PreToolUse:
+    - matcher: Edit|Write
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
+      timeout: 5000
 ---
 # Identity: The Infrastructure Engineer
 
