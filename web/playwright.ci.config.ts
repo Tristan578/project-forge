@@ -17,11 +17,12 @@ export default defineConfig({
   testMatch: '**/*.spec.ts',
   fullyParallel: true,
   forbidOnly: true,
-  retries: 2,
-  workers: 2,
+  retries: 1,
+  workers: 4,
+  maxFailures: 10,
   reporter: [['github'], ['html', { open: 'never' }]],
-  timeout: E2E_TEST_TIMEOUT_MS,
-  expect: { timeout: 15_000 },
+  timeout: 30_000,
+  expect: { timeout: 10_000 },
 
   use: {
     baseURL: 'http://localhost:3000',
