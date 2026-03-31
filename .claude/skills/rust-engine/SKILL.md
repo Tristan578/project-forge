@@ -1,6 +1,7 @@
 ---
 name: rust-engine
-description: Rust/Bevy engine development specialist. Use when writing or modifying engine/ code — ECS components, bridge systems, commands, pending queues.
+description: Write Bevy 0.18 ECS components, bridge systems, pending queues, and WASM commands for SpawnForge. Use when modifying engine/ Rust code, adding ECS components, fixing bridge isolation, or implementing new engine capabilities.
+paths: "engine/src/**"
 ---
 
 # Role: Rust Engine Specialist

@@ -1,6 +1,6 @@
 ---
 name: viewport
-description: Visual verification of the SpawnForge editor using Playwright canvas readback and scene graph inspection.
+description: Visually verify the SpawnForge editor renders correctly — Playwright canvas readback, scene graph inspection, WebGPU/WebGL2 output validation. Use when visual rendering may be broken, after engine changes, or for visual regression checks.
 ---
 
 # Viewport Verification Skill
