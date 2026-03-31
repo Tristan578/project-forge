@@ -36,7 +36,10 @@ vi.mock('@/lib/keys/resolver', () => ({
 vi.mock('@/lib/tokens/pricing', () => ({ getTokenCost: vi.fn(() => 10) }));
 vi.mock('@/lib/tokens/service', () => ({ refundTokens: vi.fn() }));
 vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
-vi.mock('ai', () => ({ generateText: mockGenerateText }));
+vi.mock('ai', () => ({
+  generateText: mockGenerateText,
+  Output: { object: vi.fn(({ schema }: { schema: unknown }) => ({ type: 'object', schema })) },
+}));
 vi.mock('@ai-sdk/anthropic', () => ({
   createAnthropic: vi.fn(() => mockAnthropicModel),
 }));
@@ -64,7 +67,7 @@ const validReport = {
   ],
 };
 
-const aiSuggestionsJson = JSON.stringify([
+const aiSuggestions = [
   {
     title: 'Add midpoint rest',
     description: 'Insert a calm scene to reset tension.',
@@ -77,7 +80,7 @@ const aiSuggestionsJson = JSON.stringify([
     targetSceneIndex: null,
     priority: 'high',
   },
-]);
+];
 
 describe('POST /api/generate/pacing', () => {
   beforeEach(() => {
@@ -106,7 +109,7 @@ describe('POST /api/generate/pacing', () => {
     vi.mocked(rateLimitResponse).mockReturnValue(
       NextResponse.json({ error: 'Too many requests' }, { status: 429 }),
     );
-    mockGenerateText.mockResolvedValue({ text: aiSuggestionsJson });
+    mockGenerateText.mockResolvedValue({ output: aiSuggestions });
   });
 
   it('returns 401 when unauthenticated', async () => {
@@ -218,8 +221,8 @@ describe('POST /api/generate/pacing', () => {
     expect(data.curve).toEqual(validReport.curve);
   });
 
-  it('returns 200 with only original suggestions when AI response is non-JSON', async () => {
-    mockGenerateText.mockResolvedValue({ text: 'Sorry, I cannot help with that.' });
+  it('returns 200 with only original suggestions when AI returns null object', async () => {
+    mockGenerateText.mockResolvedValue({ output: null });
 
     const res = await POST(makeRequest({ report: validReport }));
     expect(res.status).toBe(200);
@@ -239,7 +242,7 @@ describe('POST /api/generate/pacing', () => {
     expect(captureException).toHaveBeenCalled();
   });
 
-  it('calls generateText with the report data in the prompt', async () => {
+  it('calls generateText with the report data and structured output', async () => {
     await POST(makeRequest({ report: validReport }));
 
     expect(mockGenerateText).toHaveBeenCalledWith(
@@ -247,6 +250,7 @@ describe('POST /api/generate/pacing', () => {
         prompt: expect.stringContaining('Score: 72/100'),
         maxOutputTokens: 800,
         temperature: 0.4,
+        output: expect.objectContaining({ type: 'object' }),
       }),
     );
   });
