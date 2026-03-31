@@ -15,6 +15,7 @@ vi.mock('@/lib/db/schema', () => ({
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn(),
   and: vi.fn(),
+  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values })),
 }));
 
 const mockGetSignedDownloadUrl = vi.fn();
@@ -126,8 +127,14 @@ describe('GET /api/marketplace/assets/[id]/download', () => {
         assetFileUrl: 'https://cdn.spawnforge.ai/assets/user_1/a1/file/model.glb',
       }]),
     };
+    // update chain is needed for the atomic downloadCount increment (PF-7507)
+    const updateChain = {
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue([]),
+    };
     const mockDb = {
       select: vi.fn().mockReturnValue(assetChain),
+      update: vi.fn().mockReturnValue(updateChain),
     };
     vi.mocked(getDb).mockReturnValue(mockDb as never);
     mockGetSignedDownloadUrl.mockResolvedValue('https://signed.r2.example.com/assets/user_1/a1/file/model.glb?sig=abc');
@@ -151,8 +158,14 @@ describe('GET /api/marketplace/assets/[id]/download', () => {
         assetFileUrl: 'https://cdn.example.com/files/model.glb',
       }]),
     };
+    // update chain is needed for the atomic downloadCount increment (PF-7507)
+    const updateChain = {
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue([]),
+    };
     const mockDb = {
       select: vi.fn().mockReturnValue(assetChain),
+      update: vi.fn().mockReturnValue(updateChain),
     };
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
@@ -179,10 +192,16 @@ describe('GET /api/marketplace/assets/[id]/download', () => {
       where: vi.fn().mockReturnThis(),
       limit: vi.fn().mockResolvedValue([{ id: 'p1' }]),
     };
+    // update chain is needed for the atomic downloadCount increment (PF-7507)
+    const updateChain = {
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue([]),
+    };
     const mockDb = {
       select: vi.fn()
         .mockReturnValueOnce(assetChain)
         .mockReturnValueOnce(purchaseChain),
+      update: vi.fn().mockReturnValue(updateChain),
     };
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
