@@ -26,13 +26,8 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { logCost } from '@/lib/costs/costLogger';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
+import { createSpawnforgeAgent, isDirectBackend } from '@/lib/ai/spawnforgeAgent';
 import { resolveChatRoute } from '@/lib/providers/resolveChat';
-import { streamText, stepCountIs } from 'ai';
-import { gateway } from '@ai-sdk/gateway';
-import { anthropic } from '@ai-sdk/anthropic';
-import { convertManifestToolsToSdkTools } from '@/lib/ai/toolAdapter';
-import { AI_MODEL_PRIMARY, AI_MODELS } from '@/lib/ai/models';
-import manifestJson from '@/data/commands.json';
 import type { UserModelMessage, AssistantModelMessage } from '@ai-sdk/provider-utils';
 
 // ---------------------------------------------------------------------------
@@ -269,37 +264,6 @@ function buildModelMessages(
 // Load manifest tools for AI SDK
 // ---------------------------------------------------------------------------
 
-interface ManifestCommand {
-  name: string;
-  description: string;
-  category: string;
-  parameters: {
-    type: string;
-    properties?: Record<string, unknown>;
-    required?: string[];
-  };
-  tokenCost: number;
-  requiredScope: string;
-}
-
-const manifest = manifestJson as { version: string; commands: ManifestCommand[] };
-
-function getSdkTools() {
-  const writeTools = manifest.commands
-    .filter((cmd) => cmd.requiredScope.endsWith(':write') || cmd.category === 'query')
-    .map((cmd) => ({
-      name: cmd.name,
-      description: cmd.description,
-      parameters: {
-        type: cmd.parameters.type || 'object',
-        properties: cmd.parameters.properties || {},
-        required: cmd.parameters.required || [],
-      },
-    }));
-
-  return convertManifestToolsToSdkTools(writeTools);
-}
-
 export async function POST(request: NextRequest) {
   // 1. Authenticate + rate-limit via shared middleware pipeline
   const mid = await withApiMiddleware(request, {
@@ -477,53 +441,32 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 7. Select AI SDK model based on resolved backend
-  const canonicalModel = model || AI_MODEL_PRIMARY;
-  const isDirectBackend = !chatRoute || chatRoute.backendId === 'direct';
+  // 7. Create agent with resolved model backend + instructions
+  const agent = createSpawnforgeAgent({
+    model: model || '',
+    instructions: systemText,
+    thinking,
+  });
 
-  let modelInstance: ReturnType<typeof gateway> | ReturnType<typeof anthropic>;
-  if (isDirectBackend) {
-    // Direct Anthropic path — preserves thinking mode and prompt caching
-    modelInstance = anthropic(canonicalModel);
-  } else {
-    // Gateway path — model ID must be in provider/model format
-    const gatewayModel = canonicalModel.includes('/')
-      ? canonicalModel
-      : AI_MODELS.gatewayChat;
-    modelInstance = gateway(gatewayModel);
-  }
+  const usingDirect = isDirectBackend(model || '');
 
-  // 8. Provider options for thinking mode (Anthropic only)
-  const providerOptions = thinking && isDirectBackend ? {
-    anthropic: { thinking: { type: 'enabled' as const, budgetTokens: 10000 } },
-  } : undefined;
-
-  // 9. Convert messages and tools
+  // 8. Convert messages
   const modelMessages = buildModelMessages(messages);
-  const tools = getSdkTools();
 
-  // 10. Stream via AI SDK and return UI message stream response
+  // 9. Stream via Agent and return UI message stream response
   try {
-    const result = streamText({
-      model: modelInstance,
-      system: systemText,
+    const result = await agent.stream({
       messages: modelMessages,
-      tools,
-      stopWhen: stepCountIs(10),
-      experimental_telemetry: { isEnabled: true },
-      ...(providerOptions ? { providerOptions } : {}),
-      // Log actual LLM token usage to the cost ledger once the stream completes.
-      // usage.inputTokens and usage.outputTokens are the actual values from
-      // the model (not the estimated cost charged upfront via resolveApiKey).
-      onFinish: async ({ usage }) => {
-        // Only log cost when tokens were actually metered (direct backend with usageId).
-        // Gateway/BYOK requests don't have a usageId and should not be logged here.
+      onStepFinish: async ({ usage }) => {
+        // Log actual LLM token usage to the cost ledger once each step completes.
+        // usage.inputTokens and usage.outputTokens are the actual values from
+        // the model (not the estimated cost charged upfront via resolveApiKey).
         if (auth.ctx.user.id && usageId && usage) {
           const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
           logCost(
             auth.ctx.user.id,
             'chat_message',
-            isDirectBackend ? 'anthropic' : 'gateway',
+            usingDirect ? 'anthropic' : 'gateway',
             null,
             totalTokens,
             {
@@ -537,25 +480,15 @@ export async function POST(request: NextRequest) {
           });
         }
       },
-      // Handle mid-stream errors: refund tokens when the stream fails after starting
-      onError: async ({ error }) => {
-        captureException(error, { route: '/api/chat', model, phase: 'mid-stream' });
-        if (usageId) {
-          await refundTokens(auth.ctx.user.id, usageId).catch((refundErr: unknown) => {
-            captureException(refundErr, { route: '/api/chat', phase: 'refund_mid_stream', usageId });
-          });
-        }
-      },
     });
 
     return result.toUIMessageStreamResponse();
   } catch (err) {
-    // Handles synchronous errors (invalid params, model not found, etc.)
     captureException(err, { route: '/api/chat', model });
 
     if (usageId) {
       await refundTokens(auth.ctx.user.id, usageId).catch((refundErr: unknown) => {
-        captureException(refundErr, { route: '/api/chat', phase: 'refund_sync_error', usageId });
+        captureException(refundErr, { route: '/api/chat', phase: 'refund', usageId });
       });
     }
 
