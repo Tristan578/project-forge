@@ -286,13 +286,13 @@ All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. E
 | `docs-maintainer` | Documentation updates, README, CLAUDE.md |
 | `rust-engine` | Bevy ECS, bridge, WASM, engine/ code |
 
-### Skills (36 total in `.claude/skills/`)
+### Skills (38 total in `.claude/skills/`)
 
 **Orchestration:** `/planner`, `/builder`, `/cycle`, `/developer-experience`
 **Engine:** `/rust-engine`, `/build`, `/arch-validator`
 **Web:** `/frontend`, `/mcp-commands`, `/next-best-practices`, `/vercel-react-best-practices`, `/web-accessibility`, `/web-design-guidelines`, `/game-ui-design`
 **Testing:** `/testing` (knowledge), `/test` (action), `/vitest`, `/playwright-best-practices`
-**Infrastructure:** `/infra-services`, `/troubleshoot`, `/kanban`, `/babysit-prs`, `/pr-code-review`, `/pr-green-machine`, `/ci-status`, `/lockfile-check`
+**Infrastructure:** `/infra-services`, `/troubleshoot`, `/kanban`, `/babysit-prs`, `/pr-code-review`, `/pr-green-machine`, `/ci-status`, `/lockfile-check`, `/env-health-check`, `/changelog-review`
 **Features:** `/game-engine`, `/multiplayer-readiness`, `/db-migrate`, `/viewport`
 **Workflow:** `/design`, `/architect-flow`, `/docs`, `/doc-review`, `/sync-push`, `/sync-pull`
 
@@ -322,6 +322,7 @@ All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. E
 | `sync-to-github.sh` | (called by on-stop.sh) | Background sync to GitHub |
 | `sync-from-github.sh` | (not registered) | Manual GitHub → local sync |
 | `taskboard-state.sh` | (not registered) | Manual taskboard state dump |
+| `env-health-check.sh` | SessionStart (stale check) | Validates production environments are operable |
 
 ### Approved Specs (in progress)
 - `specs/2026-03-25-game-creation-orchestrator-phase2a-v4.md` — Game Creation Orchestrator (systems-not-genres, 4x reviewer PASS)
