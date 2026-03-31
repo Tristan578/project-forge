@@ -16,7 +16,7 @@ This means the 1000th user to ask "make a platformer" gets the same quality as t
 
 ## Existing Infrastructure
 
-- **328 MCP commands** with structured parameters -- every AI action is logged.
+- **350 MCP commands** with structured parameters -- every AI action is logged.
 - **Chat route** (`web/src/app/api/chat/route.ts`) streams AI responses with tool calls.
 - **Scene context** (`web/src/lib/chat/context.ts`) serializes current scene for AI.
 - **`.forge` scene format** is JSON -- fully parseable.

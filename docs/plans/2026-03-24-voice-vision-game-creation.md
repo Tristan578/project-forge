@@ -18,7 +18,7 @@ Competitors (Unity Muse, Roblox Assistant) are adding multimodal input. SpawnFor
 - **AI chat route** (`web/src/app/api/chat/route.ts`) already uses Vercel AI SDK with streaming.
 - **Generation handlers** (`web/src/lib/chat/handlers/generationHandlers.ts`) handle async AI jobs.
 - **Asset generation routes** exist for sprites, textures, music, SFX, voice, models, skyboxes.
-- **328 MCP commands** cover entity creation, materials, physics, scripting -- the AI can already build scenes from text instructions.
+- **350 MCP commands** cover entity creation, materials, physics, scripting -- the AI can already build scenes from text instructions.
 - **Scene context** (`web/src/lib/chat/context.ts`) provides current scene state to AI.
 
 The gap is **input modality** -- the system only accepts text today.
