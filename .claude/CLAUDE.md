@@ -195,8 +195,9 @@ Key rules:
 
 - **Engine**: 3D + 2D rendering (WebGPU/WebGL2), physics (Rapier 3D+2D), skeletal animation, particles (Hanabi GPU), LOD, post-processing, CSG booleans, procedural terrain/mesh
 - **Editor**: Material library (56 presets), visual scripting (73 node types), dialogue system, keyframe animation, in-game UI builder, tilemap editor, prefabs, multi-scene, starter system bundles (11 prepackaged system configurations with friendly genre labels)
-- **AI**: 350 MCP commands (41 categories), compound AI actions, 5 asset generation providers, AI chat with streaming/approval/undo
+- **AI**: 350 MCP commands (41 categories), compound AI actions, 5 asset generation providers, AI chat with streaming/approval/undo, system decomposer (game systems not genres)
 - **Platform**: Stripe payments (4 tiers), cloud publishing, mobile PWA, 63 E2E spec files, 14,200+ unit tests, docs.spawnforge.ai (Clerk-gated), design.spawnforge.ai (Storybook)
+- **Game Services**: leaderboards, localization (multi-language), cutscene system, economy designer, quest generator, narrative generator, accessibility tools
 - **Removed**: Editor Collaboration (PF-142) and Multiplayer Networking (PF-141) — stubs removed, will rebuild when networking backend is ready
 
 ## New Component / Command Checklist
