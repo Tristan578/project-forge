@@ -140,7 +140,9 @@ describe('POST /api/projects', () => {
     const body = await res.json();
 
     expect(res.status).toBe(403);
+    expect(body.code).toBe('PROJECT_LIMIT');
     expect(body.error).toContain('Your plan allows 3 project');
     expect(body.error).toContain('Upgrade to create more');
+    expect(body.details).toEqual({ limit: 3 });
   });
 });
