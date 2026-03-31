@@ -271,59 +271,74 @@ All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. E
 - `/cycle` — Plan -> Build -> Verify -> Update Context loop
 - `/developer-experience` — DX audits, DoQ/DoD enforcement, cross-IDE consistency
 
-### Agents (`.claude/agents/`)
-| Agent | Trigger |
-|-------|---------|
-| `builder` | Implementation tasks, coding |
-| `validator` | QA gate, full validation suite |
-| `planner` | Architecture, spec creation |
-| `docs-guardian` | Documentation review — code comments, API docs, MCP docs, repo docs. Antagonistic: PASS/FAIL only. |
-| `dx-guardian` | DX audits, cross-IDE consistency |
-| `security-reviewer` | Auth, injection, encryption, dependency audits |
-| `test-writer` | Vitest + RTL tests, coverage gaps |
-| `infra-devops` | Deploy, CI/CD, monitoring, Vercel, Cloudflare, Neon, Upstash, Sentry |
-| `ux-reviewer` | UX antagonist, accessibility (WCAG AA), theme coherence, design system compliance |
-| `code-reviewer` | PR review, code audits, regression checks |
-| `docs-maintainer` | Documentation updates, README, CLAUDE.md |
-| `rust-engine` | Bevy ECS, bridge, WASM, engine/ code |
+### Agents (`.claude/agents/` — 12 agents)
 
-### Skills (38 total in `.claude/skills/`)
+All agents have: `memory`, `effort`, `model`, `tools`, `skills`, and agent-scoped `hooks` in frontmatter.
 
-**Orchestration:** `/planner`, `/builder`, `/cycle`, `/developer-experience`
-**Engine:** `/rust-engine`, `/build`, `/arch-validator`
-**Web:** `/frontend`, `/mcp-commands`, `/next-best-practices`, `/vercel-react-best-practices`, `/web-accessibility`, `/web-design-guidelines`, `/game-ui-design`
-**Testing:** `/testing` (knowledge), `/test` (action), `/vitest`, `/playwright-best-practices`
-**Infrastructure:** `/infra-services`, `/troubleshoot`, `/kanban`, `/babysit-prs`, `/pr-code-review`, `/pr-green-machine`, `/ci-status`, `/lockfile-check`, `/env-health-check`, `/changelog-review`
-**Features:** `/game-engine`, `/multiplayer-readiness`, `/db-migrate`, `/viewport`
-**Workflow:** `/design`, `/architect-flow`, `/docs`, `/doc-review`, `/sync-push`, `/sync-pull`
+| Agent | Key Config | Trigger |
+|-------|-----------|---------|
+| `builder` | `isolation: worktree`, `memory: user` | Implementation tasks, coding |
+| `validator` | `mcpServers: playwright` | QA gate, full validation suite |
+| `planner` | `model: opus`, `memory: user` | Architecture, spec creation |
+| `docs-guardian` | `background: true`, read-only | Documentation review (PASS/FAIL only) |
+| `dx-guardian` | `background: true`, `model: haiku` | DX audits, cross-IDE consistency |
+| `security-reviewer` | `background: true`, read-only | Auth, injection, encryption audits |
+| `test-writer` | `memory: project` | Vitest + RTL tests, coverage gaps |
+| `infra-devops` | `mcpServers: github` | Deploy, CI/CD, monitoring |
+| `ux-reviewer` | `background: true`, `mcpServers: playwright` | UX/a11y (WCAG AA), design system |
+| `code-reviewer` | `background: true`, read-only | PR review, code audits |
+| `docs-maintainer` | `memory: project` | Documentation updates |
+| `rust-engine` | `mcpServers: context7` | Bevy ECS, bridge, WASM |
 
-### MCP Servers (`.mcp.json`)
-- `context7` — live library documentation for all dependencies
+**All 5 reviewers** have: `background: true`, read-only tools, Stop hook validates PASS/FAIL verdict, PreToolUse blocks write commands.
+**Agent teams:** Enabled via `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in settings.json.
+
+### Skills (~28 custom + 19 marketplace)
+
+**Orchestration:** `/planner`, `/builder`, `/cycle`
+**Engine:** `/rust-engine`, `/build`, `/arch-validator`, `/rust-best-practices` (marketplace)
+**Web:** `/frontend`, `/mcp-commands`, `/web-accessibility`, `/shadcn` (marketplace), `/vercel-react-best-practices` (marketplace, 70 rules), `/vercel-composition-patterns` (marketplace), `/vercel-react-view-transitions` (marketplace)
+**Next.js:** `/next-best-practices` (marketplace, 19 guides), `/next-cache-components` (marketplace), `/next-upgrade` (marketplace)
+**Testing:** `/testing` (merged vitest+test), `/playwright-best-practices` (marketplace, 57 rules), `/tdd` (marketplace)
+**Infrastructure:** `/infra-services` (merged ci-status), `/troubleshoot`, `/kanban` (merged sync-push/pull), `/babysit-prs`, `/pr-code-review` (context: fork), `/pr-green-machine` (context: fork), `/env-health-check`, `/changelog-review`, `/deploy-to-vercel` (marketplace)
+**Database:** `/db-migrate`, `/neon-postgres` (marketplace), `/claimable-postgres` (marketplace)
+**Features:** `/game-engine`, `/multiplayer-readiness`, `/viewport`
+**Workflow:** `/design`, `/architect-flow`, `/docs` (merged doc-review), `/developer-experience`
+
+**Consolidated (removed):** `/test`, `/vitest`, `/ci-status`, `/lockfile-check`, `/sync-push`, `/sync-pull`, `/doc-review`, `/web-design-guidelines`, `/game-ui-design` — merged into parent skills.
+**Marketplace skills** live in `.agents/skills/` with symlinks in `.claude/skills/`. Managed via `npx skills add/ls/update`. Lock file: `skills-lock.json`.
+
+### MCP Servers (`.mcp.json` — 4 servers)
+- `context7` — live library documentation for all 30+ dependencies
 - `neon` — direct Neon Postgres queries (needs `NEON_API_KEY`)
+- `playwright` — browser automation for E2E verification and visual checks
+- `github` — GitHub API access for PR/issue/Actions operations
 
-### Hooks (`.claude/hooks/`)
+### Hooks (`.claude/hooks/` — 40+ scripts, 18 event types)
+
+**Event types in settings.json:** PreToolUse, PostToolUse, SessionStart, SessionEnd, UserPromptSubmit, Stop, SubagentStart, SubagentStop, TaskCreated, TaskCompleted, TeammateIdle, PreCompact, PostCompact, StopFailure, ConfigChange, InstructionsLoaded, WorktreeCreate, CwdChanged, PostToolUseFailure
+
+**Key hooks:**
 | Hook | Event | Purpose |
 |------|-------|---------|
-| `inject-lessons-learned.sh` | PreToolUse (Edit/Write/Bash) | Shows relevant anti-patterns before action |
-| `pre-push-quality-gate.sh` | PreToolUse (Bash: git push) | Runs lint+tsc on changed files before push |
+| `inject-lessons-learned.sh` | PreToolUse (Edit/Write/Bash) | Shows anti-patterns before action |
+| `pre-push-quality-gate.sh` | PreToolUse (if: git push) | Lint+tsc before push |
+| `block-main-commits.sh` | PreToolUse (if: git commit) | Prevents commits on main |
 | `verify-branch.sh` | PreToolUse (Edit/Write) | Prevents edits on wrong branch |
-| `check-db-transaction.sh` | PreToolUse (Edit/Write) | Warns if db.transaction() used (neon-http crashes) |
-| `check-vercel-json.sh` | PreToolUse (Edit/Write) | Validates vercel.json edits (catches `nodeVersion` and other invalid fields) |
-| `check-docs-quality.sh` | PreToolUse (Bash: git push) | Validates JSDoc, stale TODOs, and manifest counts before push |
-| `post-edit-lint.sh` | PostToolUse (Edit/Write) | Auto-lint after file changes |
-| `check-arch.sh` | PostToolUse (Edit/Write) | Architecture boundary check |
-| `auto-lockfile-sync.sh` | PostToolUse (Edit/Write) | Auto-regenerates lockfile when package.json changes |
-| `post-commit-clean.sh` | PostToolUse (Bash) | Cleanup after git commits |
-| `post-merge-doc-check.sh` | PostToolUse (Bash) | Doc freshness check after merges |
+| `check-db-transaction.sh` | PreToolUse (Edit/Write) | Warns on db.transaction() |
+| `review-quality-gate.sh` | Stop (agent-scoped: 5 reviewers) | Validates PASS/FAIL verdict |
+| `block-writes.sh` | PreToolUse (agent-scoped: reviewers) | Reviewers are read-only |
+| `builder-quality-gate.sh` | Stop (agent-scoped: builder) | Verifies lint+tests ran |
+| `cargo-check-wasm.sh` | PostToolUse (agent-scoped: rust-engine) | Cargo check after .rs edits |
+| `validate-agent-output.sh` | SubagentStop | Verify reviewer output structure |
+| `reject-incomplete-review.sh` | TeammateIdle | Exit 2 if no verdict (sends back) |
+| `save-critical-context.sh` | PreCompact | Dump decisions before compaction |
+| `restore-context-hints.sh` | PostCompact | Inject context after compaction |
 | `on-session-start.sh` | SessionStart | Taskboard state + sync |
-| `on-prompt-submit.sh` | UserPromptSubmit | Taskboard context injection |
-| `on-stop.sh` | Stop | Worktree safety commit + GitHub sync |
-| `lessons-learned-reminder.sh` | Stop | Prompts agent to log lessons every 15 responses |
-| `worktree-safety-commit.sh` | (called by on-stop.sh) | Auto-commit uncommitted worktree work |
-| `sync-to-github.sh` | (called by on-stop.sh) | Background sync to GitHub |
-| `sync-from-github.sh` | (not registered) | Manual GitHub → local sync |
-| `taskboard-state.sh` | (not registered) | Manual taskboard state dump |
-| `env-health-check.sh` | SessionStart (stale check) | Validates production environments are operable |
+| `on-stop.sh` | Stop / SessionEnd | Worktree safety commit + GitHub sync |
+
+### Plugin (`.claude-plugin/plugin.json`)
+Internal plugin manifest for versioning and eventual marketplace distribution. Test with `claude --plugin-dir .`
 
 ### Approved Specs (in progress)
 - `specs/2026-03-25-game-creation-orchestrator-phase2a-v4.md` — Game Creation Orchestrator (systems-not-genres, 4x reviewer PASS)
