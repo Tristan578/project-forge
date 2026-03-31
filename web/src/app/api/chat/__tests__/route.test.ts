@@ -92,7 +92,6 @@ const mockAgent = { stream: mockStream };
 
 vi.mock('@/lib/ai/spawnforgeAgent', () => ({
   createSpawnforgeAgent: vi.fn(() => mockAgent),
-  isDirectBackend: vi.fn(() => true),
 }));
 
 // Keep @anthropic-ai/sdk mock for modules that still import it indirectly

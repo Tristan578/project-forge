@@ -89,7 +89,6 @@ const mockNegAgent = { stream: mockNegStream };
 
 vi.mock('@/lib/ai/spawnforgeAgent', () => ({
   createSpawnforgeAgent: vi.fn(() => mockNegAgent),
-  isDirectBackend: vi.fn(() => true),
 }));
 
 vi.mock('@/lib/costs/costLogger', () => ({

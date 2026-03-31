@@ -26,7 +26,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { logCost } from '@/lib/costs/costLogger';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
-import { createSpawnforgeAgent, isDirectBackend } from '@/lib/ai/spawnforgeAgent';
+import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
 import { resolveChatRoute } from '@/lib/providers/resolveChat';
 import type { UserModelMessage, AssistantModelMessage } from '@ai-sdk/provider-utils';
 
@@ -442,13 +442,15 @@ export async function POST(request: NextRequest) {
   }
 
   // 7. Create agent with resolved model backend + instructions
+  // resolveChatRoute is called once here (also used in step 5 for billing);
+  // the result determines whether we use direct Anthropic or gateway.
+  const usingDirect = usingDirectBackend;
   const agent = createSpawnforgeAgent({
+    isDirectBackend: usingDirect,
     model: model || '',
     instructions: systemText,
     thinking,
   });
-
-  const usingDirect = isDirectBackend(model || '');
 
   // 8. Convert messages
   const modelMessages = buildModelMessages(messages);
