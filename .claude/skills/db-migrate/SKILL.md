@@ -1,9 +1,10 @@
 ---
 name: db-migrate
-description: Database migration workflow for SpawnForge. Wraps Drizzle schema changes with FK validation, cascade verification, and safe push/migrate commands. Use when modifying web/src/lib/db/schema.ts or running migrations.
+description: Drizzle schema change workflow for SpawnForge Neon DB. Use when modifying schema.ts, generating migrations, applying migrations to production, or debugging FK/cascade issues.
 user-invocable: true
 allowed-tools: Bash, Read, Glob, Grep, Edit
 argument-hint: "[action: generate|push|migrate|validate|status]"
+paths: "web/src/lib/db/**"
 ---
 
 # Database Migration Workflow

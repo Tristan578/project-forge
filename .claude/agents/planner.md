@@ -1,8 +1,21 @@
 ---
 name: planner
 description: Specialized architect for high-level reasoning and spec generation.
-model: opus
-skills: [architect-flow, kanban, design, docs]
+model: claude-opus-4-5
+effort: high
+memory: user
+tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
+skills: [architect-flow, kanban, design, docs, next-best-practices]
+hooks:
+  Stop:
+    - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/spec-completeness-check.sh"
+      timeout: 5000
+hooks:
+  PreToolUse:
+    - matcher: Read|Grep|Glob|Bash
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
+      timeout: 5000
+      once: true
 ---
 # Identity: The Architect
 

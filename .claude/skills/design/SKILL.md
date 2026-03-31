@@ -1,6 +1,7 @@
 ---
 name: design
-description: Architecture and system design specialist. Use when designing new features, reviewing specs, evaluating trade-offs, or planning multi-system changes.
+description: Design feature architecture for SpawnForge with specs in specs/. Use when planning new features, evaluating trade-offs between ECS/store/MCP approaches, or designing cross-layer changes that touch Rust engine + React + MCP simultaneously.
+paths: "specs/**"
 ---
 
 # Role: Architecture & System Design Specialist
@@ -197,3 +198,12 @@ Before approving a design:
 6. Fits within performance budgets
 7. Has clear acceptance criteria
 8. Has considered migration path (if modifying existing data)
+
+## Scripts
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/validate-spec.sh" <spec-file>` — Validate spec completeness: checks for required sections (Summary, Design, Acceptance Criteria, Test Plan), Given/When/Then format, file path references, and sequence/flow descriptions
+
+## References
+
+- See [spec-template.md](references/spec-template.md) for the standard spec template with all required sections, placeholders, and a full worked example
+- See [design-principles.md](references/design-principles.md) for SpawnForge's 6 design principles: maintain the sandwich, work in both render backends, work in exported games, maintain AI parity, scale with entity count, support undo

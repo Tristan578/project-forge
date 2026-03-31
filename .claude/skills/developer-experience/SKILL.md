@@ -1,6 +1,6 @@
 ---
 name: developer-experience
-description: Developer experience guardian. Enforces documentation freshness, cross-IDE consistency, quality standards, and smooth onboarding. Invoke after completing features, on session start/stop, or when another agent needs a DX audit.
+description: DX audit for SpawnForge — checks documentation freshness, cross-IDE consistency, CLAUDE.md accuracy, and onboarding quality. Use when completing features, auditing DX quality, or when documentation may be out of sync with code.
 user-invocable: true
 allowed-tools: Bash, Read, Glob, Grep, Edit, Write
 argument-hint: "[audit|doq|dod|onboard|refresh]"
@@ -133,3 +133,12 @@ After every audit, ask:
 3. Are there configs that keep drifting? → Add to hook enforcement
 4. Are there onboarding pain points? → Fix the source, not the docs
 5. Are there quality gaps that slip through? → Add to DoQ/DoD
+
+## Scripts
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/run-dx-audit.sh"` — Wrapper that calls `bash "${REPO_ROOT}/.claude/tools/dx-audit.sh"` and prints a pass/warn/fail summary
+- `bash "${CLAUDE_SKILL_DIR}/scripts/run-dx-audit.sh" onboard` — Onboarding mode: verify zero-friction new contributor setup
+
+## References
+
+- See [dx-standards.md](references/dx-standards.md) for the Definition of Quality (DoQ), Definition of Done (DoD), cross-IDE consistency requirements, feature documentation standards, and onboarding checklist

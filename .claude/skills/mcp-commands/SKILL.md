@@ -1,6 +1,7 @@
 ---
 name: mcp-commands
-description: MCP command and AI integration specialist. Use when adding/modifying MCP commands, chat handlers, or AI-engine parity features.
+description: Add MCP commands and chat handlers for SpawnForge AI parity. Use when adding engine capabilities to the AI vocabulary, writing chat handlers, updating the commands.json manifest, or auditing AI-human feature parity.
+paths: "mcp-server/**, web/src/data/commands.json, web/src/lib/chat/handlers/**"
 ---
 
 # Role: MCP & AI Integration Specialist

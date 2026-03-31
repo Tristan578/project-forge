@@ -1,9 +1,18 @@
 ---
 name: infra-devops
 description: Use when working on deployment, CI/CD, monitoring, infrastructure, or production diagnostics. Trigger on "deploy", "CI", "pipeline", "monitoring", "health check", "Vercel", "Cloudflare", "Neon", "Upstash", "Sentry", "PostHog", "staging", "production", "CDN", "WASM binary", "rate limiting infra".
-model: sonnet
-skills: [infra-services, kanban]
+model: claude-sonnet-4-5
+effort: medium
+memory: project
+mcpServers:
+  - github
+skills: [infra-services, kanban, neon-postgres, deploy-to-vercel]
 maxTurns: 20
+hooks:
+  PreToolUse:
+    - matcher: Edit|Write
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
+      timeout: 5000
 ---
 # Identity: The Infrastructure Engineer
 

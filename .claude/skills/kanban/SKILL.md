@@ -1,6 +1,6 @@
 ---
 name: kanban
-description: "Taskboard management skill. Use this to view, create, update, and manage tickets on the project taskboard. Enforces standard ticket format with user stories and acceptance criteria. Invoked automatically by hooks or manually via /kanban."
+description: "Manage SpawnForge taskboard tickets — create, view, move, and sync to GitHub. Use when creating tickets, checking board state, syncing to GitHub before PRs, or managing the project backlog."
 ---
 
 # Taskboard Management Protocol
@@ -234,3 +234,60 @@ curl -s -X POST "http://taskboard.localhost:1355/api/subtasks/<SUBTASK_ID>/toggl
 | `high` | Important, affects key functionality | Address this session |
 | `medium` | Normal priority, planned work | Address within 2 sessions |
 | `low` | Nice to have, cleanup, minor improvements | When convenient |
+
+## Scripts
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/board-summary.sh"` — Fetch board state and print summary: ticket counts by status, in-progress tickets with subtask progress, recently completed, high-priority todo, and staleness warnings (>4h in in_progress)
+- `bash "${CLAUDE_SKILL_DIR}/scripts/validate-ticket.sh" <TICKET_ID>` — Validate a ticket against the mandatory format: checks user story, description, Given/When/Then acceptance criteria, priority, team, and subtasks
+
+## GitHub Sync
+
+Sync local taskboard tickets to/from the GitHub Project board (SpawnForge #2).
+
+### Push local tickets to GitHub (MANDATORY before creating any PR)
+
+Every PR must link to a GitHub issue (`Closes #NNNN`). Tickets only become GitHub issues after sync-push runs.
+
+```bash
+# Incremental push (syncs todo + in_progress + recently-done)
+cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py push
+
+# Full push (all tickets including historical done)
+cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py push-all
+
+# Check sync status
+cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py status
+```
+
+Then find the GitHub issue number for your ticket:
+
+```bash
+gh issue list --search "PF-XXX in:title" --limit 1
+```
+
+Include `Closes #NNNN` (GitHub issue number, NOT `PF-XXX`) in every PR body. CI will fail without it.
+
+### Pull GitHub changes to local taskboard
+
+```bash
+# Pull changes from GitHub
+cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py pull
+```
+
+This runs automatically via SessionStart hook. Pull manually when:
+- Another contributor just made changes and you need them immediately
+- You suspect sync is out of date
+
+### Sync configuration
+
+- Config: `.claude/hooks/github-sync-config.json` (project IDs, field mappings)
+- Mapping: `.claude/hooks/github-project-map.json` (ticket ↔ GitHub item ID mapping)
+- DB path: auto-detected — never pass `--db .claude/taskboard.db` to `taskboard start`
+
+### Conflict resolution
+
+If the same ticket changed locally and on GitHub:
+- `push` overwrites GitHub with local status
+- `pull` overwrites local with GitHub status
+
+To resolve manually: pull → fix local status → push.

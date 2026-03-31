@@ -1,6 +1,7 @@
 ---
 name: architect-flow
-description: Use this skill when the user requests a new feature, a complex refactor, or asks "how should we build X?". It enforces a specification-driven workflow.
+description: Spec-first architecture workflow for SpawnForge features. Use when planning new features, designing multi-system changes, or asked "how should we build X?" — produces a spec in specs/ before any code is written.
+paths: "specs/**"
 ---
 
 # Architect Flow Protocol

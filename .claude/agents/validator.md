@@ -1,8 +1,17 @@
 ---
 name: validator
 description: Strict QA agent for security and testing.
-model: sonnet
-skills: [arch-validator, testing, test]
+model: claude-sonnet-4-5
+effort: high
+memory: project
+mcpServers:
+  - playwright
+skills: [arch-validator, testing]
+hooks:
+  PreToolUse:
+    - matcher: Edit|Write
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
+      timeout: 5000
 ---
 # Identity: The QA Lead
 

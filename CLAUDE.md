@@ -134,6 +134,10 @@ Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_K
 
 ## Gotchas
 
+- **`cd web/` + git diff paths = double prefix** — `git diff --name-only` returns `web/src/...` paths relative to repo root. If a script does `cd web/` then passes those paths to vitest/eslint, the tool sees `web/web/src/...`. Always strip the `web/` prefix with `sed 's|^web/||'` after collecting paths and before invoking tools inside `web/`. Hit 4 times in this codebase (run-affected-tests.sh, coverage-diff.sh, fix-common-ci.sh, boundary-check paths).
+- **Subagent hooks don't inherit settings.json** — Only frontmatter hooks fire in subagents. If a hook must run for ALL agents (like inject-lessons-learned.sh), add it to every agent's frontmatter PreToolUse. settings.json hooks only fire in the main session.
+- **Verify npm package names with `npm view`** — Before adding any package to `.mcp.json`, `package.json`, or CI configs, verify it exists: `npm view <pkg> version`. Hallucinated package names (e.g. `@anthropic-ai/playwright-mcp` vs real `@playwright/mcp`) cause silent startup failures.
+- **vitest --coverage needs `--coverage.reporter=json-summary`** — Without this flag, `coverage-summary.json` is never created and scripts parsing it silently get N/A values. Always specify the reporter format explicitly.
 - **Node 25.x segfaults** — intermittent V8 JIT crashes in hooks/scripts. If a hook crashes with a stack trace in `libnode`, it's a Node runtime bug, not code. Investigate and fix (Boy Scout Rule) — don't bypass with `--no-verify`.
 - **`vercel build` in CI** — uses `child_process.spawn('npm')` which can't find npm on GHA runners. Use `vercel deploy` (remote build) instead of `vercel build` + `deploy --prebuilt`.
 - **Artifact versions** — `upload-artifact` and `download-artifact` MUST use the same major version (`@v4`). Never upgrade one without the other.

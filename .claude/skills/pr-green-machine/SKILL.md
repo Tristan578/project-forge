@@ -1,6 +1,7 @@
 ---
 name: pr-green-machine
-description: Sequential PR remediation pipeline — drives each open PR through code review, root-cause analysis, planning, multi-domain validation, fix, re-validation, and babysitting until CI is fully green, all Sentry comments are resolved, and merge conflicts are gone. Use when multiple PRs need to reach merge-ready state. Processes oldest to newest, one at a time, with zero assumptions.
+description: Drive all open PRs to merge-ready state — fixes CI failures, resolves Sentry comments, clears merge conflicts. Use when multiple PRs need to go green or when asked to "clean up PRs", "fix all PRs", or "make PRs mergeable".
+context: fork
 ---
 
 # PR Green Machine
@@ -148,3 +149,12 @@ Process PRs oldest to newest by PR number. The sequence for this run:
 5. PR #7415
 
 Do NOT parallelize. Each PR must be fully GREEN before starting the next. If a fix on PR N breaks PR N+1 (shared branch), fix N+1 immediately before moving on.
+
+## Scripts
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/pr-status.sh" <pr-number>` — Get full PR status: CI checks, merge conflicts, review decision, Sentry comment count, and Closes link validation
+- `bash "${CLAUDE_SKILL_DIR}/scripts/fix-common-ci.sh"` — Auto-fix common CI failures: runs `eslint --fix`, then `tsc --noEmit` to surface remaining type errors, then targeted unit tests
+
+## References
+
+- See [ci-fix-playbook.md](references/ci-fix-playbook.md) for step-by-step fixes for every common CI failure: lint, TypeScript, vitest, E2E, manifest sync, lockfile drift, and 0-second workflow failures

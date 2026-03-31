@@ -1,6 +1,7 @@
 ---
 name: testing
-description: Test engineering specialist. Use when writing tests, improving coverage, or designing test strategies. Target is 100% meaningful coverage.
+description: Write Vitest + RTL + Playwright tests for SpawnForge. Use when adding test coverage, fixing flaky tests, hitting coverage gaps, or running test suites (lint/tsc/vitest/e2e/mcp). Includes Vitest 3.x API reference.
+paths: "web/src/**/__tests__/**, web/e2e/tests/**, mcp-server/src/*.test.ts"
 ---
 
 # Role: Test Engineering Specialist
@@ -242,3 +243,71 @@ Before declaring test work complete:
 4. Test file naming matches source: `myFile.ts` → `__tests__/myFile.test.ts`
 5. Each test has a descriptive name that reads as a specification
 6. Edge case tests exist for every error path in the source code
+
+## Running Tests
+
+### Default quick suite (lint + tsc + vitest)
+
+```bash
+cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
+```
+
+### Specific suite
+
+| Suite | Command |
+|-------|---------|
+| `lint` | `cd web && npx eslint --max-warnings 0 .` |
+| `tsc` | `cd web && npx tsc --noEmit` |
+| `vitest` | `cd web && npx vitest run` |
+| `playwright` | `cd web && npx playwright test` (requires WASM build) |
+| `mcp` | `cd mcp-server && npx vitest run` |
+| `coverage` | `cd web && npx vitest run --coverage` |
+
+### Targeted (preferred during development — avoid full suite when only a few files changed)
+
+```bash
+# Run tests for a specific file
+cd web && npx vitest run src/lib/tokens/creditManager.test.ts
+
+# Run tests matching a pattern
+cd web && npx vitest run --reporter=verbose -t "creditManager"
+
+# Run only changed files
+cd web && npm run test:changed
+```
+
+### E2E prerequisites
+
+Playwright E2E tests require:
+1. WASM engine built — run `/build` first. Check `web/public/engine-pkg-webgl2/` exists.
+2. Playwright browsers installed — `npx playwright install chromium`
+3. Dev server starts automatically via Playwright's `webServer` config.
+
+## Vitest 3.x API Reference
+
+Vitest is Vite-native with Jest-compatible API, native ESM, TypeScript, and JSX support.
+
+### Core API
+
+| Topic | Key APIs |
+|-------|---------|
+| Test functions | `test()`, `it()`, `describe()`, modifiers: `.skip`, `.only`, `.concurrent` |
+| Assertions | `expect().toBe()`, `.toEqual()`, `.toMatchSnapshot()`, `.toThrow()` |
+| Hooks | `beforeEach`, `afterEach`, `beforeAll`, `afterAll` |
+| Mocking | `vi.fn()`, `vi.spyOn()`, `vi.mock()`, `vi.resetModules()` |
+| Timers | `vi.useFakeTimers()`, `vi.advanceTimersByTime()` |
+| Coverage | V8 provider: `npx vitest run --coverage` |
+
+### Mock Rules (SpawnForge-specific)
+
+- **Always use `@/lib/...` alias in `vi.mock()`** — never relative paths from `__tests__` dirs
+- **Use `vi.resetModules()` + dynamic import** for script worker tests
+- **Stub `self` with mock `postMessage`** for worker tests
+
+### Configuration
+
+- Workspace config: `web/vitest.workspace.ts` — splits into two environments:
+  - `web/vitest.config.node.ts` (environment: node) — lib, stores, API routes
+  - `web/vitest.config.jsdom.ts` (environment: jsdom) — components, hooks
+- Standalone config: `web/vitest.config.ts` — used by CI for coverage thresholds (70/60/65/72)
+- Coverage report outputs to `web/coverage/`

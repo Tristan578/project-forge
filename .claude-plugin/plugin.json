@@ -1,0 +1,8 @@
+{
+  "name": "spawnforge",
+  "version": "1.0.0",
+  "description": "SpawnForge Claude Code automation — agents, skills, hooks, and MCP for AI-native game engine development",
+  "author": {
+    "name": "Tristan Nolan"
+  }
+}

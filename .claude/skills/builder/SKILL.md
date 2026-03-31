@@ -1,6 +1,6 @@
 ---
 name: builder
-description: The Implementation Specialist. Dispatches to domain-specific skills based on what's being built. usage: /builder [spec_file]
+description: Implement a spec from specs/ into working code. Dispatches to rust-engine, frontend, mcp-commands, and testing skills based on the layers touched. Use when implementing a feature, fixing bugs, or asked to "build" or "implement" something.
 ---
 
 # Role: The Builder

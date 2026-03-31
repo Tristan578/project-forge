@@ -1,6 +1,6 @@
 ---
 name: changelog-review
-description: Check changelogs and release notes for all primary systems, frameworks, and libraries used in SpawnForge. Prevents stale training data from producing invalid recommendations. Run at session start or before major work.
+description: Check changelogs for Bevy, Next.js, Zustand, wasm-bindgen, Rapier, and all SpawnForge deps. Use when training data may be stale, before major upgrades, or when a library API behaves unexpectedly.
 ---
 
 # Changelog & Release Review
@@ -166,3 +166,11 @@ GitHub is a primary dependency (CI/CD, issue tracking, PR workflows, CLI). Check
 - **Check against actual usage** — a breaking change in a feature we don't use isn't actionable
 - **wasm-bindgen is pinned** — `=0.2.108` must match Cargo.lock. Never recommend upgrading without explicit user approval
 - **GitHub Actions versions** — `upload-artifact` and `download-artifact` MUST use the same major version (@v4). Never upgrade one without the other
+
+## Scripts
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/check-deps.sh"` — Compare installed JS dependency versions vs. npm latest for all key packages. Outputs installed version, latest version, and status (current/minor update/MAJOR UPDATE)
+
+## References
+
+- See [version-pins.md](references/version-pins.md) — Documents all version pins with the upgrade blockers: stripe ^20.4.1, wasm-bindgen =0.2.108, Next.js 16.x, Bevy 0.18, upload/download-artifact v4. Includes an upgrade decision matrix and pre-upgrade audit checklists for each pinned dependency

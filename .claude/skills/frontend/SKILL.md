@@ -1,6 +1,7 @@
 ---
 name: frontend
-description: React/Next.js frontend development specialist. Use when writing UI components, Zustand stores, hooks, or styling — anything in web/src/.
+description: Build SpawnForge React/Next.js UI — editor panels, Zustand store slices, engine event hooks, chat handlers, Tailwind styling. Use when adding components, stores, hooks, or any web/src/ code changes.
+paths: "web/src/components/**, web/src/hooks/**, web/src/stores/**"
 ---
 
 # Role: Frontend Specialist

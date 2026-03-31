@@ -1,6 +1,6 @@
 ---
 name: cycle
-description: Runs the standard Plan -> Build -> Verify loop with domain-specific skills. usage: /cycle [task]
+description: Run the full Plan → Build → Verify loop for a SpawnForge feature. Orchestrates planner → builder → validator in sequence. Use when implementing a complete feature end-to-end from spec to passing tests.
 ---
 
 # The Development Loop

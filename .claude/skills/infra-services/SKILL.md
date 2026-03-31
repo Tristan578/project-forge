@@ -1,9 +1,10 @@
 ---
 name: infra-services
-description: Infrastructure and external service specialist for SpawnForge. Use when working with Vercel, Cloudflare R2, Neon DB, Upstash Redis, Clerk auth, Stripe payments, Sentry monitoring, PostHog analytics, or GitHub Actions CI/CD.
+description: Infrastructure specialist for SpawnForge. Use when working with Vercel, Cloudflare R2, Neon DB, Upstash Redis, Clerk, Stripe, Sentry, PostHog, GitHub Actions CI/CD, or monitoring CI check status on PRs.
 user-invocable: true
 allowed-tools: Bash, Read, Glob, Grep, Agent, WebFetch
-argument-hint: "[service: vercel|r2|neon|upstash|clerk|stripe|sentry|posthog|github|all]"
+argument-hint: "[service: vercel|r2|neon|upstash|clerk|stripe|sentry|posthog|github|ci-status]"
+paths: ".github/workflows/**, infra/**, vercel.json"
 ---
 
 # Infrastructure & Services Guide
@@ -143,3 +144,49 @@ curl -s http://spawnforge.localhost:1355/api/health | python3 -m json.tool
 ```
 
 The `/api/health` endpoint checks connectivity to Neon, Upstash, Clerk, and Stripe.
+
+## Scripts
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/check-services.sh"` — Health check all SpawnForge services: Vercel status, GitHub CI recent runs, git remote connectivity, dev server, and WASM binaries
+- `bash "${CLAUDE_SKILL_DIR}/scripts/check-vercel-project.sh" [project-name]` — Show deployment details for a specific Vercel project (default: spawnforge)
+
+## References
+
+- See [service-accounts.md](references/service-accounts.md) — Canonical account IDs, project names, DO-NOT-TOUCH rules, and required GitHub Actions secrets
+- See [runbook.md](references/runbook.md) — Quick runbook: Vercel logs, rollback, Sentry checks, R2 CDN verification, Stripe webhook testing, CI diagnostics
+
+## CI Status Monitoring
+
+Monitor all CI checks on a PR and report pass/fail with failure logs.
+
+### Check current status
+
+```bash
+gh pr checks <PR_NUMBER> 2>&1
+```
+
+### Get failure logs
+
+```bash
+# Get the run ID from the check URL
+gh run view <RUN_ID> --log-failed 2>&1 | tail -30
+```
+
+### Output format
+
+```
+PR #NNNN CI Status
+━━━━━━━━━━━━━━━━━
+✓ 15/18 passing
+✗ 1 failing: Lighthouse Effects Delta Gate
+⏳ 2 pending: WASM Build, E2E UI Tests
+
+FAILURE: Lighthouse Effects Delta Gate
+  Error: ENOENT: no such file or directory, scandir '.lhci-baseline'
+```
+
+### Tips
+
+- WASM Build takes ~12 min, E2E depends on it — these are always last to finish
+- Seer Code Review is external (Sentry) — may take 3-5 min
+- If `npm ci` fails in multiple jobs simultaneously, it's a lockfile issue — check the lockfile section in `/build`

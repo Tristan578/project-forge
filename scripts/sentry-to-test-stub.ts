@@ -354,6 +354,7 @@ function sanitizeErrorForItBlock(msg: string): string {
   // Truncate and escape for an 'it' description string
   return msg
     .slice(0, 60)
+    .replace(/\\/g, '\\\\')
     .replace(/'/g, "\\'")
     .replace(/\n/g, ' ');
 }
