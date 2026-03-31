@@ -5,6 +5,22 @@ import {
   findServiceById,
 } from '../statusConfig';
 
+// Regression: #7066 — healthCheckName values must match the names returned by
+// the actual health check functions to ensure the status page correctly
+// correlates service results.
+// This list is the ground truth from lib/monitoring/healthChecks.ts.
+const KNOWN_HEALTH_CHECK_NAMES = new Set([
+  'Database (Neon)',
+  'Payments (Stripe)',
+  'Rate Limiting (Upstash)',
+  'Engine CDN',
+  'AI Providers',
+  'Clerk',
+  'Anthropic',
+  'Sentry',
+  'Cloudflare R2',
+]);
+
 describe('MONITORED_SERVICES', () => {
   it('is a non-empty array', () => {
     expect(MONITORED_SERVICES.length).toBeGreaterThan(0);
@@ -45,6 +61,17 @@ describe('MONITORED_SERVICES', () => {
   it('at least one service is non-critical', () => {
     const nonCritical = MONITORED_SERVICES.filter((s) => !s.critical);
     expect(nonCritical.length).toBeGreaterThan(0);
+  });
+
+  // Regression: #7066 — every healthCheckName must match the actual service
+  // name returned by the corresponding checkXxx() function.
+  it('every healthCheckName matches a known health check service name (regression #7066)', () => {
+    for (const service of MONITORED_SERVICES) {
+      expect(
+        KNOWN_HEALTH_CHECK_NAMES.has(service.healthCheckName),
+        `healthCheckName "${service.healthCheckName}" for service "${service.id}" does not match any known health check function name`,
+      ).toBe(true);
+    }
   });
 });
 

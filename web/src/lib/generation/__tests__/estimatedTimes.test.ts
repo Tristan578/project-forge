@@ -147,6 +147,23 @@ describe('formatEstimatedTime', () => {
     const result = formatEstimatedTime('unknown' as any);
     expect(result).toBe('');
   });
+
+  // Regression: #7032 — time ranges spanning seconds→minutes boundary must
+  // display accurately without rounding max to the next whole minute.
+  it('never rounds up max to next whole minute for mixed second/minute ranges (regression #7032)', () => {
+    // music: 30-90s. Max is 1m30s. Must NOT display as "~30s-2 min".
+    const result = formatEstimatedTime('music');
+    expect(result).not.toContain('2 min');
+    expect(result).toBe('~30s-1m 30s');
+  });
+
+  it('uses exact "1 min" label when max is exactly 60s (regression #7032)', () => {
+    // skybox: 30-60s. Max is exactly 60s = 1 min. Must NOT display "1m 0s".
+    const result = formatEstimatedTime('skybox');
+    expect(result).toBe('~30s-1 min');
+    // Ensure the max is not formatted as "1m 0s" (fractional minute display)
+    expect(result).not.toContain('1m 0s');
+  });
 });
 
 // ─── getCurrentStage ──────────────────────────────────────────────────────────
