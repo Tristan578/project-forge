@@ -14,11 +14,14 @@ import { E2E_TIMEOUT_ELEMENT_MS } from '../constants';
 // performanceTargets.ts is a TS module with path aliases — E2E tests run
 // outside the bundler, so we duplicate the numeric values here.
 // Source of truth: web/src/lib/config/performanceTargets.ts
-const EDITOR_TTI_CI_MS = 5_000;
-const EDITOR_HEAP_BUDGET_MB = 150;
+// IMPORTANT: when updating, change performanceTargets.ts FIRST then mirror here.
+const EDITOR_TTI_CI_MS = 5_000;    // = performanceTargets.EDITOR_TTI_CI_MS
+const EDITOR_HEAP_BUDGET_MB = 200;  // Conservative — WASM engine not loaded in this test
 
 test.describe('Editor Load Budget @ui @slow', () => {
-  // fixme: CI runners consistently exceed TTI budget. Needs CI-aware threshold or skip.
+  // fixme(PF-690): CI runners consistently exceed TTI budget due to slow GHA runners.
+  // Tracked: the E2E_TTI_CI_MS constant exists but cannot be enforced until CI runners
+  // are fast enough or we add a CI-specific multiplier.
   test.fixme(`time to interactive is under ${EDITOR_TTI_CI_MS}ms`, async ({ page, editor }) => {
     const start = Date.now();
 

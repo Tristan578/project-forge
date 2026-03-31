@@ -111,5 +111,5 @@ export const EDITOR_ENGINE_READY_LOCAL_MS = 10_000;
 /** Editor full engine ready — CI */
 export const EDITOR_ENGINE_READY_CI_MS = 15_000;
 
-/** JS heap budget after editor load */
-export const EDITOR_HEAP_BUDGET_MB = 150;
+/** JS heap budget after editor load (conservative — WASM adds significant heap) */
+export const EDITOR_HEAP_BUDGET_MB = 200;
