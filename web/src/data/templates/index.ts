@@ -5,6 +5,14 @@
  * Each template is a complete scene with entities, materials, physics, scripts, and input bindings.
  */
 
+import type {
+  EnvironmentData,
+  InputBinding,
+  AudioBusDef,
+  LightData,
+  AssetMetadata,
+} from '@/stores/slices/types';
+
 // Game template metadata and data
 export interface GameTemplate {
   id: string;
@@ -35,12 +43,14 @@ export interface TemplateThumbnail {
 export interface SceneFileData {
   formatVersion: number;
   metadata: { name: string; createdAt: string; modifiedAt: string };
-  environment: Record<string, unknown>;
+  environment: Partial<EnvironmentData>;
   ambientLight: { color: [number, number, number]; brightness: number };
-  inputBindings: Record<string, unknown>;
-  assets?: Record<string, unknown>;
+  /** Keyed by action name. Typed as record of InputBinding when fully specified. */
+  inputBindings: Record<string, InputBinding | unknown>;
+  assets?: Record<string, AssetMetadata>;
+  /** Post-processing settings. Legacy template format uses flat keys; store format uses PostProcessingData. */
   postProcessing?: Record<string, unknown>;
-  audioBuses?: Record<string, unknown>;
+  audioBuses?: Record<string, AudioBusDef>;
   entities: EntitySnapshotData[];
   gameUi?: string | null;
 }
@@ -57,10 +67,19 @@ export interface EntitySnapshotData {
     rotation: [number, number, number, number]; // quaternion
     scale: [number, number, number];
   };
+  /**
+   * Material data. Typed as Record<string, unknown> because template data uses
+   * number[] for color arrays while the canonical MaterialData uses tuples.
+   * Consumers that read from the store should cast to MaterialData.
+   */
   material?: Record<string, unknown> | null;
-  light?: Record<string, unknown> | null;
+  light?: LightData | null;
+  /**
+   * Physics data. Typed loosely because template data includes extra fields
+   * (e.g. mass) not yet present in PhysicsData.
+   */
   physics?: { data: Record<string, unknown>; enabled: boolean } | null;
-  gameComponents?: Array<Record<string, unknown>> | null;
+  gameComponents?: Array<{ type: string; [key: string]: unknown }> | null;
   // ... other optional snapshot fields
 }
 

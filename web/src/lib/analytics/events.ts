@@ -15,23 +15,23 @@ const env = process.env.NEXT_PUBLIC_VERCEL_ENV ?? process.env.NODE_ENV ?? 'unkno
 // Onboarding funnel
 // ---------------------------------------------------------------------------
 
-export function trackSignupComplete(tier: string) {
+export function trackSignupComplete(tier: string): void {
   track('signup_complete', { tier, env });
 }
 
-export function trackFirstSceneCreated() {
+export function trackFirstSceneCreated(): void {
   track('first_scene_created', { env });
 }
 
-export function trackFirstEntitySpawned(entityType: string) {
+export function trackFirstEntitySpawned(entityType: string): void {
   track('first_entity_spawned', { entityType, env });
 }
 
-export function trackTutorialStarted(tutorialName: string) {
+export function trackTutorialStarted(tutorialName: string): void {
   track('tutorial_started', { tutorialName, env });
 }
 
-export function trackTutorialCompleted(tutorialName: string) {
+export function trackTutorialCompleted(tutorialName: string): void {
   track('tutorial_completed', { tutorialName, env });
 }
 
@@ -39,31 +39,31 @@ export function trackTutorialCompleted(tutorialName: string) {
 // Core engagement
 // ---------------------------------------------------------------------------
 
-export function trackAIChatMessageSent(model: string) {
+export function trackAIChatMessageSent(model: string): void {
   track('ai_chat_message_sent', { model, env });
 }
 
-export function trackAIAssetGenerated(type: string, provider: string) {
+export function trackAIAssetGenerated(type: string, provider: string): void {
   track('ai_asset_generated', { type, provider, env });
 }
 
-export function trackGameExported(format: string) {
+export function trackGameExported(format: string): void {
   track('game_exported', { format, env });
 }
 
-export function trackGamePublished(tier: string) {
+export function trackGamePublished(tier: string): void {
   track('game_published', { tier, env });
 }
 
-export function trackTemplateUsed(templateName: string) {
+export function trackTemplateUsed(templateName: string): void {
   track('template_used', { templateName, env });
 }
 
-export function trackPlayModeStarted() {
+export function trackPlayModeStarted(): void {
   track('play_mode_started', { env });
 }
 
-export function trackProjectCreated() {
+export function trackProjectCreated(): void {
   track('project_created', { env });
 }
 
@@ -71,7 +71,7 @@ export function trackProjectCreated() {
 // Monetization
 // ---------------------------------------------------------------------------
 
-export function trackBYOKKeyAdded(provider: string) {
+export function trackBYOKKeyAdded(provider: string): void {
   track('byok_key_added', { provider, env });
 }
 
@@ -79,15 +79,14 @@ export function trackBYOKKeyAdded(provider: string) {
 // Feature discovery
 // ---------------------------------------------------------------------------
 
-export function trackFeatureUsed(feature: string) {
+export function trackFeatureUsed(feature: string): void {
   track('feature_used', { feature, env });
 }
 
-export function trackEditorPanelOpened(panel: string) {
+export function trackEditorPanelOpened(panel: string): void {
   track('editor_panel_opened', { panel, env });
 }
 
-export function trackCommandDispatched(command: string) {
+export function trackCommandDispatched(command: string): void {
   track('command_dispatched', { command, env });
 }
-

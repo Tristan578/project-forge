@@ -9,22 +9,22 @@ import { track } from '@vercel/analytics/server';
 
 const env = process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? 'unknown';
 
-export async function trackSubscriptionStarted(tier: string) {
+export async function trackSubscriptionStarted(tier: string): Promise<void> {
   await track('subscription_started', { tier, env });
 }
 
-export async function trackSubscriptionCancelled(tier: string) {
+export async function trackSubscriptionCancelled(tier: string): Promise<void> {
   await track('subscription_cancelled', { tier, env });
 }
 
-export async function trackAddonTokensPurchased(packageName: string) {
+export async function trackAddonTokensPurchased(packageName: string): Promise<void> {
   await track('addon_tokens_purchased', { package: packageName, env });
 }
 
-export async function trackPaymentFailed(tier: string) {
+export async function trackPaymentFailed(tier: string): Promise<void> {
   await track('payment_failed', { tier, env });
 }
 
-export async function trackGamePublishedServer(tier: string, slug: string) {
+export async function trackGamePublishedServer(tier: string, slug: string): Promise<void> {
   await track('game_published', { tier, slug, env });
 }

@@ -16,7 +16,10 @@ export type GetFn = () => EditorState;
  *
  * The data arrives from Rust via serde-wasm-bindgen as a JS object — structurally
  * correct at runtime but typed as Record<string, unknown> by the event callback.
+ * The cast is safe because bridge payloads are always plain JS objects that
+ * structurally match the target type T at runtime.
  */
-export function castPayload<T>(data: Record<string, unknown>): T {
-  return data as unknown as T;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function castPayload<T>(data: Record<string, any>): T {
+  return data as T;
 }

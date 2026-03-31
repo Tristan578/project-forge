@@ -15,14 +15,14 @@
 import { and, eq } from 'drizzle-orm';
 import { getDb, getNeonSql } from '@/lib/db/client';
 import { users, creditTransactions, tokenPurchases } from '@/lib/db/schema';
-import type { Tier } from '@/lib/db/schema';
+import type { Tier, User } from '@/lib/db/schema';
 import { TIER_MONTHLY_TOKENS } from '@/lib/tokens/pricing';
 
 /**
  * Helper: look up a user by their Stripe customer ID.
  * Returns null if no user is found (graceful handling for orphan events).
  */
-export async function findUserByStripeCustomer(customerId: string) {
+export async function findUserByStripeCustomer(customerId: string): Promise<User | null> {
   const db = getDb();
   const [user] = await db
     .select()
