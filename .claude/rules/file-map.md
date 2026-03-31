@@ -152,7 +152,12 @@ Each has a co-located `__tests__/` directory.
 
 ## Documentation Site (`apps/docs/`)
 
-Fumadocs-based docs site for the SpawnForge platform API and MCP command reference.
+Fumadocs-based docs site for the SpawnForge platform API and MCP command reference. Clerk-gated (auth required). Deployed to `docs.spawnforge.ai` via CD pipeline (`deploy-docs` job). Vercel project: `spawnforge-docs`, `rootDirectory: apps/docs`.
+
+### `apps/docs/` — Root files
+- `proxy.ts` — Clerk auth gate. Wraps `clerkMiddleware` defensively — if Clerk throws, requests pass through. Without `CLERK_SECRET_KEY`, all access is allowed (dev/CI).
+- `app/layout.tsx` — Root layout with `ClerkProvider`, `force-dynamic` export
+- `app/sign-in/[[...sign-in]]/page.tsx` — Clerk `<SignIn>` component. MUST have `'use client'` directive.
 
 ### `apps/docs/components/` — Docs-site React components
 - `CommandFilter.tsx` — Accessible faceted filter for the MCP command index. Accepts `categories`, `scopes`, `totalCommands`, optional `visibleCount` + `onFilterChange`. Uses `role="group"`, native checkboxes, and `aria-live="polite"` status region.
