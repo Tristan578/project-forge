@@ -145,3 +145,12 @@ curl -s http://spawnforge.localhost:1355/api/health 2>/dev/null | python3 -m jso
 ## Auto Mode
 
 When `$ARGUMENTS` is empty or `auto`, run through all areas in order, stopping at the first failure found. Report findings with specific file paths and line numbers.
+
+## Scripts
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/triage.sh"` — Structured diagnostic report: git status, branch, recent commits, Node version, port availability, WASM binaries, and CI status
+- `bash "${CLAUDE_SKILL_DIR}/scripts/check-dev-server.sh"` — Verify dev server status, check `.env.local` for required vars, WASM binaries, and common issues (port conflicts, Node version)
+
+## References
+
+- See [failure-patterns.md](references/failure-patterns.md) — 10 common failure patterns with root causes, diagnostic commands, and confirmed fixes (Node segfaults, Clerk auth crash, neon-http transaction crash, missing WASM, panelRegistry nesting bug, rate limiter missing await, and more)

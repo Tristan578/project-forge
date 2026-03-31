@@ -235,6 +235,11 @@ curl -s -X POST "http://taskboard.localhost:1355/api/subtasks/<SUBTASK_ID>/toggl
 | `medium` | Normal priority, planned work | Address within 2 sessions |
 | `low` | Nice to have, cleanup, minor improvements | When convenient |
 
+## Scripts
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/board-summary.sh"` — Fetch board state and print summary: ticket counts by status, in-progress tickets with subtask progress, recently completed, high-priority todo, and staleness warnings (>4h in in_progress)
+- `bash "${CLAUDE_SKILL_DIR}/scripts/validate-ticket.sh" <TICKET_ID>` — Validate a ticket against the mandatory format: checks user story, description, Given/When/Then acceptance criteria, priority, team, and subtasks
+
 ## GitHub Sync
 
 Sync local taskboard tickets to/from the GitHub Project board (SpawnForge #2).

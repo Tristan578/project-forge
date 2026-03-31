@@ -167,3 +167,14 @@ Common false positives from automated reviewers:
 - **ALWAYS reply to comments** — even false positives need a reply so reviewers know they were seen
 - **EVERY reply must contain one of:** a commit SHA, a PF-ticket number, or a technical false-positive explanation
 - **Self-check before posting:** Re-read your reply. Does it promise, imply, or conditionally suggest future work? If yes, where's the ticket? No ticket = rewrite the reply.
+
+## Scripts
+
+Run these to get an overview before diving into individual PRs:
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/check-all-prs.sh"` — List all open PRs with CI status (pass/fail/pending), branch name, and last updated time
+- `bash "${CLAUDE_SKILL_DIR}/scripts/get-failure-logs.sh" <PR_NUMBER>` — Fetch the failed CI run logs for a specific PR (last 80 lines)
+
+## References
+
+- See [common-ci-failures.md](references/common-ci-failures.md) — Top 10 CI failure patterns with diagnostic steps and fix patterns for each

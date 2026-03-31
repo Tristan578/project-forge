@@ -145,6 +145,16 @@ curl -s http://spawnforge.localhost:1355/api/health | python3 -m json.tool
 
 The `/api/health` endpoint checks connectivity to Neon, Upstash, Clerk, and Stripe.
 
+## Scripts
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/check-services.sh"` — Health check all SpawnForge services: Vercel status, GitHub CI recent runs, git remote connectivity, dev server, and WASM binaries
+- `bash "${CLAUDE_SKILL_DIR}/scripts/check-vercel-project.sh" [project-name]` — Show deployment details for a specific Vercel project (default: spawnforge)
+
+## References
+
+- See [service-accounts.md](references/service-accounts.md) — Canonical account IDs, project names, DO-NOT-TOUCH rules, and required GitHub Actions secrets
+- See [runbook.md](references/runbook.md) — Quick runbook: Vercel logs, rollback, Sentry checks, R2 CDN verification, Stripe webhook testing, CI diagnostics
+
 ## CI Status Monitoring
 
 Monitor all CI checks on a PR and report pass/fail with failure logs.
