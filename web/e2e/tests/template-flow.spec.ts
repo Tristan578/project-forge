@@ -11,7 +11,7 @@ import type { Page } from '@playwright/test';
  * Template loading (loadTemplate) is a no-op in the current stub implementation, so tests that
  * rely on sceneGraph population from a real load are marked with test.skip() until the stub is wired.
  */
-test.describe('Template Gallery @ui', () => {
+test.describe('Template Gallery @ui @dev', () => {
   test('template gallery renders with available templates', async ({ page }) => {
     // Navigate without dismissing the welcome modal so we can open templates from it.
     await page.addInitScript(() => {

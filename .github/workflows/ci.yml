@@ -318,6 +318,18 @@ jobs:
         working-directory: web
         run: npx playwright install --with-deps chromium
 
+      - name: Build for E2E
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+        run: npx next build
+
       - name: Run UI-only E2E tests
         working-directory: web
-        run: npx playwright test --grep @ui --project=chromium
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+        # Use production server (next start) instead of dev server (next dev).
+        # next dev compiles on-demand — too slow for CI (2-3 min cold start).
+        # next start boots in <5s after build, saving ~3 min per run.
+        # Exclude @dev tests — /dev route redirects to /sign-in under next start (production mode).
+        run: npx playwright test --grep '@ui' --grep-invert '@dev' --project=chromium --config playwright.ci.config.ts

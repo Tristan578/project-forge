@@ -45,7 +45,7 @@ test.describe('Navigation & Routing @ui', () => {
       expect(page.url()).toContain('/privacy');
     });
 
-    test('/dev loads without redirect', async ({ page }) => {
+    test('/dev loads without redirect @dev', async ({ page }) => {
       const response = await page.goto('/dev');
       expect(response?.status()).toBe(200);
       expect(page.url()).toContain('/dev');
@@ -168,7 +168,7 @@ test.describe('Navigation & Routing @ui', () => {
   });
 
   test.describe('Editor Route', () => {
-    test('/dev loads editor with canvas', async ({ page }) => {
+    test('/dev loads editor with canvas @dev', async ({ page }) => {
       await page.goto('/dev');
       await page.waitForLoadState('domcontentloaded');
 
@@ -176,7 +176,7 @@ test.describe('Navigation & Routing @ui', () => {
       await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
     });
 
-    test('/dev loads editor with sidebar', async ({ page }) => {
+    test('/dev loads editor with sidebar @dev', async ({ page }) => {
       await page.goto('/dev');
       await page.waitForLoadState('domcontentloaded');
 
