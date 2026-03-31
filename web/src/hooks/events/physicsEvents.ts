@@ -10,6 +10,16 @@ import { castPayload, type SetFn, type GetFn } from './types';
 /** Prefix used to identify audio occlusion raycast requests. */
 const OCCLUSION_RAYCAST_PREFIX = 'audio_occlusion:';
 
+/** Script-side raycast callback registered by the scripting runtime. */
+interface WindowWithScriptCallbacks {
+  __scriptRaycastCallback?: (event: {
+    requestId: string;
+    hitEntity: string | null;
+    point: [number, number, number];
+    distance: number;
+  }) => void;
+}
+
 export function handlePhysicsEvent(
   type: string,
   data: Record<string, unknown>,
@@ -87,7 +97,7 @@ export function handlePhysicsEvent(
         return true;
       }
       // Forward to script raycast callback
-      const raycastCb = (window as unknown as { __scriptRaycastCallback?: (event: { requestId: string; hitEntity: string | null; point: [number, number, number]; distance: number }) => void }).__scriptRaycastCallback;
+      const raycastCb = (window as WindowWithScriptCallbacks).__scriptRaycastCallback;
       if (raycastCb) {
         raycastCb(payload);
       }
