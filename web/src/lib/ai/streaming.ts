@@ -191,14 +191,22 @@ export function isAiSdkStream(response: Response): boolean {
 // Low-level: read all chunks from a ReadableStream and return accumulated text
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Shared low-level reader — consumed by the two public stream readers below
+// ---------------------------------------------------------------------------
+
 /**
- * Consume an SSE `ReadableStreamDefaultReader` to completion and return the
- * accumulated text content.  Fires optional callbacks for each event type.
+ * Core stream reader.  Reads an SSE `ReadableStreamDefaultReader` to
+ * completion, parses each line with the supplied `parseLine` function, fires
+ * optional callbacks, and returns the accumulated text content.
  *
  * Throws if an `error` event is received from the stream.
+ *
+ * @internal Not exported — callers use `readSSEStream` or `readAiSdkStream`.
  */
-export async function readSSEStream(
+async function readStreamWithParser(
   reader: ReadableStreamDefaultReader<Uint8Array>,
+  parseLine: (line: string) => SSEEnvelopeEvent | null,
   callbacks?: StreamCallbacks,
 ): Promise<string> {
   const decoder = new TextDecoder();
@@ -216,7 +224,7 @@ export async function readSSEStream(
     buffer = lines.pop() ?? '';
 
     for (const line of lines) {
-      const event = parseSSELine(line);
+      const event = parseLine(line);
       if (event === null) continue;
 
       switch (event.type) {
@@ -241,7 +249,7 @@ export async function readSSEStream(
 
   // Process any remaining buffered line (stream may not end with newline)
   if (buffer.trim()) {
-    const event = parseSSELine(buffer);
+    const event = parseLine(buffer);
     if (event !== null && event.type === 'text_delta') {
       content += event.text;
       callbacks?.onText?.(event.text);
@@ -249,6 +257,19 @@ export async function readSSEStream(
   }
 
   return content;
+}
+
+/**
+ * Consume an SSE `ReadableStreamDefaultReader` to completion and return the
+ * accumulated text content.  Fires optional callbacks for each event type.
+ *
+ * Throws if an `error` event is received from the stream.
+ */
+export function readSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  callbacks?: StreamCallbacks,
+): Promise<string> {
+  return readStreamWithParser(reader, parseSSELine, callbacks);
 }
 
 /**
@@ -260,55 +281,11 @@ export async function readSSEStream(
  *
  * Throws if an `error` event is received from the stream.
  */
-export async function readAiSdkStream(
+export function readAiSdkStream(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   callbacks?: StreamCallbacks,
 ): Promise<string> {
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let content = '';
-
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-
-    for (const line of lines) {
-      const event = parseAiSdkSSELine(line);
-      if (event === null) continue;
-
-      switch (event.type) {
-        case 'text_delta':
-          content += event.text;
-          callbacks?.onText?.(event.text);
-          break;
-        case 'progress':
-          callbacks?.onProgress?.(event.percent);
-          break;
-        case 'error':
-          callbacks?.onError?.(event.message);
-          throw new Error(event.message);
-        case 'done':
-          break;
-      }
-    }
-  }
-
-  // Flush decoder and process any trailing buffered line
-  buffer += decoder.decode();
-  if (buffer.trim()) {
-    const event = parseAiSdkSSELine(buffer);
-    if (event !== null && event.type === 'text_delta') {
-      content += event.text;
-      callbacks?.onText?.(event.text);
-    }
-  }
-
-  return content;
+  return readStreamWithParser(reader, parseAiSdkSSELine, callbacks);
 }
 
 // ---------------------------------------------------------------------------

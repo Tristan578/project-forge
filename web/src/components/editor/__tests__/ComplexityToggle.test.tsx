@@ -33,11 +33,11 @@ vi.mock('lucide-react', () => ({
 // Mock the complexity store so we control state cleanly
 // ---------------------------------------------------------------------------
 const mockSetLevel = vi.fn();
-let mockLevel = 'beginner' as import('@/stores/slices/complexitySlice').ComplexityLevel;
+let mockLevel = 'beginner' as import('@/stores/complexitySlice').ComplexityLevel;
 
-vi.mock('@/stores/slices/complexitySlice', async () => {
-  const actual = await vi.importActual<typeof import('@/stores/slices/complexitySlice')>(
-    '@/stores/slices/complexitySlice'
+vi.mock('@/stores/complexitySlice', async () => {
+  const actual = await vi.importActual<typeof import('@/stores/complexitySlice')>(
+    '@/stores/complexitySlice'
   );
   return {
     ...actual,

@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 /**
- * Tests for audioLegacyHandlers — core entity audio, bus management,
+ * Tests for audioEntityHandlers — core entity audio, bus management,
  * layering, transitions, reverb zones, and ducking rules.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createMockStore } from './handlerTestUtils';
-import { audioLegacyHandlers } from '../audioLegacyHandlers';
+import { audioEntityHandlers } from '../audioEntityHandlers';
 
 // ---------------------------------------------------------------------------
 // Mock audioManager for set_music_stems (dynamic import inside handler)
@@ -17,7 +17,7 @@ vi.mock('@/lib/audio/audioManager', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Helper: invoke with extra store methods that audioLegacyHandlers use
+// Helper: invoke with extra store methods that audioEntityHandlers use
 // ---------------------------------------------------------------------------
 function makeAudioStore(overrides: Record<string, unknown> = {}) {
   return {
@@ -52,7 +52,7 @@ async function invoke(
   storeOverrides: Record<string, unknown> = {},
 ) {
   const store = createMockStore({ ...makeAudioStore(), ...storeOverrides });
-  const result = await audioLegacyHandlers[name](args, {
+  const result = await audioEntityHandlers[name](args, {
     store,
     dispatchCommand: vi.fn(),
   });
@@ -62,7 +62,7 @@ async function invoke(
 // ===========================================================================
 // set_audio
 // ===========================================================================
-describe('audioLegacyHandlers', () => {
+describe('audioEntityHandlers', () => {
   describe('set_audio', () => {
     it('calls setAudio with entityId and audio data', async () => {
       const { result, store } = await invoke('set_audio', {

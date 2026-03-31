@@ -38,7 +38,7 @@ vi.mock('../handlers/physicsJointHandlers', () => ({ physicsJointHandlers: {} })
 vi.mock('../handlers/animationParticleHandlers', () => ({ animationParticleHandlers: {} }));
 vi.mock('../handlers/gameplayHandlers', () => ({ gameplayHandlers: {} }));
 vi.mock('../handlers/assetHandlers', () => ({ assetHandlers: {} }));
-vi.mock('../handlers/audioLegacyHandlers', () => ({ audioLegacyHandlers: {} }));
+vi.mock('../handlers/audioEntityHandlers', () => ({ audioEntityHandlers: {} }));
 vi.mock('../handlers/pixelArtHandlers', () => ({ pixelArtHandlers: {} }));
 vi.mock('../handlers/compoundHandlers', () => ({ compoundHandlers: {} }));
 

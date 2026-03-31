@@ -54,7 +54,8 @@ describe('CollapsibleSection', () => {
       </CollapsibleSection>
     );
     fireEvent.click(screen.getByText('Transform'));
-    expect(screen.queryByText('My Content')).toBeNull();
+    // Content stays in DOM (for aria-controls) but is hidden
+    expect(screen.getByText('My Content')).not.toBeVisible();
   });
 
   it('shows ChevronRight when collapsed', () => {
@@ -94,7 +95,8 @@ describe('CollapsibleSection', () => {
         <div>Hidden Content</div>
       </CollapsibleSection>
     );
-    expect(screen.queryByText('Hidden Content')).toBeNull();
+    // Content stays in DOM (for aria-controls) but is hidden
+    expect(screen.getByText('Hidden Content')).not.toBeVisible();
   });
 
   it('aria-expanded is true when expanded', () => {

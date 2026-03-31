@@ -7,7 +7,7 @@ import {
   COMPLEXITY_LABELS,
   COMPLEXITY_DESCRIPTIONS,
   type ComplexityLevel,
-} from '@/stores/slices/complexitySlice';
+} from '@/stores/complexitySlice';
 
 const LEVELS: ComplexityLevel[] = ['beginner', 'intermediate', 'expert'];
 
