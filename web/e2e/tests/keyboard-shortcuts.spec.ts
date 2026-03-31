@@ -6,7 +6,7 @@ import { E2E_TIMEOUT_SHORT_MS, E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_WASM_MS } fro
  * Verifies all documented shortcuts trigger the correct actions
  * and UI updates accordingly.
  */
-test.describe('Keyboard Shortcuts @ui', () => {
+test.describe('Keyboard Shortcuts @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });

@@ -185,7 +185,7 @@ test.describe('Play Mode @engine', () => {
  * UI-only play mode tests (no WASM engine).
  * These verify store-driven UI behavior by injecting state directly.
  */
-test.describe('Play Mode UI @ui', () => {
+test.describe('Play Mode UI @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });

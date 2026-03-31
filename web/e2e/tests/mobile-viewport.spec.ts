@@ -15,7 +15,7 @@ import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
 // ---------------------------------------------------------------------------
 // iPhone 14 (390x844)
 // ---------------------------------------------------------------------------
-test.describe('iPhone 14 Viewport (390x844) @ui', () => {
+test.describe('iPhone 14 Viewport (390x844) @ui @dev', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test.beforeEach(async ({ editor }) => {
@@ -63,7 +63,7 @@ test.describe('iPhone 14 Viewport (390x844) @ui', () => {
 // ---------------------------------------------------------------------------
 // Pixel 7 (412x915)
 // ---------------------------------------------------------------------------
-test.describe('Pixel 7 Viewport (412x915) @ui', () => {
+test.describe('Pixel 7 Viewport (412x915) @ui @dev', () => {
   test.use({ viewport: { width: 412, height: 915 } });
 
   test.beforeEach(async ({ editor }) => {

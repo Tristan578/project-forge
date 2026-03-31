@@ -24,7 +24,7 @@ import { injectStore, readStore } from '../helpers/store-injection';
 // Group 1: Store-Driven AI Command Pipeline (@ui, no WASM required)
 // ---------------------------------------------------------------------------
 
-test.describe('AI → Entity Round-trip: Store Pipeline @ui', () => {
+test.describe('AI → Entity Round-trip: Store Pipeline @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });

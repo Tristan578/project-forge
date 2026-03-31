@@ -1,7 +1,7 @@
 /**
  * Integration tests for canvas frame readback.
  *
- * @ui — these tests use loadPage() which skips the WASM engine.
+ * @ui @dev — these tests use loadPage() which skips the WASM engine.
  *         They verify the readback mechanics, not engine rendering.
  * @engine — the blank-frame detection test that actually reads from the
  *            real WebGL2 canvas requires the engine; tagged separately.
@@ -15,7 +15,7 @@ import { captureCanvasFrame, isBlankFrame } from '../lib/canvasReadback';
 import { E2E_TIMEOUT_ELEMENT_MS } from '../constants';
 
 test.describe('canvasReadback', () => {
-  test('@ui canvas is present in the editor page', async ({ page }) => {
+  test('@ui @dev canvas is present in the editor page', async ({ page }) => {
     const av = new AgentViewport(page);
     await av.bootPage();
 
@@ -24,7 +24,7 @@ test.describe('canvasReadback', () => {
     await expect(canvas).toBeAttached({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
-  test('@ui captureCanvasFrame returns a valid structure', async ({ page }) => {
+  test('@ui @dev captureCanvasFrame returns a valid structure', async ({ page }) => {
     const av = new AgentViewport(page);
     await av.bootPage();
 
@@ -41,7 +41,7 @@ test.describe('canvasReadback', () => {
     expect(capture.timestamp).toBeGreaterThan(0);
   });
 
-  test('@ui captureCanvasFrame returns non-negative dimensions', async ({ page }) => {
+  test('@ui @dev captureCanvasFrame returns non-negative dimensions', async ({ page }) => {
     const av = new AgentViewport(page);
     await av.bootPage();
 
@@ -51,7 +51,7 @@ test.describe('canvasReadback', () => {
     expect(capture.height).toBeGreaterThanOrEqual(0);
   });
 
-  test('@ui captureCanvasFrame accepts custom canvas selector', async ({ page }) => {
+  test('@ui @dev captureCanvasFrame accepts custom canvas selector', async ({ page }) => {
     const av = new AgentViewport(page);
     await av.bootPage();
 
@@ -66,7 +66,7 @@ test.describe('canvasReadback', () => {
     expect(capture.isBlank).toBe(true);
   });
 
-  test('@ui backend is detected as a valid value', async ({ page }) => {
+  test('@ui @dev backend is detected as a valid value', async ({ page }) => {
     const av = new AgentViewport(page);
     await av.bootPage();
 
@@ -75,7 +75,7 @@ test.describe('canvasReadback', () => {
     expect(validBackends).toContain(capture.backend);
   });
 
-  test('@ui frame is blank when engine is not initialized (bootPage skips WASM)', async ({ page }) => {
+  test('@ui @dev frame is blank when engine is not initialized (bootPage skips WASM)', async ({ page }) => {
     const av = new AgentViewport(page);
     await av.bootPage();
 

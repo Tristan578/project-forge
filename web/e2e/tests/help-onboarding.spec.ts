@@ -6,7 +6,7 @@ import { E2E_TIMEOUT_SHORT_MS, E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_AUTH_MS } fro
  * Verifies the help dropdown, keyboard shortcuts modal, welcome modal,
  * and getting-started checklist work correctly.
  */
-test.describe('Help & Onboarding @ui', () => {
+test.describe('Help & Onboarding @ui @dev', () => {
   test.describe('Help Menu', () => {
     test.beforeEach(async ({ editor }) => {
       await editor.loadPage();

@@ -16,7 +16,7 @@ import {
   E2E_TIMEOUT_LOAD_MS,
 } from '../constants';
 
-test.describe('Demo Regression Walkthrough @ui', () => {
+test.describe('Demo Regression Walkthrough @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });

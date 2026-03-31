@@ -11,13 +11,13 @@ import { E2E_TIMEOUT_ELEMENT_MS } from '../constants';
  * To establish baselines:
  *   npx playwright test visual-regression --update-snapshots
  *
- * Tagged @ui @visual.
+ * Tagged @ui @dev @visual.
  */
 
 // All tests are skipped until baseline screenshots are committed
 // Enable by removing test.skip and running: npx playwright test visual-regression --update-snapshots
 
-test.describe('Visual Regression @ui @visual', () => {
+test.describe('Visual Regression @ui @dev @visual', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });

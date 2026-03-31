@@ -13,7 +13,7 @@
 import { test, expect } from '../fixtures/editor.fixture';
 import { E2E_TIMEOUT_TEST_MS } from '../constants';
 
-test.describe('Performance Budget @ui', () => {
+test.describe('Performance Budget @ui @dev', () => {
   test('LCP is under 2500ms on editor page', async ({ page, editor }) => {
     // Collect LCP entries via PerformanceObserver BEFORE navigation so we
     // catch the entry that fires shortly after page load.

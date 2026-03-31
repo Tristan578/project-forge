@@ -201,7 +201,7 @@ test.describe('Editor Layout @engine', () => {
  * and mobile toolbar rendering. Uses loadPage() (no WASM) since these
  * test store-driven UI behavior.
  */
-test.describe('Responsive Layout @ui', () => {
+test.describe('Responsive Layout @ui @dev', () => {
   test('compact mode hides sidebar and panels at narrow viewport', async ({ page, editor }) => {
     // Start with mobile viewport
     await page.setViewportSize({ width: 800, height: 600 });

@@ -33,7 +33,7 @@ const MINIMAL_SCENE_JSON = JSON.stringify({
   ],
 });
 
-test.describe('load_scene store action @ui', () => {
+test.describe('load_scene store action @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });

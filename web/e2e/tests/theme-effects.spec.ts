@@ -11,7 +11,7 @@ import { test, expect } from '../fixtures/editor.fixture';
 
 const LIGHT_THEMES = ['ember', 'ice', 'leaf', 'rust', 'mech', 'light'] as const;
 
-test.describe('Theme Effects @ui', () => {
+test.describe('Theme Effects @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     // Theme-effects tests only need DOM/CSS — no WASM engine required.
     // loadPage() injects __SKIP_ENGINE=true and waits for React hydration only,
