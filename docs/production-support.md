@@ -604,31 +604,37 @@ curl -sS https://spawnforge.ai/api/health -w "\nHTTP: %{http_code} | Time: %{tim
 
 ### Required Environment Variables (Production)
 
-| Variable | Service | Validated At |
-|----------|---------|-------------|
-| `DATABASE_URL` | Neon PostgreSQL | Startup (`validateEnvironment`) |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk (client) | Startup |
-| `CLERK_SECRET_KEY` | Clerk (server) | Startup |
-| `STRIPE_SECRET_KEY` | Stripe | Startup |
-| `STRIPE_WEBHOOK_SECRET` | Stripe webhooks | Startup |
+Source of truth: `web/src/lib/config/validateEnv.ts` (`REQUIRED_VARS`). App will not start in production without these.
+
+| Variable | Service | Notes |
+|----------|---------|-------|
+| `DATABASE_URL` | Neon PostgreSQL | Connection string |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk (client) | Must be `pk_live_*` in production — test keys break all auth |
+| `CLERK_SECRET_KEY` | Clerk (server) | Must be `sk_live_*` in production |
+| `STRIPE_SECRET_KEY` | Stripe | Payments |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhooks | Webhook verification |
+| `UPSTASH_REDIS_REST_URL` | Upstash Redis | Distributed rate limiting |
+| `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis | Distributed rate limiting |
+| `ENCRYPTION_MASTER_KEY` | BYOK encryption | 64-hex-char key for AES-256-GCM BYOK key storage |
 
 ### Optional Environment Variables
 
+Source of truth: `web/src/lib/config/validateEnv.ts` (`OPTIONAL_VARS`). App degrades gracefully without these.
+
 | Variable | Service | Default |
 |----------|---------|---------|
+| `ANTHROPIC_API_KEY` | Anthropic AI | (empty — AI Gateway OIDC preferred) |
 | `NEXT_PUBLIC_APP_URL` | App URL | `http://localhost:3000` |
-| `NEXT_PUBLIC_ENGINE_CDN_URL` | WASM CDN | (empty, uses local) |
+| `NEXT_PUBLIC_ENGINE_CDN_URL` | WASM CDN | (empty, uses local `/public/`) |
 | `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | Sentry | (empty, errors untracked) |
-| `ANTHROPIC_API_KEY` | Anthropic AI | (empty, AI disabled) |
+| `NEXT_PUBLIC_POSTHOG_KEY` | PostHog analytics | (empty) |
+| `CLOUDFLARE_ACCOUNT_ID` | R2 asset storage | (empty) |
 | `MESHY_API_KEY` | Meshy 3D gen | (empty) |
 | `ELEVENLABS_API_KEY` | ElevenLabs audio | (empty) |
 | `SUNO_API_KEY` | Suno music | (empty) |
-| `CLOUDFLARE_ACCOUNT_ID` | R2 config | (empty) |
 | `R2_ACCESS_KEY_ID` | R2 auth | (empty) |
 | `R2_SECRET_ACCESS_KEY` | R2 auth | (empty) |
 | `R2_BUCKET_NAME` | R2 bucket | (empty) |
-| `UPSTASH_REDIS_REST_URL` | Rate limiting | (empty, in-memory fallback) |
-| `UPSTASH_REDIS_REST_TOKEN` | Rate limiting | (empty) |
 
 ---
 
@@ -687,7 +693,7 @@ gh workflow run cd.yml --ref <good-commit-sha>
   - Org: `tristan-nolan`, Project: `spawnforge-ai`
 - **Health endpoint**: `/api/health` with 8 service checks (5s timeout each, 3s for external services)
 - **Post-deploy smoke tests**: 4 checks run automatically after CD
-- **Env validation**: Startup check for 8 required vars (`validateEnvironment()` in `lib/config/validateEnv.ts`)
+- **Env validation**: Startup check for 8 required vars (`validateEnvironment()` in `web/src/lib/config/validateEnv.ts`)
 
 ### Gaps (Addressed by PF-607 through PF-617)
 - No external synthetic monitoring (PF-607)

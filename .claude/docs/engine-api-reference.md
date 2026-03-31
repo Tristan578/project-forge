@@ -1,7 +1,7 @@
 # SpawnForge Engine API Reference
 
-> Generated from `web/src/data/commands.json`. 327 commands across 40 categories.
-> Last updated: 2026-03-22
+> Generated from `web/src/data/commands.json`. 350 commands across 41 categories.
+> Last updated: 2026-03-30
 
 ## System Boundaries
 
