@@ -132,3 +132,4 @@ autoforge/node_modules/
 apps/docs/content/mcp/*.mdx
 .vercel
 .claude/.env-health-last-check
+.worktrees/
