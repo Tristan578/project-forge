@@ -170,11 +170,29 @@ export function buildPlan(
       }
     } else {
       // Unknown system category -- fall through to custom script
+      // Find the first entity that declares this system category, or fall back
+      // to the first entity in the GDD. The customScriptExecutor requires
+      // targetEntityId to bind the generated script to an entity.
+      let targetEntityId = '';
+      for (const scene of gdd.scenes) {
+        for (const entity of scene.entities) {
+          if (entity.systems.includes(system.category)) {
+            targetEntityId = entity.name;
+            break;
+          }
+        }
+        if (targetEntityId) break;
+      }
+      if (!targetEntityId && gdd.scenes.length > 0 && gdd.scenes[0].entities.length > 0) {
+        targetEntityId = gdd.scenes[0].entities[0].name;
+      }
+
       const step = makeStep(
         'custom_script_generate',
         {
           system,
           description: `Implement ${system.category}:${system.type} behavior`,
+          targetEntityId,
           projectType: gdd.projectType,
           feelDirective: gdd.feelDirective,
         },

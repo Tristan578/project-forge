@@ -94,7 +94,7 @@ export const verifyExecutor: ExecutorDefinition = {
       }
     }
 
-    const passed = warnings.length === 0;
+    const passed = warnings.length === 0 && issues.length === 0;
 
     return {
       success: true,

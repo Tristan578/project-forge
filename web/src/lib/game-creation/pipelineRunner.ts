@@ -170,6 +170,10 @@ export async function runPipeline(
       if (lastResult.success) {
         break;
       }
+      // Don't retry non-recoverable errors (e.g. invalid input)
+      if (lastResult.error && !lastResult.error.retryable) {
+        break;
+      }
     }
 
     if (lastResult?.success) {
