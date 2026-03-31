@@ -93,7 +93,7 @@ export function DashboardLayout({ initialProjects }: DashboardLayoutProps = {}) 
       if (res.status === 403 && body?.code === 'PROJECT_LIMIT') {
         return body.error ?? 'Project limit reached. Upgrade your plan to create more.';
       }
-      return body?.message ?? 'Failed to create project. Please try again.';
+      return body?.error ?? 'Failed to create project. Please try again.';
     } catch (err) {
       console.error('Failed to create project:', err);
       return 'Unable to connect. Please check your connection and try again.';
