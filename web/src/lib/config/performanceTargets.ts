@@ -9,6 +9,20 @@
  * backend. Marketing pages are standard Next.js SSR; the editor loads a
  * multi-MB WASM binary and initializes a WebGPU/WebGL2 canvas.
  *
+ * ## Consumer files (update when changing thresholds)
+ *
+ * These files duplicate numeric values because they cannot import TypeScript:
+ * - `web/scripts/check-bundle-size.js` — BUNDLE_* constants (CJS script)
+ * - `web/e2e/tests/load-budget.spec.ts` — EDITOR_* constants (Playwright)
+ * - `.lighthouserc.js` — CWV_MARKETING_* constants (LHCI config)
+ * - `.github/workflows/quality-gates.yml` — WASM_BINARY_* constants (bash)
+ *
+ * ## Changelog
+ *
+ * 2026-03-31: Initial creation. Bundle thresholds tightened from 4/4.75/5/5.5 MB
+ *   to 3.5/4/4.5/5 MB based on current build output (~3.2 MB first-load).
+ *   WASM thresholds set to match existing CI gate (45 MB warn / 49.5 MB fail).
+ *
  * Updated: 2026-03-31
  */
 
@@ -89,11 +103,11 @@ export const BUNDLE_TOTAL_WARN = 4.5 * 1024 * 1024;
 /** Total JS hard failure threshold */
 export const BUNDLE_TOTAL_FAIL = 5 * 1024 * 1024;
 
-/** WASM binary size warning threshold (per variant) */
-export const WASM_BINARY_WARN = 15 * 1024 * 1024;
+/** WASM binary size warning threshold (per variant, matches quality-gates.yml) */
+export const WASM_BINARY_WARN = 45 * 1024 * 1024;
 
-/** WASM binary size hard failure threshold (per variant) */
-export const WASM_BINARY_FAIL = 20 * 1024 * 1024;
+/** WASM binary size hard failure threshold (per variant, 45 MB + 10% tolerance) */
+export const WASM_BINARY_FAIL = Math.round(45 * 1024 * 1024 * 1.1);
 
 // ---------------------------------------------------------------------------
 // Editor startup

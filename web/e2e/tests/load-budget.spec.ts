@@ -1,22 +1,19 @@
 import { test, expect } from '../fixtures/editor.fixture';
 import { E2E_TIMEOUT_ELEMENT_MS } from '../constants';
+import {
+  EDITOR_TTI_CI_MS,
+  EDITOR_HEAP_BUDGET_MB,
+} from '../../src/lib/config/performanceTargets';
 
 /**
  * PF-690: Load budget performance tests.
  *
  * Measures time-to-interactive (editor canvas visible) and JS heap memory
- * after the editor loads. Budgets are sourced from performanceTargets.ts.
+ * after the editor loads. Budgets imported from performanceTargets.ts.
  *
  * Tagged @ui @slow — runs in Chromium only (needs performance.memory API).
  * Uses loadPage() (no WASM engine) to measure pure React load time.
  */
-
-// performanceTargets.ts is a TS module with path aliases — E2E tests run
-// outside the bundler, so we duplicate the numeric values here.
-// Source of truth: web/src/lib/config/performanceTargets.ts
-// IMPORTANT: when updating, change performanceTargets.ts FIRST then mirror here.
-const EDITOR_TTI_CI_MS = 5_000;    // = performanceTargets.EDITOR_TTI_CI_MS
-const EDITOR_HEAP_BUDGET_MB = 200;  // Conservative — WASM engine not loaded in this test
 
 test.describe('Editor Load Budget @ui @slow', () => {
   // fixme(PF-690): CI runners consistently exceed TTI budget due to slow GHA runners.

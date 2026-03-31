@@ -24,11 +24,13 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const BUILD_DIR = path.join(ROOT, '.next');
 
-// Mirror of performanceTargets.ts BUNDLE_* constants
-const FIRST_LOAD_WARN = 3.5 * 1024 * 1024;
-const FIRST_LOAD_FAIL = 4 * 1024 * 1024;
-const TOTAL_WARN = 4.5 * 1024 * 1024;
-const TOTAL_FAIL = 5 * 1024 * 1024;
+// Mirror of performanceTargets.ts BUNDLE_* constants.
+// Names match the canonical constants for grep-based discovery.
+// Previous values (pre-2026-03-31): 4/4.75/5/5.5 MB
+const BUNDLE_BUNDLE_FIRST_LOAD_WARN = 3.5 * 1024 * 1024;
+const BUNDLE_BUNDLE_FIRST_LOAD_FAIL = 4 * 1024 * 1024;
+const BUNDLE_BUNDLE_TOTAL_WARN = 4.5 * 1024 * 1024;
+const BUNDLE_BUNDLE_TOTAL_FAIL = 5 * 1024 * 1024;
 
 function formatBytes(bytes) {
   if (bytes < 1024) return bytes + ' B';
@@ -82,18 +84,18 @@ console.log();
 
 let failed = false;
 
-if (firstLoadSize > FIRST_LOAD_FAIL) {
-  console.error('::error::First-load JS ' + formatBytes(firstLoadSize) + ' exceeds hard limit of ' + formatBytes(FIRST_LOAD_FAIL));
+if (firstLoadSize > BUNDLE_FIRST_LOAD_FAIL) {
+  console.error('::error::First-load JS ' + formatBytes(firstLoadSize) + ' exceeds hard limit of ' + formatBytes(BUNDLE_FIRST_LOAD_FAIL));
   failed = true;
-} else if (firstLoadSize > FIRST_LOAD_WARN) {
-  console.warn('::warning::First-load JS ' + formatBytes(firstLoadSize) + ' exceeds warning threshold of ' + formatBytes(FIRST_LOAD_WARN));
+} else if (firstLoadSize > BUNDLE_FIRST_LOAD_WARN) {
+  console.warn('::warning::First-load JS ' + formatBytes(firstLoadSize) + ' exceeds warning threshold of ' + formatBytes(BUNDLE_FIRST_LOAD_WARN));
 }
 
-if (grandTotal > TOTAL_FAIL) {
-  console.error('::error::Total JS bundle ' + formatBytes(grandTotal) + ' exceeds hard limit of ' + formatBytes(TOTAL_FAIL));
+if (grandTotal > BUNDLE_TOTAL_FAIL) {
+  console.error('::error::Total JS bundle ' + formatBytes(grandTotal) + ' exceeds hard limit of ' + formatBytes(BUNDLE_TOTAL_FAIL));
   failed = true;
-} else if (grandTotal > TOTAL_WARN) {
-  console.warn('::warning::Total JS bundle ' + formatBytes(grandTotal) + ' exceeds warning threshold of ' + formatBytes(TOTAL_WARN));
+} else if (grandTotal > BUNDLE_TOTAL_WARN) {
+  console.warn('::warning::Total JS bundle ' + formatBytes(grandTotal) + ' exceeds warning threshold of ' + formatBytes(BUNDLE_TOTAL_WARN));
 }
 
 if (failed) {
