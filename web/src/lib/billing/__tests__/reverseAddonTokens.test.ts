@@ -63,7 +63,7 @@ function configureSelectSequence(responses: unknown[][]) {
 }
 
 // Helper to set the return value for the next raw neonSql`` call (the CTE claim query)
-function configureNeonSqlClaim(result: unknown[]) {
+function _configureNeonSqlClaim(result: unknown[]) {
   mockNeonSqlCallResults.push(result);
 }
 
@@ -87,71 +87,61 @@ describe('reverseAddonTokens (PF-734, PF-7514)', () => {
     };
 
     it('deducts tokens based on purchase token count (full refund)', async () => {
-      // tokenPurchases lookup -> finds purchase
       configureSelectSequence([[purchase]]);
-      // CTE claim: UPDATE returns the row with computed increment
-      // increment_cents = 4900 - 0 (old refunded_cents) = 4900
-      configureNeonSqlClaim([{ tokens: 5000, amount_cents: 4900, increment_cents: 4900 }]);
 
       await reverseAddonTokens('user-1', 'ch_abc', 4900, 4900, 'pi_abc');
 
-      // Token deduction written via neonSql.transaction()
+      // All operations in a single transaction: claim + audit + deduction
       expect(mockNeonTransaction).toHaveBeenCalledOnce();
-      // The INSERT in the transaction should use -5000 (floor(5000 * 4900/4900))
       const txStatements = mockNeonTransaction.mock.calls[0][0] as MockStatement[];
-      const insertStmt = txStatements[0];
-      expect(insertStmt.values).toContain(-5000);
-      expect(insertStmt.values).toContain('charge_refunded:ch_abc');
+      // 3 statements: claim UPDATE, audit INSERT, user UPDATE
+      expect(txStatements).toHaveLength(3);
+      // Claim: UPDATE token_purchases SET refunded_cents = 4900
+      expect(txStatements[0].values).toContain(4900);
+      expect(txStatements[0].values).toContain(purchase.id);
+      // Audit INSERT: deduction amount = floor(5000 * 4900/4900) = 5000
+      expect(txStatements[1].values).toContain(5000);
+      expect(txStatements[1].values).toContain('charge_refunded:ch_abc');
     });
 
     it('handles 50% partial refund correctly', async () => {
       configureSelectSequence([[purchase]]);
-      // increment_cents = 2450 - 0 = 2450
-      configureNeonSqlClaim([{ tokens: 5000, amount_cents: 4900, increment_cents: 2450 }]);
 
       await reverseAddonTokens('user-1', 'ch_abc', 2450, 4900, 'pi_abc');
 
       expect(mockNeonTransaction).toHaveBeenCalledOnce();
       const txStatements = mockNeonTransaction.mock.calls[0][0] as MockStatement[];
-      const insertStmt = txStatements[0];
-      // floor(5000 * 2450/4900) = floor(2500) = 2500
-      expect(insertStmt.values).toContain(-2500);
+      // floor(5000 * 2450/4900) = 2500
+      expect(txStatements[1].values).toContain(2500);
     });
 
-    it('skips processing when CTE claim returns 0 rows (idempotency / concurrent webhook)', async () => {
-      // Simulates the case where another concurrent request already advanced
-      // refunded_cents to amountRefunded, so WHERE refunded_cents < amountRefunded
-      // matches nothing and RETURNING is empty.
-      configureSelectSequence([[purchase]]);
-      configureNeonSqlClaim([]); // 0 rows = claim failed
+    it('skips when refundedCents already covers the refund (idempotency)', async () => {
+      // Purchase already fully refunded
+      const alreadyRefunded = { ...purchase, refundedCents: 4900 };
+      configureSelectSequence([[alreadyRefunded]]);
 
       await reverseAddonTokens('user-1', 'ch_abc', 4900, 4900, 'pi_abc');
 
-      // No token deduction should happen
+      // JS-side idempotency check: newRefundCents = 4900 - 4900 = 0 → skip
       expect(mockNeonTransaction).not.toHaveBeenCalled();
     });
 
     it('processes only the new increment on a second partial refund', async () => {
-      // First partial refund was 2450 cents (already tracked).
-      // Stripe now sends cumulative 4900. The CTE captures increment = 2450.
+      // First partial was 2450 cents (tracked in refundedCents)
       const partiallyRefunded = { ...purchase, refundedCents: 2450 };
       configureSelectSequence([[partiallyRefunded]]);
-      configureNeonSqlClaim([{ tokens: 5000, amount_cents: 4900, increment_cents: 2450 }]);
 
       await reverseAddonTokens('user-1', 'ch_abc', 4900, 4900, 'pi_abc');
 
       expect(mockNeonTransaction).toHaveBeenCalledOnce();
       const txStatements = mockNeonTransaction.mock.calls[0][0] as MockStatement[];
-      const insertStmt = txStatements[0];
-      // New increment: 2450 cents / 4900 total cents * 5000 tokens = 2500
-      expect(insertStmt.values).toContain(-2500);
+      // New increment: 4900 - 2450 = 2450 cents → floor(5000 * 2450/4900) = 2500
+      expect(txStatements[1].values).toContain(2500);
     });
 
     it('skips when token deduction rounds to 0', async () => {
-      // 1 token purchase, 1-cent refund of 4900: floor(1 * 1/4900) = 0
       const tinyPurchase = { ...purchase, tokens: 1 };
       configureSelectSequence([[tinyPurchase]]);
-      configureNeonSqlClaim([{ tokens: 1, amount_cents: 4900, increment_cents: 1 }]);
 
       await reverseAddonTokens('user-1', 'ch_abc', 1, 4900, 'pi_abc');
 

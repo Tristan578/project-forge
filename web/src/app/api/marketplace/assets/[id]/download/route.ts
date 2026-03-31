@@ -67,13 +67,16 @@ export async function GET(
     }
 
     // Atomic download count increment (PF-7507).
+    // Only count buyer downloads — owner downloads don't reflect buyer engagement.
     // Uses SQL expression SET download_count = download_count + 1 so concurrent
     // downloads never lose an update (no stale read-increment-write pattern).
     // Fire-and-forget: a failure here does not block the user's download.
-    db.update(marketplaceAssets)
-      .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
-      .where(eq(marketplaceAssets.id, assetId))
-      .catch(() => {});
+    if (!isOwner) {
+      db.update(marketplaceAssets)
+        .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
+        .where(eq(marketplaceAssets.id, assetId))
+        .catch(() => {});
+    }
 
     // If the URL is a CDN URL, generate a signed download URL from R2.
     // Compare parsed hostnames explicitly to avoid substring false positives
