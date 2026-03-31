@@ -42,7 +42,7 @@ export default defineConfig({
 
   webServer: {
     command: 'npx next start',
-    url: 'http://localhost:3000/dev',
+    url: 'http://localhost:3000/api/health',
     reuseExistingServer: false,
     timeout: 30_000, // next start boots in <5s after build
   },
