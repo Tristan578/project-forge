@@ -423,9 +423,12 @@ export async function POST(request: NextRequest) {
   let systemText = effectiveSystemPrompt;
   if (sceneContext && typeof sceneContext === 'string') {
     // sceneContext is client-supplied structured data (engine scene state).
-    // Sanitize to strip control characters and cap length before injecting
-    // into the system prompt, which is the highest-trust position.
-    systemText += '\n\n' + sanitizeSystemPrompt(sceneContext);
+    // Strip control characters (security) but do NOT apply the 10k system
+    // prompt length cap — scene context for complex scenes can legitimately
+    // be 50k+ chars. The total input budget (MAX_INPUT_CHARS = 600k) at
+    // step 5b is the real size guard for the entire conversation.
+    const sanitizedContext = sceneContext.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    systemText += '\n\n' + sanitizedContext;
   }
 
   // Inject relevant documentation when the user appears to be asking a how-to question
