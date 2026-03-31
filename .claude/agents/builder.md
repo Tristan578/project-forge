@@ -4,7 +4,8 @@ description: Specialized implementation agent optimized for Rust/WASM coding spe
 model: claude-sonnet-4-5
 effort: high
 memory: user
-skills: [arch-validator, rust-engine, frontend, mcp-commands, testing]
+isolation: worktree
+skills: [arch-validator, rust-engine, frontend, mcp-commands, testing, next-best-practices, tdd, neon-postgres, shadcn]
 hooks:
   PostToolUse:
     - matcher: Edit|Write

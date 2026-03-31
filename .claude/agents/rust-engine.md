@@ -4,6 +4,8 @@ description: Rust/WASM engine specialist. Knows Bevy 0.18 ECS, bridge isolation,
 model: claude-sonnet-4-5
 effort: high
 memory: project
+mcpServers:
+  - context7
 skills: [rust-engine, arch-validator, build]
 hooks:
   PostToolUse:

@@ -6,7 +6,7 @@ effort: high
 memory: project
 background: true
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
-skills: [testing, test]
+skills: [testing]
 hooks:
   Stop:
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/review-quality-gate.sh"

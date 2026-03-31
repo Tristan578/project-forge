@@ -51,6 +51,7 @@
       },
       {
         "matcher": "Bash",
+        "if": "Bash(git push *)",
         "hooks": [
           {
             "type": "command",
@@ -61,6 +62,7 @@
       },
       {
         "matcher": "Bash",
+        "if": "Bash(git commit *)",
         "hooks": [
           {
             "type": "command",
@@ -71,6 +73,7 @@
       },
       {
         "matcher": "Bash",
+        "if": "Bash(git push *)",
         "hooks": [
           {
             "type": "command",
@@ -258,6 +261,40 @@
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/worktree-setup.sh\"",
             "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/on-stop.sh\"",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "CwdChanged": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/inject-dynamic-context.sh\"",
+            "timeout": 3000
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/rate-limit-backoff.sh\"",
+            "timeout": 3000
           }
         ]
       }

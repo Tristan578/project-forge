@@ -4,8 +4,9 @@ description: Use when reviewing PRs, validating agent output, or auditing code c
 model: claude-sonnet-4-5
 effort: high
 memory: project
+background: true
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
-skills: [pr-code-review, arch-validator, testing, multiplayer-readiness, infra-services]
+skills: [pr-code-review, arch-validator, testing, multiplayer-readiness, infra-services, next-best-practices, playwright-best-practices]
 maxTurns: 25
 hooks:
   Stop:

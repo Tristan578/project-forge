@@ -4,8 +4,11 @@ description: Senior UX designer and antagonistic reviewer. Enforces design libra
 model: claude-sonnet-4-5
 effort: high
 memory: project
+background: true
+mcpServers:
+  - playwright
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
-skills: [web-accessibility, web-design-guidelines, game-ui-design, frontend, vercel-react-best-practices, playwright-best-practices, shadcn]
+skills: [web-accessibility, game-ui-design, frontend, vercel-react-best-practices, playwright-best-practices, shadcn, vercel-composition-patterns]
 maxTurns: 25
 hooks:
   Stop:

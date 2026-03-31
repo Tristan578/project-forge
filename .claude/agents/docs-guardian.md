@@ -4,6 +4,7 @@ description: Documentation quality guardian. Reviews code comments, API docs, MC
 model: claude-haiku-4-5
 effort: medium
 memory: project
+background: true
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
 skills: [docs, developer-experience]
 maxTurns: 30

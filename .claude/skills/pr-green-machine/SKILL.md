@@ -1,6 +1,7 @@
 ---
 name: pr-green-machine
 description: Drive all open PRs to merge-ready state — fixes CI failures, resolves Sentry comments, clears merge conflicts. Use when multiple PRs need to go green or when asked to "clean up PRs", "fix all PRs", or "make PRs mergeable".
+context: fork
 ---
 
 # PR Green Machine

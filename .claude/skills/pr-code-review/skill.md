@@ -1,6 +1,7 @@
 ---
 name: pr-code-review
 description: Review a PR for SpawnForge bugs, security issues, and regressions. Posts inline GitHub comments with severity markers. Use when asked to "review PR", "code review", or "check this PR". Invoke with /pr-code-review <PR number>.
+context: fork
 ---
 
 # PR Code Review

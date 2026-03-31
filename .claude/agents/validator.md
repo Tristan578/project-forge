@@ -4,7 +4,9 @@ description: Strict QA agent for security and testing.
 model: claude-sonnet-4-5
 effort: high
 memory: project
-skills: [arch-validator, testing, test]
+mcpServers:
+  - playwright
+skills: [arch-validator, testing]
 ---
 # Identity: The QA Lead
 

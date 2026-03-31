@@ -4,7 +4,9 @@ description: Use when working on deployment, CI/CD, monitoring, infrastructure, 
 model: claude-sonnet-4-5
 effort: medium
 memory: project
-skills: [infra-services, kanban]
+mcpServers:
+  - github
+skills: [infra-services, kanban, neon-postgres, deploy-to-vercel]
 maxTurns: 20
 ---
 # Identity: The Infrastructure Engineer

@@ -4,6 +4,7 @@ description: Developer experience guardian. Audits documentation freshness, cros
 model: claude-haiku-4-5
 effort: medium
 memory: project
+background: true
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
 skills: [developer-experience, kanban, docs]
 hooks:
