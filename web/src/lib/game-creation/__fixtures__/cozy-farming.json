@@ -1,0 +1,155 @@
+{
+  "id": "fixture-cozy-farming-01",
+  "title": "Sundown Farm",
+  "description": "A relaxed farming experience where players tend crops, befriend animals, and restore an old homestead at their own pace.",
+  "systems": [
+    {
+      "category": "movement",
+      "type": "walk",
+      "config": { "speed": 4, "runToggle": false },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "camera",
+      "type": "top-down",
+      "config": { "altitude": 15, "tilt": 30, "smoothing": 0.05 },
+      "priority": "core",
+      "dependsOn": ["entities"]
+    },
+    {
+      "category": "world",
+      "type": "sandbox",
+      "config": { "dayNightCycle": true, "seasons": true, "dayLengthMinutes": 10 },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "entities",
+      "type": "npc",
+      "config": { "schedules": true, "giftable": true, "friendshipLevel": 10 },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "progression",
+      "type": "unlocking",
+      "config": { "categories": ["crops", "tools", "buildings", "recipes"] },
+      "priority": "secondary",
+      "dependsOn": []
+    },
+    {
+      "category": "audio",
+      "type": "ambient",
+      "config": { "birdsong": true, "weatherVariants": true, "seasonalMusic": true },
+      "priority": "secondary",
+      "dependsOn": []
+    },
+    {
+      "category": "visual",
+      "type": "lighting",
+      "config": { "goldenHour": true, "softShadows": true },
+      "priority": "polish",
+      "dependsOn": []
+    }
+  ],
+  "scenes": [
+    {
+      "name": "HomesteadFarm",
+      "purpose": "Main farm area where crops are grown and animals tend",
+      "systems": ["movement", "camera", "world", "entities", "progression", "audio", "visual"],
+      "entities": [
+        {
+          "name": "Farmer",
+          "role": "player",
+          "systems": ["movement"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["walk", "water-crops", "harvest", "pet-animals"]
+        },
+        {
+          "name": "Chicken",
+          "role": "npc",
+          "systems": ["entities"],
+          "appearance": "primitive:sphere",
+          "behaviors": ["wander", "lay-eggs", "follow-player"]
+        },
+        {
+          "name": "TownVillager",
+          "role": "npc",
+          "systems": ["entities"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["daily-schedule", "gift-exchange", "friendly-chat"]
+        }
+      ],
+      "transitions": [
+        { "to": "Village", "trigger": "exit-farm-gate" },
+        { "to": "HomesteadFarm", "trigger": "new-day" }
+      ]
+    },
+    {
+      "name": "Village",
+      "purpose": "Nearby village with shops and other characters",
+      "systems": ["movement", "camera", "entities", "audio"],
+      "entities": [
+        {
+          "name": "Farmer",
+          "role": "player",
+          "systems": ["movement"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["walk", "shop", "socialize"]
+        },
+        {
+          "name": "Shopkeeper",
+          "role": "npc",
+          "systems": ["entities"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["open-shop", "daily-schedule"]
+        }
+      ],
+      "transitions": [
+        { "to": "HomesteadFarm", "trigger": "return-home" }
+      ]
+    }
+  ],
+  "assetManifest": [
+    {
+      "type": "music",
+      "description": "Gentle spring morning farm theme",
+      "styleDirective": "acoustic guitar, soft piano, warm and unhurried",
+      "priority": "required",
+      "fallback": "builtin:ambient-loop"
+    },
+    {
+      "type": "texture",
+      "description": "Tilled soil and grass farm tiles",
+      "styleDirective": "warm earthy tones, hand-painted, soft edges",
+      "priority": "required",
+      "fallback": "primitive:green-plane"
+    },
+    {
+      "type": "sound",
+      "description": "Water can pouring on soil",
+      "styleDirective": "gentle splashing, satisfying, light",
+      "priority": "nice-to-have",
+      "fallback": "builtin:whoosh"
+    },
+    {
+      "type": "sound",
+      "description": "Chicken clucking ambient sound",
+      "styleDirective": "soft background animal sounds, relaxing",
+      "priority": "nice-to-have",
+      "fallback": "builtin:ambient-loop"
+    }
+  ],
+  "estimatedScope": "large",
+  "styleDirective": "Warm hand-painted art with soft lighting and natural colors",
+  "feelDirective": {
+    "mood": "cozy",
+    "pacing": "slow",
+    "weight": "light",
+    "referenceGames": ["Stardew Valley", "Story of Seasons"],
+    "oneLiner": "Tend your farm, make friends, and let the seasons guide you"
+  },
+  "constraints": ["No enemies", "No fail state", "Player-directed pacing"],
+  "projectType": "3d"
+}

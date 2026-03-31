@@ -1,0 +1,35 @@
+{
+  "id": "fixture-single-system-01",
+  "title": "Key Test",
+  "description": "Minimal game with only keyboard input handling.",
+  "systems": [
+    {
+      "category": "input",
+      "type": "keyboard",
+      "config": { "keys": ["ArrowLeft", "ArrowRight", "Space"] },
+      "priority": "core",
+      "dependsOn": []
+    }
+  ],
+  "scenes": [
+    {
+      "name": "Main",
+      "purpose": "Minimal scene",
+      "systems": ["input"],
+      "entities": [],
+      "transitions": []
+    }
+  ],
+  "assetManifest": [],
+  "estimatedScope": "small",
+  "styleDirective": "Minimal",
+  "feelDirective": {
+    "mood": "neutral",
+    "pacing": "medium",
+    "weight": "medium",
+    "referenceGames": [],
+    "oneLiner": "Press keys to do things"
+  },
+  "constraints": [],
+  "projectType": "2d"
+}

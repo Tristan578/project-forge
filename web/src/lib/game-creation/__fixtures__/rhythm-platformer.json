@@ -1,0 +1,111 @@
+{
+  "id": "fixture-rhythm-platformer-01",
+  "title": "Beat Runner",
+  "description": "A side-scrolling game where the player jumps and runs in sync with music.",
+  "systems": [
+    {
+      "category": "movement",
+      "type": "walk+jump",
+      "config": { "jumpForce": 12, "speed": 8, "gravity": 25 },
+      "priority": "core",
+      "dependsOn": ["physics"]
+    },
+    {
+      "category": "camera",
+      "type": "side-scroll",
+      "config": { "followX": true, "followY": false, "leadAhead": 2 },
+      "priority": "core",
+      "dependsOn": ["entities"]
+    },
+    {
+      "category": "world",
+      "type": "levels",
+      "config": { "levelCount": 5, "scrollDirection": "horizontal" },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "audio",
+      "type": "reactive",
+      "config": { "beatSync": true, "bpm": 120 },
+      "priority": "secondary",
+      "dependsOn": []
+    },
+    {
+      "category": "feedback",
+      "type": "score",
+      "config": { "multiplierOnBeat": 2, "showCombo": true },
+      "priority": "secondary",
+      "dependsOn": ["challenge"]
+    },
+    {
+      "category": "physics",
+      "type": "standard-gravity",
+      "config": { "gravity": 25, "friction": 0.2 },
+      "priority": "core",
+      "dependsOn": []
+    }
+  ],
+  "scenes": [
+    {
+      "name": "MainLevel",
+      "purpose": "Primary gameplay loop",
+      "systems": ["movement", "camera", "world", "audio", "feedback", "physics"],
+      "entities": [
+        {
+          "name": "Player",
+          "role": "player",
+          "systems": ["movement", "physics"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["jump-on-beat", "run-forward"]
+        },
+        {
+          "name": "BeatMarker",
+          "role": "trigger",
+          "systems": ["audio"],
+          "appearance": "primitive:sphere",
+          "behaviors": ["pulse-on-beat"]
+        }
+      ],
+      "transitions": [
+        { "to": "ResultsScreen", "trigger": "level-complete" }
+      ]
+    },
+    {
+      "name": "ResultsScreen",
+      "purpose": "Show score at end of level",
+      "systems": ["feedback"],
+      "entities": [],
+      "transitions": [
+        { "to": "MainLevel", "trigger": "restart" }
+      ]
+    }
+  ],
+  "assetManifest": [
+    {
+      "type": "music",
+      "description": "Upbeat chiptune track at 120 BPM",
+      "styleDirective": "8-bit electronic, energetic",
+      "priority": "required",
+      "fallback": "builtin:music-loop"
+    },
+    {
+      "type": "texture",
+      "description": "Tiled platform surface texture",
+      "styleDirective": "pixel art, neon on dark background",
+      "priority": "nice-to-have",
+      "fallback": "primitive:checker"
+    }
+  ],
+  "estimatedScope": "medium",
+  "styleDirective": "Neon pixel art aesthetic with reactive lighting",
+  "feelDirective": {
+    "mood": "energetic",
+    "pacing": "fast",
+    "weight": "light",
+    "referenceGames": ["Geometry Dash", "Bit.Trip Runner"],
+    "oneLiner": "Run and jump to the beat, every miss breaks the chain"
+  },
+  "constraints": ["No enemies", "Single player only"],
+  "projectType": "2d"
+}
