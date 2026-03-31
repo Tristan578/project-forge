@@ -262,3 +262,11 @@ date +%s > "$(git rev-parse --show-toplevel)/.claude/.env-health-last-check"
 - **Don't treat AI Provider outages as critical** — they're external and expected
 - **Flag 0s workflow failures loudly** — these are always YAML parse errors, never transient
 - **Check staging too** — if staging works but production doesn't, the issue is isolated to the production deploy step
+
+## Scripts
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/run-health-check.sh"` — Full health check: local env file, required vars, node version, and production environments via hook script
+
+## References
+
+- See [required-env-vars.md](references/required-env-vars.md) for the complete list of required environment variables, where to get them, and common error patterns

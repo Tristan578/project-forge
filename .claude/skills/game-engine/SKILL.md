@@ -137,3 +137,13 @@ Detailed reference material is available in the `references/` folder. Consult th
 | Performance is poor | Profile with browser dev tools, reduce draw calls, use object pooling, and optimize asset sizes |
 | Touch controls are unresponsive | Prevent default touch behavior and handle touch events separately from mouse events |
 | WebGL context lost | Handle the `webglcontextlost` event and restore state on `webglcontextrestored` |
+
+## SpawnForge-Specific Scripts
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/check-engine-binaries.sh"` — Verify all 4 WASM engine binaries exist in `web/public/engine-pkg-*`, check file sizes, and report staleness
+
+## SpawnForge-Specific References
+
+- See [ecs-patterns.md](references/ecs-patterns.md) for the complete new-component checklist, entity lifecycle, and command dispatch chain
+- See [command-dispatch.md](references/command-dispatch.md) for how the JSON command system works and how to add new commands
+- See [templates/component-checklist.md](templates/component-checklist.md) for a fillable checklist to track new component implementation progress

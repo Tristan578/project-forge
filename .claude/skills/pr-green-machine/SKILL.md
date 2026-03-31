@@ -149,3 +149,12 @@ Process PRs oldest to newest by PR number. The sequence for this run:
 5. PR #7415
 
 Do NOT parallelize. Each PR must be fully GREEN before starting the next. If a fix on PR N breaks PR N+1 (shared branch), fix N+1 immediately before moving on.
+
+## Scripts
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/pr-status.sh" <pr-number>` — Get full PR status: CI checks, merge conflicts, review decision, Sentry comment count, and Closes link validation
+- `bash "${CLAUDE_SKILL_DIR}/scripts/fix-common-ci.sh"` — Auto-fix common CI failures: runs `eslint --fix`, then `tsc --noEmit` to surface remaining type errors, then targeted unit tests
+
+## References
+
+- See [ci-fix-playbook.md](references/ci-fix-playbook.md) for step-by-step fixes for every common CI failure: lint, TypeScript, vitest, E2E, manifest sync, lockfile drift, and 0-second workflow failures
