@@ -73,16 +73,17 @@ vi.mock('@anthropic-ai/sdk', () => {
 });
 
 // Mock the SpawnForge agent module — route.ts calls createSpawnforgeAgent().stream()
+function makeMockNegStreamResponse() {
+  return new Response('f:{"messageId":"msg-1"}\n0:"Hello"\n', {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+    },
+  });
+}
 const mockNegStreamResult = {
-  toUIMessageStreamResponse: vi.fn().mockReturnValue(
-    new Response('f:{"messageId":"msg-1"}\n0:"Hello"\n', {
-      status: 200,
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-      },
-    }),
-  ),
+  toUIMessageStreamResponse: vi.fn().mockImplementation(() => makeMockNegStreamResponse()),
 };
 const mockNegStream = vi.fn().mockResolvedValue(mockNegStreamResult);
 const mockNegAgent = { stream: mockNegStream };
@@ -169,15 +170,7 @@ describe('POST /api/chat — negative cases', () => {
 
     // Re-setup agent.stream() after vi.clearAllMocks() wipes the module-level mock
     mockNegStream.mockResolvedValue(mockNegStreamResult);
-    mockNegStreamResult.toUIMessageStreamResponse.mockReturnValue(
-      new Response('f:{"messageId":"msg-1"}\n0:"Hello"\n', {
-        status: 200,
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-        },
-      }),
-    );
+    mockNegStreamResult.toUIMessageStreamResponse.mockImplementation(() => makeMockNegStreamResponse());
 
     // Default: refundTokens returns a Promise (vi.clearAllMocks wipes mockResolvedValue)
     vi.mocked(refundTokens).mockResolvedValue({ refunded: true });

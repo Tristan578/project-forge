@@ -17,7 +17,7 @@
 import { ToolLoopAgent, stepCountIs } from 'ai';
 import { gateway } from '@ai-sdk/gateway';
 import { anthropic } from '@ai-sdk/anthropic';
-import { convertManifestToolsToSdkTools } from '@/lib/ai/toolAdapter';
+import { convertManifestToolsToSdkTools, type ManifestTool } from '@/lib/ai/toolAdapter';
 import { AI_MODEL_PRIMARY, AI_MODELS } from '@/lib/ai/models';
 import manifestJson from '@/data/commands.json';
 
@@ -25,39 +25,42 @@ import manifestJson from '@/data/commands.json';
 // Manifest → AI SDK tools (cached at module level)
 // ---------------------------------------------------------------------------
 
-interface ManifestCommand {
-  name: string;
-  description: string;
+interface ManifestEntry extends ManifestTool {
   category: string;
-  parameters: {
-    type: string;
-    properties?: Record<string, unknown>;
-    required?: string[];
-  };
   tokenCost: number;
   requiredScope: string;
 }
 
-const manifest = manifestJson as { version: string; commands: ManifestCommand[] };
+const manifest = manifestJson as { version: string; commands: ManifestEntry[] };
 
 /**
  * Build AI SDK tool definitions from the MCP command manifest.
- * Includes write-scoped commands and query commands — read-only commands
- * are excluded to reduce tool count and prevent the model from calling
- * informational endpoints when it should be acting.
+ *
+ * Filter policy: includes `:write`-scoped commands and `query`-category commands.
+ * Read-only informational commands are excluded to reduce tool count (274 of 350)
+ * and prevent the model from calling informational endpoints when it should be acting.
+ *
+ * IMPORTANT: This function runs once at module load and the result is cached in
+ * AGENT_TOOLS. It must NEVER contain per-user or per-request logic (e.g. tier-based
+ * tool gating). If per-user filtering is needed in the future, move the call inside
+ * createSpawnforgeAgent() and pass user context as a parameter.
  */
 function getAgentTools() {
   const writeTools = manifest.commands
     .filter((cmd) => cmd.requiredScope.endsWith(':write') || cmd.category === 'query')
-    .map((cmd) => ({
-      name: cmd.name,
-      description: cmd.description,
-      parameters: {
-        type: cmd.parameters.type || 'object',
-        properties: cmd.parameters.properties || {},
-        required: cmd.parameters.required || [],
-      },
-    }));
+    .map((cmd) => {
+      const params = cmd.parameters;
+      const isObject = params && !Array.isArray(params) && typeof params === 'object';
+      return {
+        name: cmd.name,
+        description: cmd.description,
+        parameters: {
+          type: (isObject ? params.type : undefined) || 'object',
+          properties: (isObject ? params.properties : undefined) || {},
+          required: (isObject ? params.required : undefined) || [],
+        },
+      };
+    });
 
   return convertManifestToolsToSdkTools(writeTools);
 }

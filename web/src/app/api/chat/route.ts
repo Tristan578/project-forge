@@ -107,7 +107,7 @@ async function getDocsEntries(): Promise<DocEntry[]> {
 const SYSTEM_PROMPT = `You are an expert game creation assistant for SpawnForge, an AI-powered 3D game engine that runs in the browser. You help users create games by orchestrating scene setup, materials, physics, scripting, audio, and more through MCP commands.
 
 ## What You Can Do
-You have access to 118 MCP commands across 19 categories:
+You have access to 350 MCP commands across 41 categories. Key categories include:
 - **scene**: spawn_entity, delete_entities, duplicate_entity, rename_entity, set_parent, get_scene_graph
 - **materials**: update_material (PBR: baseColor, metallic, roughness, emissive, textures, alpha modes, clearcoat, transmission)
 - **lighting**: update_light, set_ambient_light (point, directional, spot lights with shadows)
@@ -421,8 +421,11 @@ export async function POST(request: NextRequest) {
   }
 
   let systemText = effectiveSystemPrompt;
-  if (sceneContext) {
-    systemText += '\n\n' + sceneContext;
+  if (sceneContext && typeof sceneContext === 'string') {
+    // sceneContext is client-supplied structured data (engine scene state).
+    // Sanitize to strip control characters and cap length before injecting
+    // into the system prompt, which is the highest-trust position.
+    systemText += '\n\n' + sanitizeSystemPrompt(sceneContext);
   }
 
   // Inject relevant documentation when the user appears to be asking a how-to question
@@ -445,11 +448,14 @@ export async function POST(request: NextRequest) {
   // resolveChatRoute is called once here (also used in step 5 for billing);
   // the result determines whether we use direct Anthropic or gateway.
   const usingDirect = usingDirectBackend;
+  // Tier gate: thinking mode (10k extra tokens per step) restricted to creator/pro,
+  // consistent with the systemOverride gate. Prevents amplified token burn on free tiers.
+  const canUseThinking = auth.ctx.user.tier === 'creator' || auth.ctx.user.tier === 'pro';
   const agent = createSpawnforgeAgent({
     isDirectBackend: usingDirect,
     model: model || '',
     instructions: systemText,
-    thinking,
+    thinking: canUseThinking && thinking === true,
   });
 
   // 8. Convert messages
