@@ -85,7 +85,7 @@ describe('POST /api/marketplace/assets/[id]/purchase', () => {
     expect(body.error).toBe('Asset not found');
   });
 
-  it('should return 400 when already purchased', async () => {
+  it('should return 409 when already purchased (regression: was 400, is a conflict not malformed request)', async () => {
     const assetChain = {
       from: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
@@ -108,11 +108,11 @@ describe('POST /api/marketplace/assets/[id]/purchase', () => {
     const res = await POST(req, { params: Promise.resolve({ id: 'a1' }) });
     const body = await res.json();
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
     expect(body.error).toBe('Already purchased');
   });
 
-  it('should return 400 when buying own asset', async () => {
+  it('should return 403 when buying own asset (regression: was 400, is a permission violation)', async () => {
     const assetChain = {
       from: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
@@ -135,7 +135,7 @@ describe('POST /api/marketplace/assets/[id]/purchase', () => {
     const res = await POST(req, { params: Promise.resolve({ id: 'a1' }) });
     const body = await res.json();
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(403);
     expect(body.error).toBe('Cannot purchase your own asset');
   });
 
