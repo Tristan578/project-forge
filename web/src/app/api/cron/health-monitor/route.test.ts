@@ -10,8 +10,18 @@ vi.mock('@/lib/monitoring/healthChecks');
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
+
+const { mockLoggerError, mockLoggerWarn } = vi.hoisted(() => ({
+  mockLoggerError: vi.fn(),
+  mockLoggerWarn: vi.fn(),
+}));
+
 vi.mock('@/lib/logging/logger', () => ({
-  logger: { child: () => ({ info: vi.fn(), error: vi.fn() }), error: vi.fn() },
+  logger: {
+    child: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
+    error: mockLoggerError,
+    warn: mockLoggerWarn,
+  },
 }));
 
 const CRON_SECRET = 'test-cron-secret';
@@ -106,5 +116,75 @@ describe('GET /api/cron/health-monitor', () => {
     // Always 200 — Vercel treats non-200 as cron failure and backs off
     expect(res.status).toBe(200);
     expect(captureException).toHaveBeenCalledTimes(2);
+  });
+
+  // -------------------------------------------------------------------------
+  // Regression: #7075 — non-critical degraded services log at warn, not error
+  // -------------------------------------------------------------------------
+
+  it('logs non-critical degraded service at warn level, not error (regression #7075)', async () => {
+    vi.mocked(runAllHealthChecks).mockResolvedValue({
+      overall: 'degraded',
+      timestamp: new Date().toISOString(),
+      environment: 'test',
+      version: '1.0.0',
+      services: [
+        { name: 'Database (Neon)', status: 'healthy', latencyMs: 10, lastChecked: new Date().toISOString() },
+        { name: 'Clerk', status: 'healthy', latencyMs: 10, lastChecked: new Date().toISOString() },
+        { name: 'Rate Limiting (Upstash)', status: 'degraded', latencyMs: 0, lastChecked: new Date().toISOString(), error: 'vars missing' },
+      ],
+    });
+    vi.mocked(computeCriticalStatus).mockReturnValue('healthy');
+
+    await GET(makeReq(`Bearer ${CRON_SECRET}`));
+
+    // Non-critical degraded → warn, not error
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining('non-critical'),
+      expect.objectContaining({ failureCount: 1 }),
+    );
+    expect(mockLoggerError).not.toHaveBeenCalled();
+  });
+
+  it('logs critical down service at error level (regression #7075)', async () => {
+    vi.mocked(runAllHealthChecks).mockResolvedValue({
+      overall: 'down',
+      timestamp: new Date().toISOString(),
+      environment: 'test',
+      version: '1.0.0',
+      services: [
+        { name: 'Database (Neon)', status: 'down', latencyMs: 0, lastChecked: new Date().toISOString(), error: 'timeout' },
+        { name: 'Clerk', status: 'healthy', latencyMs: 10, lastChecked: new Date().toISOString() },
+      ],
+    });
+    vi.mocked(computeCriticalStatus).mockReturnValue('down');
+
+    await GET(makeReq(`Bearer ${CRON_SECRET}`));
+
+    // Critical failure → error
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.stringContaining('critical'),
+      expect.objectContaining({ criticalFailureCount: 1 }),
+    );
+    expect(mockLoggerWarn).not.toHaveBeenCalled();
+  });
+
+  it('logs error for critical AND warn for non-critical when both fail (regression #7075)', async () => {
+    vi.mocked(runAllHealthChecks).mockResolvedValue({
+      overall: 'down',
+      timestamp: new Date().toISOString(),
+      environment: 'test',
+      version: '1.0.0',
+      services: [
+        { name: 'Database (Neon)', status: 'down', latencyMs: 0, lastChecked: new Date().toISOString(), error: 'timeout' },
+        { name: 'Rate Limiting (Upstash)', status: 'degraded', latencyMs: 0, lastChecked: new Date().toISOString(), error: 'slow' },
+      ],
+    });
+    vi.mocked(computeCriticalStatus).mockReturnValue('down');
+
+    await GET(makeReq(`Bearer ${CRON_SECRET}`));
+
+    expect(mockLoggerError).toHaveBeenCalled();
+    expect(mockLoggerWarn).toHaveBeenCalled();
   });
 });
