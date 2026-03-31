@@ -53,7 +53,7 @@ cd "$WEB_DIR"
 
 # Run coverage on current branch (after)
 echo "Running coverage on current branch..."
-npx vitest run --coverage --coverage.reportsDirectory="${COVERAGE_DIR}/after" \
+npx vitest run --coverage --coverage.reporter=json-summary --coverage.reportsDirectory="${COVERAGE_DIR}/after" \
   "${changed_tests[@]}" 2>&1 | tail -30 || true
 
 # Get baseline coverage from base branch
@@ -63,7 +63,7 @@ git stash push -m "coverage-diff-stash" --include-untracked 2>/dev/null || true
 git checkout "${BASE}" 2>/dev/null || { echo "Cannot checkout ${BASE} — skipping baseline comparison"; git stash pop 2>/dev/null || true; exit 0; }
 
 echo "Running coverage on ${BASE}..."
-npx vitest run --coverage --coverage.reportsDirectory="${COVERAGE_DIR}/before" \
+npx vitest run --coverage --coverage.reporter=json-summary --coverage.reportsDirectory="${COVERAGE_DIR}/before" \
   "${changed_tests[@]}" 2>&1 | tail -30 || true
 
 # Return to current state

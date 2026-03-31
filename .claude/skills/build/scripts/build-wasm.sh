@@ -7,8 +7,8 @@
 # Produces 4 build variants in web/public/:
 #   engine-pkg-webgl2/     — Editor, WebGL2 backend
 #   engine-pkg-webgpu/     — Editor, WebGPU backend
-#   engine-pkg-webgl2-rt/  — Runtime (exported game), WebGL2
-#   engine-pkg-webgpu-rt/  — Runtime (exported game), WebGPU
+#   engine-pkg-webgl2-runtime/  — Runtime (exported game), WebGL2
+#   engine-pkg-webgpu-runtime/  — Runtime (exported game), WebGPU
 #
 # Requirements:
 #   - Rust stable with wasm32-unknown-unknown target
@@ -93,8 +93,8 @@ case "$REQUESTED" in
   all)
     build_variant "webgl2"         "engine-pkg-webgl2"
     build_variant "webgpu"         "engine-pkg-webgpu"
-    build_variant "webgl2,runtime" "engine-pkg-webgl2-rt"
-    build_variant "webgpu,runtime" "engine-pkg-webgpu-rt"
+    build_variant "webgl2,runtime" "engine-pkg-webgl2-runtime"
+    build_variant "webgpu,runtime" "engine-pkg-webgpu-runtime"
     ;;
   *)
     echo "ERROR: Unknown variant '$REQUESTED'. Use: webgl2 | webgpu | all" >&2
