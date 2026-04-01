@@ -45,15 +45,17 @@ export const characterSetupExecutor: ExecutorDefinition = {
       );
     }
 
-    const { entity, projectType, entityId } = parsed.data;
+    const { entity, projectType } = parsed.data;
+    let { entityId } = parsed.data;
+
+    // When called from system registry (no entityId), spawn the character entity first
     if (!entityId) {
-      return failResult(
-        makeStepError(
-          'MISSING_ENTITY',
-          'No entityId provided',
-          this.userFacingErrorMessage,
-        ),
-      );
+      entityId = `player_${crypto.randomUUID().slice(0, 8)}`;
+      ctx.dispatchCommand('spawn_entity', {
+        entityId,
+        name: entity.name,
+        type: projectType === '2d' ? 'Sprite' : 'Cube',
+      });
     }
 
     // [B5] Route based on project type

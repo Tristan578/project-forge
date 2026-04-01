@@ -178,12 +178,15 @@ describe('scene_create executor', () => {
     expect(result.error?.code).toBe('INVALID_INPUT');
   });
 
-  it('fails with INVALID_INPUT when name is missing', async () => {
+  it('uses default name when name is missing (system registry overlay)', async () => {
     const ctx = makeMockCtx();
     const result = await executor.execute({ purpose: 'test' }, ctx);
 
-    expect(result.success).toBe(false);
-    expect(result.error?.code).toBe('INVALID_INPUT');
+    // When called from system registry (camera/world), name defaults to 'Untitled Scene'
+    expect(result.success).toBe(true);
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('rename_scene', expect.objectContaining({
+      name: 'Untitled Scene',
+    }));
   });
 
   it('returns ABORTED when signal is already aborted', async () => {
@@ -334,15 +337,19 @@ describe('character_setup executor', () => {
     expect(result.output?.['rigApplied']).toBe(true);
   });
 
-  it('fails with MISSING_ENTITY when entityId not provided', async () => {
+  it('spawns entity when entityId not provided', async () => {
     const ctx = makeMockCtx();
     const result = await executor.execute(
       { entity: baseEntity, projectType: '3d' },
       ctx,
     );
 
-    expect(result.success).toBe(false);
-    expect(result.error?.code).toBe('MISSING_ENTITY');
+    // When called without entityId (from system registry), spawns entity first
+    expect(result.success).toBe(true);
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', expect.objectContaining({
+      name: baseEntity.name,
+      type: 'Cube',
+    }));
   });
 
   it('uses default player entity when entity not provided', async () => {
