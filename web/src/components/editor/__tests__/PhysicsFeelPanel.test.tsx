@@ -141,6 +141,28 @@ describe('PhysicsFeelPanel', () => {
     expect(vi.mocked(analyzePhysicsFeel)).toHaveBeenCalledOnce();
   });
 
+  it('analyzePhysicsFeel receives only physics-enabled entities (#8119)', () => {
+    mockStore({
+      sceneGraph: {
+        nodes: {
+          'phys-1': { entityId: 'phys-1', components: ['PhysicsData', 'RigidBody'], name: 'Ball' },
+          'no-phys': { entityId: 'no-phys', components: ['Mesh3d'], name: 'Floor' },
+          'phys-2': { entityId: 'phys-2', components: ['PhysicsData'], name: 'Wall' },
+        },
+      },
+      primaryPhysics: { gravityScale: 1, friction: 0.5 },
+      physicsEnabled: true,
+      physics2d: {},
+    });
+    render(<PhysicsFeelPanel />);
+    fireEvent.click(screen.getByLabelText('Analyze current scene physics feel'));
+    const call = vi.mocked(analyzePhysicsFeel).mock.calls[0][0];
+    const entityIds = call.entities.map((e: { entityId: string }) => e.entityId);
+    expect(entityIds).toContain('phys-1');
+    expect(entityIds).toContain('phys-2');
+    expect(entityIds).not.toContain('no-phys');
+  });
+
   it('displays analysis results after scene analysis', () => {
     render(<PhysicsFeelPanel />);
     fireEvent.click(screen.getByLabelText('Analyze current scene physics feel'));

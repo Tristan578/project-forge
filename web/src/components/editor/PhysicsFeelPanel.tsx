@@ -108,7 +108,9 @@ export function PhysicsFeelPanel() {
   const handleAnalyze = useCallback(() => {
     const entities: PhysicsSceneContext['entities'] = [];
     if (sceneGraph) {
+      const physicsSet = new Set(physicsEntityIds);
       for (const node of Object.values(sceneGraph.nodes)) {
+        if (!physicsSet.has(node.entityId)) continue;
         entities.push({
           entityId: node.entityId,
           physics: primaryPhysics && physicsEnabled
@@ -119,7 +121,7 @@ export function PhysicsFeelPanel() {
     }
     const result = analyzePhysicsFeel({ entities });
     setAnalysis(result);
-  }, [sceneGraph, primaryPhysics, physicsEnabled]);
+  }, [sceneGraph, primaryPhysics, physicsEnabled, physicsEntityIds]);
 
   const handleApply = useCallback(() => {
     const dispatch = getCommandDispatcher();
