@@ -258,7 +258,8 @@ export function buildPlan(
   // [S2] Truncate asset manifest to tier cap
   const allPriorStepIds = steps.map(s => s.id);
   const tierCap = ASSET_TIER_CAPS[userTier];
-  const cappedAssets = gdd.assetManifest
+  // Copy before sorting to avoid mutating gdd.assetManifest in-place
+  const cappedAssets = [...gdd.assetManifest]
     .sort(
       (a, b) =>
         (a.priority === 'required' ? 0 : 1) - (b.priority === 'required' ? 0 : 1),

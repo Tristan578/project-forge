@@ -53,9 +53,17 @@ export const sceneCreateExecutor: ExecutorDefinition = {
 
     const { name, cameraMode, cameraConfig, worldType, worldConfig } = parsed.data;
 
-    // Use create_scene (creates without clearing) instead of new_scene (clears current)
-    // Manifest: create_scene requires { name: string }
-    ctx.dispatchCommand('create_scene', { name });
+    // Determine if this is a primary scene creation or a config overlay.
+    // Config overlays come from camera/world system registry steps — they have
+    // cameraMode/worldType but no explicit name (defaults to 'Untitled Scene').
+    // Only create a new scene for primary creation steps.
+    const isConfigOverlay = (cameraMode || cameraConfig || worldType || worldConfig)
+      && name === 'Untitled Scene';
+
+    if (!isConfigOverlay) {
+      // Primary scene creation — manifest: create_scene requires { name: string }
+      ctx.dispatchCommand('create_scene', { name });
+    }
 
     // Apply camera configuration if provided (from camera system registry).
     // set_game_camera requires entityId + valid mode enum.

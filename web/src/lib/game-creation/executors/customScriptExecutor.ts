@@ -78,6 +78,7 @@ const FORBIDDEN_PATTERNS = [
   /constructor\.constructor/,
   /\brequire\b\s*\(/,
   /\bimport\b\s*\(/,
+  /\bimport\b\s+\w/,         // static ES module imports: import x from '...'
 ];
 
 function validateGeneratedScript(
@@ -91,8 +92,11 @@ function validateGeneratedScript(
       };
     }
   }
-  // Must define at least onStart or onUpdate
-  if (!code.includes('onStart') && !code.includes('onUpdate')) {
+  // Must define at least onStart or onUpdate as actual function declarations
+  // Use regex to avoid matching comments or string literals containing these names
+  const hasOnStart = /\bfunction\s+onStart\b|\bonStart\s*[=(]/.test(code);
+  const hasOnUpdate = /\bfunction\s+onUpdate\b|\bonUpdate\s*[=(]/.test(code);
+  if (!hasOnStart && !hasOnUpdate) {
     return {
       valid: false,
       reason: 'Script must define onStart() or onUpdate()',

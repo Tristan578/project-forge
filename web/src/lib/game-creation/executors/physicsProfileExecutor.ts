@@ -93,13 +93,22 @@ export const physicsProfileExecutor: ExecutorDefinition = {
     };
 
     const ids = entityIds ?? [];
+
+    // When called from movement system registry without entityIds, apply the
+    // physics profile globally via update_physics_config (scene-level settings).
+    // Per-entity physics is applied when entityIds are provided.
     if (ids.length === 0) {
-      return successResult({ presetUsed: presetKey, entityCount: 0 });
+      ctx.dispatchCommand('update_physics_config', {
+        gravity: finalProfile.gravity,
+        friction: finalProfile.friction,
+        restitution: finalProfile.restitution,
+      });
+      return successResult({ presetUsed: presetKey, entityCount: 0, appliedGlobally: true });
     }
 
     applyPhysicsProfile(finalProfile, ctx.dispatchCommand, ids);
 
-    return successResult({ presetUsed: presetKey, entityCount: ids.length });
+    return successResult({ presetUsed: presetKey, entityCount: ids.length, appliedGlobally: false });
   },
 };
 

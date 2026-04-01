@@ -757,7 +757,7 @@ describe('auto_polish executor', () => {
       sceneGraph: {
         nodes: { cam1: { entityId: 'cam-entity-1', name: 'Camera' } },
         rootIds: ['cam1'],
-      } as EditorState['sceneGraph'],
+      } as unknown as EditorState['sceneGraph'],
     });
     const ctx = makeMockCtx({ projectType: '2d', store: storeWithCamera });
     vi.mocked(ctx.resolveStepOutput).mockReturnValue({ issues: ['no_camera_on_player'] });
@@ -789,7 +789,7 @@ describe('auto_polish executor', () => {
       sceneGraph: {
         nodes: { cam1: { entityId: 'cam-1', name: 'Camera' } },
         rootIds: ['cam1'],
-      } as EditorState['sceneGraph'],
+      } as unknown as EditorState['sceneGraph'],
     });
     const ctx = makeMockCtx({ store: storeWithCamera });
     vi.mocked(ctx.resolveStepOutput).mockReturnValue({
