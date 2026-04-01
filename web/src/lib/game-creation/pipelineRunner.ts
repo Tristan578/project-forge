@@ -128,9 +128,24 @@ export async function runPipeline(
       return plan;
     }
 
-    // Skip step if any dependency was not completed
+    // Skip step if any dependency was not completed.
+    // If the step is non-optional, this is a pipeline failure — a required
+    // step cannot run because its upstream dependency failed/was skipped.
     if (!dependenciesMet(step, stepMap)) {
       setStepStatus(step, 'skipped');
+      if (!step.optional) {
+        step.error = {
+          code: 'DEPENDENCY_FAILED',
+          message: `Required step "${step.id}" skipped because a dependency was not completed`,
+          userFacingMessage: 'A required step could not run because a previous step failed.',
+          retryable: false,
+        };
+        setPlanStatus(plan, 'failed', callbacks);
+        for (let j = i + 1; j < plan.steps.length; j++) {
+          setStepStatus(plan.steps[j], 'skipped');
+        }
+        return plan;
+      }
       continue;
     }
 

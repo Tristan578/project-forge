@@ -286,6 +286,44 @@ describe('runPipeline', () => {
     expect(result.status).toBe('failed');
   });
 
+  it('fails plan when non-optional step depends on a skipped optional step', async () => {
+    // step_0 uses physics_profile (failureExecutor), is optional -> skipped
+    // step_1 is non-optional and depends on step_0 -> DEPENDENCY_FAILED
+    const plan = makePlan({
+      steps: [
+        { ...makeStep('step_0', 'physics_profile'), optional: true },
+        { ...makeStep('step_1', 'verify_all_scenes'), dependsOn: ['step_0'] },
+      ],
+    });
+    const ctx = makeContext(controller.signal);
+    const result = await runPipeline(plan, makeRegistry(failureExecutor, verifyExecutor), ctx);
+
+    expect(result.steps[0].status).toBe('skipped'); // optional failure -> skipped
+    expect(result.steps[1].status).toBe('skipped'); // dependency unmet
+    expect(result.steps[1].error?.code).toBe('DEPENDENCY_FAILED');
+    expect(result.status).toBe('failed');
+  });
+
+  it('skips optional step with unmet dependencies without failing plan', async () => {
+    // step_0 uses physics_profile (fails), is optional -> skipped
+    // step_1 is optional and depends on step_0 -> skipped (no error, just optional skip)
+    // step_2 has no deps, uses scene_create (succeeds) -> completed
+    const plan = makePlan({
+      steps: [
+        { ...makeStep('step_0', 'physics_profile'), optional: true },
+        { ...makeStep('step_1', 'verify_all_scenes'), dependsOn: ['step_0'], optional: true },
+        makeStep('step_2', 'scene_create'), // no deps, should run
+      ],
+    });
+    const ctx = makeContext(controller.signal);
+    const result = await runPipeline(plan, makeRegistry(failureExecutor, verifyExecutor, successExecutor), ctx);
+
+    expect(result.steps[0].status).toBe('skipped'); // optional failure
+    expect(result.steps[1].status).toBe('skipped'); // optional dep unmet
+    expect(result.steps[2].status).toBe('completed'); // independent, runs fine
+    expect(result.status).toBe('completed');
+  });
+
   it('fires onStepComplete callback after each step', async () => {
     const completed: string[] = [];
     const plan = makePlan({
