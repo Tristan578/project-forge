@@ -55,7 +55,7 @@ function makeGdd(entityCountPerScene = 2, sceneCount = 1): OrchestratorGDD {
     systems: [],
     scenes,
     assetManifest: [],
-    estimatedScope: 'tiny' as OrchestratorGDD['estimatedScope'],
+    estimatedScope: 'small',
     styleDirective: 'minimal',
     feelDirective: {
       mood: 'neutral',

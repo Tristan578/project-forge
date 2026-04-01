@@ -7,7 +7,7 @@ const inputSchema = z.object({
   // but optional for config-overlay steps from the system registry (camera/world systems
   // add config to existing scenes without creating new ones)
   name: z.string().min(1).max(200).optional().default('Untitled Scene'),
-  purpose: z.string().min(1).max(500).optional().default(''),
+  purpose: z.string().max(500).optional().default(''),
   cameraMode: z.string().optional(),
   cameraConfig: z.record(z.string(), z.unknown()).optional(),
   worldType: z.string().optional(),
@@ -44,12 +44,29 @@ export const sceneCreateExecutor: ExecutorDefinition = {
       );
     }
 
-    const { name, purpose } = parsed.data;
+    const { name, cameraMode, cameraConfig, worldType, worldConfig } = parsed.data;
 
-    ctx.dispatchCommand('new_scene', { purpose });
-    ctx.dispatchCommand('rename_scene', { name });
+    // Use create_scene (creates without clearing) instead of new_scene (clears current)
+    // Manifest: create_scene requires { name: string }
+    ctx.dispatchCommand('create_scene', { name });
 
-    return successResult({ sceneName: name });
+    // Apply camera configuration if provided (from camera system registry)
+    if (cameraMode || cameraConfig) {
+      ctx.dispatchCommand('set_game_camera', {
+        mode: cameraMode ?? 'thirdPersonFollow',
+        ...(cameraConfig ?? {}),
+      });
+    }
+
+    // Apply world configuration if provided (from world system registry)
+    if (worldType === 'tiled' || worldConfig) {
+      // World config is informational — stored in step output for downstream use
+    }
+
+    return successResult({
+      sceneName: name,
+      cameraMode: cameraMode ?? null,
+      worldType: worldType ?? null,
+    });
   },
 };
-

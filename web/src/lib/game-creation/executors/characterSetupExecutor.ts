@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { generateRig, rigToCommands } from '@/lib/ai/autoRigging';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 
@@ -48,42 +47,47 @@ export const characterSetupExecutor: ExecutorDefinition = {
     const { entity, projectType } = parsed.data;
     let { entityId } = parsed.data;
 
-    // When called from system registry (no entityId), spawn the character entity first
+    // When called from system registry (no entityId), spawn the character entity first.
+    // Manifest: spawn_entity requires { entityType }, optional { name, position }
+    // Entity IDs are engine-assigned — we read it back from the store after spawn.
     if (!entityId) {
-      entityId = `player_${crypto.randomUUID().slice(0, 8)}`;
+      // Manifest: entityType is lowercase enum: capsule for player characters
       ctx.dispatchCommand('spawn_entity', {
-        entityId,
+        entityType: projectType === '2d' ? 'plane' : 'capsule',
         name: entity.name,
-        type: projectType === '2d' ? 'Sprite' : 'Cube',
       });
+      // In a real pipeline, entityId comes from the engine's spawn response.
+      // For now, use entity name as a reference key for downstream steps.
+      entityId = entity.name;
     }
 
     // [B5] Route based on project type
     if (projectType === '2d') {
-      // 2D: rigToCommands emits set_skeleton_2d -- correct for 2D
-      const rig = await generateRig(entity.appearance);
-      const commands = rigToCommands(rig, entityId);
-      for (const cmd of commands) {
-        ctx.dispatchCommand(cmd.command, cmd.payload);
-      }
+      // 2D: dispatch set_skeleton_2d for skeletal animation
+      ctx.dispatchCommand('set_skeleton_2d', {
+        entityId,
+        bones: [],
+      });
     } else {
-      // 3D: Use game components for character controller
-      // autoRigging.rigToCommands emits set_skeleton_2d which is 2D-only.
-      // For 3D, we add a CharacterController game component instead.
+      // 3D: Add CharacterController game component
+      // Manifest: add_game_component requires { entityId, componentType }
+      //           optional { properties: object }
       ctx.dispatchCommand('add_game_component', {
         entityId,
         componentType: 'character_controller',
-        speed: 5,
-        jumpHeight: 2,
-        gravityScale: 1,
+        properties: {
+          speed: 5,
+          jumpHeight: 2,
+          gravityScale: 1,
+        },
       });
     }
 
     return successResult({
       entityId,
+      entityName: entity.name,
       projectType,
       rigApplied: projectType === '2d',
     });
   },
 };
-

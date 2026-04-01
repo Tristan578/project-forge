@@ -74,14 +74,9 @@ export const verifyExecutor: ExecutorDefinition = {
       issues.push('no_ambient_light');
     }
 
-    // Check 4: Physics components without colliders
-    // We check the physics store for entries where physicsEnabled is true
-    // but the physics data has no collider shape info
-    const { primaryPhysics, physicsEnabled } = ctx.store;
-    if (physicsEnabled && primaryPhysics && !primaryPhysics.colliderShape) {
-      warnings.push('Entity has physics enabled but no collider shape configured');
-      issues.push('physics_without_collider');
-    }
+    // Check 4: Physics without collider — requires per-entity iteration
+    // which is not available from the flat store snapshot. This check is
+    // deferred to Phase 2D when the orchestrator has entity-level queries.
 
     // Check 5: No ground plane heuristic for 3D
     if (ctx.projectType === '3d' && nodes.length > 0) {

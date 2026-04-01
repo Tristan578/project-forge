@@ -29,8 +29,9 @@ async function generateAsset(
     throw new Error('Aborted');
   }
   // Production: would call fetch('/api/generate/...', { signal })
-  // For now: return a deterministic placeholder so tests can assert on it
-  return `asset_${Date.now().toString(36)}`;
+  // Placeholder — returns a unique-ish ID for each call. Tests should assert
+  // on success/failure, not the specific ID value.
+  return `asset_${crypto.randomUUID().slice(0, 8)}`;
 }
 
 export const assetGenerateExecutor: ExecutorDefinition = {

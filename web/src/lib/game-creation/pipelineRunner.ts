@@ -43,11 +43,11 @@ function setStepStatus(step: PlanStep, status: PlanStep['status']): void {
 
 /**
  * Check whether all steps listed in dependsOn have completed successfully.
- * Returns false if any dependency is failed or skipped (i.e. did not complete).
+ * Uses a precomputed Map for O(1) lookups instead of O(n) find() per dep.
  */
-function dependenciesMet(step: PlanStep, steps: PlanStep[]): boolean {
+function dependenciesMet(step: PlanStep, stepMap: Map<string, PlanStep>): boolean {
   for (const depId of step.dependsOn) {
-    const dep = steps.find((s) => s.id === depId);
+    const dep = stepMap.get(depId);
     if (!dep || dep.status !== 'completed') {
       return false;
     }
@@ -108,18 +108,28 @@ export async function runPipeline(
     return plan;
   }
 
+  // Precompute step lookup map for O(1) dependency checks
+  const stepMap = new Map<string, PlanStep>();
+  for (const s of plan.steps) {
+    stepMap.set(s.id, s);
+  }
+
   for (let i = 0; i < plan.steps.length; i++) {
     const step = plan.steps[i];
     plan.currentStepIndex = i;
 
     // Check abort signal before starting each new step
     if (context.signal.aborted) {
-      setStepStatus(step, 'skipped');
-      continue;
+      // Mark all remaining steps as skipped and set plan to cancelled
+      for (let j = i; j < plan.steps.length; j++) {
+        setStepStatus(plan.steps[j], 'skipped');
+      }
+      setPlanStatus(plan, 'cancelled', callbacks);
+      return plan;
     }
 
     // Skip step if any dependency was not completed
-    if (!dependenciesMet(step, plan.steps)) {
+    if (!dependenciesMet(step, stepMap)) {
       setStepStatus(step, 'skipped');
       continue;
     }

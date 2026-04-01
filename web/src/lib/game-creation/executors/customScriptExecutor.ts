@@ -7,11 +7,9 @@ import { zSystemCategory } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 
 // --- [S6] PREREQUISITE: Reflect and Proxy must be in SHADOWED_GLOBALS ---
-// Before this executor can be used in production, the following MUST be added
-// to web/src/lib/scripting/scriptWorker.ts SHADOWED_GLOBALS:
-//   'Reflect', 'Proxy'
-// Without this, LLM-generated scripts could use Reflect/Proxy to escape
-// the sandbox.
+// [S6] Sandbox requirement: Reflect and Proxy must remain in SHADOWED_GLOBALS.
+// This executor relies on Reflect and Proxy being shadowed in
+// web/src/lib/scripting/sandboxGlobals.ts (verified: both present).
 
 // [FIX: V4-4] Use zSystemCategory for type-safe category validation.
 // Using z.string() would allow arbitrary strings to flow into LLM prompts.

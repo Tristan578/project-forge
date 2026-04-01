@@ -17,9 +17,48 @@ import type {
   ExecutorName,
   UserTier,
   SystemCategory,
+  GameSystem,
 } from './types';
 import { FALLBACK_SCHEMA } from './types';
 import { SYSTEM_REGISTRY } from './systems';
+
+// --- Topological sort for system dependency ordering ---
+// Ensures systems are processed after their dependsOn categories.
+// Within same depth, sorted by priority (core first).
+function topoSortSystems(
+  systems: GameSystem[],
+  priorityOrder: Record<string, number>,
+): GameSystem[] {
+  const byCategory = new Map<SystemCategory, GameSystem>();
+  for (const s of systems) {
+    byCategory.set(s.category, s);
+  }
+
+  const visited = new Set<SystemCategory>();
+  const result: GameSystem[] = [];
+
+  function visit(system: GameSystem): void {
+    if (visited.has(system.category)) return;
+    visited.add(system.category);
+    // Visit dependencies first
+    for (const dep of system.dependsOn) {
+      const depSystem = byCategory.get(dep);
+      if (depSystem) {
+        visit(depSystem);
+      }
+    }
+    result.push(system);
+  }
+
+  // Sort by priority first so that within same dependency depth, core comes first
+  const sorted = [...systems].sort(
+    (a, b) => (priorityOrder[a.priority] ?? 2) - (priorityOrder[b.priority] ?? 2),
+  );
+  for (const system of sorted) {
+    visit(system);
+  }
+  return result;
+}
 
 // --- Finding S2: Tier-based asset caps ---
 const ASSET_TIER_CAPS: Record<UserTier, number> = {
@@ -125,14 +164,14 @@ export function buildPlan(
   // [B2] Systems declare dependsOn categories. We resolve to step IDs.
   const systemCategoryStepIds: Record<string, string[]> = {};
 
+  // Topological sort: systems with dependencies come after their dependencies.
+  // Within the same dependency depth, sort by priority (core > secondary > polish).
   const PRIORITY_ORDER: Record<string, number> = {
     core: 0,
     secondary: 1,
     polish: 2,
   };
-  const orderedSystems = [...gdd.systems].sort(
-    (a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority],
-  );
+  const orderedSystems = topoSortSystems(gdd.systems, PRIORITY_ORDER);
 
   // All entity step IDs as a baseline dependency for system steps
   const allEntityStepIds = Object.values(entityStepIds);

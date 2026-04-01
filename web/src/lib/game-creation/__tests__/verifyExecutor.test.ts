@@ -224,21 +224,8 @@ describe('verify_all_scenes executor', () => {
     expect(result.error?.code).toBe('ABORTED');
   });
 
-  it('warns about physics without collider shape', async () => {
-    const nodes = [
-      makeNode({ entityId: 'e1', name: 'Player' }),
-      makeNode({ entityId: 'e2', name: 'Camera' }),
-      makeNode({ entityId: 'e3', name: 'Ambient Light' }),
-      makeNode({ entityId: 'e4', name: 'Ground' }),
-    ];
-    const ctx = makeMockCtx(nodes, {
-      physicsEnabled: true,
-      primaryPhysics: { colliderShape: null },
-    });
-    const result = await executor.execute({}, ctx);
-
-    expect(result.output?.['issues']).toContain('physics_without_collider');
-  });
+  // Physics-without-collider check deferred to Phase 2D — requires per-entity
+  // iteration which the flat store snapshot cannot provide.
 
   it('returns warnings array (even empty)', async () => {
     const ctx = makeMockCtx([]);

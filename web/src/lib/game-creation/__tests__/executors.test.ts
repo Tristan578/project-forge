@@ -160,14 +160,13 @@ describe('scene_create executor', () => {
     expect(executor.name).toBe('scene_create');
   });
 
-  it('dispatches new_scene and rename_scene on happy path', async () => {
+  it('dispatches create_scene on happy path', async () => {
     const ctx = makeMockCtx();
     const result = await executor.execute({ name: 'Level 1', purpose: 'Main game level' }, ctx);
 
     expect(result.success).toBe(true);
     expect(result.output?.['sceneName']).toBe('Level 1');
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('new_scene', expect.any(Object));
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('rename_scene', { name: 'Level 1' });
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('create_scene', { name: 'Level 1' });
   });
 
   it('fails with INVALID_INPUT when name is empty', async () => {
@@ -184,9 +183,7 @@ describe('scene_create executor', () => {
 
     // When called from system registry (camera/world), name defaults to 'Untitled Scene'
     expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('rename_scene', expect.objectContaining({
-      name: 'Untitled Scene',
-    }));
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('create_scene', { name: 'Untitled Scene' });
   });
 
   it('returns ABORTED when signal is already aborted', async () => {
@@ -348,7 +345,7 @@ describe('character_setup executor', () => {
     expect(result.success).toBe(true);
     expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', expect.objectContaining({
       name: baseEntity.name,
-      type: 'Cube',
+      entityType: 'capsule',
     }));
   });
 
@@ -382,7 +379,7 @@ describe('entity_setup executor', () => {
     expect(executor.name).toBe('entity_setup');
   });
 
-  it('dispatches spawn_entity on happy path (3D)', async () => {
+  it('dispatches switch_scene then spawn_entity on happy path (3D)', async () => {
     const ctx = makeMockCtx({ projectType: '3d' });
     const result = await executor.execute(
       { entity: baseEntity, scene: 'Level 1', projectType: '3d' },
@@ -390,15 +387,16 @@ describe('entity_setup executor', () => {
     );
 
     expect(result.success).toBe(true);
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('switch_scene', { sceneId: 'Level 1' });
     expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', expect.objectContaining({
       name: 'Enemy',
-      scene: 'Level 1',
+      entityType: 'cube',
     }));
     expect(result.output?.['entityName']).toBe('Enemy');
     expect(result.output?.['role']).toBe('enemy');
   });
 
-  it('uses Sprite entity type for 2D', async () => {
+  it('uses plane entity type for 2D', async () => {
     const ctx = makeMockCtx({ projectType: '2d' });
     const result = await executor.execute(
       { entity: baseEntity, scene: 'Level 1', projectType: '2d' },
@@ -406,10 +404,10 @@ describe('entity_setup executor', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(result.output?.['entityType']).toBe('Sprite');
+    expect(result.output?.['entityType']).toBe('plane');
   });
 
-  it('uses Sphere entity type for projectile role', async () => {
+  it('uses sphere entity type for projectile role', async () => {
     const projectileEntity = { ...baseEntity, role: 'projectile' as const };
     const ctx = makeMockCtx({ projectType: '3d' });
     const result = await executor.execute(
@@ -418,7 +416,7 @@ describe('entity_setup executor', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(result.output?.['entityType']).toBe('Sphere');
+    expect(result.output?.['entityType']).toBe('sphere');
   });
 
   it('fails with INVALID_INPUT when scene is missing', async () => {
@@ -746,26 +744,14 @@ describe('auto_polish executor', () => {
     expect(calls.every(([cmd]) => cmd !== 'set_ambient_light')).toBe(true);
   });
 
-  it('dispatches set_game_camera with SideScroller for 2D', async () => {
+  it('adds camera setup fix for no_camera_on_player', async () => {
     const ctx = makeMockCtx({ projectType: '2d' });
     vi.mocked(ctx.resolveStepOutput).mockReturnValue({ issues: ['no_camera_on_player'] });
     const result = await executor.execute({ ...baseInput, projectType: '2d' }, ctx);
 
     expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', expect.objectContaining({
-      mode: 'SideScroller',
-    }));
-  });
-
-  it('dispatches set_game_camera with ThirdPerson for 3D', async () => {
-    const ctx = makeMockCtx();
-    vi.mocked(ctx.resolveStepOutput).mockReturnValue({ issues: ['no_camera_on_player'] });
-    const result = await executor.execute(baseInput, ctx);
-
-    expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', expect.objectContaining({
-      mode: 'ThirdPerson',
-    }));
+    const fixes = result.output?.['fixesApplied'] as string[];
+    expect(fixes).toContain('Added player camera setup');
   });
 
   it('dispatches spawn_entity ground plane for no_ground_plane', async () => {

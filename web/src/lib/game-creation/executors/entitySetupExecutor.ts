@@ -2,15 +2,16 @@ import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 
-// Map entity role to a default entity type to spawn
+// Map entity role to valid spawn_entity entityType enum values (lowercase)
+// Manifest: entityType enum: cube, sphere, plane, cylinder, cone, torus, capsule, point_light, etc.
 const ROLE_TO_ENTITY_TYPE: Record<string, string> = {
-  player: 'Cube',
-  enemy: 'Cube',
-  npc: 'Cube',
-  decoration: 'Cube',
-  trigger: 'Cube',
-  interactable: 'Cube',
-  projectile: 'Sphere',
+  player: 'capsule',
+  enemy: 'cube',
+  npc: 'cube',
+  decoration: 'cube',
+  trigger: 'cube',
+  interactable: 'cube',
+  projectile: 'sphere',
 };
 
 const entityBlueprintSchema = z.object({
@@ -50,12 +51,18 @@ export const entitySetupExecutor: ExecutorDefinition = {
     }
 
     const { entity, scene, projectType } = parsed.data;
-    const entityType = projectType === '2d' ? 'Sprite' : (ROLE_TO_ENTITY_TYPE[entity.role] ?? 'Cube');
+    // Manifest: spawn_entity entityType is lowercase enum
+    const entityType = projectType === '2d' ? 'plane' : (ROLE_TO_ENTITY_TYPE[entity.role] ?? 'cube');
 
+    // Switch to the target scene before spawning
+    // Manifest: switch_scene requires { sceneId: string }
+    ctx.dispatchCommand('switch_scene', { sceneId: scene });
+
+    // Manifest: spawn_entity requires { entityType }, optional { name, position }
+    // Note: 'scene' is NOT a valid parameter — we switch_scene first
     ctx.dispatchCommand('spawn_entity', {
       entityType,
       name: entity.name,
-      scene,
     });
 
     return successResult({
@@ -65,4 +72,3 @@ export const entitySetupExecutor: ExecutorDefinition = {
     });
   },
 };
-
