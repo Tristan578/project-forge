@@ -1,0 +1,61 @@
+name: Coverage Ratchet
+
+# Standalone workflow for committing bumped coverage thresholds on main.
+# quality-gates.yml cannot push because reusable workflows inherit the
+# caller's permissions (ci.yml → contents: read). This workflow runs
+# independently with contents: write so the ratchet script can commit.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/src/**'
+      - 'web/vitest.config.ts'
+      - 'web/vitest.config.node.ts'
+      - 'web/vitest.config.jsdom.ts'
+      - 'web/package.json'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: coverage-ratchet-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  ratchet:
+    name: Ratchet Coverage Thresholds
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Run tests with coverage
+        working-directory: web
+        run: npx vitest run --coverage --coverage.reporter=json-summary --pool=threads
+        continue-on-error: true
+
+      - name: Run ratchet script
+        run: bash .claude/skills/testing/scripts/ratchet-coverage.sh web/coverage
+
+      - name: Commit bumped thresholds
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet web/vitest.config.ts; then
+            echo "No threshold changes to commit."
+          else
+            git add web/vitest.config.ts
+            git commit -m "chore: ratchet coverage thresholds [skip ci]"
+            git push
+          fi

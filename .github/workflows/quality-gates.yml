@@ -218,18 +218,10 @@ jobs:
       - name: Run coverage ratchet (informational on PRs, commits on main)
         run: bash .claude/skills/testing/scripts/ratchet-coverage.sh web/coverage
 
-      - name: Commit bumped thresholds (main branch only, requires write perms)
-        if: github.ref == 'refs/heads/main' && inputs.can-commit-ratchet
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet web/vitest.config.ts; then
-            echo "No threshold changes to commit."
-          else
-            git add web/vitest.config.ts
-            git commit -m "chore: ratchet coverage thresholds [skip ci]"
-            git push
-          fi
+      # NOTE: The ratchet commit step has been moved to a standalone workflow
+      # (.github/workflows/coverage-ratchet.yml) because reusable workflows
+      # inherit the caller's permissions (ci.yml → contents: read) and cannot
+      # push. See #8122.
 
   test-mcp:
     name: MCP Tests
