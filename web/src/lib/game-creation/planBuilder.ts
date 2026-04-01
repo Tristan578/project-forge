@@ -162,7 +162,9 @@ export function buildPlan(
         },
         [sceneStepId],
       );
-      entityStepIds[entity.name] = step.id;
+      // Scope entity step IDs by scene to avoid collisions when
+      // entities in different scenes share the same name
+      entityStepIds[`${scene.name}:${entity.name}`] = step.id;
       steps.push(step);
     }
   }
@@ -233,16 +235,20 @@ export function buildPlan(
         targetEntityId = gdd.scenes[0].entities[0].name;
       }
 
+      // If no entity exists to bind the script to, mark step as optional
+      // so the pipeline doesn't abort — the system simply won't have a script
+      const hasTarget = targetEntityId.length > 0;
       const step = makeStep(
         'custom_script_generate',
         {
           system,
           description: `Implement ${system.category}:${system.type} behavior`,
-          targetEntityId,
+          targetEntityId: hasTarget ? targetEntityId : 'unbound',
           projectType: gdd.projectType,
           feelDirective: gdd.feelDirective,
         },
         systemDeps,
+        !hasTarget, // optional when no entity to bind to
       );
       steps.push(step);
     }

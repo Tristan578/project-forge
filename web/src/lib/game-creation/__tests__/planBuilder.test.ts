@@ -343,6 +343,39 @@ describe('buildPlan', () => {
     expect(sceneNames).toContain('Scene3');
   });
 
+  it('handles duplicate entity names across different scenes without collision', () => {
+    const gdd = makeGdd({
+      scenes: [
+        {
+          name: 'Forest',
+          purpose: 'outdoor level',
+          systems: [],
+          entities: [
+            { name: 'Enemy', role: 'enemy' as const, systems: [], appearance: 'goblin', behaviors: [] },
+          ],
+          transitions: [],
+        },
+        {
+          name: 'Castle',
+          purpose: 'indoor level',
+          systems: [],
+          entities: [
+            { name: 'Enemy', role: 'enemy' as const, systems: [], appearance: 'knight', behaviors: [] },
+          ],
+          transitions: [],
+        },
+      ],
+    });
+
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const entitySteps = plan.steps.filter(s => s.executor === 'entity_setup');
+
+    // Both entities should have their own steps (no overwrite)
+    expect(entitySteps).toHaveLength(2);
+    // Each depends on its own scene step (different scene step IDs)
+    expect(entitySteps[0].dependsOn).not.toEqual(entitySteps[1].dependsOn);
+  });
+
   // Additional: plan contains required top-level fields
   it('returns plan with required top-level fields', () => {
     const gdd = makeGdd();
