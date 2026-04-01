@@ -101,7 +101,7 @@ export async function GET(
       .orderBy(orderFn(leaderboardEntries.score))
       .limit(limit);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       leaderboard: {
         name: board.name,
         sortOrder: board.sortOrder,
@@ -115,6 +115,8 @@ export async function GET(
         createdAt: e.createdAt,
       })),
     });
+    response.headers.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=60');
+    return response;
   } catch (error) {
     captureException(error, { route: '/api/play/[userId]/[slug]/leaderboard GET' });
     return NextResponse.json({ error: 'Failed to fetch leaderboard' }, { status: 500 });

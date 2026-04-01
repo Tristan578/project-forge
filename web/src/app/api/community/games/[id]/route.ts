@@ -127,7 +127,9 @@ export async function GET(
       })),
     };
 
-    return NextResponse.json({ game: formattedGame });
+    const response = NextResponse.json({ game: formattedGame });
+    response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+    return response;
   } catch (error) {
     console.error('Failed to fetch game:', error);
     captureException(error, { route: '/api/community/games/[id]' });
