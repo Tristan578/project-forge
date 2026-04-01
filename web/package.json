@@ -31,7 +31,7 @@
     "@ai-sdk/anthropic": "^3.0.63",
     "@ai-sdk/gateway": "^3.0.78",
     "@ai-sdk/react": "^3.0.138",
-    "@anthropic-ai/sdk": "^0.80.0",
+    "@anthropic-ai/sdk": "^0.81.0",
     "@aws-sdk/client-s3": "^3.1004.0",
     "@aws-sdk/s3-request-presigner": "^3.1014.0",
     "@clerk/nextjs": "^7.0.7",
