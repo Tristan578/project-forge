@@ -751,14 +751,26 @@ describe('auto_polish executor', () => {
     expect(calls.every(([cmd]) => cmd !== 'set_ambient_light')).toBe(true);
   });
 
-  it('adds camera setup fix for no_camera_on_player', async () => {
-    const ctx = makeMockCtx({ projectType: '2d' });
+  it('configures camera via set_game_camera for no_camera_on_player', async () => {
+    // Provide a Camera node in the store (every scene has one by default)
+    const storeWithCamera = makeMockStore({
+      sceneGraph: {
+        nodes: { cam1: { entityId: 'cam-entity-1', name: 'Camera' } },
+        rootIds: ['cam1'],
+      } as EditorState['sceneGraph'],
+    });
+    const ctx = makeMockCtx({ projectType: '2d', store: storeWithCamera });
     vi.mocked(ctx.resolveStepOutput).mockReturnValue({ issues: ['no_camera_on_player'] });
     const result = await executor.execute({ ...baseInput, projectType: '2d' }, ctx);
 
     expect(result.success).toBe(true);
+    // Should dispatch set_game_camera with the camera entity's ID and valid mode
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', expect.objectContaining({
+      entityId: 'cam-entity-1',
+      mode: 'sideScroller', // 2D project type
+    }));
     const fixes = result.output?.['fixesApplied'] as string[];
-    expect(fixes).toContain('Added player camera setup');
+    expect(fixes).toContain('Configured camera as sideScroller');
   });
 
   it('dispatches spawn_entity ground plane for no_ground_plane', async () => {
@@ -773,7 +785,13 @@ describe('auto_polish executor', () => {
   });
 
   it('handles multiple issues, applies all fixes', async () => {
-    const ctx = makeMockCtx();
+    const storeWithCamera = makeMockStore({
+      sceneGraph: {
+        nodes: { cam1: { entityId: 'cam-1', name: 'Camera' } },
+        rootIds: ['cam1'],
+      } as EditorState['sceneGraph'],
+    });
+    const ctx = makeMockCtx({ store: storeWithCamera });
     vi.mocked(ctx.resolveStepOutput).mockReturnValue({
       issues: ['no_ambient_light', 'no_camera_on_player'],
     });

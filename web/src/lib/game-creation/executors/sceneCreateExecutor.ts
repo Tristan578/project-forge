@@ -2,6 +2,13 @@ import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 
+// Valid camera modes per engine manifest (set_game_camera.mode enum)
+const VALID_CAMERA_MODES = [
+  'thirdPersonFollow', 'firstPerson', 'sideScroller',
+  'topDown', 'fixed', 'orbital',
+] as const;
+type CameraMode = typeof VALID_CAMERA_MODES[number];
+
 const inputSchema = z.object({
   // name/purpose are required for primary scene creation (from planBuilder Phase 1)
   // but optional for config-overlay steps from the system registry (camera/world systems
@@ -51,19 +58,23 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     ctx.dispatchCommand('create_scene', { name });
 
     // Apply camera configuration if provided (from camera system registry).
-    // set_game_camera requires entityId — we can only apply if one is in cameraConfig
-    // or if the scene has a known camera entity. Without entityId, store the config
-    // in output for downstream steps (e.g. autoPolish) to apply later.
+    // set_game_camera requires entityId + valid mode enum.
     if (cameraMode || cameraConfig) {
       const cameraEntityId = (cameraConfig as Record<string, unknown> | undefined)?.['entityId'];
+
+      // Validate cameraMode against engine enum — reject invalid values
+      const validMode: CameraMode = VALID_CAMERA_MODES.includes(cameraMode as CameraMode)
+        ? (cameraMode as CameraMode)
+        : 'thirdPersonFollow';
+
       if (typeof cameraEntityId === 'string') {
         ctx.dispatchCommand('set_game_camera', {
           entityId: cameraEntityId,
-          mode: cameraMode ?? 'thirdPersonFollow',
+          mode: validMode,
           ...(cameraConfig ?? {}),
         });
       }
-      // If no entityId, camera config is stored in output for later application
+      // If no entityId, camera config stored in output for downstream steps
     }
 
     // Apply world configuration if provided (from world system registry)

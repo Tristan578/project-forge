@@ -56,17 +56,26 @@ export const autoPolishExecutor: ExecutorDefinition = {
     }
 
     // set_game_camera — manifest requires { entityId, mode }
-    // mode enum: thirdPersonFollow, firstPerson, sideScroller, topDown, fixed, orbital
+    // Every scene has a default Camera entity (Undeletable). Find it from the store
+    // and configure it as a player-following camera.
     if (issues.includes('no_camera_on_player')) {
-      // Spawn a camera entity first, then configure it
-      ctx.dispatchCommand('spawn_entity', {
-        entityType: 'point_light', // placeholder — cameras are implicit in SpawnForge
-        name: 'GameCamera',
+      const nodes = Object.values(ctx.store.sceneGraph.nodes);
+      const cameraNode = nodes.find(n => {
+        const lower = n.name.toLowerCase();
+        return lower === 'camera' || lower.endsWith('camera') || lower.endsWith('_cam');
       });
-      // Note: set_game_camera requires entityId which we don't have from spawn.
-      // In production, this would read the spawned entity ID from the store.
-      // For now, apply camera mode to the scene's default camera.
-      fixes.push('Added player camera setup');
+
+      if (cameraNode) {
+        const mode = parsed.data.projectType === '2d' ? 'sideScroller' : 'thirdPersonFollow';
+        ctx.dispatchCommand('set_game_camera', {
+          entityId: cameraNode.entityId,
+          mode,
+          followSmoothing: 0.8,
+        });
+        fixes.push(`Configured camera as ${mode}`);
+      } else {
+        fixes.push('Warning: no camera entity found to configure');
+      }
     }
 
     // spawn_entity — manifest: { entityType, name?, position?: [x,y,z] }

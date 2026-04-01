@@ -61,15 +61,21 @@ function collectTsFiles(dir: string): string[] {
 // - Test description strings: describe('platformer', ...), it('is not a platformer', ...)
 //
 // For this test we scan the actual code tokens (non-comment, non-string portions).
-// Strategy: strip block comments, then line comments, then check remaining content.
-// This is approximate but sufficient for a lint-style guard.
+// Strategy: strip block comments, line comments, then string literals, then check.
+// This ensures genre terms in error messages or user-facing strings don't false-positive.
 // ---------------------------------------------------------------------------
 
-function stripComments(source: string): string {
+function stripCommentsAndStrings(source: string): string {
   // Strip block comments (/* ... */) — non-greedy
   let stripped = source.replace(/\/\*[\s\S]*?\*\//g, '');
   // Strip line comments (// ...)
   stripped = stripped.replace(/\/\/[^\n]*/g, '');
+  // Strip template literals (`...`)
+  stripped = stripped.replace(/`[^`]*`/g, '""');
+  // Strip single-quoted strings ('...')
+  stripped = stripped.replace(/'[^']*'/g, '""');
+  // Strip double-quoted strings ("...")
+  stripped = stripped.replace(/"[^"]*"/g, '""');
   return stripped;
 }
 
@@ -89,7 +95,7 @@ describe('Genre Agnosticism (B10)', () => {
 
     it(`${relativePath} contains no genre terminology`, () => {
       const source = fs.readFileSync(filePath, 'utf8');
-      const stripped = stripComments(source);
+      const stripped = stripCommentsAndStrings(source);
       const lines = stripped.split('\n');
 
       const violations: string[] = [];
