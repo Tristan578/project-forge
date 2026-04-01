@@ -62,7 +62,7 @@ function violationSummary(
 // Editor page — main area
 // ---------------------------------------------------------------------------
 
-test.describe('Accessibility Audit — Editor @ui', () => {
+test.describe('Accessibility Audit — Editor @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });
@@ -113,7 +113,7 @@ test.describe('Accessibility Audit — Editor @ui', () => {
 // 404 page
 // ---------------------------------------------------------------------------
 
-test.describe('Accessibility Audit — 404 Page @ui', () => {
+test.describe('Accessibility Audit — 404 Page @ui @dev', () => {
   test('404 page has zero critical or serious axe violations', async ({
     page,
   }) => {
@@ -146,7 +146,7 @@ test.describe('Accessibility Audit — 404 Page @ui', () => {
 // Settings dialog
 // ---------------------------------------------------------------------------
 
-test.describe('Accessibility Audit — Settings Dialog @ui', () => {
+test.describe('Accessibility Audit — Settings Dialog @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });
@@ -189,7 +189,7 @@ test.describe('Accessibility Audit — Settings Dialog @ui', () => {
 // WelcomeModal
 // ---------------------------------------------------------------------------
 
-test.describe('Accessibility Audit — WelcomeModal @ui', () => {
+test.describe('Accessibility Audit — WelcomeModal @ui @dev', () => {
   test('WelcomeModal has zero critical or serious axe violations', async ({
     page,
   }) => {
@@ -244,7 +244,7 @@ test.describe('Accessibility Audit — WelcomeModal @ui', () => {
 // Keyboard shortcuts panel
 // ---------------------------------------------------------------------------
 
-test.describe('Accessibility Audit — Keyboard Shortcuts Panel @ui', () => {
+test.describe('Accessibility Audit — Keyboard Shortcuts Panel @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });

@@ -1,7 +1,7 @@
 import { test, expect } from '../fixtures/editor.fixture';
 import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS, E2E_TIMEOUT_AUTH_MS } from '../constants';
 
-test.describe('Modals @ui', () => {
+test.describe('Modals @ui @dev', () => {
   test('settings modal opens and is visible', async ({ page, editor }) => {
     await editor.loadPage();
 

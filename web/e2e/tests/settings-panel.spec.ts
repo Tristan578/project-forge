@@ -11,7 +11,7 @@ import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
 // Target only the settings dialog, not Next.js error overlays or other modals
 const settingsDialog = '[role="dialog"][aria-labelledby="settings-dialog-title"]';
 
-test.describe('Settings Panel @ui', () => {
+test.describe('Settings Panel @ui @dev', () => {
   test.beforeEach(async ({ editor, page }) => {
     await editor.loadPage();
     // Open settings modal

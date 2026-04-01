@@ -4,7 +4,7 @@ import {
   E2E_TIMEOUT_ELEMENT_MS,
 } from '../constants';
 
-test.describe('AI Chat @ui', () => {
+test.describe('AI Chat @ui @dev', () => {
   test('chat overlay can be opened with Ctrl+K shortcut', async ({ page, editor }) => {
     await editor.loadPage();
 

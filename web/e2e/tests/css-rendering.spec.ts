@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('CSS & Visual Rendering Tests @ui', () => {
+test.describe('CSS & Visual Rendering Tests @ui @dev', () => {
   test('no elements with bg- class but transparent background', async ({ page, editor }) => {
     await editor.loadPage();
 

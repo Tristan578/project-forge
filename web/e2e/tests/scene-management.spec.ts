@@ -11,7 +11,7 @@
 import { test, expect } from '../fixtures/editor.fixture';
 import { E2E_TIMEOUT_ELEMENT_MS } from '../constants';
 
-test.describe('Scene Management @ui', () => {
+test.describe('Scene Management @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });

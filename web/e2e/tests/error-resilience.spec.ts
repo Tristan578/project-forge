@@ -7,7 +7,7 @@ import { E2E_TIMEOUT_SHORT_MS, E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS, E2E_
  * including store corruption attempts, rapid interactions, and
  * console error monitoring.
  */
-test.describe('Error Resilience @ui', () => {
+test.describe('Error Resilience @ui @dev', () => {
   test.describe('Console Error Monitoring', () => {
     test('editor loads without critical JS errors', async ({ page, editor }) => {
       const errors: string[] = [];

@@ -11,11 +11,11 @@ import {
  * Measures time-to-interactive (editor canvas visible) and JS heap memory
  * after the editor loads. Budgets imported from performanceTargets.ts.
  *
- * Tagged @ui @slow — runs in Chromium only (needs performance.memory API).
+ * Tagged @ui @dev @slow — runs in Chromium only (needs performance.memory API).
  * Uses loadPage() (no WASM engine) to measure pure React load time.
  */
 
-test.describe('Editor Load Budget @ui @slow', () => {
+test.describe('Editor Load Budget @ui @dev @slow', () => {
   // fixme(PF-690): CI runners consistently exceed TTI budget due to slow GHA runners.
   // Tracked: the E2E_TTI_CI_MS constant exists but cannot be enforced until CI runners
   // are fast enough or we add a CI-specific multiplier.

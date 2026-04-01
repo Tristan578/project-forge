@@ -19,7 +19,7 @@ import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
 // ---------------------------------------------------------------------------
 // Responsive Layout Breakpoints
 // ---------------------------------------------------------------------------
-test.describe('Responsive Layout Breakpoints @ui', () => {
+test.describe('Responsive Layout Breakpoints @ui @dev', () => {
   test('mobile viewport (375×667) shows canvas', async ({ page, editor }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await editor.loadPage();
@@ -98,7 +98,7 @@ test.describe('Responsive Layout Breakpoints @ui', () => {
 // ---------------------------------------------------------------------------
 // Compact Mode — Sidebar Collapse
 // ---------------------------------------------------------------------------
-test.describe('Mobile Sidebar Collapse @ui', () => {
+test.describe('Mobile Sidebar Collapse @ui @dev', () => {
   test('sidebar is hidden at mobile viewport (375px)', async ({ page, editor }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await editor.loadPage();
@@ -148,7 +148,7 @@ test.describe('Mobile Sidebar Collapse @ui', () => {
 // ---------------------------------------------------------------------------
 // Mobile Toolbar
 // ---------------------------------------------------------------------------
-test.describe('Mobile Toolbar @ui', () => {
+test.describe('Mobile Toolbar @ui @dev', () => {
   test('mobile toolbar is visible at compact viewport', async ({ page, editor }) => {
     await page.setViewportSize({ width: 768, height: 600 });
     await editor.loadPage();
@@ -215,7 +215,7 @@ test.describe('Mobile Toolbar @ui', () => {
 // ---------------------------------------------------------------------------
 // WCAG Touch Target Sizes (min 44×44px)
 // ---------------------------------------------------------------------------
-test.describe('Touch Target Sizes @ui', () => {
+test.describe('Touch Target Sizes @ui @dev', () => {
   test('mobile toolbar gizmo buttons meet minimum touch target size', async ({ page, editor }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await editor.loadPage();
@@ -274,7 +274,7 @@ test.describe('Touch Target Sizes @ui', () => {
 // ---------------------------------------------------------------------------
 // Virtual Joystick Store Configuration
 // ---------------------------------------------------------------------------
-test.describe('Virtual Joystick Store Config @ui', () => {
+test.describe('Virtual Joystick Store Config @ui @dev', () => {
   test('mobileTouchConfig exists in store with enabled flag', async ({ editor }) => {
     await editor.loadPage();
 
@@ -332,7 +332,7 @@ test.describe('Virtual Joystick Store Config @ui', () => {
 // ---------------------------------------------------------------------------
 // Canvas Rendering Across Breakpoints
 // ---------------------------------------------------------------------------
-test.describe('Canvas Rendering Across Breakpoints @ui', () => {
+test.describe('Canvas Rendering Across Breakpoints @ui @dev', () => {
   test('canvas has non-zero dimensions at mobile viewport', async ({ page, editor }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await editor.loadPage();
@@ -417,7 +417,7 @@ test.describe('Canvas Rendering Across Breakpoints @ui', () => {
 // ---------------------------------------------------------------------------
 // Drawer Panel (mobile hierarchy / inspector)
 // ---------------------------------------------------------------------------
-test.describe('Mobile Drawer Panels @ui', () => {
+test.describe('Mobile Drawer Panels @ui @dev', () => {
   test('hierarchy drawer opens on toggle button click', async ({ page, editor }) => {
     await page.setViewportSize({ width: 768, height: 600 });
     await editor.loadPage();

@@ -14,27 +14,27 @@ import { expect } from '@playwright/test';
 import type { AgentViewport } from '../lib/agentViewport';
 
 test.describe('AgentViewport — bootPage (no engine)', () => {
-  test('@ui boot initializes without errors', async ({ agentViewport: av }) => {
+  test('@ui @dev boot initializes without errors', async ({ agentViewport: av }) => {
     // bootPage skips WASM engine — just React hydration
     await av.bootPage();
     // If bootPage didn't throw, the fixture is working
     expect(av).toBeDefined();
   });
 
-  test('@ui consoleErrors starts empty after boot', async ({ agentViewport: av }) => {
+  test('@ui @dev consoleErrors starts empty after boot', async ({ agentViewport: av }) => {
     await av.bootPage();
     // No errors expected on a clean dev page
     expect(av.consoleErrors).toBeDefined();
     expect(Array.isArray(av.consoleErrors)).toBe(true);
   });
 
-  test('@ui clearConsoleErrors empties the list', async ({ agentViewport: av }) => {
+  test('@ui @dev clearConsoleErrors empties the list', async ({ agentViewport: av }) => {
     await av.bootPage();
     av.clearConsoleErrors();
     expect(av.consoleErrors).toHaveLength(0);
   });
 
-  test('@ui observe returns a ViewportObservation structure', async ({ agentViewport: av }) => {
+  test('@ui @dev observe returns a ViewportObservation structure', async ({ agentViewport: av }) => {
     await av.bootPage();
     const obs = await av.observe('test');
 
@@ -47,13 +47,13 @@ test.describe('AgentViewport — bootPage (no engine)', () => {
     expect(obs.capturedAt).toBeGreaterThan(0);
   });
 
-  test('@ui observe without label has undefined label', async ({ agentViewport: av }) => {
+  test('@ui @dev observe without label has undefined label', async ({ agentViewport: av }) => {
     await av.bootPage();
     const obs = await av.observe();
     expect(obs.label).toBeUndefined();
   });
 
-  test('@ui observe returns valid scene structure', async ({ agentViewport: av }) => {
+  test('@ui @dev observe returns valid scene structure', async ({ agentViewport: av }) => {
     await av.bootPage();
     const obs = await av.observe();
 
@@ -68,7 +68,7 @@ test.describe('AgentViewport — bootPage (no engine)', () => {
     expect(typeof obs.scene.nodes).toBe('object');
   });
 
-  test('@ui getSceneSnapshot returns null or a valid snapshot', async ({ agentViewport: av }) => {
+  test('@ui @dev getSceneSnapshot returns null or a valid snapshot', async ({ agentViewport: av }) => {
     await av.bootPage();
     const snapshot = await av.getSceneSnapshot();
 
@@ -83,7 +83,7 @@ test.describe('AgentViewport — bootPage (no engine)', () => {
     }
   });
 
-  test('@ui captureViewport returns a ViewportCapture', async ({ agentViewport: av }) => {
+  test('@ui @dev captureViewport returns a ViewportCapture', async ({ agentViewport: av }) => {
     await av.bootPage();
     const capture = await av.captureViewport();
 
@@ -95,7 +95,7 @@ test.describe('AgentViewport — bootPage (no engine)', () => {
     expect(capture).toHaveProperty('isBlank');
   });
 
-  test('@ui sendCommand returns CommandResult with success boolean', async ({ agentViewport: av }) => {
+  test('@ui @dev sendCommand returns CommandResult with success boolean', async ({ agentViewport: av }) => {
     await av.bootPage();
     const result = await av.sendCommand('noop', {});
 
@@ -106,7 +106,7 @@ test.describe('AgentViewport — bootPage (no engine)', () => {
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  test('@ui sendCommand returns false when engine not initialized', async ({ agentViewport: av }) => {
+  test('@ui @dev sendCommand returns false when engine not initialized', async ({ agentViewport: av }) => {
     await av.bootPage();
     // With __SKIP_ENGINE=true, __FORGE_DISPATCH won't be wired to a real engine
     // The dispatch may still return a value — we just verify it's a boolean
@@ -114,7 +114,7 @@ test.describe('AgentViewport — bootPage (no engine)', () => {
     expect(typeof result.success).toBe('boolean');
   });
 
-  test('@ui verifyEntityExists returns a VerificationResult', async ({ agentViewport: av }) => {
+  test('@ui @dev verifyEntityExists returns a VerificationResult', async ({ agentViewport: av }) => {
     await av.bootPage();
     const result = await av.verifyEntityExists('Camera');
 
@@ -125,7 +125,7 @@ test.describe('AgentViewport — bootPage (no engine)', () => {
     expect(typeof result.reason).toBe('string');
   });
 
-  test('@ui verifyEntitySelected returns a VerificationResult', async ({ agentViewport: av }) => {
+  test('@ui @dev verifyEntitySelected returns a VerificationResult', async ({ agentViewport: av }) => {
     await av.bootPage();
     const result = await av.verifyEntitySelected('nonexistent-id');
 
@@ -134,7 +134,7 @@ test.describe('AgentViewport — bootPage (no engine)', () => {
     expect(result.passed).toBe(false); // nothing selected
   });
 
-  test('@ui getSelectedEntityProperties returns null when nothing selected', async ({ agentViewport: av }) => {
+  test('@ui @dev getSelectedEntityProperties returns null when nothing selected', async ({ agentViewport: av }) => {
     await av.bootPage();
     const props = await av.getSelectedEntityProperties();
     // Either null (nothing selected) or a node (if something was preselected)
@@ -146,14 +146,14 @@ test.describe('AgentViewport — bootPage (no engine)', () => {
     }
   });
 
-  test('@ui observe captures consoleErrors in the observation', async ({ agentViewport: av }) => {
+  test('@ui @dev observe captures consoleErrors in the observation', async ({ agentViewport: av }) => {
     await av.bootPage();
     const obs = await av.observe();
     // consoleErrors should be an array (may be empty)
     expect(Array.isArray(obs.consoleErrors)).toBe(true);
   });
 
-  test('@ui captureViewport with custom selector returns blank for non-existent canvas', async ({ agentViewport: av }) => {
+  test('@ui @dev captureViewport with custom selector returns blank for non-existent canvas', async ({ agentViewport: av }) => {
     await av.bootPage();
     const capture = await av.captureViewport({
       canvasSelector: '#does-not-exist-canvas-abc',
@@ -163,7 +163,7 @@ test.describe('AgentViewport — bootPage (no engine)', () => {
     expect(capture.width).toBe(0);
   });
 
-  test('@ui observe scene has valid engineMode value', async ({ agentViewport: av }) => {
+  test('@ui @dev observe scene has valid engineMode value', async ({ agentViewport: av }) => {
     await av.bootPage();
     const obs = await av.observe();
     const validModes = ['edit', 'play', 'paused'];

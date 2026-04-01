@@ -90,7 +90,7 @@ const POSITIONED_ENTITY_SCENE = JSON.stringify({
 // Group 1: Store-level round-trip tests (@ui — no WASM needed)
 // ---------------------------------------------------------------------------
 
-test.describe('Save/Load round-trip — store level @ui', () => {
+test.describe('Save/Load round-trip — store level @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
     await editor.waitForEditorStore();

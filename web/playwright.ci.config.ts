@@ -23,7 +23,7 @@ export default defineConfig({
   retries: 1,
   workers: 4,
   maxFailures: 10,
-  reporter: [['github'], ['html', { open: 'never' }]],
+  reporter: [['github'], ['blob'], ['html', { open: 'never' }]],
   timeout: CI_TEST_TIMEOUT_MS,
   expect: { timeout: CI_EXPECT_TIMEOUT_MS },
 

@@ -21,7 +21,7 @@ import {
  * WASM-dependent assertions are guarded with isStrictMode.
  * Store state is manipulated via injectStore / window.__EDITOR_STORE.setState.
  */
-test.describe('Game Creation Flow @ui', () => {
+test.describe('Game Creation Flow @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });

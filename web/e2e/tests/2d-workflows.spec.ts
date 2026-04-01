@@ -2,7 +2,7 @@ import { test, expect } from '../fixtures/editor.fixture';
 import { injectStore, isStrictMode } from '../helpers/store-injection';
 import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS, E2E_TIMEOUT_NAV_MS } from '../constants';
 
-test.describe('2D Workflows @ui', () => {
+test.describe('2D Workflows @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });

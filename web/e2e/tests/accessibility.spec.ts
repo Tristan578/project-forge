@@ -10,7 +10,7 @@ import {
  * Verifies ARIA roles, labels, keyboard navigation, focus management,
  * and screen reader compatibility across the editor UI.
  */
-test.describe('Accessibility @ui', () => {
+test.describe('Accessibility @ui @dev', () => {
   test.describe('ARIA Landmarks', () => {
     test.beforeEach(async ({ editor }) => {
       await editor.loadPage();

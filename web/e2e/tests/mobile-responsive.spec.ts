@@ -16,7 +16,7 @@ import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
 // ---------------------------------------------------------------------------
 // iPhone 14 (390x844)
 // ---------------------------------------------------------------------------
-test.describe('iPhone 14 Viewport (390x844) @ui', () => {
+test.describe('iPhone 14 Viewport (390x844) @ui @dev', () => {
   test.beforeEach(async ({ page, editor }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await editor.loadPage();
@@ -100,7 +100,7 @@ test.describe('iPhone 14 Viewport (390x844) @ui', () => {
 // ---------------------------------------------------------------------------
 // iPad (768x1024)
 // ---------------------------------------------------------------------------
-test.describe('iPad Viewport (768x1024) @ui', () => {
+test.describe('iPad Viewport (768x1024) @ui @dev', () => {
   test.beforeEach(async ({ page, editor }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await editor.loadPage();
@@ -158,7 +158,7 @@ test.describe('iPad Viewport (768x1024) @ui', () => {
 // ---------------------------------------------------------------------------
 // WCAG 2.5.5 Touch Target Sizes (44x44 CSS px minimum) — both viewports
 // ---------------------------------------------------------------------------
-test.describe('Touch Target Sizes @ui', () => {
+test.describe('Touch Target Sizes @ui @dev', () => {
   for (const [label, viewport] of [
     ['iPhone 14 (390x844)', { width: 390, height: 844 }],
     ['iPad (768x1024)', { width: 768, height: 1024 }],

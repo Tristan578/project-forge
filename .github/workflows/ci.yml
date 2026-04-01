@@ -292,14 +292,19 @@ jobs:
 
   # Engine-dependent E2E tests (@engine) require WASM + GPU which CI runners lack.
   # Only UI-only E2E tests (@ui) run in CI — they test React shell without WASM.
+  # Sharded across 3 parallel runners to stay well under the 30-min timeout.
   test-e2e-ui:
-    name: E2E UI Tests
+    name: E2E UI Tests (${{ matrix.shard }})
     needs: [ci-gate]
     if: ${{ needs.ci-gate.outputs.needs-web == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/3, 2/3, 3/3]
     steps:
       - uses: actions/checkout@v4
 
@@ -314,9 +319,22 @@ jobs:
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('web/package-lock.json') }}
+
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: web
         run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright OS deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: web
+        run: npx playwright install-deps chromium
 
       - name: Build for E2E
         working-directory: web
@@ -324,12 +342,54 @@ jobs:
           SKIP_ENV_VALIDATION: 'true'
         run: npx next build
 
-      - name: Run UI-only E2E tests
+      - name: Run UI-only E2E tests (shard ${{ matrix.shard }})
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-        # Use production server (next start) instead of dev server (next dev).
-        # next dev compiles on-demand — too slow for CI (2-3 min cold start).
-        # next start boots in <5s after build, saving ~3 min per run.
-        # Exclude @dev tests — /dev route redirects to /sign-in under next start (production mode).
-        run: npx playwright test --grep '@ui' --grep-invert '@dev' --project=chromium --config playwright.ci.config.ts
+        run: npx playwright test --grep '@ui' --grep-invert '@dev' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
+
+      - name: Upload blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-report-${{ strategy.job-index }}
+          path: web/blob-report/
+          retention-days: 7
+
+  # Merge sharded E2E reports into a single HTML report
+  merge-e2e-reports:
+    name: Merge E2E Reports
+    needs: [test-e2e-ui]
+    if: ${{ !cancelled() && needs.test-e2e-ui.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Download blob reports
+        uses: actions/download-artifact@v4
+        with:
+          path: web/all-blob-reports
+          pattern: blob-report-*
+          merge-multiple: true
+
+      - name: Merge reports
+        working-directory: web
+        run: npx playwright merge-reports --reporter=html ./all-blob-reports
+
+      - name: Upload merged report
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: web/playwright-report/
+          retention-days: 14

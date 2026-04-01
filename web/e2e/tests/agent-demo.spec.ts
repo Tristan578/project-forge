@@ -25,7 +25,7 @@ test.describe('AgentViewport — demo workflow', () => {
    * to verify what it has built. This test covers 11 assertions across
    * scene state, viewport, formatters, and verification helpers.
    */
-  test('@ui agent can observe initial editor state and format a report', async ({ agentViewport: av }) => {
+  test('@ui @dev agent can observe initial editor state and format a report', async ({ agentViewport: av }) => {
     // 1. Boot the editor (page-level, no WASM)
     await av.bootPage();
 

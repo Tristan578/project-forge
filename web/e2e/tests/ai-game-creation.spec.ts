@@ -16,7 +16,7 @@ import {
  * In CI (strict mode): tests throw if stores are unavailable.
  * Locally: tests skip assertions gracefully when stores aren't exposed.
  */
-test.describe('AI Game Creation Flow @ui', () => {
+test.describe('AI Game Creation Flow @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });
