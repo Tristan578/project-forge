@@ -16,6 +16,7 @@ export interface PhysicsProfile {
   jumpForce: number;
   moveSpeed: number;
   friction: number;
+  restitution: number;
   airControl: number;
   terminalVelocity: number;
   acceleration: number;
@@ -63,6 +64,7 @@ export const PHYSICS_PRESETS: Record<string, PhysicsProfile> = {
     jumpForce: 8,
     moveSpeed: 6,
     friction: 0.3,
+    restitution: 0.1,
     airControl: 0.9,
     terminalVelocity: 15,
     acceleration: 20,
@@ -75,6 +77,7 @@ export const PHYSICS_PRESETS: Record<string, PhysicsProfile> = {
     jumpForce: 14,
     moveSpeed: 10,
     friction: 0.5,
+    restitution: 0.05,
     airControl: 0.7,
     terminalVelocity: 30,
     acceleration: 100,
@@ -87,6 +90,7 @@ export const PHYSICS_PRESETS: Record<string, PhysicsProfile> = {
     jumpForce: 12,
     moveSpeed: 4,
     friction: 0.6,
+    restitution: 0.1,
     airControl: 0.2,
     terminalVelocity: 25,
     acceleration: 8,
@@ -99,6 +103,7 @@ export const PHYSICS_PRESETS: Record<string, PhysicsProfile> = {
     jumpForce: 10,
     moveSpeed: 7,
     friction: 0.4,
+    restitution: 0.3,
     airControl: 0.5,
     terminalVelocity: 20,
     acceleration: 50,
@@ -111,6 +116,7 @@ export const PHYSICS_PRESETS: Record<string, PhysicsProfile> = {
     jumpForce: 3,
     moveSpeed: 5,
     friction: 0.05,
+    restitution: 0.8,
     airControl: 1.0,
     terminalVelocity: 50,
     acceleration: 10,
@@ -123,6 +129,7 @@ export const PHYSICS_PRESETS: Record<string, PhysicsProfile> = {
     jumpForce: 5,
     moveSpeed: 3,
     friction: 0.8,
+    restitution: 0.05,
     airControl: 0.8,
     terminalVelocity: 8,
     acceleration: 12,
@@ -135,6 +142,7 @@ export const PHYSICS_PRESETS: Record<string, PhysicsProfile> = {
     jumpForce: 0,
     moveSpeed: 30,
     friction: 0.15,
+    restitution: 0.2,
     airControl: 0.1,
     terminalVelocity: 60,
     acceleration: 25,
@@ -147,6 +155,7 @@ export const PHYSICS_PRESETS: Record<string, PhysicsProfile> = {
     jumpForce: 8,
     moveSpeed: 5,
     friction: 0.9,
+    restitution: 0.0,
     airControl: 0.6,
     terminalVelocity: 15,
     acceleration: 80,
@@ -259,6 +268,7 @@ export function interpolateProfiles(
     jumpForce: lerp(a.jumpForce, b.jumpForce),
     moveSpeed: lerp(a.moveSpeed, b.moveSpeed),
     friction: lerp(a.friction, b.friction),
+    restitution: lerp(a.restitution, b.restitution),
     airControl: lerp(a.airControl, b.airControl),
     terminalVelocity: lerp(a.terminalVelocity, b.terminalVelocity),
     acceleration: lerp(a.acceleration, b.acceleration),
@@ -316,6 +326,7 @@ export function analyzePhysicsFeel(ctx: PhysicsSceneContext): PhysicsAnalysis {
     jumpForce: avgJump,
     moveSpeed: avgSpeed,
     friction: avgFriction,
+    restitution: 0.3,
     airControl: inferredAirControl,
     terminalVelocity: inferredTerminalVelocity,
     acceleration: inferredAcceleration,
@@ -386,6 +397,7 @@ export function applyPhysicsProfile(
       entityId,
       gravityScale,
       friction: profile.friction,
+      restitution: profile.restitution,
     });
 
     dispatch('update_game_component', {
