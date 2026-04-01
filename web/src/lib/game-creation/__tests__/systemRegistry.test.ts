@@ -82,12 +82,14 @@ describe('SYSTEM_REGISTRY', () => {
     SYSTEM_REGISTRY = mod.SYSTEM_REGISTRY;
   });
 
-  it('has exactly 4 registered entries (movement, camera, world, entities)', () => {
-    expect(SYSTEM_REGISTRY.size).toBe(4);
+  it('has exactly 3 registered entries (movement, camera, world)', () => {
+    // NOTE: 'entities' is NOT registered — planBuilder Phase 2 handles entity
+    // setup directly to avoid duplicate spawn_entity calls.
+    expect(SYSTEM_REGISTRY.size).toBe(3);
     expect(SYSTEM_REGISTRY.has('movement')).toBe(true);
     expect(SYSTEM_REGISTRY.has('camera')).toBe(true);
     expect(SYSTEM_REGISTRY.has('world')).toBe(true);
-    expect(SYSTEM_REGISTRY.has('entities')).toBe(true);
+    expect(SYSTEM_REGISTRY.has('entities')).toBe(false);
   });
 
   it('returns undefined for an unknown category', () => {
@@ -131,14 +133,14 @@ describe('SYSTEM_REGISTRY', () => {
       expect(steps).toHaveLength(2);
     });
 
-    it('first step uses physics_profile executor with systemConfig + systemType', () => {
+    it('first step uses physics_profile executor with config + systemType', () => {
       const def = SYSTEM_REGISTRY.get('movement')!;
       const system = makeSystem('movement', 'platformer');
       system.config = { gravity: 9.8 };
       const steps = def.setupSteps(system, makeGdd());
       expect(steps[0].executor).toBe('physics_profile');
       expect(steps[0].input).toMatchObject({
-        systemConfig: system.config,
+        config: system.config,
         systemType: system.type,
       });
     });
@@ -198,42 +200,7 @@ describe('SYSTEM_REGISTRY', () => {
     });
   });
 
-  describe('entities system', () => {
-    it('returns one entity_setup step per entity across all scenes', () => {
-      const def = SYSTEM_REGISTRY.get('entities')!;
-      const system = makeSystem('entities', 'default');
-      const gdd = makeGdd(3, 2); // 3 entities × 2 scenes = 6 steps
-      const steps = def.setupSteps(system, gdd);
-      expect(steps).toHaveLength(6);
-    });
-
-    it('each step uses entity_setup executor', () => {
-      const def = SYSTEM_REGISTRY.get('entities')!;
-      const system = makeSystem('entities', 'default');
-      const gdd = makeGdd(2, 1);
-      const steps = def.setupSteps(system, gdd);
-      for (const step of steps) {
-        expect(step.executor).toBe('entity_setup');
-      }
-    });
-
-    it('step input contains entity and scene name', () => {
-      const def = SYSTEM_REGISTRY.get('entities')!;
-      const system = makeSystem('entities', 'default');
-      const gdd = makeGdd(1, 1);
-      const steps = def.setupSteps(system, gdd);
-      expect(steps[0].input).toMatchObject({
-        entity: gdd.scenes[0].entities[0],
-        scene: gdd.scenes[0].name,
-      });
-    });
-
-    it('returns 0 steps when all scenes have 0 entities', () => {
-      const def = SYSTEM_REGISTRY.get('entities')!;
-      const system = makeSystem('entities', 'default');
-      const gdd = makeGdd(0, 2);
-      const steps = def.setupSteps(system, gdd);
-      expect(steps).toHaveLength(0);
-    });
-  });
+  // NOTE: 'entities' system is NOT registered in the registry — entity setup
+  // is handled directly by planBuilder Phase 2 to avoid duplicate spawns.
+  // See systems/index.ts for rationale.
 });

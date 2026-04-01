@@ -50,12 +50,20 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // Manifest: create_scene requires { name: string }
     ctx.dispatchCommand('create_scene', { name });
 
-    // Apply camera configuration if provided (from camera system registry)
+    // Apply camera configuration if provided (from camera system registry).
+    // set_game_camera requires entityId — we can only apply if one is in cameraConfig
+    // or if the scene has a known camera entity. Without entityId, store the config
+    // in output for downstream steps (e.g. autoPolish) to apply later.
     if (cameraMode || cameraConfig) {
-      ctx.dispatchCommand('set_game_camera', {
-        mode: cameraMode ?? 'thirdPersonFollow',
-        ...(cameraConfig ?? {}),
-      });
+      const cameraEntityId = (cameraConfig as Record<string, unknown> | undefined)?.['entityId'];
+      if (typeof cameraEntityId === 'string') {
+        ctx.dispatchCommand('set_game_camera', {
+          entityId: cameraEntityId,
+          mode: cameraMode ?? 'thirdPersonFollow',
+          ...(cameraConfig ?? {}),
+        });
+      }
+      // If no entityId, camera config is stored in output for later application
     }
 
     // Apply world configuration if provided (from world system registry)

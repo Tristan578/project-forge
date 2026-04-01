@@ -16,7 +16,7 @@ registerSystem({
     return [
       {
         executor: 'physics_profile',
-        input: { systemConfig: system.config, systemType: system.type },
+        input: { config: system.config, systemType: system.type },
       },
       {
         executor: 'character_setup',

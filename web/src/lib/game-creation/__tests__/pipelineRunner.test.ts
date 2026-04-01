@@ -443,6 +443,7 @@ describe('runPipeline', () => {
     expect(result.steps[0].status).toBe('completed'); // current step finishes
     expect(step1Started).toBe(false); // next step skipped
     expect(result.steps[1].status).toBe('skipped');
+    expect(result.status).toBe('cancelled'); // plan status transitions to cancelled on abort
   });
 
   it('fires onPlanStatusChange when plan status transitions', async () => {

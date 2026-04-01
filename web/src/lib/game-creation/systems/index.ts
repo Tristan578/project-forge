@@ -16,4 +16,7 @@ export { SYSTEM_REGISTRY, registerSystem } from './registry';
 import './movement';
 import './camera';
 import './world';
-import './entities';
+// NOTE: 'entities' is intentionally NOT registered here. Entity setup is
+// handled by planBuilder Phase 2, which iterates gdd.scenes[].entities
+// directly. Registering 'entities' in the system registry would cause
+// duplicate spawn_entity calls (Phase 2 + Phase 3 both spawning).

@@ -35,11 +35,16 @@ function topoSortSystems(
   }
 
   const visited = new Set<SystemCategory>();
+  const inStack = new Set<SystemCategory>(); // cycle detection
   const result: GameSystem[] = [];
 
   function visit(system: GameSystem): void {
     if (visited.has(system.category)) return;
-    visited.add(system.category);
+    if (inStack.has(system.category)) {
+      // Cycle detected — break it by skipping this dependency
+      return;
+    }
+    inStack.add(system.category);
     // Visit dependencies first
     for (const dep of system.dependsOn) {
       const depSystem = byCategory.get(dep);
@@ -47,6 +52,8 @@ function topoSortSystems(
         visit(depSystem);
       }
     }
+    inStack.delete(system.category);
+    visited.add(system.category);
     result.push(system);
   }
 

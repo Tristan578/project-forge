@@ -315,10 +315,17 @@ describe('character_setup executor', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', expect.objectContaining({
+    // Manifest: add_game_component requires { entityId, componentType, properties? }
+    // Properties must be NESTED under 'properties' key, not at top level
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', {
       entityId: 'entity-1',
       componentType: 'character_controller',
-    }));
+      properties: expect.objectContaining({
+        speed: expect.any(Number),
+        jumpHeight: expect.any(Number),
+        gravityScale: expect.any(Number),
+      }),
+    });
     expect(result.output?.['rigApplied']).toBe(false);
   });
 
