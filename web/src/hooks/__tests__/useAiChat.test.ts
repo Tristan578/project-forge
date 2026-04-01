@@ -105,21 +105,22 @@ describe('useAiChat', () => {
     expect(result.current.status).toBe('error');
   });
 
-  it('provides append for sending messages programmatically', () => {
-    const appendFn = vi.fn();
+  it('provides sendMessage for sending messages programmatically', () => {
+    const sendMessageFn = vi.fn();
     mockUseChat.mockReturnValue({
       messages: [],
       status: 'ready',
-      append: appendFn,
+      sendMessage: sendMessageFn,
       stop: vi.fn(),
     });
 
     const { result } = renderHook(() => useAiChat());
-    const message = { role: 'user' as const, content: 'Build a platformer' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const msg = { content: 'Build a platformer' } as any;
     act(() => {
-      result.current.append(message);
+      result.current.sendMessage(msg);
     });
-    expect(appendFn).toHaveBeenCalledWith(message);
+    expect(sendMessageFn).toHaveBeenCalledWith(msg);
   });
 
   it('creates a new transport instance on each render', () => {
