@@ -38,7 +38,7 @@ function makeGdd(overrides: Partial<OrchestratorGDD> = {}): OrchestratorGDD {
       },
     ],
     assetManifest: [],
-    estimatedScope: 'tiny',
+    estimatedScope: 'small',
     styleDirective: 'minimal',
     feelDirective: {
       mood: 'neutral',
