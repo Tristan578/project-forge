@@ -108,9 +108,17 @@ export const sceneCreateExecutor: ExecutorDefinition = {
       // World config is informational — stored in step output for downstream use
     }
 
+    // Store pending camera config in output so downstream steps (auto_polish)
+    // can apply it once a camera entity exists. Without this, camera preferences
+    // from the GDD are silently lost when no entityId is available at scene creation.
+    const pendingCamera = (cameraMode && !cameraEntityId)
+      ? { mode: VALID_CAMERA_MODES.includes(cameraMode as CameraMode) ? cameraMode : 'thirdPersonFollow', config: cameraConfig }
+      : null;
+
     return successResult({
       sceneName: name,
       cameraMode: cameraMode ?? null,
+      pendingCameraConfig: pendingCamera,
       worldType: worldType ?? null,
     });
   },

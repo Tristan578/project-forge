@@ -341,18 +341,19 @@ describe('character_setup executor', () => {
     expect(result.output?.['rigApplied']).toBe(true);
   });
 
-  it('spawns entity when entityId not provided', async () => {
+  it('resolves entity from store when entityId not provided (no duplicate spawn)', async () => {
     const ctx = makeMockCtx();
     const result = await executor.execute(
       { entity: baseEntity, projectType: '3d' },
       ctx,
     );
 
-    // When called without entityId (from system registry), spawns entity first
+    // When called without entityId, resolves from store — does NOT spawn a duplicate
     expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', expect.objectContaining({
-      name: baseEntity.name,
-      entityType: 'capsule',
+    expect(ctx.dispatchCommand).not.toHaveBeenCalledWith('spawn_entity', expect.anything());
+    // Should still add game component using the resolved entity name
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', expect.objectContaining({
+      componentType: 'character_controller',
     }));
   });
 

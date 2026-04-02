@@ -259,12 +259,12 @@ export async function decomposeIntoSystems(
         purpose: sanitizePrompt(scene.purpose, 500).filtered ?? '',
         entities: scene.entities.map(entity => ({
           ...entity,
-          name: sanitizePrompt(entity.name, 200).filtered ?? entity.name.slice(0, 200).replace(/[<>{}]/g, ''),
+          name: sanitizePrompt(entity.name, 200).filtered ?? 'Entity',
           appearance: sanitizePrompt(entity.appearance, 300).filtered ?? 'default appearance',
-          behaviors: entity.behaviors.map(b => {
-            const s = sanitizePrompt(b, 100);
-            return s.safe ? (s.filtered ?? b) : b.slice(0, 100).replace(/[<>{}]/g, '');
-          }),
+          behaviors: entity.behaviors
+            .map(b => sanitizePrompt(b, 100))
+            .filter(s => s.safe)
+            .map(s => s.filtered!),
         })),
       })),
       assetManifest: data.assetManifest.map(a => {

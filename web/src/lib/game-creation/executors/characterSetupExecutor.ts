@@ -47,18 +47,14 @@ export const characterSetupExecutor: ExecutorDefinition = {
     const { entity, projectType } = parsed.data;
     let { entityId } = parsed.data;
 
-    // When called from system registry (no entityId), spawn the character entity first.
-    // Manifest: spawn_entity requires { entityType }, optional { name, position }
-    // Entity IDs are engine-assigned — we read it back from the store after spawn.
+    // When called from system registry (no entityId), resolve from the store.
+    // Entities are already spawned by entity_setup steps in planBuilder Phase 2 —
+    // spawning here would create duplicates.
     if (!entityId) {
-      // Manifest: entityType is lowercase enum: capsule for player characters
-      ctx.dispatchCommand('spawn_entity', {
-        entityType: projectType === '2d' ? 'plane' : 'capsule',
-        name: entity.name,
-      });
-      // In a real pipeline, entityId comes from the engine's spawn response.
-      // For now, use entity name as a reference key for downstream steps.
-      entityId = entity.name;
+      // Look up the first entity matching the expected name in the scene graph
+      const nodes = Object.values(ctx.store.sceneGraph.nodes);
+      const match = nodes.find(n => n.name === entity.name);
+      entityId = match?.entityId ?? entity.name;
     }
 
     // [B5] Route based on project type
