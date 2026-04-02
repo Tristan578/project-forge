@@ -19,12 +19,15 @@ permissions:
   contents: write
 
 concurrency:
-  group: coverage-ratchet-${{ github.sha }}
+  # Stable group key — serializes ratchet runs on main to prevent push conflicts
+  group: coverage-ratchet-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   ratchet:
     name: Ratchet Coverage Thresholds
+    # Skip ratchet commits from github-actions[bot] to prevent retrigger loops
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -32,7 +35,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20'
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -42,8 +45,14 @@ jobs:
 
       - name: Run tests with coverage
         working-directory: web
-        run: npx vitest run --coverage --coverage.reporter=json-summary --pool=threads
+        id: vitest
+        run: |
+          npx vitest run --coverage --coverage.reporter=json-summary --pool=threads
         continue-on-error: true
+
+      - name: Check vitest exit
+        if: steps.vitest.outcome == 'failure'
+        run: echo "::warning::vitest exited non-zero — coverage may be incomplete"
 
       - name: Run ratchet script
         run: bash .claude/skills/testing/scripts/ratchet-coverage.sh web/coverage

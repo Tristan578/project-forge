@@ -94,14 +94,11 @@ export function PhysicsFeelPanel() {
     const fromComponents = Object.values(sceneGraph.nodes)
       .filter((node) => node.components.some((c) => PHYSICS_COMPONENTS.has(c)))
       .map((node) => node.entityId);
-    // Fallback: store-tracked physics entities (2D physics map + 3D if components are empty)
+    // Fallback: store-tracked 2D physics entities only (not all scene nodes).
+    // When fromComponents is empty, the engine hasn't reported component data yet —
+    // returning all entities would include non-physics entities in analysis.
     if (fromComponents.length > 0) return fromComponents;
-    // Merge 2D physics entity IDs with any entity IDs in the scene graph that have physicsEnabled
-    const physicsEnabledFromStore = physicsEnabled
-      ? Object.values(sceneGraph.nodes).map((n) => n.entityId)
-      : [];
-    const merged = new Set([...physics2dEntityIds, ...physicsEnabledFromStore]);
-    return Array.from(merged);
+    return physics2dEntityIds;
   }, [sceneGraph, physics2dEntityIds, physicsEnabled]);
 
   // --- Handlers ---
