@@ -99,7 +99,7 @@ export function PhysicsFeelPanel() {
     // returning all entities would include non-physics entities in analysis.
     if (fromComponents.length > 0) return fromComponents;
     return physics2dEntityIds;
-  }, [sceneGraph, physics2dEntityIds, physicsEnabled]);
+  }, [sceneGraph, physics2dEntityIds]);
 
   // --- Handlers ---
   const handleAnalyze = useCallback(() => {
