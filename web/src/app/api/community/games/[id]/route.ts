@@ -127,9 +127,9 @@ export async function GET(
       })),
     };
 
-    const response = NextResponse.json({ game: formattedGame });
-    response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
-    return response;
+    // No Cache-Control: this endpoint returns user comments which may be
+    // moderated/flagged. Caching would keep flagged comments visible.
+    return NextResponse.json({ game: formattedGame });
   } catch (error) {
     console.error('Failed to fetch game:', error);
     captureException(error, { route: '/api/community/games/[id]' });

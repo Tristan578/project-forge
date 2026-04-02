@@ -13,6 +13,7 @@
  *   const { messages, sendMessage, status, stop } = useAiChat();
  */
 
+import { useMemo } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 
@@ -21,9 +22,8 @@ import { DefaultChatTransport } from 'ai';
  * UI message stream transport. The default api path is '/api/chat'.
  */
 export function useAiChat() {
-  return useChat({
-    transport: new DefaultChatTransport({ api: '/api/chat' }),
-  });
+  const transport = useMemo(() => new DefaultChatTransport({ api: '/api/chat' }), []);
+  return useChat({ transport });
 }
 
 export type { UseChatHelpers } from '@ai-sdk/react';

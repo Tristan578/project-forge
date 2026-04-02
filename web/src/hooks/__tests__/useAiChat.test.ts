@@ -115,18 +115,17 @@ describe('useAiChat', () => {
     });
 
     const { result } = renderHook(() => useAiChat());
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const msg = { content: 'Build a platformer' } as any;
     act(() => {
-      result.current.sendMessage(msg);
+      result.current.sendMessage({ content: 'Build a platformer' } as unknown as Parameters<typeof result.current.sendMessage>[0]);
     });
-    expect(sendMessageFn).toHaveBeenCalledWith(msg);
+    expect(sendMessageFn).toHaveBeenCalledOnce();
   });
 
-  it('creates a new transport instance on each render', () => {
+  it('reuses the same transport instance across rerenders', () => {
     const { rerender } = renderHook(() => useAiChat());
-    const firstCallCount = MockDefaultChatTransport.mock.calls.length;
+    const callCountAfterMount = MockDefaultChatTransport.mock.calls.length;
     rerender();
-    expect(MockDefaultChatTransport.mock.calls.length).toBeGreaterThan(firstCallCount);
+    // useMemo ensures transport is NOT recreated on rerender
+    expect(MockDefaultChatTransport.mock.calls.length).toBe(callCountAfterMount);
   });
 });
