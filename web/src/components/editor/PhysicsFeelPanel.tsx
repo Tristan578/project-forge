@@ -53,7 +53,9 @@ export function PhysicsFeelPanel() {
   const sceneGraph = useEditorStore((s) => s.sceneGraph);
   const primaryPhysics = useEditorStore((s) => s.primaryPhysics);
   const physicsEnabled = useEditorStore((s) => s.physicsEnabled);
-  const physics2dEntityIds = useEditorStore((s) => Object.keys(s.physics2d));
+  const physics2dEntityIds = useEditorStore((s) =>
+    Object.keys(s.physics2d).filter(id => s.physics2dEnabled[id])
+  );
 
   // --- Local state ---
   const [selectedPresetA, setSelectedPresetA] = useState<string>(PRESET_KEYS[0]);
