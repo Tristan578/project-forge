@@ -246,20 +246,20 @@ export function buildPlan(
         targetEntityId = gdd.scenes[0].entities[0].name;
       }
 
-      // If no entity exists to bind the script to, mark step as optional
-      // so the pipeline doesn't abort — the system simply won't have a script
-      const hasTarget = targetEntityId.length > 0;
+      // If no entity exists to bind the script to, skip the step entirely.
+      // Sending 'unbound' as entityId would cause set_script to fail in the engine.
+      if (!targetEntityId) continue;
+
       const step = makeStep(
         'custom_script_generate',
         {
           system,
           description: `Implement ${system.category}:${system.type} behavior`,
-          targetEntityId: hasTarget ? targetEntityId : 'unbound',
+          targetEntityId,
           projectType: gdd.projectType,
           feelDirective: gdd.feelDirective,
         },
         systemDeps,
-        !hasTarget, // optional when no entity to bind to
       );
       steps.push(step);
     }
