@@ -111,7 +111,8 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // Store pending camera config in output so downstream steps (auto_polish)
     // can apply it once a camera entity exists. Without this, camera preferences
     // from the GDD are silently lost when no entityId is available at scene creation.
-    const pendingCamera = (cameraMode && !cameraEntityId)
+    const hasCameraEntityId = typeof (cameraConfig as Record<string, unknown> | undefined)?.['entityId'] === 'string';
+    const pendingCamera = (cameraMode && !hasCameraEntityId)
       ? { mode: VALID_CAMERA_MODES.includes(cameraMode as CameraMode) ? cameraMode : 'thirdPersonFollow', config: cameraConfig }
       : null;
 

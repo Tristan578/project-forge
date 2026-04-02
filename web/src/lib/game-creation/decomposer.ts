@@ -255,7 +255,7 @@ export async function decomposeIntoSystems(
       // These flow into executor inputs and downstream LLM prompts.
       scenes: data.scenes.map(scene => ({
         ...scene,
-        name: sanitizePrompt(scene.name, 200).filtered ?? scene.name.slice(0, 200).replace(/[<>{}]/g, ''),
+        name: sanitizePrompt(scene.name, 200).filtered ?? 'Scene',
         purpose: sanitizePrompt(scene.purpose, 500).filtered ?? '',
         entities: scene.entities.map(entity => ({
           ...entity,
