@@ -29,7 +29,7 @@ import { useAiChat } from '../useAiChat';
 describe('useAiChat', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Must return an object from a function invoked with `new`
+    // Constructor mock — `this` is the new instance when invoked with `new`
     MockDefaultChatTransport.mockImplementation(function (this: { _api: string }, { api }: { api: string }) {
       this._api = api;
     });
