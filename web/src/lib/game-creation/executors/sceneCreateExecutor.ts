@@ -70,16 +70,34 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     if (cameraMode || cameraConfig) {
       const cameraEntityId = (cameraConfig as Record<string, unknown> | undefined)?.['entityId'];
 
-      // Validate cameraMode against engine enum — reject invalid values
-      const validMode: CameraMode = VALID_CAMERA_MODES.includes(cameraMode as CameraMode)
-        ? (cameraMode as CameraMode)
+      // Normalize hyphenated camera modes from LLM output to camelCase engine enum.
+      // e.g. "side-scroller" → "sideScroller", "third-person" → "thirdPersonFollow"
+      const CAMERA_MODE_ALIASES: Record<string, CameraMode> = {
+        'side-scroller': 'sideScroller',
+        'side_scroller': 'sideScroller',
+        'third-person': 'thirdPersonFollow',
+        'third_person': 'thirdPersonFollow',
+        'first-person': 'firstPerson',
+        'first_person': 'firstPerson',
+        'top-down': 'topDown',
+        'top_down': 'topDown',
+      };
+      const normalized = typeof cameraMode === 'string'
+        ? CAMERA_MODE_ALIASES[cameraMode.toLowerCase()] ?? cameraMode
+        : cameraMode;
+      const validMode: CameraMode = VALID_CAMERA_MODES.includes(normalized as CameraMode)
+        ? (normalized as CameraMode)
         : 'thirdPersonFollow';
 
       if (typeof cameraEntityId === 'string') {
+        // Destructure cameraConfig to extract only safe numeric params.
+        // LLM-sourced cameraConfig could include entityId/mode — never let
+        // those overwrite the validated values above.
+        const { entityId: _drop, mode: _dropMode, ...safeConfig } = (cameraConfig ?? {}) as Record<string, unknown>;
         ctx.dispatchCommand('set_game_camera', {
           entityId: cameraEntityId,
           mode: validMode,
-          ...(cameraConfig ?? {}),
+          ...safeConfig,
         });
       }
       // If no entityId, camera config stored in output for downstream steps

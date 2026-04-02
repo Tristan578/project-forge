@@ -136,13 +136,24 @@ export function buildPlan(
     };
   }
 
+  // --- Phase 0: Plan presentation (no-op step for gate_plan to anchor on) ---
+  // gate_plan fires AFTER afterStepId completes. If we anchor on the first
+  // scene_create step, one scene is already created before the user reviews.
+  // A no-op step_0 lets the gate fire before any engine commands.
+  const planPresentStep = makeStep('plan_present', {
+    sceneCount: gdd.scenes.length,
+    systemCount: gdd.systems.length,
+    entityCount: gdd.scenes.reduce((n, s) => n + s.entities.length, 0),
+  });
+  steps.push(planPresentStep);
+
   // --- Phase 1: Scene creation ---
   const sceneStepIds: Record<string, string> = {};
   for (const scene of gdd.scenes) {
     const step = makeStep('scene_create', {
       name: scene.name,
       purpose: scene.purpose,
-    });
+    }, [planPresentStep.id]); // Depend on plan_present so scenes wait for gate
     sceneStepIds[scene.name] = step.id;
     steps.push(step);
   }

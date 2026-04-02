@@ -7,8 +7,10 @@ import { assetGenerateExecutor } from './assetGenerateExecutor';
 import { customScriptExecutor } from './customScriptExecutor';
 import { verifyExecutor } from './verifyExecutor';
 import { autoPolishExecutor } from './autoPolishExecutor';
+import { planPresentExecutor } from './planPresentExecutor';
 
 export const EXECUTOR_REGISTRY = new Map<ExecutorName, ExecutorDefinition>([
+  [planPresentExecutor.name, planPresentExecutor],
   [sceneCreateExecutor.name, sceneCreateExecutor],
   [physicsProfileExecutor.name, physicsProfileExecutor],
   [characterSetupExecutor.name, characterSetupExecutor],

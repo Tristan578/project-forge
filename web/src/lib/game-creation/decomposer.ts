@@ -236,12 +236,29 @@ export async function decomposeIntoSystems(
 
     return {
       id: crypto.randomUUID(),
+      // [FIX: Sentry] Never fall back to raw unsanitized LLM output.
+      // If title is unsafe (injection content), use a generic fallback.
       title: sanitizedTitle.safe
         ? sanitizedTitle.filtered!
-        : data.title.slice(0, 200),
+        : 'Untitled Game',
       description: cleanPrompt,
       systems: data.systems,
-      scenes: data.scenes,
+      // Sanitize nested string fields in scenes (entity names, purposes, behaviors).
+      // These flow into executor inputs and downstream LLM prompts.
+      scenes: data.scenes.map(scene => ({
+        ...scene,
+        name: sanitizePrompt(scene.name, 200).filtered ?? scene.name.slice(0, 200).replace(/[<>{}]/g, ''),
+        purpose: sanitizePrompt(scene.purpose, 500).filtered ?? '',
+        entities: scene.entities.map(entity => ({
+          ...entity,
+          name: sanitizePrompt(entity.name, 200).filtered ?? entity.name.slice(0, 200).replace(/[<>{}]/g, ''),
+          appearance: sanitizePrompt(entity.appearance, 300).filtered ?? 'default appearance',
+          behaviors: entity.behaviors.map(b => {
+            const s = sanitizePrompt(b, 100);
+            return s.safe ? (s.filtered ?? b) : b.slice(0, 100).replace(/[<>{}]/g, '');
+          }),
+        })),
+      })),
       assetManifest: data.assetManifest.map(a => {
         // [S4] Sanitize styleDirective on each asset
         const assetStyle = sanitizePrompt(a.styleDirective, 300);
@@ -255,9 +272,10 @@ export async function decomposeIntoSystems(
         };
       }),
       estimatedScope: data.estimatedScope,
+      // [FIX: Sentry] Never fall back to raw unsanitized LLM output.
       styleDirective: sanitizedStyle.safe
         ? sanitizedStyle.filtered!
-        : data.styleDirective.slice(0, 500),
+        : 'default style',
       feelDirective: {
         ...data.feelDirective,
         // [FIX: NS2] mood sanitized

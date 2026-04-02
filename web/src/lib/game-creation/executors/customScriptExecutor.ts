@@ -257,6 +257,9 @@ export const customScriptExecutor: ExecutorDefinition = {
     }
 
     // [FIX: NB1] Bind script to entity via set_script command (NOT update_script).
+    // Use original targetEntityId (not safeEntityId.filtered) — the entity ID is an
+    // engine-assigned identifier, not user input. sanitizePrompt above only gates
+    // whether the ID is safe for LLM prompt interpolation, not whether it's valid.
     ctx.dispatchCommand('set_script', {
       entityId: targetEntityId,
       source: code,

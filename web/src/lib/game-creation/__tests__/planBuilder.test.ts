@@ -168,7 +168,11 @@ describe('buildPlan', () => {
     expect(gatePlan).toBeDefined();
     expect(gatePlan!.afterStepId).toBe('step_0');
     expect(plan.steps[0].id).toBe('step_0');
-    expect(plan.steps[0].executor).toBe('scene_create');
+    // step_0 is now plan_present (no-op) so gate fires BEFORE scene creation
+    expect(plan.steps[0].executor).toBe('plan_present');
+    // First scene_create is step_1 and depends on plan_present
+    expect(plan.steps[1].executor).toBe('scene_create');
+    expect(plan.steps[1].dependsOn).toContain('step_0');
   });
 
   // 6. gate_assets created before assets
