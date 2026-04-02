@@ -23,6 +23,9 @@ if (DSN) {
       // and tool call traces for every streamText/generateText call.
       // Requires experimental_telemetry: { isEnabled: true } on each call.
       Sentry.vercelAIIntegration(),
+      // Auto-collects runtime health metrics: RSS, heap, CPU, event loop.
+      // Emitted every 30s in production for Sentry performance dashboard.
+      ...(IS_PROD ? [Sentry.nodeRuntimeMetricsIntegration()] : []),
     ],
   });
 
