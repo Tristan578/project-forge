@@ -287,9 +287,10 @@ export async function decomposeIntoSystems(
           : 'neutral',
         // [FIX: NS2] referenceGames entries sanitized
         referenceGames: sanitizedRefGames,
+        // [FIX: Sentry] Never fall back to raw unsanitized LLM output.
         oneLiner: sanitizedOneLiner.safe
           ? sanitizedOneLiner.filtered!
-          : data.feelDirective.oneLiner.slice(0, 200),
+          : 'A new game experience',
       },
       constraints: sanitizedConstraints, // [FIX: NB3] unsafe constraints dropped
       projectType,
