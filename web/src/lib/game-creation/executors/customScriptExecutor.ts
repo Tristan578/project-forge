@@ -78,7 +78,7 @@ const FORBIDDEN_PATTERNS = [
   /constructor\.constructor/,
   /\brequire\b\s*\(/,
   /\bimport\b\s*\(/,
-  /\bimport\b\s+\w/,         // static ES module imports: import x from '...'
+  /\bimport\b\s*[{\w*]/,     // static ES module imports: import x, import {x}, import * as, import{x}
 ];
 
 function validateGeneratedScript(

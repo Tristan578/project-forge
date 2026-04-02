@@ -1,8 +1,9 @@
 /**
  * Tests for the Game Creation Orchestrator system registry.
  *
- * Verifies that each built-in system category (movement, camera, world, entities)
+ * Verifies that each built-in system category (movement, camera, world)
  * is registered and produces the correct step shape for the plan builder.
+ * Note: entities are handled by planBuilder directly, not via the system registry.
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';

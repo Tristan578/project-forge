@@ -98,12 +98,10 @@ export const physicsProfileExecutor: ExecutorDefinition = {
     // physics profile globally via update_physics_config (scene-level settings).
     // Per-entity physics is applied when entityIds are provided.
     if (ids.length === 0) {
-      ctx.dispatchCommand('update_physics_config', {
-        gravity: finalProfile.gravity,
-        friction: finalProfile.friction,
-        restitution: finalProfile.restitution,
-      });
-      return successResult({ presetUsed: presetKey, entityCount: 0, appliedGlobally: true });
+      // No physics entities to configure. The engine has no global
+      // physics config command — per-entity update_physics is the only
+      // option. Return success so downstream steps aren't blocked.
+      return successResult({ presetUsed: presetKey, entityCount: 0, appliedGlobally: false });
     }
 
     applyPhysicsProfile(finalProfile, ctx.dispatchCommand, ids);

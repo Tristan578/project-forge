@@ -155,13 +155,21 @@ export async function decomposeIntoSystems(
         : '',
     ].filter(Boolean).join('\n');
 
-    const content = await fetchAI(userMessage, {
-      model: AI_MODEL_PRIMARY,
-      sceneContext: '',
-      thinking: false,
-      systemOverride: DECOMPOSITION_SYSTEM_PROMPT,
-      priority: 2,
-    });
+    let content: string;
+    try {
+      content = await fetchAI(userMessage, {
+        model: AI_MODEL_PRIMARY,
+        sceneContext: '',
+        thinking: false,
+        systemOverride: DECOMPOSITION_SYSTEM_PROMPT,
+        priority: 2,
+      });
+    } catch (err) {
+      lastError = new Error(
+        `Attempt ${attempt + 1}: LLM call failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      continue;
+    }
 
     // Parse JSON from response — strip markdown fences if present
     let jsonStr = content.trim();
