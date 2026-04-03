@@ -53,7 +53,9 @@ export function PhysicsFeelPanel() {
   const sceneGraph = useEditorStore((s) => s.sceneGraph);
   const primaryPhysics = useEditorStore((s) => s.primaryPhysics);
   const physicsEnabled = useEditorStore((s) => s.physicsEnabled);
-  const physics2dEntityIds = useEditorStore((s) => Object.keys(s.physics2d));
+  const physics2dEntityIds = useEditorStore((s) =>
+    Object.keys(s.physics2d).filter(id => s.physics2dEnabled[id])
+  );
 
   // --- Local state ---
   const [selectedPresetA, setSelectedPresetA] = useState<string>(PRESET_KEYS[0]);
@@ -94,21 +96,20 @@ export function PhysicsFeelPanel() {
     const fromComponents = Object.values(sceneGraph.nodes)
       .filter((node) => node.components.some((c) => PHYSICS_COMPONENTS.has(c)))
       .map((node) => node.entityId);
-    // Fallback: store-tracked physics entities (2D physics map + 3D if components are empty)
+    // Fallback: store-tracked 2D physics entities only (not all scene nodes).
+    // When fromComponents is empty, the engine hasn't reported component data yet —
+    // returning all entities would include non-physics entities in analysis.
     if (fromComponents.length > 0) return fromComponents;
-    // Merge 2D physics entity IDs with any entity IDs in the scene graph that have physicsEnabled
-    const physicsEnabledFromStore = physicsEnabled
-      ? Object.values(sceneGraph.nodes).map((n) => n.entityId)
-      : [];
-    const merged = new Set([...physics2dEntityIds, ...physicsEnabledFromStore]);
-    return Array.from(merged);
-  }, [sceneGraph, physics2dEntityIds, physicsEnabled]);
+    return physics2dEntityIds;
+  }, [sceneGraph, physics2dEntityIds]);
 
   // --- Handlers ---
   const handleAnalyze = useCallback(() => {
     const entities: PhysicsSceneContext['entities'] = [];
     if (sceneGraph) {
+      const physicsSet = new Set(physicsEntityIds);
       for (const node of Object.values(sceneGraph.nodes)) {
+        if (!physicsSet.has(node.entityId)) continue;
         entities.push({
           entityId: node.entityId,
           physics: primaryPhysics && physicsEnabled
@@ -119,7 +120,7 @@ export function PhysicsFeelPanel() {
     }
     const result = analyzePhysicsFeel({ entities });
     setAnalysis(result);
-  }, [sceneGraph, primaryPhysics, physicsEnabled]);
+  }, [sceneGraph, primaryPhysics, physicsEnabled, physicsEntityIds]);
 
   const handleApply = useCallback(() => {
     const dispatch = getCommandDispatcher();
