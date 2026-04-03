@@ -579,6 +579,75 @@ export function sanitizeForPublic(services: ServiceHealth[]): ServiceHealth[] {
  * Checks run in parallel. Anthropic downtime causes 'degraded' overall but
  * does not trigger 503 (not in CRITICAL_SERVICES).
  */
+/**
+ * Smoke-test the createGenerationHandler factory pipeline.
+ *
+ * Creates a trivial handler and sends a request through it. The factory
+ * should fail at auth (returns 401) — NOT throw an unhandled error.
+ * If body parsing, validate dispatch, provider/operation resolution, or
+ * error handling is broken, this catches it before users do.
+ *
+ * This is cheap: no external calls, no DB, no Redis. Pure in-process.
+ */
+async function checkGenerationFactory(): Promise<ServiceHealth> {
+  const start = Date.now();
+  try {
+    const { createGenerationHandler } = await import('@/lib/api/createGenerationHandler');
+    const handler = createGenerationHandler({
+      route: '/api/health/factory-smoke',
+      provider: 'anthropic',
+      operation: 'chat_short',
+      rateLimitKey: 'health-smoke',
+      validate: (body) => {
+        const prompt = body.prompt;
+        if (!prompt || typeof prompt !== 'string') return { ok: false, error: 'missing prompt' };
+        return { ok: true, params: { prompt } };
+      },
+      execute: async (params) => ({ echo: params.prompt }),
+    });
+
+    const { NextRequest } = await import('next/server');
+    const req = new NextRequest('http://localhost/api/health/factory-smoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'smoke test' }),
+    });
+
+    const res = await handler(req);
+    // Auth will reject (no Clerk session) — that's expected.
+    // What we're checking is that the factory didn't throw.
+    const latencyMs = Date.now() - start;
+
+    if (res.status === 401 || res.status === 200) {
+      return {
+        name: 'Generation Factory',
+        status: 'healthy',
+        latencyMs,
+        lastChecked: new Date().toISOString(),
+        details: { responseStatus: res.status },
+      };
+    }
+
+    // Unexpected status — factory pipeline may be broken
+    return {
+      name: 'Generation Factory',
+      status: 'degraded',
+      latencyMs,
+      lastChecked: new Date().toISOString(),
+      error: `Unexpected status ${res.status} from factory smoke test`,
+    };
+  } catch (err) {
+    // Factory threw — this is the critical failure case
+    return {
+      name: 'Generation Factory',
+      status: 'down',
+      latencyMs: Date.now() - start,
+      lastChecked: new Date().toISOString(),
+      error: `Factory smoke test threw: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
 export async function runAllHealthChecks(): Promise<HealthReport> {
   const services = await Promise.all([
     checkDatabase(),
@@ -590,6 +659,7 @@ export async function runAllHealthChecks(): Promise<HealthReport> {
     checkAnthropic(),
     checkSentry(),
     checkCloudflareR2(),
+    checkGenerationFactory(),
   ]);
 
   const env = process.env.NEXT_PUBLIC_ENVIRONMENT ?? process.env.NODE_ENV ?? 'unknown';
