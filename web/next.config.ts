@@ -179,8 +179,8 @@ const nextConfig: NextConfig = {
 };
 
 export default withSentryConfig(withNextIntl(analyzer(nextConfig)), {
-  // Suppress source map upload logs in CI
-  silent: true,
+  // Show warnings but suppress info-level upload noise
+  silent: 'warn' as unknown as boolean,
 
   // Upload source maps for production builds
   org: process.env.SENTRY_ORG || 'tristan-nolan',
@@ -191,6 +191,10 @@ export default withSentryConfig(withNextIntl(analyzer(nextConfig)), {
 
   // Automatically tree-shake Sentry logger statements to reduce bundle size
   disableLogger: true,
+
+  // Route Sentry events through /monitoring to bypass ad-blockers.
+  // Replaces the manual /api/sentry tunnel route.
+  tunnelRoute: '/monitoring',
 
   // Source map configuration
   sourcemaps: {

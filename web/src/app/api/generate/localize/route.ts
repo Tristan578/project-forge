@@ -125,6 +125,7 @@ export const POST = createGenerationHandler<
           system: 'You are a professional video game localizer. Return only valid JSON.',
           prompt,
           maxOutputTokens: 4096,
+          experimental_telemetry: { isEnabled: true },
         });
 
         const { translations } = parseTranslationResponse(raw, chunk);
