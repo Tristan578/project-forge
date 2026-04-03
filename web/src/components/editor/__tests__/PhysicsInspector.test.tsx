@@ -1,3 +1,6 @@
+/**
+ * @vitest-environment jsdom
+ */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
 import { PhysicsInspector } from '../PhysicsInspector';
