@@ -116,6 +116,7 @@ Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
       maxOutputTokens: 800,
       temperature: 0.4,
       output: Output.object({ schema: PacingSuggestionSchema }),
+      experimental_telemetry: { isEnabled: true },
     });
 
     const aiSuggestions: PacingSuggestion[] = (aiResult.output ?? []).map((s) => ({
