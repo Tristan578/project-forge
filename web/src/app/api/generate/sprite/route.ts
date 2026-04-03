@@ -15,8 +15,8 @@ type SpriteProvider = 'dalle3' | 'sdxl';
 export const POST = createGenerationHandler<
   {
     prompt: string;
-    style?: string;
-    size: string;
+    style?: 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
+    size: '32x32' | '64x64' | '128x128' | '256x256' | '512x512' | '1024x1024';
     provider: SpriteProvider;
     removeBackground: boolean;
     serviceName: 'openai' | 'replicate';
@@ -62,8 +62,8 @@ export const POST = createGenerationHandler<
       ok: true,
       params: {
         prompt: prompt as string,
-        style: style as string | undefined,
-        size: size as string,
+        style: style as 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic' | undefined,
+        size: (size as string) as '32x32' | '64x64' | '128x128' | '256x256' | '512x512' | '1024x1024',
         provider: actualProvider,
         removeBackground: removeBackground as boolean,
         serviceName,

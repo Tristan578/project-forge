@@ -4,8 +4,11 @@ import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { DB_PROVIDER } from '@/lib/config/providers';
 
+type TileSize = 16 | 32 | 48 | 64;
+type GridSize = '4x4' | '8x8' | '16x16';
+
 export const POST = createGenerationHandler<
-  { prompt: string; tileSize: number; gridSize: string },
+  { prompt: string; tileSize: TileSize; gridSize: GridSize },
   { jobId: string; provider: string; status: string; estimatedSeconds: number }
 >({
   route: '/api/generate/tileset-gen',
@@ -38,8 +41,8 @@ export const POST = createGenerationHandler<
       ok: true,
       params: {
         prompt: prompt as string,
-        tileSize: tileSize as number,
-        gridSize: gridSize as string,
+        tileSize: tileSize as TileSize,
+        gridSize: gridSize as GridSize,
       },
     };
   },

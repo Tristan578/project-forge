@@ -15,7 +15,7 @@ export const POST = createGenerationHandler<
   {
     prompt: string;
     mode: 'text-to-3d' | 'image-to-3d';
-    quality: string;
+    quality: 'standard' | 'high';
     imageBase64?: string;
     artStyle?: string;
     negativePrompt?: string;
@@ -59,7 +59,7 @@ export const POST = createGenerationHandler<
       params: {
         prompt: prompt as string,
         mode: (mode as 'text-to-3d' | 'image-to-3d') ?? 'text-to-3d',
-        quality: quality as string,
+        quality: (quality as string) as 'standard' | 'high',
         imageBase64: imageBase64 as string | undefined,
         artStyle: artStyle as string | undefined,
         negativePrompt: negativePrompt as string | undefined,

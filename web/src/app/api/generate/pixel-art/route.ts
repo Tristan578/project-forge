@@ -76,7 +76,7 @@ export const POST = createGenerationHandler<
       }
       const validation = validateCustomPalette(customPalette as string[]);
       if (!validation.valid) {
-        return { ok: false, error: validation.error, status: 400 };
+        return { ok: false, error: validation.error ?? 'Invalid custom palette', status: 400 };
       }
     }
     if (dithering && !VALID_DITHERING.includes(dithering as string)) {

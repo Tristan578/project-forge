@@ -5,12 +5,15 @@ import { SpriteClient } from '@/lib/generate/spriteClient';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 import { DB_PROVIDER } from '@/lib/config/providers';
 
+type SpriteStyle = 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
+type SpriteSize = '32x32' | '64x64' | '128x128' | '256x256';
+
 export const POST = createGenerationHandler<
   {
     prompt: string;
     frameCount: number;
-    style?: string;
-    size: string;
+    style?: SpriteStyle;
+    size: SpriteSize;
   },
   { jobId: string; provider: string; status: string; estimatedSeconds: number }
 >({
@@ -46,8 +49,8 @@ export const POST = createGenerationHandler<
       params: {
         prompt: (prompt as string).trim(),
         frameCount: frameCount as number,
-        style: style as string | undefined,
-        size: size as string,
+        style: style as SpriteStyle | undefined,
+        size: size as SpriteSize,
       },
     };
   },
