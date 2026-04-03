@@ -5,7 +5,6 @@
 
 export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 
-import { NextResponse } from 'next/server';
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { DB_PROVIDER } from '@/lib/config/providers';
