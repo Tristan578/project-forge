@@ -44,6 +44,11 @@ export const POST = createGenerationHandler<
       return { ok: false, error: 'frameCount must be an integer between 2 and 8' };
     }
 
+    const VALID_SIZES: SpriteSize[] = ['32x32', '64x64', '128x128', '256x256'];
+    if (!VALID_SIZES.includes(size as SpriteSize)) {
+      return { ok: false, error: `size must be one of: ${VALID_SIZES.join(', ')}` };
+    }
+
     return {
       ok: true,
       params: {

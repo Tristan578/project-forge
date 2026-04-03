@@ -43,6 +43,16 @@ export const POST = createGenerationHandler<
       return { ok: false, error: 'Prompt must be between 3 and 500 characters' };
     }
 
+    const VALID_MODES = ['text-to-3d', 'image-to-3d'];
+    if (!mode || !VALID_MODES.includes(mode as string)) {
+      return { ok: false, error: `mode must be one of: ${VALID_MODES.join(', ')}` };
+    }
+
+    const VALID_QUALITIES = ['standard', 'high'];
+    if (quality !== undefined && !VALID_QUALITIES.includes(quality as string)) {
+      return { ok: false, error: `quality must be one of: ${VALID_QUALITIES.join(', ')}` };
+    }
+
     if (mode === 'image-to-3d' && !imageBase64) {
       return { ok: false, error: 'imageBase64 required for image-to-3d mode' };
     }
