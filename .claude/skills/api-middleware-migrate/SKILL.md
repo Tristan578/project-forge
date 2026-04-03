@@ -34,20 +34,25 @@ export async function POST(req: NextRequest) {
 ## Target Pattern (after)
 
 ```typescript
-import { withApiMiddleware } from '@/lib/middleware/withApiMiddleware';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { z } from 'zod';
 
 const bodySchema = z.object({
   name: z.string().min(1),
 });
 
-export const POST = withApiMiddleware({
-  auth: true,
-  rateLimit: { key: 'route', limit: 30, windowMs: 60_000 },
-  body: bodySchema,
-}, async (req, { user, body }) => {
-  // ... business logic using validated body ...
-});
+export const POST = withApiMiddleware(
+  async (req, { userId, body }) => {
+    // ... business logic using validated body ...
+    return NextResponse.json({ ok: true });
+  },
+  {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `route:${id}`, max: 30, windowSeconds: 60 },
+    validate: bodySchema,
+  },
+);
 ```
 
 ## Process
@@ -109,7 +114,9 @@ cd web && npx vitest run <test-file-for-this-route>
 
 ## Notes
 
-- `withApiMiddleware` doesn't exist yet — create it as part of the first migration
-- Model it on Next.js middleware patterns, NOT Express middleware
-- The middleware should return `NextResponse` for auth/rateLimit failures
-- Business logic handler receives a typed context object
+- `withApiMiddleware` already exists at `web/src/lib/api/middleware.ts` with two overloads:
+  - **Result-object** (legacy): `const mid = await withApiMiddleware(req, opts); if (mid.error) return mid.error;`
+  - **Handler-wrapper** (preferred): `export const POST = withApiMiddleware(handler, opts);`
+- Options: `{ requireAuth, rateLimit, rateLimitConfig: { key, max, windowSeconds, useIp?, distributed? }, validate }`
+- Handler receives `(req, { userId, authContext, body })` context object
+- Tests at `web/src/lib/api/__tests__/middleware.test.ts`

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# PreToolUse hook: warn about common sanitization anti-patterns in staged/edited files.
-# Fires on Edit/Write when the file imports sanitizePrompt or is in game-creation/.
+# PreToolUse hook: warn about common sanitization anti-patterns in edited files.
+# Fires on Edit/Write when the file content references sanitization-related keywords.
 
 set -euo pipefail
 
-# Read the tool input to get the file path
-FILE_PATH="${CLAUDE_FILE_PATH:-}"
+# Read the tool input JSON from stdin (consistent with other hooks)
+INPUT=$(cat)
+FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
 [ -z "$FILE_PATH" ] && exit 0
 
 # Only check files that deal with LLM sanitization

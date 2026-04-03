@@ -11,7 +11,8 @@ BRANCH=$(git branch --show-current 2>/dev/null || echo "")
 
 # Find the PR number for this branch
 PR=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || echo "")
-[ -z "$PR" ] && exit 0
+# gh jq returns literal "null" when no PR exists — treat as empty
+[ -z "$PR" ] || [ "$PR" = "null" ] && exit 0
 
 # Count unreplied bot comments (paginated)
 UNREPLIED=$(python3 -c "
@@ -22,7 +23,28 @@ result = subprocess.run(
 )
 if result.returncode != 0:
     sys.exit(0)
-comments = json.loads(result.stdout)
+# --paginate may emit multiple JSON arrays; wrap in a list and flatten
+raw = result.stdout.strip()
+if not raw:
+    sys.exit(0)
+try:
+    comments = json.loads(raw)
+except json.JSONDecodeError:
+    # Paginated output: multiple JSON arrays concatenated
+    comments = []
+    for chunk in raw.split('\n'):
+        chunk = chunk.strip()
+        if chunk:
+            try:
+                parsed = json.loads(chunk)
+                if isinstance(parsed, list):
+                    comments.extend(parsed)
+                else:
+                    comments.append(parsed)
+            except json.JSONDecodeError:
+                pass
+    if not comments:
+        sys.exit(0)
 replied_to = {c['in_reply_to_id'] for c in comments if c.get('in_reply_to_id')}
 unreplied = [c for c in comments
              if c['user']['login'] in ('sentry[bot]', 'Copilot')
