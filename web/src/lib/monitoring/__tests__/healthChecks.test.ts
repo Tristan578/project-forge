@@ -648,7 +648,7 @@ describe('healthChecks', () => {
       const { runAllHealthChecks } = await import('@/lib/monitoring/healthChecks');
       const report = await runAllHealthChecks();
 
-      expect(report.services).toHaveLength(9);
+      expect(report.services).toHaveLength(10);
       expect(report.environment).toBe('test');
       expect(report.version).toBe('abcdef12');
       expect(report.timestamp).toBeDefined();

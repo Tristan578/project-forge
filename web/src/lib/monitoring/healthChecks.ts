@@ -592,28 +592,33 @@ export function sanitizeForPublic(services: ServiceHealth[]): ServiceHealth[] {
 async function checkGenerationFactory(): Promise<ServiceHealth> {
   const start = Date.now();
   try {
-    const { createGenerationHandler } = await import('@/lib/api/createGenerationHandler');
-    const handler = createGenerationHandler({
-      route: '/api/health/factory-smoke',
-      provider: 'anthropic',
-      operation: 'chat_short',
-      rateLimitKey: 'health-smoke',
-      validate: (body) => {
-        const prompt = body.prompt;
-        if (!prompt || typeof prompt !== 'string') return { ok: false, error: 'missing prompt' };
-        return { ok: true, params: { prompt } };
-      },
-      execute: async (params) => ({ echo: params.prompt }),
-    });
+    const res = await withTimeout(
+      (async () => {
+        const { createGenerationHandler } = await import('@/lib/api/createGenerationHandler');
+        const handler = createGenerationHandler({
+          route: '/api/health/factory-smoke',
+          provider: 'anthropic',
+          operation: 'chat_short',
+          rateLimitKey: 'health-smoke',
+          validate: (body) => {
+            const prompt = body.prompt;
+            if (!prompt || typeof prompt !== 'string') return { ok: false, error: 'missing prompt' };
+            return { ok: true, params: { prompt } };
+          },
+          execute: async (params) => ({ echo: params.prompt }),
+        });
 
-    const { NextRequest } = await import('next/server');
-    const req = new NextRequest('http://localhost/api/health/factory-smoke', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'smoke test' }),
-    });
+        const { NextRequest } = await import('next/server');
+        const req = new NextRequest('http://localhost/api/health/factory-smoke', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: 'smoke test' }),
+        });
 
-    const res = await handler(req);
+        return handler(req);
+      })(),
+      SERVICE_TIMEOUT_MS,
+    );
     // Auth will reject (no Clerk session) — that's expected.
     // What we're checking is that the factory didn't throw.
     const latencyMs = Date.now() - start;
