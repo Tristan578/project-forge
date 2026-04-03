@@ -170,18 +170,21 @@ export function createGenerationHandler<TParams, TResult>(
       }
     }
 
-    // 6. Resolve API key + deduct tokens
-    const resolvedProvider = typeof provider === 'function' ? provider(params) : provider;
-    const resolvedOperation = typeof operation === 'function' ? operation(params) : operation;
+    // 6. Resolve provider, operation, and token cost
+    let resolvedProvider: Provider;
+    let resolvedOperation: string;
     let tokenCost: number;
     try {
-      tokenCost = tokenCostFn ? tokenCostFn(params) : getTokenCost(resolvedOperation);
+      resolvedProvider = typeof provider === 'function' ? provider(params) : provider;
+      resolvedOperation = typeof operation === 'function' ? operation(params) : operation;
+      const rawCost = tokenCostFn ? tokenCostFn(params) : getTokenCost(resolvedOperation);
+      tokenCost = Math.round(rawCost);
       if (!Number.isFinite(tokenCost) || tokenCost < 0) {
-        captureException(new Error(`Invalid token cost: ${tokenCost}`), { route });
+        captureException(new Error(`Invalid token cost: ${rawCost}`), { route });
         return NextResponse.json({ error: 'Internal pricing error' }, { status: 500 });
       }
     } catch (err) {
-      captureException(err, { route, action: 'tokenCost' });
+      captureException(err, { route, action: 'resolve_billing_params' });
       return NextResponse.json({ error: 'Internal pricing error' }, { status: 500 });
     }
     let apiKey: string;

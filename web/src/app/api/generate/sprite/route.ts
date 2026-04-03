@@ -51,8 +51,13 @@ export const POST = createGenerationHandler<
       return { ok: false, error: 'Prompt must be between 3 and 500 characters' };
     }
 
+    const VALID_PROVIDERS = ['auto', 'dalle3', 'sdxl'];
+    if (provider !== undefined && !VALID_PROVIDERS.includes(provider as string)) {
+      return { ok: false, error: `Invalid provider. Must be one of: ${VALID_PROVIDERS.join(', ')}` };
+    }
+
     const actualProvider: SpriteProvider =
-      provider === 'auto'
+      (!provider || provider === 'auto')
         ? (style === 'pixel-art' ? 'sdxl' : 'dalle3')
         : (provider as SpriteProvider);
 
