@@ -58,6 +58,9 @@ export interface GenerationHandlerConfig<TParams, TResult> {
   /** Skip content safety check (for routes that don't have a text prompt) */
   skipContentSafety?: boolean;
 
+  /** HTTP status code for successful responses (default: 200) */
+  successStatus?: number;
+
   /**
    * Validate and extract typed params from the raw request body.
    * Return `{ ok: true, params }` or `{ ok: false, error, status }`.
@@ -101,6 +104,7 @@ export function createGenerationHandler<TParams, TResult>(
     rateLimitWindowSeconds = 300,
     promptField = 'prompt',
     skipContentSafety = false,
+    successStatus = 200,
     validate,
     execute,
   } = config;
@@ -178,7 +182,7 @@ export function createGenerationHandler<TParams, TResult>(
     // 7. Execute provider call
     try {
       const result = await execute(params, apiKey, { userId, tier, usageId, tokenCost });
-      return NextResponse.json(result);
+      return NextResponse.json(result, { status: successStatus });
     } catch (err) {
       // 8. Refund tokens on provider failure
       if (usageId) {

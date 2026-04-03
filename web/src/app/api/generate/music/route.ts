@@ -1,113 +1,56 @@
 export const maxDuration = 180; // API_MAX_DURATION_HEAVY_GEN_S
 
-import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
-import { getTokenCost } from '@/lib/tokens/pricing';
+import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { SunoClient } from '@/lib/generate/sunoClient';
-import { captureException } from '@/lib/monitoring/sentry-server';
-import { rateLimitResponse } from '@/lib/rateLimit';
-import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
-import { refundTokens } from '@/lib/tokens/service';
-import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { DB_PROVIDER } from '@/lib/config/providers';
-import { badRequest, validationError, internalError } from '@/lib/api/errors';
 
+export const POST = createGenerationHandler<
+  { prompt: string; durationSeconds: number; instrumental: boolean },
+  { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
+>({
+  route: '/api/generate/music',
+  provider: DB_PROVIDER.music,
+  operation: 'music_generation',
+  rateLimitKey: 'gen-music',
+  successStatus: 201,
+  validate: (body) => {
+    const { prompt, durationSeconds = 30, instrumental = true } = body as {
+      prompt?: unknown;
+      durationSeconds?: unknown;
+      instrumental?: unknown;
+    };
 
-export async function POST(request: NextRequest) {
-  // 1. Authenticate
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  // Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
-  const aggRl = await aggregateGenerationRateLimit(authResult.ctx.user.id);
-  if (!aggRl.allowed) return rateLimitResponse(aggRl.remaining, aggRl.resetAt);
-
-  // 1b. Rate limit: 10 generation requests per 5 minutes per user (distributed)
-  const rl = await distributedRateLimit(`gen-music:${authResult.ctx.user.id}`, 10, 300);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
-
-  // 2. Parse request
-  let body: {
-    prompt: string;
-    durationSeconds?: number;
-    instrumental?: boolean;
-  };
-
-  try {
-    body = await request.json();
-  } catch {
-    return badRequest('Invalid JSON');
-  }
-
-  const { prompt, durationSeconds = 30, instrumental = true } = body;
-
-  // Validate
-  if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
-    return validationError('Prompt must be between 3 and 500 characters');
-  }
-
-  if (!(typeof durationSeconds === 'number' && Number.isFinite(durationSeconds)) || durationSeconds < 15 || durationSeconds > 120) {
-    return validationError('Duration must be between 15 and 120 seconds');
-  }
-
-  // 2b. Content safety filter
-  const safety = sanitizePrompt(prompt);
-  if (!safety.safe) {
-    return validationError(safety.reason ?? 'Content rejected by safety filter');
-  }
-  const safePrompt = safety.filtered ?? prompt;
-
-  // 3. Resolve API key and deduct tokens
-  const tokenCost = getTokenCost('music_generation');
-
-  let apiKey: string;
-  let usageId: string | undefined;
-
-  try {
-    const resolved = await resolveApiKey(
-      authResult.ctx.user.id,
-      DB_PROVIDER.music,
-      tokenCost,
-      'music_generation',
-      { prompt: safePrompt, durationSeconds, instrumental }
-    );
-    apiKey = resolved.key;
-    usageId = resolved.usageId;
-  } catch (err) {
-    if (err instanceof ApiKeyError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+    if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
+      return { ok: false, error: 'Prompt must be between 3 and 500 characters' };
     }
-    throw err;
-  }
 
-  // 4. Call Suno API
-  const client = new SunoClient({ apiKey });
+    if (!(typeof durationSeconds === 'number' && Number.isFinite(durationSeconds)) || durationSeconds < 15 || durationSeconds > 120) {
+      return { ok: false, error: 'Duration must be between 15 and 120 seconds' };
+    }
 
-  try {
+    return {
+      ok: true,
+      params: {
+        prompt: prompt as string,
+        durationSeconds: durationSeconds as number,
+        instrumental: instrumental as boolean,
+      },
+    };
+  },
+  execute: async (params, apiKey, ctx) => {
+    const client = new SunoClient({ apiKey });
     const result = await client.createMusic({
-      prompt: safePrompt,
-      durationSeconds,
-      instrumental,
+      prompt: params.prompt,
+      durationSeconds: params.durationSeconds,
+      instrumental: params.instrumental,
     });
 
-    return NextResponse.json(
-      {
-        jobId: result.taskId,
-        provider: DB_PROVIDER.music,
-        status: 'pending',
-        estimatedSeconds: 60,
-        usageId,
-      },
-      { status: 201 }
-    );
-  } catch (err) {
-    if (usageId) {
-      try { await refundTokens(authResult.ctx.user.id, usageId); }
-      catch (refundErr) { captureException(refundErr, { route: '/api/generate/music', action: 'refund', usageId }); }
-    }
-    captureException(err, { route: '/api/generate/music', prompt: safePrompt });
-    const message = err instanceof Error ? err.message : 'Provider error';
-    return internalError(message);
-  }
-}
+    return {
+      jobId: result.taskId,
+      provider: DB_PROVIDER.music,
+      status: 'pending',
+      estimatedSeconds: 60,
+      usageId: ctx.usageId,
+    };
+  },
+});
