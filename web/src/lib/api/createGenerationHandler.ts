@@ -62,6 +62,12 @@ export interface GenerationHandlerConfig<TParams, TResult> {
   successStatus?: number;
 
   /**
+   * Override the token cost with a dynamic value computed from validated params.
+   * When provided, this replaces the static `getTokenCost(operation)` lookup.
+   */
+  tokenCost?: (params: TParams) => number;
+
+  /**
    * Validate and extract typed params from the raw request body.
    * Return `{ ok: true, params }` or `{ ok: false, error, status }`.
    */
@@ -105,6 +111,7 @@ export function createGenerationHandler<TParams, TResult>(
     promptField = 'prompt',
     skipContentSafety = false,
     successStatus = 200,
+    tokenCost: tokenCostFn,
     validate,
     execute,
   } = config;
@@ -164,7 +171,7 @@ export function createGenerationHandler<TParams, TResult>(
     }
 
     // 6. Resolve API key + deduct tokens
-    const tokenCost = getTokenCost(operation);
+    const tokenCost = tokenCostFn ? tokenCostFn(params) : getTokenCost(operation);
     let apiKey: string;
     let usageId: string | undefined;
 

@@ -231,6 +231,26 @@ describe('createGenerationHandler', () => {
     expect(mockAggRateLimit).toHaveBeenCalledWith('user-1');
   });
 
+  it('uses dynamic tokenCost when provided', async () => {
+    const executeSpy = vi.fn().mockResolvedValue({ ok: true });
+    const handler = createGenerationHandler({
+      route: '/api/generate/test',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-test',
+      tokenCost: (params) => (params as { count: number }).count * 5,
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string, count: (body.count as number) ?? 1 } }),
+      execute: executeSpy,
+    });
+
+    await handler(makeRequest({ prompt: 'test prompt', count: 4 }));
+    expect(executeSpy).toHaveBeenCalledWith(
+      expect.anything(),
+      'test-key',
+      expect.objectContaining({ tokenCost: 20 }),
+    );
+  });
+
   it('skips content safety when configured', async () => {
     const handler = createGenerationHandler({
       route: '/api/generate/test',
