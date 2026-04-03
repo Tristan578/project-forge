@@ -37,8 +37,8 @@ export const POST = createGenerationHandler<
       return { ok: false, error: 'prompt is required (min 3 characters)' };
     }
 
-    if (typeof frameCount !== 'number' || frameCount < 2 || frameCount > 8) {
-      return { ok: false, error: 'frameCount must be between 2 and 8' };
+    if (typeof frameCount !== 'number' || !Number.isInteger(frameCount) || frameCount < 2 || frameCount > 8) {
+      return { ok: false, error: 'frameCount must be an integer between 2 and 8' };
     }
 
     return {

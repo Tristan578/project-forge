@@ -100,7 +100,7 @@ describe('POST /api/generate/sprite-sheet', () => {
     const res = await POST(makeRequest({ prompt: 'walk cycle', frameCount: 1 }));
     expect(res.status).toBe(422);
     const data = await res.json();
-    expect(data.error).toContain('frameCount must be between 2 and 8');
+    expect(data.error).toContain('frameCount must be');
   });
 
   it('returns 402 when tokens insufficient', async () => {

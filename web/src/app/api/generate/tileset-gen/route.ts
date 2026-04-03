@@ -24,6 +24,16 @@ export const POST = createGenerationHandler<
       return { ok: false, error: 'Prompt must be between 3 and 500 characters' };
     }
 
+    const VALID_TILE_SIZES = [16, 32, 48, 64];
+    if (!VALID_TILE_SIZES.includes(tileSize as number)) {
+      return { ok: false, error: `tileSize must be one of: ${VALID_TILE_SIZES.join(', ')}` };
+    }
+
+    const VALID_GRID_SIZES = ['4x4', '8x8', '16x16'];
+    if (!VALID_GRID_SIZES.includes(gridSize as string)) {
+      return { ok: false, error: `gridSize must be one of: ${VALID_GRID_SIZES.join(', ')}` };
+    }
+
     return {
       ok: true,
       params: {

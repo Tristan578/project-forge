@@ -173,7 +173,17 @@ export function createGenerationHandler<TParams, TResult>(
     // 6. Resolve API key + deduct tokens
     const resolvedProvider = typeof provider === 'function' ? provider(params) : provider;
     const resolvedOperation = typeof operation === 'function' ? operation(params) : operation;
-    const tokenCost = tokenCostFn ? tokenCostFn(params) : getTokenCost(resolvedOperation);
+    let tokenCost: number;
+    try {
+      tokenCost = tokenCostFn ? tokenCostFn(params) : getTokenCost(resolvedOperation);
+      if (!Number.isFinite(tokenCost) || tokenCost < 0) {
+        captureException(new Error(`Invalid token cost: ${tokenCost}`), { route });
+        return NextResponse.json({ error: 'Internal pricing error' }, { status: 500 });
+      }
+    } catch (err) {
+      captureException(err, { route, action: 'tokenCost' });
+      return NextResponse.json({ error: 'Internal pricing error' }, { status: 500 });
+    }
     let apiKey: string;
     let usageId: string | undefined;
 
