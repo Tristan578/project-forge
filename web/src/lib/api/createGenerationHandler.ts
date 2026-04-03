@@ -23,7 +23,7 @@ import type { Provider } from '@/lib/db/schema';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimitResponse } from '@/lib/rateLimit';
-import { distributedRateLimit } from '@/lib/rateLimit/distributed';
+import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 
@@ -113,7 +113,11 @@ export function createGenerationHandler<TParams, TResult>(
     const userId = authResult.ctx.user.id;
     const tier = authResult.ctx.user.tier;
 
-    // 2. Rate limit (distributed via Upstash)
+    // 2a. Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
+    const aggRl = await aggregateGenerationRateLimit(userId);
+    if (!aggRl.allowed) return rateLimitResponse(aggRl.remaining, aggRl.resetAt);
+
+    // 2b. Per-route rate limit (distributed via Upstash)
     const rl = await distributedRateLimit(
       `${rateLimitKey}:${userId}`,
       rateLimitMax,
