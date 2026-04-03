@@ -9,10 +9,18 @@ if (DSN) {
     dsn: DSN,
     environment: process.env.NODE_ENV ?? 'development',
     release: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? 'local',
-    tracesSampleRate: IS_PROD ? 0.1 : 1.0,
 
-    // Tunnel to bypass ad-blockers
-    tunnel: '/api/sentry',
+    // Dynamic sampling: keep AI-related traces at higher rate
+    tracesSampler: ({ name }) => {
+      if (name?.includes('/api/generate/') || name?.includes('/api/chat')) return 1.0;
+      if (name?.includes('/api/')) return IS_PROD ? 0.2 : 1.0;
+      return IS_PROD ? 0.1 : 1.0;
+    },
+
+    // Tunnel handled by tunnelRoute in next.config.ts (bypasses ad-blockers)
+
+    sendDefaultPii: true,
+    enableLogs: true,
 
     integrations: [
       Sentry.browserTracingIntegration(),
@@ -26,9 +34,6 @@ if (DSN) {
     replaysOnErrorSampleRate: 1.0,
   });
 
-  // Apply consistent fingerprinting rules so similar AI module errors are
-  // grouped into single Sentry issues rather than creating hundreds of separate
-  // noise issues.
   configureSentryFingerprinting();
 }
 

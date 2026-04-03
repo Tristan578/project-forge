@@ -4,11 +4,19 @@ import * as Sentry from '@sentry/nextjs';
  * Next.js Instrumentation Hook
  *
  * Called once when the Next.js server starts. Used for one-time setup
- * like environment validation and monitoring initialization.
+ * like environment validation, Sentry initialization, and monitoring.
  *
  * @see https://nextjs.org/docs/app/building-your-application/optimizing/instrumentation
  */
 export async function register() {
+  // Sentry server/edge SDK initialization
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    await import('../sentry.server.config');
+  }
+  if (process.env.NEXT_RUNTIME === 'edge') {
+    await import('../sentry.edge.config');
+  }
+
   const { validateEnvironment } = await import('@/lib/config/validateEnv');
   const result = validateEnvironment();
 
@@ -20,21 +28,8 @@ export async function register() {
     }
   }
 
-  // Initialize Sentry SDK for the current server runtime.
-  // Without these imports, Sentry initialization depends on config file
-  // side-effects loading at the right time.
-  if (process.env.NEXT_RUNTIME === 'nodejs') {
-    await import('../sentry.server.config');
-  }
-  if (process.env.NEXT_RUNTIME === 'edge') {
-    await import('../sentry.edge.config');
-  }
 }
 
-/**
- * Captures unhandled server-side request errors automatically.
- * Without this export, any unhandled route error is invisible to Sentry.
- *
- * @see https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/#server-side-error-capture
- */
+// Captures server-side errors from Server Components, middleware, and proxies.
+// Requires @sentry/nextjs >= 8.28.0 and Next.js >= 15.
 export const onRequestError = Sentry.captureRequestError;

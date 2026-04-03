@@ -638,7 +638,7 @@ describe('healthChecks', () => {
   // runAllHealthChecks
   // ---------------------------------------------------------------------------
   describe('runAllHealthChecks', () => {
-    it('returns a HealthReport with all 9 services', async () => {
+    it('returns a HealthReport with all 10 services', async () => {
       vi.resetModules();
 
       // Minimal mocks: DB neon needs a mock even with no DATABASE_URL
@@ -648,7 +648,7 @@ describe('healthChecks', () => {
       const { runAllHealthChecks } = await import('@/lib/monitoring/healthChecks');
       const report = await runAllHealthChecks();
 
-      expect(report.services).toHaveLength(9);
+      expect(report.services).toHaveLength(10);
       expect(report.environment).toBe('test');
       expect(report.version).toBe('abcdef12');
       expect(report.timestamp).toBeDefined();

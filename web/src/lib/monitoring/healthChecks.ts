@@ -14,6 +14,7 @@
  */
 import 'server-only';
 import { getMetrics, DEGRADED_AVG_THRESHOLD_MS } from '@/lib/db/queryMonitor';
+import { DB_PROVIDER } from '@/lib/config/providers';
 
 export type ServiceStatus = 'healthy' | 'degraded' | 'down';
 
@@ -575,6 +576,94 @@ export function sanitizeForPublic(services: ServiceHealth[]): ServiceHealth[] {
 }
 
 /**
+ * Smoke-test the createGenerationHandler factory wiring.
+ *
+ * Creates a trivial handler and sends an unauthenticated request through it.
+ * Because createGenerationHandler authenticates first, the expected outcome is
+ * a structured 401 response rather than an unhandled error.
+ *
+ * This verifies that the factory can be imported, instantiated, and invoked on
+ * the auth path without throwing. It does not exercise later stages such as
+ * body parsing, validation dispatch, or provider/operation resolution.
+ */
+async function checkGenerationFactory(): Promise<ServiceHealth> {
+  const start = Date.now();
+  try {
+    const res = await withTimeout(
+      (async () => {
+        const { createGenerationHandler } = await import('@/lib/api/createGenerationHandler');
+        const handler = createGenerationHandler({
+          route: '/api/health/factory-smoke',
+          provider: DB_PROVIDER.chat,
+          operation: 'chat_short',
+          rateLimitKey: 'health-smoke',
+          validate: (body) => {
+            const prompt = body.prompt;
+            if (!prompt || typeof prompt !== 'string') return { ok: false, error: 'missing prompt' };
+            return { ok: true, params: { prompt } };
+          },
+          execute: async (params) => ({ echo: params.prompt }),
+        });
+
+        const { NextRequest } = await import('next/server');
+        const req = new NextRequest('http://localhost/api/health/factory-smoke', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: 'smoke test' }),
+        });
+
+        return handler(req);
+      })(),
+      SERVICE_TIMEOUT_MS,
+    );
+    // Auth should reject (no Clerk session on health route) — 401 is expected.
+    // 200 means auth leaked from the caller's request context (authenticateRequest
+    // calls auth() which reads Clerk context, not the synthetic NextRequest).
+    // Treat 200 as degraded: factory works but may have billed tokens.
+    const latencyMs = Date.now() - start;
+
+    if (res.status === 401) {
+      return {
+        name: 'Generation Factory',
+        status: 'healthy',
+        latencyMs,
+        lastChecked: new Date().toISOString(),
+        details: { responseStatus: res.status },
+      };
+    }
+
+    if (res.status === 200) {
+      return {
+        name: 'Generation Factory',
+        status: 'degraded',
+        latencyMs,
+        lastChecked: new Date().toISOString(),
+        error: 'Factory smoke test unexpectedly authenticated — may have billed tokens',
+        details: { responseStatus: res.status },
+      };
+    }
+
+    // Unexpected status — factory pipeline may be broken
+    return {
+      name: 'Generation Factory',
+      status: 'degraded',
+      latencyMs,
+      lastChecked: new Date().toISOString(),
+      error: `Unexpected status ${res.status} from factory smoke test`,
+    };
+  } catch (err) {
+    // Factory threw — this is the critical failure case
+    return {
+      name: 'Generation Factory',
+      status: 'down',
+      latencyMs: Date.now() - start,
+      lastChecked: new Date().toISOString(),
+      error: `Factory smoke test threw: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
  * Run all service checks concurrently and return a full HealthReport.
  * Checks run in parallel. Anthropic downtime causes 'degraded' overall but
  * does not trigger 503 (not in CRITICAL_SERVICES).
@@ -590,6 +679,7 @@ export async function runAllHealthChecks(): Promise<HealthReport> {
     checkAnthropic(),
     checkSentry(),
     checkCloudflareR2(),
+    checkGenerationFactory(),
   ]);
 
   const env = process.env.NEXT_PUBLIC_ENVIRONMENT ?? process.env.NODE_ENV ?? 'unknown';

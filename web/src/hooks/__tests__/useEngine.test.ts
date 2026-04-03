@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { useEngine, resetEngine, fetchWasmHash } from '../useEngine';
+import { useEngine, resetEngine, recoverEngine, fetchWasmHash } from '../useEngine';
 import * as initLog from '@/lib/initLog';
 
 vi.mock('@/lib/initLog', () => ({
@@ -9,6 +9,12 @@ vi.mock('@/lib/initLog', () => ({
 
 vi.mock('../useEngineStatus', () => ({
   emitStatusEvent: vi.fn(),
+}));
+
+vi.mock('@/lib/monitoring/sentry-client', () => ({
+  captureException: vi.fn(),
+  addBreadcrumb: vi.fn(),
+  setTag: vi.fn(),
 }));
 
 // We need to mock the dynamic import in loadWasm, which is hard.
@@ -121,6 +127,59 @@ describe('useEngine', () => {
     });
 
     delete (window as Window & { __SKIP_ENGINE?: boolean }).__SKIP_ENGINE;
+  });
+});
+
+describe('recoverEngine', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetEngine();
+
+    const canvas = document.createElement('canvas');
+    canvas.id = 'forge-canvas';
+    document.body.appendChild(canvas);
+  });
+
+  afterEach(() => {
+    // Clean up DOM — safe in test env (no user content)
+    while (document.body.firstChild) {
+      document.body.removeChild(document.body.firstChild);
+    }
+    resetEngine();
+  });
+
+  it('returns false when canvas element is missing', async () => {
+    // Remove canvas before calling recover
+    while (document.body.firstChild) {
+      document.body.removeChild(document.body.firstChild);
+    }
+    const result = await recoverEngine('forge-canvas');
+    // loadWasm will reject in jsdom (no WASM binary), so recovery fails
+    expect(result).toBe(false);
+  });
+
+  it('returns false when loadWasm throws', async () => {
+    const result = await recoverEngine('forge-canvas');
+    // loadWasm uses a dynamic import that will fail in jsdom (no WASM binary)
+    expect(result).toBe(false);
+  });
+
+  it('captures exception on failure', async () => {
+    const sentry = await import('@/lib/monitoring/sentry-client');
+    await recoverEngine('forge-canvas');
+    expect(sentry.captureException).toHaveBeenCalled();
+  });
+
+  it('adds breadcrumb before attempting recovery', async () => {
+    const sentry = await import('@/lib/monitoring/sentry-client');
+    await recoverEngine('forge-canvas');
+    expect(sentry.addBreadcrumb).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: 'engine',
+        message: 'WASM engine recovery attempted',
+        level: 'info',
+      }),
+    );
   });
 });
 

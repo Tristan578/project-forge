@@ -9,7 +9,18 @@ if (DSN) {
     dsn: DSN,
     environment: process.env.NODE_ENV ?? 'development',
     release: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? 'local',
-    tracesSampleRate: IS_PROD ? 0.1 : 1.0,
+
+    // Dynamic sampling: 100% for AI traces, lower for other API routes
+    tracesSampler: ({ name }) => {
+      if (name?.includes('/api/generate/') || name?.includes('/api/chat')) return 1.0;
+      if (name?.includes('/api/')) return IS_PROD ? 0.2 : 1.0;
+      return IS_PROD ? 0.1 : 1.0;
+    },
+
+    // Capture local variables in stack frames for easier debugging
+    includeLocalVariables: true,
+    sendDefaultPii: true,
+    enableLogs: true,
 
     integrations: [
       // Captures AI token usage, model IDs, latency, and errors for every
@@ -24,8 +35,7 @@ if (DSN) {
       // Requires experimental_telemetry: { isEnabled: true } on each call.
       Sentry.vercelAIIntegration(),
       // Auto-collects runtime health metrics: RSS, heap, CPU, event loop.
-      // Enabled on Vercel production + preview only. Excludes 'development'
-      // (local vercel dev) and non-Vercel local dev (no VERCEL_ENV).
+      // Enabled on Vercel production + preview only.
       ...(process.env.VERCEL_ENV === 'production' || process.env.VERCEL_ENV === 'preview'
         ? [Sentry.nodeRuntimeMetricsIntegration()]
         : []),

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback, useState, useSyncExternalStore } from 'react';
 import { logInitEvent, type InitPhase } from '@/lib/initLog';
 import { emitStatusEvent } from './useEngineStatus';
-import { captureException, setTag } from '@/lib/monitoring/sentry-client';
+import { addBreadcrumb, captureException, setTag } from '@/lib/monitoring/sentry-client';
 import { showError } from '@/lib/toast';
 import { fetchWasmWithMetrics } from '@/lib/monitoring/cdnAnalytics';
 import { GPU_INIT_TIMEOUT_MS, WASM_FETCH_TIMEOUT_MS } from '@/lib/config/timeouts';
@@ -429,43 +429,34 @@ export function resetEngine(): void {
 /**
  * Attempt to recover the WASM engine after a panic without a full page reload.
  *
- * 1. Snapshots the current editor store state to localStorage
- * 2. Resets the WASM module
- * 3. Reloads the WASM binary
- * 4. Re-initializes the engine on the existing canvas
- * 5. Restores scene state by replaying commands from the snapshot
+ * 1. Resets the WASM module
+ * 2. Reloads the WASM binary
+ * 3. Re-initializes the engine on the existing canvas
+ *
+ * The Zustand editor store persists in memory, so React components retain
+ * scene graph, selection, etc. Components that depend on engine state
+ * re-sync via their effects after re-initialization.
  *
  * Returns true if recovery succeeded, false if it failed (caller should
  * fall back to a full page reload).
  */
 export async function recoverEngine(canvasId: string): Promise<boolean> {
   try {
-    // Step 1: Snapshot current editor state before clearing anything
-    let stateBackup: string | null = null;
-    try {
-      stateBackup = localStorage.getItem('forge-editor-store');
-      if (stateBackup) {
-        localStorage.setItem('forge-editor-crash-backup', JSON.stringify({
-          timestamp: new Date().toISOString(),
-          state: stateBackup,
-        }));
-      }
-    } catch { /* localStorage may be unavailable */ }
-
-    captureException(new Error('WASM engine recovery attempted'), {
-      source: 'recoverEngine',
-      canvasId,
-      hadStateBackup: Boolean(stateBackup),
+    addBreadcrumb({
+      category: 'engine',
+      message: 'WASM engine recovery attempted',
+      level: 'info',
+      data: { canvasId },
     });
 
-    // Step 2: Reset module state
+    // Step 1: Reset module state
     resetEngine();
 
-    // Step 3: Reload WASM
+    // Step 2: Reload WASM
     setLoadingState({ phase: 'downloading', progress: 0 });
     const wasm = await loadWasm();
 
-    // Step 4: Re-initialize on existing canvas
+    // Step 3: Re-initialize on existing canvas
     const canvas = document.getElementById(canvasId);
     if (!canvas) {
       setLoadingState({ phase: 'error', error: 'Canvas not found during recovery' });
@@ -475,11 +466,6 @@ export async function recoverEngine(canvasId: string): Promise<boolean> {
     setLoadingState({ phase: 'initializing', progress: 0 });
     wasm.init_engine(canvasId);
     setLoadingState({ phase: 'ready', progress: 100 });
-
-    // Step 5: Restore state — the editor store persists in memory (Zustand),
-    // so React components will re-render with existing state. The WASM engine
-    // starts fresh, but the editor UI retains scene graph, selection, etc.
-    // Components that depend on engine state will re-sync via their effects.
 
     return true;
   } catch (err) {
