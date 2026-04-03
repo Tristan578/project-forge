@@ -88,6 +88,7 @@ describe('Regression #2: refund endpoint idempotency', () => {
         const usesFactory = content.includes('createGenerationHandler');
         const lines = content.split('\n');
         let inJsonResponse = false;
+        let inExecuteBlock = false;
         let inExecuteReturn = false;
         let hasUsageId = false;
         for (const line of lines) {
@@ -100,8 +101,9 @@ describe('Regression #2: refund endpoint idempotency', () => {
             break;
           }
           if (inJsonResponse && trimmed.includes(');')) inJsonResponse = false;
-          // Pattern 2: Factory execute return value
-          if (usesFactory && /^\breturn\s*\{/.test(trimmed)) inExecuteReturn = true;
+          // Pattern 2: Factory — only scan inside the execute: block
+          if (usesFactory && /^\s*execute\s*:/.test(line)) inExecuteBlock = true;
+          if (inExecuteBlock && /^\s*return\s*\{/.test(trimmed)) inExecuteReturn = true;
           if (inExecuteReturn && /\busageId\b/.test(trimmed)) {
             hasUsageId = true;
             break;
