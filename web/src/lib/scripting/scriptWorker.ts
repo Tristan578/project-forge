@@ -1102,8 +1102,8 @@ self.onmessage = (e: MessageEvent) => {
         processAsyncResponses(msg.asyncResponses);
       }
 
-      timeData.delta = msg.dt || 0;
-      timeData.elapsed = msg.elapsed || 0;
+      timeData.delta = msg.dt ?? 0;
+      timeData.elapsed = msg.elapsed ?? 0;
 
       // Delta encoding support: if entitiesDelta is present, apply it to
       // the current entityStates to reconstruct the full state. This avoids

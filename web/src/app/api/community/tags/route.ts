@@ -24,12 +24,14 @@ export async function GET(req: NextRequest) {
       .orderBy(sql`COUNT(*) DESC`)
       .limit(20);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       tags: tags.map((t: { tag: string; count: number }) => ({
         tag: t.tag,
         count: Number(t.count),
       })),
     });
+    response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    return response;
   } catch (error) {
     console.error('Failed to fetch tags:', error);
     captureException(error, { route: '/api/community/tags' });

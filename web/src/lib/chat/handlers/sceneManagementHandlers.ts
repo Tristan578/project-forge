@@ -234,7 +234,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
     await ctx.store.startSceneTransition(p.data.sceneName, {
       type: p.data.transitionType || 'fade',
-      duration: p.data.duration || 500,
+      duration: p.data.duration ?? 500,
       color: p.data.color || '#000000',
       direction: p.data.direction || 'left',
     });

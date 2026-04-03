@@ -88,7 +88,9 @@ export async function GET(req: NextRequest) {
       // No meta file
     }
 
-    return NextResponse.json({ docs, meta });
+    const response = NextResponse.json({ docs, meta });
+    response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    return response;
   } catch (err) {
     captureException(err, { route: '/api/docs' });
     return NextResponse.json(

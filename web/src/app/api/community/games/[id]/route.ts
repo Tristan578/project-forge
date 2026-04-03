@@ -127,7 +127,11 @@ export async function GET(
       })),
     };
 
-    return NextResponse.json({ game: formattedGame });
+    // Explicit no-store: this endpoint returns user comments which may be
+    // moderated/flagged. Caching would keep flagged content visible.
+    const response = NextResponse.json({ game: formattedGame });
+    response.headers.set('Cache-Control', 'no-store');
+    return response;
   } catch (error) {
     console.error('Failed to fetch game:', error);
     captureException(error, { route: '/api/community/games/[id]' });
