@@ -2,6 +2,7 @@ export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { DB_PROVIDER } from '@/lib/config/providers';
 
 const VOICE_STYLE_MAP: Record<string, number> = {
@@ -28,6 +29,7 @@ export const POST = createGenerationHandler<
   operation: 'voice_generation',
   rateLimitKey: 'gen-voice',
   promptField: 'text',
+  skipContentSafety: true,
   validate: (body) => {
     const { text, voiceId, stability, similarityBoost, voiceStyle } = body as Record<string, unknown>;
     let style = body.style as number | undefined;
@@ -66,11 +68,18 @@ export const POST = createGenerationHandler<
       return { ok: false, error: 'Text must be between 1 and 1000 characters' };
     }
 
+    // Content safety filter (handled here, not by factory, so textLength reflects filtered text)
+    const safety = sanitizePrompt(text as string);
+    if (!safety.safe) {
+      return { ok: false, error: safety.reason ?? 'Content rejected by safety filter' };
+    }
+    const safeText = safety.filtered ?? (text as string);
+
     return {
       ok: true,
       params: {
-        text: text as string,
-        textLength: (text as string).length,
+        text: safeText,
+        textLength: safeText.length,
         voiceId: voiceId as string | undefined,
         stability: stability as number | undefined,
         similarityBoost: similarityBoost as number | undefined,
