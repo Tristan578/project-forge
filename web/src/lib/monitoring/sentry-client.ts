@@ -4,11 +4,11 @@ const DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
 /**
  * Initialize the Sentry browser SDK.
- * With @sentry/nextjs, init happens via sentry.client.config.ts automatically.
+ * With @sentry/nextjs, init happens via instrumentation-client.ts automatically.
  * This function is kept for backward compatibility with SentryProvider.
  */
 export function initSentryClient(): void {
-  // No-op — @sentry/nextjs initializes from sentry.client.config.ts
+  // No-op — @sentry/nextjs initializes from instrumentation-client.ts
 }
 
 /**

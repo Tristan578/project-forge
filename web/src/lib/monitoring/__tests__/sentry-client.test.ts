@@ -53,12 +53,12 @@ describe('sentry-client', () => {
   });
 
   describe('when NEXT_PUBLIC_SENTRY_DSN is set', () => {
-    it('initSentryClient is a no-op (init handled by sentry.client.config.ts)', async () => {
+    it('initSentryClient is a no-op (init handled by instrumentation-client.ts)', async () => {
       vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://key@sentry.io/456');
       vi.stubEnv('NODE_ENV', 'production');
       const { initSentryClient } = await import('../sentry-client');
       initSentryClient();
-      // @sentry/nextjs initializes via sentry.client.config.ts, not this function
+      // @sentry/nextjs initializes via instrumentation-client.ts, not this function
       expect(Sentry.init).not.toHaveBeenCalled();
       vi.unstubAllEnvs();
     });

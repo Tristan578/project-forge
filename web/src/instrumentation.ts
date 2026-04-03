@@ -1,3 +1,5 @@
+import * as Sentry from '@sentry/nextjs';
+
 /**
  * Next.js Instrumentation Hook
  *
@@ -17,4 +19,22 @@ export async function register() {
       );
     }
   }
+
+  // Initialize Sentry SDK for the current server runtime.
+  // Without these imports, Sentry initialization depends on config file
+  // side-effects loading at the right time.
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    await import('../sentry.server.config');
+  }
+  if (process.env.NEXT_RUNTIME === 'edge') {
+    await import('../sentry.edge.config');
+  }
 }
+
+/**
+ * Captures unhandled server-side request errors automatically.
+ * Without this export, any unhandled route error is invisible to Sentry.
+ *
+ * @see https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/#server-side-error-capture
+ */
+export const onRequestError = Sentry.captureRequestError;

@@ -155,7 +155,7 @@ function fingerprintEvent(event: Event): Event {
  * Register the Sentry event processor that applies consistent fingerprinting
  * rules for AI module errors.
  *
- * Call this once from sentry.client.config.ts (and sentry.server.config.ts if
+ * Call this once from instrumentation-client.ts (and sentry.server.config.ts if
  * server-side fingerprinting is also desired).
  *
  * Groups:

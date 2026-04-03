@@ -304,7 +304,7 @@ describe('PF-892: Sentry client config must not include server-only AI integrati
    * integrations. Including them in the browser (client) config causes runtime
    * errors because the Anthropic SDK is not available in the browser context.
    *
-   * sentry.client.config.ts must only use browser-safe integrations:
+   * instrumentation-client.ts must only use browser-safe integrations:
    *   - browserTracingIntegration
    *   - replayIntegration
    *
@@ -312,23 +312,23 @@ describe('PF-892: Sentry client config must not include server-only AI integrati
    *   - anthropicAIIntegration
    *   - vercelAIIntegration
    */
-  it('sentry.client.config.ts does not contain anthropicAIIntegration', async () => {
+  it('instrumentation-client.ts does not contain anthropicAIIntegration', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const clientConfigPath = path.resolve(
       process.cwd(),
-      'sentry.client.config.ts',
+      'instrumentation-client.ts',
     );
     const content = fs.readFileSync(clientConfigPath, 'utf-8');
     expect(content).not.toContain('anthropicAIIntegration');
   });
 
-  it('sentry.client.config.ts does not contain vercelAIIntegration', async () => {
+  it('instrumentation-client.ts does not contain vercelAIIntegration', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const clientConfigPath = path.resolve(
       process.cwd(),
-      'sentry.client.config.ts',
+      'instrumentation-client.ts',
     );
     const content = fs.readFileSync(clientConfigPath, 'utf-8');
     expect(content).not.toContain('vercelAIIntegration');
