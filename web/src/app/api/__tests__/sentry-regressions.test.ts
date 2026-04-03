@@ -81,19 +81,34 @@ describe('Regression #2: refund endpoint idempotency', () => {
       const routeFile = join(GENERATE_DIR, dir, 'route.ts');
       try {
         const content = readFileSync(routeFile, 'utf-8');
-        // usageId must appear in the success response JSON
+        // usageId must appear in the success response JSON.
+        // Two patterns:
+        //   1. Direct: NextResponse.json({ ..., usageId, ... })
+        //   2. Factory: createGenerationHandler execute returns { ..., usageId: ctx.usageId, ... }
+        const usesFactory = content.includes('createGenerationHandler');
         const lines = content.split('\n');
         let inJsonResponse = false;
+        let inExecuteBlock = false;
+        let inExecuteReturn = false;
         let hasUsageId = false;
         for (const line of lines) {
           const trimmed = line.trim();
           if (trimmed.startsWith('//')) continue;
+          // Pattern 1: Direct NextResponse.json
           if (trimmed.includes('NextResponse.json(')) inJsonResponse = true;
           if (inJsonResponse && /\busageId\b/.test(trimmed)) {
             hasUsageId = true;
             break;
           }
           if (inJsonResponse && trimmed.includes(');')) inJsonResponse = false;
+          // Pattern 2: Factory — only scan inside the execute: block
+          if (usesFactory && /^\s*execute\s*:/.test(line)) inExecuteBlock = true;
+          if (inExecuteBlock && /^\s*return\s*\{/.test(trimmed)) inExecuteReturn = true;
+          if (inExecuteReturn && /\busageId\b/.test(trimmed)) {
+            hasUsageId = true;
+            break;
+          }
+          if (inExecuteReturn && /^\s*};/.test(trimmed)) inExecuteReturn = false;
         }
         if (!hasUsageId) {
           missing.push(`generate/${dir}/route.ts — missing usageId in success response (breaks async refund)`);
