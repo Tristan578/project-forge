@@ -54,10 +54,10 @@ export const POST = createGenerationHandler<
   // skipContentSafety: true,       // if route handles safety in validate()
 
   // Dynamic pricing (if cost depends on params):
-  // tokenCost: (params) => params.count * TOKEN_COSTS.per_item,
+  // tokenCost: (params) => params.count * TOKEN_COSTS.<operation>_cost_per_item,
 
   // Dynamic provider (if provider depends on params):
-  // provider: (params) => params.useGpu ? 'replicate' : 'openai',
+  // provider: (params) => params.useGpu ? DB_PROVIDER.sprite : DB_PROVIDER.image,
 
   // Dynamic operation (if operation depends on params):
   // operation: (params) => params.quality === 'high' ? 'op_high' : 'op_standard',
@@ -112,7 +112,7 @@ Edit `web/src/lib/tokens/pricing.ts` — add the operation to `TOKEN_COSTS`:
 <operation>: <cost>,  // e.g. ambience_generation: 30,
 ```
 
-If cost is dynamic (per-item, per-frame), add a `_per_item` entry and use `tokenCost` callback in the route.
+If cost is dynamic (per-item, per-frame), add a `_cost_per_item` or `_cost_per_frame` entry (matching existing naming: `sprite_sheet_cost_per_frame`) and use `tokenCost` callback in the route.
 
 ## Step 3: Add Integration Test
 
@@ -166,4 +166,4 @@ npx tsc --noEmit  # (may need NODE_OPTIONS="--max-old-space-size=4096")
 4. **Large params in billing metadata** — if params include base64, arrays, or long text, add `billingMetadata` callback to exclude them
 5. **textLength before content safety** — if you need text length for billing, handle content safety in `validate()` with `skipContentSafety: true` and compute length from the sanitized text
 6. **Missing usageId in async responses** — async job routes MUST include `usageId: ctx.usageId` for client-side refund via polling
-7. **Forgetting to add pricing** — route will crash at runtime if `TOKEN_COSTS` doesn't have the operation
+7. **Forgetting to add pricing** — `getTokenCost()` returns 0 for unknown operations, so the route silently executes for free. This is revenue loss, not a crash — harder to detect. Always verify the operation key exists in `TOKEN_COSTS` before deploying
