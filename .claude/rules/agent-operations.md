@@ -133,13 +133,17 @@ git push -u origin $(git branch --show-current)
 # 1. Run quality gate
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 
-# 2. Sync tickets to GitHub
+# 2. Add changeset (if user-facing changes)
+npx changeset
+# Or manually: create .changeset/<name>.md with package + semver bump + description
+
+# 3. Sync tickets to GitHub
 python3 .claude/hooks/github_project_sync.py push
 
-# 3. Find GitHub issue number
+# 4. Find GitHub issue number
 gh issue list --search "PF-XXX in:title" --limit 1
 
-# 4. Create PR with Closes link
+# 5. Create PR with Closes link
 gh pr create --title "fix: description" --body "$(cat <<'EOF'
 ## Summary
 - bullet points

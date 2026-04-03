@@ -1,0 +1,43 @@
+name: Changeset Check
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  changeset:
+    name: Require Changeset
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip changeset') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for changeset files
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # Get changesets added in this PR (compared to base branch)
+          CHANGESETS=$(git diff --name-only --diff-filter=A "origin/${BASE_REF}...HEAD" -- '.changeset/*.md' | grep -v 'README.md' || true)
+
+          if [ -z "$CHANGESETS" ]; then
+            echo "::error::No changeset found. Run 'npx changeset' to add one, or add the 'skip changeset' label to bypass."
+            echo ""
+            echo "Every PR that changes user-facing behavior needs a changeset."
+            echo "Create one with: npx changeset"
+            echo "Or manually create .changeset/<name>.md with:"
+            echo ""
+            echo '---'
+            echo '"web": patch'
+            echo '---'
+            echo ''
+            echo 'Description of the change.'
+            exit 1
+          fi
+
+          echo "Found changeset(s):"
+          echo "$CHANGESETS"

@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Version Packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Create or update Version Packages PR
+        uses: changesets/action@v1
+        with:
+          title: "chore: version packages"
+          commit: "chore: version packages"
+          version: npm run changeset:version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  tag-release:
+    name: Tag and Release
+    runs-on: ubuntu-latest
+    # Only run when the "Version Packages" PR is merged.
+    # head_commit.message is safe here — used in an `if:` expression, not a shell command.
+    if: github.event.head_commit.message == 'chore: version packages'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Get version from web/package.json
+        id: version
+        run: |
+          VERSION=$(node -p "require('./web/package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: check-tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract changelog for this version
+        if: steps.check-tag.outputs.exists == 'false'
+        id: changelog
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Extract the section for this version from CHANGELOG.md
+          ESCAPED_VERSION="${VERSION//./\\.}"
+          BODY=$(awk "/^## ${ESCAPED_VERSION}/{found=1; next} /^## /{if(found) exit} found" CHANGELOG.md)
+          if [ -z "$BODY" ]; then
+            BODY="Release v${VERSION}"
+          fi
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo "$BODY"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create git tag
+        if: steps.check-tag.outputs.exists == 'false'
+        env:
+          TAG: v${{ steps.version.outputs.version }}
+        run: |
+          git tag "$TAG"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        if: steps.check-tag.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ steps.version.outputs.version }}
+          BODY: ${{ steps.changelog.outputs.body }}
+        run: |
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes "$BODY"

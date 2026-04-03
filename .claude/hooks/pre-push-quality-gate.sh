@@ -114,6 +114,12 @@ if echo "$CHANGED_FILES" | grep -qE 'panelRegistry|WorkspaceProvider'; then
   }
 fi
 
+# 4. Warn if no changeset exists for this branch (non-blocking)
+CHANGESET_FILES=$(git diff --name-only --diff-filter=A origin/main...HEAD -- '.changeset/*.md' 2>/dev/null | grep -v 'README.md' || true)
+if [ -z "$CHANGESET_FILES" ]; then
+  echo "[pre-push] WARNING: No changeset found for this branch. Run 'npx changeset' to add one before creating a PR." >&2
+fi
+
 if [ -n "$ERRORS" ]; then
   echo "${ERRORS}" >&2
   exit 2
