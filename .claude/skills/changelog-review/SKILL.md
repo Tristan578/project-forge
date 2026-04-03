@@ -118,13 +118,26 @@ Output a structured report:
 - [Libraries that are up to date or have no breaking changes]
 ```
 
-### Step 4: Update CLAUDE.md if Needed
+### Step 4: Create Tickets for Actionable Updates
+
+**MANDATORY.** Every update worth tracking gets a GitHub issue:
+
+- **Recommended updates** (bug fixes, security patches): one ticket per update
+- **Breaking change audits** (e.g. Stripe v21): audit-only ticket, DO NOT UPGRADE label
+- **Minor patches with no notable changes**: bundle into a single "routine npm update" ticket, or skip if truly trivial
+- **Bundling**: group related updates (e.g. multiple Vercel ecosystem packages) into one ticket when they share a test plan
+
+```bash
+gh issue create --title "PF-DEP: <description>" --body "<user story + acceptance criteria>" --label "enhancement"
+```
+
+### Step 5: Update CLAUDE.md if Needed
 
 If a breaking change is found that could trip up future sessions:
 - Add it to the Gotchas section of CLAUDE.md
 - Add it to `.claude/rules/library-apis.md` if it's an API pattern change
 
-### Step 5: Mark Review Complete
+### Step 6: Mark Review Complete
 
 After completing a review, update the timestamp so the SessionStart hook knows:
 
