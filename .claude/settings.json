@@ -333,15 +333,6 @@
             "timeout": 3000
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/log-hook-failure.sh\"",
-            "timeout": 3000
-          }
-        ]
       }
     ]
   },
