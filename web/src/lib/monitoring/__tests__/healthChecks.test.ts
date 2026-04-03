@@ -638,7 +638,7 @@ describe('healthChecks', () => {
   // runAllHealthChecks
   // ---------------------------------------------------------------------------
   describe('runAllHealthChecks', () => {
-    it('returns a HealthReport with all 9 services', async () => {
+    it('returns a HealthReport with all 10 services', async () => {
       vi.resetModules();
 
       // Minimal mocks: DB neon needs a mock even with no DATABASE_URL

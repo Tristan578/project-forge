@@ -14,6 +14,7 @@
  */
 import 'server-only';
 import { getMetrics, DEGRADED_AVG_THRESHOLD_MS } from '@/lib/db/queryMonitor';
+import { DB_PROVIDER } from '@/lib/config/providers';
 
 export type ServiceStatus = 'healthy' | 'degraded' | 'down';
 
@@ -575,19 +576,15 @@ export function sanitizeForPublic(services: ServiceHealth[]): ServiceHealth[] {
 }
 
 /**
- * Run all service checks concurrently and return a full HealthReport.
- * Checks run in parallel. Anthropic downtime causes 'degraded' overall but
- * does not trigger 503 (not in CRITICAL_SERVICES).
- */
-/**
- * Smoke-test the createGenerationHandler factory pipeline.
+ * Smoke-test the createGenerationHandler factory wiring.
  *
- * Creates a trivial handler and sends a request through it. The factory
- * should fail at auth (returns 401) — NOT throw an unhandled error.
- * If body parsing, validate dispatch, provider/operation resolution, or
- * error handling is broken, this catches it before users do.
+ * Creates a trivial handler and sends an unauthenticated request through it.
+ * Because createGenerationHandler authenticates first, the expected outcome is
+ * a structured 401 response rather than an unhandled error.
  *
- * This is cheap: no external calls, no DB, no Redis. Pure in-process.
+ * This verifies that the factory can be imported, instantiated, and invoked on
+ * the auth path without throwing. It does not exercise later stages such as
+ * body parsing, validation dispatch, or provider/operation resolution.
  */
 async function checkGenerationFactory(): Promise<ServiceHealth> {
   const start = Date.now();
@@ -597,7 +594,7 @@ async function checkGenerationFactory(): Promise<ServiceHealth> {
         const { createGenerationHandler } = await import('@/lib/api/createGenerationHandler');
         const handler = createGenerationHandler({
           route: '/api/health/factory-smoke',
-          provider: 'anthropic',
+          provider: DB_PROVIDER.chat,
           operation: 'chat_short',
           rateLimitKey: 'health-smoke',
           validate: (body) => {
@@ -653,6 +650,11 @@ async function checkGenerationFactory(): Promise<ServiceHealth> {
   }
 }
 
+/**
+ * Run all service checks concurrently and return a full HealthReport.
+ * Checks run in parallel. Anthropic downtime causes 'degraded' overall but
+ * does not trigger 503 (not in CRITICAL_SERVICES).
+ */
 export async function runAllHealthChecks(): Promise<HealthReport> {
   const services = await Promise.all([
     checkDatabase(),
