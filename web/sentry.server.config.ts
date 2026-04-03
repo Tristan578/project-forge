@@ -24,8 +24,9 @@ if (DSN) {
       // Requires experimental_telemetry: { isEnabled: true } on each call.
       Sentry.vercelAIIntegration(),
       // Auto-collects runtime health metrics: RSS, heap, CPU, event loop.
-      // Emitted every 30s in production for Sentry performance dashboard.
-      ...(IS_PROD ? [Sentry.nodeRuntimeMetricsIntegration()] : []),
+      // Enabled on Vercel production + preview (VERCEL_ENV), plus any
+      // non-dev NODE_ENV. Local dev excluded to reduce noise.
+      ...(process.env.VERCEL_ENV || IS_PROD ? [Sentry.nodeRuntimeMetricsIntegration()] : []),
     ],
   });
 

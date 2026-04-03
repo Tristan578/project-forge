@@ -70,7 +70,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.1",
-    "@next/bundle-analyzer": "^16.2.1",
+    "@next/bundle-analyzer": "^16.2.2",
     "@playwright/test": "^1.59.1",
     "@swc/helpers": "^0.5.19",
     "@tailwindcss/postcss": "^4",
@@ -81,15 +81,15 @@
     "@types/node": "^25",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@vitest/coverage-v8": "4.1.1",
+    "@vitest/coverage-v8": "^4.1.2",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
-    "eslint-config-next": "^16.2.1",
+    "eslint-config-next": "^16.2.2",
     "jsdom": "^29.0.1",
     "portless": "^0.7.2",
     "tailwindcss": "^4",
     "typescript": "^6",
-    "vitest": "4.1.1"
+    "vitest": "^4.1.2"
   },
   "optionalDependencies": {
     "@types/trusted-types": "^2.0.7"
