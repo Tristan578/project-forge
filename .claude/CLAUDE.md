@@ -300,7 +300,7 @@ All agents have: `memory`, `effort`, `model`, `tools`, `skills`, and agent-scope
 **Web:** `/frontend`, `/mcp-commands`, `/web-accessibility`, `/shadcn` (marketplace), `/vercel-react-best-practices` (marketplace, 70 rules), `/vercel-composition-patterns` (marketplace), `/vercel-react-view-transitions` (marketplace)
 **Next.js:** `/next-best-practices` (marketplace, 19 guides), `/next-cache-components` (marketplace), `/next-upgrade` (marketplace)
 **Testing:** `/testing` (merged vitest+test), `/playwright-best-practices` (marketplace, 57 rules), `/tdd` (marketplace)
-**Infrastructure:** `/infra-services` (merged ci-status), `/troubleshoot`, `/kanban` (merged sync-push/pull), `/babysit-prs`, `/pr-code-review` (context: fork), `/pr-green-machine` (context: fork), `/env-health-check`, `/changelog-review`, `/deploy-to-vercel` (marketplace)
+**Infrastructure:** `/infra-services` (merged ci-status), `/troubleshoot`, `/kanban` (merged sync-push/pull), `/babysit-prs`, `/pr-code-review` (context: fork), `/pr-green-machine` (context: fork), `/env-health-check`, `/changelog-review`, `/deploy-to-vercel` (marketplace), `/resolve-pr-comments` (threaded replies on every bot comment + verification), `/api-middleware-migrate` (route migration to withApiMiddleware)
 **Database:** `/db-migrate`, `/neon-postgres` (marketplace), `/claimable-postgres` (marketplace)
 **Deployment:** `/deploy-engine` (user-only — build WASM + upload to R2 CDN)
 **Billing:** `stripe-webhooks` (background — auto-loads on `web/src/lib/billing/**` edits, documents CTE claims + transaction ordering)

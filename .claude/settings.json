@@ -107,6 +107,17 @@
         "hooks": [
           {
             "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/check-sanitization-patterns.sh\"",
+            "timeout": 3000,
+            "statusMessage": "Checking sanitization patterns"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/check-vercel-json.sh\"",
             "timeout": 3000
           }
@@ -151,6 +162,19 @@
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/post-merge-doc-check.sh\"",
             "timeout": 10000
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "if": "Bash(git push *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/post-push-resolve-comments.sh\"",
+            "async": true,
+            "timeout": 30000,
+            "statusMessage": "Checking for unreplied review comments"
           }
         ]
       }
