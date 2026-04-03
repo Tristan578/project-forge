@@ -139,7 +139,11 @@ export function createGenerationHandler<TParams, TResult>(
     // 3. Parse request body
     let rawBody: Record<string, unknown>;
     try {
-      rawBody = await request.json();
+      const parsed = await request.json();
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: 400 });
+      }
+      rawBody = parsed as Record<string, unknown>;
     } catch {
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     }
