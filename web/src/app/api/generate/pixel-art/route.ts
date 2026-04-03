@@ -79,16 +79,16 @@ export const POST = createGenerationHandler<
         return { ok: false, error: validation.error ?? 'Invalid custom palette', status: 400 };
       }
     }
-    if (dithering && !VALID_DITHERING.includes(dithering as string)) {
+    if (dithering !== undefined && (typeof dithering !== 'string' || !VALID_DITHERING.includes(dithering))) {
       return { ok: false, error: `Invalid dithering. Must be one of: ${VALID_DITHERING.join(', ')}`, status: 400 };
     }
     if (ditheringIntensity !== undefined && (typeof ditheringIntensity !== 'number' || ditheringIntensity < 0 || ditheringIntensity > 1)) {
       return { ok: false, error: 'Dithering intensity must be a number between 0 and 1', status: 400 };
     }
-    if (style && !VALID_STYLES.includes(style as string)) {
+    if (style !== undefined && (typeof style !== 'string' || !VALID_STYLES.includes(style))) {
       return { ok: false, error: `Invalid style. Must be one of: ${VALID_STYLES.join(', ')}`, status: 400 };
     }
-    if (provider && !VALID_PROVIDERS.includes(provider as string)) {
+    if (provider !== undefined && (typeof provider !== 'string' || !VALID_PROVIDERS.includes(provider))) {
       return { ok: false, error: `Invalid provider. Must be one of: ${VALID_PROVIDERS.join(', ')}`, status: 400 };
     }
 

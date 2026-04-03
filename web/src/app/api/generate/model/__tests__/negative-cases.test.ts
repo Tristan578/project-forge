@@ -21,7 +21,6 @@ vi.mock('@/lib/auth/api-auth', () => ({
 }));
 
 vi.mock('@/lib/rateLimit', () => ({
-  rateLimit: vi.fn(),
   rateLimitResponse: vi.fn(() => new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 })),
 }));
 
@@ -76,7 +75,6 @@ vi.mock('@/lib/ai/contentSafety', () => ({
 // ---------------------------------------------------------------------------
 
 import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -115,7 +113,7 @@ describe('POST /api/generate/model — negative cases', () => {
       ok: true,
       ctx: { user: mockUser, clerkId: 'clerk_gen' },
     });
-    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300_000 });
+    vi.mocked(distributedRateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300_000 });
     vi.mocked(resolveApiKey).mockResolvedValue({
       type: 'platform',
       key: 'meshy-key',

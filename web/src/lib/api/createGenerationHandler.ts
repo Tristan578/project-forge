@@ -74,6 +74,14 @@ export interface GenerationHandlerConfig<TParams, TResult> {
   validate: (body: Record<string, unknown>) => ValidateResult<TParams>;
 
   /**
+   * Extract a small metadata object from params for billing records.
+   * When omitted, params is passed directly — routes with large fields
+   * (imageBase64, strings arrays) SHOULD provide this to avoid bloating
+   * the token_usage.metadata JSONB column.
+   */
+  billingMetadata?: (params: TParams) => Record<string, unknown>;
+
+  /**
    * Execute the provider call with validated params and resolved API key.
    * The return value is sent as the JSON response body.
    */
@@ -112,6 +120,7 @@ export function createGenerationHandler<TParams, TResult>(
     skipContentSafety = false,
     successStatus = 200,
     tokenCost: tokenCostFn,
+    billingMetadata: billingMetadataFn,
     validate,
     execute,
   } = config;
@@ -195,7 +204,8 @@ export function createGenerationHandler<TParams, TResult>(
     let usageId: string | undefined;
 
     try {
-      const resolved = await resolveApiKey(userId, resolvedProvider, tokenCost, resolvedOperation, params as Record<string, unknown>);
+      const metadata = billingMetadataFn ? billingMetadataFn(params) : (params as Record<string, unknown>);
+      const resolved = await resolveApiKey(userId, resolvedProvider, tokenCost, resolvedOperation, metadata);
       apiKey = resolved.key;
       usageId = resolved.usageId;
     } catch (err) {

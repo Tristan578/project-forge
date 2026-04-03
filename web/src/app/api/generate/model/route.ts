@@ -36,6 +36,11 @@ export const POST = createGenerationHandler<
       : (params.quality === 'high' ? '3d_generation_high' : '3d_generation_standard'),
   rateLimitKey: 'gen-model',
   successStatus: 201,
+  billingMetadata: (params) => ({
+    prompt: params.prompt,
+    mode: params.mode,
+    quality: params.quality,
+  }),
   validate: (body) => {
     const { prompt, mode, quality = 'standard', imageBase64, artStyle, negativePrompt } = body as Record<string, unknown>;
 

@@ -2,6 +2,7 @@ export const maxDuration = 120; // API_MAX_DURATION_BATCH_S
 
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
+import { DB_PROVIDER } from '@/lib/config/providers';
 import {
   buildTranslationPrompt,
   parseTranslationResponse,
@@ -28,12 +29,16 @@ export const POST = createGenerationHandler<
   { locales: Record<string, LocaleBundle> }
 >({
   route: '/api/generate/localize',
-  provider: 'anthropic',
+  provider: DB_PROVIDER.chat,
   operation: 'localize_scene',
   rateLimitKey: 'gen-localize',
   rateLimitMax: 5,
   rateLimitWindowSeconds: 600,
   skipContentSafety: true,
+  billingMetadata: (params) => ({
+    stringCount: params.strings.length,
+    localeCount: params.targetLocales.length,
+  }),
   tokenCost: (params) => {
     const chunkCount = Math.ceil(params.strings.length / CHUNK_SIZE);
     return chunkCount * params.targetLocales.length * TOKEN_COST_PER_CHUNK;

@@ -8,7 +8,8 @@ export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
-import { SPRITE_ESTIMATED_SECONDS } from '@/lib/config/providers';
+import { SPRITE_SIZES, SPRITE_ESTIMATED_SECONDS } from '@/lib/config/providers';
+import type { SpriteSize } from '@/lib/config/providers';
 
 type SpriteProvider = 'dalle3' | 'sdxl';
 
@@ -16,7 +17,7 @@ export const POST = createGenerationHandler<
   {
     prompt: string;
     style?: 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
-    size: '32x32' | '64x64' | '128x128' | '256x256' | '512x512' | '1024x1024';
+    size: SpriteSize;
     provider: SpriteProvider;
     removeBackground: boolean;
     serviceName: 'openai' | 'replicate';
@@ -56,6 +57,15 @@ export const POST = createGenerationHandler<
       return { ok: false, error: `Invalid provider. Must be one of: ${VALID_PROVIDERS.join(', ')}` };
     }
 
+    const VALID_SIZES: readonly string[] = SPRITE_SIZES;
+    if (!VALID_SIZES.includes(size as string)) {
+      return { ok: false, error: `Invalid size. Must be one of: ${VALID_SIZES.join(', ')}` };
+    }
+
+    if (typeof removeBackground !== 'boolean') {
+      return { ok: false, error: 'removeBackground must be a boolean' };
+    }
+
     const actualProvider: SpriteProvider =
       (!provider || provider === 'auto')
         ? (style === 'pixel-art' ? 'sdxl' : 'dalle3')
@@ -68,9 +78,9 @@ export const POST = createGenerationHandler<
       params: {
         prompt: prompt as string,
         style: style as 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic' | undefined,
-        size: (size as string) as '32x32' | '64x64' | '128x128' | '256x256' | '512x512' | '1024x1024',
+        size: size as SpriteSize,
         provider: actualProvider,
-        removeBackground: removeBackground as boolean,
+        removeBackground,
         serviceName,
       },
     };

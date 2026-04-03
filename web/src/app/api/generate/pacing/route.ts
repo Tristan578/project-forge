@@ -2,6 +2,8 @@ export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
+import { getTokenCost } from '@/lib/tokens/pricing';
+import { DB_PROVIDER } from '@/lib/config/providers';
 import { generateText, Output } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
@@ -52,11 +54,12 @@ export const POST = createGenerationHandler<
   PacingReport
 >({
   route: '/api/generate/pacing',
-  provider: 'anthropic',
-  operation: 'chat_short',
+  provider: DB_PROVIDER.chat,
+  operation: 'pacing_analysis',
   rateLimitKey: 'gen-pacing',
   rateLimitMax: 20,
   skipContentSafety: true,
+  tokenCost: () => getTokenCost('chat_short'),
   validate: (body) => {
     const { report } = body as { report?: unknown };
 
