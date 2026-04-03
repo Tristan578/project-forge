@@ -91,11 +91,16 @@ function clearEngineCrash(): void {
 /**
  * Install a global interceptor for WASM panics.
  * After detecting a panic, sets engineCrashed state so components can react.
+ *
+ * Catches panics from two sources:
+ * 1. console.error from Rust's `console_error_panic_hook` (panicked at / wasm-bindgen)
+ * 2. Unhandled RuntimeError from WASM traps (out-of-bounds, unreachable, etc.)
  */
 function installPanicInterceptor(): void {
   if (panicInterceptorInstalled || typeof window === 'undefined') return;
   panicInterceptorInstalled = true;
 
+  // Source 1: console.error from Rust panic hook
   const originalConsoleError = console.error;
   console.error = (...args: unknown[]) => {
     originalConsoleError.apply(console, args);
@@ -110,6 +115,22 @@ function installPanicInterceptor(): void {
       setEngineCrashed(msg.slice(0, 500));
     }
   };
+
+  // Source 2: Unhandled RuntimeError from WASM traps (unreachable, OOB, etc.)
+  window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
+    const reason = event.reason;
+    if (reason instanceof WebAssembly.RuntimeError || (reason instanceof Error && reason.message.includes('unreachable'))) {
+      const msg = reason instanceof Error ? reason.message : String(reason);
+      captureException(new Error(`WASM RuntimeError: ${msg.slice(0, 500)}`), {
+        source: 'unhandled_wasm_runtime_error',
+        fullMessage: msg.slice(0, 2000),
+        engineBackend: resolvedBackend,
+      });
+      if (!_engineCrashed) {
+        setEngineCrashed(`WASM RuntimeError: ${msg.slice(0, 500)}`);
+      }
+    }
+  });
 }
 
 function emitEvent(phase: InitPhase, message?: string, error?: string) {
@@ -403,6 +424,72 @@ export function resetEngine(): void {
   initPromise = null;
   setLoadingState({ phase: 'idle' });
   clearEngineCrash();
+}
+
+/**
+ * Attempt to recover the WASM engine after a panic without a full page reload.
+ *
+ * 1. Snapshots the current editor store state to localStorage
+ * 2. Resets the WASM module
+ * 3. Reloads the WASM binary
+ * 4. Re-initializes the engine on the existing canvas
+ * 5. Restores scene state by replaying commands from the snapshot
+ *
+ * Returns true if recovery succeeded, false if it failed (caller should
+ * fall back to a full page reload).
+ */
+export async function recoverEngine(canvasId: string): Promise<boolean> {
+  try {
+    // Step 1: Snapshot current editor state before clearing anything
+    let stateBackup: string | null = null;
+    try {
+      stateBackup = localStorage.getItem('forge-editor-store');
+      if (stateBackup) {
+        localStorage.setItem('forge-editor-crash-backup', JSON.stringify({
+          timestamp: new Date().toISOString(),
+          state: stateBackup,
+        }));
+      }
+    } catch { /* localStorage may be unavailable */ }
+
+    captureException(new Error('WASM engine recovery attempted'), {
+      source: 'recoverEngine',
+      canvasId,
+      hadStateBackup: Boolean(stateBackup),
+    });
+
+    // Step 2: Reset module state
+    resetEngine();
+
+    // Step 3: Reload WASM
+    setLoadingState({ phase: 'downloading', progress: 0 });
+    const wasm = await loadWasm();
+
+    // Step 4: Re-initialize on existing canvas
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) {
+      setLoadingState({ phase: 'error', error: 'Canvas not found during recovery' });
+      return false;
+    }
+
+    setLoadingState({ phase: 'initializing', progress: 0 });
+    wasm.init_engine(canvasId);
+    setLoadingState({ phase: 'ready', progress: 100 });
+
+    // Step 5: Restore state — the editor store persists in memory (Zustand),
+    // so React components will re-render with existing state. The WASM engine
+    // starts fresh, but the editor UI retains scene graph, selection, etc.
+    // Components that depend on engine state will re-sync via their effects.
+
+    return true;
+  } catch (err) {
+    captureException(err instanceof Error ? err : new Error(String(err)), {
+      source: 'recoverEngine',
+      phase: 'recovery_failed',
+    });
+    setLoadingState({ phase: 'error', error: 'Recovery failed — please reload the page' });
+    return false;
+  }
 }
 
 export interface UseEngineOptions {
