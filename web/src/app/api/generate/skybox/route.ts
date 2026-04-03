@@ -5,116 +5,47 @@
 
 export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 
-import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
-import { getTokenCost } from '@/lib/tokens/pricing';
+import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { MeshyClient } from '@/lib/generate/meshyClient';
-import { captureException } from '@/lib/monitoring/sentry-server';
-import { rateLimitResponse } from '@/lib/rateLimit';
-import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
-import { refundTokens } from '@/lib/tokens/service';
-import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { DB_PROVIDER } from '@/lib/config/providers';
 
+export const POST = createGenerationHandler<
+  { prompt: string; style: string },
+  { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
+>({
+  route: '/api/generate/skybox',
+  provider: DB_PROVIDER.texture,
+  operation: 'skybox_generation',
+  rateLimitKey: 'gen-skybox',
+  successStatus: 201,
+  validate: (body) => {
+    const { prompt, style = 'realistic' } = body as {
+      prompt?: unknown;
+      style?: unknown;
+    };
 
-export async function POST(request: NextRequest) {
-  // 1. Authenticate
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  // Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
-  const aggRl = await aggregateGenerationRateLimit(authResult.ctx.user.id);
-  if (!aggRl.allowed) return rateLimitResponse(aggRl.remaining, aggRl.resetAt);
-
-  // 1b. Rate limit: 10 generation requests per 5 minutes per user
-  const rl = await distributedRateLimit(`gen-skybox:${authResult.ctx.user.id}`, 10, 300);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
-
-  // 2. Parse request
-  let body: {
-    prompt: string;
-    style?: 'realistic' | 'fantasy' | 'sci-fi' | 'cartoon';
-  };
-
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
-
-  const { prompt, style = 'realistic' } = body;
-
-  // Validate
-  if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
-    return NextResponse.json(
-      { error: 'Prompt must be between 3 and 500 characters' },
-      { status: 422 }
-    );
-  }
-
-  // 2b. Content safety filter
-  const safety = sanitizePrompt(prompt);
-  if (!safety.safe) {
-    return NextResponse.json(
-      { error: safety.reason ?? 'Content rejected by safety filter' },
-      { status: 422 }
-    );
-  }
-  const safePrompt = safety.filtered ?? prompt;
-
-  // 3. Resolve API key and deduct tokens
-  const tokenCost = getTokenCost('skybox_generation');
-
-  let apiKey: string;
-  let usageId: string | undefined;
-
-  try {
-    const resolved = await resolveApiKey(
-      authResult.ctx.user.id,
-      DB_PROVIDER.texture,
-      tokenCost,
-      'skybox_generation',
-      { prompt: safePrompt, style }
-    );
-    apiKey = resolved.key;
-    usageId = resolved.usageId;
-  } catch (err) {
-    if (err instanceof ApiKeyError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+    if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
+      return { ok: false, error: 'Prompt must be between 3 and 500 characters' };
     }
-    throw err;
-  }
 
-  // 4. Call Meshy API (using text-to-texture for equirectangular panorama)
-  const client = new MeshyClient({ apiKey });
+    return { ok: true, params: { prompt: prompt as string, style: (style as string) ?? 'realistic' } };
+  },
+  execute: async (params, apiKey, ctx) => {
+    const client = new MeshyClient({ apiKey });
 
-  try {
-    // Use texture generation with skybox-specific prompt augmentation
     const result = await client.createTextToTexture({
-      prompt: `Equirectangular panorama skybox: ${safePrompt}`,
+      prompt: `Equirectangular panorama skybox: ${params.prompt}`,
       resolution: '2048',
-      style,
+      style: params.style,
       tiling: false,
     });
 
-    return NextResponse.json(
-      {
-        jobId: result.taskId,
-        provider: DB_PROVIDER.texture,
-        status: 'pending',
-        estimatedSeconds: 90,
-        usageId,
-      },
-      { status: 201 }
-    );
-  } catch (err) {
-    if (usageId) {
-      try { await refundTokens(authResult.ctx.user.id, usageId); }
-      catch (refundErr) { captureException(refundErr, { route: '/api/generate/skybox', action: 'refund', usageId }); }
-    }
-    captureException(err, { route: '/api/generate/skybox', prompt: safePrompt });
-    const message = err instanceof Error ? err.message : 'Provider error';
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
+    return {
+      jobId: result.taskId,
+      provider: DB_PROVIDER.texture,
+      status: 'pending',
+      estimatedSeconds: 90,
+      usageId: ctx.usageId,
+    };
+  },
+});

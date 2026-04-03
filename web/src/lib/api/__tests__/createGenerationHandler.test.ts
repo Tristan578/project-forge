@@ -31,6 +31,7 @@ vi.mock('@/lib/rateLimit', () => ({
 }));
 vi.mock('@/lib/rateLimit/distributed', () => ({
   distributedRateLimit: vi.fn(),
+  aggregateGenerationRateLimit: vi.fn(),
 }));
 vi.mock('@/lib/ai/contentSafety', () => ({
   sanitizePrompt: vi.fn((p: string) => ({ safe: true, filtered: p })),
@@ -47,7 +48,7 @@ vi.mock('@/lib/db/client', () => ({
 
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey } from '@/lib/keys/resolver';
-import { distributedRateLimit } from '@/lib/rateLimit/distributed';
+import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -56,6 +57,7 @@ import { createGenerationHandler } from '../createGenerationHandler';
 const mockAuth = vi.mocked(authenticateRequest);
 const mockResolve = vi.mocked(resolveApiKey);
 const mockRateLimit = vi.mocked(distributedRateLimit);
+const mockAggRateLimit = vi.mocked(aggregateGenerationRateLimit);
 const mockSanitize = vi.mocked(sanitizePrompt);
 const mockRefund = vi.mocked(refundTokens);
 const mockCapture = vi.mocked(captureException);
@@ -93,6 +95,7 @@ describe('createGenerationHandler', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ctx: { user: { id: 'user-1', tier: 'pro' } as any, clerkId: 'clerk-1' },
     });
+    mockAggRateLimit.mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 900000 });
     mockRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
     mockResolve.mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
     mockSanitize.mockReturnValue({ safe: true, filtered: 'test prompt' });
@@ -107,7 +110,15 @@ describe('createGenerationHandler', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns 429 when rate limited', async () => {
+  it('returns 429 when aggregate rate limited', async () => {
+    mockAggRateLimit.mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() });
+    const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(429);
+    // Per-route rate limit should not be called when aggregate rejects
+    expect(mockRateLimit).not.toHaveBeenCalled();
+  });
+
+  it('returns 429 when per-route rate limited', async () => {
     mockRateLimit.mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() });
     const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
     expect(res.status).toBe(429);
@@ -202,6 +213,22 @@ describe('createGenerationHandler', () => {
       'test-key',
       expect.objectContaining({ userId: 'user-1', tier: 'pro', usageId: 'usage-1', tokenCost: 10 }),
     );
+  });
+
+  it('calls aggregate rate limit before per-route rate limit', async () => {
+    const callOrder: string[] = [];
+    mockAggRateLimit.mockImplementation(async () => {
+      callOrder.push('aggregate');
+      return { allowed: true, remaining: 29, resetAt: Date.now() + 900000 };
+    });
+    mockRateLimit.mockImplementation(async () => {
+      callOrder.push('per-route');
+      return { allowed: true, remaining: 9, resetAt: Date.now() + 300000 };
+    });
+
+    await testHandler(makeRequest({ prompt: 'test prompt' }));
+    expect(callOrder).toEqual(['aggregate', 'per-route']);
+    expect(mockAggRateLimit).toHaveBeenCalledWith('user-1');
   });
 
   it('skips content safety when configured', async () => {
