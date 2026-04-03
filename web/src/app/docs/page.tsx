@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import { cacheLife, cacheTag } from 'next/cache';
 import { DocsPage } from '@/components/docs/DocsPage';
 
 export const metadata = {
@@ -6,7 +7,10 @@ export const metadata = {
   description: 'Learn how to build games with SpawnForge — guides, tutorials, and API reference.',
 };
 
-export default function DocsRoute() {
+export default async function DocsRoute() {
+  'use cache';
+  cacheLife('days');
+  cacheTag('docs');
   return (
     <Suspense fallback={<DocsLoadingFallback />}>
       <DocsPage />
