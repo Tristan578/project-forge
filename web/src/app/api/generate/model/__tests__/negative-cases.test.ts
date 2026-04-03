@@ -139,18 +139,16 @@ describe('POST /api/generate/model — negative cases', () => {
       expect(res.status).toBe(400);
     });
 
-    it('throws when body is null JSON (destructure of null)', async () => {
+    it('returns 400 when body is null JSON', async () => {
       const req = makeRawRequest('null');
-      // null is valid JSON but destructuring null throws TypeError
-      // The route does not guard against this — it crashes
-      await expect(POST(req)).rejects.toThrow();
+      const res = await POST(req);
+      expect(res.status).toBe(400);
     });
 
     it('returns 400 for array JSON body', async () => {
       const req = makeRawRequest('[1,2,3]');
       const res = await POST(req);
-      // Array is valid JSON but destructuring prompt/mode will get undefined
-      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(res.status).toBe(400);
     });
   });
 
