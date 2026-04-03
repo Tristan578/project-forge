@@ -45,7 +45,11 @@ if (typeof globalThis.localStorage?.clear !== 'function') {
 }
 
 // jest-dom matchers (toBeInTheDocument, toHaveTextContent, etc.)
-import '@testing-library/jest-dom/vitest';
+// Vitest 4.1.2 requires explicit expect.extend() — the side-effect import
+// from '@testing-library/jest-dom/vitest' may use a different expect instance.
+import { expect } from 'vitest';
+import * as matchers from '@testing-library/jest-dom/matchers';
+expect.extend(matchers);
 
 // Global test isolation — prevent state leaks between tests
 // ---------------------------------------------------------------------------
