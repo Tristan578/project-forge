@@ -179,8 +179,8 @@ const nextConfig: NextConfig = {
 };
 
 export default withSentryConfig(withNextIntl(analyzer(nextConfig)), {
-  // Show warnings but suppress info-level upload noise
-  silent: 'warn' as unknown as boolean,
+  // Show all Sentry build output (source map upload warnings, etc.)
+  silent: false,
 
   // Upload source maps for production builds
   org: process.env.SENTRY_ORG || 'tristan-nolan',
