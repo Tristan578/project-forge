@@ -41,6 +41,11 @@ vi.mock('@/lib/tokens/pricing', () => ({
   getTokenCost: vi.fn(() => 100),
 }));
 
+vi.mock('@/lib/rateLimit/distributed', () => ({
+  distributedRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 }),
+  aggregateGenerationRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 900000 }),
+}));
+
 const mockCreateTextTo3D = vi.fn();
 const mockCreateImageTo3D = vi.fn();
 
@@ -72,6 +77,7 @@ vi.mock('@/lib/ai/contentSafety', () => ({
 
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
@@ -196,24 +202,18 @@ describe('POST /api/generate/model — negative cases', () => {
   describe('rate limiting', () => {
     it('applies rate limit with correct key pattern', async () => {
       await POST(makeRequest({ prompt: 'test model', mode: 'text-to-3d' }));
-      expect(rateLimit).toHaveBeenCalledWith('gen-model:user-gen', 10, 300_000);
+      expect(distributedRateLimit).toHaveBeenCalledWith('gen-model:user-gen', 10, 300);
     });
 
     it('returns 429 with proper response when rate limited', async () => {
-      vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60_000 });
-      vi.mocked(rateLimitResponse).mockReturnValue(
-        new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 }) as never,
-      );
+      vi.mocked(distributedRateLimit).mockResolvedValueOnce({ allowed: false, remaining: 0, resetAt: Date.now() + 60_000 });
 
       const res = await POST(makeRequest({ prompt: 'test', mode: 'text-to-3d' }));
       expect(res.status).toBe(429);
     });
 
     it('does not call Meshy API when rate limited', async () => {
-      vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60_000 });
-      vi.mocked(rateLimitResponse).mockReturnValue(
-        new Response(JSON.stringify({ error: 'Rate limited' }), { status: 429 }) as never,
-      );
+      vi.mocked(distributedRateLimit).mockResolvedValueOnce({ allowed: false, remaining: 0, resetAt: Date.now() + 60_000 });
 
       await POST(makeRequest({ prompt: 'test model', mode: 'text-to-3d' }));
       expect(mockCreateTextTo3D).not.toHaveBeenCalled();
@@ -239,11 +239,7 @@ describe('POST /api/generate/model — negative cases', () => {
       await POST(makeRequest({ prompt: 'broken', mode: 'text-to-3d' }));
       expect(captureException).toHaveBeenCalledWith(
         expect.any(Error),
-        expect.objectContaining({
-          route: '/api/generate/model',
-          prompt: 'broken',
-          mode: 'text-to-3d',
-        }),
+        expect.objectContaining({ route: '/api/generate/model' }),
       );
     });
 

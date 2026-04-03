@@ -5,148 +5,92 @@
 
 export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 
-import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { SpriteClient } from '@/lib/generate/spriteClient';
-import { captureException } from '@/lib/monitoring/sentry-server';
-import { rateLimitResponse } from '@/lib/rateLimit';
-import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
-import { refundTokens } from '@/lib/tokens/service';
-import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 import { SPRITE_ESTIMATED_SECONDS } from '@/lib/config/providers';
 
+type SpriteProvider = 'dalle3' | 'sdxl';
 
-export async function POST(request: NextRequest) {
-  // 1. Authenticate
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  // Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
-  const aggRl = await aggregateGenerationRateLimit(authResult.ctx.user.id);
-  if (!aggRl.allowed) return rateLimitResponse(aggRl.remaining, aggRl.resetAt);
-
-  // 1b. Rate limit: 10 generation requests per 5 minutes per user (distributed)
-  const rl = await distributedRateLimit(`gen-sprite:${authResult.ctx.user.id}`, 10, 300);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
-
-  // 2. Parse request
-  let body: {
+export const POST = createGenerationHandler<
+  {
     prompt: string;
-    style?: 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
-    size?: '32x32' | '64x64' | '128x128' | '256x256' | '512x512' | '1024x1024';
-    provider?: 'auto' | 'dalle3' | 'sdxl';
-    removeBackground?: boolean;
-  };
-
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+    style?: string;
+    size: string;
+    provider: SpriteProvider;
+    removeBackground: boolean;
+    serviceName: 'openai' | 'replicate';
+  },
+  {
+    jobId: string;
+    provider: SpriteProvider;
+    status: string;
+    estimatedSeconds: number;
+    usageId: string | undefined;
   }
-
-  const {
-    prompt,
-    style,
-    size = '64x64',
-    provider = 'auto',
-    removeBackground = true,
-  } = body;
-
-  // Validate
-  if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
-    return NextResponse.json(
-      { error: 'Prompt must be between 3 and 500 characters' },
-      { status: 422 }
-    );
-  }
-
-  // 2b. Content safety filter
-  const safety = sanitizePrompt(prompt);
-  if (!safety.safe) {
-    return NextResponse.json(
-      { error: safety.reason ?? 'Content rejected by safety filter' },
-      { status: 422 }
-    );
-  }
-  const safePrompt = safety.filtered ?? prompt;
-
-  // 3. Determine provider and resolve API key
-  const actualProvider = provider === 'auto'
-    ? (style === 'pixel-art' ? 'sdxl' : 'dalle3')
-    : provider;
-
-  const tokenCost = actualProvider === 'dalle3'
-    ? TOKEN_COSTS.sprite_generation_dalle3
-    : TOKEN_COSTS.sprite_generation_replicate;
-  const serviceName = actualProvider === 'dalle3' ? 'openai' : 'replicate';
-
-  let apiKey: string;
-  let usageId: string | undefined;
-
-  try {
-    const resolved = await resolveApiKey(
-      authResult.ctx.user.id,
-      serviceName,
-      tokenCost,
-      'sprite_generation',
-      { prompt: safePrompt, style, size }
-    );
-    apiKey = resolved.key;
-    usageId = resolved.usageId;
-  } catch (err) {
-    if (err instanceof ApiKeyError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
-    }
-    throw err;
-  }
-
-  // 4. Call sprite generation
-  const client = new SpriteClient(apiKey, actualProvider);
-
-  try {
-    const result = await client.generateSprite({
-      prompt: safePrompt,
+>({
+  route: '/api/generate/sprite',
+  provider: (params) => params.serviceName,
+  operation: 'sprite_generation',
+  rateLimitKey: 'gen-sprite',
+  successStatus: 201,
+  tokenCost: (params) =>
+    params.provider === 'dalle3'
+      ? TOKEN_COSTS.sprite_generation_dalle3
+      : TOKEN_COSTS.sprite_generation_replicate,
+  validate: (body) => {
+    const {
+      prompt,
       style,
-      size,
-      provider: actualProvider,
-      removeBackground,
+      size = '64x64',
+      provider = 'auto',
+      removeBackground = true,
+    } = body as Record<string, unknown>;
+
+    if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
+      return { ok: false, error: 'Prompt must be between 3 and 500 characters' };
+    }
+
+    const actualProvider: SpriteProvider =
+      provider === 'auto'
+        ? (style === 'pixel-art' ? 'sdxl' : 'dalle3')
+        : (provider as SpriteProvider);
+
+    const serviceName = actualProvider === 'dalle3' ? 'openai' as const : 'replicate' as const;
+
+    return {
+      ok: true,
+      params: {
+        prompt: prompt as string,
+        style: style as string | undefined,
+        size: size as string,
+        provider: actualProvider,
+        removeBackground: removeBackground as boolean,
+        serviceName,
+      },
+    };
+  },
+  execute: async (params, apiKey, ctx) => {
+    const client = new SpriteClient(apiKey, params.provider);
+    const result = await client.generateSprite({
+      prompt: params.prompt,
+      style: params.style,
+      size: params.size,
+      provider: params.provider,
+      removeBackground: params.removeBackground,
     });
 
-    // DALL-E 3 returns the result URL directly as taskId (synchronous).
-    // Prefix with "dalle3:" so the status route can identify synchronous jobs
-    // without fragile startsWith('http') pattern matching.
     let finalJobId = result.taskId;
-    if (actualProvider === 'dalle3' && result.status === 'completed') {
+    if (params.provider === 'dalle3' && result.status === 'completed') {
       finalJobId = `dalle3:${result.taskId}`;
     }
-    if (removeBackground && result.status === 'completed' && actualProvider !== 'dalle3') {
-      // Background removal will be handled by polling hook
-      finalJobId = result.taskId;
-    }
 
-    return NextResponse.json(
-      {
-        jobId: finalJobId,
-        provider: actualProvider,
-        status: result.status,
-        estimatedSeconds: SPRITE_ESTIMATED_SECONDS[actualProvider],
-        usageId,
-        // Exposing it would let the client also refund, causing double credit.
-      },
-      { status: 201 }
-    );
-  } catch (err) {
-    if (usageId) {
-      try {
-        await refundTokens(authResult.ctx.user.id, usageId);
-      } catch (refundErr) {
-        captureException(refundErr, { route: '/api/generate/sprite', action: 'refund', usageId });
-      }
-    }
-    captureException(err, { route: '/api/generate/sprite', prompt: safePrompt });
-    const message = err instanceof Error ? err.message : 'Provider error';
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
+    return {
+      jobId: finalJobId,
+      provider: params.provider,
+      status: result.status,
+      estimatedSeconds: SPRITE_ESTIMATED_SECONDS[params.provider],
+      usageId: ctx.usageId,
+    };
+  },
+});

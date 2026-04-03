@@ -37,11 +37,11 @@ export interface GenerationHandlerConfig<TParams, TResult> {
   /** Route path for Sentry context (e.g. '/api/generate/sfx') */
   route: string;
 
-  /** Provider name for API key resolution (e.g. 'elevenlabs', 'replicate') */
-  provider: Provider;
+  /** Provider name for API key resolution. Static or computed from validated params. */
+  provider: Provider | ((params: TParams) => Provider);
 
-  /** Token operation name for pricing lookup (e.g. 'sfx_generation') */
-  operation: string;
+  /** Token operation name for pricing lookup. Static or computed from validated params. */
+  operation: string | ((params: TParams) => string);
 
   /** Rate limit key prefix (user ID is appended) */
   rateLimitKey: string;
@@ -171,12 +171,14 @@ export function createGenerationHandler<TParams, TResult>(
     }
 
     // 6. Resolve API key + deduct tokens
-    const tokenCost = tokenCostFn ? tokenCostFn(params) : getTokenCost(operation);
+    const resolvedProvider = typeof provider === 'function' ? provider(params) : provider;
+    const resolvedOperation = typeof operation === 'function' ? operation(params) : operation;
+    const tokenCost = tokenCostFn ? tokenCostFn(params) : getTokenCost(resolvedOperation);
     let apiKey: string;
     let usageId: string | undefined;
 
     try {
-      const resolved = await resolveApiKey(userId, provider, tokenCost, operation, params as Record<string, unknown>);
+      const resolved = await resolveApiKey(userId, resolvedProvider, tokenCost, resolvedOperation, params as Record<string, unknown>);
       apiKey = resolved.key;
       usageId = resolved.usageId;
     } catch (err) {
