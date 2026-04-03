@@ -15,6 +15,7 @@ const VOICE_STYLE_MAP: Record<string, number> = {
 export const POST = createGenerationHandler<
   {
     text: string;
+    textLength: number;
     voiceId?: string;
     stability?: number;
     similarityBoost?: number;
@@ -69,6 +70,7 @@ export const POST = createGenerationHandler<
       ok: true,
       params: {
         text: text as string,
+        textLength: (text as string).length,
         voiceId: voiceId as string | undefined,
         stability: stability as number | undefined,
         similarityBoost: similarityBoost as number | undefined,
