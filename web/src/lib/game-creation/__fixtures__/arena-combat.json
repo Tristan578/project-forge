@@ -1,0 +1,128 @@
+{
+  "id": "fixture-arena-combat-01",
+  "title": "Void Arena",
+  "description": "A fast-paced arena game where the player fights waves of enemies using melee combos and dodge rolls.",
+  "systems": [
+    {
+      "category": "movement",
+      "type": "run+dodge",
+      "config": { "speed": 10, "dodgeDistance": 5, "dodgeCooldown": 0.8 },
+      "priority": "core",
+      "dependsOn": ["physics"]
+    },
+    {
+      "category": "camera",
+      "type": "follow",
+      "config": { "perspective": "over-shoulder", "combatShake": true },
+      "priority": "core",
+      "dependsOn": ["entities"]
+    },
+    {
+      "category": "challenge",
+      "type": "combat",
+      "config": { "waveCount": 10, "difficultyScaling": "linear" },
+      "priority": "core",
+      "dependsOn": ["entities"]
+    },
+    {
+      "category": "entities",
+      "type": "enemies",
+      "config": { "spawnPool": ["grunt", "brute", "ranged"], "maxActive": 8 },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "feedback",
+      "type": "health",
+      "config": { "maxHealth": 100, "regeneration": false },
+      "priority": "core",
+      "dependsOn": ["challenge"]
+    }
+  ],
+  "scenes": [
+    {
+      "name": "Arena",
+      "purpose": "Main combat arena for all waves",
+      "systems": ["movement", "camera", "challenge", "entities", "feedback"],
+      "entities": [
+        {
+          "name": "Warrior",
+          "role": "player",
+          "systems": ["movement", "feedback"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["melee-attack", "dodge-roll", "take-damage"]
+        },
+        {
+          "name": "Grunt",
+          "role": "enemy",
+          "systems": ["entities"],
+          "appearance": "primitive:cube",
+          "behaviors": ["chase-player", "melee-attack"]
+        },
+        {
+          "name": "Brute",
+          "role": "enemy",
+          "systems": ["entities"],
+          "appearance": "primitive:cube",
+          "behaviors": ["charge-attack", "area-slam"]
+        }
+      ],
+      "transitions": [
+        { "to": "GameOver", "trigger": "player-health-zero" },
+        { "to": "Victory", "trigger": "all-waves-cleared" }
+      ]
+    },
+    {
+      "name": "GameOver",
+      "purpose": "Death screen with restart option",
+      "systems": ["feedback"],
+      "entities": [],
+      "transitions": [
+        { "to": "Arena", "trigger": "restart" }
+      ]
+    },
+    {
+      "name": "Victory",
+      "purpose": "Victory celebration screen",
+      "systems": ["feedback"],
+      "entities": [],
+      "transitions": [
+        { "to": "Arena", "trigger": "play-again" }
+      ]
+    }
+  ],
+  "assetManifest": [
+    {
+      "type": "sound",
+      "description": "Melee hit impact sound effect",
+      "styleDirective": "sharp, punchy, satisfying",
+      "priority": "required",
+      "fallback": "builtin:hit-sfx"
+    },
+    {
+      "type": "sound",
+      "description": "Dodge roll whoosh",
+      "styleDirective": "quick air rush",
+      "priority": "required",
+      "fallback": "builtin:whoosh"
+    },
+    {
+      "type": "texture",
+      "description": "Arena floor with worn combat markings",
+      "styleDirective": "dark stone, battle-scarred, dramatic lighting",
+      "priority": "nice-to-have",
+      "fallback": "primitive:dark-plane"
+    }
+  ],
+  "estimatedScope": "medium",
+  "styleDirective": "Dark dramatic arena with particle effects on hits",
+  "feelDirective": {
+    "mood": "intense",
+    "pacing": "fast",
+    "weight": "heavy",
+    "referenceGames": ["Hades", "Dead Cells"],
+    "oneLiner": "Every dodge matters when the arena wants you dead"
+  },
+  "constraints": ["Single arena map", "No story elements"],
+  "projectType": "3d"
+}

@@ -1,0 +1,105 @@
+{
+  "id": "fixture-exploration-puzzle-01",
+  "title": "Gravity Garden",
+  "description": "An open world where the player manipulates gravity to solve environmental puzzles.",
+  "systems": [
+    {
+      "category": "movement",
+      "type": "walk",
+      "config": { "speed": 5, "canFlipGravity": true },
+      "priority": "core",
+      "dependsOn": ["physics"]
+    },
+    {
+      "category": "camera",
+      "type": "follow",
+      "config": { "smoothing": 0.1, "offset": [0, 2, 0] },
+      "priority": "core",
+      "dependsOn": ["entities"]
+    },
+    {
+      "category": "world",
+      "type": "open-world",
+      "config": { "size": "large", "zones": 4 },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "challenge",
+      "type": "physics-puzzle",
+      "config": { "gravitySwitchCooldown": 2, "maxSwitches": 3 },
+      "priority": "core",
+      "dependsOn": ["physics"]
+    }
+  ],
+  "scenes": [
+    {
+      "name": "Garden",
+      "purpose": "Main open exploration area",
+      "systems": ["movement", "camera", "world", "challenge"],
+      "entities": [
+        {
+          "name": "Explorer",
+          "role": "player",
+          "systems": ["movement"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["walk", "flip-gravity"]
+        },
+        {
+          "name": "GravityOrb",
+          "role": "interactable",
+          "systems": ["challenge"],
+          "appearance": "primitive:sphere",
+          "behaviors": ["activate-gravity-flip"]
+        }
+      ],
+      "transitions": [
+        { "to": "PuzzleVault", "trigger": "collect-all-orbs" }
+      ]
+    },
+    {
+      "name": "PuzzleVault",
+      "purpose": "Final puzzle chamber",
+      "systems": ["movement", "camera", "challenge"],
+      "entities": [
+        {
+          "name": "Explorer",
+          "role": "player",
+          "systems": ["movement"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["walk", "flip-gravity"]
+        }
+      ],
+      "transitions": [
+        { "to": "Garden", "trigger": "exit" }
+      ]
+    }
+  ],
+  "assetManifest": [
+    {
+      "type": "texture",
+      "description": "Lush garden ground texture with grass and flowers",
+      "styleDirective": "painterly, warm greens and yellows",
+      "priority": "required",
+      "fallback": "primitive:green-plane"
+    },
+    {
+      "type": "sound",
+      "description": "Gravity flip sound effect",
+      "styleDirective": "whoosh with reverb tail",
+      "priority": "required",
+      "fallback": "builtin:whoosh"
+    }
+  ],
+  "estimatedScope": "medium",
+  "styleDirective": "Painterly open world with dreamlike colors",
+  "feelDirective": {
+    "mood": "contemplative",
+    "pacing": "slow",
+    "weight": "floaty",
+    "referenceGames": ["Manifold Garden", "Portal"],
+    "oneLiner": "The world bends to your will — think before you flip"
+  },
+  "constraints": ["No time pressure", "No combat"],
+  "projectType": "3d"
+}

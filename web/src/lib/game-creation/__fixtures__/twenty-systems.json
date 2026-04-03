@@ -1,0 +1,242 @@
+{
+  "id": "fixture-twenty-systems-01",
+  "title": "Everything Game",
+  "description": "A stress test GDD with all 12 system categories populated.",
+  "systems": [
+    {
+      "category": "movement",
+      "type": "walk+jump",
+      "config": { "speed": 8 },
+      "priority": "core",
+      "dependsOn": ["physics"]
+    },
+    {
+      "category": "movement",
+      "type": "swim",
+      "config": { "underwaterGravity": 0.3 },
+      "priority": "secondary",
+      "dependsOn": ["physics"]
+    },
+    {
+      "category": "input",
+      "type": "keyboard",
+      "config": { "keys": ["WASD", "Space"] },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "input",
+      "type": "gamepad",
+      "config": { "rumble": true },
+      "priority": "secondary",
+      "dependsOn": []
+    },
+    {
+      "category": "camera",
+      "type": "follow",
+      "config": { "smoothing": 0.1 },
+      "priority": "core",
+      "dependsOn": ["entities"]
+    },
+    {
+      "category": "camera",
+      "type": "top-down",
+      "config": { "altitude": 20 },
+      "priority": "secondary",
+      "dependsOn": []
+    },
+    {
+      "category": "world",
+      "type": "open-world",
+      "config": { "size": "large" },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "world",
+      "type": "levels",
+      "config": { "levelCount": 10 },
+      "priority": "secondary",
+      "dependsOn": []
+    },
+    {
+      "category": "challenge",
+      "type": "combat",
+      "config": { "waveCount": 5 },
+      "priority": "core",
+      "dependsOn": ["entities"]
+    },
+    {
+      "category": "entities",
+      "type": "enemies",
+      "config": { "maxActive": 12 },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "progression",
+      "type": "leveling",
+      "config": { "maxLevel": 50 },
+      "priority": "secondary",
+      "dependsOn": ["challenge"]
+    },
+    {
+      "category": "feedback",
+      "type": "health",
+      "config": { "maxHealth": 100 },
+      "priority": "core",
+      "dependsOn": ["challenge"]
+    },
+    {
+      "category": "feedback",
+      "type": "score",
+      "config": { "highScore": true },
+      "priority": "secondary",
+      "dependsOn": ["challenge"]
+    },
+    {
+      "category": "narrative",
+      "type": "branching",
+      "config": { "maxChoices": 4 },
+      "priority": "secondary",
+      "dependsOn": []
+    },
+    {
+      "category": "audio",
+      "type": "reactive",
+      "config": { "dynamicMix": true },
+      "priority": "secondary",
+      "dependsOn": []
+    },
+    {
+      "category": "audio",
+      "type": "ambient",
+      "config": { "zones": true },
+      "priority": "polish",
+      "dependsOn": []
+    },
+    {
+      "category": "visual",
+      "type": "post-processing",
+      "config": { "bloom": true, "vignette": true },
+      "priority": "polish",
+      "dependsOn": []
+    },
+    {
+      "category": "visual",
+      "type": "particle-effects",
+      "config": { "maxParticles": 1000 },
+      "priority": "polish",
+      "dependsOn": []
+    },
+    {
+      "category": "physics",
+      "type": "standard-gravity",
+      "config": { "gravity": 20 },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "physics",
+      "type": "water-volume",
+      "config": { "buoyancy": 0.8 },
+      "priority": "polish",
+      "dependsOn": []
+    }
+  ],
+  "scenes": [
+    {
+      "name": "World",
+      "purpose": "Main open world with all systems active",
+      "systems": [
+        "movement", "input", "camera", "world", "challenge",
+        "entities", "progression", "feedback", "narrative",
+        "audio", "visual", "physics"
+      ],
+      "entities": [
+        {
+          "name": "Hero",
+          "role": "player",
+          "systems": ["movement", "input", "feedback"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["walk", "jump", "swim", "attack", "talk"]
+        },
+        {
+          "name": "Villager",
+          "role": "npc",
+          "systems": ["narrative"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["greet", "give-quest"]
+        },
+        {
+          "name": "Slime",
+          "role": "enemy",
+          "systems": ["entities"],
+          "appearance": "primitive:sphere",
+          "behaviors": ["hop-toward-player", "melee-attack"]
+        }
+      ],
+      "transitions": [
+        { "to": "Dungeon", "trigger": "enter-dungeon" }
+      ]
+    },
+    {
+      "name": "Dungeon",
+      "purpose": "Indoor combat area",
+      "systems": ["movement", "input", "camera", "challenge", "entities", "feedback", "physics"],
+      "entities": [
+        {
+          "name": "Hero",
+          "role": "player",
+          "systems": ["movement", "feedback"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["walk", "attack"]
+        },
+        {
+          "name": "Boss",
+          "role": "enemy",
+          "systems": ["entities"],
+          "appearance": "primitive:cube",
+          "behaviors": ["phase-two-attack", "summon-minions"]
+        }
+      ],
+      "transitions": [
+        { "to": "World", "trigger": "boss-defeated" }
+      ]
+    }
+  ],
+  "assetManifest": [
+    {
+      "type": "music",
+      "description": "Overworld adventure theme",
+      "styleDirective": "orchestral, heroic, loopable",
+      "priority": "required",
+      "fallback": "builtin:music-loop"
+    },
+    {
+      "type": "music",
+      "description": "Dungeon tension track",
+      "styleDirective": "dark orchestral, tension, minor key",
+      "priority": "required",
+      "fallback": "builtin:ambient-loop"
+    },
+    {
+      "type": "sound",
+      "description": "Attack swing sound effect",
+      "styleDirective": "sharp whoosh, impact",
+      "priority": "required",
+      "fallback": "builtin:hit-sfx"
+    }
+  ],
+  "estimatedScope": "large",
+  "styleDirective": "Fantasy adventure with rich detail and dynamic lighting",
+  "feelDirective": {
+    "mood": "epic",
+    "pacing": "medium",
+    "weight": "heavy",
+    "referenceGames": ["Zelda", "Dark Souls"],
+    "oneLiner": "A vast world filled with secrets, challenges, and stories"
+  },
+  "constraints": ["Single player", "Offline only"],
+  "projectType": "3d"
+}

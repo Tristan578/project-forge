@@ -17,6 +17,7 @@ import type { EditorState } from '@/stores/editorStore';
 // ---------------------------------------------------------------------------
 
 export type ExecutorName =
+  | 'plan_present'
   | 'scene_create'
   | 'physics_profile'
   | 'character_setup'

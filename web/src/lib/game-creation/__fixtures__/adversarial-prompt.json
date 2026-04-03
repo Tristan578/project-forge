@@ -1,0 +1,65 @@
+{
+  "id": "fixture-adversarial-prompt-01",
+  "title": "Safe Title After Sanitization",
+  "description": "A game with sanitized fields that previously contained injection attempts.",
+  "systems": [
+    {
+      "category": "movement",
+      "type": "walk",
+      "config": { "speed": 5 },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "camera",
+      "type": "follow",
+      "config": { "smoothing": 0.1 },
+      "priority": "core",
+      "dependsOn": ["entities"]
+    },
+    {
+      "category": "world",
+      "type": "levels",
+      "config": { "levelCount": 1 },
+      "priority": "core",
+      "dependsOn": []
+    }
+  ],
+  "scenes": [
+    {
+      "name": "SafeScene",
+      "purpose": "A normal scene after sanitization",
+      "systems": ["movement", "camera", "world"],
+      "entities": [
+        {
+          "name": "Player",
+          "role": "player",
+          "systems": ["movement"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["walk"]
+        }
+      ],
+      "transitions": []
+    }
+  ],
+  "assetManifest": [
+    {
+      "type": "texture",
+      "description": "Normal texture description",
+      "styleDirective": "clean and simple style",
+      "priority": "required",
+      "fallback": "primitive:checker"
+    }
+  ],
+  "estimatedScope": "small",
+  "styleDirective": "Clean simple visual style",
+  "feelDirective": {
+    "mood": "neutral",
+    "pacing": "medium",
+    "weight": "medium",
+    "referenceGames": ["Safe Game"],
+    "oneLiner": "A safely sanitized game experience"
+  },
+  "constraints": ["No unsafe content", "All fields post-sanitization"],
+  "projectType": "2d"
+}

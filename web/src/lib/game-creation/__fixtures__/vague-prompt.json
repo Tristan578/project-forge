@@ -1,0 +1,43 @@
+{
+  "id": "fixture-vague-prompt-01",
+  "title": "Game",
+  "description": "A game.",
+  "systems": [
+    {
+      "category": "input",
+      "type": "keyboard",
+      "config": {},
+      "priority": "core",
+      "dependsOn": []
+    }
+  ],
+  "scenes": [
+    {
+      "name": "Scene1",
+      "purpose": "The only scene",
+      "systems": ["input"],
+      "entities": [
+        {
+          "name": "Thing",
+          "role": "decoration",
+          "systems": [],
+          "appearance": "primitive:cube",
+          "behaviors": []
+        }
+      ],
+      "transitions": []
+    }
+  ],
+  "assetManifest": [],
+  "estimatedScope": "small",
+  "styleDirective": "basic",
+  "feelDirective": {
+    "mood": "neutral",
+    "pacing": "medium",
+    "weight": "medium",
+    "referenceGames": [],
+    "oneLiner": "A game"
+  },
+  "constraints": [],
+  "projectType": "2d"
+}

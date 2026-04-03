@@ -1,0 +1,121 @@
+{
+  "id": "fixture-2d-sprite-game-01",
+  "title": "Sprite Hero",
+  "description": "A 2D sprite-based game where the player navigates a side-scrolling world.",
+  "systems": [
+    {
+      "category": "movement",
+      "type": "walk+jump",
+      "config": { "speed": 7, "jumpForce": 14, "coyoteTime": 0.1 },
+      "priority": "core",
+      "dependsOn": ["physics"]
+    },
+    {
+      "category": "camera",
+      "type": "side-scroll",
+      "config": { "followX": true, "followY": true, "deadZone": 1 },
+      "priority": "core",
+      "dependsOn": ["entities"]
+    },
+    {
+      "category": "entities",
+      "type": "sprite-characters",
+      "config": { "animationFrameRate": 12, "flipOnDirection": true },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "physics",
+      "type": "standard-gravity",
+      "config": { "gravity": 22, "maxFallSpeed": 30 },
+      "priority": "core",
+      "dependsOn": []
+    }
+  ],
+  "scenes": [
+    {
+      "name": "ForestLevel",
+      "purpose": "First side-scrolling level through a forest",
+      "systems": ["movement", "camera", "entities", "physics"],
+      "entities": [
+        {
+          "name": "Hero",
+          "role": "player",
+          "systems": ["movement", "entities"],
+          "appearance": "sprite:hero-idle",
+          "behaviors": ["walk", "jump", "flip-on-direction"]
+        },
+        {
+          "name": "Coin",
+          "role": "interactable",
+          "systems": ["entities"],
+          "appearance": "sprite:coin-spin",
+          "behaviors": ["spin", "collect-on-touch"]
+        },
+        {
+          "name": "TreeDecor",
+          "role": "decoration",
+          "systems": [],
+          "appearance": "sprite:tree-large",
+          "behaviors": []
+        }
+      ],
+      "transitions": [
+        { "to": "CaveLevel", "trigger": "reach-end" }
+      ]
+    },
+    {
+      "name": "CaveLevel",
+      "purpose": "Underground cave level with platforms",
+      "systems": ["movement", "camera", "entities", "physics"],
+      "entities": [
+        {
+          "name": "Hero",
+          "role": "player",
+          "systems": ["movement", "entities"],
+          "appearance": "sprite:hero-idle",
+          "behaviors": ["walk", "jump"]
+        }
+      ],
+      "transitions": [
+        { "to": "ForestLevel", "trigger": "exit-cave" }
+      ]
+    }
+  ],
+  "assetManifest": [
+    {
+      "type": "sprite",
+      "description": "Hero character sprite sheet with idle, run, and jump animations",
+      "entityRef": "Hero",
+      "styleDirective": "16x16 pixel art, bright colors, clear silhouette",
+      "priority": "required",
+      "fallback": "primitive:capsule"
+    },
+    {
+      "type": "sprite",
+      "description": "Spinning coin collectible sprite",
+      "entityRef": "Coin",
+      "styleDirective": "8x8 pixel art, gold, 4-frame spin animation",
+      "priority": "required",
+      "fallback": "primitive:sphere"
+    },
+    {
+      "type": "music",
+      "description": "Cheerful forest adventure background music",
+      "styleDirective": "chiptune, major key, loopable",
+      "priority": "nice-to-have",
+      "fallback": "builtin:music-loop"
+    }
+  ],
+  "estimatedScope": "medium",
+  "styleDirective": "Classic 16-bit pixel art sprite aesthetic",
+  "feelDirective": {
+    "mood": "cheerful",
+    "pacing": "medium",
+    "weight": "light",
+    "referenceGames": ["Shovel Knight", "Celeste"],
+    "oneLiner": "Crisp sprites, tight controls, classic side-scrolling charm"
+  },
+  "constraints": ["2D only", "Sprite-based rendering"],
+  "projectType": "2d"
+}

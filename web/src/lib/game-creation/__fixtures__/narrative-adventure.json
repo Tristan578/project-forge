@@ -1,0 +1,128 @@
+{
+  "id": "fixture-narrative-adventure-01",
+  "title": "The Cartographer's Echo",
+  "description": "A narrative-driven adventure where a cartographer explores a forgotten city and uncovers its history through branching dialogue.",
+  "systems": [
+    {
+      "category": "movement",
+      "type": "walk",
+      "config": { "speed": 4, "canInteract": true },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "camera",
+      "type": "follow",
+      "config": { "perspective": "over-shoulder", "smoothing": 0.08 },
+      "priority": "core",
+      "dependsOn": ["entities"]
+    },
+    {
+      "category": "narrative",
+      "type": "branching",
+      "config": { "maxChoices": 3, "affectsEnding": true },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "entities",
+      "type": "npc",
+      "config": { "dialogueTrigger": "proximity", "triggerRadius": 3 },
+      "priority": "secondary",
+      "dependsOn": []
+    },
+    {
+      "category": "audio",
+      "type": "ambient",
+      "config": { "zones": true, "crossfade": true },
+      "priority": "secondary",
+      "dependsOn": []
+    }
+  ],
+  "scenes": [
+    {
+      "name": "CitySquare",
+      "purpose": "Central hub with NPCs and exploration routes",
+      "systems": ["movement", "camera", "narrative", "entities", "audio"],
+      "entities": [
+        {
+          "name": "Cartographer",
+          "role": "player",
+          "systems": ["movement"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["walk", "examine", "talk-to-npc"]
+        },
+        {
+          "name": "Archivist",
+          "role": "npc",
+          "systems": ["narrative"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["greet", "share-lore", "quest-giver"]
+        },
+        {
+          "name": "GhostEcho",
+          "role": "npc",
+          "systems": ["narrative"],
+          "appearance": "primitive:sphere",
+          "behaviors": ["drift", "whisper-history"]
+        }
+      ],
+      "transitions": [
+        { "to": "Archive", "trigger": "enter-archive" },
+        { "to": "Ending", "trigger": "map-complete" }
+      ]
+    },
+    {
+      "name": "Archive",
+      "purpose": "Library with documents and deeper lore",
+      "systems": ["movement", "camera", "narrative", "audio"],
+      "entities": [
+        {
+          "name": "Cartographer",
+          "role": "player",
+          "systems": ["movement"],
+          "appearance": "primitive:capsule",
+          "behaviors": ["walk", "examine"]
+        }
+      ],
+      "transitions": [
+        { "to": "CitySquare", "trigger": "exit" }
+      ]
+    },
+    {
+      "name": "Ending",
+      "purpose": "Narrative conclusion scene",
+      "systems": ["narrative", "audio"],
+      "entities": [],
+      "transitions": []
+    }
+  ],
+  "assetManifest": [
+    {
+      "type": "music",
+      "description": "Melancholic ambient score for a forgotten city",
+      "styleDirective": "orchestral, slow strings, no percussion",
+      "priority": "required",
+      "fallback": "builtin:ambient-loop"
+    },
+    {
+      "type": "3d-model",
+      "description": "Ancient stone fountain for the city square",
+      "entityRef": "CitySquare",
+      "styleDirective": "worn stone, moss-covered, gothic",
+      "priority": "nice-to-have",
+      "fallback": "primitive:cylinder"
+    }
+  ],
+  "estimatedScope": "large",
+  "styleDirective": "Atmospheric gothic with warm candlelight tones",
+  "feelDirective": {
+    "mood": "melancholic",
+    "pacing": "slow",
+    "weight": "medium",
+    "referenceGames": ["What Remains of Edith Finch", "Disco Elysium"],
+    "oneLiner": "Every ruin has a voice — you just have to learn to listen"
+  },
+  "constraints": ["No combat", "Dialogue choices matter"],
+  "projectType": "3d"
+}

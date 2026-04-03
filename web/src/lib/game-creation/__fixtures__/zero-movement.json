@@ -1,0 +1,83 @@
+{
+  "id": "fixture-zero-movement-01",
+  "title": "Perfect Timing",
+  "description": "A timing game where the player taps to hit notes at the exact right moment. No movement required.",
+  "systems": [
+    {
+      "category": "input",
+      "type": "timing",
+      "config": { "windowMs": 150, "penaltyOnMiss": true },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "camera",
+      "type": "fixed",
+      "config": { "locked": true },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "challenge",
+      "type": "timing",
+      "config": { "bpm": 130, "noteCount": 64 },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "feedback",
+      "type": "score",
+      "config": { "grades": ["perfect", "good", "miss"], "comboMultiplier": true },
+      "priority": "core",
+      "dependsOn": ["challenge"]
+    }
+  ],
+  "scenes": [
+    {
+      "name": "Stage",
+      "purpose": "Main rhythm stage",
+      "systems": ["input", "camera", "challenge", "feedback"],
+      "entities": [
+        {
+          "name": "NoteTarget",
+          "role": "trigger",
+          "systems": ["input"],
+          "appearance": "primitive:sphere",
+          "behaviors": ["appear-on-beat", "register-tap"]
+        }
+      ],
+      "transitions": [
+        { "to": "Results", "trigger": "song-complete" }
+      ]
+    },
+    {
+      "name": "Results",
+      "purpose": "Show final score and grade",
+      "systems": ["feedback"],
+      "entities": [],
+      "transitions": [
+        { "to": "Stage", "trigger": "retry" }
+      ]
+    }
+  ],
+  "assetManifest": [
+    {
+      "type": "music",
+      "description": "120 BPM electronic track for the timing stage",
+      "styleDirective": "driving beat, clear tempo, electronic",
+      "priority": "required",
+      "fallback": "builtin:music-loop"
+    }
+  ],
+  "estimatedScope": "small",
+  "styleDirective": "Minimalist dark stage with glowing note indicators",
+  "feelDirective": {
+    "mood": "focused",
+    "pacing": "fast",
+    "weight": "light",
+    "referenceGames": ["Osu!", "Friday Night Funkin"],
+    "oneLiner": "Hit the beat, earn the grade, master the rhythm"
+  },
+  "constraints": ["No movement system", "Fixed camera only"],
+  "projectType": "2d"
+}

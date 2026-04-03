@@ -1,0 +1,72 @@
+{
+  "id": "fixture-sandbox-creative-01",
+  "title": "Block Worlds",
+  "description": "A sandbox builder where players place and remove blocks to create anything they imagine.",
+  "systems": [
+    {
+      "category": "input",
+      "type": "drag-drop",
+      "config": { "gridSnap": true, "gridSize": 1, "maxPlaceRange": 8 },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "camera",
+      "type": "top-down",
+      "config": { "zoomMin": 5, "zoomMax": 50, "canOrbit": true },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "world",
+      "type": "sandbox",
+      "config": { "worldSize": 64, "undoHistory": 100, "saveSlots": 5 },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "entities",
+      "type": "placeable-objects",
+      "config": { "palette": ["cube", "ramp", "cylinder", "sphere"], "colorable": true },
+      "priority": "core",
+      "dependsOn": []
+    }
+  ],
+  "scenes": [
+    {
+      "name": "BuildWorld",
+      "purpose": "Main sandbox building environment",
+      "systems": ["input", "camera", "world", "entities"],
+      "entities": [
+        {
+          "name": "PlaceableBlock",
+          "role": "decoration",
+          "systems": ["entities"],
+          "appearance": "primitive:cube",
+          "behaviors": ["place", "remove", "color-change"]
+        }
+      ],
+      "transitions": []
+    }
+  ],
+  "assetManifest": [
+    {
+      "type": "texture",
+      "description": "Block face texture atlas with multiple material types",
+      "styleDirective": "clean flat colors, minimal detail, grid-friendly",
+      "priority": "required",
+      "fallback": "primitive:checker"
+    }
+  ],
+  "estimatedScope": "small",
+  "styleDirective": "Clean minimal aesthetic with vibrant block colors",
+  "feelDirective": {
+    "mood": "playful",
+    "pacing": "slow",
+    "weight": "light",
+    "referenceGames": ["Minecraft", "Townscaper"],
+    "oneLiner": "Build anything, no rules, just blocks and your imagination"
+  },
+  "constraints": ["No enemies", "No win condition"],
+  "projectType": "3d"
+}
