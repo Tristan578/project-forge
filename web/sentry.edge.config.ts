@@ -19,14 +19,6 @@ if (DSN) {
 
     sendDefaultPii: true,
     enableLogs: true,
-
-    integrations: [
-      Sentry.anthropicAIIntegration({
-        recordInputs: !IS_PROD,
-        recordOutputs: !IS_PROD,
-      }),
-      Sentry.vercelAIIntegration(),
-    ],
   });
 
   configureSentryFingerprinting();
