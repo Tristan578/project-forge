@@ -616,16 +616,29 @@ async function checkGenerationFactory(): Promise<ServiceHealth> {
       })(),
       SERVICE_TIMEOUT_MS,
     );
-    // Auth will reject (no Clerk session) — that's expected.
-    // What we're checking is that the factory didn't throw.
+    // Auth should reject (no Clerk session on health route) — 401 is expected.
+    // 200 means auth leaked from the caller's request context (authenticateRequest
+    // calls auth() which reads Clerk context, not the synthetic NextRequest).
+    // Treat 200 as degraded: factory works but may have billed tokens.
     const latencyMs = Date.now() - start;
 
-    if (res.status === 401 || res.status === 200) {
+    if (res.status === 401) {
       return {
         name: 'Generation Factory',
         status: 'healthy',
         latencyMs,
         lastChecked: new Date().toISOString(),
+        details: { responseStatus: res.status },
+      };
+    }
+
+    if (res.status === 200) {
+      return {
+        name: 'Generation Factory',
+        status: 'degraded',
+        latencyMs,
+        lastChecked: new Date().toISOString(),
+        error: 'Factory smoke test unexpectedly authenticated — may have billed tokens',
         details: { responseStatus: res.status },
       };
     }
