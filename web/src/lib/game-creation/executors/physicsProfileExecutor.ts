@@ -84,10 +84,10 @@ export const physicsProfileExecutor: ExecutorDefinition = {
     // User-controlled config CANNOT override gravity, friction, or terminal velocity.
     const finalProfile = {
       ...baseProfile,
-      ...(typeof config?.['moveSpeed'] === 'number'
+      ...(typeof config?.['moveSpeed'] === 'number' && Number.isFinite(config['moveSpeed'])
         ? { moveSpeed: config['moveSpeed'] as number }
         : {}),
-      ...(typeof config?.['jumpForce'] === 'number'
+      ...(typeof config?.['jumpForce'] === 'number' && Number.isFinite(config['jumpForce'])
         ? { jumpForce: config['jumpForce'] as number }
         : {}),
     };
@@ -98,10 +98,20 @@ export const physicsProfileExecutor: ExecutorDefinition = {
     // physics profile globally via update_physics_config (scene-level settings).
     // Per-entity physics is applied when entityIds are provided.
     if (ids.length === 0) {
-      // No physics entities to configure. The engine has no global
-      // physics config command — per-entity update_physics is the only
-      // option. Return success so downstream steps aren't blocked.
-      return successResult({ presetUsed: presetKey, entityCount: 0, appliedGlobally: false });
+      // No entityIds provided (common path from movement system registry).
+      // Look up physics-enabled entities from the store.
+      const storeNodes = Object.values(ctx.store.sceneGraph.nodes);
+      const physicsNodes = storeNodes
+        .filter(n => n.components.some(c => ['PhysicsData', 'RigidBody', 'Collider'].includes(c)))
+        .map(n => n.entityId)
+        .filter(id => typeof id === 'string' && id.trim().length > 0);
+
+      if (physicsNodes.length === 0) {
+        return successResult({ presetUsed: presetKey, entityCount: 0, appliedGlobally: false });
+      }
+
+      applyPhysicsProfile(finalProfile, ctx.dispatchCommand, physicsNodes);
+      return successResult({ presetUsed: presetKey, entityCount: physicsNodes.length, appliedGlobally: false });
     }
 
     applyPhysicsProfile(finalProfile, ctx.dispatchCommand, ids);

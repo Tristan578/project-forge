@@ -253,20 +253,36 @@ export async function decomposeIntoSystems(
       systems: data.systems,
       // Sanitize nested string fields in scenes (entity names, purposes, behaviors).
       // These flow into executor inputs and downstream LLM prompts.
-      scenes: data.scenes.map(scene => ({
-        ...scene,
-        name: sanitizePrompt(scene.name, 200).filtered ?? 'Scene',
-        purpose: sanitizePrompt(scene.purpose, 500).filtered ?? '',
-        entities: scene.entities.map(entity => ({
-          ...entity,
-          name: sanitizePrompt(entity.name, 200).filtered ?? 'Entity',
-          appearance: sanitizePrompt(entity.appearance, 300).filtered ?? 'default appearance',
-          behaviors: entity.behaviors
-            .map(b => sanitizePrompt(b, 100))
-            .filter(s => s.safe)
-            .map(s => s.filtered!),
-        })),
-      })),
+      scenes: data.scenes.map(scene => {
+        const sName = sanitizePrompt(scene.name, 200);
+        const sPurpose = sanitizePrompt(scene.purpose, 500);
+        return {
+          ...scene,
+          name: sName.safe ? sName.filtered! : 'Scene',
+          purpose: sPurpose.safe ? sPurpose.filtered! : '',
+          transitions: scene.transitions.map(t => {
+            const tTo = sanitizePrompt(t.to, 100);
+            const tTrigger = sanitizePrompt(t.trigger, 200);
+            return {
+              to: tTo.safe ? tTo.filtered! : '',
+              trigger: tTrigger.safe ? tTrigger.filtered! : '',
+            };
+          }).filter(t => t.to.length > 0),
+          entities: scene.entities.map(entity => {
+            const eName = sanitizePrompt(entity.name, 200);
+            const eAppearance = sanitizePrompt(entity.appearance, 300);
+            return {
+              ...entity,
+              name: eName.safe ? eName.filtered! : 'Entity',
+              appearance: eAppearance.safe ? eAppearance.filtered! : 'default appearance',
+              behaviors: entity.behaviors
+                .map(b => sanitizePrompt(b, 100))
+                .filter(s => s.safe)
+                .map(s => s.filtered!),
+            };
+          }),
+        };
+      }),
       assetManifest: data.assetManifest.map(a => {
         // [S4] Sanitize styleDirective on each asset
         const assetStyle = sanitizePrompt(a.styleDirective, 300);
@@ -275,7 +291,7 @@ export async function decomposeIntoSystems(
           // If unsafe, fall back to generic description — never pass raw unsanitized
           // LLM output to downstream asset generation prompts
           styleDirective: assetStyle.safe
-            ? (assetStyle.filtered ?? a.styleDirective.slice(0, 300))
+            ? assetStyle.filtered!
             : 'default style',
         };
       }),
@@ -291,7 +307,7 @@ export async function decomposeIntoSystems(
         // A mood string that is entirely injection content must not be passed
         // to second-stage prompts (physics_profile, audio, visual executors).
         mood: sanitizedMood.safe
-          ? (sanitizedMood.filtered ?? data.feelDirective.mood.slice(0, 100))
+          ? sanitizedMood.filtered!
           : 'neutral',
         // [FIX: NS2] referenceGames entries sanitized
         referenceGames: sanitizedRefGames,
