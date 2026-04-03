@@ -1,121 +1,64 @@
 export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 
-import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { SpriteClient } from '@/lib/generate/spriteClient';
-import { captureException } from '@/lib/monitoring/sentry-server';
-import { rateLimitResponse } from '@/lib/rateLimit';
-import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
-import { sanitizePrompt } from '@/lib/ai/contentSafety';
-import { refundTokens } from '@/lib/tokens/service';
-import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 import { DB_PROVIDER } from '@/lib/config/providers';
 
+type TileSize = 16 | 32 | 48 | 64;
+type GridSize = '4x4' | '8x8' | '16x16';
 
-export async function POST(request: NextRequest) {
-  // 1. Authenticate
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
+export const POST = createGenerationHandler<
+  { prompt: string; tileSize: TileSize; gridSize: GridSize },
+  { jobId: string; provider: string; status: string; estimatedSeconds: number }
+>({
+  route: '/api/generate/tileset-gen',
+  provider: DB_PROVIDER.sprite,
+  operation: 'tileset_generation',
+  rateLimitKey: 'gen-tileset',
+  successStatus: 201,
+  validate: (body) => {
+    const { prompt, tileSize = 32, gridSize = '8x8' } = body as {
+      prompt?: unknown;
+      tileSize?: unknown;
+      gridSize?: unknown;
+    };
 
-  // Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
-  const aggRl = await aggregateGenerationRateLimit(authResult.ctx.user.id);
-  if (!aggRl.allowed) return rateLimitResponse(aggRl.remaining, aggRl.resetAt);
-
-  // 1b. Rate limit: 10 generation requests per 5 minutes per user
-  const rl = await distributedRateLimit(`gen-tileset:${authResult.ctx.user.id}`, 10, 300);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
-
-  // 2. Parse request
-  let body: {
-    prompt: string;
-    tileSize?: 16 | 32 | 48 | 64;
-    gridSize?: '4x4' | '8x8' | '16x16';
-  };
-
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
-
-  const {
-    prompt,
-    tileSize = 32,
-    gridSize = '8x8',
-  } = body;
-
-  // Validate (PF-898: typeof guard prevents prototype/non-string values bypassing length check)
-  if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
-    return NextResponse.json(
-      { error: 'Prompt must be between 3 and 500 characters' },
-      { status: 422 }
-    );
-  }
-
-  // 2b. Content safety filter
-  const safety = sanitizePrompt(prompt);
-  if (!safety.safe) {
-    return NextResponse.json(
-      { error: safety.reason ?? 'Content rejected by safety filter' },
-      { status: 422 }
-    );
-  }
-  const safePrompt = safety.filtered ?? prompt;
-
-  // 3. Resolve API key (Replicate for tiling mode)
-  const tokenCost = TOKEN_COSTS.tileset_generation;
-
-  let apiKey: string;
-  let usageId: string | undefined;
-
-  try {
-    const resolved = await resolveApiKey(
-      authResult.ctx.user.id,
-      DB_PROVIDER.sprite,
-      tokenCost,
-      'tileset_generation',
-      { prompt: safePrompt, tileSize, gridSize }
-    );
-    apiKey = resolved.key;
-    usageId = resolved.usageId;
-  } catch (err) {
-    if (err instanceof ApiKeyError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+    if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
+      return { ok: false, error: 'Prompt must be between 3 and 500 characters' };
     }
-    throw err;
-  }
 
-  // 4. Call tileset generation
-  const client = new SpriteClient(apiKey, 'sdxl');
+    const VALID_TILE_SIZES = [16, 32, 48, 64];
+    if (!VALID_TILE_SIZES.includes(tileSize as number)) {
+      return { ok: false, error: `tileSize must be one of: ${VALID_TILE_SIZES.join(', ')}` };
+    }
 
-  try {
+    const VALID_GRID_SIZES = ['4x4', '8x8', '16x16'];
+    if (!VALID_GRID_SIZES.includes(gridSize as string)) {
+      return { ok: false, error: `gridSize must be one of: ${VALID_GRID_SIZES.join(', ')}` };
+    }
+
+    return {
+      ok: true,
+      params: {
+        prompt: prompt as string,
+        tileSize: tileSize as TileSize,
+        gridSize: gridSize as GridSize,
+      },
+    };
+  },
+  execute: async (params, apiKey) => {
+    const client = new SpriteClient(apiKey, 'sdxl');
     const result = await client.generateTileset({
-      prompt: safePrompt,
-      tileSize,
-      gridSize,
+      prompt: params.prompt,
+      tileSize: params.tileSize,
+      gridSize: params.gridSize,
     });
 
-    return NextResponse.json(
-      {
-        jobId: result.taskId,
-        provider: DB_PROVIDER.sprite,
-        status: result.status,
-        estimatedSeconds: 60,
-      },
-      { status: 201 }
-    );
-  } catch (err) {
-    // Refund tokens on provider failure
-    if (usageId) {
-      try {
-        await refundTokens(authResult.ctx.user.id, usageId);
-      } catch (refundErr) {
-        captureException(refundErr, { route: '/api/generate/tileset-gen', action: 'refund', usageId });
-      }
-    }
-    captureException(err, { route: '/api/generate/tileset-gen', prompt: safePrompt });
-    const message = err instanceof Error ? err.message : 'Provider error';
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
+    return {
+      jobId: result.taskId,
+      provider: DB_PROVIDER.sprite,
+      status: result.status,
+      estimatedSeconds: 60,
+    };
+  },
+});

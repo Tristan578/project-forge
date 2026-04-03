@@ -37,11 +37,11 @@ export interface GenerationHandlerConfig<TParams, TResult> {
   /** Route path for Sentry context (e.g. '/api/generate/sfx') */
   route: string;
 
-  /** Provider name for API key resolution (e.g. 'elevenlabs', 'replicate') */
-  provider: Provider;
+  /** Provider name for API key resolution. Static or computed from validated params. */
+  provider: Provider | ((params: TParams) => Provider);
 
-  /** Token operation name for pricing lookup (e.g. 'sfx_generation') */
-  operation: string;
+  /** Token operation name for pricing lookup. Static or computed from validated params. */
+  operation: string | ((params: TParams) => string);
 
   /** Rate limit key prefix (user ID is appended) */
   rateLimitKey: string;
@@ -62,10 +62,24 @@ export interface GenerationHandlerConfig<TParams, TResult> {
   successStatus?: number;
 
   /**
+   * Override the token cost with a dynamic value computed from validated params.
+   * When provided, this replaces the static `getTokenCost(operation)` lookup.
+   */
+  tokenCost?: (params: TParams) => number;
+
+  /**
    * Validate and extract typed params from the raw request body.
    * Return `{ ok: true, params }` or `{ ok: false, error, status }`.
    */
   validate: (body: Record<string, unknown>) => ValidateResult<TParams>;
+
+  /**
+   * Extract a small metadata object from params for billing records.
+   * When omitted, params is passed directly — routes with large fields
+   * (imageBase64, strings arrays) SHOULD provide this to avoid bloating
+   * the token_usage.metadata JSONB column.
+   */
+  billingMetadata?: (params: TParams) => Record<string, unknown>;
 
   /**
    * Execute the provider call with validated params and resolved API key.
@@ -105,6 +119,8 @@ export function createGenerationHandler<TParams, TResult>(
     promptField = 'prompt',
     skipContentSafety = false,
     successStatus = 200,
+    tokenCost: tokenCostFn,
+    billingMetadata: billingMetadataFn,
     validate,
     execute,
   } = config;
@@ -132,7 +148,11 @@ export function createGenerationHandler<TParams, TResult>(
     // 3. Parse request body
     let rawBody: Record<string, unknown>;
     try {
-      rawBody = await request.json();
+      const parsed = await request.json();
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: 400 });
+      }
+      rawBody = parsed as Record<string, unknown>;
     } catch {
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     }
@@ -163,13 +183,29 @@ export function createGenerationHandler<TParams, TResult>(
       }
     }
 
-    // 6. Resolve API key + deduct tokens
-    const tokenCost = getTokenCost(operation);
+    // 6. Resolve provider, operation, and token cost
+    let resolvedProvider: Provider;
+    let resolvedOperation: string;
+    let tokenCost: number;
+    try {
+      resolvedProvider = typeof provider === 'function' ? provider(params) : provider;
+      resolvedOperation = typeof operation === 'function' ? operation(params) : operation;
+      const rawCost = tokenCostFn ? tokenCostFn(params) : getTokenCost(resolvedOperation);
+      tokenCost = Math.round(rawCost);
+      if (!Number.isFinite(tokenCost) || tokenCost < 0) {
+        captureException(new Error(`Invalid token cost: ${rawCost}`), { route });
+        return NextResponse.json({ error: 'Internal pricing error' }, { status: 500 });
+      }
+    } catch (err) {
+      captureException(err, { route, action: 'resolve_billing_params' });
+      return NextResponse.json({ error: 'Internal pricing error' }, { status: 500 });
+    }
     let apiKey: string;
     let usageId: string | undefined;
 
     try {
-      const resolved = await resolveApiKey(userId, provider, tokenCost, operation, params as Record<string, unknown>);
+      const metadata = billingMetadataFn ? billingMetadataFn(params) : (params as Record<string, unknown>);
+      const resolved = await resolveApiKey(userId, resolvedProvider, tokenCost, resolvedOperation, metadata);
       apiKey = resolved.key;
       usageId = resolved.usageId;
     } catch (err) {

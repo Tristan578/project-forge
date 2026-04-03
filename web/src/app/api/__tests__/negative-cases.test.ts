@@ -431,10 +431,10 @@ describe('POST /api/generate/model — negative cases', () => {
     vi.clearAllMocks();
   });
 
-  it('returns 401 when not authenticated (withApiMiddleware)', async () => {
-    mockWithApiMiddleware.mockResolvedValue({
-      error: makeUnauthedResponse(),
-      authContext: null,
+  it('returns 401 when not authenticated', async () => {
+    mockAuthenticateRequest.mockResolvedValue({
+      ok: false,
+      response: makeUnauthedResponse(),
     });
 
     const { POST } = await import('@/app/api/generate/model/route');
@@ -443,11 +443,13 @@ describe('POST /api/generate/model — negative cases', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns 429 when rate limited by middleware', async () => {
-    mockWithApiMiddleware.mockResolvedValue({
-      error: makeRateLimitedResponse(),
-      authContext: null,
+  it('returns 429 when rate limited', async () => {
+    mockAuthenticateRequest.mockResolvedValue({
+      ok: true,
+      ctx: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
     });
+    mockDistributedRateLimit.mockResolvedValueOnce({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    mockRateLimitResponse.mockReturnValue(makeRateLimitedResponse());
 
     const { POST } = await import('@/app/api/generate/model/route');
     const req = makeRequest('http://localhost/api/generate/model', { prompt: 'a red cube', mode: 'text-to-3d' });
@@ -456,10 +458,11 @@ describe('POST /api/generate/model — negative cases', () => {
   });
 
   it('returns 400 for invalid JSON body', async () => {
-    mockWithApiMiddleware.mockResolvedValue({
-      error: null,
-      authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+    mockAuthenticateRequest.mockResolvedValue({
+      ok: true,
+      ctx: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
     });
+    mockDistributedRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
 
     const { POST } = await import('@/app/api/generate/model/route');
     const req = makeRequestRaw('http://localhost/api/generate/model', 'not json');
@@ -468,10 +471,11 @@ describe('POST /api/generate/model — negative cases', () => {
   });
 
   it('returns 422 when prompt is too short', async () => {
-    mockWithApiMiddleware.mockResolvedValue({
-      error: null,
-      authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+    mockAuthenticateRequest.mockResolvedValue({
+      ok: true,
+      ctx: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
     });
+    mockDistributedRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
 
     const { POST } = await import('@/app/api/generate/model/route');
     const req = makeRequest('http://localhost/api/generate/model', {
@@ -483,10 +487,11 @@ describe('POST /api/generate/model — negative cases', () => {
   });
 
   it('returns 422 when image-to-3d mode is missing imageBase64', async () => {
-    mockWithApiMiddleware.mockResolvedValue({
-      error: null,
-      authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+    mockAuthenticateRequest.mockResolvedValue({
+      ok: true,
+      ctx: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
     });
+    mockDistributedRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
 
     const { POST } = await import('@/app/api/generate/model/route');
     const req = makeRequest('http://localhost/api/generate/model', {
