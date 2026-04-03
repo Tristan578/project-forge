@@ -118,8 +118,8 @@ vi.mock('@/lib/config/providers', () => ({
   SPRITE_SIZES: ['32x32', '64x64', '128x128', '256x256', '512x512', '1024x1024'],
   SPRITE_ESTIMATED_SECONDS: { dalle3: 15, sdxl: 30 },
   PIXEL_ART_SIZES: [16, 32, 64, 128],
-  PIXEL_ART_DITHERING_MODES: ['none', 'floyd-steinberg', 'ordered'],
-  PIXEL_ART_STYLES: ['character', 'tile', 'icon', 'landscape'],
+  PIXEL_ART_DITHERING_MODES: ['none', 'bayer4x4', 'bayer8x8'],
+  PIXEL_ART_STYLES: ['character', 'prop', 'tile', 'icon', 'environment'],
 }));
 
 // AI SDK mocks (pacing/localize)
@@ -326,7 +326,7 @@ describe('generate route integration (route → factory → provider)', () => {
     const res = await POST(makeRequest('http://test/api/generate/sprite', {
       prompt: 'test', size: '999x999', removeBackground: true,
     }));
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBe(422);
   });
 
   it('model: rejects invalid mode', async () => {
@@ -342,7 +342,7 @@ describe('generate route integration (route → factory → provider)', () => {
     const res = await POST(makeRequest('http://test/api/generate/tileset-gen', {
       prompt: 'test', tileSize: 99, gridSize: '8x8',
     }));
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBe(422);
   });
 
   it('sprite-sheet: rejects non-integer frameCount', async () => {
