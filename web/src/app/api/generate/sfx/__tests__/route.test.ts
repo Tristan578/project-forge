@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey } from '@/lib/keys/resolver';
-import { rateLimit } from '@/lib/rateLimit';
+import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { refundTokens } from '@/lib/tokens/service';
 import type { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 
@@ -39,9 +39,16 @@ vi.mock('@/lib/generate/elevenlabsClient', () => {
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
+vi.mock('@/lib/ai/contentSafety', () => ({
+  sanitizePrompt: vi.fn((text: string) => ({ safe: true, filtered: text })),
+}));
 vi.mock('@/lib/rateLimit', () => ({
   rateLimit: vi.fn(),
   rateLimitResponse: vi.fn(() => new Response('Rate limited', { status: 429 })),
+}));
+vi.mock('@/lib/rateLimit/distributed', () => ({
+  distributedRateLimit: vi.fn(),
+  aggregateGenerationRateLimit: vi.fn(),
 }));
 vi.mock('@/lib/tokens/service', () => ({
   refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
@@ -64,7 +71,12 @@ describe('POST /api/generate/sfx', () => {
       ok: true as const,
       ctx: { clerkId: 'clerk_1', user: mockUser as never },
     });
-    vi.mocked(rateLimit).mockResolvedValue({
+    vi.mocked(aggregateGenerationRateLimit).mockResolvedValue({
+      allowed: true,
+      remaining: 29,
+      resetAt: Date.now() + 900_000,
+    });
+    vi.mocked(distributedRateLimit).mockResolvedValue({
       allowed: true,
       remaining: 9,
       resetAt: Date.now() + 300_000,
@@ -93,7 +105,7 @@ describe('POST /api/generate/sfx', () => {
 
   describe('rate limiting', () => {
     it('returns 429 when rate limited', async () => {
-      vi.mocked(rateLimit).mockResolvedValue({
+      vi.mocked(distributedRateLimit).mockResolvedValue({
         allowed: false,
         remaining: 0,
         resetAt: Date.now() + 60_000,

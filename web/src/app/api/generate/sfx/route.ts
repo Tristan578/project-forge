@@ -1,115 +1,44 @@
 export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 
-import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
-import { getTokenCost } from '@/lib/tokens/pricing';
+import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
-import { captureException } from '@/lib/monitoring/sentry-server';
-import { rateLimitResponse } from '@/lib/rateLimit';
-import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
-import { sanitizePrompt } from '@/lib/ai/contentSafety';
-import { refundTokens } from '@/lib/tokens/service';
 import { DB_PROVIDER } from '@/lib/config/providers';
 
+export const POST = createGenerationHandler<
+  { prompt: string; durationSeconds: number },
+  { audioBase64: string; durationSeconds: number; provider: string }
+>({
+  route: '/api/generate/sfx',
+  provider: DB_PROVIDER.sfx,
+  operation: 'sfx_generation',
+  rateLimitKey: 'gen-sfx',
+  validate: (body) => {
+    const { prompt, durationSeconds = 5 } = body as {
+      prompt?: unknown;
+      durationSeconds?: unknown;
+    };
 
-export async function POST(request: NextRequest) {
-  // 1. Authenticate
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  // Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
-  const aggRl = await aggregateGenerationRateLimit(authResult.ctx.user.id);
-  if (!aggRl.allowed) return rateLimitResponse(aggRl.remaining, aggRl.resetAt);
-
-  // 1b. Rate limit: 10 generation requests per 5 minutes per user (distributed)
-  const rl = await distributedRateLimit(`gen-sfx:${authResult.ctx.user.id}`, 10, 300);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
-
-  // 2. Parse request
-  let body: {
-    prompt: string;
-    durationSeconds?: number;
-  };
-
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
-
-  const { prompt, durationSeconds = 5 } = body;
-
-  // Validate (PF-898: typeof guard prevents prototype/non-string values bypassing length check)
-  if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
-    return NextResponse.json(
-      { error: 'Prompt must be between 3 and 500 characters' },
-      { status: 422 }
-    );
-  }
-
-  if (typeof durationSeconds !== 'number' || !Number.isFinite(durationSeconds) || durationSeconds < 0.5 || durationSeconds > 22) {
-    return NextResponse.json(
-      { error: 'Duration must be between 0.5 and 22 seconds' },
-      { status: 422 }
-    );
-  }
-
-  // 2b. Content safety filter
-  const safety = sanitizePrompt(prompt);
-  if (!safety.safe) {
-    return NextResponse.json(
-      { error: safety.reason ?? 'Content rejected by safety filter' },
-      { status: 422 }
-    );
-  }
-  const safePrompt = safety.filtered ?? prompt;
-
-  // 3. Resolve API key and deduct tokens
-  const tokenCost = getTokenCost('sfx_generation');
-
-  let apiKey: string;
-  let usageId: string | undefined;
-
-  try {
-    const resolved = await resolveApiKey(
-      authResult.ctx.user.id,
-      DB_PROVIDER.sfx,
-      tokenCost,
-      'sfx_generation',
-      { prompt: safePrompt, durationSeconds }
-    );
-    apiKey = resolved.key;
-    usageId = resolved.usageId;
-  } catch (err) {
-    if (err instanceof ApiKeyError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+    if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
+      return { ok: false, error: 'Prompt must be between 3 and 500 characters' };
     }
-    throw err;
-  }
 
-  // 4. Call ElevenLabs API (synchronous)
-  const client = new ElevenLabsClient({ apiKey });
+    if (typeof durationSeconds !== 'number' || !Number.isFinite(durationSeconds) || durationSeconds < 0.5 || durationSeconds > 22) {
+      return { ok: false, error: 'Duration must be between 0.5 and 22 seconds' };
+    }
 
-  try {
-    const result = await client.generateSfx({ prompt: safePrompt, durationSeconds });
+    return { ok: true, params: { prompt: prompt as string, durationSeconds: durationSeconds as number } };
+  },
+  execute: async (params, apiKey) => {
+    const client = new ElevenLabsClient({ apiKey });
+    const result = await client.generateSfx({
+      prompt: params.prompt,
+      durationSeconds: params.durationSeconds,
+    });
 
-    return NextResponse.json({
+    return {
       audioBase64: result.audioBase64,
       durationSeconds: result.durationSeconds,
       provider: DB_PROVIDER.sfx,
-    });
-  } catch (err) {
-    // Refund tokens on provider failure
-    if (usageId) {
-      try {
-        await refundTokens(authResult.ctx.user.id, usageId);
-      } catch (refundErr) {
-        captureException(refundErr, { route: '/api/generate/sfx', action: 'refund', usageId });
-      }
-    }
-    captureException(err, { route: '/api/generate/sfx', prompt: safePrompt });
-    const message = err instanceof Error ? err.message : 'Provider error';
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
+    };
+  },
+});
