@@ -6,10 +6,10 @@ import type { BridgeToolConfig } from '@/lib/bridges/types';
 import { ALLOWED_TEMPLATES } from '@/lib/bridges/luaTemplates';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { BRIDGE_CACHE_TTL_MS } from '@/lib/config/timeouts';
 
 // Cache discovered tool config to avoid spawning a child process on every request
 let cachedTool: { config: BridgeToolConfig; expiresAt: number } | null = null;
-const CACHE_TTL_MS = 60_000; // 60 seconds
 
 async function getCachedTool(): Promise<BridgeToolConfig> {
   const now = Date.now();
@@ -17,7 +17,7 @@ async function getCachedTool(): Promise<BridgeToolConfig> {
     return cachedTool.config;
   }
   const config = await discoverTool('aseprite');
-  cachedTool = { config, expiresAt: now + CACHE_TTL_MS };
+  cachedTool = { config, expiresAt: now + BRIDGE_CACHE_TTL_MS };
   return config;
 }
 

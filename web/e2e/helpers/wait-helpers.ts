@@ -3,6 +3,8 @@ import { expect } from '@playwright/test';
 import {
   E2E_HYDRATION_TIMEOUT_MS,
   E2E_VISIBILITY_TIMEOUT_MS,
+  E2E_SHORT_WAIT_MS,
+  E2E_MEDIUM_WAIT_MS,
 } from '../../src/lib/config/timeouts';
 
 /**
@@ -18,12 +20,12 @@ import {
  *
  * @param page - Playwright Page
  * @param panelName - The panel title/label (case-insensitive match)
- * @param timeout - Maximum wait time in ms (default 5000)
+ * @param timeout - Maximum wait time in ms (default E2E_SHORT_WAIT_MS)
  */
 export async function waitForPanel(
   page: Page,
   panelName: string,
-  timeout = 5000,
+  timeout = E2E_SHORT_WAIT_MS,
 ): Promise<void> {
   const panelLocator = page
     .locator('.dv-tab, [data-testid^="panel-"]')
@@ -37,12 +39,12 @@ export async function waitForPanel(
  *
  * @param page - Playwright Page
  * @param entityName - The entity name to wait for (case-insensitive)
- * @param timeout - Maximum wait time in ms (default 10000)
+ * @param timeout - Maximum wait time in ms (default E2E_MEDIUM_WAIT_MS)
  */
 export async function waitForEntity(
   page: Page,
   entityName: string,
-  timeout = 10000,
+  timeout = E2E_MEDIUM_WAIT_MS,
 ): Promise<void> {
   await page.waitForFunction(
     (name: string) => {
@@ -106,12 +108,12 @@ export async function waitForHydration(
  *
  * @param page - Playwright Page
  * @param mode - The expected engine mode ('edit' | 'play' | 'paused')
- * @param timeout - Maximum wait time in ms (default 5000)
+ * @param timeout - Maximum wait time in ms (default E2E_SHORT_WAIT_MS)
  */
 export async function waitForEngineMode(
   page: Page,
   mode: string,
-  timeout = 5000,
+  timeout = E2E_SHORT_WAIT_MS,
 ): Promise<void> {
   await page.waitForFunction(
     (expectedMode: string) => {
@@ -128,11 +130,11 @@ export async function waitForEngineMode(
  * Waits for the canvas element to be visible and have non-zero dimensions.
  *
  * @param page - Playwright Page
- * @param timeout - Maximum wait time in ms (default 10000)
+ * @param timeout - Maximum wait time in ms (default E2E_MEDIUM_WAIT_MS)
  */
 export async function waitForCanvas(
   page: Page,
-  timeout = 10000,
+  timeout = E2E_MEDIUM_WAIT_MS,
 ): Promise<void> {
   const canvas = page.locator('canvas').first();
   await expect(canvas).toBeVisible({ timeout });
@@ -145,13 +147,13 @@ export async function waitForCanvas(
  * @param page - Playwright Page
  * @param width - Target viewport width
  * @param height - Target viewport height
- * @param timeout - Maximum wait time in ms (default 5000)
+ * @param timeout - Maximum wait time in ms (default E2E_SHORT_WAIT_MS)
  */
 export async function waitForResize(
   page: Page,
   width: number,
   height: number,
-  timeout = 5000,
+  timeout = E2E_SHORT_WAIT_MS,
 ): Promise<void> {
   await page.setViewportSize({ width, height });
   await expect(page.locator('canvas').first()).toBeVisible({ timeout });
@@ -164,12 +166,12 @@ export async function waitForResize(
  *
  * @param page - Playwright Page
  * @param stableMs - How long to wait with no new errors (default 1000)
- * @param timeout - Maximum overall wait time (default 5000)
+ * @param timeout - Maximum overall wait time (default E2E_SHORT_WAIT_MS)
  */
 export async function waitForConsoleStable(
   page: Page,
   stableMs = 1000,
-  timeout = 5000,
+  timeout = E2E_SHORT_WAIT_MS,
 ): Promise<void> {
   await page.waitForFunction(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

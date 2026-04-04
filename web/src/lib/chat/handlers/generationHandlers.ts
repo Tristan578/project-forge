@@ -10,6 +10,7 @@ import { useGenerationStore } from '@/stores/generationStore';
 import type { GenerationType } from '@/stores/generationStore';
 import { enrichPrompt, enrichSfxPrompt, enrichMusicPrompt, enrichVoiceStyle } from '@/lib/generate/promptEnricher';
 import { inferSfxCategory, getSpatialDefaults } from '@/lib/generate/postProcess';
+import { DIRECT_CAPABILITY_PROVIDER } from '@/lib/config/providers';
 
 /** Generate a unique ID for client-side job tracking. */
 export function makeJobId(): string {
@@ -141,7 +142,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       providerJobId: data.jobId as string,
       type: 'model',
       prompt: p.data.prompt,
-      provider: (data.provider as string) ?? 'meshy',
+      provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.model3d,
       usageId: data.usageId as string | undefined,
       entityId: modelTargetId,
       autoPlace: p.data.autoPlace ?? true,
@@ -184,7 +185,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       providerJobId: data.jobId as string,
       type: 'model',
       prompt: p.data.prompt ?? 'image-to-3d',
-      provider: (data.provider as string) ?? 'meshy',
+      provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.model3d,
       usageId: data.usageId as string | undefined,
       entityId: imageTargetId,
       autoPlace: p.data.autoPlace ?? true,
@@ -238,7 +239,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       providerJobId: data.jobId as string,
       type: 'texture',
       prompt: p.data.prompt,
-      provider: (data.provider as string) ?? 'meshy',
+      provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.texture,
       entityId: p.data.entityId,
       usageId: data.usageId as string | undefined,
       autoPlace: p.data.autoPlace ?? !!p.data.entityId,
@@ -277,7 +278,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       providerJobId: data.jobId as string,
       type: 'texture',
       prompt: p.data.prompt,
-      provider: (data.provider as string) ?? 'meshy',
+      provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.texture,
       entityId: p.data.entityId,
       usageId: data.usageId as string | undefined,
     });
@@ -393,7 +394,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       providerJobId: data.jobId as string,
       type: 'skybox',
       prompt: p.data.prompt,
-      provider: (data.provider as string) ?? 'meshy',
+      provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.texture,
       usageId: data.usageId as string | undefined,
     });
 
@@ -458,7 +459,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       providerJobId: data.jobId as string,
       type: 'music',
       prompt: p.data.prompt,
-      provider: (data.provider as string) ?? 'suno',
+      provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.music,
       entityId: p.data.entityId,
       usageId: data.usageId as string | undefined,
       autoPlace: musicAutoPlace,

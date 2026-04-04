@@ -33,6 +33,25 @@ export const PROVIDER_NAMES = [
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
 
 // ---------------------------------------------------------------------------
+// BYOK (Bring Your Own Key) providers
+// ---------------------------------------------------------------------------
+
+/**
+ * Providers that support user-supplied API keys.
+ * Superset of PROVIDER_NAMES — includes providers like 'hyper3d' that are
+ * valid DB `Provider` members but not monitored via circuit breakers.
+ */
+export const BYOK_PROVIDERS = [
+  'anthropic',
+  'meshy',
+  'hyper3d',
+  'elevenlabs',
+  'suno',
+] as const;
+
+export type ByokProvider = (typeof BYOK_PROVIDERS)[number];
+
+// ---------------------------------------------------------------------------
 // Backend identifiers
 // ---------------------------------------------------------------------------
 

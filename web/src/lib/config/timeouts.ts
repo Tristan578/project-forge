@@ -22,6 +22,21 @@ export const E2E_VISIBILITY_TIMEOUT_MS = 30_000;
 /** Navigation timeout for Playwright page.goto */
 export const E2E_NAVIGATION_TIMEOUT_MS = 30_000;
 
+/** Playwright expect assertion timeout */
+export const E2E_EXPECT_TIMEOUT_MS = 15_000;
+
+/** Playwright action (click, fill, etc.) timeout */
+export const E2E_ACTION_TIMEOUT_MS = 10_000;
+
+/** Playwright webServer startup timeout */
+export const E2E_WEB_SERVER_TIMEOUT_MS = 120_000;
+
+/** Short wait for E2E panel/mode/resize assertions */
+export const E2E_SHORT_WAIT_MS = 5_000;
+
+/** Medium wait for E2E entity/canvas assertions */
+export const E2E_MEDIUM_WAIT_MS = 10_000;
+
 // ---------------------------------------------------------------------------
 // Vitest timeouts
 // ---------------------------------------------------------------------------
@@ -125,6 +140,9 @@ export const HEALTH_CACHE_TTL_MS = 30_000;
 
 /** Bridge manager cache TTL */
 export const BRIDGE_CACHE_TTL_MS = 60_000;
+
+/** Docs index empty-response cache TTL */
+export const DOCS_EMPTY_CACHE_TTL_MS = 30_000;
 
 // ---------------------------------------------------------------------------
 // Circuit breaker timing
