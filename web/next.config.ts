@@ -189,8 +189,13 @@ export default withSentryConfig(withNextIntl(analyzer(nextConfig)), {
   // Auth token for source map upload (set SENTRY_AUTH_TOKEN in env)
   authToken: process.env.SENTRY_AUTH_TOKEN,
 
-  // Automatically tree-shake Sentry logger statements to reduce bundle size
-  disableLogger: true,
+  // Tree-shake Sentry logger statements to reduce bundle size (webpack only;
+  // Turbopack handles this via its own dead-code elimination).
+  webpack: {
+    treeshake: {
+      removeDebugLogging: true,
+    },
+  },
 
   // Route Sentry events through /monitoring to bypass ad-blockers.
   // Replaces the manual /api/sentry tunnel route.
