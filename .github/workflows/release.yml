@@ -71,7 +71,7 @@ jobs:
           # ensures local refs are complete, but also check remote as a safety net)
           if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-          elif git ls-remote --tags origin "v${VERSION}" | grep -q .; then
+          elif git ls-remote --tags origin "refs/tags/v${VERSION}" | grep -q .; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
