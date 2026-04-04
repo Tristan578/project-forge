@@ -126,7 +126,13 @@ if echo "$CHANGED_FILES" | grep -qE 'package\.json|package-lock\.json'; then
   cd "$WEB_DIR"
 fi
 
-# 5. Warn if no changeset exists for this branch (non-blocking)
+# 5. Magic constants check (warnings only — does not block push)
+MAGIC_CHECK="$PROJECT_DIR/web/scripts/check-magic-constants.sh"
+if [ -x "$MAGIC_CHECK" ]; then
+  bash "$MAGIC_CHECK" 2>&1 || true
+fi
+
+# 6. Warn if no changeset exists for this branch (non-blocking)
 # Run from project root so the .changeset/ path resolves correctly
 cd "$PROJECT_DIR"
 CHANGESET_FILES=$(git diff --name-only --diff-filter=A origin/main...HEAD -- '.changeset/*.md' 2>/dev/null | grep -v 'README.md' || true)

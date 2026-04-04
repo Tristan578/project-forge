@@ -1,7 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
 import {
   E2E_TEST_TIMEOUT_MS,
+  E2E_EXPECT_TIMEOUT_MS,
+  E2E_ACTION_TIMEOUT_MS,
   E2E_NAVIGATION_TIMEOUT_MS,
+  E2E_WEB_SERVER_TIMEOUT_MS,
 } from './src/lib/config/timeouts';
 
 export default defineConfig({
@@ -13,11 +16,11 @@ export default defineConfig({
   workers: process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'html',
   timeout: E2E_TEST_TIMEOUT_MS,
-  expect: { timeout: 15_000 },
+  expect: { timeout: E2E_EXPECT_TIMEOUT_MS },
 
   use: {
     baseURL: 'http://localhost:3000',
-    actionTimeout: 10_000,
+    actionTimeout: E2E_ACTION_TIMEOUT_MS,
     navigationTimeout: E2E_NAVIGATION_TIMEOUT_MS,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
@@ -67,6 +70,6 @@ export default defineConfig({
     command: 'npm run dev:raw',
     url: 'http://localhost:3000/dev',
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: E2E_WEB_SERVER_TIMEOUT_MS,
   },
 });

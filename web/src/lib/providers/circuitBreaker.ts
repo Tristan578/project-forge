@@ -83,11 +83,11 @@ export class ProviderCircuitBreaker {
     public readonly provider: string,
     config: CircuitBreakerConfig = {}
   ) {
-    this.windowMs = config.windowMs ?? 5 * 60 * 1000;
-    this.errorRateThreshold = config.errorRateThreshold ?? 0.5;
-    this.minRequestsToEvaluate = config.minRequestsToEvaluate ?? 3;
-    this.costAnomalyMultiplier = config.costAnomalyMultiplier ?? 2;
-    this.halfOpenAfterMs = config.halfOpenAfterMs ?? 60 * 1000;
+    this.windowMs = config.windowMs ?? CIRCUIT_BREAKER_WINDOW_MS;
+    this.errorRateThreshold = config.errorRateThreshold ?? CIRCUIT_BREAKER_DEFAULTS.errorRateThreshold;
+    this.minRequestsToEvaluate = config.minRequestsToEvaluate ?? CIRCUIT_BREAKER_DEFAULTS.minRequestsToEvaluate;
+    this.costAnomalyMultiplier = config.costAnomalyMultiplier ?? CIRCUIT_BREAKER_DEFAULTS.costAnomalyMultiplier;
+    this.halfOpenAfterMs = config.halfOpenAfterMs ?? CIRCUIT_BREAKER_HALF_OPEN_MS;
   }
 
   /** Get current circuit state (checks for auto-transition to HALF_OPEN). */

@@ -42,6 +42,8 @@ PROVIDER_HITS=$(grep -rn --include="*.ts" --include="*.tsx" \
   | grep -v '\.test\.' \
   | grep -v '// allowed-magic-constant' \
   | grep -v "Error\|error\|console\.\|throw\|import\b" \
+  | grep -v '^\s*\*\|^\s*//' \
+  | grep -v "type.*=.*'" \
   || true)
 
 if [ -n "$PROVIDER_HITS" ]; then

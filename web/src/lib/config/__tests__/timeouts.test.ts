@@ -4,6 +4,11 @@ import {
   E2E_HYDRATION_TIMEOUT_MS,
   E2E_VISIBILITY_TIMEOUT_MS,
   E2E_NAVIGATION_TIMEOUT_MS,
+  E2E_EXPECT_TIMEOUT_MS,
+  E2E_ACTION_TIMEOUT_MS,
+  E2E_WEB_SERVER_TIMEOUT_MS,
+  E2E_SHORT_WAIT_MS,
+  E2E_MEDIUM_WAIT_MS,
   VITEST_TEST_TIMEOUT_MS,
   VITEST_HOOK_TIMEOUT_MS,
   GPU_INIT_TIMEOUT_MS,
@@ -32,6 +37,7 @@ import {
   ERROR_TTL_MS,
   HEALTH_CACHE_TTL_MS,
   BRIDGE_CACHE_TTL_MS,
+  DOCS_EMPTY_CACHE_TTL_MS,
   CIRCUIT_BREAKER_WINDOW_MS,
   CIRCUIT_BREAKER_HALF_OPEN_MS,
   WEBHOOK_RETRY_MAX_DELAY_MS,
@@ -56,6 +62,31 @@ describe('E2E / Playwright timeouts', () => {
 
   it('hydration timeout is shorter than test timeout', () => {
     expect(E2E_HYDRATION_TIMEOUT_MS).toBeLessThan(E2E_TEST_TIMEOUT_MS);
+  });
+
+  it('E2E_EXPECT_TIMEOUT_MS is 15 seconds', () => {
+    expect(E2E_EXPECT_TIMEOUT_MS).toBe(15_000);
+  });
+
+  it('E2E_ACTION_TIMEOUT_MS is 10 seconds', () => {
+    expect(E2E_ACTION_TIMEOUT_MS).toBe(10_000);
+  });
+
+  it('E2E_WEB_SERVER_TIMEOUT_MS is 120 seconds', () => {
+    expect(E2E_WEB_SERVER_TIMEOUT_MS).toBe(120_000);
+  });
+
+  it('E2E_SHORT_WAIT_MS is 5 seconds', () => {
+    expect(E2E_SHORT_WAIT_MS).toBe(5_000);
+  });
+
+  it('E2E_MEDIUM_WAIT_MS is 10 seconds', () => {
+    expect(E2E_MEDIUM_WAIT_MS).toBe(10_000);
+  });
+
+  it('short wait < medium wait < visibility timeout', () => {
+    expect(E2E_SHORT_WAIT_MS).toBeLessThan(E2E_MEDIUM_WAIT_MS);
+    expect(E2E_MEDIUM_WAIT_MS).toBeLessThan(E2E_VISIBILITY_TIMEOUT_MS);
   });
 });
 
@@ -196,6 +227,10 @@ describe('Debounce and cooldown intervals', () => {
 
   it('BRIDGE_CACHE_TTL_MS is 60 seconds', () => {
     expect(BRIDGE_CACHE_TTL_MS).toBe(60_000);
+  });
+
+  it('DOCS_EMPTY_CACHE_TTL_MS is 30 seconds', () => {
+    expect(DOCS_EMPTY_CACHE_TTL_MS).toBe(30_000);
   });
 
   it('auto-save debounce is longer than viewport debounce', () => {

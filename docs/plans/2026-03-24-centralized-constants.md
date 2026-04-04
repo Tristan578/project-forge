@@ -1,6 +1,6 @@
 # Plan: Centralized Constants Architecture
 
-> **Status:** DRAFT
+> **Status:** IMPLEMENTED
 > **Date:** 2026-03-24
 > **Scope:** Extract hardcoded magic numbers, provider strings, enum literals, and scope patterns into centralized config modules under `web/src/lib/config/`.
 
