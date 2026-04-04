@@ -133,8 +133,8 @@ git push -u origin $(git branch --show-current)
 # 1. Run quality gate
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 
-# 2. Add changeset (if user-facing changes)
-npx changeset
+# 2. Add changeset (if user-facing changes) — run from repo root, not web/
+cd "$PROJECT_DIR" && npx changeset
 # Or manually: create .changeset/<name>.md with package + semver bump + description
 
 # 3. Sync tickets to GitHub

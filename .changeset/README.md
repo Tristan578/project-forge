@@ -15,4 +15,4 @@ Fixed the widget alignment in the inspector panel.
 
 ## Skip changesets
 
-Add the `[skip changeset]` label to PRs that don't need a changeset (docs-only, CI config, etc.).
+Add the `skip changeset` label to PRs that don't need a changeset (docs-only, CI config, etc.).

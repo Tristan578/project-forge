@@ -38,11 +38,15 @@ jobs:
   tag-release:
     name: Tag and Release
     runs-on: ubuntu-latest
-    # Only run when the "Version Packages" PR is merged.
+    # Detect the Version Packages commit. Uses startsWith to handle squash merges
+    # that append the PR number (e.g. "chore: version packages (#123)").
     # head_commit.message is safe here — used in an `if:` expression, not a shell command.
-    if: github.event.head_commit.message == 'chore: version packages'
+    if: startsWith(github.event.head_commit.message, 'chore: version packages')
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - uses: actions/setup-node@v4
         with:
@@ -62,7 +66,11 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          # Check both local and remote tags (fetch-depth: 0 + fetch-tags: true
+          # ensures local refs are complete, but also check remote as a safety net)
           if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --tags origin "v${VERSION}" | grep -q .; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
@@ -74,9 +82,19 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          # Extract the section for this version from CHANGELOG.md
           ESCAPED_VERSION="${VERSION//./\\.}"
-          BODY=$(awk "/^## ${ESCAPED_VERSION}/{found=1; next} /^## /{if(found) exit} found" CHANGELOG.md)
+          BODY=""
+
+          # Try per-package changelog first (where changesets writes by default)
+          for CHANGELOG in web/CHANGELOG.md CHANGELOG.md; do
+            if [ -f "$CHANGELOG" ]; then
+              BODY=$(awk "/^## ${ESCAPED_VERSION}/{found=1; next} /^## /{if(found) exit} found" "$CHANGELOG")
+              if [ -n "$BODY" ]; then
+                break
+              fi
+            fi
+          done
+
           if [ -z "$BODY" ]; then
             BODY="Release v${VERSION}"
           fi

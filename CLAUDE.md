@@ -77,7 +77,7 @@ All work tracked via taskboard. Use `/kanban` skill for full protocol.
 - **vitest workspace drops coverage thresholds** — CI must use standalone `vitest.config.ts` (70/60/65/72 thresholds).
 - **Never merge PRs** — Claude creates PRs; user reviews and merges. Run review board first.
 - **Every PR must have `Closes #NNNN`** — GitHub issue number, not PF-XXX. Run sync-push first.
-- **Every PR needs a changeset** — Run `npx changeset` or create `.changeset/<name>.md`. Use `[skip changeset]` label for docs/CI-only PRs.
+- **Every PR needs a changeset** — Run `npx changeset` (from repo root) or create `.changeset/<name>.md`. Use `skip changeset` label for docs/CI-only PRs.
 - **Sentry re-reviews every commit** — Reply with commit SHA + evidence, not "already fixed".
 - **`replace_all` double-prefix danger** — Renaming `X` to `PREFIX_X` when some are already `PREFIX_X` produces `PREFIX_PREFIX_X`.
 
