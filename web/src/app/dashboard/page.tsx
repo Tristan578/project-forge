@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
 import { DashboardLayout } from '@/components/dashboard/DashboardLayout';
 import type { Project } from '@/components/dashboard/DashboardLayout';
 import { safeAuth } from '@/lib/auth/safe-auth';
@@ -22,6 +23,13 @@ export const metadata: Metadata = {
  */
 export default async function DashboardPage() {
   const { userId } = await safeAuth();
+
+  // Defense-in-depth: middleware should redirect unauthenticated users,
+  // but bot crawlers sometimes bypass it. Without this guard, SSR renders
+  // <UserButton> without ClerkProvider context (SPAWNFORGE-AI-1).
+  if (!userId) {
+    redirect('/sign-in');
+  }
 
   let initialProjects: Project[] | undefined;
   if (userId) {
