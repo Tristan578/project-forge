@@ -61,6 +61,7 @@ jobs:
           VERSION=$(node -p "require('./web/package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # -- Gather state ----------------------------------------------------------
       - name: Check if tag already exists
         id: check-tag
         env:
@@ -71,6 +72,18 @@ jobs:
           if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           elif git ls-remote --tags origin "v${VERSION}" | grep -q .; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check if release exists
+        id: check-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
@@ -103,6 +116,7 @@ jobs:
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
 
+      # -- Act ----------------------------------------------------------------
       - name: Create git tag
         if: steps.check-tag.outputs.exists == 'false'
         env:
@@ -110,18 +124,6 @@ jobs:
         run: |
           git tag "$TAG"
           git push origin "$TAG"
-
-      - name: Check if release exists
-        id: check-release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: v${{ steps.version.outputs.version }}
-        run: |
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Create GitHub Release
         if: steps.check-release.outputs.exists == 'false'
