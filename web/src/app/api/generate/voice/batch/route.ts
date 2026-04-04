@@ -1,7 +1,7 @@
 export const maxDuration = 120; // API_MAX_DURATION_BATCH_S
 
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { rateLimitResponse } from '@/lib/rateLimit';
@@ -25,15 +25,15 @@ interface VoiceSettings {
 }
 
 export async function POST(request: NextRequest) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
+  const mid = await withApiMiddleware(request, { requireAuth: true });
+  if (mid.error) return mid.error;
 
   // Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
-  const aggRl = await aggregateGenerationRateLimit(authResult.ctx.user.id);
+  const aggRl = await aggregateGenerationRateLimit(mid.userId!);
   if (!aggRl.allowed) return rateLimitResponse(aggRl.remaining, aggRl.resetAt);
 
   // Rate limit: 5 batch requests per 5 minutes per user
-  const rl = await distributedRateLimit(`gen-voice-batch:${authResult.ctx.user.id}`, 5, 300);
+  const rl = await distributedRateLimit(`gen-voice-batch:${mid.userId!}`, 5, 300);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   let body: {
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
   let usageId: string | undefined;
   try {
     const resolved = await resolveApiKey(
-      authResult.ctx.user.id,
+      mid.userId!,
       'elevenlabs',
       tokenCost,
       'voice_batch_generation',
@@ -139,14 +139,14 @@ export async function POST(request: NextRequest) {
     try {
       if (results.length === 0) {
         // All items failed — full refund via the original usage record
-        await refundTokens(authResult.ctx.user.id, usageId);
+        await refundTokens(mid.userId!, usageId);
       } else {
         // Partial failure — refund 5 tokens per failed item.
         // Pass usageId so refundTokenAmount restores to the correct pool
         // (monthly vs addon) instead of always crediting addon tokens.
         const refundAmount = errors.length * 5;
         await refundTokenAmount(
-          authResult.ctx.user.id,
+          mid.userId!,
           refundAmount,
           `voice_batch_partial_failure:${errors.length}_of_${items.length}_failed`,
           usageId,
