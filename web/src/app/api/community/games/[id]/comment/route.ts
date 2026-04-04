@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { gameComments, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse, rateLimitPublicRoute } from '@/lib/rateLimit';
+import { withApiMiddleware } from '@/lib/api/middleware';
+import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 import { containsBlockedKeyword } from '@/lib/moderation/keywords';
 import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
@@ -69,12 +69,12 @@ export async function POST(
 ) {
   try {
     const db = getDb();
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-
-    // Rate limit: 20 comments per minute per user
-    const rl = await rateLimit(`comment:${authResult.ctx.user.id}`, 20, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `comment:${id}`, max: 20, windowSeconds: 60 },
+    });
+    if (mid.error) return mid.error;
 
     const { id: gameId } = await params;
 
@@ -119,7 +119,7 @@ export async function POST(
       .insert(gameComments)
       .values({
         gameId,
-        userId: authResult.ctx.user.id,
+        userId: mid.userId!,
         content: sanitized,
         parentId: parentResult.value ?? null,
         flagged: shouldFlag ? 1 : 0,
@@ -132,7 +132,7 @@ export async function POST(
         displayName: users.displayName,
       })
       .from(users)
-      .where(eq(users.id, authResult.ctx.user.id))
+      .where(eq(users.id, mid.userId!))
       .limit(1);
 
     return NextResponse.json(
@@ -141,7 +141,7 @@ export async function POST(
           id: comment.id,
           content: comment.content,
           parentId: comment.parentId,
-          authorId: authResult.ctx.user.id,
+          authorId: mid.userId!,
           authorName: author[0]?.displayName || 'Unknown',
           createdAt: comment.createdAt.toISOString(),
         },
