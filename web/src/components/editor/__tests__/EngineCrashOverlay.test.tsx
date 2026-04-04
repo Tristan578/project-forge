@@ -13,12 +13,14 @@ const mockOnEngineCrash = vi.fn((listener: (message: string) => void) => {
 });
 const mockUnsubscribe = vi.fn();
 const mockResetEngine = vi.fn();
+const mockRecoverEngine = vi.fn(async (_canvasId: string) => false);
 const mockIsEngineCrashed = vi.fn(() => false);
 const mockGetEngineCrashMessage = vi.fn(() => null as string | null);
 
 vi.mock('@/hooks/useEngine', () => ({
   onEngineCrash: (...args: unknown[]) => mockOnEngineCrash(...(args as [(_: string) => void])),
   resetEngine: (...args: unknown[]) => mockResetEngine(...args),
+  recoverEngine: (...args: unknown[]) => mockRecoverEngine(...(args as [string])),
   isEngineCrashed: () => mockIsEngineCrashed(),
   getEngineCrashMessage: () => mockGetEngineCrashMessage(),
 }));
@@ -26,6 +28,7 @@ vi.mock('@/hooks/useEngine', () => ({
 vi.mock('lucide-react', () => ({
   AlertTriangle: (props: Record<string, unknown>) => <span data-testid="alert-icon" {...props} />,
   RefreshCw: (props: Record<string, unknown>) => <span data-testid="refresh-icon" {...props} />,
+  RotateCcw: (props: Record<string, unknown>) => <span data-testid="recover-icon" {...props} />,
   Save: (props: Record<string, unknown>) => <span data-testid="save-icon" {...props} />,
 }));
 
@@ -60,10 +63,11 @@ describe('EngineCrashOverlay', () => {
     expect(await screen.findByText('Engine Crashed')).toBeInTheDocument();
   });
 
-  it('shows Save and Reload buttons', async () => {
+  it('shows Recover, Save, and Reload buttons', async () => {
     render(<EngineCrashOverlay />);
     if (capturedListener) capturedListener('test panic');
-    expect(await screen.findByText('Reload Engine')).toBeInTheDocument();
+    expect(await screen.findByText('Recover Engine')).toBeInTheDocument();
+    expect(screen.getByText('Reload Page')).toBeInTheDocument();
     expect(screen.getByText(/Save/)).toBeInTheDocument();
   });
 
@@ -74,12 +78,19 @@ describe('EngineCrashOverlay', () => {
     expect(dialog.getAttribute('aria-modal')).toBe('true');
   });
 
-  it('calls resetEngine and reloads on Reload Engine click', async () => {
+  it('calls resetEngine and reloads on Reload Page click', async () => {
     render(<EngineCrashOverlay />);
     if (capturedListener) capturedListener('test panic');
-    fireEvent.click(await screen.findByText('Reload Engine'));
+    fireEvent.click(await screen.findByText('Reload Page'));
     expect(mockResetEngine).toHaveBeenCalled();
     expect(window.location.reload).toHaveBeenCalled();
+  });
+
+  it('calls recoverEngine on Recover Engine click', async () => {
+    render(<EngineCrashOverlay />);
+    if (capturedListener) capturedListener('test panic');
+    fireEvent.click(await screen.findByText('Recover Engine'));
+    expect(mockRecoverEngine).toHaveBeenCalledWith('forge-canvas');
   });
 
   it('shows crash dialog immediately if engine already crashed before mount', () => {

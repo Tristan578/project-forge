@@ -36,3 +36,11 @@ if (DSN) {
 
   configureSentryFingerprinting();
 }
+
+/**
+ * Captures App Router navigation spans so client-side navigations appear
+ * in Sentry traces. Without this, all SPA navigations are invisible.
+ *
+ * @see https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/#react-router-instrumentation
+ */
+export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

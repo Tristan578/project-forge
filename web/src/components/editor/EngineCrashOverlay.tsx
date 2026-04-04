@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { AlertTriangle, RefreshCw, Save } from 'lucide-react';
-import { onEngineCrash, isEngineCrashed, getEngineCrashMessage, resetEngine } from '@/hooks/useEngine';
+import { AlertTriangle, RefreshCw, RotateCcw, Save } from 'lucide-react';
+import { onEngineCrash, isEngineCrashed, getEngineCrashMessage, resetEngine, recoverEngine } from '@/hooks/useEngine';
 
 export function EngineCrashOverlay() {
   const [crashed, setCrashed] = useState(() => isEngineCrashed());
   const [crashMessage, setCrashMessage] = useState<string | null>(() => getEngineCrashMessage());
+  const [recovering, setRecovering] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onEngineCrash((message) => {
@@ -14,6 +15,18 @@ export function EngineCrashOverlay() {
       setCrashMessage(message);
     });
     return unsubscribe;
+  }, []);
+
+  const handleRecoverEngine = useCallback(async () => {
+    setRecovering(true);
+    const success = await recoverEngine('forge-canvas');
+    if (success) {
+      setCrashed(false);
+      setCrashMessage(null);
+    }
+    setRecovering(false);
+    // If recovery failed, the overlay stays up — user can still use
+    // the full reload buttons below.
   }, []);
 
   const handleReloadEngine = useCallback(() => {
@@ -42,7 +55,7 @@ export function EngineCrashOverlay() {
           <AlertTriangle className="h-8 w-8 shrink-0 text-red-500" />
           <h2 id="engine-crash-title" className="text-lg font-bold text-white">Engine Crashed</h2>
         </div>
-        <p id="engine-crash-desc" className="mb-4 text-sm text-zinc-300">The game engine encountered a fatal error and stopped responding. You can reload the engine or save your work before refreshing.</p>
+        <p id="engine-crash-desc" className="mb-4 text-sm text-zinc-300">The game engine encountered a fatal error and stopped responding. Try recovering the engine first, or reload the page if recovery fails.</p>
         {process.env.NODE_ENV === 'development' && crashMessage && (
           <details className="mb-4 rounded border border-zinc-700 bg-zinc-950 p-3">
             <summary className="cursor-pointer text-xs font-semibold text-zinc-400">Technical Details</summary>
@@ -50,11 +63,14 @@ export function EngineCrashOverlay() {
           </details>
         )}
         <div className="flex flex-col gap-2">
+          <button onClick={handleRecoverEngine} disabled={recovering} className="flex items-center justify-center gap-2 rounded bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50">
+            <RotateCcw className={`h-4 w-4 ${recovering ? 'animate-spin' : ''}`} />{recovering ? 'Recovering...' : 'Recover Engine'}
+          </button>
           <button onClick={handleSaveAndRefresh} className="flex items-center justify-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
             <Save className="h-4 w-4" />Save &amp; Refresh
           </button>
           <button onClick={handleReloadEngine} className="flex items-center justify-center gap-2 rounded bg-zinc-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <RefreshCw className="h-4 w-4" />Reload Engine
+            <RefreshCw className="h-4 w-4" />Reload Page
           </button>
         </div>
       </div>

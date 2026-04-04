@@ -27,6 +27,7 @@ export async function register() {
       );
     }
   }
+
 }
 
 // Captures server-side errors from Server Components, middleware, and proxies.

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback, useState, useSyncExternalStore } from 'react';
 import { logInitEvent, type InitPhase } from '@/lib/initLog';
 import { emitStatusEvent } from './useEngineStatus';
-import { captureException, setTag } from '@/lib/monitoring/sentry-client';
+import { addBreadcrumb, captureException, setTag } from '@/lib/monitoring/sentry-client';
 import { showError } from '@/lib/toast';
 import { fetchWasmWithMetrics } from '@/lib/monitoring/cdnAnalytics';
 import { GPU_INIT_TIMEOUT_MS, WASM_FETCH_TIMEOUT_MS } from '@/lib/config/timeouts';
@@ -88,14 +88,37 @@ function clearEngineCrash(): void {
   _engineCrashMessage = null;
 }
 
+// --- Recovery signal (allows useEngine hook to re-trigger onReady after recovery) ---
+let _recoveryCount = 0;
+type RecoveryListener = () => void;
+const _recoveryListeners = new Set<RecoveryListener>();
+
+function signalRecoveryComplete(): void {
+  _recoveryCount++;
+  for (const listener of _recoveryListeners) {
+    try { listener(); } catch { /* prevent listener errors from breaking the loop */ }
+  }
+}
+
+/** Subscribe to engine recovery completions. Returns an unsubscribe function. */
+export function onEngineRecovered(listener: RecoveryListener): () => void {
+  _recoveryListeners.add(listener);
+  return () => { _recoveryListeners.delete(listener); };
+}
+
 /**
  * Install a global interceptor for WASM panics.
  * After detecting a panic, sets engineCrashed state so components can react.
+ *
+ * Catches panics from two sources:
+ * 1. console.error from Rust's `console_error_panic_hook` (panicked at / wasm-bindgen)
+ * 2. Unhandled RuntimeError from WASM traps (out-of-bounds, unreachable, etc.)
  */
 function installPanicInterceptor(): void {
   if (panicInterceptorInstalled || typeof window === 'undefined') return;
   panicInterceptorInstalled = true;
 
+  // Source 1: console.error from Rust panic hook
   const originalConsoleError = console.error;
   console.error = (...args: unknown[]) => {
     originalConsoleError.apply(console, args);
@@ -110,6 +133,22 @@ function installPanicInterceptor(): void {
       setEngineCrashed(msg.slice(0, 500));
     }
   };
+
+  // Source 2: Unhandled RuntimeError from WASM traps (unreachable, OOB, etc.)
+  window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
+    const reason = event.reason;
+    if (reason instanceof WebAssembly.RuntimeError || (reason instanceof Error && reason.message.includes('unreachable'))) {
+      const msg = reason instanceof Error ? reason.message : String(reason);
+      captureException(new Error(`WASM RuntimeError: ${msg.slice(0, 500)}`), {
+        source: 'unhandled_wasm_runtime_error',
+        fullMessage: msg.slice(0, 2000),
+        engineBackend: resolvedBackend,
+      });
+      if (!_engineCrashed) {
+        setEngineCrashed(`WASM RuntimeError: ${msg.slice(0, 500)}`);
+      }
+    }
+  });
 }
 
 function emitEvent(phase: InitPhase, message?: string, error?: string) {
@@ -405,6 +444,74 @@ export function resetEngine(): void {
   clearEngineCrash();
 }
 
+/**
+ * Attempt to recover the WASM engine after a panic without a full page reload.
+ *
+ * 1. Resets the WASM module
+ * 2. Reloads the WASM binary
+ * 3. Re-initializes the engine on the existing canvas
+ *
+ * The Zustand editor store persists in memory, so React components retain
+ * scene graph, selection, etc. Components that depend on engine state
+ * re-sync via their effects after re-initialization.
+ *
+ * Returns true if recovery succeeded, false if it failed (caller should
+ * fall back to a full page reload).
+ */
+export async function recoverEngine(canvasId: string): Promise<boolean> {
+  try {
+    addBreadcrumb({
+      category: 'engine',
+      message: 'WASM engine recovery attempted',
+      level: 'info',
+      data: { canvasId },
+    });
+
+    // Step 1: Reset module state
+    resetEngine();
+
+    // Step 2: Reload WASM
+    setLoadingState({ phase: 'downloading', progress: 0 });
+    const wasm = await loadWasm();
+
+    // Step 3: Re-initialize on existing canvas
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) {
+      setLoadingState({ phase: 'error', error: 'Canvas not found during recovery' });
+      return false;
+    }
+
+    setLoadingState({ phase: 'initializing', progress: 0 });
+    wasm.init_engine(canvasId);
+
+    // Yield to microtask queue so unhandledrejection handlers can fire
+    // before we check crash state. The console.error path is synchronous,
+    // but WASM traps that surface via unhandledrejection are async.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    // Guard: if a new crash occurred during async recovery (e.g. the fresh
+    // module panicked immediately), do not dismiss the crash overlay.
+    if (_engineCrashed) {
+      setLoadingState({ phase: 'error', error: 'Engine crashed again during recovery' });
+      return false;
+    }
+
+    setLoadingState({ phase: 'ready', progress: 100 });
+
+    // Signal recovery so useEngine hooks can re-trigger onReady
+    signalRecoveryComplete();
+
+    return true;
+  } catch (err) {
+    captureException(err instanceof Error ? err : new Error(String(err)), {
+      source: 'recoverEngine',
+      phase: 'recovery_failed',
+    });
+    setLoadingState({ phase: 'error', error: 'Recovery failed — please reload the page' });
+    return false;
+  }
+}
+
 export interface UseEngineOptions {
   onReady?: () => void;
   onError?: (error: Error) => void;
@@ -506,6 +613,16 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
       cancelled = true;
     };
   }, [canvasId]);
+
+  // Re-trigger onReady after successful engine recovery (recoverEngine bypasses
+  // the initialization effect above, so the hook must listen for recovery separately)
+  useEffect(() => {
+    return onEngineRecovered(() => {
+      setIsReady(true);
+      setError(null);
+      onReadyRef.current?.();
+    });
+  }, []);
 
   const sendCommand = useCallback(
     <T = unknown>(command: string, payload: unknown): T | undefined => {
