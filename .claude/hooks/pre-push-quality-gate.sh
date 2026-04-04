@@ -127,6 +127,8 @@ if echo "$CHANGED_FILES" | grep -qE 'package\.json|package-lock\.json'; then
 fi
 
 # 5. Warn if no changeset exists for this branch (non-blocking)
+# Run from project root so the .changeset/ path resolves correctly
+cd "$PROJECT_DIR"
 CHANGESET_FILES=$(git diff --name-only --diff-filter=A origin/main...HEAD -- '.changeset/*.md' 2>/dev/null | grep -v 'README.md' || true)
 if [ -z "$CHANGESET_FILES" ]; then
   echo "[pre-push] WARNING: No changeset found for this branch. Run 'npx changeset' to add one before creating a PR." >&2
