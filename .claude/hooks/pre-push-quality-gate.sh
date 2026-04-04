@@ -114,7 +114,19 @@ if echo "$CHANGED_FILES" | grep -qE 'panelRegistry|WorkspaceProvider'; then
   }
 fi
 
-# 4. Warn if no changeset exists for this branch (non-blocking)
+# 4. Lockfile sync check (catches workspace/dep changes that break npm ci in CI)
+if echo "$CHANGED_FILES" | grep -qE 'package\.json|package-lock\.json'; then
+  cd "$PROJECT_DIR"
+  LOCKFILE_OUTPUT=$(npm ci --dry-run 2>&1) || {
+    echo "[pre-push] BLOCKED: package-lock.json is out of sync with package.json." >&2
+    echo "$LOCKFILE_OUTPUT" | grep -E "Missing:|EUSAGE|out of sync" | head -5 >&2
+    echo "[pre-push] Fix: rm -rf node_modules package-lock.json && npm install" >&2
+    ERRORS="${ERRORS}Lockfile out of sync — npm ci will fail in CI. "
+  }
+  cd "$WEB_DIR"
+fi
+
+# 5. Warn if no changeset exists for this branch (non-blocking)
 CHANGESET_FILES=$(git diff --name-only --diff-filter=A origin/main...HEAD -- '.changeset/*.md' 2>/dev/null | grep -v 'README.md' || true)
 if [ -z "$CHANGESET_FILES" ]; then
   echo "[pre-push] WARNING: No changeset found for this branch. Run 'npx changeset' to add one before creating a PR." >&2
