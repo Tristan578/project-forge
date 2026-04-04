@@ -88,6 +88,24 @@ function clearEngineCrash(): void {
   _engineCrashMessage = null;
 }
 
+// --- Recovery signal (allows useEngine hook to re-trigger onReady after recovery) ---
+let _recoveryCount = 0;
+type RecoveryListener = () => void;
+const _recoveryListeners = new Set<RecoveryListener>();
+
+function signalRecoveryComplete(): void {
+  _recoveryCount++;
+  for (const listener of _recoveryListeners) {
+    try { listener(); } catch { /* prevent listener errors from breaking the loop */ }
+  }
+}
+
+/** Subscribe to engine recovery completions. Returns an unsubscribe function. */
+export function onEngineRecovered(listener: RecoveryListener): () => void {
+  _recoveryListeners.add(listener);
+  return () => { _recoveryListeners.delete(listener); };
+}
+
 /**
  * Install a global interceptor for WASM panics.
  * After detecting a panic, sets engineCrashed state so components can react.
@@ -465,7 +483,18 @@ export async function recoverEngine(canvasId: string): Promise<boolean> {
 
     setLoadingState({ phase: 'initializing', progress: 0 });
     wasm.init_engine(canvasId);
+
+    // Guard: if a new crash occurred during async recovery (e.g. the fresh
+    // module panicked immediately), do not dismiss the crash overlay.
+    if (_engineCrashed) {
+      setLoadingState({ phase: 'error', error: 'Engine crashed again during recovery' });
+      return false;
+    }
+
     setLoadingState({ phase: 'ready', progress: 100 });
+
+    // Signal recovery so useEngine hooks can re-trigger onReady
+    signalRecoveryComplete();
 
     return true;
   } catch (err) {
@@ -579,6 +608,16 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
       cancelled = true;
     };
   }, [canvasId]);
+
+  // Re-trigger onReady after successful engine recovery (recoverEngine bypasses
+  // the initialization effect above, so the hook must listen for recovery separately)
+  useEffect(() => {
+    return onEngineRecovered(() => {
+      setIsReady(true);
+      setError(null);
+      onReadyRef.current?.();
+    });
+  }, []);
 
   const sendCommand = useCallback(
     <T = unknown>(command: string, payload: unknown): T | undefined => {

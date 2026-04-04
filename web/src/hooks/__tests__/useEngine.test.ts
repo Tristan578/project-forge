@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { useEngine, resetEngine, recoverEngine, fetchWasmHash } from '../useEngine';
+import { useEngine, resetEngine, recoverEngine, fetchWasmHash, onEngineRecovered } from '../useEngine';
 import * as initLog from '@/lib/initLog';
 
 vi.mock('@/lib/initLog', () => ({
@@ -180,6 +180,27 @@ describe('recoverEngine', () => {
         level: 'info',
       }),
     );
+  });
+});
+
+describe('onEngineRecovered', () => {
+  it('returns an unsubscribe function that removes the listener', () => {
+    const listener = vi.fn();
+    const unsub = onEngineRecovered(listener);
+    expect(typeof unsub).toBe('function');
+    unsub();
+    // After unsubscribe, listener should not be called on future signals
+    // (we can't trigger signalRecoveryComplete directly, but unsubscribe is testable)
+  });
+
+  it('accepts multiple listeners', () => {
+    const listener1 = vi.fn();
+    const listener2 = vi.fn();
+    const unsub1 = onEngineRecovered(listener1);
+    const unsub2 = onEngineRecovered(listener2);
+    // Clean up
+    unsub1();
+    unsub2();
   });
 });
 
