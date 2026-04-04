@@ -118,10 +118,16 @@ fi
 if echo "$CHANGED_FILES" | grep -qE 'package\.json|package-lock\.json'; then
   cd "$PROJECT_DIR"
   LOCKFILE_OUTPUT=$(npm ci --dry-run 2>&1) || {
-    echo "[pre-push] BLOCKED: package-lock.json is out of sync with package.json." >&2
-    echo "$LOCKFILE_OUTPUT" | grep -E "Missing:|EUSAGE|out of sync" | head -5 >&2
-    echo "[pre-push] Fix: rm -rf node_modules package-lock.json && npm install" >&2
-    ERRORS="${ERRORS}Lockfile out of sync — npm ci will fail in CI. "
+    # Only block on actual lockfile mismatch — registry outages or auth errors
+    # should not prevent pushes with a misleading "out of sync" message.
+    if echo "$LOCKFILE_OUTPUT" | grep -qiE 'package-lock\.json|Missing:|Invalid:|out of sync|EUSAGE'; then
+      echo "[pre-push] BLOCKED: package-lock.json is out of sync with package.json." >&2
+      echo "$LOCKFILE_OUTPUT" | grep -iE "Missing:|EUSAGE|out of sync|Invalid:" | head -5 >&2
+      echo "[pre-push] Fix: rm -rf node_modules package-lock.json && npm install" >&2
+      ERRORS="${ERRORS}Lockfile out of sync — npm ci will fail in CI. "
+    else
+      echo "[pre-push] WARNING: npm ci --dry-run failed (possibly registry/network issue). Allowing push." >&2
+    fi
   }
   cd "$WEB_DIR"
 fi
@@ -135,9 +141,18 @@ fi
 # 6. Warn if no changeset exists for this branch (non-blocking)
 # Run from project root so the .changeset/ path resolves correctly
 cd "$PROJECT_DIR"
-CHANGESET_FILES=$(git diff --name-only --diff-filter=A origin/main...HEAD -- '.changeset/*.md' 2>/dev/null | grep -v 'README.md' || true)
-if [ -z "$CHANGESET_FILES" ]; then
-  echo "[pre-push] WARNING: No changeset found for this branch. Run 'npx changeset' to add one before creating a PR." >&2
+# Determine base ref — origin/main may not exist in forks or shallow clones
+CHANGESET_BASE=""
+if git rev-parse --verify origin/main >/dev/null 2>&1; then
+  CHANGESET_BASE="origin/main"
+elif git rev-parse --verify main >/dev/null 2>&1; then
+  CHANGESET_BASE="main"
+fi
+if [ -n "$CHANGESET_BASE" ]; then
+  CHANGESET_FILES=$(git diff --name-only --diff-filter=A "${CHANGESET_BASE}...HEAD" -- '.changeset/*.md' 2>/dev/null | grep -v 'README.md' || true)
+  if [ -z "$CHANGESET_FILES" ]; then
+    echo "[pre-push] WARNING: No changeset found for this branch. Run 'npx changeset' to add one before creating a PR." >&2
+  fi
 fi
 
 if [ -n "$ERRORS" ]; then
