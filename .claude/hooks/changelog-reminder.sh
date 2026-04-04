@@ -5,7 +5,7 @@ set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo '.')"
 
-# Check for pending changeset files (uncommitted work needing a changeset)
+# Check for pending changeset files (not yet consumed by `changeset version`)
 CHANGESET_DIR="$ROOT/.changeset"
 if [ -d "$CHANGESET_DIR" ]; then
   PENDING=$(find "$CHANGESET_DIR" -name '*.md' ! -name 'README.md' 2>/dev/null | wc -l | tr -d ' ')
