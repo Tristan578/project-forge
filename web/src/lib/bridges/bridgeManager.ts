@@ -6,7 +6,7 @@ import { join } from 'path';
 import type { BridgeToolConfig, BridgeToolStatus, BridgesConfig, PlatformPaths } from './types';
 import { BRIDGE_CACHE_TTL_MS } from '@/lib/config/timeouts';
 
-const CONFIG_DIR = join(/* turbopackIgnore: true */ homedir(), '.spawnforge');
+const CONFIG_DIR = join(homedir(), '.spawnforge');
 const CONFIG_FILE = join(CONFIG_DIR, 'bridges.json');
 
 /** Allowlist of known tool IDs — rejects arbitrary toolId values. */
