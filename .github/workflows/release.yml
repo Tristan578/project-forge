@@ -77,7 +77,6 @@ jobs:
           fi
 
       - name: Extract changelog for this version
-        if: steps.check-tag.outputs.exists == 'false'
         id: changelog
         env:
           VERSION: ${{ steps.version.outputs.version }}
