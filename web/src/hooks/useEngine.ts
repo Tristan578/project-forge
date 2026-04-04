@@ -484,6 +484,11 @@ export async function recoverEngine(canvasId: string): Promise<boolean> {
     setLoadingState({ phase: 'initializing', progress: 0 });
     wasm.init_engine(canvasId);
 
+    // Yield to microtask queue so unhandledrejection handlers can fire
+    // before we check crash state. The console.error path is synchronous,
+    // but WASM traps that surface via unhandledrejection are async.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
     // Guard: if a new crash occurred during async recovery (e.g. the fresh
     // module panicked immediately), do not dismiss the crash overlay.
     if (_engineCrashed) {

@@ -32,21 +32,19 @@ export default async function DashboardPage() {
   }
 
   let initialProjects: Project[] | undefined;
-  if (userId) {
-    try {
-      const rows = await listProjects(userId);
-      initialProjects = rows.map((p) => ({
-        id: p.id,
-        name: p.name,
-        thumbnail: p.thumbnail ?? null,
-        entityCount: p.entityCount ?? 0,
-        updatedAt: p.updatedAt instanceof Date
-          ? p.updatedAt.toISOString()
-          : String(p.updatedAt),
-      }));
-    } catch {
-      // DB unavailable — leave undefined so DashboardLayout falls back to client-side fetch
-    }
+  try {
+    const rows = await listProjects(userId);
+    initialProjects = rows.map((p) => ({
+      id: p.id,
+      name: p.name,
+      thumbnail: p.thumbnail ?? null,
+      entityCount: p.entityCount ?? 0,
+      updatedAt: p.updatedAt instanceof Date
+        ? p.updatedAt.toISOString()
+        : String(p.updatedAt),
+    }));
+  } catch {
+    // DB unavailable — leave undefined so DashboardLayout falls back to client-side fetch
   }
 
   return <DashboardLayout initialProjects={initialProjects} />;
