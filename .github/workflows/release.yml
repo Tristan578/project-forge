@@ -41,7 +41,7 @@ jobs:
     # Detect the Version Packages commit. Uses startsWith to handle squash merges
     # that append the PR number (e.g. "chore: version packages (#123)").
     # head_commit.message is safe here — used in an `if:` expression, not a shell command.
-    if: startsWith(github.event.head_commit.message, 'chore: version packages')
+    if: "startsWith(github.event.head_commit.message, 'chore: version packages')"
     steps:
       - uses: actions/checkout@v4
         with:
