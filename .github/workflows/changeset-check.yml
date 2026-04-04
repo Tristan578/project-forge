@@ -12,17 +12,26 @@ jobs:
     name: Require Changeset
     runs-on: ubuntu-latest
     steps:
-      - name: Skip if label present
+      - name: Skip if label present or Version Packages PR
         id: skip
         env:
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
+          # Bypass for "skip changeset" label
           if echo "$LABELS" | grep -q '"skip changeset"'; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "Changeset check bypassed via 'skip changeset' label."
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          # Bypass for Version Packages PR (created by changesets/action,
+          # which removes consumed .changeset/*.md files — no new ones expected)
+          if [[ "$PR_TITLE" == "chore: version packages"* ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Changeset check bypassed — Version Packages PR."
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         if: steps.skip.outputs.skip == 'false'
@@ -32,10 +41,10 @@ jobs:
       - name: Check for changeset files
         if: steps.skip.outputs.skip == 'false'
         env:
-          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # Get changesets added in this PR (compared to base branch)
-          CHANGESETS=$(git diff --name-only --diff-filter=A "origin/${BASE_REF}...HEAD" -- '.changeset/*.md' | grep -v 'README.md' || true)
+          # Use base SHA (reliable) instead of origin/<ref> which may not exist as a remote-tracking ref
+          CHANGESETS=$(git diff --name-only --diff-filter=A "${BASE_SHA}...HEAD" -- '.changeset/*.md' | grep -v 'README.md' || true)
 
           if [ -z "$CHANGESETS" ]; then
             echo "::error::No changeset found. Run 'npx changeset' to add one, or add the 'skip changeset' label to bypass."
