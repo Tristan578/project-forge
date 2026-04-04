@@ -5,8 +5,7 @@ import type { Provider } from '@/lib/db/schema';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { parseJsonBody, requireString, requireOneOf } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
-
-const VALID_PROVIDERS = ['anthropic', 'meshy', 'hyper3d', 'elevenlabs', 'suno'] as const; // allowed-magic-constant — hyper3d is not in PROVIDER_NAMES (circuit-breaker only)
+import { BYOK_PROVIDERS } from '@/lib/config/providers';
 
 /** PUT /api/keys/:provider — store/update a BYOK key */
 export async function PUT(
@@ -24,7 +23,7 @@ export async function PUT(
   if (tierCheck) return tierCheck;
 
   const { provider } = await params;
-  const providerResult = requireOneOf(provider, 'Provider', VALID_PROVIDERS);
+  const providerResult = requireOneOf(provider, 'Provider', BYOK_PROVIDERS);
   if (!providerResult.ok) return providerResult.response;
 
   const parsed = await parseJsonBody(req);
@@ -55,7 +54,7 @@ export async function DELETE(
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const { provider } = await params;
-  const providerResult = requireOneOf(provider, 'Provider', VALID_PROVIDERS);
+  const providerResult = requireOneOf(provider, 'Provider', BYOK_PROVIDERS);
   if (!providerResult.ok) return providerResult.response;
 
   try {

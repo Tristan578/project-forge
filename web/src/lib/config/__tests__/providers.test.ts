@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   PROVIDER_NAMES,
+  BYOK_PROVIDERS,
   BACKEND_IDS,
   PROVIDER_CAPABILITIES,
   DIRECT_CAPABILITY_PROVIDER,
@@ -36,6 +37,22 @@ describe('PROVIDER_NAMES', () => {
   it('has no duplicates', () => {
     const names = [...PROVIDER_NAMES];
     expect(names.length).toBe(new Set(names).size);
+  });
+});
+
+describe('BYOK_PROVIDERS', () => {
+  it('contains BYOK-enabled providers including hyper3d', () => {
+    const providers = [...BYOK_PROVIDERS];
+    expect(providers).toContain('anthropic');
+    expect(providers).toContain('meshy');
+    expect(providers).toContain('hyper3d');
+    expect(providers).toContain('elevenlabs');
+    expect(providers).toContain('suno');
+  });
+
+  it('has no duplicates', () => {
+    const providers = [...BYOK_PROVIDERS];
+    expect(providers.length).toBe(new Set(providers).size);
   });
 });
 
