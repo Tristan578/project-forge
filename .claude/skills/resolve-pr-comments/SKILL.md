@@ -13,6 +13,39 @@ Fixes code where needed, replies on each conversation thread, and verifies repli
 
 **This is the ONLY correct way to handle PR review comments.**
 
+## Step 0: Checkout the PR Branch (MANDATORY)
+
+Before reading ANY files, you MUST be on the PR's head branch. Reading files from the
+wrong branch caused a real Sentry bug to be dismissed as a "false positive" (2026-04-04).
+
+```bash
+PR=$ARGUMENTS
+REPO="Tristan578/project-forge"
+
+# 1. Get the PR's head branch name
+PR_BRANCH=$(gh pr view "$PR" --json headRefName --jq .headRefName)
+
+# 2. Get current branch
+CURRENT_BRANCH=$(git branch --show-current)
+
+# 3. Switch if needed
+if [ "$CURRENT_BRANCH" != "$PR_BRANCH" ]; then
+  git stash --include-untracked 2>/dev/null || true
+  git checkout "$PR_BRANCH"
+  git pull --ff-only origin "$PR_BRANCH" 2>/dev/null || true
+fi
+
+# 4. VERIFY — print both and confirm they match
+echo "PR branch:      $PR_BRANCH"
+echo "Current branch: $(git branch --show-current)"
+```
+
+**If these don't match, STOP. Do not proceed to Step 1.**
+
+This is not optional. This is not skippable. Every file you read in Steps 3-4 MUST
+come from this branch. If you read a file and it seems shorter or different than the
+diff hunk suggests, you are probably on the wrong branch — re-check.
+
 ## Step 1: Fetch ALL Review Comments (Paginated)
 
 ```bash
@@ -135,6 +168,7 @@ All <N> review comments addressed in \`<SHA>\`.
 3. **Counting wrong** — There may be multiple rounds of bot comments (Sentry/Copilot re-review on each push). Count ALL bot comments, not just the first batch
 4. **Replying to stale code** — The diff hunk in the comment is from when it was posted. Always read the CURRENT file before replying
 5. **Assuming prior replies covered everything** — New push = new bot comments. Check AFTER every push
+6. **Reading files from the wrong branch** — On 2026-04-04, a valid Sentry bug (wrong `cwd` in pre-push hook) was dismissed as "false positive" because the file was read from `main` (123 lines, no changeset section) instead of the PR branch (141 lines, with the buggy changeset check at line 130). The file "seemed fine" because it was a completely different version. Step 0 exists to prevent this. If a file seems shorter or different than the diff hunk suggests, **you are on the wrong branch**.
 
 ## When to Use This Skill
 
