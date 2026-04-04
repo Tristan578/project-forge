@@ -1,4 +1,8 @@
 import '@testing-library/jest-dom/vitest';
+import { toHaveNoViolations } from 'jest-axe';
+import { expect } from 'vitest';
+
+expect.extend(toHaveNoViolations);
 
 // jsdom does not implement window.matchMedia — provide a default stub.
 // Tests that need specific matchMedia behavior can override with vi.spyOn().

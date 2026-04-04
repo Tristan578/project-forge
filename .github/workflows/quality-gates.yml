@@ -679,3 +679,57 @@ jobs:
             exit 1
           fi
           echo "PASS: No internal story titles found in public Storybook build."
+
+  chromatic:
+    name: Chromatic Visual Regression
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if design system files changed
+        id: check-design
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || echo "")
+          if echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No design system changes — skipping Chromatic"
+          fi
+
+      - uses: actions/setup-node@v6
+        if: steps.check-design.outputs.changed == 'true'
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+        if: steps.check-design.outputs.changed == 'true'
+
+      - name: Build @spawnforge/ui
+        if: steps.check-design.outputs.changed == 'true'
+        run: cd packages/ui && npm run build
+
+      - name: Sync vendored UI for Storybook
+        if: steps.check-design.outputs.changed == 'true'
+        run: bash apps/design/scripts/sync-vendored-ui.sh
+
+      - name: Run Chromatic
+        if: steps.check-design.outputs.changed == 'true'
+        uses: chromaui/action@latest
+        with:
+          projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
+          workingDir: apps/design
+          exitZeroOnChanges: true
+          exitOnceUploaded: true
+          onlyChanged: true
+          skip: ${{ secrets.CHROMATIC_PROJECT_TOKEN == '' }}
