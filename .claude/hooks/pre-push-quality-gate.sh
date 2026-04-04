@@ -114,6 +114,12 @@ if echo "$CHANGED_FILES" | grep -qE 'panelRegistry|WorkspaceProvider'; then
   }
 fi
 
+# 4. Magic constants check (warnings only — does not block push)
+MAGIC_CHECK="$PROJECT_DIR/web/scripts/check-magic-constants.sh"
+if [ -x "$MAGIC_CHECK" ]; then
+  bash "$MAGIC_CHECK" 2>&1 || true
+fi
+
 if [ -n "$ERRORS" ]; then
   echo "${ERRORS}" >&2
   exit 2

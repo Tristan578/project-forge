@@ -11,10 +11,9 @@ export interface DocsData {
   meta: Record<string, unknown>;
 }
 
-let cachedDocs: DocsData | null = null;
+import { DOCS_EMPTY_CACHE_TTL_MS } from '@/lib/config/timeouts';
 
-/** TTL for caching empty responses to prevent repeated fetches (30 seconds) */
-const EMPTY_CACHE_TTL_MS = 30_000;
+let cachedDocs: DocsData | null = null;
 
 /** Timestamp of the last empty response, used for TTL-based retry gating */
 let emptyCacheTime: number | null = null;
@@ -24,7 +23,7 @@ export async function loadDocsIndex(): Promise<DocsData> {
   if (cachedDocs && cachedDocs.docs.length > 0) return cachedDocs;
 
   // If we recently got an empty response, return it without re-fetching
-  if (cachedDocs && emptyCacheTime !== null && Date.now() - emptyCacheTime < EMPTY_CACHE_TTL_MS) {
+  if (cachedDocs && emptyCacheTime !== null && Date.now() - emptyCacheTime < DOCS_EMPTY_CACHE_TTL_MS) {
     return cachedDocs;
   }
 
