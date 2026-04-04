@@ -5,6 +5,7 @@ import { MeshyClient } from '@/lib/generate/meshyClient';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { DB_PROVIDER } from '@/lib/config/providers';
 
 export async function GET(request: NextRequest) {
   // 1. Authenticate
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
   try {
     const resolved = await resolveApiKey(
       authResult.ctx.user.id,
-      'meshy',
+      DB_PROVIDER.model3d,
       0, // No cost for status checks
       'status_check'
     );

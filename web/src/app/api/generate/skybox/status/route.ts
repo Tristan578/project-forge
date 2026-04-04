@@ -4,6 +4,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { DB_PROVIDER } from '@/lib/config/providers';
 
 export async function GET(request: NextRequest) {
   // 1. Authenticate
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
   try {
     const resolved = await resolveApiKey(
       authResult.ctx.user.id,
-      'meshy',
+      DB_PROVIDER.texture,
       0,
       'status_check'
     );

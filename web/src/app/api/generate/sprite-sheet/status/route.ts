@@ -4,6 +4,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { DB_PROVIDER } from '@/lib/config/providers';
 
 export async function GET(request: NextRequest) {
   const authResult = await authenticateRequest();
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest) {
   try {
     const resolved = await resolveApiKey(
       authResult.ctx.user.id,
-      'replicate',
+      DB_PROVIDER.sprite,
       0,
       'status_check'
     );

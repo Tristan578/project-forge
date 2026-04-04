@@ -5,8 +5,8 @@ import {
   getAllBreakerStats,
   resetProviderBreaker,
   resetAllBreakers,
-  type ProviderName,
 } from '@/lib/providers/circuitBreaker';
+import { PROVIDER_NAMES, type ProviderName } from '@/lib/config/providers';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
@@ -96,14 +96,9 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const validProviders: ProviderName[] = [
-        'anthropic', 'openai', 'meshy', 'elevenlabs', 'suno',
-        'replicate', 'removebg', 'openrouter', 'vercel-gateway', 'github-models',
-      ];
-
-      if (!validProviders.includes(provider as ProviderName)) {
+      if (!(PROVIDER_NAMES as readonly string[]).includes(provider)) {
         return NextResponse.json(
-          { error: `Unknown provider: ${provider}. Valid providers: ${validProviders.join(', ')}` },
+          { error: `Unknown provider: ${provider}. Valid providers: ${PROVIDER_NAMES.join(', ')}` },
           { status: 400 }
         );
       }

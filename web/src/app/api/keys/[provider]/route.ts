@@ -6,7 +6,7 @@ import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { parseJsonBody, requireString, requireOneOf } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
-const VALID_PROVIDERS = ['anthropic', 'meshy', 'hyper3d', 'elevenlabs', 'suno'] as const;
+const VALID_PROVIDERS = ['anthropic', 'meshy', 'hyper3d', 'elevenlabs', 'suno'] as const; // allowed-magic-constant — hyper3d is not in PROVIDER_NAMES (circuit-breaker only)
 
 /** PUT /api/keys/:provider — store/update a BYOK key */
 export async function PUT(
