@@ -40,6 +40,11 @@ These are lower-frequency gotchas moved from CLAUDE.md. The most common ones rem
 - **`ToolLoopAgent.stream()` has no `onError`** — Use `result.toUIMessageStreamResponse({ onFinish })`.
 - **Dynamic route `[name]` params need validation** — If POST validates name characters, PATCH/DELETE on `[name]` must validate too. Malformed percent-encoding (`%E0%A4%A`) passes Next.js decoding but should return 400 before DB queries.
 
+## WASM / CDN
+- **WASM CDN same-origin fallback** — JS glue (`forge_engine.js`) and WASM binary (`forge_engine_bg.wasm`) are a coupled pair. Both MUST load from the same origin. Cannot load JS from CDN and WASM from same-origin. `getWasmBasePaths()` handles this.
+- **`fetchWithRetry` 4xx handling** — The throw on 4xx is inside the try-catch loop. Must rethrow permanent errors explicitly or they get caught and retried as transient failures.
+- **Same-origin WASM in production** — Requires CD pipeline to copy WASM artifacts to `web/public/` before `next build`. Already done in `cd.yml` lines 400-409.
+
 ## UI & Frontend
 - **Dockview CSS class** — `.dv-dockview` (NOT `.dv-dockview-container`).
 - **`aria-controls` requires target in DOM** — Use `<div hidden={!show}>` instead of conditional rendering.

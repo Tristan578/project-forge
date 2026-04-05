@@ -119,7 +119,7 @@ describe('reportWasmLoadMetric', () => {
 describe('fetchWithRetry', () => {
   // vi.restoreAllMocks() in vitest.setup.ts runs after each test — must
   // re-create spy in beforeEach so each test has a fresh mock.
-  let fetchSpy: ReturnType<typeof vi.spyOn<typeof globalThis, 'fetch'>>;
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
   beforeEach(() => { fetchSpy = vi.spyOn(globalThis, 'fetch'); });
 
   it('fails fast on 404 without retrying', async () => {
@@ -172,7 +172,7 @@ describe('fetchWithRetry', () => {
 // ---------------------------------------------------------------------------
 
 describe('fetchWasmWithMetrics', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn<typeof globalThis, 'fetch'>>;
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis, 'fetch');
