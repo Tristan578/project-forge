@@ -2,6 +2,57 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
+// Local plugin: detect hardcoded Tailwind color classes that should use design tokens.
+// Pattern: bg-zinc-800, text-gray-300, border-slate-500, etc.
+// These should be replaced with CSS custom property references (e.g., bg-[var(--sf-bg-surface)]).
+const HARDCODED_COLOR_RE =
+  /\b(?:bg|text|border|ring|outline|shadow|divide|from|via|to|placeholder|decoration|accent|caret|fill|stroke)-(?:zinc|gray|slate|stone|neutral|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(?:50|100|200|300|400|500|600|700|800|900|950)\b/;
+
+const noHardcodedPrimitives = {
+  meta: {
+    type: 'suggestion',
+    docs: { description: 'Disallow hardcoded Tailwind color scale classes; use design token CSS vars instead' },
+    schema: [],
+  },
+  create(context) {
+    function check(node, value) {
+      const match = HARDCODED_COLOR_RE.exec(value);
+      if (match) {
+        context.report({
+          node,
+          message: `Hardcoded Tailwind color '${match[0]}' — use a CSS custom property (e.g., bg-[var(--sf-bg-surface)]) or semantic token class instead.`,
+        });
+      }
+    }
+    return {
+      // className="bg-zinc-800 ..."
+      JSXAttribute(node) {
+        if (
+          node.name.name === 'className' &&
+          node.value?.type === 'Literal' &&
+          typeof node.value.value === 'string'
+        ) {
+          check(node.value, node.value.value);
+        }
+      },
+      // Template literals inside cn(), clsx(), or className={`...`}
+      TemplateLiteral(node) {
+        for (const quasi of node.quasis) {
+          if (HARDCODED_COLOR_RE.test(quasi.value.raw)) {
+            check(quasi, quasi.value.raw);
+          }
+        }
+      },
+    };
+  },
+};
+
+const localPlugin = {
+  rules: {
+    'no-hardcoded-primitives': noHardcodedPrimitives,
+  },
+};
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -12,6 +63,18 @@ const eslintConfig = defineConfig([
         varsIgnorePattern: '^_',
         destructuredArrayIgnorePattern: '^_',
       }],
+    },
+  },
+  {
+    // Design token enforcement (DS-F: Frontend Consolidation #8130).
+    // Currently 'off' — ~3988 violations across the codebase. Enable per-directory
+    // as files are migrated to CSS custom property tokens. Target: 'warn' then 'error'.
+    // Excludes test files since they may legitimately reference Tailwind classes.
+    files: ['src/**/*.tsx'],
+    ignores: ['src/**/*.{test,spec}.tsx'],
+    plugins: { 'spawnforge': localPlugin },
+    rules: {
+      'spawnforge/no-hardcoded-primitives': 'off',
     },
   },
   {
