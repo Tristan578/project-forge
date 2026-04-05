@@ -5,14 +5,10 @@
 
 set -euo pipefail
 
-# Read tool input from stdin (JSON) — same pattern as pre-push-quality-gate.sh
-INPUT=$(cat)
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/hook-utils.sh"
 
-# Fallback: try env var convention (TOOL_INPUT_command)
-if [ -z "$COMMAND" ]; then
-  COMMAND="${TOOL_INPUT_command:-}"
-fi
+COMMAND=$(get_bash_command)
 
 # Only check gh pr create commands
 if [[ "$COMMAND" != *"gh pr create"* ]]; then
