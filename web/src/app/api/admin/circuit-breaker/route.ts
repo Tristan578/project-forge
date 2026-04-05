@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
+import { assertAdmin } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import {
   getAllBreakerStats,
@@ -15,10 +16,10 @@ import { captureException } from '@/lib/monitoring/sentry-server';
  * Returns the current state of all AI provider circuit breakers.
  * Admin-only endpoint.
  */
-export async function GET() {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-  const { clerkId } = authResult.ctx;
+export async function GET(req: NextRequest) {
+  const mid = await withApiMiddleware(req, { requireAuth: true });
+  if (mid.error) return mid.error;
+  const { clerkId } = mid.authContext!;
 
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
@@ -56,9 +57,9 @@ export async function GET() {
  * Body: { action: 'reset_all' } | { action: 'reset_provider', provider: string }
  */
 export async function POST(request: NextRequest) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-  const { clerkId } = authResult.ctx;
+  const mid = await withApiMiddleware(request, { requireAuth: true });
+  if (mid.error) return mid.error;
+  const { clerkId } = mid.authContext!;
 
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;

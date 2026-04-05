@@ -1,17 +1,15 @@
-import { NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { discoverTool } from '@/lib/bridges/bridgeManager';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
-export async function GET() {
-  const auth = await authenticateRequest();
-  if (!auth.ok) {
-    return auth.response;
-  }
-
-  const rl = await rateLimit(`user:bridges-aseprite-status:${auth.ctx.user.id}`, 30, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+export async function GET(req: NextRequest) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `user:bridges-aseprite-status:${id}`, max: 30, windowSeconds: 60, distributed: false },
+  });
+  if (mid.error) return mid.error;
 
   try {
     const config = await discoverTool('aseprite');

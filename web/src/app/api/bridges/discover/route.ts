@@ -1,17 +1,15 @@
-import { NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { discoverTool, isAllowedToolId } from '@/lib/bridges/bridgeManager';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
-export async function POST(req: Request) {
-  const auth = await authenticateRequest();
-  if (!auth.ok) {
-    return auth.response;
-  }
-
-  const rl = await rateLimit(`user:bridges-discover:${auth.ctx.user.id}`, 10, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+export async function POST(req: NextRequest) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `user:bridges-discover:${id}`, max: 10, windowSeconds: 60, distributed: false },
+  });
+  if (mid.error) return mid.error;
 
   try {
     const body = await req.json();

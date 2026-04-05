@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
 import { publishedGames, projects, gameTags } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
-import { rateLimitResponse } from '@/lib/rateLimit';
-import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
 import { logger } from '@/lib/logging/logger';
@@ -16,18 +14,15 @@ export async function POST(request: NextRequest) {
   const requestId = extractRequestId(request.headers);
   const reqLog = logger.child({ requestId, endpoint: 'POST /api/publish' });
 
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-  const { user, clerkId } = authResult.ctx;
+  const mid = await withApiMiddleware(request, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `publish:${id}`, max: 10, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
+  const { user, clerkId } = mid.authContext!;
 
   const reqLogAuth = reqLog.child({ userId: user.id });
-
-  // Rate limit: 10 publish requests per minute per user (distributed across instances)
-  const rl = await distributedRateLimit(`publish:${clerkId}`, 10, 60);
-  if (!rl.allowed) {
-    reqLogAuth.warn('Publish rate limit exceeded');
-    return rateLimitResponse(rl.remaining, rl.resetAt);
-  }
 
   const parsed = await parseJsonBody(request);
   if (!parsed.ok) return parsed.response;

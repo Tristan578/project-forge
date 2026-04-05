@@ -9,19 +9,17 @@
 export const maxDuration = 10; // API_MAX_DURATION_SIMPLE_S
 
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { refundTokens } from '@/lib/tokens/service';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function POST(request: NextRequest) {
-  // 1. Authenticate
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  // 1b. Rate limit: 3 requests per minute per user
-  const rl = await rateLimit(`refund:${authResult.ctx.user.id}`, 3, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+  const mid = await withApiMiddleware(request, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `refund:${id}`, max: 3, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
   // 2. Parse request
   let body: {
@@ -42,7 +40,7 @@ export async function POST(request: NextRequest) {
 
   // 3. Refund tokens
   try {
-    await refundTokens(authResult.ctx.user.id, usageId);
+    await refundTokens(mid.userId!, usageId);
 
     return NextResponse.json({
       success: true,

@@ -6,6 +6,7 @@ import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { getMetrics } from '@/lib/db/queryMonitor';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
+import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/rateLimit', () => ({
@@ -45,7 +46,7 @@ describe('GET /api/admin/db-metrics', () => {
       response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/db-metrics'));
     expect(res.status).toBe(401);
   });
 
@@ -54,7 +55,7 @@ describe('GET /api/admin/db-metrics', () => {
       mockNextResponse({ error: 'Admin access required' }, { status: 403 })
     );
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/db-metrics'));
     expect(res.status).toBe(403);
   });
 
@@ -63,12 +64,12 @@ describe('GET /api/admin/db-metrics', () => {
       mockNextResponse({ error: 'Too many requests' }, { status: 429 })
     );
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/db-metrics'));
     expect(res.status).toBe(429);
   });
 
   it('returns metrics on success', async () => {
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/db-metrics'));
     const data = await res.json();
 
     expect(res.status).toBe(200);
@@ -82,7 +83,7 @@ describe('GET /api/admin/db-metrics', () => {
       throw new Error('Query monitor failed');
     });
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/db-metrics'));
     expect(res.status).toBe(500);
   });
 });

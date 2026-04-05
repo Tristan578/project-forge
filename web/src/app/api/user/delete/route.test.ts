@@ -5,6 +5,7 @@ import { POST } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { deleteUserAccount } from '@/lib/auth/user-service';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
+import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/auth/user-service');
@@ -20,7 +21,7 @@ describe('POST /api/user/delete', () => {
       response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
-    const res = await POST();
+    const res = await POST(new NextRequest('http://localhost/api/user/delete'));
     expect(res.status).toBe(401);
   });
 
@@ -29,7 +30,7 @@ describe('POST /api/user/delete', () => {
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
     vi.mocked(deleteUserAccount).mockResolvedValue(undefined);
 
-    const res = await POST();
+    const res = await POST(new NextRequest('http://localhost/api/user/delete'));
     const data = await res.json();
     
     expect(res.status).toBe(200);
@@ -45,7 +46,7 @@ describe('POST /api/user/delete', () => {
     // Suppress console.error for this test
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const res = await POST();
+    const res = await POST(new NextRequest('http://localhost/api/user/delete'));
     const data = await res.json();
     
     expect(res.status).toBe(500);

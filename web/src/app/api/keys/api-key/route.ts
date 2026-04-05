@@ -1,26 +1,26 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
-import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
+import { assertTier } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
 import { apiKeys } from '@/lib/db/schema';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { API_KEY_SCOPES, findInvalidScopes, type ApiKeyScope } from '@/lib/config/scopes';
 import { RATE_LIMIT_ADMIN_WINDOW_MS } from '@/lib/config/timeouts';
 
 /** POST /api/keys/api-key — generate a new MCP API key */
-export async function POST(req: Request) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  // Rate limit: 5 API key generation requests per minute per user
-  const rl = await rateLimit(`apikey-gen:${authResult.ctx.user.id}`, 5, RATE_LIMIT_ADMIN_WINDOW_MS);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+export async function POST(req: NextRequest) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `apikey-gen:${id}`, max: 5, windowSeconds: RATE_LIMIT_ADMIN_WINDOW_MS / 1000, distributed: false },
+  });
+  if (mid.error) return mid.error;
 
   // MCP keys require Creator+ tier
-  const tierCheck = assertTier(authResult.ctx.user, ['creator', 'pro']);
+  const tierCheck = assertTier(mid.authContext!.user, ['creator', 'pro']);
   if (tierCheck) return tierCheck;
 
   let body: { name?: unknown; scopes?: unknown };
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
   const [record] = await db
     .insert(apiKeys)
     .values({
-      userId: authResult.ctx.user.id,
+      userId: mid.userId!,
       name,
       keyHash,
       keyPrefix: prefix,
@@ -76,9 +76,9 @@ export async function POST(req: Request) {
 }
 
 /** GET /api/keys/api-key — list API keys (no secrets) */
-export async function GET() {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
+export async function GET(req: NextRequest) {
+  const mid = await withApiMiddleware(req, { requireAuth: true });
+  if (mid.error) return mid.error;
 
   try {
     const db = getDb();
@@ -92,7 +92,7 @@ export async function GET() {
         createdAt: apiKeys.createdAt,
       })
       .from(apiKeys)
-      .where(eq(apiKeys.userId, authResult.ctx.user.id));
+      .where(eq(apiKeys.userId, mid.userId!));
 
     return NextResponse.json({
       keys: keys.map((k) => ({

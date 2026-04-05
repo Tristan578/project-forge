@@ -1,15 +1,16 @@
-import { NextResponse } from 'next/server';
-import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { assertAdmin } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { getDb } from '@/lib/db/client';
 import { users, costLog, creditTransactions, tokenConfig, tierConfig } from '@/lib/db/schema';
 import { sql, count, sum, desc } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
-export async function GET() {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-  const { clerkId } = authResult.ctx;
+export async function GET(req: NextRequest) {
+  const mid = await withApiMiddleware(req, { requireAuth: true });
+  if (mid.error) return mid.error;
+  const { clerkId } = mid.authContext!;
 
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;

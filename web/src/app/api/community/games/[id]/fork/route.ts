@@ -2,24 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { publishedGames, projects, gameForks, users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const db = getDb();
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-
-    // Rate limit: 10 fork requests per minute per user
-    const rl = await rateLimit(`fork:${authResult.ctx.user.id}`, 10, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `fork:${id}`, max: 10, windowSeconds: 60 },
+    });
+    if (mid.error) return mid.error;
 
     const { id: gameId } = await params;
 
@@ -52,13 +51,13 @@ export async function POST(
     const [user] = await db
       .select({ tier: users.tier })
       .from(users)
-      .where(eq(users.id, authResult.ctx.user.id))
+      .where(eq(users.id, mid.userId!))
       .limit(1);
 
     const userProjects = await db
       .select({ id: projects.id })
       .from(projects)
-      .where(eq(projects.userId, authResult.ctx.user.id));
+      .where(eq(projects.userId, mid.userId!));
 
     // Intentional: fork limits are deliberately more generous than publish limits
     // to encourage community remixing. They differ from publish limits and are
@@ -84,7 +83,7 @@ export async function POST(
     const [newProject] = await db
       .insert(projects)
       .values({
-        userId: authResult.ctx.user.id,
+        userId: mid.userId!,
         name: `${game.title} (Fork)`,
         sceneData: originalProject.sceneData,
         entityCount: originalProject.entityCount,
@@ -96,7 +95,7 @@ export async function POST(
     await db.insert(gameForks).values({
       originalGameId: gameId,
       forkedProjectId: newProject.id,
-      userId: authResult.ctx.user.id,
+      userId: mid.userId!,
     });
 
     return NextResponse.json({ projectId: newProject.id }, { status: 201 });

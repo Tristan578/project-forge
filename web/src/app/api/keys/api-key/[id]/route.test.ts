@@ -4,6 +4,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 
+import { NextRequest } from 'next/server';
+
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/db/client');
 vi.mock('@/lib/db/schema', () => ({
@@ -27,7 +29,7 @@ describe('DELETE /api/keys/api-key/[id]', () => {
     });
 
     const { DELETE } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/api-key/key-1', { method: 'DELETE' });
+    const req = new NextRequest('http://localhost:3000/api/keys/api-key/key-1', { method: 'DELETE' });
     const res = await DELETE(req, { params: Promise.resolve({ id: 'key-1' }) });
 
     expect(res.status).toBe(401);
@@ -43,7 +45,7 @@ describe('DELETE /api/keys/api-key/[id]', () => {
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
     const { DELETE } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/api-key/missing', { method: 'DELETE' });
+    const req = new NextRequest('http://localhost:3000/api/keys/api-key/missing', { method: 'DELETE' });
     const res = await DELETE(req, { params: Promise.resolve({ id: 'missing' }) });
     const body = await res.json();
 
@@ -61,7 +63,7 @@ describe('DELETE /api/keys/api-key/[id]', () => {
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
     const { DELETE } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/api-key/key-1', { method: 'DELETE' });
+    const req = new NextRequest('http://localhost:3000/api/keys/api-key/key-1', { method: 'DELETE' });
     const res = await DELETE(req, { params: Promise.resolve({ id: 'key-1' }) });
     const body = await res.json();
 
