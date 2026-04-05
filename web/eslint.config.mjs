@@ -117,7 +117,7 @@ const eslintConfig = defineConfig([
       'no-restricted-syntax': ['warn',
         {
           selector: "VariableDeclarator[init.callee.name='getDb']",
-          message: 'Do not assign getDb() to a variable. Use queryWithResilience(() => getDb().select()...) instead for circuit breaker protection. (Allowed inside queryWithResilience callbacks when multiple queries share a db reference.)',
+          message: 'Do not assign getDb() to a variable — this bypasses automatic retries and circuit-breaker recovery for DB outages. Wrap with queryWithResilience(() => getDb().select()...) instead. If multiple queries share a db ref inside a queryWithResilience callback, add eslint-disable-next-line.',
         },
       ],
     },
