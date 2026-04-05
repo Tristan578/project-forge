@@ -133,7 +133,8 @@ export async function distributedRateLimit(
     return await upstashSlidingWindow(key, limit, windowSeconds);
   } catch (err) {
     // Report Upstash failure to Sentry so silent fallbacks are visible (#8210)
-    captureException(err, { component: 'distributedRateLimit', key, limit, windowSeconds });
+    // Strip user-identifying suffixes from key to avoid PII in Sentry extra context
+    captureException(err, { component: 'distributedRateLimit', keyPrefix: key.split(':')[0], limit, windowSeconds });
     // Fall back to in-memory to avoid blocking requests
     const result = await rateLimit(key, limit, windowSeconds * 1000);
     return result;
