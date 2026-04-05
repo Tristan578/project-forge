@@ -69,9 +69,11 @@ describe('checkDbRateLimit — with Upstash', () => {
     _resetDbRateLimiter();
     process.env.UPSTASH_REDIS_REST_URL = 'https://fake.upstash.io';
     process.env.UPSTASH_REDIS_REST_TOKEN = 'fake-token';
+    vi.useFakeTimers();
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     if (savedUrl) process.env.UPSTASH_REDIS_REST_URL = savedUrl;
     else delete process.env.UPSTASH_REDIS_REST_URL;
     if (savedToken) process.env.UPSTASH_REDIS_REST_TOKEN = savedToken;
@@ -90,20 +92,25 @@ describe('checkDbRateLimit — with Upstash', () => {
     expect(mockLimit).toHaveBeenCalledWith('global-db-ops');
   });
 
-  it('retries once after ~100ms when rate limited, then allows', async () => {
+  it('retries once after 100ms when rate limited, then allows', async () => {
     mockLimit
       .mockResolvedValueOnce({ success: false, remaining: 0, reset: Date.now() + 1000 })
       .mockResolvedValueOnce({ success: true, remaining: 1, reset: Date.now() + 1000 });
 
-    const start = Date.now();
-    await expect(checkDbRateLimit()).resolves.toBeUndefined();
-    expect(Date.now() - start).toBeGreaterThanOrEqual(80);
+    const promise = checkDbRateLimit();
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(promise).resolves.toBeUndefined();
     expect(mockLimit).toHaveBeenCalledTimes(2);
   });
 
   it('throws DbRateLimitError after retry also fails', async () => {
     mockLimit.mockResolvedValue({ success: false, remaining: 0, reset: Date.now() + 1000 });
-    await expect(checkDbRateLimit()).rejects.toThrow(DbRateLimitError);
+    const promise = checkDbRateLimit();
+    // Suppress the unhandled-rejection warning that fires between advanceTimersByTimeAsync
+    // completing (which resolves the setTimeout and rejects the promise) and our await below.
+    void promise.catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(promise).rejects.toThrow(DbRateLimitError);
     expect(mockLimit).toHaveBeenCalledTimes(2);
   });
 
