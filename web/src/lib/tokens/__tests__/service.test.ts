@@ -407,28 +407,29 @@ describe('refundTokens', () => {
     mockLimit.mockResolvedValueOnce([{
       id: 'usage-1', userId: 'user-1', tokens: 30, source: 'monthly', provider: 'anthropic',
     }]);
+    // 2 neonSql calls: setClause fragment (consumed, ignored) + CTE query
+    mockNeonSqlResults.push([]); // setClause fragment
+    mockNeonSqlResults.push([{ id: 'user-1' }]); // CTE RETURNING → refund succeeded
 
     const result = await refundTokens('user-1', 'usage-1');
 
     expect(result.refunded).toBe(true);
-    // 2 neonSql calls: setClause fragment + CTE query
     expect(mockNeonSql).toHaveBeenCalledTimes(2);
   });
 
-  it('uses CTE with INSERT...WHERE NOT EXISTS guard (idempotency at SQL level)', async () => {
+  it('returns refunded:false when idempotency guard skips duplicate', async () => {
     const { refundTokens } = await import('../service');
 
     mockWhere.mockReturnValueOnce(chainableWhere());
     mockLimit.mockResolvedValueOnce([{
       id: 'usage-dup', userId: 'user-1', tokens: 20, source: 'addon', provider: 'anthropic',
     }]);
+    // CTE query returns empty (INSERT was no-op, UPDATE skipped) → already refunded
+    // mockNeonSqlResults defaults to [] so no push needed
 
-    // CTE always runs — the WHERE NOT EXISTS / RETURNING guard inside the
-    // SQL prevents the UPDATE when the INSERT is a no-op.
-    // True idempotency testing requires integration tests against a real DB.
     const result = await refundTokens('user-1', 'usage-dup');
 
-    expect(result.refunded).toBe(true); // function always returns true when record exists
+    expect(result.refunded).toBe(false);
     expect(mockNeonSql).toHaveBeenCalledTimes(2);
   });
 
@@ -439,6 +440,8 @@ describe('refundTokens', () => {
     mockLimit.mockResolvedValueOnce([{
       id: 'usage-2', userId: 'user-1', tokens: 50, source: 'addon', provider: null,
     }]);
+    mockNeonSqlResults.push([]); // setClause fragment
+    mockNeonSqlResults.push([{ id: 'user-1' }]); // CTE RETURNING
 
     const result = await refundTokens('user-1', 'usage-2');
 
@@ -453,6 +456,8 @@ describe('refundTokens', () => {
     mockLimit.mockResolvedValueOnce([{
       id: 'usage-3', userId: 'user-1', tokens: 40, source: 'mixed', provider: 'meshy',
     }]);
+    mockNeonSqlResults.push([]); // setClause fragment
+    mockNeonSqlResults.push([{ id: 'user-1' }]); // CTE RETURNING
 
     const result = await refundTokens('user-1', 'usage-3');
 

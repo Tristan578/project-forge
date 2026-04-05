@@ -201,7 +201,7 @@ export async function refundTokens(userId: string, usageId: string): Promise<Ref
     ? neonSql`monthly_tokens_used = GREATEST(0, monthly_tokens_used - ${record.tokens})`
     : neonSql`addon_tokens = addon_tokens + ${record.tokens}`;
 
-  await neonSql`
+  const result = await neonSql`
     WITH ins AS (
       INSERT INTO token_usage (user_id, operation, tokens, source, provider, metadata)
       SELECT ${userId}::uuid, 'refund', ${-record.tokens}, ${record.source}, ${record.provider}, ${refundMetadata}::jsonb
@@ -217,8 +217,11 @@ export async function refundTokens(userId: string, usageId: string): Promise<Ref
     SET ${setClause}, updated_at = NOW()
     WHERE id = ${userId}::uuid
       AND EXISTS (SELECT 1 FROM ins)
+    RETURNING id
   `;
-  return { refunded: true };
+  // If the CTE idempotency guard skipped the INSERT, the UPDATE also
+  // does nothing (EXISTS check), so result is empty → already refunded.
+  return { refunded: result.length > 0 };
 }
 
 /**

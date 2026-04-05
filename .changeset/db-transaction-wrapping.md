@@ -2,4 +2,4 @@
 "spawnforge": patch
 ---
 
-Wrap credit/token DB mutations in neonSql.transaction to eliminate TOCTOU race conditions. Add CTE-based idempotency guards for refund operations. Fix `||` vs `??` for priceTokens default in marketplace route.
+Use atomic UPDATE...WHERE...RETURNING guards to eliminate TOCTOU race conditions in token deductions. Add CTE-based idempotency guards for refund operations with accurate return semantics. Fix `||` vs `??` for priceTokens default in marketplace route.
