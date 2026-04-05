@@ -14,5 +14,5 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": ["src/**/*"],
-  "exclude": ["src/**/*.test.*", "src/test-setup.ts", "src/vitest.d.ts", "dist"]
+  "exclude": ["src/**/*.test.*", "src/test-setup.ts", "src/vitest.d.ts", "src/jest-axe.d.ts", "dist"]
 }
