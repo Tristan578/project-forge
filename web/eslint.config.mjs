@@ -37,8 +37,20 @@ const noHardcodedPrimitives = {
           check(node.value, node.value.value);
         }
       },
-      // Template literals inside cn(), clsx(), or className={`...`}
+      // Template literals only in className-related contexts:
+      // className={`...`}, cn(`...`), clsx(`...`), cva(`...`), twMerge(`...`)
       TemplateLiteral(node) {
+        const parent = node.parent;
+        const isClassNameExpr =
+          // className={`...`}
+          (parent?.type === 'JSXExpressionContainer' &&
+            parent.parent?.type === 'JSXAttribute' &&
+            parent.parent.name?.name === 'className') ||
+          // cn(`...`), clsx(`...`), cva(`...`), twMerge(`...`)
+          (parent?.type === 'CallExpression' &&
+            parent.callee?.type === 'Identifier' &&
+            /^(cn|clsx|cva|twMerge)$/.test(parent.callee.name));
+        if (!isClassNameExpr) return;
         for (const quasi of node.quasis) {
           check(quasi, quasi.value.raw);
         }
