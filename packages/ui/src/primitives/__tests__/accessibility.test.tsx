@@ -59,7 +59,12 @@ const PRIMITIVE_FIXTURES: Record<string, () => JSX.Element> = {
     </Dialog>
   ),
   Input: () => <Input aria-label="Name" placeholder="Enter name" />,
-  Label: () => <Label htmlFor="test-input">Name</Label>,
+  Label: () => (
+    <>
+      <Label htmlFor="test-input">Name</Label>
+      <Input id="test-input" placeholder="Enter name" />
+    </>
+  ),
   Popover: () => (
     <Popover trigger={<button>Open</button>} content="Popover content" />
   ),
