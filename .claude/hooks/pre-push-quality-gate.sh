@@ -72,17 +72,41 @@ if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
     return 1
   }
 
-  run_tsc
-  if is_jit_segfault "$TSC_EXIT" "$TSC_OUTPUT"; then
-    echo "[pre-push] WARNING: tsc crashed (Node JIT segfault, likely Node 25.x V8 bug). Retrying once..." >&2
+  # Scope tsc errors to files changed in this branch only.
+  # A full `tsc --noEmit` reports ALL project errors including pre-existing ones
+  # from main (847+ as of 2026-04-04). We only want to block on NEW errors
+  # introduced by the current branch's changes.
+  CHANGED_TS=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$' | grep '^web/' | sed 's|^web/||' || true)
+  if [ -z "$CHANGED_TS" ]; then
+    true  # No TS files changed, skip tsc
+  else
     run_tsc
-  fi
+    if is_jit_segfault "$TSC_EXIT" "$TSC_OUTPUT"; then
+      echo "[pre-push] WARNING: tsc crashed (Node JIT segfault, likely Node 25.x V8 bug). Retrying once..." >&2
+      run_tsc
+    fi
 
-  if is_jit_segfault "$TSC_EXIT" "$TSC_OUTPUT"; then
-    echo "[pre-push] WARNING: tsc crashed twice (signal exit / libnode). Allowing push — CI (Node 20) will catch real errors." >&2
-  elif [ "$TSC_EXIT" != "0" ] && [ -n "$TSC_EXIT" ]; then
-    echo "$TSC_OUTPUT" | tail -10 >&2
-    ERRORS="${ERRORS}TypeScript errors found. "
+    if is_jit_segfault "$TSC_EXIT" "$TSC_OUTPUT"; then
+      echo "[pre-push] WARNING: tsc crashed twice (signal exit / libnode). Allowing push — CI (Node 20) will catch real errors." >&2
+    elif [ "$TSC_EXIT" != "0" ] && [ -n "$TSC_EXIT" ]; then
+      # Filter tsc output to only show errors in files changed by this branch.
+      # This avoids blocking on pre-existing errors from main.
+      BRANCH_ERRORS=""
+      while IFS= read -r changed_file; do
+        [ -z "$changed_file" ] && continue
+        ESCAPED_FILE=$(printf '%s' "$changed_file" | sed 's/[.[\*^$()+?{}|]/\\&/g')
+        FILE_ERRORS=$(echo "$TSC_OUTPUT" | grep "^${ESCAPED_FILE}(" || true)
+        if [ -n "$FILE_ERRORS" ]; then
+          BRANCH_ERRORS="${BRANCH_ERRORS}${FILE_ERRORS}
+"
+        fi
+      done <<< "$CHANGED_TS"
+
+      if [ -n "$BRANCH_ERRORS" ]; then
+        echo "$BRANCH_ERRORS" | tail -10 >&2
+        ERRORS="${ERRORS}TypeScript errors found in changed files. "
+      fi
+    fi
   fi
 fi
 
