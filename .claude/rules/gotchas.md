@@ -48,7 +48,7 @@ These are lower-frequency gotchas moved from CLAUDE.md. The most common ones rem
 - **R2 engine CDN requires manual upload** — WASM files gitignored, use `wrangler r2 object put`.
 
 ## Claude Code Config
-- **`.claude/prompts/` ≠ `.claude/skills/`** — Prompts are template files only accessible from the prompt bar UI. Skills (in `.claude/skills/<name>/skill.md`) are invocable via `/name` from the CLI and via the `Skill` tool. If it should be callable as `/foo`, it MUST be a skill, not a prompt. Never create automation in `.claude/prompts/`.
+- **`.claude/prompts/` ≠ `.claude/skills/`** — Prompts are template files only accessible from the prompt bar UI. Skills (in `.claude/skills/<name>/SKILL.md`) are invocable via `/name` from the CLI and via the `Skill` tool. If it should be callable as `/foo`, it MUST be a skill, not a prompt. Never create automation in `.claude/prompts/`.
 
 ## Infrastructure
 - **Vercel account scope** — ALWAYS use `--scope tnolan`. Never `nolantj-livecoms-projects`.

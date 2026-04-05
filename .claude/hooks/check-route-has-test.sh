@@ -4,15 +4,8 @@
 
 set -euo pipefail
 
-# Extract the file path from the tool input JSON
-FILE_PATH=$(echo "$TOOL_INPUT" 2>/dev/null | python3 -c "
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    print(data.get('file_path', ''))
-except:
-    print('')
-" 2>/dev/null || echo "")
+# Extract the file path from the tool input environment variable
+FILE_PATH="${TOOL_INPUT_file_path:-}"
 
 # Only care about route.ts files (not test files themselves)
 if [[ "$FILE_PATH" != *"/route.ts" ]] || [[ "$FILE_PATH" == *"__tests__"* ]]; then
