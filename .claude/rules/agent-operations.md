@@ -143,8 +143,8 @@ python3 .claude/hooks/github_project_sync.py push
 # 4. Find GitHub issue number
 gh issue list --search "PF-XXX in:title" --limit 1
 
-# 5. Create PR with Closes link
-gh pr create --title "fix: description" --body "$(cat <<'EOF'
+# 5. Create PR with Closes link AND milestone (BOTH REQUIRED)
+gh pr create --title "fix: description" --milestone "P1: User Workflow Blockers" --body "$(cat <<'EOF'
 ## Summary
 - bullet points
 
@@ -154,6 +154,8 @@ Closes #NNNN (PF-XXX)
 - [ ] test steps
 EOF
 )"
+# Valid milestones: "P0: Production Blockers", "P1: User Workflow Blockers",
+#                   "P2: Degraded Experience", "P3: Tech Debt"
 ```
 
 ### After PR Creation
