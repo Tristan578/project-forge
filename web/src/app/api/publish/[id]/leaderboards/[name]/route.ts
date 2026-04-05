@@ -45,7 +45,14 @@ export async function PATCH(
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
     }
 
-    const board = await findBoard(gameId, decodeURIComponent(boardName));
+    let decodedBoardName: string;
+    try {
+      decodedBoardName = decodeURIComponent(boardName);
+    } catch {
+      return NextResponse.json({ error: 'Invalid leaderboard name' }, { status: 400 });
+    }
+
+    const board = await findBoard(gameId, decodedBoardName);
     if (!board) {
       return NextResponse.json({ error: 'Leaderboard not found' }, { status: 404 });
     }
@@ -62,10 +69,15 @@ export async function PATCH(
     if (typeof body.maxEntries === 'number' && Number.isFinite(body.maxEntries)) {
       updates.maxEntries = Math.min(Math.max(Math.round(body.maxEntries), 1), 1000);
     }
-    if (body.minScore === null) updates.minScore = null;
-    else if (typeof body.minScore === 'number' && Number.isFinite(body.minScore)) updates.minScore = Math.round(body.minScore);
-    if (body.maxScore === null) updates.maxScore = null;
-    else if (typeof body.maxScore === 'number' && Number.isFinite(body.maxScore)) updates.maxScore = Math.round(body.maxScore);
+    const minScore = body.minScore === null ? null
+      : (typeof body.minScore === 'number' && Number.isFinite(body.minScore)) ? Math.round(body.minScore) : undefined;
+    const maxScore = body.maxScore === null ? null
+      : (typeof body.maxScore === 'number' && Number.isFinite(body.maxScore)) ? Math.round(body.maxScore) : undefined;
+    if (minScore !== undefined && maxScore !== undefined && minScore !== null && maxScore !== null && minScore > maxScore) {
+      return NextResponse.json({ error: 'minScore must be <= maxScore' }, { status: 400 });
+    }
+    if (minScore !== undefined) updates.minScore = minScore;
+    if (maxScore !== undefined) updates.maxScore = maxScore;
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
@@ -101,7 +113,14 @@ export async function DELETE(
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
     }
 
-    const board = await findBoard(gameId, decodeURIComponent(boardName));
+    let decodedBoardName: string;
+    try {
+      decodedBoardName = decodeURIComponent(boardName);
+    } catch {
+      return NextResponse.json({ error: 'Invalid leaderboard name' }, { status: 400 });
+    }
+
+    const board = await findBoard(gameId, decodedBoardName);
     if (!board) {
       return NextResponse.json({ error: 'Leaderboard not found' }, { status: 404 });
     }
