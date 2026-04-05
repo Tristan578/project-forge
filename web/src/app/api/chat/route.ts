@@ -274,6 +274,14 @@ export async function POST(request: NextRequest) {
   if (mid.error) return mid.error;
   const auth = { ctx: mid.authContext! };
 
+  // 1b. Tier gate — starter tier has no AI access
+  if (auth.ctx.user.tier === 'starter') {
+    return Response.json(
+      { error: 'AI features require a paid plan' },
+      { status: 403 }
+    );
+  }
+
   // 2. Validate request size (max 1MB — generous limit for conversation history + scene context;
   //    the more precise MAX_INPUT_CHARS check below enforces the actual token budget)
   const bodyText = await request.text();

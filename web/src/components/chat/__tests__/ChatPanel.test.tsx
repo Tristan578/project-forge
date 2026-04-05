@@ -93,11 +93,12 @@ vi.mock('@/stores/editorStore', () => ({
   ),
 }));
 
+const mockCanUseAI = vi.fn(() => true);
 vi.mock('@/stores/userStore', () => ({
   useUserStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
     selector({
       tier: 'creator',
-      canUseAI: () => true,
+      canUseAI: mockCanUseAI,
     })
   ),
 }));

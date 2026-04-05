@@ -421,21 +421,37 @@ export async function reverseAddonTokens(
       // claim actually succeeds.
       const now = new Date().toISOString();
 
-      const result = await neonSql`
-        WITH claim AS (
+      // Step 1: Read the old refunded_cents with FOR UPDATE (row lock).
+      // Step 2: UPDATE only if the old value < amountRefunded (claim guard).
+      // Step 3: Compute tokens_to_deduct from the delta (new - old).
+      // Step 4: Audit INSERT + user UPDATE depend on deduction > 0.
+      //
+      // RETURNING reads post-UPDATE values, so we capture pre-UPDATE state
+      // via a separate SELECT...FOR UPDATE CTE.
+      await neonSql`
+        WITH old_state AS (
+          SELECT refunded_cents, tokens, amount_cents
+          FROM token_purchases
+          WHERE id = ${purchase.id}
+          FOR UPDATE
+        ),
+        claim AS (
           UPDATE token_purchases
           SET refunded_cents = ${amountRefunded}
-          WHERE id = ${purchase.id}
-            AND refunded_cents < ${amountRefunded}
-          RETURNING
-            tokens,
-            amount_cents,
-            ${amountRefunded} - refunded_cents AS old_refunded_cents,
-            LEAST(${amountRefunded} - (${amountRefunded} - (${amountRefunded} - refunded_cents)), amount_cents) AS _dummy
+          FROM old_state
+          WHERE token_purchases.id = ${purchase.id}
+            AND old_state.refunded_cents < ${amountRefunded}
+          RETURNING old_state.refunded_cents AS old_refunded_cents,
+                    old_state.tokens,
+                    old_state.amount_cents
         ),
         deduction AS (
           SELECT FLOOR(
-            claim.tokens * LEAST((${amountRefunded}::int - claim.old_refunded_cents)::float / claim.amount_cents, 1)
+            claim.tokens * LEAST(
+              (${amountRefunded}::int - claim.old_refunded_cents)::float
+                / NULLIF(claim.amount_cents, 0),
+              1
+            )
           )::int AS tokens_to_deduct
           FROM claim
         ),
@@ -455,11 +471,8 @@ export async function reverseAddonTokens(
         WHERE users.id = ${userId} AND d.tokens_to_deduct > 0
         RETURNING users.id
       `;
-      // If claim matched 0 rows (already refunded), the entire CTE chain
-      // produces no rows — audit and user UPDATE are skipped.
-      if (result.length > 0) return;
-      // If claim failed (no purchase match or already claimed), fall through
-      // only if purchase wasn't found — otherwise we're done.
+      // If claim matched 0 rows (already refunded or amount_cents=0),
+      // the entire CTE chain produces no rows — done.
       return;
     }
   }
@@ -499,7 +512,7 @@ export async function reverseAddonTokens(
       RETURNING amount
     )
     UPDATE users
-    SET addon_tokens = GREATEST(0, addon_tokens + (SELECT amount FROM audit)),
+    SET addon_tokens = GREATEST(0, addon_tokens - ABS((SELECT amount FROM audit))),
         updated_at   = ${now}
     WHERE id = ${userId}
       AND EXISTS (SELECT 1 FROM audit)

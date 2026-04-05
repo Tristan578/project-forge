@@ -285,15 +285,11 @@ describe('ExportDialog', () => {
     expect(screen.getByText('Exporting...').textContent).toBe('Exporting...');
   });
 
-  it('shows Cancel Export button when exporting and calls onClose', () => {
-    const onClose = vi.fn();
+  it('disables Cancel button when exporting', () => {
     setupStore({ isExporting: true });
-    render(<ExportDialog isOpen={true} onClose={onClose} />);
-    const cancelBtn = screen.getByText('Cancel Export');
-    expect(cancelBtn).toBeTruthy();
-    expect(cancelBtn.closest('button')?.hasAttribute('disabled')).toBe(false);
-    fireEvent.click(cancelBtn);
-    expect(onClose).toHaveBeenCalledOnce();
+    render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
+    const cancelBtn = screen.getByText('Cancel').closest('button');
+    expect(cancelBtn?.hasAttribute('disabled')).toBe(true);
   });
 
   it('disables close X button when exporting', () => {

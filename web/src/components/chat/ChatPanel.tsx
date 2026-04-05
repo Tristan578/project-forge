@@ -63,7 +63,7 @@ export function ChatPanel() {
   const loopIteration = useChatStore((s) => s.loopIteration);
   const sessionTokens = useChatStore((s) => s.sessionTokens);
   const sendMessage = useChatStore((s) => s.sendMessage);
-  const canUseAI = useUserStore((s) => s.canUseAI);
+  const canUseAI = useUserStore((s) => s.canUseAI());
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const handleRetry = useCallback(() => {
@@ -112,7 +112,7 @@ export function ChatPanel() {
       <div ref={scrollRef} aria-live="polite" aria-label="Chat messages" className="flex-1 overflow-y-auto">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
-            {canUseAI() ? (
+            {canUseAI ? (
               <>
                 <MessageSquare size={28} className="text-zinc-700" />
                 <p className="text-xs text-zinc-400">
