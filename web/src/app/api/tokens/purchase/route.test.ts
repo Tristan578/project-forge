@@ -3,6 +3,7 @@ vi.mock('server-only', () => ({}));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import { rateLimit } from '@/lib/rateLimit';
+import { NextRequest } from 'next/server';
 
 const mockCreateCheckoutSession = vi.hoisted(() => vi.fn());
 
@@ -68,7 +69,7 @@ describe('POST /api/tokens/purchase', () => {
     });
 
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/tokens/purchase', {
+    const req = new NextRequest('http://localhost:3000/api/tokens/purchase', {
       method: 'POST',
       body: JSON.stringify({ package: 'spark' }),
     });
@@ -82,7 +83,7 @@ describe('POST /api/tokens/purchase', () => {
     vi.mocked(distributedRateLimit).mockResolvedValueOnce({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/tokens/purchase', {
+    const req = new NextRequest('http://localhost:3000/api/tokens/purchase', {
       method: 'POST',
       body: JSON.stringify({ package: 'spark' }),
     });
@@ -96,7 +97,7 @@ describe('POST /api/tokens/purchase', () => {
     vi.mocked(assertTier).mockReturnValue(tierResponse as never);
 
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/tokens/purchase', {
+    const req = new NextRequest('http://localhost:3000/api/tokens/purchase', {
       method: 'POST',
       body: JSON.stringify({ package: 'spark' }),
     });
@@ -107,7 +108,7 @@ describe('POST /api/tokens/purchase', () => {
 
   it('should return 422 for invalid package (regression: was 400, valid JSON with invalid business value)', async () => {
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/tokens/purchase', {
+    const req = new NextRequest('http://localhost:3000/api/tokens/purchase', {
       method: 'POST',
       body: JSON.stringify({ package: 'nonexistent' }),
     });
@@ -120,7 +121,7 @@ describe('POST /api/tokens/purchase', () => {
 
   it('returns checkoutUrl on successful Stripe checkout session creation', async () => {
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/tokens/purchase', {
+    const req = new NextRequest('http://localhost:3000/api/tokens/purchase', {
       method: 'POST',
       body: JSON.stringify({ package: 'spark' }),
     });
@@ -143,7 +144,7 @@ describe('POST /api/tokens/purchase', () => {
     mockCreateCheckoutSession.mockRejectedValueOnce(new Error('Stripe network error'));
 
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/tokens/purchase', {
+    const req = new NextRequest('http://localhost:3000/api/tokens/purchase', {
       method: 'POST',
       body: JSON.stringify({ package: 'blaze' }),
     });

@@ -11,6 +11,7 @@ vi.mock('@/lib/rateLimit', () => ({
   rateLimitResponse: vi.fn(() => new Response('Rate limited', { status: 429 })),
 }));
 vi.mock('@/lib/keys/resolver');
+import { NextRequest } from 'next/server';
 vi.mock('@/lib/db/schema', () => ({
   // Provider type placeholder
 }));
@@ -35,7 +36,7 @@ describe('PUT /api/keys/[provider]', () => {
     });
 
     const { PUT } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/anthropic', {
+    const req = new NextRequest('http://localhost:3000/api/keys/anthropic', {
       method: 'PUT',
       body: JSON.stringify({ key: 'sk-test-key-12345678' }),
     });
@@ -48,7 +49,7 @@ describe('PUT /api/keys/[provider]', () => {
     vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const { PUT } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/anthropic', {
+    const req = new NextRequest('http://localhost:3000/api/keys/anthropic', {
       method: 'PUT',
       body: JSON.stringify({ key: 'sk-test-key-12345678' }),
     });
@@ -59,7 +60,7 @@ describe('PUT /api/keys/[provider]', () => {
 
   it('should return 400 for invalid provider', async () => {
     const { PUT } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/invalid', {
+    const req = new NextRequest('http://localhost:3000/api/keys/invalid', {
       method: 'PUT',
       body: JSON.stringify({ key: 'sk-test-key-12345678' }),
     });
@@ -72,7 +73,7 @@ describe('PUT /api/keys/[provider]', () => {
 
   it('should return 400 for short API key', async () => {
     const { PUT } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/anthropic', {
+    const req = new NextRequest('http://localhost:3000/api/keys/anthropic', {
       method: 'PUT',
       body: JSON.stringify({ key: 'short' }),
     });
@@ -85,7 +86,7 @@ describe('PUT /api/keys/[provider]', () => {
 
   it('should store key and return success', async () => {
     const { PUT } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/anthropic', {
+    const req = new NextRequest('http://localhost:3000/api/keys/anthropic', {
       method: 'PUT',
       body: JSON.stringify({ key: 'sk-ant-api03-1234567890' }),
     });
@@ -119,7 +120,7 @@ describe('DELETE /api/keys/[provider]', () => {
     });
 
     const { DELETE } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/anthropic', { method: 'DELETE' });
+    const req = new NextRequest('http://localhost:3000/api/keys/anthropic', { method: 'DELETE' });
     const res = await DELETE(req, { params: Promise.resolve({ provider: 'anthropic' }) });
 
     expect(res.status).toBe(401);
@@ -127,7 +128,7 @@ describe('DELETE /api/keys/[provider]', () => {
 
   it('should return 400 for invalid provider', async () => {
     const { DELETE } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/invalid', { method: 'DELETE' });
+    const req = new NextRequest('http://localhost:3000/api/keys/invalid', { method: 'DELETE' });
     const res = await DELETE(req, { params: Promise.resolve({ provider: 'invalid' }) });
     const body = await res.json();
 
@@ -137,7 +138,7 @@ describe('DELETE /api/keys/[provider]', () => {
 
   it('should delete key and return success', async () => {
     const { DELETE } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/anthropic', { method: 'DELETE' });
+    const req = new NextRequest('http://localhost:3000/api/keys/anthropic', { method: 'DELETE' });
     const res = await DELETE(req, { params: Promise.resolve({ provider: 'anthropic' }) });
     const body = await res.json();
 

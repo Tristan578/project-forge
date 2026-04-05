@@ -3,6 +3,7 @@ vi.mock('server-only', () => ({}));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
+import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/db/client');
@@ -27,7 +28,7 @@ describe('GET /api/marketplace/purchases', () => {
     });
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/marketplace/purchases'));
 
     expect(res.status).toBe(401);
   });
@@ -44,7 +45,7 @@ describe('GET /api/marketplace/purchases', () => {
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/marketplace/purchases'));
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -62,7 +63,7 @@ describe('GET /api/marketplace/purchases', () => {
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/marketplace/purchases'));
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -73,7 +74,7 @@ describe('GET /api/marketplace/purchases', () => {
     vi.mocked(getDb).mockImplementation(() => { throw new Error('DB error'); });
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/marketplace/purchases'));
     const body = await res.json();
 
     expect(res.status).toBe(500);

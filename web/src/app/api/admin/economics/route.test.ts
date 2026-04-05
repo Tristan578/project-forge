@@ -5,6 +5,7 @@ import { GET } from './route';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
+import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/db/client');
@@ -20,7 +21,7 @@ describe('GET /api/admin/economics', () => {
       response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/economics'));
     expect(res.status).toBe(401);
   });
 
@@ -29,7 +30,7 @@ describe('GET /api/admin/economics', () => {
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
     vi.mocked(assertAdmin).mockReturnValue(mockNextResponse({ error: 'Forbidden' }, { status: 403 }));
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/economics'));
     expect(res.status).toBe(403);
   });
 
@@ -60,7 +61,7 @@ describe('GET /api/admin/economics', () => {
         .mockReturnValueOnce(chainMock)      // tierConfigs
     } as unknown as ReturnType<typeof getDb>);
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/economics'));
     const data = await res.json();
     
     expect(res.status).toBe(200);

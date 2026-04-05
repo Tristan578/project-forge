@@ -33,7 +33,7 @@ describe('GET /api/marketplace/seller/assets', () => {
     });
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/marketplace/seller/assets'));
 
     expect(res.status).toBe(401);
   });
@@ -62,7 +62,7 @@ describe('GET /api/marketplace/seller/assets', () => {
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/marketplace/seller/assets'));
     const body = await res.json();
 
     expect(res.status).toBe(200);
