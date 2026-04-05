@@ -150,20 +150,22 @@ export async function storeProviderKey(
 
 /** Delete a BYOK key for a provider */
 export async function deleteProviderKey(userId: string, provider: Provider): Promise<void> {
-  const db = getDb();
-  await db
-    .delete(providerKeys)
-    .where(and(eq(providerKeys.userId, userId), eq(providerKeys.provider, provider)));
+  await queryWithResilience(() =>
+    getDb()
+      .delete(providerKeys)
+      .where(and(eq(providerKeys.userId, userId), eq(providerKeys.provider, provider)))
+  );
 }
 
 /** List which providers have BYOK keys configured */
 export async function listConfiguredProviders(
   userId: string
 ): Promise<{ provider: Provider; createdAt: Date }[]> {
-  const db = getDb();
-  const keys = await db
-    .select({ provider: providerKeys.provider, createdAt: providerKeys.createdAt })
-    .from(providerKeys)
-    .where(eq(providerKeys.userId, userId));
+  const keys = await queryWithResilience(() =>
+    getDb()
+      .select({ provider: providerKeys.provider, createdAt: providerKeys.createdAt })
+      .from(providerKeys)
+      .where(eq(providerKeys.userId, userId))
+  );
   return keys;
 }

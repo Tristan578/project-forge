@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn(),
+  queryWithResilience: vi.fn((fn: () => unknown) => fn()),
 }));
 
 vi.mock('@/lib/db/schema', () => ({

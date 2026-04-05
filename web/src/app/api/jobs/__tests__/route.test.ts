@@ -12,6 +12,7 @@ import { NextRequest } from 'next/server';
 
 // Mock dependencies before importing route
 vi.mock('@/lib/db/client', () => ({
+  queryWithResilience: vi.fn((fn: () => unknown) => fn()),
   getDb: vi.fn(),
 }));
 

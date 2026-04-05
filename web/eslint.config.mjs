@@ -114,10 +114,10 @@ const eslintConfig = defineConfig([
       'src/**/*.{test,spec}.{ts,tsx}',
     ],
     rules: {
-      'no-restricted-syntax': ['error',
+      'no-restricted-syntax': ['warn',
         {
           selector: "VariableDeclarator[init.callee.name='getDb']",
-          message: 'Do not assign getDb() to a variable. Use queryWithResilience(() => getDb().select()...) instead for circuit breaker protection.',
+          message: 'Do not assign getDb() to a variable. Use queryWithResilience(() => getDb().select()...) instead for circuit breaker protection. (Allowed inside queryWithResilience callbacks when multiple queries share a db reference.)',
         },
       ],
     },

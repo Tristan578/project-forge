@@ -53,7 +53,23 @@ expect.extend(matchers);
 
 // Global test isolation — prevent state leaks between tests
 // ---------------------------------------------------------------------------
-import { afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
+
+// Ensure queryWithResilience is always a passthrough in tests.
+// Many route tests auto-mock '@/lib/db/client' but don't set up queryWithResilience,
+// causing it to return undefined instead of calling the wrapped function.
+beforeEach(async () => {
+  try {
+    const mod = await import('@/lib/db/client');
+    const qwr = vi.mocked(mod).queryWithResilience;
+    // Only set implementation if it's a mock and has no custom implementation
+    if (qwr && typeof qwr.mockImplementation === 'function' && !qwr.getMockImplementation()) {
+      qwr.mockImplementation((fn: () => unknown) => fn() as never);
+    }
+  } catch {
+    // Module not mocked or not available — skip
+  }
+});
 
 afterEach(() => {
   vi.restoreAllMocks();

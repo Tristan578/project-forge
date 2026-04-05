@@ -14,6 +14,7 @@ import { NextRequest } from 'next/server';
 // ---------------------------------------------------------------------------
 
 vi.mock('@/lib/db/client', () => ({
+  queryWithResilience: vi.fn((fn: () => unknown) => fn()),
   getDb: vi.fn(),
 }));
 

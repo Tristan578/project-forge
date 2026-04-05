@@ -9,6 +9,7 @@ vi.mock('@/lib/monitoring/sentry-server');
 vi.mock('@/lib/billing/subscription-lifecycle');
 vi.mock('@/lib/billing/webhookIdempotency');
 vi.mock('@/lib/db/client', () => ({
+  queryWithResilience: vi.fn((fn: () => unknown) => fn()),
   getDb: vi.fn().mockReturnValue({}),
   getNeonSql: vi.fn().mockReturnValue(
     Object.assign(vi.fn(), { transaction: vi.fn().mockResolvedValue([]) }),

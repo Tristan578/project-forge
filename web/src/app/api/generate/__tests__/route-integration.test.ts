@@ -46,6 +46,7 @@ vi.mock('@/lib/tokens/pricing', () => ({
     tileset_generation: 50,
     pixel_art_replicate: 10,
     pixel_art_openai: 20,
+    localize_cost_per_chunk: 5,
   },
 }));
 
@@ -62,6 +63,7 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
 }));
 
 vi.mock('@/lib/db/client', () => ({
+  queryWithResilience: vi.fn((fn: () => unknown) => fn()),
   getDb: vi.fn().mockReturnValue({}),
   getNeonSql: vi.fn().mockReturnValue(
     Object.assign(vi.fn(), { transaction: vi.fn().mockResolvedValue([]) }),

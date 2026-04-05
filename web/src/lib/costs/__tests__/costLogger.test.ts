@@ -16,6 +16,7 @@ vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn(() => ({
     insert: mockInsert,
   })),
+  queryWithResilience: vi.fn((fn: () => unknown) => fn()),
 }));
 
 vi.mock('@/lib/db/schema', () => ({

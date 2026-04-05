@@ -43,6 +43,7 @@ export async function GET(req: NextRequest) {
     };
 
     const rows = await queryWithResilience(() => {
+      // eslint-disable-next-line no-restricted-syntax -- db ref needed for branching inside queryWithResilience
       const db = getDb();
       if (search) {
         const pattern = `%${search}%`;
