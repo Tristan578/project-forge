@@ -92,7 +92,7 @@ const PRIMITIVE_FIXTURES: Record<string, () => JSX.Element> = {
     />
   ),
   Textarea: () => <Textarea aria-label="Message" placeholder="Type here" />,
-  Toast: () => <Toast message="Success!" variant="success" onClose={() => {}} />,
+  Toast: () => <Toast message="Success!" variant="success" onDismiss={() => {}} />,
   Tooltip: () => (
     <Tooltip content="Help text">
       <button>Hover me</button>

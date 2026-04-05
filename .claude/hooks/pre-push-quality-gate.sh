@@ -94,7 +94,8 @@ if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
       BRANCH_ERRORS=""
       while IFS= read -r changed_file; do
         [ -z "$changed_file" ] && continue
-        FILE_ERRORS=$(echo "$TSC_OUTPUT" | grep "^${changed_file}(" || true)
+        ESCAPED_FILE=$(printf '%s' "$changed_file" | sed 's/[.[\*^$()+?{}|]/\\&/g')
+        FILE_ERRORS=$(echo "$TSC_OUTPUT" | grep "^${ESCAPED_FILE}(" || true)
         if [ -n "$FILE_ERRORS" ]; then
           BRANCH_ERRORS="${BRANCH_ERRORS}${FILE_ERRORS}
 "
