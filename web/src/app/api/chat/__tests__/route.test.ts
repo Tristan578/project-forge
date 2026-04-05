@@ -107,7 +107,7 @@ vi.mock('@anthropic-ai/sdk', () => {
 // ---------------------------------------------------------------------------
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { validateBodySize, detectPromptInjection } from '@/lib/chat/sanitizer';
@@ -193,6 +193,24 @@ describe('POST /api/chat', () => {
 
       const res = await POST(makeRequest(validBody()));
       expect(res.status).toBe(401);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Tier gate
+  // -------------------------------------------------------------------------
+  describe('tier gate', () => {
+    it('returns 403 when assertTier rejects', async () => {
+      const tierResponse = Response.json(
+        { error: 'TIER_REQUIRED', message: 'This feature requires one of: hobbyist, creator, pro', currentTier: 'starter' },
+        { status: 403 },
+      );
+      vi.mocked(assertTier).mockReturnValueOnce(tierResponse as never);
+
+      const res = await POST(makeRequest(validBody()));
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error).toBe('TIER_REQUIRED');
     });
   });
 
