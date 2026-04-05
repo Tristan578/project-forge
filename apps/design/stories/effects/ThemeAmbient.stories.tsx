@@ -1,4 +1,4 @@
-import type { Meta, StoryObj } from '@storybook/react';
+import type { Meta, StoryObj, StoryFn } from '@storybook/react';
 import { ThemeAmbient, type ThemeName } from '@spawnforge/ui';
 
 /**
@@ -12,6 +12,40 @@ import { ThemeAmbient, type ThemeName } from '@spawnforge/ui';
  *
  * The effect is absolutely positioned, pointer-events: none, z-index: 5.
  */
+
+/** Helper: creates the effects-attribute decorator (theme is handled by preview via globals). */
+function effectsDecorator(effects: 'on' | 'off') {
+  return (Story: StoryFn) => {
+    document.documentElement.setAttribute('data-sf-effects', effects);
+    return <Story />;
+  };
+}
+
+/** Helper: builds story config for a given theme + optional overrides. */
+function themeStory(
+  theme: ThemeName,
+  effects: 'on' | 'off' = 'on',
+  overrides?: Partial<Story>,
+): Story {
+  return {
+    globals: { sfTheme: theme },
+    decorators: [effectsDecorator(effects)],
+    ...overrides,
+  };
+}
+
+/** Helper: builds story config for a narrow (768px) viewport variant. */
+function narrowStory(
+  theme: ThemeName,
+  name: string,
+  effects: 'on' | 'off' = 'on',
+): Story {
+  return themeStory(theme, effects, {
+    name,
+    parameters: { viewport: { defaultViewport: 'ipad' } },
+  });
+}
+
 const meta: Meta<typeof ThemeAmbient> = {
   title: 'Effects/ThemeAmbient',
   component: ThemeAmbient,
@@ -28,8 +62,6 @@ const meta: Meta<typeof ThemeAmbient> = {
   decorators: [
     (Story, context) => {
       const theme = (context.globals.sfTheme || 'dark') as ThemeName;
-      // Apply data-sf-effects so ThemeAmbient can read it
-      document.documentElement.setAttribute('data-sf-effects', 'on');
       return (
         <div
           style={{
@@ -96,90 +128,42 @@ export default meta;
 type Story = StoryObj<typeof ThemeAmbient>;
 
 /** Dark theme — no effect rendered (null). */
-export const Dark: Story = {
-  decorators: [
-    (Story) => {
-      document.documentElement.setAttribute('data-sf-theme', 'dark');
-      document.documentElement.setAttribute('data-sf-effects', 'on');
-      return <Story />;
-    },
-  ],
-};
+export const Dark: Story = themeStory('dark');
 
 /** Ember theme — radial-gradient pulse with floating sparks. */
-export const Ember: Story = {
-  decorators: [
-    (Story) => {
-      document.documentElement.setAttribute('data-sf-theme', 'ember');
-      document.documentElement.setAttribute('data-sf-effects', 'on');
-      return <Story />;
-    },
-  ],
-};
+export const Ember: Story = themeStory('ember');
 
 /** Ice theme — SVG frost cracks growing across panel borders. */
-export const Ice: Story = {
-  decorators: [
-    (Story) => {
-      document.documentElement.setAttribute('data-sf-theme', 'ice');
-      document.documentElement.setAttribute('data-sf-effects', 'on');
-      return <Story />;
-    },
-  ],
-};
+export const Ice: Story = themeStory('ice');
 
 /** Leaf theme — SVG leaves drifting upward from sidebar edges. */
-export const Leaf: Story = {
-  decorators: [
-    (Story) => {
-      document.documentElement.setAttribute('data-sf-theme', 'leaf');
-      document.documentElement.setAttribute('data-sf-effects', 'on');
-      return <Story />;
-    },
-  ],
-};
+export const Leaf: Story = themeStory('leaf');
 
 /** Rust theme — small SVG gears rotating on panel dividers. */
-export const Rust: Story = {
-  decorators: [
-    (Story) => {
-      document.documentElement.setAttribute('data-sf-theme', 'rust');
-      document.documentElement.setAttribute('data-sf-effects', 'on');
-      return <Story />;
-    },
-  ],
-};
+export const Rust: Story = themeStory('rust');
 
 /** Mech theme — scan line + HUD corner brackets. */
-export const Mech: Story = {
-  decorators: [
-    (Story) => {
-      document.documentElement.setAttribute('data-sf-theme', 'mech');
-      document.documentElement.setAttribute('data-sf-effects', 'on');
-      return <Story />;
-    },
-  ],
-};
+export const Mech: Story = themeStory('mech');
 
 /** Light theme — warm radial glow at toolbar area. */
-export const Light: Story = {
-  decorators: [
-    (Story) => {
-      document.documentElement.setAttribute('data-sf-theme', 'light');
-      document.documentElement.setAttribute('data-sf-effects', 'on');
-      return <Story />;
-    },
-  ],
-};
+export const Light: Story = themeStory('light');
 
 /** Effects disabled — no effect regardless of theme. */
-export const EffectsOff: Story = {
+export const EffectsOff: Story = themeStory('ember', 'off', {
   name: 'Effects Off (ember)',
-  decorators: [
-    (Story) => {
-      document.documentElement.setAttribute('data-sf-theme', 'ember');
-      document.documentElement.setAttribute('data-sf-effects', 'off');
-      return <Story />;
-    },
-  ],
-};
+});
+
+/** Ember at narrow viewport — verifies overflow: hidden clips effects. */
+export const EmberNarrow: Story = narrowStory('ember', 'Ember (768px)');
+
+/** Ice at narrow viewport. */
+export const IceNarrow: Story = narrowStory('ice', 'Ice (768px)');
+
+/** Mech at narrow viewport — scan lines should still fill width. */
+export const MechNarrow: Story = narrowStory('mech', 'Mech (768px)');
+
+/** Effects off at narrow viewport — confirms no effect leakage. */
+export const EffectsOffNarrow: Story = narrowStory('ember', 'Effects Off (768px)', 'off');
+
+/** Dark at narrow viewport — baseline for no-effect rendering. */
+export const DarkNarrow: Story = narrowStory('dark', 'Dark (768px)');

@@ -48,6 +48,18 @@ export { ThemeAmbient } from './effects/ThemeAmbient';
 // Tier 2 Composites
 export { ThemeImportExport } from './composites/ThemeImportExport';
 export { SettingsPanel, type SettingsPanelProps } from './composites/SettingsPanel';
+export { Vec3Input, type Vec3InputProps } from './composites/Vec3Input';
+export { SliderInput, type SliderInputProps } from './composites/SliderInput';
+export { ColorPicker, type ColorPickerProps } from './composites/ColorPicker';
+export { TreeView, type TreeViewProps, type TreeNode } from './composites/TreeView';
+export { PropertyGrid, type PropertyGridProps, type PropertyGridItem } from './composites/PropertyGrid';
+export { CollapsibleSection, type CollapsibleSectionProps } from './composites/CollapsibleSection';
+export {
+  KeyboardShortcutsPanel,
+  type KeyboardShortcutsPanelProps,
+  type KeyboardShortcut,
+  type ShortcutGroup,
+} from './composites/KeyboardShortcutsPanel';
 
 // Utilities
 export { validateCustomTheme, type ValidatedTheme } from './utils/themeValidator';
