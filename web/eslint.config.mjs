@@ -15,6 +15,18 @@ const eslintConfig = defineConfig([
     },
   },
   {
+    files: ['src/app/api/**/route.ts'],
+    rules: {
+      'no-restricted-imports': ['warn', {
+        paths: [{
+          name: '@/lib/auth/api-auth',
+          importNames: ['authenticateRequest'],
+          message: 'Use withApiMiddleware from @/lib/api/middleware instead of authenticateRequest directly.',
+        }],
+      }],
+    },
+  },
+  {
     files: ['src/**/*.{test,spec}.{ts,tsx,js,jsx}'],
     rules: {
       'no-restricted-syntax': [
