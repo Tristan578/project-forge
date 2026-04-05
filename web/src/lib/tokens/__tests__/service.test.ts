@@ -397,10 +397,10 @@ describe('refundTokens', () => {
 
     expect(result.refunded).toBe(false);
     expect(mockSelect).toHaveBeenCalled();
-    expect(mockNeonSql.transaction).not.toHaveBeenCalled();
+    expect(mockNeonSql).not.toHaveBeenCalled();
   });
 
-  it('refunds monthly tokens atomically via transaction', async () => {
+  it('refunds monthly tokens via CTE statement', async () => {
     const { refundTokens } = await import('../service');
 
     mockWhere.mockReturnValueOnce(chainableWhere());
@@ -411,13 +411,11 @@ describe('refundTokens', () => {
     const result = await refundTokens('user-1', 'usage-1');
 
     expect(result.refunded).toBe(true);
+    // 2 neonSql calls: setClause fragment + CTE query
     expect(mockNeonSql).toHaveBeenCalledTimes(2);
-    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
-    // Transaction receives exactly 2 statements (INSERT + UPDATE)
-    expect(mockNeonSql.transaction.mock.calls[0][0]).toHaveLength(2);
   });
 
-  it('builds transaction with INSERT...WHERE NOT EXISTS guard (idempotency at SQL level)', async () => {
+  it('uses CTE with INSERT...WHERE NOT EXISTS guard (idempotency at SQL level)', async () => {
     const { refundTokens } = await import('../service');
 
     mockWhere.mockReturnValueOnce(chainableWhere());
@@ -425,17 +423,16 @@ describe('refundTokens', () => {
       id: 'usage-dup', userId: 'user-1', tokens: 20, source: 'addon', provider: 'anthropic',
     }]);
 
-    // Transaction always runs — the WHERE NOT EXISTS / EXISTS guards
-    // inside the SQL prevent actual changes when already refunded.
+    // CTE always runs — the WHERE NOT EXISTS / RETURNING guard inside the
+    // SQL prevents the UPDATE when the INSERT is a no-op.
     // True idempotency testing requires integration tests against a real DB.
     const result = await refundTokens('user-1', 'usage-dup');
 
     expect(result.refunded).toBe(true); // function always returns true when record exists
-    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
-    expect(mockNeonSql.transaction.mock.calls[0][0]).toHaveLength(2);
+    expect(mockNeonSql).toHaveBeenCalledTimes(2);
   });
 
-  it('refunds addon tokens atomically', async () => {
+  it('refunds addon tokens via CTE statement', async () => {
     const { refundTokens } = await import('../service');
 
     mockWhere.mockReturnValueOnce(chainableWhere());
@@ -446,11 +443,10 @@ describe('refundTokens', () => {
     const result = await refundTokens('user-1', 'usage-2');
 
     expect(result.refunded).toBe(true);
-    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
-    expect(mockNeonSql.transaction.mock.calls[0][0]).toHaveLength(2);
+    expect(mockNeonSql).toHaveBeenCalledTimes(2);
   });
 
-  it('refunds mixed source to addon atomically', async () => {
+  it('refunds mixed source to addon via CTE statement', async () => {
     const { refundTokens } = await import('../service');
 
     mockWhere.mockReturnValueOnce(chainableWhere());
@@ -461,8 +457,7 @@ describe('refundTokens', () => {
     const result = await refundTokens('user-1', 'usage-3');
 
     expect(result.refunded).toBe(true);
-    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
-    expect(mockNeonSql.transaction.mock.calls[0][0]).toHaveLength(2);
+    expect(mockNeonSql).toHaveBeenCalledTimes(2);
   });
 
   it('returns refunded:false for free usageId', async () => {
@@ -478,7 +473,7 @@ describe('refundTokens', () => {
     expect(result.refunded).toBe(false);
   });
 
-  it('propagates transaction errors to caller', async () => {
+  it('propagates CTE errors to caller', async () => {
     const { refundTokens } = await import('../service');
 
     mockWhere.mockReturnValueOnce(chainableWhere());
@@ -486,9 +481,82 @@ describe('refundTokens', () => {
       id: 'usage-err', userId: 'user-1', tokens: 10, source: 'addon', provider: 'anthropic',
     }]);
 
-    mockNeonSql.transaction.mockRejectedValueOnce(new Error('connection reset'));
+    // First call builds the setClause fragment, second is the CTE execution
+    mockNeonSql
+      .mockResolvedValueOnce([]) // setClause fragment
+      .mockRejectedValueOnce(new Error('connection reset')); // CTE execution
 
     await expect(refundTokens('user-1', 'usage-err')).rejects.toThrow('connection reset');
+  });
+});
+
+describe('refundTokenAmount', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    resetChain();
+  });
+
+  it('skips refund when tokens <= 0', async () => {
+    const { refundTokenAmount } = await import('../service');
+
+    await refundTokenAmount('user-1', 0, 'no-op');
+
+    expect(mockNeonSql).not.toHaveBeenCalled();
+    expect(mockNeonSql.transaction).not.toHaveBeenCalled();
+  });
+
+  it('uses CTE for idempotent refund when usageId is provided', async () => {
+    const { refundTokenAmount } = await import('../service');
+
+    // Mock the source lookup
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{ source: 'addon' }]);
+
+    await refundTokenAmount('user-1', 50, 'partial failure', 'usage-123');
+
+    // 2 neonSql calls: setClause fragment + CTE query (not transaction)
+    expect(mockNeonSql).toHaveBeenCalledTimes(2);
+    expect(mockNeonSql.transaction).not.toHaveBeenCalled();
+  });
+
+  it('uses transaction for non-idempotent refund without usageId', async () => {
+    const { refundTokenAmount } = await import('../service');
+
+    mockNeonSql.transaction.mockResolvedValue(undefined);
+
+    await refundTokenAmount('user-1', 25, 'error recovery');
+
+    // 3 neonSql calls: setClause fragment + 2 transaction statements
+    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
+    expect(mockNeonSql.transaction.mock.calls[0][0]).toHaveLength(2);
+  });
+
+  it('looks up original source from usage record', async () => {
+    const { refundTokenAmount } = await import('../service');
+
+    // Mock: usage record has monthly source
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{ source: 'monthly' }]);
+
+    await refundTokenAmount('user-1', 30, 'batch fail', 'usage-monthly');
+
+    expect(mockSelect).toHaveBeenCalled();
+    // 2 neonSql calls: setClause fragment + CTE query
+    expect(mockNeonSql).toHaveBeenCalledTimes(2);
+  });
+
+  it('defaults to addon source when usage record not found', async () => {
+    const { refundTokenAmount } = await import('../service');
+
+    // Mock: no usage record found
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([]);
+
+    await refundTokenAmount('user-1', 20, 'fallback', 'usage-gone');
+
+    // 2 neonSql calls: setClause fragment + CTE query (defaults to addon pool)
+    expect(mockNeonSql).toHaveBeenCalledTimes(2);
   });
 });
 

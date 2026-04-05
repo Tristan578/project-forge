@@ -451,7 +451,7 @@ describe('refundCredits', () => {
 
     const result = await refundCredits('user-uuid-1', 0, 'txn-1');
     expect(result.success).toBe(true);
-    expect(mockNeonSqlFn.transaction).not.toHaveBeenCalled();
+    expect(mockNeonSqlFn).not.toHaveBeenCalled();
   });
 
   it('returns success=true immediately for negative amount', async () => {
@@ -459,12 +459,12 @@ describe('refundCredits', () => {
 
     const result = await refundCredits('user-uuid-1', -10, 'txn-2');
     expect(result.success).toBe(true);
-    expect(mockNeonSqlFn.transaction).not.toHaveBeenCalled();
+    expect(mockNeonSqlFn).not.toHaveBeenCalled();
   });
 
-  it('adds refund atomically via neonSql.transaction with idempotency guard', async () => {
+  it('adds refund atomically via CTE with idempotency guard', async () => {
     mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 50, earnedCredits: 0 });
-    // After transaction, getBalance reads updated user
+    // After CTE, getBalance reads updated user
     const updatedUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 150, earnedCredits: 0 });
     let selectCallCount = 0;
     mockSelect.mockImplementation(() => {
@@ -476,9 +476,8 @@ describe('refundCredits', () => {
     const result = await refundCredits('user-uuid-1', 100, 'txn-3');
 
     expect(result.success).toBe(true);
-    // Uses neonSql.transaction with 2 statements (INSERT audit + UPDATE balance)
-    expect(mockNeonSqlFn.transaction).toHaveBeenCalledOnce();
-    expect(mockNeonSqlFn.transaction.mock.calls[0][0]).toHaveLength(2);
+    // Uses a single CTE statement (INSERT + UPDATE in one query)
+    expect(mockNeonSqlFn).toHaveBeenCalledOnce();
   });
 
   it('throws when user does not exist', async () => {

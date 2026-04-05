@@ -45,7 +45,7 @@ export async function deductCredits(
 
   const neonSql = getNeonSql();
 
-  // Atomic waterfall deduction + audit trail in a single transaction (PF-996).
+  // Atomic waterfall deduction via a single UPDATE...WHERE...RETURNING (PF-996).
   //
   // The UPDATE's WHERE clause includes the balance check so concurrent requests
   // cannot both pass: only one UPDATE succeeds when balance is at the limit.
@@ -55,11 +55,9 @@ export async function deductCredits(
   //   2. Then from addon_tokens
   //   3. Then from earned_credits
   //
-  // The audit INSERT uses INSERT...SELECT from the UPDATED row so balance_after
-  // is computed from post-deduction state at execution time.
-  //
-  // Both statements are in a single neonSql.transaction() so if the audit
-  // INSERT fails, the deduction is also rolled back (no lost audit trail).
+  // The audit INSERT runs as a separate statement after the UPDATE. If the audit
+  // INSERT fails, the deduction still stands — the worst case is a missing audit
+  // row (not a financial loss), recoverable via admin tooling.
   const rows = await neonSql`
     UPDATE users
     SET
@@ -161,15 +159,15 @@ export async function refundCredits(
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!user) throw new Error(`User not found: ${userId}`);
 
-  // Atomic refund: credit balance + audit trail in a single transaction (PF-996).
-  // INSERT...SELECT with WHERE NOT EXISTS prevents double-refund on concurrent
-  // requests (idempotency via reference_id). The UPDATE uses EXISTS to only
-  // credit if the INSERT succeeded (same pattern as service.ts refundTokens).
+  // Atomic idempotent refund using a CTE (PF-996).
+  // The CTE INSERT only succeeds if no refund for this transactionId exists yet
+  // (WHERE NOT EXISTS). The UPDATE's WHERE depends on the CTE's RETURNING output,
+  // so it only runs when the INSERT actually inserted a row — NOT when a
+  // pre-existing refund row happens to match. This prevents double-crediting.
   const neonSql = getNeonSql();
 
-  await neonSql.transaction([
-    // 1. Audit: insert refund record only if no refund for this transactionId exists
-    neonSql`
+  await neonSql`
+    WITH ins AS (
       INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
       SELECT ${userId}, 'refund', ${amount},
              GREATEST(0, monthly_tokens - monthly_tokens_used) + addon_tokens + ${amount} + earned_credits,
@@ -181,21 +179,14 @@ export async function refundCredits(
             AND transaction_type = 'refund'
             AND reference_id = ${transactionId}
         )
-    `,
-    // 2. Credit: restore to addon pool only if the audit INSERT above succeeded
-    neonSql`
-      UPDATE users
-      SET addon_tokens = addon_tokens + ${amount},
-          updated_at = NOW()
-      WHERE id = ${userId}
-        AND EXISTS (
-          SELECT 1 FROM credit_transactions
-          WHERE user_id = ${userId}
-            AND transaction_type = 'refund'
-            AND reference_id = ${transactionId}
-        )
-    `,
-  ]);
+      RETURNING id
+    )
+    UPDATE users
+    SET addon_tokens = addon_tokens + ${amount},
+        updated_at = NOW()
+    WHERE id = ${userId}
+      AND EXISTS (SELECT 1 FROM ins)
+  `;
 
   const balance = await getBalance(userId);
   return { success: true, balance };
