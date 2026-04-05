@@ -721,10 +721,6 @@ jobs:
       - run: npm ci
         if: steps.check-design.outputs.changed == 'true'
 
-      - name: Build @spawnforge/ui
-        if: steps.check-design.outputs.changed == 'true'
-        run: cd packages/ui && npm run build
-
       - name: Sync vendored UI for Storybook
         if: steps.check-design.outputs.changed == 'true'
         run: bash apps/design/scripts/sync-vendored-ui.sh
