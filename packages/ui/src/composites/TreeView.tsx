@@ -1,4 +1,4 @@
-import { useState, useCallback, type ReactNode, type KeyboardEvent } from 'react';
+import { useState, useCallback, useMemo, type ReactNode, type KeyboardEvent } from 'react';
 import { cn } from '../utils/cn';
 
 export interface TreeNode {
@@ -73,7 +73,7 @@ function TreeItem({
               e.stopPropagation();
               onToggleExpand(node.id);
             }}
-            aria-label={isExpanded ? 'Collapse' : 'Expand'}
+            aria-label={isExpanded ? `Collapse ${node.label}` : `Expand ${node.label}`}
             className="w-4 h-4 flex items-center justify-center shrink-0"
             style={{ color: 'var(--sf-text-muted)' }}
           >
@@ -120,9 +120,10 @@ export function TreeView({
 }: TreeViewProps) {
   const [internalExpanded, setInternalExpanded] = useState<Set<string>>(new Set());
 
-  const expandedSet = controlledExpandedIds
-    ? new Set(controlledExpandedIds)
-    : internalExpanded;
+  const expandedSet = useMemo(
+    () => controlledExpandedIds ? new Set(controlledExpandedIds) : internalExpanded,
+    [controlledExpandedIds, internalExpanded],
+  );
 
   const handleToggle = useCallback(
     (id: string) => {

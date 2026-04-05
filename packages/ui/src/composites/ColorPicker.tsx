@@ -21,6 +21,13 @@ export function ColorPicker({
   const id = useId();
   const [textValue, setTextValue] = useState(value);
 
+  // Sync textValue when parent changes the value prop
+  const [prevValue, setPrevValue] = useState(value);
+  if (prevValue !== value) {
+    setPrevValue(value);
+    setTextValue(value);
+  }
+
   const handleTextChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const raw = e.target.value;
