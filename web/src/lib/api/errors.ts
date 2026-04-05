@@ -72,6 +72,8 @@ export enum ErrorCode {
   RATE_LIMITED = 'RATE_LIMITED',
   INTERNAL_ERROR = 'INTERNAL_ERROR',
   SERVICE_UNAVAILABLE = 'SERVICE_UNAVAILABLE',
+  DB_CIRCUIT_OPEN = 'DB_CIRCUIT_OPEN',
+  DB_RATE_LIMITED = 'DB_RATE_LIMITED',
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +146,37 @@ export const internalError = (message = 'Internal server error') =>
 /** 503 — service unavailable */
 export const serviceUnavailable = (message: string) =>
   createErrorResponse(503, message, { code: ErrorCode.SERVICE_UNAVAILABLE });
+
+/**
+ * Check if an error is a DB resilience error (circuit breaker open or rate limited)
+ * and return a 503 response with retryAfter header. Returns null if the error
+ * is not a DB resilience error and should be handled elsewhere.
+ */
+export function handleDbError(error: unknown): NextResponse | null {
+  if (
+    error instanceof Error &&
+    error.name === 'CircuitBreakerOpenError'
+  ) {
+    return createErrorResponse(503, 'Database temporarily unavailable', {
+      code: ErrorCode.DB_CIRCUIT_OPEN,
+      details: { retryAfter: 30 },
+      headers: { 'Retry-After': '30' },
+    });
+  }
+
+  if (
+    error instanceof Error &&
+    error.name === 'DbRateLimitError'
+  ) {
+    return createErrorResponse(503, 'Database temporarily unavailable — too many requests', {
+      code: ErrorCode.DB_RATE_LIMITED,
+      details: { retryAfter: 5 },
+      headers: { 'Retry-After': '5' },
+    });
+  }
+
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Legacy compat (existing code references this)
