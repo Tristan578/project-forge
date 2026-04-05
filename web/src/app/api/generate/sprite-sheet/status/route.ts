@@ -20,13 +20,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing jobId parameter' }, { status: 400 });
   }
 
-  // Placeholder sprite sheets (from stub implementation) complete instantly
+  // Client-side sprite sheet imports use spritesheet_ prefixed IDs and complete
+  // instantly (no server-side generation). Return completed so the UI doesn't
+  // show a false failure state (#8184).
   if (jobId.startsWith('spritesheet_')) {
     return NextResponse.json({
       jobId,
-      status: 'failed',
-      progress: 0,
-      error: 'Sprite sheet generation is not yet available with the current provider',
+      status: 'completed',
+      progress: 100,
     });
   }
 

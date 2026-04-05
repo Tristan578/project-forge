@@ -53,13 +53,12 @@ describe('GET /api/generate/sprite-sheet/status', () => {
     expect(data.error).toBe('Missing jobId parameter');
   });
 
-  it('returns failed immediately for spritesheet_ prefixed jobIds', async () => {
+  it('returns completed for spritesheet_ prefixed jobIds (client-side imports)', async () => {
     const res = await GET(makeRequest('spritesheet_abc123'));
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.status).toBe('failed');
-    expect(data.progress).toBe(0);
-    expect(data.error).toContain('not yet available');
+    expect(data.status).toBe('completed');
+    expect(data.progress).toBe(100);
   });
 
   it('returns 402 when API key resolution fails', async () => {
