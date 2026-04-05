@@ -6,7 +6,7 @@ import nextTs from "eslint-config-next/typescript";
 // Pattern: bg-zinc-800, text-gray-300, border-slate-500, etc.
 // These should be replaced with CSS custom property references (e.g., bg-[var(--sf-bg-surface)]).
 const HARDCODED_COLOR_RE =
-  /\b(?:bg|text|border|ring|outline|shadow|divide|from|via|to|placeholder|decoration|accent|caret|fill|stroke)-(?:zinc|gray|slate|stone|neutral|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(?:50|100|200|300|400|500|600|700|800|900|950)\b/;
+  /\b(?:bg|text|border|ring|outline|shadow|divide|from|via|to|placeholder|decoration|accent|caret|fill|stroke)-(?:zinc|gray|slate|stone|neutral|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(?:50|100|200|300|400|500|600|700|800|900|950)\b/g;
 
 const noHardcodedPrimitives = {
   meta: {
@@ -16,8 +16,10 @@ const noHardcodedPrimitives = {
   },
   create(context) {
     function check(node, value) {
-      const match = HARDCODED_COLOR_RE.exec(value);
-      if (match) {
+      // Reset lastIndex since the regex has the global flag.
+      HARDCODED_COLOR_RE.lastIndex = 0;
+      let match;
+      while ((match = HARDCODED_COLOR_RE.exec(value)) !== null) {
         context.report({
           node,
           message: `Hardcoded Tailwind color '${match[0]}' — use a CSS custom property (e.g., bg-[var(--sf-bg-surface)]) or semantic token class instead.`,
@@ -38,9 +40,7 @@ const noHardcodedPrimitives = {
       // Template literals inside cn(), clsx(), or className={`...`}
       TemplateLiteral(node) {
         for (const quasi of node.quasis) {
-          if (HARDCODED_COLOR_RE.test(quasi.value.raw)) {
-            check(quasi, quasi.value.raw);
-          }
+          check(quasi, quasi.value.raw);
         }
       },
     };
