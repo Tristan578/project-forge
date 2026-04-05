@@ -1,0 +1,41 @@
+name: Chromatic Accept Baselines
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to accept baselines for'
+        required: true
+        type: string
+
+jobs:
+  accept:
+    name: Accept Chromatic Baselines
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      - name: Install design app dependencies
+        run: cd apps/design && npm ci
+
+      - name: Run Chromatic with auto-accept
+        run: cd apps/design && npx chromatic --auto-accept-changes --exit-zero-on-changes
+        env:
+          CHROMATIC_PROJECT_TOKEN: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
