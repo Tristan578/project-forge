@@ -11,11 +11,11 @@ function TypographyReference() {
           Font Families
         </h3>
         {Object.entries(FONT_FAMILY).map(([key, value]) => (
-          <div key={key} className="mb-3" style={{ '--ff': value } as React.CSSProperties}>
+          <div key={key} className="mb-3" style={{ '--demo-ff': value } as React.CSSProperties}>
             <div className="font-mono text-xs opacity-50 mb-1">
               FONT_FAMILY.{key}
             </div>
-            <div className="font-[family-name:var(--ff)] text-lg">
+            <div className="font-[family-name:var(--demo-ff)] text-lg">
               The quick brown fox jumps over the lazy dog
             </div>
           </div>
@@ -30,7 +30,7 @@ function TypographyReference() {
           <div
             key={key}
             className="flex items-baseline gap-4 mb-2"
-            style={{ '--fs': value } as React.CSSProperties}
+            style={{ '--demo-fs': value } as React.CSSProperties}
           >
             <div className="w-[100px] font-mono text-xs opacity-50">
               FONT_SIZE.{key}
@@ -38,7 +38,7 @@ function TypographyReference() {
             <div className="w-[60px] font-mono text-xs opacity-50">
               {value}
             </div>
-            <div className="text-[length:var(--fs)]">
+            <div className="text-[length:var(--demo-fs)]">
               Sample text at {key}
             </div>
           </div>
@@ -53,7 +53,7 @@ function TypographyReference() {
           <div
             key={key}
             className="flex items-baseline gap-4 mb-2"
-            style={{ '--fw': value } as React.CSSProperties}
+            style={{ '--demo-fw': value } as React.CSSProperties}
           >
             <div className="w-[100px] font-mono text-xs opacity-50">
               FONT_WEIGHT.{key}
@@ -61,7 +61,7 @@ function TypographyReference() {
             <div className="w-[40px] font-mono text-xs opacity-50">
               {value}
             </div>
-            <div className="font-[number:var(--fw)] text-lg">
+            <div className="font-[number:var(--demo-fw)] text-lg">
               Sample text at {key} weight
             </div>
           </div>

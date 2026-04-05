@@ -10,9 +10,9 @@ function RadiusReference() {
           <div
             key={key}
             className="text-center"
-            style={{ '--r': value } as React.CSSProperties}
+            style={{ '--demo-r': value } as React.CSSProperties}
           >
-            <div className="w-20 h-20 bg-[var(--sf-accent)] rounded-[var(--r)] mb-2" />
+            <div className="w-20 h-20 bg-[var(--sf-accent)] rounded-[var(--demo-r)] mb-2" />
             <div className="font-mono text-xs">RADIUS.{key}</div>
             <div className="font-mono text-[11px] opacity-60">{value}</div>
           </div>

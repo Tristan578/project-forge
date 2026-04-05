@@ -10,7 +10,7 @@ function SpacingScale() {
           <div
             key={key}
             className="flex items-center gap-4"
-            style={{ '--w': value } as React.CSSProperties}
+            style={{ '--demo-w': value } as React.CSSProperties}
           >
             <div className="w-[80px] font-mono text-[13px]">
               SPACING.{key}
@@ -18,7 +18,7 @@ function SpacingScale() {
             <div className="w-[50px] font-mono text-[13px] opacity-60">
               {value}
             </div>
-            <div className="h-6 w-[var(--w)] rounded bg-[var(--sf-accent)] transition-[width] duration-200" />
+            <div className="h-6 w-[var(--demo-w)] rounded bg-[var(--sf-accent)] transition-[width] duration-200" />
           </div>
         ))}
       </div>
