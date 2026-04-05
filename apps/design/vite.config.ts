@@ -7,4 +7,7 @@ import react from '@vitejs/plugin-react';
 // without importing React explicitly.
 export default defineConfig({
   plugins: [react()],
+  build: {
+    target: 'es2022',
+  },
 });

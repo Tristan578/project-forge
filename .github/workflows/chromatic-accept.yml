@@ -29,11 +29,8 @@ jobs:
 
       - run: npm ci
 
-      - name: Build @spawnforge/ui
-        run: cd packages/ui && npm run build
-
-      - name: Install design app dependencies
-        run: cd apps/design && npm ci
+      - name: Sync vendored UI for Storybook
+        run: bash apps/design/scripts/sync-vendored-ui.sh
 
       - name: Run Chromatic with auto-accept
         run: cd apps/design && npx chromatic --auto-accept-changes --exit-zero-on-changes

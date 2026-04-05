@@ -677,3 +677,73 @@ jobs:
             exit 1
           fi
           echo "PASS: No internal story titles found in public Storybook build."
+
+  chromatic:
+    name: Chromatic Visual Regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch main branch for merge-base
+        run: git fetch --no-tags --prune origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Check if design system files changed
+        id: check-design
+        run: |
+          # workflow_call doesn't populate github.event.pull_request —
+          # compare HEAD against an explicitly fetched origin/main ref.
+          MERGE_BASE=$(git merge-base refs/remotes/origin/main HEAD 2>/dev/null || true)
+          if [ -z "$MERGE_BASE" ]; then
+            echo "Unable to determine merge base with origin/main — running Chromatic to avoid a false skip"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only "$MERGE_BASE" HEAD 2>/dev/null || echo "")
+          if echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No design system changes — skipping Chromatic"
+          fi
+
+      - uses: actions/setup-node@v6
+        if: steps.check-design.outputs.changed == 'true'
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+        if: steps.check-design.outputs.changed == 'true'
+
+      - name: Sync vendored UI for Storybook
+        if: steps.check-design.outputs.changed == 'true'
+        run: bash apps/design/scripts/sync-vendored-ui.sh
+
+      - name: Check Chromatic token
+        id: check-token
+        if: steps.check-design.outputs.changed == 'true'
+        env:
+          CHROMATIC_TOKEN: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
+        run: |
+          if [ -n "$CHROMATIC_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "CHROMATIC_PROJECT_TOKEN not set — skipping Chromatic"
+          fi
+
+      - name: Run Chromatic
+        if: steps.check-design.outputs.changed == 'true' && steps.check-token.outputs.available == 'true'
+        uses: chromaui/action@v16
+        with:
+          projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
+          workingDir: apps/design
+          exitZeroOnChanges: true
+          exitOnceUploaded: true
+          onlyChanged: true

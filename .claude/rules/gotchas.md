@@ -19,6 +19,8 @@ These are lower-frequency gotchas moved from CLAUDE.md. The most common ones rem
 - **E2E CI uses `next start` not `next dev`** — `next dev` cold-compiles 2-3 min. Requires `playwright.ci.config.ts`.
 - **Sentry/Copilot re-review on every push** — Fix ALL issues in ONE commit, run `security-reviewer` BEFORE pushing.
 - **Vitest 4.x jest-dom matcher registration** — Use explicit `expect.extend(matchers)` in vitest.setup.ts.
+- **Storybook build target is `es2022`** — `apps/design/vite.config.ts` sets `build.target: 'es2022'`. Do NOT use `esnext` (not a real target) or legacy targets like `safari14` (esbuild 0.28 can't transform destructuring for it). No legacy browser support for internal tooling.
+- **`secrets` context forbidden in workflow_call step `if:`** — Use an env var in a prior step and check step outputs instead. GitHub Actions only allows `env`, `github`, `inputs`, `steps` etc. in step conditions inside reusable workflows.
 
 ## Database
 - **`onConflictDoUpdate` field completeness** — List EVERY mutable field in `.set()`. Missing fields keep original values.
