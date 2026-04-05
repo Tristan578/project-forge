@@ -50,6 +50,11 @@ export async function resilientFetch(
 
   await new Promise((r) => setTimeout(r, retryAfterMs));
 
-  // Single retry attempt
+  // Single retry attempt — re-create request to ensure body is fresh.
+  // If input is a Request, clone it; otherwise re-use input+init (string/URL
+  // bodies in init are not consumed by fetch).
+  if (input instanceof Request) {
+    return fetch(input.clone(), init);
+  }
   return fetch(input, init);
 }
