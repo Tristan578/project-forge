@@ -71,6 +71,7 @@ const mockNeonSql = Object.assign(
 vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn(() => mockDb),
   getNeonSql: vi.fn(() => mockNeonSql),
+  queryWithResilience: vi.fn((fn: () => Promise<unknown>) => fn()),
 }));
 
 vi.mock('@/lib/db/schema', () => ({

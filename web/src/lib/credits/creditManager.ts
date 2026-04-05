@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { getDb, getNeonSql } from '../db/client';
+import { getDb, getNeonSql, queryWithResilience } from '../db/client';
 import { users } from '../db/schema';
 import { TIER_MONTHLY_TOKENS } from '../tokens/pricing';
 
@@ -12,8 +12,9 @@ export interface CreditBalance {
 
 /** Get the 3-pool credit balance for a user */
 export async function getBalance(userId: string): Promise<CreditBalance> {
-  const db = getDb();
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const [user] = await queryWithResilience(() =>
+    getDb().select().from(users).where(eq(users.id, userId)).limit(1)
+  );
   if (!user) throw new Error(`User not found: ${userId}`);
 
   const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
@@ -58,47 +59,50 @@ export async function deductCredits(
   // The audit INSERT runs as a separate statement after the UPDATE. If the audit
   // INSERT fails, the deduction still stands — the worst case is a missing audit
   // row (not a financial loss), recoverable via admin tooling.
-  const rows = await neonSql`
-    UPDATE users
-    SET
-      monthly_tokens_used = monthly_tokens_used
-        + LEAST(
-            ${amount},
-            GREATEST(0, monthly_tokens - monthly_tokens_used)
-          ),
-      addon_tokens = addon_tokens
-        - LEAST(
-            GREATEST(0, ${amount} - GREATEST(0, monthly_tokens - monthly_tokens_used)),
-            addon_tokens
-          ),
-      earned_credits = earned_credits
-        - LEAST(
-            GREATEST(0,
-              ${amount}
-              - GREATEST(0, monthly_tokens - monthly_tokens_used)
-              - addon_tokens
+  const rows = await queryWithResilience(() =>
+    neonSql`
+      UPDATE users
+      SET
+        monthly_tokens_used = monthly_tokens_used
+          + LEAST(
+              ${amount},
+              GREATEST(0, monthly_tokens - monthly_tokens_used)
             ),
-            earned_credits
-          ),
-      updated_at = NOW()
-    WHERE
-      id = ${userId}
-      AND GREATEST(0, monthly_tokens - monthly_tokens_used)
-            + addon_tokens
-            + earned_credits >= ${amount}
-    RETURNING
-      id,
-      monthly_tokens,
-      monthly_tokens_used,
-      addon_tokens,
-      earned_credits
-  `;
+        addon_tokens = addon_tokens
+          - LEAST(
+              GREATEST(0, ${amount} - GREATEST(0, monthly_tokens - monthly_tokens_used)),
+              addon_tokens
+            ),
+        earned_credits = earned_credits
+          - LEAST(
+              GREATEST(0,
+                ${amount}
+                - GREATEST(0, monthly_tokens - monthly_tokens_used)
+                - addon_tokens
+              ),
+              earned_credits
+            ),
+        updated_at = NOW()
+      WHERE
+        id = ${userId}
+        AND GREATEST(0, monthly_tokens - monthly_tokens_used)
+              + addon_tokens
+              + earned_credits >= ${amount}
+      RETURNING
+        id,
+        monthly_tokens,
+        monthly_tokens_used,
+        addon_tokens,
+        earned_credits
+    `
+  );
 
   if (rows.length === 0) {
     // Either user not found or insufficient balance.
     // Check which it is so we can give a correct response.
-    const db = getDb();
-    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const [user] = await queryWithResilience(() =>
+      getDb().select().from(users).where(eq(users.id, userId)).limit(1)
+    );
     if (!user) throw new Error(`User not found: ${userId}`);
 
     const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
@@ -133,10 +137,12 @@ export async function deductCredits(
   // via RETURNING. Since the deduction uses WHERE guards, the worst case
   // if the audit INSERT fails is a missing audit row (not a financial loss).
   // We use neonSql here for consistency with the raw SQL UPDATE above.
-  await neonSql`
-    INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source)
-    VALUES (${userId}, 'deduction', ${-amount}, ${balance.total}, ${actionType})
-  `;
+  await queryWithResilience(() =>
+    neonSql`
+      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source)
+      VALUES (${userId}, 'deduction', ${-amount}, ${balance.total}, ${actionType})
+    `
+  );
 
   return { success: true, balance };
 }
@@ -155,8 +161,9 @@ export async function refundCredits(
     return { success: true, balance: await getBalance(userId) };
   }
 
-  const db = getDb();
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const [user] = await queryWithResilience(() =>
+    getDb().select().from(users).where(eq(users.id, userId)).limit(1)
+  );
   if (!user) throw new Error(`User not found: ${userId}`);
 
   // Atomic idempotent refund using a CTE (PF-996).
@@ -166,7 +173,8 @@ export async function refundCredits(
   // pre-existing refund row happens to match. This prevents double-crediting.
   const neonSql = getNeonSql();
 
-  await neonSql`
+  await queryWithResilience(() =>
+    neonSql`
     WITH ins AS (
       INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
       SELECT ${userId}, 'refund', ${amount},
@@ -186,7 +194,8 @@ export async function refundCredits(
         updated_at = NOW()
     WHERE id = ${userId}
       AND EXISTS (SELECT 1 FROM ins)
-  `;
+    `
+  );
 
   const balance = await getBalance(userId);
   return { success: true, balance };
@@ -203,23 +212,25 @@ export async function grantMonthlyCredits(
 
   // All mutations atomic via neonSql.transaction() (PF-996).
   // INSERT before UPDATE so balance_after reads pre-grant addon_tokens.
-  await neonSql.transaction([
-    neonSql`
-      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source)
-      SELECT ${userId}, 'monthly_grant', ${allocation},
-             ${allocation} + addon_tokens + earned_credits,
-             ${tierId}
-      FROM users WHERE id = ${userId}
-    `,
-    neonSql`
-      UPDATE users
-      SET monthly_tokens      = ${allocation},
-          monthly_tokens_used = 0,
-          billing_cycle_start = ${now},
-          updated_at          = ${now}
-      WHERE id = ${userId}
-    `,
-  ]);
+  await queryWithResilience(() =>
+    neonSql.transaction([
+      neonSql`
+        INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source)
+        SELECT ${userId}, 'monthly_grant', ${allocation},
+               ${allocation} + addon_tokens + earned_credits,
+               ${tierId}
+        FROM users WHERE id = ${userId}
+      `,
+      neonSql`
+        UPDATE users
+        SET monthly_tokens      = ${allocation},
+            monthly_tokens_used = 0,
+            billing_cycle_start = ${now},
+            updated_at          = ${now}
+        WHERE id = ${userId}
+      `,
+    ])
+  );
 }
 
 /**
@@ -234,8 +245,9 @@ export async function processRollover(
   userId: string,
   tierId: string
 ): Promise<void> {
-  const db = getDb();
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const [user] = await queryWithResilience(() =>
+    getDb().select().from(users).where(eq(users.id, userId)).limit(1)
+  );
   if (!user) return;
 
   const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
@@ -250,23 +262,25 @@ export async function processRollover(
   // All mutations atomic. INSERT before UPDATE so balance_after reads
   // pre-rollover addon_tokens. Rollover amount computed in SQL at execution
   // time to prevent stale snapshot races.
-  await neonSql.transaction([
-    neonSql`
-      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source)
-      SELECT ${userId}, 'rollover',
-             LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${cap}),
-             GREATEST(0, monthly_tokens - monthly_tokens_used) + addon_tokens + earned_credits
-               + LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${cap}),
-             ${tierId}
-      FROM users WHERE id = ${userId}
-        AND GREATEST(0, monthly_tokens - monthly_tokens_used) > 0
-    `,
-    neonSql`
-      UPDATE users
-      SET addon_tokens = addon_tokens + LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${cap}),
-          updated_at   = ${now}
-      WHERE id = ${userId}
-        AND GREATEST(0, monthly_tokens - monthly_tokens_used) > 0
-    `,
-  ]);
+  await queryWithResilience(() =>
+    neonSql.transaction([
+      neonSql`
+        INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source)
+        SELECT ${userId}, 'rollover',
+               LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${cap}),
+               GREATEST(0, monthly_tokens - monthly_tokens_used) + addon_tokens + earned_credits
+                 + LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${cap}),
+               ${tierId}
+        FROM users WHERE id = ${userId}
+          AND GREATEST(0, monthly_tokens - monthly_tokens_used) > 0
+      `,
+      neonSql`
+        UPDATE users
+        SET addon_tokens = addon_tokens + LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${cap}),
+            updated_at   = ${now}
+        WHERE id = ${userId}
+          AND GREATEST(0, monthly_tokens - monthly_tokens_used) > 0
+      `,
+    ])
+  );
 }
