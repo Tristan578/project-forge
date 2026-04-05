@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { moderationAppeals } from '@/lib/db/schema';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { gameComments } from '@/lib/db/schema';
 import { inArray } from 'drizzle-orm';
 import { assertAdmin } from '@/lib/auth/api-auth';

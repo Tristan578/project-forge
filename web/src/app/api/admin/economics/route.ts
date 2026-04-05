@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { users, costLog, creditTransactions, tokenConfig, tierConfig } from '@/lib/db/schema';
 import { sql, count, sum, desc } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
