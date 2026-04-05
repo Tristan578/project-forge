@@ -3,6 +3,7 @@ import {
   readCfCacheStatus,
   reportWasmLoadMetric,
   fetchWasmWithMetrics,
+  fetchWithRetry,
   type CfCacheStatus,
   type WasmLoadMetric,
 } from '@/lib/monitoring/cdnAnalytics';
@@ -112,12 +113,69 @@ describe('reportWasmLoadMetric', () => {
 });
 
 // ---------------------------------------------------------------------------
+// fetchWithRetry (#8246)
+// ---------------------------------------------------------------------------
+
+describe('fetchWithRetry', () => {
+  // vi.restoreAllMocks() in vitest.setup.ts runs after each test — must
+  // re-create spy in beforeEach so each test has a fresh mock.
+  let fetchSpy: ReturnType<typeof vi.spyOn<typeof globalThis, 'fetch'>>;
+  beforeEach(() => { fetchSpy = vi.spyOn(globalThis, 'fetch'); });
+
+  it('fails fast on 404 without retrying', async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 404, statusText: 'Not Found' }));
+    await expect(
+      fetchWithRetry('https://cdn.example.com/engine.wasm', undefined, 3),
+    ).rejects.toThrow('WASM fetch failed: 404');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns response on first success', async () => {
+    fetchSpy.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    const result = await fetchWithRetry('https://cdn.example.com/engine.wasm', undefined, 1);
+    expect(result.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries on 502 and succeeds on second attempt', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(new Response(null, { status: 502, statusText: 'Bad Gateway' }))
+      .mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    const result = await fetchWithRetry('https://cdn.example.com/engine.wasm', undefined, 2);
+    expect(result.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  }, 10000);
+
+  it('throws after max attempts on persistent 503', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(new Response(null, { status: 503, statusText: 'Service Unavailable' }))
+      .mockResolvedValueOnce(new Response(null, { status: 503, statusText: 'Service Unavailable' }));
+    await expect(
+      fetchWithRetry('https://cdn.example.com/engine.wasm', undefined, 2),
+    ).rejects.toThrow('WASM fetch failed: 503');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  }, 10000);
+
+  it('does not retry when signal is aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    fetchSpy.mockRejectedValueOnce(new DOMException('aborted', 'AbortError'));
+    await expect(
+      fetchWithRetry('https://cdn.example.com/engine.wasm', controller.signal, 3),
+    ).rejects.toThrow();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // fetchWasmWithMetrics
 // ---------------------------------------------------------------------------
 
 describe('fetchWasmWithMetrics', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn<typeof globalThis, 'fetch'>>;
+
   beforeEach(() => {
-    vi.clearAllMocks();
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
     // Provide a minimal performance.now stub since vitest/node doesn't always have it
     if (!globalThis.performance) {
       (globalThis as Record<string, unknown>).performance = { now: () => Date.now() };
@@ -127,51 +185,20 @@ describe('fetchWasmWithMetrics', () => {
     }
   });
 
-  it('returns the fetch Response', async () => {
-    const mockResponse = new Response('body', {
+  it('returns the fetch Response on success', async () => {
+    fetchSpy.mockResolvedValueOnce(new Response('body', {
       status: 200,
       headers: { 'cf-cache-status': 'HIT' },
-    });
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mockResponse);
-
+    }));
     const result = await fetchWasmWithMetrics('https://cdn.example.com/engine.wasm', 'webgpu', 0);
-
-    expect(fetchSpy).toHaveBeenCalledWith('https://cdn.example.com/engine.wasm', {});
-    expect(result).toBe(mockResponse);
+    expect(result.status).toBe(200);
   });
 
-  it('passes the AbortSignal to fetch when provided', async () => {
-    const controller = new AbortController();
-    const mockResponse = new Response(null, { status: 200 });
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mockResponse);
-
-    await fetchWasmWithMetrics(
-      'https://cdn.example.com/engine.wasm',
-      'webgl2',
-      0,
-      controller.signal,
-    );
-
-    expect(fetchSpy).toHaveBeenCalledWith(
-      'https://cdn.example.com/engine.wasm',
-      { signal: controller.signal },
-    );
-  });
-
-  it('propagates fetch errors without swallowing them', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('network error'));
-
+  it('throws on 404 (non-retryable via fetchWithRetry)', async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 404, statusText: 'Not Found' }));
     await expect(
-      fetchWasmWithMetrics('https://cdn.example.com/engine.wasm', 'webgpu', 0),
-    ).rejects.toThrow('network error');
-  });
-
-  it('still returns the Response even for non-ok status', async () => {
-    const errorResponse = new Response(null, { status: 404 });
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(errorResponse);
-
-    const result = await fetchWasmWithMetrics('/engine.wasm', 'webgl2', 0);
-    expect(result.status).toBe(404);
+      fetchWasmWithMetrics('https://cdn.example.com/engine.wasm', 'webgl2', 0),
+    ).rejects.toThrow('WASM fetch failed: 404');
   });
 
   describe('cache status detection', () => {

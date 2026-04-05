@@ -95,24 +95,58 @@ export function reportWasmLoadMetric(metric: WasmLoadMetric): void {
  * @param backend - Which engine backend is being loaded
  * @param startTimeMs - performance.now() value from before the fetch started
  */
+/**
+ * Fetch with exponential backoff retry for transient failures (#8246).
+ *
+ * Retries on 5xx and network errors. Fails fast on 4xx (permanent errors).
+ * Respects AbortSignal — aborted fetches are never retried.
+ */
+export async function fetchWithRetry(
+  url: string,
+  signal: AbortSignal | undefined,
+  maxAttempts = 3,
+): Promise<Response> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const response = await fetch(url, signal ? { signal } : {});
+      if (response.ok) return response;
+      // 4xx = permanent error, fail fast (do NOT retry)
+      if (response.status < 500) {
+        throw new Error(`WASM fetch failed: ${response.status} ${response.statusText}`);
+      }
+      // 5xx = transient, retry
+      lastError = new Error(`WASM fetch failed: ${response.status} ${response.statusText}`);
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      const error = err instanceof Error ? err : new Error(String(err));
+      // Rethrow permanent (4xx) errors — only retry transient failures
+      if (error.message.startsWith('WASM fetch failed:')) throw error;
+      lastError = error;
+    }
+    if (attempt < maxAttempts - 1) {
+      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+    }
+  }
+  throw lastError!;
+}
+
 export async function fetchWasmWithMetrics(
   url: string,
   backend: 'webgpu' | 'webgl2',
   startTimeMs: number,
   signal?: AbortSignal,
 ): Promise<Response> {
-  const response = await fetch(url, signal ? { signal } : {});
+  const response = await fetchWithRetry(url, signal);
 
-  if (response.ok) {
-    const cacheStatus = readCfCacheStatus(response);
-    const fetchTimeMs = performance.now() - startTimeMs;
-    const cdnEnabled = !url.startsWith('/') && !url.startsWith(window.location.origin);
+  const cacheStatus = readCfCacheStatus(response);
+  const fetchTimeMs = performance.now() - startTimeMs;
+  const cdnEnabled = !url.startsWith('/') && !url.startsWith(window.location.origin);
 
-    // Schedule metric reporting without blocking the load path
-    queueMicrotask(() => {
-      reportWasmLoadMetric({ loadTimeMs: fetchTimeMs, backend, cacheStatus, cdnEnabled });
-    });
-  }
+  // Schedule metric reporting without blocking the load path
+  queueMicrotask(() => {
+    reportWasmLoadMetric({ loadTimeMs: fetchTimeMs, backend, cacheStatus, cdnEnabled });
+  });
 
   return response;
 }
