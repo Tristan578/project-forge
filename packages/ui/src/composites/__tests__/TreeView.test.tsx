@@ -28,7 +28,7 @@ describe('TreeView', () => {
   it('expands children on click', () => {
     render(<TreeView nodes={NODES} />);
     expect(screen.queryByText('Child 1')).toBeNull();
-    fireEvent.click(screen.getByLabelText('Expand'));
+    fireEvent.click(screen.getByLabelText('Expand Root'));
     expect(screen.getByText('Child 1')).not.toBeNull();
     expect(screen.getByText('Child 2')).not.toBeNull();
   });

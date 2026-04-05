@@ -118,16 +118,19 @@ export function TreeView({
   onToggleExpand: controlledOnToggle,
   className,
 }: TreeViewProps) {
-  const [internalExpanded, setInternalExpanded] = useState<Set<string>>(new Set());
+  const isControlled = controlledExpandedIds !== undefined && controlledOnToggle !== undefined;
+  const [internalExpanded, setInternalExpanded] = useState<Set<string>>(
+    () => controlledExpandedIds ? new Set(controlledExpandedIds) : new Set(),
+  );
 
   const expandedSet = useMemo(
-    () => controlledExpandedIds ? new Set(controlledExpandedIds) : internalExpanded,
-    [controlledExpandedIds, internalExpanded],
+    () => isControlled ? new Set(controlledExpandedIds) : internalExpanded,
+    [isControlled, controlledExpandedIds, internalExpanded],
   );
 
   const handleToggle = useCallback(
     (id: string) => {
-      if (controlledOnToggle) {
+      if (isControlled) {
         controlledOnToggle(id);
       } else {
         setInternalExpanded((prev) => {
@@ -141,7 +144,7 @@ export function TreeView({
         });
       }
     },
-    [controlledOnToggle]
+    [isControlled, controlledOnToggle]
   );
 
   return (
