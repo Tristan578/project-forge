@@ -29,7 +29,6 @@ const mockDb = { select: mockSelect };
 // Both paths now use a single CTE tagged template call (no .transaction()).
 // We track all calls via mockNeonSqlCalls and control return values via
 // mockNeonSqlCallResults.
-interface MockStatement { _type: 'neon_statement'; values: unknown[] }
 const mockNeonTransaction = vi.fn().mockResolvedValue([]);
 const mockNeonSqlCalls: { strings: TemplateStringsArray; values: unknown[] }[] = [];
 
