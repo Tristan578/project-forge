@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { FONT_FAMILY, FONT_SIZE, FONT_WEIGHT } from '@spawnforge/ui/tokens';
 import { DEMO_FONT_FAMILY, DEMO_FONT_SIZE, DEMO_FONT_WEIGHT } from './vars';
@@ -12,7 +13,7 @@ function TypographyReference() {
           Font Families
         </h3>
         {Object.entries(FONT_FAMILY).map(([key, value]) => (
-          <div key={key} className="mb-3" style={{ [DEMO_FONT_FAMILY]: value } as React.CSSProperties}>
+          <div key={key} className="mb-3" style={{ [DEMO_FONT_FAMILY]: value } as CSSProperties}>
             <div className="font-mono text-xs opacity-50 mb-1">
               FONT_FAMILY.{key}
             </div>
@@ -31,7 +32,7 @@ function TypographyReference() {
           <div
             key={key}
             className="flex items-baseline gap-4 mb-2"
-            style={{ [DEMO_FONT_SIZE]: value } as React.CSSProperties}
+            style={{ [DEMO_FONT_SIZE]: value } as CSSProperties}
           >
             <div className="w-[100px] font-mono text-xs opacity-50">
               FONT_SIZE.{key}
@@ -54,7 +55,7 @@ function TypographyReference() {
           <div
             key={key}
             className="flex items-baseline gap-4 mb-2"
-            style={{ [DEMO_FONT_WEIGHT]: value } as React.CSSProperties}
+            style={{ [DEMO_FONT_WEIGHT]: value } as CSSProperties}
           >
             <div className="w-[100px] font-mono text-xs opacity-50">
               FONT_WEIGHT.{key}

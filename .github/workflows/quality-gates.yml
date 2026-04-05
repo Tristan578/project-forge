@@ -680,7 +680,6 @@ jobs:
 
   chromatic:
     name: Chromatic Visual Regression
-    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -693,9 +692,10 @@ jobs:
       - name: Check if design system files changed
         id: check-design
         run: |
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || echo "")
+          # workflow_call doesn't populate github.event.pull_request —
+          # use origin/main as the merge base instead of PR SHAs.
+          MERGE_BASE=$(git merge-base origin/main HEAD 2>/dev/null || echo "HEAD~1")
+          CHANGED=$(git diff --name-only "$MERGE_BASE" HEAD 2>/dev/null || echo "")
           if echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/'; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else

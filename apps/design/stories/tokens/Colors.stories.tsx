@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { THEME_NAMES, THEME_DEFINITIONS, type ThemeName } from '@spawnforge/ui/tokens';
 import { DEMO_BG } from './vars';
@@ -7,7 +8,7 @@ function ColorSwatch({ token, value }: { token: string; value: string }) {
     <div className="flex items-center gap-3 py-1">
       <div
         className={`w-10 h-10 rounded-md border border-[var(--sf-border)] shrink-0 bg-[var(${DEMO_BG})]`}
-        style={{ [DEMO_BG]: value } as React.CSSProperties}
+        style={{ [DEMO_BG]: value } as CSSProperties}
       />
       <div>
         <div className="font-mono text-[13px]">{token}</div>

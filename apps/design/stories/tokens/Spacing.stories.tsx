@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { SPACING } from '@spawnforge/ui/tokens';
 import { DEMO_WIDTH } from './vars';
@@ -11,7 +12,7 @@ function SpacingScale() {
           <div
             key={key}
             className="flex items-center gap-4"
-            style={{ [DEMO_WIDTH]: value } as React.CSSProperties}
+            style={{ [DEMO_WIDTH]: value } as CSSProperties}
           >
             <div className="w-[80px] font-mono text-[13px]">
               SPACING.{key}
