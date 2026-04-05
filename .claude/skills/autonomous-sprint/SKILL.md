@@ -128,25 +128,20 @@ Move to the next item in the priority queue. Repeat the loop.
 
 Lessons from prior runs. **Boot sequence validates these against live state and deletes stale entries.**
 
-### Session 2026-04-05 (run 3)
-- **Specs written**: 3 P0 architecture specs (#8176 DB resilience, #8178 CDN redundancy, #8181 keyboard nav)
-- **Review board caught 5 issues across 3 specs**: Semaphore useless on Vercel serverless (arch), JS glue+WASM origin coupling (arch), Play mode double-dispatch (arch), CDN build pipeline gap (DX), missing gotchas.md updates (DX)
+### Session 2026-04-05 (run 4)
+- **Resolved**: All 11 Copilot + 2 Sentry comments on PR #8232 with commit SHAs and fixes
+- **Boy Scout fixes**: hook env var convention, SKILL.md naming, gotchas.md typo, misleading UX copy, inconsistent tier gate
+- **Created**: 3 P0 epics (#8233/#8234/#8235) with 21 atomic stories (#8236-#8256)
+- **Tests added**: ChatPanel canUseAI=false and handleRetry with attachments
 - **Lessons**:
-  - Module-level singletons on Vercel serverless are per-request, not per-instance. Use Upstash Redis for cross-instance coordination.
-  - WASM JS glue + binary are origin-coupled. Cannot independently swap origins for fallback.
-  - Bevy receives keyboard natively in Play mode — React handlers must no-op to avoid double-dispatch.
+  - "Filed for follow-up" on a pre-existing bug is Boy Scout Rule violation — fix it or don't reply.
+  - Hook env vars use `TOOL_INPUT_file_path`, not `$TOOL_INPUT` JSON parsing.
+  - `assertTier()` returns consistent `{ error: 'TIER_REQUIRED', currentTier }` — never hand-roll tier checks.
 
-### Session 2026-04-05 (run 2)
-- **Shipped**: PR #8232 (Stripe refund race, AI tier gate, 7 UX fixes). Closes #8187, #8194, #8193, #8198, #8190, #8191, #8184.
-- **Lessons**:
-  - PostgreSQL RETURNING reads post-UPDATE values. Use `SELECT...FOR UPDATE` CTE to capture pre-UPDATE state.
-  - Client-side tier checks are UX, not security. Always duplicate on server.
-
-### Session 2026-04-05 (run 1)
-- **Shipped**: PR #8231 (model names, token costs, leaderboard API, Replicate model fix, boardName validation). Closes #8174, #8200, #8173, #8172, #7512, #8175.
-- **Lessons**:
-  - Replicate API: use `model` field (not `version`) with `owner/name` format.
-  - Route `[name]` params need validation matching POST — malformed `%` encoding reaches DB without it.
+### Session 2026-04-05 (runs 1-3)
+- **Shipped**: PR #8231 (model names, leaderboard API). PR #8232 (Stripe refund race, AI tier gate, 7 UX fixes).
+- **Specs written**: 3 P0 architecture specs (DB resilience, CDN redundancy, keyboard nav)
+- **Key lessons**: Vercel serverless singletons are per-request (use Upstash), WASM JS glue+binary are origin-coupled, Play mode double-dispatch risk.
 
 ## Session End Protocol
 
