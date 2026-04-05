@@ -15,9 +15,15 @@ if [[ "$COMMAND" != *"gh pr create"* ]]; then
   exit 0
 fi
 
+# Bypass for automated PRs (autoforge scripts use their own metadata)
+if echo "$COMMAND" | grep -qE 'autoforge:'; then
+  exit 0
+fi
+
 ERRORS=()
 
-# Check for Closes #NNNN in the body
+# Best-effort check: grep the command string for Closes #NNNN.
+# This catches inline --body but not --body-file (not used by our automation).
 if ! echo "$COMMAND" | grep -qiE 'Closes #[0-9]+'; then
   ERRORS+=("PR body must contain 'Closes #NNNN' linking to a GitHub issue.")
 fi

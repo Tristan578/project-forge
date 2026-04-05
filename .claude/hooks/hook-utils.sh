@@ -45,8 +45,9 @@ get_tool_field() {
   local val
   val=$(echo "$input" | jq -r ".tool_input.${field} // empty" 2>/dev/null)
   if [ -z "$val" ]; then
-    # Fallback to env var convention
-    eval "val=\${TOOL_INPUT_${field}:-}"
+    # Fallback to env var convention (indirect expansion, no eval)
+    local env_var="TOOL_INPUT_${field}"
+    val="${!env_var:-}"
   fi
   echo "$val"
 }
