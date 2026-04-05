@@ -29,10 +29,16 @@ function resetChain() {
   mockUpdate.mockReturnValue({ set: mockSet });
   mockSet.mockReturnValue({ where: mockWhere });
   mockOrderBy.mockResolvedValue([]);
+  mockNeonSqlResults.length = 0;
 }
 
+/** Mock neonSql tagged template — returns queued values from mockNeonSqlResults */
+const mockNeonSqlResults: unknown[][] = [];
 const mockNeonSql = Object.assign(
-  vi.fn((_strings: TemplateStringsArray, ..._values: unknown[]): unknown => ({ query: 'mock' })),
+  vi.fn((_strings: TemplateStringsArray, ..._values: unknown[]): Promise<unknown[]> => {
+    const next = mockNeonSqlResults.shift();
+    return Promise.resolve(next ?? []);
+  }),
   { transaction: vi.fn().mockResolvedValue(undefined) }
 );
 
@@ -215,7 +221,7 @@ describe('deductTokens', () => {
   it('deducts from monthly tokens when sufficient', async () => {
     const { deductTokens } = await import('../service');
 
-    // Read user
+    // Read user (via Drizzle)
     mockLimit.mockResolvedValueOnce([{
       monthlyTokens: 100,
       monthlyTokensUsed: 10,
@@ -223,11 +229,10 @@ describe('deductTokens', () => {
       billingCycleStart: null,
     }]);
 
-    // Atomic update succeeds
-    mockReturning.mockResolvedValueOnce([{ id: 'user-1' }]);
-
-    // Insert usage log
-    mockReturning.mockResolvedValueOnce([{ id: 'usage-123' }]);
+    // neonSql UPDATE RETURNING (atomic deduction)
+    mockNeonSqlResults.push([{ id: 'user-1' }]);
+    // neonSql INSERT RETURNING (usage log)
+    mockNeonSqlResults.push([{ id: 'usage-123' }]);
 
     // getTokenBalance call after deduction
     mockLimit.mockResolvedValueOnce([{
@@ -256,11 +261,10 @@ describe('deductTokens', () => {
       billingCycleStart: null,
     }]);
 
-    // Atomic update succeeds
-    mockReturning.mockResolvedValueOnce([{ id: 'user-1' }]);
-
-    // Insert usage log
-    mockReturning.mockResolvedValueOnce([{ id: 'usage-456' }]);
+    // neonSql UPDATE RETURNING (atomic deduction)
+    mockNeonSqlResults.push([{ id: 'user-1' }]);
+    // neonSql INSERT RETURNING (usage log)
+    mockNeonSqlResults.push([{ id: 'usage-456' }]);
 
     // getTokenBalance after
     mockLimit.mockResolvedValueOnce([{
@@ -289,11 +293,10 @@ describe('deductTokens', () => {
       billingCycleStart: null,
     }]);
 
-    // Atomic update succeeds
-    mockReturning.mockResolvedValueOnce([{ id: 'user-1' }]);
-
-    // Insert usage log
-    mockReturning.mockResolvedValueOnce([{ id: 'usage-789' }]);
+    // neonSql UPDATE RETURNING (atomic deduction)
+    mockNeonSqlResults.push([{ id: 'user-1' }]);
+    // neonSql INSERT RETURNING (usage log)
+    mockNeonSqlResults.push([{ id: 'usage-789' }]);
 
     // getTokenBalance after
     mockLimit.mockResolvedValueOnce([{
@@ -330,8 +333,8 @@ describe('deductTokens', () => {
         addonTokens: 0,
         billingCycleStart: null,
       }]);
-      // Atomic update returns empty (race condition)
-      mockReturning.mockResolvedValueOnce([]);
+      // neonSql UPDATE returns empty (race condition)
+      mockNeonSqlResults.push([]);
     }
 
     // Final getTokenBalance after exhausting retries

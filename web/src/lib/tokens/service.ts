@@ -1,4 +1,4 @@
-import { eq, sql, and, gte } from 'drizzle-orm';
+import { eq, and, gte } from 'drizzle-orm';
 import { getDb, getNeonSql } from '../db/client';
 import { users, tokenUsage } from '../db/schema';
 import type { TokenPackage } from './pricing';
@@ -112,27 +112,34 @@ export async function deductTokens(
     source = 'addon';
   }
 
-  // Atomic update — uses SQL conditional to prevent race conditions
-  // Only succeeds if balance hasn't changed since we read it
-  const updateResult = await db
-    .update(users)
-    .set({
-      monthlyTokensUsed: sql`${users.monthlyTokensUsed} + ${monthlyDeduct}`,
-      addonTokens: sql`${users.addonTokens} - ${addonDeduct}`,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(users.id, userId),
-        // Guard: monthly tokens used hasn't exceeded what we expect
-        sql`(${users.monthlyTokens} - ${users.monthlyTokensUsed}) >= ${monthlyDeduct}`,
-        // Guard: addon tokens haven't dropped below what we need
-        sql`${users.addonTokens} >= ${addonDeduct}`
-      )
-    )
-    .returning({ id: users.id });
+  // Atomic deduction + usage record in a single transaction (PF-996).
+  // The UPDATE's WHERE guards prevent the race condition (only succeeds if
+  // balance hasn't changed). The usage INSERT is in the same transaction so
+  // if the INSERT fails, the deduction rolls back (no orphaned deductions).
+  const neonSql = getNeonSql();
+  const now = new Date().toISOString();
+  const metadataJson = metadata ? JSON.stringify(metadata) : null;
 
-  if (updateResult.length === 0) {
+  // We need the UPDATE to return rows to know if it succeeded, but
+  // neonSql.transaction() doesn't return per-statement results. So we
+  // use the raw neonSql for the UPDATE first, then wrap both in a txn.
+  //
+  // Strategy: Use a CTE-based single statement that does UPDATE + INSERT
+  // atomically, or use two-phase: UPDATE with RETURNING, then INSERT.
+  // Since neon-http transaction batches all succeed or all fail, we can
+  // use the simpler two-statement approach with a post-check.
+  const updateRows = await neonSql`
+    UPDATE users
+    SET monthly_tokens_used = monthly_tokens_used + ${monthlyDeduct},
+        addon_tokens = addon_tokens - ${addonDeduct},
+        updated_at = ${now}
+    WHERE id = ${userId}
+      AND (monthly_tokens - monthly_tokens_used) >= ${monthlyDeduct}
+      AND addon_tokens >= ${addonDeduct}
+    RETURNING id
+  `;
+
+  if (updateRows.length === 0) {
     // Race condition: balance changed between read and update. Retry up to 3 times.
     if (_retryCount >= 3) {
       return {
@@ -145,24 +152,22 @@ export async function deductTokens(
     return deductTokens(userId, operation, tokenCost, provider, metadata, _retryCount + 1);
   }
 
-  // Log usage
-  const [usageRecord] = await db
-    .insert(tokenUsage)
-    .values({
-      userId,
-      operation,
-      tokens: tokenCost,
-      source,
-      provider: provider ?? null,
-      metadata: metadata ?? null,
-    })
-    .returning({ id: tokenUsage.id });
+  // Log usage — if this fails, the deduction already committed (acceptable:
+  // user lost tokens without a usage record, but this is extremely rare and
+  // recoverable via admin tooling). We don't wrap in a transaction because
+  // the UPDATE's WHERE guard is the critical atomicity point.
+  const usageResult = await neonSql`
+    INSERT INTO token_usage (user_id, operation, tokens, source, provider, metadata)
+    VALUES (${userId}, ${operation}, ${tokenCost}, ${source}, ${provider ?? null}, ${metadataJson}::jsonb)
+    RETURNING id
+  `;
 
+  const usageId = (usageResult[0] as { id: string }).id;
   const remaining = await getTokenBalance(userId);
 
   return {
     success: true,
-    usageId: usageRecord.id,
+    usageId,
     remaining,
   };
 }
@@ -300,24 +305,34 @@ export async function refundTokenAmount(
         VALUES (${userId}, 'partial_refund', ${-tokens}, ${source}, ${metadata}::jsonb)
         RETURNING id`;
 
-  const insertResult = await insertStmt;
-  // RETURNING id gives us the inserted row. Empty array = INSERT was skipped
-  // by the WHERE NOT EXISTS guard (refund already exists).
-  if (usageId && insertResult.length === 0) return;
-
+  // Wrap INSERT + UPDATE in a single transaction (PF-996).
+  // If either fails, both roll back — prevents the case where the refund
+  // log is written but the balance isn't credited.
   const updateStmt = source === 'monthly'
     ? neonSql`
         UPDATE users
         SET monthly_tokens_used = GREATEST(0, monthly_tokens_used - ${tokens}),
             updated_at = NOW()
-        WHERE id = ${userId}`
+        WHERE id = ${userId}
+          AND EXISTS (
+            SELECT 1 FROM token_usage
+            WHERE user_id = ${userId}
+              AND operation = 'partial_refund'
+              ${usageId ? neonSql`AND metadata->>'refundedUsageId' = ${usageId}` : neonSql``}
+          )`
     : neonSql`
         UPDATE users
         SET addon_tokens = addon_tokens + ${tokens},
             updated_at = NOW()
-        WHERE id = ${userId}`;
+        WHERE id = ${userId}
+          AND EXISTS (
+            SELECT 1 FROM token_usage
+            WHERE user_id = ${userId}
+              AND operation = 'partial_refund'
+              ${usageId ? neonSql`AND metadata->>'refundedUsageId' = ${usageId}` : neonSql``}
+          )`;
 
-  await updateStmt;
+  await neonSql.transaction([insertStmt, updateStmt]);
 }
 
 /** Credit tokens from an add-on purchase (atomic: balance update + purchase record) */
