@@ -723,8 +723,21 @@ jobs:
         if: steps.check-design.outputs.changed == 'true'
         run: bash apps/design/scripts/sync-vendored-ui.sh
 
+      - name: Check Chromatic token
+        id: check-token
+        if: steps.check-design.outputs.changed == 'true'
+        env:
+          CHROMATIC_TOKEN: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
+        run: |
+          if [ -n "$CHROMATIC_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "CHROMATIC_PROJECT_TOKEN not set — skipping Chromatic"
+          fi
+
       - name: Run Chromatic
-        if: ${{ steps.check-design.outputs.changed == 'true' && secrets.CHROMATIC_PROJECT_TOKEN != '' }}
+        if: steps.check-design.outputs.changed == 'true' && steps.check-token.outputs.available == 'true'
         uses: chromaui/action@v16
         with:
           projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
