@@ -5,6 +5,7 @@
  */
 
 import { validateResourceId } from '@/lib/validation/resourceId';
+import { REPLICATE_MODEL_SDXL } from '@/lib/ai/models';
 
 export interface SpriteGenerateParams {
   prompt: string;
@@ -91,7 +92,7 @@ export class SpriteClient {
         'Authorization': `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        version: 'stability-ai/sdxl:latest',
+        model: REPLICATE_MODEL_SDXL,
         input: {
           prompt: enhancedPrompt,
           width,
@@ -142,7 +143,7 @@ export class SpriteClient {
         'Authorization': `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        version: 'stability-ai/sdxl:latest',
+        model: REPLICATE_MODEL_SDXL,
         input: {
           prompt: enhancedPrompt,
           width: sheetWidth,
@@ -176,7 +177,7 @@ export class SpriteClient {
         'Authorization': `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        version: 'stability-ai/sdxl:latest',
+        model: REPLICATE_MODEL_SDXL,
         input: {
           prompt: enhancedPrompt,
           width: 512,

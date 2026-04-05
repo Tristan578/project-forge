@@ -61,3 +61,10 @@ export const AI_MODELS = {
 } as const;
 
 export type AiModelKey = keyof typeof AI_MODELS;
+
+// ---------------------------------------------------------------------------
+// Image generation models (Replicate)
+// ---------------------------------------------------------------------------
+
+/** Replicate SDXL model identifier — used with the `model` field (NOT `version`) */
+export const REPLICATE_MODEL_SDXL = 'stability-ai/sdxl' as const;

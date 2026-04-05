@@ -2,6 +2,7 @@
 // web/src/lib/generate/pixelArtClient.ts
 import 'server-only';
 
+import { REPLICATE_MODEL_SDXL } from '@/lib/ai/models';
 export type { PixelArtStyle } from '@/lib/config/providers';
 import type { PixelArtStyle } from '@/lib/config/providers';
 export type PixelArtProvider = 'openai' | 'replicate';
@@ -89,7 +90,7 @@ export class PixelArtClient {
         'Authorization': `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        version: 'stability-ai/sdxl:latest',
+        model: REPLICATE_MODEL_SDXL,
         input: {
           prompt,
           negative_prompt: 'blurry, anti-aliased, smooth gradients, realistic, photograph',
