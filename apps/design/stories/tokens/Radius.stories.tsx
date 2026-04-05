@@ -7,11 +7,12 @@ function RadiusReference() {
       <h2 className="mb-6">Border Radius Tokens</h2>
       <div className="flex gap-6 flex-wrap">
         {Object.entries(RADIUS).map(([key, value]) => (
-          <div key={key} className="text-center">
-            <div
-              className="w-20 h-20 bg-[var(--sf-accent)] mb-2"
-              style={{ borderRadius: value }}
-            />
+          <div
+            key={key}
+            className="text-center"
+            style={{ '--r': value } as React.CSSProperties}
+          >
+            <div className="w-20 h-20 bg-[var(--sf-accent)] rounded-[var(--r)] mb-2" />
             <div className="font-mono text-xs">RADIUS.{key}</div>
             <div className="font-mono text-[11px] opacity-60">{value}</div>
           </div>

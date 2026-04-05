@@ -5,8 +5,8 @@ function ColorSwatch({ token, value }: { token: string; value: string }) {
   return (
     <div className="flex items-center gap-3 py-1">
       <div
-        className="w-10 h-10 rounded-md border border-[var(--sf-border)] shrink-0"
-        style={{ backgroundColor: value }}
+        className="w-10 h-10 rounded-md border border-[var(--sf-border)] shrink-0 bg-[var(--swatch)]"
+        style={{ '--swatch': value } as React.CSSProperties}
       />
       <div>
         <div className="font-mono text-[13px]">{token}</div>

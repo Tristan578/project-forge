@@ -11,11 +11,11 @@ function TypographyReference() {
           Font Families
         </h3>
         {Object.entries(FONT_FAMILY).map(([key, value]) => (
-          <div key={key} className="mb-3">
+          <div key={key} className="mb-3" style={{ '--ff': value } as React.CSSProperties}>
             <div className="font-mono text-xs opacity-50 mb-1">
               FONT_FAMILY.{key}
             </div>
-            <div style={{ fontFamily: value, fontSize: 18 }}>
+            <div className="font-[family-name:var(--ff)] text-lg">
               The quick brown fox jumps over the lazy dog
             </div>
           </div>
@@ -27,14 +27,18 @@ function TypographyReference() {
           Font Sizes
         </h3>
         {Object.entries(FONT_SIZE).map(([key, value]) => (
-          <div key={key} className="flex items-baseline gap-4 mb-2">
+          <div
+            key={key}
+            className="flex items-baseline gap-4 mb-2"
+            style={{ '--fs': value } as React.CSSProperties}
+          >
             <div className="w-[100px] font-mono text-xs opacity-50">
               FONT_SIZE.{key}
             </div>
             <div className="w-[60px] font-mono text-xs opacity-50">
               {value}
             </div>
-            <div style={{ fontSize: value }}>
+            <div className="text-[length:var(--fs)]">
               Sample text at {key}
             </div>
           </div>
@@ -46,14 +50,18 @@ function TypographyReference() {
           Font Weights
         </h3>
         {Object.entries(FONT_WEIGHT).map(([key, value]) => (
-          <div key={key} className="flex items-baseline gap-4 mb-2">
+          <div
+            key={key}
+            className="flex items-baseline gap-4 mb-2"
+            style={{ '--fw': value } as React.CSSProperties}
+          >
             <div className="w-[100px] font-mono text-xs opacity-50">
               FONT_WEIGHT.{key}
             </div>
             <div className="w-[40px] font-mono text-xs opacity-50">
               {value}
             </div>
-            <div style={{ fontWeight: Number(value), fontSize: 18 }}>
+            <div className="font-[number:var(--fw)] text-lg">
               Sample text at {key} weight
             </div>
           </div>
