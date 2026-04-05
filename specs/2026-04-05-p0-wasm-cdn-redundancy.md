@@ -119,9 +119,27 @@ throw new Error('Failed to load WASM from all origins');
 
 4. **CORS note**: The R2 CDN origin uses a Cloudflare Worker (`engine-cdn`) to add CORS headers. Same-origin fallback doesn't need CORS since it's served by Vercel. No CORS issues on fallback.
 
-**Tradeoff**: Vercel deployment size increases by ~32-60MB (4 WASM variants). Well within the 250MB limit but adds deploy time.
+**Build pipeline clarification**: WASM binaries are gitignored and NOT built during Vercel's `next build`. They are:
+- Built locally via `build_wasm.ps1` (requires Rust toolchain)
+- Uploaded to R2 CDN via `/deploy-engine` skill (`wrangler r2 object put`)
+- Copied to `web/public/` by the build script for local dev
 
-**Files**: `web/src/hooks/useEngine.ts`, `build_wasm.ps1` (already correct), `.gitignore` (already correct)
+For the same-origin fallback to work in production, the CD pipeline must include a step that downloads the current WASM binaries from R2 into `web/public/` before `next build`. This can be a GitHub Actions step:
+```yaml
+- name: Fetch WASM from R2 for same-origin fallback
+  run: |
+    for variant in editor-webgpu editor-webgl2 runtime-webgpu runtime-webgl2; do
+      mkdir -p web/public/engine-pkg-${variant}
+      curl -sL https://engine.spawnforge.ai/${COMMIT_SHA}/engine-pkg-${variant}/forge_engine.js \
+        -o web/public/engine-pkg-${variant}/forge_engine.js
+      curl -sL https://engine.spawnforge.ai/${COMMIT_SHA}/engine-pkg-${variant}/forge_engine_bg.wasm \
+        -o web/public/engine-pkg-${variant}/forge_engine_bg.wasm
+    done
+```
+
+**Tradeoff**: Vercel deployment size increases by ~32-60MB (4 WASM variants). Vercel Pro plan limit is 250MB per deployment — verified we're well within budget. Adds ~30s to deploy for the download step.
+
+**Files**: `web/src/hooks/useEngine.ts`, `.github/workflows/cd.yml` (add WASM download step), `build_wasm.ps1` (already copies to public/ for local dev)
 
 ### Phase 3: User-visible retry in InitOverlay
 
@@ -146,10 +164,16 @@ The InitOverlay already has a "Try WebGL2" button for GPU failures. Add:
 
 **Files**: `.github/workflows/post-deploy-smoke.yml`, `web/src/hooks/useEngine.ts`
 
+## Documentation Updates
+
+- Update `.claude/rules/gotchas.md`: add "WASM CDN fallback — same-origin requires both JS glue + WASM from same origin"
+- Update `docs/production-support.md`: document the fallback behavior and how to force same-origin in emergencies
+- Update `.env.example`: mark `NEXT_PUBLIC_ENGINE_CDN_URL` as optional (same-origin fallback when unset)
+
 ## Test Plan
 
 - [ ] Unit test: `fetchWithRetry` retries on 502, fails fast on 404
-- [ ] Unit test: `getWasmUrls` returns CDN first, same-origin second
+- [ ] Unit test: `getWasmBasePaths` returns CDN first, same-origin second
 - [ ] Unit test: `loadWasm` falls back to same-origin when CDN fails
 - [ ] Unit test: InitOverlay shows retry button on error
 - [ ] E2E test: Engine loads with `NEXT_PUBLIC_ENGINE_CDN_URL` unset (same-origin path)

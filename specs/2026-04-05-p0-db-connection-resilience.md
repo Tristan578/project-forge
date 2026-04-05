@@ -94,7 +94,13 @@ export const dbRateLimit = new Ratelimit({
 - [ ] Unit test: `queryWithResilience` retries once after rate limit, then throws
 - [ ] Unit test: API routes return 503 with `retryAfter` when circuit is open
 - [ ] Integration test: Rapid concurrent requests don't exceed semaphore limit
-- [ ] Grep audit: zero direct `getDb()` calls outside `client.ts`
+- [ ] Grep audit: zero direct `getDb()` calls outside `client.ts` (exception: health check `SELECT 1` may call directly)
+
+## Documentation Updates
+
+- Update `.claude/rules/gotchas.md`: add "Always use `queryWithResilience()` — never call `getDb()` directly in API routes"
+- Update `docs/production-support.md`: document circuit breaker behavior and health endpoint stats
+- Add ESLint `no-restricted-syntax` rule to catch raw `getDb()` usage
 
 ## Estimated Scope
 
