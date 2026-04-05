@@ -3,6 +3,7 @@
 import { useEffect, useRef, useMemo } from 'react';
 import { MessageSquare, Trash2, Wrench, Sparkles } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
+import { useUserStore } from '@/stores/userStore';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { SuggestionChips } from './SuggestionChips';
@@ -61,6 +62,7 @@ export function ChatPanel() {
   const clearChat = useChatStore((s) => s.clearChat);
   const loopIteration = useChatStore((s) => s.loopIteration);
   const sessionTokens = useChatStore((s) => s.sessionTokens);
+  const canUseAI = useUserStore((s) => s.canUseAI);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom on new messages
@@ -102,11 +104,28 @@ export function ChatPanel() {
       <div ref={scrollRef} aria-live="polite" aria-label="Chat messages" className="flex-1 overflow-y-auto">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
-            <MessageSquare size={28} className="text-zinc-700" />
-            <p className="text-xs text-zinc-400">
-              Describe what you want to build.
-            </p>
-            <SuggestionChips className="max-w-[280px] justify-center" />
+            {canUseAI() ? (
+              <>
+                <MessageSquare size={28} className="text-zinc-700" />
+                <p className="text-xs text-zinc-400">
+                  Describe what you want to build.
+                </p>
+                <SuggestionChips className="max-w-[280px] justify-center" />
+              </>
+            ) : (
+              <>
+                <Sparkles size={28} className="text-zinc-700" />
+                <p className="text-xs text-zinc-400">
+                  AI features require a paid plan.
+                </p>
+                <a
+                  href="/pricing"
+                  className="text-xs font-medium text-purple-400 hover:text-purple-300"
+                >
+                  View plans
+                </a>
+              </>
+            )}
           </div>
         ) : (
           <div className="py-2">
