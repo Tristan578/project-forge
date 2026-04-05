@@ -97,6 +97,9 @@ export async function POST(
       : 100;
     const minScore = typeof body.minScore === 'number' && Number.isFinite(body.minScore) ? Math.round(body.minScore) : null;
     const maxScore = typeof body.maxScore === 'number' && Number.isFinite(body.maxScore) ? Math.round(body.maxScore) : null;
+    if (minScore !== null && maxScore !== null && minScore > maxScore) {
+      return NextResponse.json({ error: 'minScore must be <= maxScore' }, { status: 400 });
+    }
 
     const db = getDb();
     const [board] = await db
