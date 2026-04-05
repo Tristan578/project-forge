@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
         name: nameResult.value,
         description: descResult.value,
         category: catResult.value,
-        priceTokens: (priceTokens as number) || 0,
+        priceTokens: (priceTokens as number) ?? 0,
         license: licenseResult.value,
         tags,
         status: 'draft' as const,
