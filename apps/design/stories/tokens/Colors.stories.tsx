@@ -3,20 +3,14 @@ import { THEME_NAMES, THEME_DEFINITIONS, type ThemeName } from '@spawnforge/ui/t
 
 function ColorSwatch({ token, value }: { token: string; value: string }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '4px 0' }}>
+    <div className="flex items-center gap-3 py-1">
       <div
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: 6,
-          backgroundColor: value,
-          border: '1px solid var(--sf-border)',
-          flexShrink: 0,
-        }}
+        className="w-10 h-10 rounded-md border border-[var(--sf-border)] shrink-0"
+        style={{ backgroundColor: value }}
       />
       <div>
-        <div style={{ fontFamily: 'monospace', fontSize: 13 }}>{token}</div>
-        <div style={{ fontFamily: 'monospace', fontSize: 11, opacity: 0.6 }}>{value}</div>
+        <div className="font-mono text-[13px]">{token}</div>
+        <div className="font-mono text-[11px] opacity-60">{value}</div>
       </div>
     </div>
   );
@@ -36,11 +30,11 @@ function ThemeColorGrid({ theme }: { theme: ThemeName }) {
   );
 
   return (
-    <div style={{ padding: 24 }}>
-      <h2 style={{ margin: '0 0 16px', fontFamily: 'system-ui' }}>
+    <div className="p-6">
+      <h2 className="mb-4 font-sans">
         {theme.charAt(0).toUpperCase() + theme.slice(1)} Theme
       </h2>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-2">
         {colorTokens.map(([token, value]) => (
           <ColorSwatch key={token} token={token} value={value} />
         ))}
@@ -59,7 +53,7 @@ type Story = StoryObj;
 
 export const AllThemes: Story = {
   render: () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+    <div className="flex flex-col gap-8">
       {THEME_NAMES.map((theme) => (
         <ThemeColorGrid key={theme} theme={theme} />
       ))}

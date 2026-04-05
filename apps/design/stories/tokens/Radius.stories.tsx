@@ -3,22 +3,17 @@ import { RADIUS } from '@spawnforge/ui/tokens';
 
 function RadiusReference() {
   return (
-    <div style={{ padding: 24, fontFamily: 'system-ui' }}>
-      <h2 style={{ margin: '0 0 24px' }}>Border Radius Tokens</h2>
-      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+    <div className="p-6 font-sans">
+      <h2 className="mb-6">Border Radius Tokens</h2>
+      <div className="flex gap-6 flex-wrap">
         {Object.entries(RADIUS).map(([key, value]) => (
-          <div key={key} style={{ textAlign: 'center' }}>
+          <div key={key} className="text-center">
             <div
-              style={{
-                width: 80,
-                height: 80,
-                backgroundColor: 'var(--sf-accent)',
-                borderRadius: value,
-                marginBottom: 8,
-              }}
+              className="w-20 h-20 bg-[var(--sf-accent)] mb-2"
+              style={{ borderRadius: value }}
             />
-            <div style={{ fontFamily: 'monospace', fontSize: 12 }}>RADIUS.{key}</div>
-            <div style={{ fontFamily: 'monospace', fontSize: 11, opacity: 0.6 }}>{value}</div>
+            <div className="font-mono text-xs">RADIUS.{key}</div>
+            <div className="font-mono text-[11px] opacity-60">{value}</div>
           </div>
         ))}
       </div>

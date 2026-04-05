@@ -3,16 +3,16 @@ import { FONT_FAMILY, FONT_SIZE, FONT_WEIGHT } from '@spawnforge/ui/tokens';
 
 function TypographyReference() {
   return (
-    <div style={{ padding: 24, fontFamily: 'system-ui' }}>
-      <h2 style={{ margin: '0 0 24px' }}>Typography Tokens</h2>
+    <div className="p-6 font-sans">
+      <h2 className="mb-6">Typography Tokens</h2>
 
-      <section style={{ marginBottom: 32 }}>
-        <h3 style={{ margin: '0 0 12px', fontSize: 14, textTransform: 'uppercase', opacity: 0.6 }}>
+      <section className="mb-8">
+        <h3 className="mb-3 text-sm uppercase opacity-60">
           Font Families
         </h3>
         {Object.entries(FONT_FAMILY).map(([key, value]) => (
-          <div key={key} style={{ marginBottom: 12 }}>
-            <div style={{ fontFamily: 'monospace', fontSize: 12, opacity: 0.5, marginBottom: 4 }}>
+          <div key={key} className="mb-3">
+            <div className="font-mono text-xs opacity-50 mb-1">
               FONT_FAMILY.{key}
             </div>
             <div style={{ fontFamily: value, fontSize: 18 }}>
@@ -22,16 +22,16 @@ function TypographyReference() {
         ))}
       </section>
 
-      <section style={{ marginBottom: 32 }}>
-        <h3 style={{ margin: '0 0 12px', fontSize: 14, textTransform: 'uppercase', opacity: 0.6 }}>
+      <section className="mb-8">
+        <h3 className="mb-3 text-sm uppercase opacity-60">
           Font Sizes
         </h3>
         {Object.entries(FONT_SIZE).map(([key, value]) => (
-          <div key={key} style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 8 }}>
-            <div style={{ width: 100, fontFamily: 'monospace', fontSize: 12, opacity: 0.5 }}>
+          <div key={key} className="flex items-baseline gap-4 mb-2">
+            <div className="w-[100px] font-mono text-xs opacity-50">
               FONT_SIZE.{key}
             </div>
-            <div style={{ width: 60, fontFamily: 'monospace', fontSize: 12, opacity: 0.5 }}>
+            <div className="w-[60px] font-mono text-xs opacity-50">
               {value}
             </div>
             <div style={{ fontSize: value }}>
@@ -42,15 +42,15 @@ function TypographyReference() {
       </section>
 
       <section>
-        <h3 style={{ margin: '0 0 12px', fontSize: 14, textTransform: 'uppercase', opacity: 0.6 }}>
+        <h3 className="mb-3 text-sm uppercase opacity-60">
           Font Weights
         </h3>
         {Object.entries(FONT_WEIGHT).map(([key, value]) => (
-          <div key={key} style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 8 }}>
-            <div style={{ width: 100, fontFamily: 'monospace', fontSize: 12, opacity: 0.5 }}>
+          <div key={key} className="flex items-baseline gap-4 mb-2">
+            <div className="w-[100px] font-mono text-xs opacity-50">
               FONT_WEIGHT.{key}
             </div>
-            <div style={{ width: 40, fontFamily: 'monospace', fontSize: 12, opacity: 0.5 }}>
+            <div className="w-[40px] font-mono text-xs opacity-50">
               {value}
             </div>
             <div style={{ fontWeight: Number(value), fontSize: 18 }}>

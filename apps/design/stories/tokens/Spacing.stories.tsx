@@ -3,25 +3,20 @@ import { SPACING } from '@spawnforge/ui/tokens';
 
 function SpacingScale() {
   return (
-    <div style={{ padding: 24, fontFamily: 'system-ui' }}>
-      <h2 style={{ margin: '0 0 16px' }}>Spacing Scale (4px grid)</h2>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div className="p-6 font-sans">
+      <h2 className="mb-4">Spacing Scale (4px grid)</h2>
+      <div className="flex flex-col gap-3">
         {Object.entries(SPACING).map(([key, value]) => (
-          <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{ width: 80, fontFamily: 'monospace', fontSize: 13 }}>
+          <div key={key} className="flex items-center gap-4">
+            <div className="w-[80px] font-mono text-[13px]">
               SPACING.{key}
             </div>
-            <div style={{ width: 50, fontFamily: 'monospace', fontSize: 13, opacity: 0.6 }}>
+            <div className="w-[50px] font-mono text-[13px] opacity-60">
               {value}
             </div>
             <div
-              style={{
-                height: 24,
-                width: value,
-                backgroundColor: 'var(--sf-accent)',
-                borderRadius: 4,
-                transition: 'width 200ms',
-              }}
+              className="h-6 rounded bg-[var(--sf-accent)] transition-[width] duration-200"
+              style={{ width: value }}
             />
           </div>
         ))}
