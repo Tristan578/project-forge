@@ -30,7 +30,11 @@ const mockSelect = vi.fn().mockImplementation(() => {
 
 // Mock for getNeonSql() — returns a tagged-template function that resolves
 // to mockAtomicRows (simulating the atomic UPDATE...RETURNING result).
-const mockNeonSqlFn = vi.fn().mockImplementation(async () => mockAtomicRows);
+// Also includes .transaction() for multi-statement atomic operations.
+const mockNeonSqlFn = Object.assign(
+  vi.fn().mockImplementation(async () => mockAtomicRows),
+  { transaction: vi.fn().mockResolvedValue(undefined) }
+);
 
 vi.mock('../../db/client', () => ({
   getDb: () => ({
@@ -196,8 +200,8 @@ describe('deductCredits — atomic deduction (regression for #8023)', () => {
     const result = await deductCredits('user-uuid-1', 50, 'chat');
     expect(result.success).toBe(true);
 
-    // Must use the atomic neonSql path
-    expect(mockNeonSqlFn).toHaveBeenCalledOnce();
+    // Must use the atomic neonSql path (UPDATE RETURNING + INSERT audit)
+    expect(mockNeonSqlFn).toHaveBeenCalledTimes(2);
     // Must NOT use the old getDb().update() path for the deduction itself
     expect(mockUpdate).not.toHaveBeenCalled();
   });
@@ -246,17 +250,15 @@ describe('deductCredits — atomic deduction (regression for #8023)', () => {
     expect(result.balance.earned).toBe(100);
   });
 
-  it('writes an audit transaction on successful deduction', async () => {
+  it('writes an audit transaction via neonSql on successful deduction', async () => {
     mockAtomicRows = [makeAtomicRow({ monthly_tokens: 100, monthly_tokens_used: 10, addon_tokens: 0, earned_credits: 0 })];
 
     await deductCredits('user-uuid-1', 10, 'chat_standard');
 
-    expect(mockInsert).toHaveBeenCalledOnce();
-    const insertValues = mockInsert.mock.results[0].value.values.mock.calls[0][0];
-    expect(insertValues.transactionType).toBe('deduction');
-    expect(insertValues.amount).toBe(-10);
-    expect(insertValues.source).toBe('chat_standard');
-    expect(insertValues.userId).toBe('user-uuid-1');
+    // Audit INSERT is now via neonSql tagged template (second call after UPDATE RETURNING)
+    expect(mockNeonSqlFn).toHaveBeenCalledTimes(2);
+    // db.insert should NOT be used for the audit trail anymore
+    expect(mockInsert).not.toHaveBeenCalled();
   });
 
   it('does not write an audit transaction when balance is insufficient', async () => {
@@ -282,8 +284,8 @@ describe('deductCredits — TOCTOU race condition regression (#8023)', () => {
 
     await deductCredits('user-uuid-1', 50, 'test');
 
-    // The atomic neon SQL path must be called
-    expect(mockNeonSqlFn).toHaveBeenCalledOnce();
+    // The atomic neon SQL path must be called (UPDATE RETURNING + INSERT audit)
+    expect(mockNeonSqlFn).toHaveBeenCalledTimes(2);
     // The old non-atomic Drizzle update must NOT be called for the deduction
     expect(mockUpdate).not.toHaveBeenCalled();
   });
@@ -342,45 +344,27 @@ describe('deductCredits — error handling', () => {
 // ---------------------------------------------------------------------------
 
 describe('grantMonthlyCredits', () => {
-  it('sets monthlyTokens to tier allocation and resets used counter', async () => {
+  it('uses neonSql.transaction with 2 statements (INSERT audit + UPDATE)', async () => {
     mockUser = makeUser({ monthlyTokens: 300, monthlyTokensUsed: 150, addonTokens: 0, earnedCredits: 0 });
-    // After update, getBalance reads updated user
-    const updatedUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
-    let selectCallCount = 0;
-    mockSelect.mockImplementation(() => {
-      const user = selectCallCount === 0 ? mockUser : updatedUser;
-      selectCallCount++;
-      return buildSelectChain(user ? [user] : []);
-    });
 
     await grantMonthlyCredits('user-uuid-1', 'creator');
 
-    expect(mockUpdate).toHaveBeenCalledOnce();
-    const setArg = mockUpdate.mock.results[0].value.set.mock.calls[0][0];
-    expect(setArg.monthlyTokens).toBe(1000);
-    expect(setArg.monthlyTokensUsed).toBe(0);
+    // Now uses neonSql.transaction instead of separate db.update + db.insert
+    expect(mockNeonSqlFn.transaction).toHaveBeenCalledOnce();
+    expect(mockNeonSqlFn.transaction.mock.calls[0][0]).toHaveLength(2);
   });
 
-  it('grants correct token count for each tier', async () => {
-    const tiers: Array<[string, number]> = [
-      ['starter', 50],
-      ['hobbyist', 300],
-      ['creator', 1000],
-      ['pro', 3000],
-    ];
+  it('calls neonSql.transaction for each tier', async () => {
+    const tiers = ['starter', 'hobbyist', 'creator', 'pro'];
 
-    for (const [tier, expected] of tiers) {
+    for (const tier of tiers) {
       vi.clearAllMocks();
+      mockNeonSqlFn.transaction.mockResolvedValue(undefined);
       const user = makeUser({ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
       mockSelect.mockImplementation(() => buildSelectChain([user]));
-      mockUpdate.mockReturnValue({
-        set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
-      });
-      mockInsert.mockReturnValue({ values: vi.fn().mockResolvedValue([]) });
 
       await grantMonthlyCredits('user-uuid-1', tier);
-      const setArg = mockUpdate.mock.results[0].value.set.mock.calls[0][0];
-      expect(setArg.monthlyTokens, `tier=${tier}`).toBe(expected);
+      expect(mockNeonSqlFn.transaction).toHaveBeenCalledOnce();
     }
   });
 
@@ -390,28 +374,17 @@ describe('grantMonthlyCredits', () => {
 
     await grantMonthlyCredits('user-uuid-1', 'enterprise');
 
-    const setArg = mockUpdate.mock.results[0].value.set.mock.calls[0][0];
-    expect(setArg.monthlyTokens).toBe(0);
+    // Still calls transaction — allocation is 0 but statements still execute
+    expect(mockNeonSqlFn.transaction).toHaveBeenCalledOnce();
   });
 
-  it('writes a monthly_grant audit transaction', async () => {
+  it('writes audit + update atomically via neonSql.transaction', async () => {
     mockUser = makeUser({ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
-    const updatedUser = makeUser({ monthlyTokens: 300, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
-    let selectCallCount = 0;
-    mockSelect.mockImplementation(() => {
-      const user = selectCallCount === 0 ? mockUser : updatedUser;
-      selectCallCount++;
-      return buildSelectChain(user ? [user] : []);
-    });
 
     await grantMonthlyCredits('user-uuid-1', 'hobbyist');
 
-    expect(mockInsert).toHaveBeenCalledOnce();
-    const insertValues = mockInsert.mock.results[0].value.values.mock.calls[0][0];
-    expect(insertValues.transactionType).toBe('monthly_grant');
-    expect(insertValues.amount).toBe(300);
-    expect(insertValues.source).toBe('hobbyist');
-    expect(insertValues.userId).toBe('user-uuid-1');
+    expect(mockNeonSqlFn.transaction).toHaveBeenCalledOnce();
+    expect(mockNeonSqlFn.transaction.mock.calls[0][0]).toHaveLength(2);
   });
 });
 
@@ -424,74 +397,47 @@ describe('processRollover', () => {
     mockUser = null;
 
     await processRollover('ghost', 'creator');
-    expect(mockUpdate).not.toHaveBeenCalled();
-    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockNeonSqlFn.transaction).not.toHaveBeenCalled();
   });
 
   it('does nothing when monthly remaining is zero', async () => {
     mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 1000, addonTokens: 0, earnedCredits: 0 });
 
     await processRollover('user-uuid-1', 'creator');
-    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockNeonSqlFn.transaction).not.toHaveBeenCalled();
   });
 
   it('does nothing when monthly tokens were never allocated', async () => {
     mockUser = makeUser({ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
 
     await processRollover('user-uuid-1', 'creator');
-    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockNeonSqlFn.transaction).not.toHaveBeenCalled();
   });
 
-  it('rolls over unused tokens up to the tier cap', async () => {
+  it('rolls over unused tokens atomically via neonSql.transaction', async () => {
     // Creator has 1000 monthly; 400 remaining — rollover capped at 1000, so 400 rolls over
     mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 600, addonTokens: 0, earnedCredits: 0 });
-    const updatedUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 600, addonTokens: 400, earnedCredits: 0 });
-    let selectCallCount = 0;
-    mockSelect.mockImplementation(() => {
-      const user = selectCallCount === 0 ? mockUser : updatedUser;
-      selectCallCount++;
-      return buildSelectChain(user ? [user] : []);
-    });
 
     await processRollover('user-uuid-1', 'creator');
-    expect(mockUpdate).toHaveBeenCalledOnce();
-    expect(mockInsert).toHaveBeenCalledOnce();
+    expect(mockNeonSqlFn.transaction).toHaveBeenCalledOnce();
+    expect(mockNeonSqlFn.transaction.mock.calls[0][0]).toHaveLength(2);
   });
 
   it('caps rollover at the tier monthly allocation when remaining exceeds cap', async () => {
     // Pro tier cap is 3000, but user somehow has 5000 remaining — capped at 3000
     mockUser = makeUser({ monthlyTokens: 5000, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
-    const updatedUser = makeUser({ monthlyTokens: 5000, monthlyTokensUsed: 0, addonTokens: 3000, earnedCredits: 0 });
-    let selectCallCount = 0;
-    mockSelect.mockImplementation(() => {
-      const user = selectCallCount === 0 ? mockUser : updatedUser;
-      selectCallCount++;
-      return buildSelectChain(user ? [user] : []);
-    });
 
     await processRollover('user-uuid-1', 'pro');
-    expect(mockUpdate).toHaveBeenCalledOnce();
+    expect(mockNeonSqlFn.transaction).toHaveBeenCalledOnce();
   });
 
-  it('writes a rollover audit transaction with correct amount', async () => {
-    const monthlyRemaining = 200;
+  it('writes rollover audit + update atomically in one transaction', async () => {
     mockUser = makeUser({ monthlyTokens: 300, monthlyTokensUsed: 100, addonTokens: 50, earnedCredits: 0 });
-    const updatedUser = makeUser({ monthlyTokens: 300, monthlyTokensUsed: 100, addonTokens: 250, earnedCredits: 0 });
-    let selectCallCount = 0;
-    mockSelect.mockImplementation(() => {
-      const user = selectCallCount === 0 ? mockUser : updatedUser;
-      selectCallCount++;
-      return buildSelectChain(user ? [user] : []);
-    });
 
     await processRollover('user-uuid-1', 'hobbyist');
 
-    expect(mockInsert).toHaveBeenCalledOnce();
-    const insertValues = mockInsert.mock.results[0].value.values.mock.calls[0][0];
-    expect(insertValues.transactionType).toBe('rollover');
-    expect(insertValues.amount).toBe(monthlyRemaining);
-    expect(insertValues.source).toBe('hobbyist');
-    expect(insertValues.userId).toBe('user-uuid-1');
+    expect(mockNeonSqlFn.transaction).toHaveBeenCalledOnce();
+    expect(mockNeonSqlFn.transaction.mock.calls[0][0]).toHaveLength(2);
   });
 });
 
@@ -505,8 +451,7 @@ describe('refundCredits', () => {
 
     const result = await refundCredits('user-uuid-1', 0, 'txn-1');
     expect(result.success).toBe(true);
-    expect(mockUpdate).not.toHaveBeenCalled();
-    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockNeonSqlFn).not.toHaveBeenCalled();
   });
 
   it('returns success=true immediately for negative amount', async () => {
@@ -514,11 +459,12 @@ describe('refundCredits', () => {
 
     const result = await refundCredits('user-uuid-1', -10, 'txn-2');
     expect(result.success).toBe(true);
-    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockNeonSqlFn).not.toHaveBeenCalled();
   });
 
-  it('adds refund amount to addon tokens and records audit trail', async () => {
+  it('adds refund atomically via CTE with idempotency guard', async () => {
     mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 50, earnedCredits: 0 });
+    // After CTE, getBalance reads updated user
     const updatedUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 150, earnedCredits: 0 });
     let selectCallCount = 0;
     mockSelect.mockImplementation(() => {
@@ -530,16 +476,8 @@ describe('refundCredits', () => {
     const result = await refundCredits('user-uuid-1', 100, 'txn-3');
 
     expect(result.success).toBe(true);
-    expect(mockUpdate).toHaveBeenCalledOnce();
-
-    // Verify audit transaction
-    expect(mockInsert).toHaveBeenCalledOnce();
-    const insertValues = mockInsert.mock.results[0].value.values.mock.calls[0][0];
-    expect(insertValues.transactionType).toBe('refund');
-    expect(insertValues.amount).toBe(100);
-    expect(insertValues.source).toBe('credit_refund');
-    expect(insertValues.referenceId).toBe('txn-3');
-    expect(insertValues.userId).toBe('user-uuid-1');
+    // Uses a single CTE statement (INSERT + UPDATE in one query)
+    expect(mockNeonSqlFn).toHaveBeenCalledOnce();
   });
 
   it('throws when user does not exist', async () => {

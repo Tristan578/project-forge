@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
+import { assertAdmin } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -10,17 +11,17 @@ const VALID_TIERS = ['starter', 'hobbyist', 'creator', 'pro'] as const;
 type Tier = (typeof VALID_TIERS)[number];
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-  const { clerkId } = authResult.ctx;
+  const mid = await withApiMiddleware(req, { requireAuth: true });
+  if (mid.error) return mid.error;
+  const { clerkId } = mid.authContext!;
 
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
-  const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-users-get');
+  const limited = await rateLimitAdminRoute(mid.userId!, 'admin-users-get');
   if (limited) return limited;
 
   const { id } = await params;
@@ -44,14 +45,14 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-  const { clerkId } = authResult.ctx;
+  const mid = await withApiMiddleware(req, { requireAuth: true });
+  if (mid.error) return mid.error;
+  const { clerkId } = mid.authContext!;
 
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
-  const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-users-patch');
+  const limited = await rateLimitAdminRoute(mid.userId!, 'admin-users-patch');
   if (limited) return limited;
 
   const { id } = await params;

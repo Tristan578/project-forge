@@ -1,8 +1,7 @@
-import { NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getProject, updateProject, deleteProject } from '@/lib/projects/service';
 import { parseJsonBody, requireString, requireObject, optionalString } from '@/lib/apiValidation';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { validationError, notFound, internalError } from '@/lib/api/errors';
 
@@ -10,17 +9,18 @@ import { validationError, notFound, internalError } from '@/lib/api/errors';
  * GET /api/projects/[id]
  * Load a single project by ID.
  */
-export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  const rl = await rateLimit(`user:project-get:${authResult.ctx.user.id}`, 30, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `user:project-get:${id}`, max: 30, windowSeconds: 60, distributed: false },
+  });
+  if (mid.error) return mid.error;
 
   const { id } = await params;
 
   try {
-    const project = await getProject(authResult.ctx.user.id, id);
+    const project = await getProject(mid.userId!, id);
 
     if (!project) {
       return notFound('Project not found');
@@ -38,12 +38,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
  * Update a project.
  * Body: { name?: string, sceneData?: object, thumbnail?: string, entityCount?: number }
  */
-export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  const rl = await rateLimit(`user:project-put:${authResult.ctx.user.id}`, 10, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `user:project-put:${id}`, max: 10, windowSeconds: 60, distributed: false },
+  });
+  if (mid.error) return mid.error;
 
   const { id } = await params;
   const parsed = await parseJsonBody(req);
@@ -87,7 +88,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   }
 
   try {
-    const project = await updateProject(authResult.ctx.user.id, id, updates);
+    const project = await updateProject(mid.userId!, id, updates);
 
     if (!project) {
       return notFound('Project not found');
@@ -104,17 +105,18 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
  * DELETE /api/projects/[id]
  * Delete a project.
  */
-export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  const rl = await rateLimit(`user:project-delete:${authResult.ctx.user.id}`, 10, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `user:project-delete:${id}`, max: 10, windowSeconds: 60, distributed: false },
+  });
+  if (mid.error) return mid.error;
 
   const { id } = await params;
 
   try {
-    const deleted = await deleteProject(authResult.ctx.user.id, id);
+    const deleted = await deleteProject(mid.userId!, id);
 
     if (!deleted) {
       return notFound('Project not found');

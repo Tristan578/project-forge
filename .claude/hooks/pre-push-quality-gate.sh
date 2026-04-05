@@ -72,17 +72,41 @@ if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
     return 1
   }
 
-  run_tsc
-  if is_jit_segfault "$TSC_EXIT" "$TSC_OUTPUT"; then
-    echo "[pre-push] WARNING: tsc crashed (Node JIT segfault, likely Node 25.x V8 bug). Retrying once..." >&2
+  # Scope tsc errors to files changed in this branch only.
+  # A full `tsc --noEmit` reports ALL project errors including pre-existing ones
+  # from main (847+ as of 2026-04-04). We only want to block on NEW errors
+  # introduced by the current branch's changes.
+  CHANGED_TS=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$' | grep '^web/' | sed 's|^web/||' || true)
+  if [ -z "$CHANGED_TS" ]; then
+    true  # No TS files changed, skip tsc
+  else
     run_tsc
-  fi
+    if is_jit_segfault "$TSC_EXIT" "$TSC_OUTPUT"; then
+      echo "[pre-push] WARNING: tsc crashed (Node JIT segfault, likely Node 25.x V8 bug). Retrying once..." >&2
+      run_tsc
+    fi
 
-  if is_jit_segfault "$TSC_EXIT" "$TSC_OUTPUT"; then
-    echo "[pre-push] WARNING: tsc crashed twice (signal exit / libnode). Allowing push — CI (Node 20) will catch real errors." >&2
-  elif [ "$TSC_EXIT" != "0" ] && [ -n "$TSC_EXIT" ]; then
-    echo "$TSC_OUTPUT" | tail -10 >&2
-    ERRORS="${ERRORS}TypeScript errors found. "
+    if is_jit_segfault "$TSC_EXIT" "$TSC_OUTPUT"; then
+      echo "[pre-push] WARNING: tsc crashed twice (signal exit / libnode). Allowing push — CI (Node 20) will catch real errors." >&2
+    elif [ "$TSC_EXIT" != "0" ] && [ -n "$TSC_EXIT" ]; then
+      # Filter tsc output to only show errors in files changed by this branch.
+      # This avoids blocking on pre-existing errors from main.
+      BRANCH_ERRORS=""
+      while IFS= read -r changed_file; do
+        [ -z "$changed_file" ] && continue
+        ESCAPED_FILE=$(printf '%s' "$changed_file" | sed 's/[.[\*^$()+?{}|]/\\&/g')
+        FILE_ERRORS=$(echo "$TSC_OUTPUT" | grep "^${ESCAPED_FILE}(" || true)
+        if [ -n "$FILE_ERRORS" ]; then
+          BRANCH_ERRORS="${BRANCH_ERRORS}${FILE_ERRORS}
+"
+        fi
+      done <<< "$CHANGED_TS"
+
+      if [ -n "$BRANCH_ERRORS" ]; then
+        echo "$BRANCH_ERRORS" | tail -10 >&2
+        ERRORS="${ERRORS}TypeScript errors found in changed files. "
+      fi
+    fi
   fi
 fi
 
@@ -114,10 +138,45 @@ if echo "$CHANGED_FILES" | grep -qE 'panelRegistry|WorkspaceProvider'; then
   }
 fi
 
-# 4. Magic constants check (warnings only — does not block push)
+# 4. Lockfile sync check (catches workspace/dep changes that break npm ci in CI)
+if echo "$CHANGED_FILES" | grep -qE 'package\.json|package-lock\.json'; then
+  cd "$PROJECT_DIR"
+  LOCKFILE_OUTPUT=$(npm ci --dry-run 2>&1) || {
+    # Only block on actual lockfile mismatch — registry outages or auth errors
+    # should not prevent pushes with a misleading "out of sync" message.
+    if echo "$LOCKFILE_OUTPUT" | grep -qiE 'package-lock\.json|Missing:|Invalid:|out of sync|EUSAGE'; then
+      echo "[pre-push] BLOCKED: package-lock.json is out of sync with package.json." >&2
+      echo "$LOCKFILE_OUTPUT" | grep -iE "Missing:|EUSAGE|out of sync|Invalid:" | head -5 >&2
+      echo "[pre-push] Fix: rm -rf node_modules package-lock.json && npm install" >&2
+      ERRORS="${ERRORS}Lockfile out of sync — npm ci will fail in CI. "
+    else
+      echo "[pre-push] WARNING: npm ci --dry-run failed (possibly registry/network issue). Allowing push." >&2
+    fi
+  }
+  cd "$WEB_DIR"
+fi
+
+# 5. Magic constants check (warnings only — does not block push)
 MAGIC_CHECK="$PROJECT_DIR/web/scripts/check-magic-constants.sh"
 if [ -x "$MAGIC_CHECK" ]; then
   bash "$MAGIC_CHECK" 2>&1 || true
+fi
+
+# 6. Warn if no changeset exists for this branch (non-blocking)
+# Run from project root so the .changeset/ path resolves correctly
+cd "$PROJECT_DIR"
+# Determine base ref — origin/main may not exist in forks or shallow clones
+CHANGESET_BASE=""
+if git rev-parse --verify origin/main >/dev/null 2>&1; then
+  CHANGESET_BASE="origin/main"
+elif git rev-parse --verify main >/dev/null 2>&1; then
+  CHANGESET_BASE="main"
+fi
+if [ -n "$CHANGESET_BASE" ]; then
+  CHANGESET_FILES=$(git diff --name-only --diff-filter=A "${CHANGESET_BASE}...HEAD" -- '.changeset/*.md' 2>/dev/null | grep -v 'README.md' || true)
+  if [ -z "$CHANGESET_FILES" ]; then
+    echo "[pre-push] WARNING: No changeset found for this branch. Run 'npx changeset' to add one before creating a PR." >&2
+  fi
 fi
 
 if [ -n "$ERRORS" ]; then

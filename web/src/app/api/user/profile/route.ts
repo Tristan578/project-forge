@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { updateDisplayName } from '@/lib/auth/user-service';
 import { parseJsonBody, requireString } from '@/lib/apiValidation';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { internalError } from '@/lib/api/errors';
 
@@ -10,14 +9,15 @@ import { internalError } from '@/lib/api/errors';
  * GET /api/user/profile
  * Get the authenticated user's profile data.
  */
-export async function GET() {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
+export async function GET(req: NextRequest) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `user:profile-get:${id}`, max: 30, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
-  const rl = await rateLimit(`user:profile-get:${authResult.ctx.user.id}`, 30, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
-
-  const user = authResult.ctx.user;
+  const user = mid.authContext!.user;
 
   return NextResponse.json({
     displayName: user.displayName,
@@ -32,11 +32,12 @@ export async function GET() {
  * Update the authenticated user's display name.
  */
 export async function PUT(request: NextRequest) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  const rl = await rateLimit(`user:profile-put:${authResult.ctx.user.id}`, 10, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+  const mid = await withApiMiddleware(request, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `user:profile-put:${id}`, max: 10, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
   const parsed = await parseJsonBody(request);
   if (!parsed.ok) return parsed.response;
@@ -45,7 +46,7 @@ export async function PUT(request: NextRequest) {
   if (!nameResult.ok) return nameResult.response;
 
   try {
-    const user = await updateDisplayName(authResult.ctx.user.id, nameResult.value);
+    const user = await updateDisplayName(mid.userId!, nameResult.value);
     return NextResponse.json({
       displayName: user.displayName,
       email: user.email,

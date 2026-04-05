@@ -1,19 +1,19 @@
-import { NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
 import { assetPurchases } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-    const { user } = authResult.ctx;
-
-    const rl = await rateLimit(`user:marketplace-purchases:${user.id}`, 30, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `user:marketplace-purchases:${id}`, max: 30, windowSeconds: 60, distributed: false },
+    });
+    if (mid.error) return mid.error;
+    const { user } = mid.authContext!;
 
     const db = getDb();
 

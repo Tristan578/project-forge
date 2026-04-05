@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import type { BridgeToolConfig, BridgeResult } from '@/lib/bridges/types';
 
 vi.mock('server-only', () => ({}));
@@ -35,7 +35,7 @@ const mockResult: BridgeResult = {
 };
 
 function makeRequest(body: unknown) {
-  return new Request('http://test/api/bridges/aseprite/execute', {
+  return new NextRequest('http://test/api/bridges/aseprite/execute', {
     method: 'POST',
     body: JSON.stringify(body),
   });

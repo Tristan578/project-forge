@@ -223,11 +223,11 @@ describe('POST /api/publish', () => {
       expect(res.status).toBe(429);
     });
 
-    it('rate limits by user clerkId with correct limits', async () => {
+    it('rate limits by user ID with correct limits', async () => {
       vi.mocked(getDb).mockReturnValue(makeNewPublicationDb() as never);
 
       await POST(makeRequest(validBody()));
-      expect(distributedRateLimit).toHaveBeenCalledWith('publish:clerk_1', 10, 60);
+      expect(distributedRateLimit).toHaveBeenCalledWith('publish:user-1', 10, 60);
     });
   });
 

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { gameComments } from '@/lib/db/schema';
 import { inArray } from 'drizzle-orm';
-import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
+import { assertAdmin } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
@@ -18,13 +19,13 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: NextRequest) {
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
+    const mid = await withApiMiddleware(req, { requireAuth: true });
+    if (mid.error) return mid.error;
 
-    const adminError = assertAdmin(authResult.ctx.clerkId);
+    const adminError = assertAdmin(mid.authContext!.clerkId);
     if (adminError) return adminError;
 
-    const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-moderation-bulk');
+    const limited = await rateLimitAdminRoute(mid.userId!, 'admin-moderation-bulk');
     if (limited) return limited;
 
     const body = await req.json() as unknown;

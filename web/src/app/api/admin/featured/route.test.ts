@@ -32,7 +32,7 @@ describe('GET /api/admin/featured', () => {
     });
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/featured'));
 
     expect(res.status).toBe(401);
   });
@@ -42,7 +42,7 @@ describe('GET /api/admin/featured', () => {
     vi.mocked(assertAdmin).mockReturnValue(adminResponse as never);
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/featured'));
 
     expect(res.status).toBe(403);
   });
@@ -69,7 +69,7 @@ describe('GET /api/admin/featured', () => {
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/featured'));
     const body = await res.json();
 
     expect(res.status).toBe(200);

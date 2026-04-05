@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { POST } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { discoverTool, isAllowedToolId } from '@/lib/bridges/bridgeManager';
@@ -19,7 +19,7 @@ const mockConfig: BridgeToolConfig = {
 };
 
 function makeRequest(body: unknown) {
-  return new Request('http://test/api/bridges/discover', {
+  return new NextRequest('http://test/api/bridges/discover', {
     method: 'POST',
     body: JSON.stringify(body),
   });

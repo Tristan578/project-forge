@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import { rateLimit } from '@/lib/rateLimit';
 import { getDb } from '@/lib/db/client';
+import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/rateLimit', () => ({
@@ -37,7 +38,7 @@ describe('POST /api/keys/api-key', () => {
     });
 
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/api-key', {
+    const req = new NextRequest('http://localhost:3000/api/keys/api-key', {
       method: 'POST',
       body: JSON.stringify({ name: 'Test Key' }),
     });
@@ -50,7 +51,7 @@ describe('POST /api/keys/api-key', () => {
     vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/api-key', {
+    const req = new NextRequest('http://localhost:3000/api/keys/api-key', {
       method: 'POST',
       body: JSON.stringify({ name: 'Test Key' }),
     });
@@ -64,7 +65,7 @@ describe('POST /api/keys/api-key', () => {
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/api-key', {
+    const req = new NextRequest('http://localhost:3000/api/keys/api-key', {
       method: 'POST',
       body: JSON.stringify({ name: 'Test Key', scopes: ['invalid:scope'] }),
     });
@@ -85,7 +86,7 @@ describe('POST /api/keys/api-key', () => {
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/keys/api-key', {
+    const req = new NextRequest('http://localhost:3000/api/keys/api-key', {
       method: 'POST',
       body: JSON.stringify({ name: 'My Key' }),
     });
@@ -117,7 +118,7 @@ describe('GET /api/keys/api-key', () => {
     });
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/keys/api-key'));
 
     expect(res.status).toBe(401);
   });
@@ -141,7 +142,7 @@ describe('GET /api/keys/api-key', () => {
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/keys/api-key'));
     const body = await res.json();
 
     expect(res.status).toBe(200);

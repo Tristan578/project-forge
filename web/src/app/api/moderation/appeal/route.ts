@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { moderationAppeals } from '@/lib/db/schema';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
@@ -20,8 +20,8 @@ export async function POST(req: NextRequest) {
   if (limited) return limited;
 
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
+    const mid = await withApiMiddleware(req, { requireAuth: true });
+    if (mid.error) return mid.error;
 
     const body = await req.json();
     const { contentId, contentType, reason } = body;
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     const [appeal] = await db
       .insert(moderationAppeals)
       .values({
-        userId: authResult.ctx.user.id,
+        userId: mid.userId!,
         contentId,
         contentType,
         reason: reason.trim(),

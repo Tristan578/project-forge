@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { generationJobs } from '@/lib/db/schema';
 import { eq, and, inArray, desc } from 'drizzle-orm';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
@@ -11,11 +10,12 @@ export const dynamic = 'force-dynamic';
 // POST: Create a job record (called by client after generation API returns)
 export async function POST(req: NextRequest) {
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-
-    const rl = await rateLimit(`jobs:${authResult.ctx.user.id}`, 30, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `jobs:${id}`, max: 30, windowSeconds: 60, distributed: false },
+    });
+    if (mid.error) return mid.error;
 
     const body = await req.json();
     const { providerJobId, provider, type, prompt, parameters, tokenCost, tokenUsageId, entityId } = body;
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     const [job] = await db
       .insert(generationJobs)
       .values({
-        userId: authResult.ctx.user.id,
+        userId: mid.userId!,
         providerJobId,
         provider,
         type,
@@ -54,8 +54,8 @@ export async function POST(req: NextRequest) {
 // GET: Fetch user's active (in-progress) jobs for hydration on page load
 export async function GET(req: NextRequest) {
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
+    const mid = await withApiMiddleware(req, { requireAuth: true });
+    if (mid.error) return mid.error;
 
     const db = getDb();
     const searchParams = req.nextUrl.searchParams;
@@ -64,16 +64,16 @@ export async function GET(req: NextRequest) {
     let conditions;
     if (statusFilter === 'active') {
       conditions = and(
-        eq(generationJobs.userId, authResult.ctx.user.id),
+        eq(generationJobs.userId, mid.userId!),
         inArray(generationJobs.status, ['pending', 'processing', 'downloading'])
       );
     } else if (statusFilter && statusFilter !== 'all') {
       conditions = and(
-        eq(generationJobs.userId, authResult.ctx.user.id),
+        eq(generationJobs.userId, mid.userId!),
         eq(generationJobs.status, statusFilter as 'pending' | 'processing' | 'downloading' | 'completed' | 'failed' | 'cancelled')
       );
     } else {
-      conditions = eq(generationJobs.userId, authResult.ctx.user.id);
+      conditions = eq(generationJobs.userId, mid.userId!);
     }
 
     const jobs = await db

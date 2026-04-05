@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { parseJsonBody, optionalString } from '@/lib/apiValidation';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function PATCH(
@@ -14,12 +13,13 @@ export async function PATCH(
   const { id: assetId } = await context.params;
 
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-    const { user } = authResult.ctx;
-
-    const rl = await rateLimit(`user:seller-asset-patch:${user.id}`, 10, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `user:seller-asset-patch:${id}`, max: 10, windowSeconds: 60, distributed: false },
+    });
+    if (mid.error) return mid.error;
+    const { user } = mid.authContext!;
 
     const db = getDb();
 

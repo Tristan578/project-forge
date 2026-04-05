@@ -47,19 +47,19 @@ describe('GET /api/admin/circuit-breaker', () => {
 
   it('returns 401 if unauthenticated', async () => {
     mockAuthUnauthorized();
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/circuit-breaker'));
     expect(res.status).toBe(401);
   });
 
   it('returns 403 if not admin', async () => {
     mockAuthForbidden();
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/circuit-breaker'));
     expect(res.status).toBe(403);
   });
 
   it('returns circuit breaker summary for admin', async () => {
     mockAuthAdmin();
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/circuit-breaker'));
     expect(res.status).toBe(200);
 
     const data = await res.json() as {
@@ -79,7 +79,7 @@ describe('GET /api/admin/circuit-breaker', () => {
     const cb = getProviderBreaker('anthropic');
     cb.recordSuccess(100, 10); // cost anomaly — trips immediately
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/circuit-breaker'));
     const data = await res.json() as {
       summary: { open: number; healthy: number };
     };
@@ -89,7 +89,7 @@ describe('GET /api/admin/circuit-breaker', () => {
 
   it('all providers appear in the response', async () => {
     mockAuthAdmin();
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/admin/circuit-breaker'));
     const data = await res.json() as {
       providers: Array<{ provider: string }>;
     };
@@ -134,7 +134,7 @@ describe('POST /api/admin/circuit-breaker', () => {
     expect(data.success).toBe(true);
 
     // All should be closed now
-    const getRes = await GET();
+    const getRes = await GET(new NextRequest('http://localhost/api/admin/circuit-breaker'));
     const getBody = await getRes.json() as { summary: { open: number } };
     expect(getBody.summary.open).toBe(0);
   });

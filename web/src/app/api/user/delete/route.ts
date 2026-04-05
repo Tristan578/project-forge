@@ -1,22 +1,22 @@
-import { NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { deleteUserAccount } from '@/lib/auth/user-service';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
  * POST /api/user/delete
  * Permanently delete the authenticated user's account and all associated data.
  */
-export async function POST() {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  const rl = await rateLimit(`user:account-delete:${authResult.ctx.user.id}`, 5, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+export async function POST(req: NextRequest) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `user:account-delete:${id}`, max: 5, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
   try {
-    await deleteUserAccount(authResult.ctx.user.id);
+    await deleteUserAccount(mid.userId!);
     return NextResponse.json({ deleted: true });
   } catch (err) {
     captureException(err, { route: '/api/user/delete' });

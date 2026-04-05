@@ -224,6 +224,87 @@ describe('withApiMiddleware', () => {
   });
 
   // -----------------------------------------------------------------------
+  // Handler-wrapping overload — rollback (handler never called on failure)
+  // -----------------------------------------------------------------------
+
+  describe('handler-wrapping overload rollback', () => {
+    it('returns 401 and never calls handler when auth fails', async () => {
+      const authError = NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      mockAuthenticateRequest.mockResolvedValue({ ok: false, response: authError });
+      const handlerFn = vi.fn(async () => NextResponse.json({ ok: true }));
+
+      const wrapped = withApiMiddleware(handlerFn, { requireAuth: true });
+      const res = await wrapped(new NextRequest('http://localhost/api/test'));
+
+      expect(res.status).toBe(401);
+      expect(handlerFn).not.toHaveBeenCalled();
+    });
+
+    it('returns 429 and never calls handler when rate limit denies', async () => {
+      mockAuthenticateRequest.mockResolvedValue({ ok: true, ctx: mockAuthContext });
+      mockDistributedRateLimit.mockResolvedValue(deniedRlResult());
+      mockRateLimitResponse.mockReturnValue(
+        NextResponse.json({ error: 'Too many requests' }, { status: 429 }),
+      );
+      const handlerFn = vi.fn(async () => NextResponse.json({ ok: true }));
+
+      const wrapped = withApiMiddleware(handlerFn, {
+        requireAuth: true,
+        rateLimit: true,
+        rateLimitConfig: { key: (id) => `test:${id}`, max: 5, windowSeconds: 60 },
+      });
+      const res = await wrapped(new NextRequest('http://localhost/api/test'));
+
+      expect(res.status).toBe(429);
+      expect(handlerFn).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 and never calls handler for unparseable JSON body', async () => {
+      const handlerFn = vi.fn(async () => NextResponse.json({ ok: true }));
+
+      const wrapped = withApiMiddleware(handlerFn, {
+        requireAuth: false,
+        validate: z.object({ name: z.string() }),
+      });
+
+      const req = new NextRequest('http://localhost/api/test', {
+        method: 'POST',
+        body: 'not-json',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const res = await wrapped(req);
+
+      expect(res.status).toBe(400);
+      expect(handlerFn).not.toHaveBeenCalled();
+    });
+
+    it('calls handler with parsed body and userId on success', async () => {
+      mockAuthenticateRequest.mockResolvedValue({ ok: true, ctx: mockAuthContext });
+      const handlerFn = vi.fn(async (_req: NextRequest, ctx: { userId: string | null; body: unknown }) =>
+        NextResponse.json({ userId: ctx.userId, body: ctx.body }),
+      );
+
+      const wrapped = withApiMiddleware(handlerFn, {
+        requireAuth: true,
+        validate: z.object({ action: z.string() }),
+      });
+
+      const req = new NextRequest('http://localhost/api/test', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'reset' }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const res = await wrapped(req);
+
+      expect(res.status).toBe(200);
+      expect(handlerFn).toHaveBeenCalledOnce();
+      const resBody = await res.json();
+      expect(resBody.userId).toBe('user-1');
+      expect(resBody.body).toEqual({ action: 'reset' });
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Zod validation (Plan E task E2)
   // -----------------------------------------------------------------------
 
