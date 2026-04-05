@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { logger } from '@/lib/logging/logger';
@@ -64,8 +64,6 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const db = getDb();
-
     // Create or retrieve Stripe customer
     let customerId = user.stripeCustomerId;
     if (!customerId) {
@@ -79,7 +77,7 @@ export async function POST(req: NextRequest) {
       customerId = customer.id;
 
       // Save customer ID to database
-      await db.update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, user.id));
+      await queryWithResilience(() => getDb().update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, user.id)));
       reqLog.info('Stripe customer created', { customerId });
     }
 

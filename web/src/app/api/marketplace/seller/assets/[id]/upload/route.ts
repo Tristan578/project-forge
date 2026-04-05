@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { uploadToR2, buildAssetKey } from '@/lib/storage/r2';
@@ -36,13 +36,11 @@ export async function POST(
     if (mid.error) return mid.error;
     const { user } = mid.authContext!;
 
-    const db = getDb();
-
-    const [asset] = await db
+    const [asset] = await queryWithResilience(() => getDb()
       .select()
       .from(marketplaceAssets)
       .where(and(eq(marketplaceAssets.id, assetId), eq(marketplaceAssets.sellerId, user.id)))
-      .limit(1);
+      .limit(1));
 
     if (!asset) {
       return NextResponse.json({ error: 'Asset not found or not owned by you' }, { status: 404 });
@@ -111,11 +109,11 @@ export async function POST(
     // orphaned. A cleanup job or reconciliation step could address this, but the added complexity
     // is not warranted for MVP.
 
-    const [updated] = await db
+    const [updated] = await queryWithResilience(() => getDb()
       .update(marketplaceAssets)
       .set(updates)
       .where(eq(marketplaceAssets.id, assetId))
-      .returning();
+      .returning());
 
     return NextResponse.json({
       uploaded: {

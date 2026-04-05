@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { marketplaceAssets, sellerProfiles } from '@/lib/db/schema';
 import { desc, asc, eq, ilike, and, or, sql } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
@@ -11,7 +11,6 @@ export async function GET(req: NextRequest) {
   if (limited) return limited;
 
   try {
-    const db = getDb();
     const { searchParams } = new URL(req.url);
     const query = searchParams.get('q') || '';
     const category = searchParams.get('category');
@@ -73,7 +72,7 @@ export async function GET(req: NextRequest) {
     const offset = (page - 1) * limit;
 
     // Fetch assets with seller info
-    const results = await db
+    const results = await queryWithResilience(() => getDb()
       .select({
         id: marketplaceAssets.id,
         name: marketplaceAssets.name,
@@ -96,7 +95,7 @@ export async function GET(req: NextRequest) {
       .where(and(...conditions))
       .orderBy(orderBy)
       .limit(limit + 1)
-      .offset(offset);
+      .offset(offset));
 
     const hasMore = results.length > limit;
     const assets = results.slice(0, limit).map((r) => ({

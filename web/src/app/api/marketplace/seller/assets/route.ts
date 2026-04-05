@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { parseJsonBody, requireString, requireOneOf } from '@/lib/apiValidation';
@@ -19,12 +19,10 @@ export async function GET(req: NextRequest) {
     if (mid.error) return mid.error;
     const { user } = mid.authContext!;
 
-    const db = getDb();
-
-    const assets = await db
+    const assets = await queryWithResilience(() => getDb()
       .select()
       .from(marketplaceAssets)
-      .where(eq(marketplaceAssets.sellerId, user.id));
+      .where(eq(marketplaceAssets.sellerId, user.id)));
 
     const formatted = assets.map((a) => ({
       id: a.id,
@@ -58,8 +56,6 @@ export async function POST(req: NextRequest) {
     if (mid.error) return mid.error;
     const { user } = mid.authContext!;
 
-    const db = getDb();
-
     const parsed = await parseJsonBody(req);
     if (!parsed.ok) return parsed.response;
 
@@ -89,7 +85,7 @@ export async function POST(req: NextRequest) {
       ? (parsed.body.tags as unknown[]).filter((t): t is string => typeof t === 'string').slice(0, 20)
       : [];
 
-    const [asset] = await db
+    const [asset] = await queryWithResilience(() => getDb()
       .insert(marketplaceAssets)
       .values({
         sellerId: user.id,
@@ -101,7 +97,7 @@ export async function POST(req: NextRequest) {
         tags,
         status: 'draft' as const,
       })
-      .returning();
+      .returning());
 
     return NextResponse.json({ asset });
   } catch (error) {

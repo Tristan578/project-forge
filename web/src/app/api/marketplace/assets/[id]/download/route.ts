@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { marketplaceAssets, assetPurchases } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { getSignedDownloadUrl } from '@/lib/storage/r2';
@@ -37,24 +37,22 @@ export async function GET(
     if (mid.error) return mid.error;
     const { user } = mid.authContext!;
 
-    const db = getDb();
-
-    const [asset] = await db
+    const [asset] = await queryWithResilience(() => getDb()
       .select()
       .from(marketplaceAssets)
       .where(eq(marketplaceAssets.id, assetId))
-      .limit(1);
+      .limit(1));
 
     if (!asset) {
       return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
     }
 
     // Check if user purchased it or owns it
-    const [purchase] = await db
+    const [purchase] = await queryWithResilience(() => getDb()
       .select()
       .from(assetPurchases)
       .where(and(eq(assetPurchases.buyerId, user.id), eq(assetPurchases.assetId, assetId)))
-      .limit(1);
+      .limit(1));
 
     const isOwner = asset.sellerId === user.id;
 
@@ -72,9 +70,9 @@ export async function GET(
     // downloads never lose an update (no stale read-increment-write pattern).
     // Fire-and-forget: a failure here does not block the user's download.
     if (!isOwner) {
-      db.update(marketplaceAssets)
+      queryWithResilience(() => getDb().update(marketplaceAssets)
         .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
-        .where(eq(marketplaceAssets.id, assetId))
+        .where(eq(marketplaceAssets.id, assetId)))
         .catch(() => {});
     }
 

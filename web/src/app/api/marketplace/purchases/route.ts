@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { assetPurchases } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -15,12 +15,10 @@ export async function GET(req: NextRequest) {
     if (mid.error) return mid.error;
     const { user } = mid.authContext!;
 
-    const db = getDb();
-
-    const purchases = await db
+    const purchases = await queryWithResilience(() => getDb()
       .select({ assetId: assetPurchases.assetId })
       .from(assetPurchases)
-      .where(eq(assetPurchases.buyerId, user.id));
+      .where(eq(assetPurchases.buyerId, user.id)));
 
     return NextResponse.json({ assetIds: purchases.map((p) => p.assetId) });
   } catch (error) {
