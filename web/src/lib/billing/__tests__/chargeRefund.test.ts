@@ -206,10 +206,10 @@ describe('handleChargeRefunded (PF-526)', () => {
       expect(cteCall!.values).toContain(1);
     });
 
-    it('CTE uses NULLIF to prevent division by zero on amount_cents', async () => {
-      // The purchase-record path (primary path) uses NULLIF(claim.amount_cents, 0).
-      // The fallback path avoids division entirely (uses multiplication by ratio).
-      // This test verifies the fallback path handles ratio correctly.
+    it('fallback path passes ratio through and SQL guard prevents deduction when addonTokens is zero', async () => {
+      // The fallback path (no purchase record) avoids division entirely —
+      // it uses multiplication by the pre-computed ratio. The SQL WHERE guard
+      // (FLOOR(addon_tokens * ratio) > 0) prevents deduction when result is 0.
       mockSelectLimit.mockResolvedValueOnce([{
         ...mockUserRecord,
         addonTokens: 0,

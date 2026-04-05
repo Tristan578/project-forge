@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # PreToolUse hook: fires on `gh pr create` commands.
 # Validates that the command includes --milestone and Closes #NNNN in the body.
-# Exits non-zero with a warning (not a block) to nudge compliance.
+# Exits 1 to BLOCK the command if metadata is missing.
 
 set -euo pipefail
 
-COMMAND="${TOOL_INPUT_command:-}"
+# Read tool input from stdin (JSON) — same pattern as pre-push-quality-gate.sh
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+
+# Fallback: try env var convention (TOOL_INPUT_command)
+if [ -z "$COMMAND" ]; then
+  COMMAND="${TOOL_INPUT_command:-}"
+fi
 
 # Only check gh pr create commands
 if [[ "$COMMAND" != *"gh pr create"* ]]; then
