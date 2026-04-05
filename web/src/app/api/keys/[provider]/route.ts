@@ -1,25 +1,25 @@
-import { NextResponse } from 'next/server';
-import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { assertTier } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { storeProviderKey, deleteProviderKey } from '@/lib/keys/resolver';
 import type { Provider } from '@/lib/db/schema';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { parseJsonBody, requireString, requireOneOf } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { BYOK_PROVIDERS } from '@/lib/config/providers';
 
 /** PUT /api/keys/:provider — store/update a BYOK key */
 export async function PUT(
-  req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
 ) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `keys:${id}`, max: 10, windowSeconds: 60, distributed: false },
+  });
+  if (mid.error) return mid.error;
 
-  // Rate limit: 10 key management requests per minute per user
-  const rl = await rateLimit(`keys:${authResult.ctx.user.id}`, 10, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
-
-  const tierCheck = assertTier(authResult.ctx.user, ['hobbyist', 'creator', 'pro']);
+  const tierCheck = assertTier(mid.authContext!.user, ['hobbyist', 'creator', 'pro']);
   if (tierCheck) return tierCheck;
 
   const { provider } = await params;
@@ -33,7 +33,7 @@ export async function PUT(
   if (!keyResult.ok) return keyResult.response;
 
   try {
-    await storeProviderKey(authResult.ctx.user.id, providerResult.value as Provider, keyResult.value);
+    await storeProviderKey(mid.userId!, providerResult.value as Provider, keyResult.value);
     return NextResponse.json({ success: true, provider: providerResult.value, configured: true });
   } catch (err) {
     captureException(err, { route: '/api/keys/[provider]', method: 'PUT' });
@@ -43,22 +43,22 @@ export async function PUT(
 
 /** DELETE /api/keys/:provider — remove a BYOK key */
 export async function DELETE(
-  _req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
 ) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  // Rate limit: 10 key management requests per minute per user
-  const rl = await rateLimit(`keys:${authResult.ctx.user.id}`, 10, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `keys:${id}`, max: 10, windowSeconds: 60, distributed: false },
+  });
+  if (mid.error) return mid.error;
 
   const { provider } = await params;
   const providerResult = requireOneOf(provider, 'Provider', BYOK_PROVIDERS);
   if (!providerResult.ok) return providerResult.response;
 
   try {
-    await deleteProviderKey(authResult.ctx.user.id, providerResult.value as Provider);
+    await deleteProviderKey(mid.userId!, providerResult.value as Provider);
     return NextResponse.json({ success: true, provider: providerResult.value, configured: false });
   } catch (err) {
     captureException(err, { route: '/api/keys/[provider]', method: 'DELETE' });

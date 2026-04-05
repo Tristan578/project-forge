@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { generationJobs } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
@@ -14,11 +13,12 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-
-    const rl = await rateLimit(`user:job-update:${authResult.ctx.user.id}`, 60, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `user:job-update:${id}`, max: 60, windowSeconds: 60, distributed: false },
+    });
+    if (mid.error) return mid.error;
 
     const { id } = await params;
     const body = await req.json();
@@ -29,7 +29,7 @@ export async function PATCH(
     const [existing] = await db
       .select({ id: generationJobs.id })
       .from(generationJobs)
-      .where(and(eq(generationJobs.id, id), eq(generationJobs.userId, authResult.ctx.user.id)))
+      .where(and(eq(generationJobs.id, id), eq(generationJobs.userId, mid.userId!)))
       .limit(1);
 
     if (!existing) {

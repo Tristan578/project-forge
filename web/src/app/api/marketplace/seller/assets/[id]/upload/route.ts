@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { uploadToR2, buildAssetKey } from '@/lib/storage/r2';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 const ALLOWED_PREVIEW_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const ALLOWED_ASSET_TYPES = [
@@ -29,12 +28,13 @@ export async function POST(
   const { id: assetId } = await context.params;
 
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-    const { user } = authResult.ctx;
-
-    const rl = await rateLimit(`user:seller-asset-upload:${user.id}`, 10, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `user:seller-asset-upload:${id}`, max: 10, windowSeconds: 60, distributed: false },
+    });
+    if (mid.error) return mid.error;
+    const { user } = mid.authContext!;
 
     const db = getDb();
 

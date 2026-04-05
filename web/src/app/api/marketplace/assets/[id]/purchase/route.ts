@@ -1,28 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
 import { users, marketplaceAssets, assetPurchases, creditTransactions } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { validationError, conflict, forbidden, paymentRequired, internalError } from '@/lib/api/errors';
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   const { id: assetId } = await context.params;
 
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-    const { user, clerkId } = authResult.ctx;
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `purchase:${id}`, max: 10, windowSeconds: 60, distributed: false },
+    });
+    if (mid.error) return mid.error;
+    const { user } = mid.authContext!;
 
     const db = getDb();
-
-    // Rate limit: 10 purchase requests per minute per user
-    const rl = await rateLimit(`purchase:${clerkId}`, 10, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     // Get asset
     const [asset] = await db

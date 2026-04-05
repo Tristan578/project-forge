@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
 import { assetPurchases, assetReviews, marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { parseJsonBody, requireInteger, optionalString } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
@@ -14,15 +13,15 @@ export async function POST(
   const { id: assetId } = await context.params;
 
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-    const { user, clerkId } = authResult.ctx;
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `review:${id}`, max: 20, windowSeconds: 60, distributed: false },
+    });
+    if (mid.error) return mid.error;
+    const { user } = mid.authContext!;
 
     const db = getDb();
-
-    // Rate limit: 20 review submissions per minute per user
-    const rl = await rateLimit(`review:${clerkId}`, 20, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const parsed = await parseJsonBody(req);
     if (!parsed.ok) return parsed.response;

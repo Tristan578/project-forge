@@ -1,10 +1,9 @@
-import { NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { executeOperation } from '@/lib/bridges/asepriteBridge';
 import { discoverTool } from '@/lib/bridges/bridgeManager';
 import type { BridgeToolConfig } from '@/lib/bridges/types';
 import { ALLOWED_TEMPLATES } from '@/lib/bridges/luaTemplates';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { BRIDGE_CACHE_TTL_MS } from '@/lib/config/timeouts';
 
@@ -21,14 +20,13 @@ async function getCachedTool(): Promise<BridgeToolConfig> {
   return config;
 }
 
-export async function POST(req: Request) {
-  const auth = await authenticateRequest();
-  if (!auth.ok) {
-    return auth.response;
-  }
-
-  const rl = await rateLimit(`user:bridges-aseprite-execute:${auth.ctx.user.id}`, 10, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+export async function POST(req: NextRequest) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `user:bridges-aseprite-execute:${id}`, max: 10, windowSeconds: 60, distributed: false },
+  });
+  if (mid.error) return mid.error;
 
   try {
     const body = await req.json();
