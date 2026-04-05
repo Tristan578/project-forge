@@ -39,7 +39,14 @@ export async function PATCH(
 
   // Next.js already decodes route params — do not call decodeURIComponent again
   // (double-decoding breaks names containing '%', e.g. '%25' → '%' → URIError).
-  const { id: gameId, name: boardName } = await params;
+  const { id: gameId, name: rawBoardName } = await params;
+
+  // Reject names with characters that would make the board unaddressable or that
+  // indicate malformed percent-encoding from the URL layer.
+  if (/[\/\\%]/.test(rawBoardName) || /[\x00-\x1f\x7f]/.test(rawBoardName)) {
+    return NextResponse.json({ error: 'Invalid leaderboard name' }, { status: 400 });
+  }
+  const boardName = rawBoardName;
 
   try {
     const game = await verifyGameOwnership(gameId, mid.userId!);
@@ -111,7 +118,12 @@ export async function DELETE(
   if (mid.error) return mid.error;
 
   // Next.js already decodes route params — do not call decodeURIComponent again.
-  const { id: gameId, name: boardName } = await params;
+  const { id: gameId, name: rawBoardName } = await params;
+
+  if (/[\/\\%]/.test(rawBoardName) || /[\x00-\x1f\x7f]/.test(rawBoardName)) {
+    return NextResponse.json({ error: 'Invalid leaderboard name' }, { status: 400 });
+  }
+  const boardName = rawBoardName;
 
   try {
     const game = await verifyGameOwnership(gameId, mid.userId!);
