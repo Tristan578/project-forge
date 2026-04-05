@@ -237,10 +237,8 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: mcp-server/package-lock.json
 
       - run: npm ci
-        working-directory: mcp-server
 
       - run: npx vitest run
         working-directory: mcp-server
@@ -724,7 +722,7 @@ jobs:
         run: bash apps/design/scripts/sync-vendored-ui.sh
 
       - name: Run Chromatic
-        if: steps.check-design.outputs.changed == 'true'
+        if: ${{ steps.check-design.outputs.changed == 'true' && secrets.CHROMATIC_PROJECT_TOKEN != '' }}
         uses: chromaui/action@latest
         with:
           projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
@@ -732,4 +730,3 @@ jobs:
           exitZeroOnChanges: true
           exitOnceUploaded: true
           onlyChanged: true
-          skip: ${{ secrets.CHROMATIC_PROJECT_TOKEN == '' }}
