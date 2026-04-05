@@ -227,7 +227,7 @@ describe('POST /api/publish', () => {
       vi.mocked(getDb).mockReturnValue(makeNewPublicationDb() as never);
 
       await POST(makeRequest(validBody()));
-      expect(distributedRateLimit).toHaveBeenCalledWith('publish:clerk_1', 10, 60);
+      expect(distributedRateLimit).toHaveBeenCalledWith('publish:user-1', 10, 60);
     });
   });
 
