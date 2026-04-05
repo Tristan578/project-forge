@@ -38,6 +38,7 @@ These are lower-frequency gotchas moved from CLAUDE.md. The most common ones rem
 - **`VERCEL_ENV` includes `'development'`** — Use explicit `=== 'production' || === 'preview'`.
 - **`sanitizeSystemPrompt` truncates at 10k chars** — Use inline regex for scene context (can be 50k+).
 - **`ToolLoopAgent.stream()` has no `onError`** — Use `result.toUIMessageStreamResponse({ onFinish })`.
+- **Dynamic route `[name]` params need validation** — If POST validates name characters, PATCH/DELETE on `[name]` must validate too. Malformed percent-encoding (`%E0%A4%A`) passes Next.js decoding but should return 400 before DB queries.
 
 ## UI & Frontend
 - **Dockview CSS class** — `.dv-dockview` (NOT `.dv-dockview-container`).
@@ -45,6 +46,9 @@ These are lower-frequency gotchas moved from CLAUDE.md. The most common ones rem
 - **SHADOWED_GLOBALS shared module** — `sandboxGlobals.ts` is single source of truth. Import, never duplicate.
 - **Clerk `<SignIn>`/`<SignUp>` must be in `'use client'` files** — Server Component barrel export triggers SSR 500.
 - **R2 engine CDN requires manual upload** — WASM files gitignored, use `wrangler r2 object put`.
+
+## Claude Code Config
+- **`.claude/prompts/` ≠ `.claude/skills/`** — Prompts are template files only accessible from the prompt bar UI. Skills (in `.claude/skills/<name>/SKILL.md`) are invocable via `/name` from the CLI and via the `Skill` tool. If it should be callable as `/foo`, it MUST be a skill, not a prompt. Never create automation in `.claude/prompts/`.
 
 ## Infrastructure
 - **Vercel account scope** — ALWAYS use `--scope tnolan`. Never `nolantj-livecoms-projects`.

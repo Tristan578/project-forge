@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, memo } from 'react';
-import { Copy, ClipboardPaste, MousePointerClick } from 'lucide-react';
+import { Copy, ClipboardPaste, MousePointerClick, Plus } from 'lucide-react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -46,6 +46,7 @@ const EMPTY_COMPONENTS: string[] = [];
 export const InspectorPanel = memo(function InspectorPanel() {
   const isSectionVisible = useComplexityStore((s) => s.isInspectorSectionVisible);
   const primaryId = useEditorStore((s) => s.primaryId);
+  const sceneEmpty = useEditorStore((s) => s.sceneGraph.rootIds.length === 0);
   const primaryName = useEditorStore((s) => s.primaryName);
   const primaryTransform = useEditorStore((s) => s.primaryTransform);
   const primaryLight = useEditorStore((s) => s.primaryLight);
@@ -197,9 +198,11 @@ export const InspectorPanel = memo(function InspectorPanel() {
     return (
       <div className="flex h-full flex-col bg-[var(--sf-bg-app)] px-3 py-4 overflow-y-auto">
         <EmptyState
-          icon={MousePointerClick}
-          title="Select an entity"
-          description="Click an entity in the viewport or hierarchy to inspect its properties"
+          icon={sceneEmpty ? Plus : MousePointerClick}
+          title={sceneEmpty ? 'Empty scene' : 'Select an entity'}
+          description={sceneEmpty
+            ? 'Use the Add Entity button to add your first entity, or use the AI chat to describe what you want to build'
+            : 'Click an entity in the viewport or hierarchy to inspect its properties'}
           className="mb-4"
         />
         <h2 className="mb-4 text-sm font-semibold text-zinc-300">Scene Settings</h2>

@@ -88,11 +88,15 @@ function FailedState({
       <h2 className="mb-2 text-lg font-semibold text-zinc-100">
         Unable to Initialize Engine
       </h2>
-      <p className="mb-4 text-sm text-zinc-400">
+      <p className="mb-2 text-sm text-zinc-400">
         We tried 3 times but couldn&apos;t start the engine.
-        <br />
-        This may be a browser or GPU compatibility issue.
       </p>
+      <ul className="mb-4 list-inside list-disc text-left text-xs text-zinc-500">
+        <li>Chrome 113+ or Edge 113+ recommended (WebGPU support)</li>
+        <li>Hardware GPU acceleration must be enabled</li>
+        <li>Ensure your browser is up to date</li>
+        <li>Try WebGL2 mode below for broader compatibility</li>
+      </ul>
       <div className="mb-3">
         <button
           onClick={onSwitchToWebGL2}

@@ -407,116 +407,117 @@ export async function reverseAddonTokens(
       .limit(1);
 
     if (purchase) {
-      // TOCTOU fix (PF-7514): the old code read purchase.refundedCents outside
-      // the transaction and used that snapshot to compute newRefundCents.
-      // Two concurrent webhooks could both read the same stale refundedCents,
-      // both compute newRefundCents > 0, and both proceed to deduct tokens.
+      // Atomic claim-then-deduct using a CTE (PF-7514 / #8187).
       //
-      // Fix: atomically advance refunded_cents with WHERE refunded_cents < amountRefunded.
-      // The UPDATE returns the pre-update refunded_cents (via RETURNING + arithmetic)
-      // so we can compute the exact increment this caller is responsible for.
-      // If another request already set refunded_cents = amountRefunded, the WHERE
-      // guard fails and 0 rows are returned — we exit without double-deducting.
+      // Previous code had a TOCTOU race: it read purchase.refundedCents in JS,
+      // computed tokensToDeduct in JS, then ran a 3-statement neonSql.transaction.
+      // The claim UPDATE (statement 1) guarded with WHERE refunded_cents < X,
+      // but statements 2-3 ran unconditionally — two concurrent webhooks both
+      // reading stale refundedCents=0 would both deduct tokens.
+      //
+      // Fix: a single SQL statement where the CTE atomically claims the refund
+      // increment and computes tokensToDeduct. The audit INSERT and user UPDATE
+      // both depend on the claim via EXISTS/JOIN, so they only execute when the
+      // claim actually succeeds.
       const now = new Date().toISOString();
-      // Use a CTE to capture the pre-update refunded_cents value.
-      // In a plain UPDATE...RETURNING, column values are the NEW values, so
-      // we cannot recover the old refunded_cents from RETURNING alone.
-      // The CTE snapshots the old row first; the UPDATE then joins against it
-      // so we can compute the exact increment this caller is responsible for.
-      // Compute token deduction from the purchase record + new refund increment.
-      // The idempotency guard (refundedCents >= amountRefunded) already ran above.
-      const newRefundCents = amountRefunded - purchase.refundedCents;
-      if (newRefundCents <= 0) return;
 
-      const refundRatio = Math.min(newRefundCents / purchase.amountCents, 1);
-      const tokensToDeduct = Math.floor(purchase.tokens * refundRatio);
-      if (tokensToDeduct <= 0) return;
-
-      // ALL operations in a single transaction: claim, audit, and deduction.
-      // If any step fails, none commit — prevents the case where the claim
-      // succeeds but the deduction doesn't (permanent financial loss).
-      // INSERT before UPDATE so balance_after reads pre-deduction addon_tokens.
-      await neonSql.transaction([
-        // 1. Claim: advance refunded_cents (idempotency guard)
-        neonSql`
+      // Step 1: Read the old refunded_cents with FOR UPDATE (row lock).
+      // Step 2: UPDATE only if the old value < amountRefunded (claim guard).
+      // Step 3: Compute tokens_to_deduct from the delta (new - old).
+      // Step 4: Audit INSERT + user UPDATE depend on deduction > 0.
+      //
+      // RETURNING reads post-UPDATE values, so we capture pre-UPDATE state
+      // via a separate SELECT...FOR UPDATE CTE.
+      await neonSql`
+        WITH old_state AS (
+          SELECT refunded_cents, tokens, amount_cents
+          FROM token_purchases
+          WHERE id = ${purchase.id}
+          FOR UPDATE
+        ),
+        claim AS (
           UPDATE token_purchases
           SET refunded_cents = ${amountRefunded}
-          WHERE id = ${purchase.id}
-            AND refunded_cents < ${amountRefunded}
-        `,
-        // 2. Audit: record the deduction (clamped to actual balance)
-        neonSql`
+          FROM old_state
+          WHERE token_purchases.id = ${purchase.id}
+            AND old_state.refunded_cents < ${amountRefunded}
+          RETURNING old_state.refunded_cents AS old_refunded_cents,
+                    old_state.tokens,
+                    old_state.amount_cents
+        ),
+        deduction AS (
+          SELECT FLOOR(
+            claim.tokens * LEAST(
+              (${amountRefunded}::int - claim.old_refunded_cents)::float
+                / NULLIF(claim.amount_cents, 0),
+              1
+            )
+          )::int AS tokens_to_deduct
+          FROM claim
+        ),
+        audit AS (
           INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-          SELECT ${userId}, 'adjustment', -LEAST(${tokensToDeduct}, addon_tokens),
-                 GREATEST(0, monthly_tokens - monthly_tokens_used) + GREATEST(0, addon_tokens - ${tokensToDeduct}) + earned_credits,
+          SELECT ${userId}, 'adjustment', -LEAST(d.tokens_to_deduct, u.addon_tokens),
+                 GREATEST(0, u.monthly_tokens - u.monthly_tokens_used) + GREATEST(0, u.addon_tokens - d.tokens_to_deduct) + u.earned_credits,
                  ${`charge_refunded:${chargeId}`}, ${chargeId}
-          FROM users WHERE id = ${userId}
-        `,
-        // 3. Deduct: reduce addon_tokens (clamped to 0)
-        neonSql`
-          UPDATE users
-          SET addon_tokens = GREATEST(0, addon_tokens - ${tokensToDeduct}),
-              updated_at   = ${now}
-          WHERE id = ${userId}
-        `,
-      ]);
+          FROM deduction d, users u
+          WHERE u.id = ${userId} AND d.tokens_to_deduct > 0
+          RETURNING id
+        )
+        UPDATE users
+        SET addon_tokens = GREATEST(0, addon_tokens - d.tokens_to_deduct),
+            updated_at   = ${now}
+        FROM deduction d
+        WHERE users.id = ${userId} AND d.tokens_to_deduct > 0
+        RETURNING users.id
+      `;
+      // If claim matched 0 rows (already refunded), the entire CTE chain
+      // produces no rows — done. If amount_cents=0 (comped purchase),
+      // NULLIF returns NULL and the deduction rounds to 0, skipping audit+update.
       return;
     }
   }
 
   // --- Fallback: no purchase record found (non-addon charge or legacy) ---
-  // Check idempotency via existing credit transaction for this chargeId
-  const [existingRefund] = await db
-    .select({ id: creditTransactions.id })
-    .from(creditTransactions)
-    .where(
-      and(
-        eq(creditTransactions.userId, userId),
-        eq(creditTransactions.referenceId, chargeId),
-        eq(creditTransactions.source, `charge_refunded:${chargeId}`)
-      )
-    )
-    .limit(1);
-
-  if (existingRefund) return; // Already processed this charge
-
-  const [user] = await db
-    .select({
-      addonTokens: users.addonTokens,
-      monthlyTokens: users.monthlyTokens,
-      monthlyTokensUsed: users.monthlyTokensUsed,
-      earnedCredits: users.earnedCredits,
-    })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!user) return;
-
-  // Calculate proportional token deduction from current balance (legacy)
+  // Atomic idempotent deduction using a CTE (PF-7514 / #8187).
+  //
+  // Previous code had a TOCTOU race: SELECT for existingRefund, then INSERT
+  // if not found. Two concurrent webhooks could both see "no existing refund"
+  // and both insert + deduct.
+  //
+  // Fix: CTE INSERT...WHERE NOT EXISTS atomically checks and inserts. The
+  // user UPDATE depends on the INSERT via EXISTS, so it only runs when the
+  // INSERT actually created a row.
   const refundRatio = Math.min(amountRefunded / amountTotal, 1);
-  const tokensToDeduct = Math.floor(user.addonTokens * refundRatio);
-
-  if (tokensToDeduct <= 0) return;
-
-  const clampedDeduction = Math.min(tokensToDeduct, user.addonTokens);
+  const source = `charge_refunded:${chargeId}`;
   const now = new Date().toISOString();
 
-  // INSERT before UPDATE: balance_after reads pre-deduction addon_tokens via INSERT...SELECT
-  await neonSql.transaction([
-    neonSql`
+  await neonSql`
+    WITH audit AS (
       INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-      SELECT ${userId}, 'adjustment', ${-clampedDeduction},
-             GREATEST(0, monthly_tokens - monthly_tokens_used) + GREATEST(0, addon_tokens - ${clampedDeduction}) + earned_credits,
-             ${`charge_refunded:${chargeId}`}, ${chargeId}
-      FROM users WHERE id = ${userId}
-    `,
-    neonSql`
-      UPDATE users
-      SET addon_tokens = GREATEST(0, addon_tokens - ${clampedDeduction}),
-          updated_at   = ${now}
-      WHERE id = ${userId}
-    `,
-  ]);
+      SELECT ${userId}, 'adjustment',
+             -LEAST(FLOOR(u.addon_tokens * ${refundRatio})::int, u.addon_tokens),
+             GREATEST(0, u.monthly_tokens - u.monthly_tokens_used)
+               + GREATEST(0, u.addon_tokens - FLOOR(u.addon_tokens * ${refundRatio})::int)
+               + u.earned_credits,
+             ${source}, ${chargeId}
+      FROM users u
+      WHERE u.id = ${userId}
+        AND FLOOR(u.addon_tokens * ${refundRatio})::int > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM credit_transactions ct
+          WHERE ct.user_id = ${userId}
+            AND ct.reference_id = ${chargeId}
+            AND ct.source = ${source}
+        )
+      RETURNING amount
+    )
+    UPDATE users
+    SET addon_tokens = GREATEST(0, addon_tokens - ABS((SELECT amount FROM audit))),
+        updated_at   = ${now}
+    WHERE id = ${userId}
+      AND EXISTS (SELECT 1 FROM audit)
+  `;
 }
 
 /**

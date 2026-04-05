@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useMemo } from 'react';
-import { MessageSquare, Trash2, Wrench, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useRef, useMemo } from 'react';
+import { MessageSquare, Trash2, Wrench, Sparkles, RotateCcw } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
+import { useUserStore } from '@/stores/userStore';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { SuggestionChips } from './SuggestionChips';
@@ -61,7 +62,16 @@ export function ChatPanel() {
   const clearChat = useChatStore((s) => s.clearChat);
   const loopIteration = useChatStore((s) => s.loopIteration);
   const sessionTokens = useChatStore((s) => s.sessionTokens);
+  const sendMessage = useChatStore((s) => s.sendMessage);
+  const canUseAI = useUserStore((s) => s.canUseAI());
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const handleRetry = useCallback(() => {
+    const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
+    if (lastUserMsg) {
+      void sendMessage(lastUserMsg.content, lastUserMsg.images, lastUserMsg.entityRefs);
+    }
+  }, [messages, sendMessage]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -102,11 +112,28 @@ export function ChatPanel() {
       <div ref={scrollRef} aria-live="polite" aria-label="Chat messages" className="flex-1 overflow-y-auto">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
-            <MessageSquare size={28} className="text-zinc-700" />
-            <p className="text-xs text-zinc-400">
-              Describe what you want to build.
-            </p>
-            <SuggestionChips className="max-w-[280px] justify-center" />
+            {canUseAI ? (
+              <>
+                <MessageSquare size={28} className="text-zinc-700" />
+                <p className="text-xs text-zinc-400">
+                  Describe what you want to build.
+                </p>
+                <SuggestionChips className="max-w-[280px] justify-center" />
+              </>
+            ) : (
+              <>
+                <Sparkles size={28} className="text-zinc-700" />
+                <p className="text-xs text-zinc-400">
+                  AI features require a paid plan.
+                </p>
+                <a
+                  href="/pricing"
+                  className="text-xs font-medium text-purple-400 hover:text-purple-300"
+                >
+                  View plans
+                </a>
+              </>
+            )}
           </div>
         ) : (
           <div className="py-2">
@@ -126,8 +153,16 @@ export function ChatPanel() {
 
         {/* Error display */}
         {error && (
-          <div role="alert" className="mx-3 mb-2 rounded border border-red-900/50 bg-red-900/20 px-3 py-2 text-xs text-red-400">
-            {error}
+          <div role="alert" className="mx-3 mb-2 flex items-center justify-between rounded border border-red-900/50 bg-red-900/20 px-3 py-2 text-xs text-red-400">
+            <span>{error}</span>
+            <button
+              onClick={handleRetry}
+              className="ml-2 flex shrink-0 items-center gap-1 rounded px-2 py-1 text-red-300 hover:bg-red-900/30"
+              aria-label="Retry last message"
+            >
+              <RotateCcw size={12} />
+              Retry
+            </button>
           </div>
         )}
       </div>

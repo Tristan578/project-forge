@@ -22,14 +22,14 @@ const mockSelect = vi.fn().mockReturnValue({ from: mockSelectFrom });
 
 const mockDb = { insert: mockInsert, update: mockUpdate, select: mockSelect };
 
-// Neon SQL mock
-interface MockStatement { _type: 'neon_statement'; values: unknown[] }
+// Neon SQL mock — tagged template returns Promise (for CTE queries) and also provides .transaction()
 const mockNeonTransaction = vi.fn().mockResolvedValue([]);
+const mockNeonSqlCalls: { strings: TemplateStringsArray; values: unknown[] }[] = [];
 const mockNeonSql = Object.assign(
-  vi.fn((_strings: TemplateStringsArray, ..._values: unknown[]): MockStatement => ({
-    _type: 'neon_statement',
-    values: _values,
-  })),
+  vi.fn((_strings: TemplateStringsArray, ..._values: unknown[]): Promise<unknown[]> => {
+    mockNeonSqlCalls.push({ strings: _strings, values: _values });
+    return Promise.resolve([]);
+  }),
   { transaction: mockNeonTransaction },
 );
 
@@ -56,6 +56,7 @@ const mockUser = {
 describe('subscription-lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockNeonSqlCalls.length = 0;
     mockSelectWhere.mockReturnValue({ limit: vi.fn().mockResolvedValue([mockUser]) });
     mockUpdateSet.mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
   });
@@ -121,6 +122,7 @@ import {
 describe('handleChargeRefunded', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockNeonSqlCalls.length = 0;
     mockSelectWhere.mockReturnValue({
       limit: vi.fn().mockResolvedValue([mockUser]),
     });
@@ -145,22 +147,23 @@ describe('handleChargeRefunded', () => {
     expect(mockNeonTransaction).not.toHaveBeenCalled();
   });
 
-  it('calls reverseAddonTokens for a full refund (fallback path)', async () => {
+  it('calls reverseAddonTokens for a full refund (fallback CTE path)', async () => {
     // Select 1: findUserByStripeCustomer -> mockUser
-    // Select 2: fallback idempotency check -> no existing refund
-    // Select 3: user addonTokens lookup
     mockSelectWhere
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([mockUser]) })
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) })
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ addonTokens: 5000, monthlyTokens: 150000, monthlyTokensUsed: 30000, earnedCredits: 0 }]) });
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([mockUser]) });
     await handleChargeRefunded('cus_abc', 'ch_full', 1000, 1000);
-    expect(mockNeonTransaction).toHaveBeenCalledOnce();
+    // Fallback now uses a single CTE statement (not transaction) for atomicity (#8187)
+    const cteCall = mockNeonSqlCalls.find(c =>
+      c.strings.some(s => s.includes('audit'))
+    );
+    expect(cteCall).toBeDefined();
   });
 });
 
 describe('reverseAddonTokens (fallback path, no paymentIntentId)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockNeonSqlCalls.length = 0;
     mockUpdateSet.mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
   });
 
@@ -172,32 +175,26 @@ describe('reverseAddonTokens (fallback path, no paymentIntentId)', () => {
     expect(mockNeonTransaction).not.toHaveBeenCalled();
   });
 
-  it('deducts proportional tokens for partial refund via neonSql.transaction', async () => {
-    mockSelectWhere
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) })
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ addonTokens: 1000, monthlyTokens: 0, monthlyTokensUsed: 0, earnedCredits: 0 }]) });
+  it('deducts proportional tokens for partial refund via CTE', async () => {
     await reverseAddonTokens('user_abc', 'ch_partial', 500, 1000);
-    expect(mockNeonTransaction).toHaveBeenCalledOnce();
-
-    // Check the INSERT statement values include the deduction amount
-    const allCalls = mockNeonSql.mock.calls;
-    const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[0];
-    const insertValues = insertCall.slice(1).flat();
-    expect(insertValues).toContain(-500); // deduction
-    expect(insertValues).toContain('charge_refunded:ch_partial');
+    // Fallback now uses a single CTE statement (#8187)
+    const cteCall = mockNeonSqlCalls.find(c =>
+      c.strings.some(s => s.includes('audit'))
+    );
+    expect(cteCall).toBeDefined();
+    // refundRatio = 500/1000 = 0.5
+    expect(cteCall!.values).toContain(0.5);
+    expect(cteCall!.values).toContain('charge_refunded:ch_partial');
   });
 
-  it('deducts all tokens for full refund', async () => {
-    mockSelectWhere
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) })
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ addonTokens: 1000, monthlyTokens: 0, monthlyTokensUsed: 0, earnedCredits: 0 }]) });
+  it('deducts all tokens for full refund via CTE', async () => {
     await reverseAddonTokens('user_abc', 'ch_full', 1000, 1000);
-    expect(mockNeonTransaction).toHaveBeenCalledOnce();
-
-    const allCalls = mockNeonSql.mock.calls;
-    const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[0];
-    const insertValues = insertCall.slice(1).flat();
-    expect(insertValues).toContain(-1000);
+    const cteCall = mockNeonSqlCalls.find(c =>
+      c.strings.some(s => s.includes('audit'))
+    );
+    expect(cteCall).toBeDefined();
+    // refundRatio = 1000/1000 = 1
+    expect(cteCall!.values).toContain(1);
   });
 
   it('does nothing when calculated deduction is 0', async () => {

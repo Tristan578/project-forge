@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { ChatPanel } from '../ChatPanel';
 
 vi.mock('lucide-react', () => ({
@@ -37,45 +37,49 @@ vi.mock('lucide-react', () => ({
 const mockClearChat = vi.fn();
 const mockSendMessage = vi.fn();
 
+let chatStoreOverrides: Record<string, unknown> = {};
+
+const defaultChatState = {
+  messages: [],
+  isStreaming: false,
+  error: null,
+  clearChat: mockClearChat,
+  sendMessage: mockSendMessage,
+  loopIteration: 0,
+  sessionTokens: { input: 0, output: 0 },
+  rightPanelTab: 'chat',
+  setRightPanelTab: vi.fn(),
+  activeModel: 'claude-sonnet-4-6',
+  setModel: vi.fn(),
+  thinkingEnabled: false,
+  setThinkingEnabled: vi.fn(),
+  approvalMode: false,
+  setApprovalMode: vi.fn(),
+  showEntityPicker: false,
+  setShowEntityPicker: vi.fn(),
+  setEntityPickerFilter: vi.fn(),
+  pendingEntityRefs: {},
+  addEntityRef: vi.fn(),
+  clearEntityRefs: vi.fn(),
+  stopStreaming: vi.fn(),
+  entityPickerFilter: '',
+  setMessageFeedback: vi.fn(),
+  batchUndoMessage: vi.fn(),
+  approveToolCalls: vi.fn(),
+  rejectToolCalls: vi.fn(),
+  conversations: [],
+  activeConversationId: null,
+  createConversation: vi.fn(),
+  switchConversation: vi.fn(),
+  deleteConversation: vi.fn(),
+  renameConversation: vi.fn(),
+  loadConversations: vi.fn(),
+};
+
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: Object.assign(
     vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
-      selector({
-        messages: [],
-        isStreaming: false,
-        error: null,
-        clearChat: mockClearChat,
-        sendMessage: mockSendMessage,
-        loopIteration: 0,
-        sessionTokens: { input: 0, output: 0 },
-        rightPanelTab: 'chat',
-        setRightPanelTab: vi.fn(),
-        activeModel: 'claude-sonnet-4-6',
-        setModel: vi.fn(),
-        thinkingEnabled: false,
-        setThinkingEnabled: vi.fn(),
-        approvalMode: false,
-        setApprovalMode: vi.fn(),
-        showEntityPicker: false,
-        setShowEntityPicker: vi.fn(),
-        setEntityPickerFilter: vi.fn(),
-        pendingEntityRefs: {},
-        addEntityRef: vi.fn(),
-        clearEntityRefs: vi.fn(),
-        stopStreaming: vi.fn(),
-        entityPickerFilter: '',
-        setMessageFeedback: vi.fn(),
-        batchUndoMessage: vi.fn(),
-        approveToolCalls: vi.fn(),
-        rejectToolCalls: vi.fn(),
-        conversations: [],
-        activeConversationId: null,
-        createConversation: vi.fn(),
-        switchConversation: vi.fn(),
-        deleteConversation: vi.fn(),
-        renameConversation: vi.fn(),
-        loadConversations: vi.fn(),
-      })
+      selector({ ...defaultChatState, ...chatStoreOverrides })
     ),
     { setState: vi.fn(), getState: vi.fn() },
   ),
@@ -93,9 +97,20 @@ vi.mock('@/stores/editorStore', () => ({
   ),
 }));
 
+const mockCanUseAI = vi.fn(() => true);
+vi.mock('@/stores/userStore', () => ({
+  useUserStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
+    selector({
+      tier: 'creator',
+      canUseAI: mockCanUseAI,
+    })
+  ),
+}));
+
 describe('ChatPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    chatStoreOverrides = {};
   });
 
   afterEach(() => {
@@ -127,5 +142,30 @@ describe('ChatPanel', () => {
     render(<ChatPanel />);
     // ConversationList renders a button with "New Chat" or similar
     expect(screen.getByLabelText('Switch conversation')).toBeDefined();
+  });
+
+  it('shows upgrade prompt when canUseAI is false', () => {
+    mockCanUseAI.mockReturnValue(false);
+    render(<ChatPanel />);
+    expect(screen.getByText('AI features require a paid plan.')).toBeDefined();
+    const link = screen.getByText('View plans');
+    expect(link).toBeDefined();
+    expect(link.getAttribute('href')).toBe('/pricing');
+    // Should NOT show suggestion chips
+    expect(screen.queryByText('Describe what you want to build.')).toBeNull();
+  });
+
+  it('retry button sends the last user message with all attachments', () => {
+    chatStoreOverrides = {
+      messages: [
+        { id: '1', role: 'user', content: 'Build a castle', images: ['img1.png'], entityRefs: { e1: 'Castle' } },
+        { id: '2', role: 'assistant', content: 'Sure!' },
+      ],
+      error: 'Connection failed',
+    };
+    render(<ChatPanel />);
+    const retryBtn = screen.getByLabelText('Retry last message');
+    fireEvent.click(retryBtn);
+    expect(mockSendMessage).toHaveBeenCalledWith('Build a castle', ['img1.png'], { e1: 'Castle' });
   });
 });
