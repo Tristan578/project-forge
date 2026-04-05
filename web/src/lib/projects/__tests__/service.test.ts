@@ -43,6 +43,7 @@ const mockDb = {
 
 vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn(() => mockDb),
+  queryWithResilience: vi.fn((fn: () => Promise<unknown>) => fn()),
 }));
 
 vi.mock('@/lib/db/schema', () => ({

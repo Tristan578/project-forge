@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { getDb, getNeonSql } from '../db/client';
+import { getDb, getNeonSql, queryWithResilience } from '../db/client';
 import {
   users,
   projects,
@@ -14,54 +14,58 @@ export async function syncUserFromClerk(clerkData: {
   first_name?: string | null;
   last_name?: string | null;
 }): Promise<User> {
-  const db = getDb();
   const email = clerkData.email_addresses[0]?.email_address;
   if (!email) throw new Error('No email found in Clerk data');
 
   const displayName = [clerkData.first_name, clerkData.last_name].filter(Boolean).join(' ') || null;
 
   // Upsert user
-  const [user] = await db
-    .insert(users)
-    .values({
-      clerkId: clerkData.id,
-      email,
-      displayName,
-    })
-    .onConflictDoUpdate({
-      target: users.clerkId,
-      set: {
+  const [user] = await queryWithResilience(() =>
+    getDb()
+      .insert(users)
+      .values({
+        clerkId: clerkData.id,
         email,
         displayName,
-        updatedAt: new Date(),
-      },
-    })
-    .returning();
+      })
+      .onConflictDoUpdate({
+        target: users.clerkId,
+        set: {
+          email,
+          displayName,
+          updatedAt: new Date(),
+        },
+      })
+      .returning()
+  );
 
   return user;
 }
 
 /** Get user by Clerk ID */
 export async function getUserByClerkId(clerkId: string): Promise<User | null> {
-  const db = getDb();
-  const [user] = await db.select().from(users).where(eq(users.clerkId, clerkId)).limit(1);
+  const [user] = await queryWithResilience(() =>
+    getDb().select().from(users).where(eq(users.clerkId, clerkId)).limit(1)
+  );
   return user ?? null;
 }
 
 /** Get user by internal ID */
 export async function getUserById(userId: string): Promise<User | null> {
-  const db = getDb();
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const [user] = await queryWithResilience(() =>
+    getDb().select().from(users).where(eq(users.id, userId)).limit(1)
+  );
   return user ?? null;
 }
 
 /** Update user tier (called from Stripe webhooks) */
 export async function updateUserTier(userId: string, tier: Tier): Promise<void> {
-  const db = getDb();
-  await db
-    .update(users)
-    .set({ tier, updatedAt: new Date() })
-    .where(eq(users.id, userId));
+  await queryWithResilience(() =>
+    getDb()
+      .update(users)
+      .set({ tier, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+  );
 }
 
 /** Update Stripe customer/subscription IDs */
@@ -70,15 +74,16 @@ export async function updateUserStripe(
   stripeCustomerId: string,
   stripeSubscriptionId?: string
 ): Promise<void> {
-  const db = getDb();
-  await db
-    .update(users)
-    .set({
-      stripeCustomerId,
-      stripeSubscriptionId: stripeSubscriptionId ?? undefined,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
+  await queryWithResilience(() =>
+    getDb()
+      .update(users)
+      .set({
+        stripeCustomerId,
+        stripeSubscriptionId: stripeSubscriptionId ?? undefined,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+  );
 }
 
 /** Update user display name */
@@ -86,16 +91,17 @@ export async function updateDisplayName(
   userId: string,
   displayName: string
 ): Promise<User> {
-  const db = getDb();
   const trimmed = displayName.trim();
   if (trimmed.length === 0) throw new Error('Display name cannot be empty');
   if (trimmed.length > 50) throw new Error('Display name must be 50 characters or less');
 
-  const [user] = await db
-    .update(users)
-    .set({ displayName: trimmed, updatedAt: new Date() })
-    .where(eq(users.id, userId))
-    .returning();
+  const [user] = await queryWithResilience(() =>
+    getDb()
+      .update(users)
+      .set({ displayName: trimmed, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning()
+  );
 
   if (!user) throw new Error('User not found');
   return user;
@@ -124,22 +130,25 @@ export async function updateDisplayName(
  *   → users
  */
 export async function deleteUserAccount(userId: string): Promise<void> {
-  const db = getDb();
   const neonSql = getNeonSql();
 
   // Read IDs of dependent records before the transaction.
   // These reads are outside the transaction intentionally: the neon-http
   // sql.transaction() API only accepts DML statements (no SELECT inside txn).
-  const userGames = await db
-    .select({ id: publishedGames.id })
-    .from(publishedGames)
-    .where(eq(publishedGames.userId, userId));
+  const userGames = await queryWithResilience(() =>
+    getDb()
+      .select({ id: publishedGames.id })
+      .from(publishedGames)
+      .where(eq(publishedGames.userId, userId))
+  );
   const gameIds = userGames.map((g) => g.id);
 
-  const userProjects = await db
-    .select({ id: projects.id })
-    .from(projects)
-    .where(eq(projects.userId, userId));
+  const userProjects = await queryWithResilience(() =>
+    getDb()
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.userId, userId))
+  );
   const projectIds = userProjects.map((p) => p.id);
 
   // Build the full list of DELETE statements in dependency order.
@@ -221,5 +230,5 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   statements.push(neonSql`DELETE FROM users WHERE id = ${userId}`);
 
   // Execute all statements atomically
-  await neonSql.transaction(statements);
+  await queryWithResilience(() => neonSql.transaction(statements));
 }

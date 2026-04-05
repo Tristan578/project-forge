@@ -52,6 +52,7 @@ const mockNeonSql = Object.assign(vi.fn().mockResolvedValue([]), {
 vi.mock('@/lib/db/client', () => ({
   getDb: () => mockDb,
   getNeonSql: () => mockNeonSql,
+  queryWithResilience: vi.fn((fn: () => Promise<unknown>) => fn()),
 }));
 
 // Stub drizzle sql/eq/and/gte — they just need to produce opaque tokens
