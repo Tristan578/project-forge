@@ -199,10 +199,8 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: mcp-server/package-lock.json
 
       - run: npm ci
-        working-directory: mcp-server
 
       - run: npx vitest run
         working-directory: mcp-server
@@ -453,9 +451,6 @@ jobs:
       - name: npm audit (web)
         working-directory: web
         run: npm audit --audit-level=critical
-
-      - run: npm ci
-        working-directory: mcp-server
 
       - name: npm audit (mcp-server)
         working-directory: mcp-server
