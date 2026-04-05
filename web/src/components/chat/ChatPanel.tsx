@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useMemo } from 'react';
-import { MessageSquare, Trash2, Wrench, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useRef, useMemo } from 'react';
+import { MessageSquare, Trash2, Wrench, Sparkles, RotateCcw } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useUserStore } from '@/stores/userStore';
 import { ChatMessage } from './ChatMessage';
@@ -62,8 +62,16 @@ export function ChatPanel() {
   const clearChat = useChatStore((s) => s.clearChat);
   const loopIteration = useChatStore((s) => s.loopIteration);
   const sessionTokens = useChatStore((s) => s.sessionTokens);
+  const sendMessage = useChatStore((s) => s.sendMessage);
   const canUseAI = useUserStore((s) => s.canUseAI);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const handleRetry = useCallback(() => {
+    const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
+    if (lastUserMsg) {
+      void sendMessage(lastUserMsg.content);
+    }
+  }, [messages, sendMessage]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -145,8 +153,16 @@ export function ChatPanel() {
 
         {/* Error display */}
         {error && (
-          <div role="alert" className="mx-3 mb-2 rounded border border-red-900/50 bg-red-900/20 px-3 py-2 text-xs text-red-400">
-            {error}
+          <div role="alert" className="mx-3 mb-2 flex items-center justify-between rounded border border-red-900/50 bg-red-900/20 px-3 py-2 text-xs text-red-400">
+            <span>{error}</span>
+            <button
+              onClick={handleRetry}
+              className="ml-2 flex shrink-0 items-center gap-1 rounded px-2 py-1 text-red-300 hover:bg-red-900/30"
+              aria-label="Retry last message"
+            >
+              <RotateCcw size={12} />
+              Retry
+            </button>
           </div>
         )}
       </div>

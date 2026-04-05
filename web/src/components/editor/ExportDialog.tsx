@@ -539,11 +539,10 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 border-t border-zinc-700 px-4 py-3">
           <button
-            onClick={onClose}
-            disabled={isExporting}
-            className="rounded px-3 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
+            onClick={() => { setExporting(false); onClose(); }}
+            className="rounded px-3 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
           >
-            Cancel
+            {isExporting ? 'Cancel Export' : 'Cancel'}
           </button>
           <button
             onClick={handleExport}
