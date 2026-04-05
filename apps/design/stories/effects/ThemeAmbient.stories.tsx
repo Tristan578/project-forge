@@ -183,3 +183,68 @@ export const EffectsOff: Story = {
     },
   ],
 };
+
+/** Ember at narrow viewport — verifies overflow: hidden clips effects. */
+export const EmberNarrow: Story = {
+  name: 'Ember (768px)',
+  parameters: { viewport: { defaultViewport: 'ipad' } },
+  decorators: [
+    (Story) => {
+      document.documentElement.setAttribute('data-sf-theme', 'ember');
+      document.documentElement.setAttribute('data-sf-effects', 'on');
+      return <Story />;
+    },
+  ],
+};
+
+/** Ice at narrow viewport. */
+export const IceNarrow: Story = {
+  name: 'Ice (768px)',
+  parameters: { viewport: { defaultViewport: 'ipad' } },
+  decorators: [
+    (Story) => {
+      document.documentElement.setAttribute('data-sf-theme', 'ice');
+      document.documentElement.setAttribute('data-sf-effects', 'on');
+      return <Story />;
+    },
+  ],
+};
+
+/** Mech at narrow viewport — scan lines should still fill width. */
+export const MechNarrow: Story = {
+  name: 'Mech (768px)',
+  parameters: { viewport: { defaultViewport: 'ipad' } },
+  decorators: [
+    (Story) => {
+      document.documentElement.setAttribute('data-sf-theme', 'mech');
+      document.documentElement.setAttribute('data-sf-effects', 'on');
+      return <Story />;
+    },
+  ],
+};
+
+/** Effects off at narrow viewport — confirms no effect leakage. */
+export const EffectsOffNarrow: Story = {
+  name: 'Effects Off (768px)',
+  parameters: { viewport: { defaultViewport: 'ipad' } },
+  decorators: [
+    (Story) => {
+      document.documentElement.setAttribute('data-sf-theme', 'ember');
+      document.documentElement.setAttribute('data-sf-effects', 'off');
+      return <Story />;
+    },
+  ],
+};
+
+/** Dark at narrow viewport — baseline for no-effect rendering. */
+export const DarkNarrow: Story = {
+  name: 'Dark (768px)',
+  parameters: { viewport: { defaultViewport: 'ipad' } },
+  decorators: [
+    (Story) => {
+      document.documentElement.setAttribute('data-sf-theme', 'dark');
+      document.documentElement.setAttribute('data-sf-effects', 'on');
+      return <Story />;
+    },
+  ],
+};
