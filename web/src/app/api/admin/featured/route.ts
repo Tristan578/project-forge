@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     const adminError = assertAdmin(mid.authContext!.clerkId);
     if (adminError) return adminError;
 
-    const rateLimitError = await rateLimitAdminRoute(mid.authContext!.clerkId, 'admin-featured');
+    const rateLimitError = await rateLimitAdminRoute(mid.userId!, 'admin-featured');
     if (rateLimitError) return rateLimitError;
 
     const db = getDb();
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     const adminError = assertAdmin(mid.authContext!.clerkId);
     if (adminError) return adminError;
 
-    const rateLimitError = await rateLimitAdminRoute(mid.authContext!.clerkId, 'admin-featured');
+    const rateLimitError = await rateLimitAdminRoute(mid.userId!, 'admin-featured');
     if (rateLimitError) return rateLimitError;
 
     const body = await req.json();
@@ -134,7 +134,7 @@ export async function DELETE(req: NextRequest) {
     const adminError = assertAdmin(mid.authContext!.clerkId);
     if (adminError) return adminError;
 
-    const rateLimitError = await rateLimitAdminRoute(mid.authContext!.clerkId, 'admin-featured');
+    const rateLimitError = await rateLimitAdminRoute(mid.userId!, 'admin-featured');
     if (rateLimitError) return rateLimitError;
 
     const { searchParams } = new URL(req.url);

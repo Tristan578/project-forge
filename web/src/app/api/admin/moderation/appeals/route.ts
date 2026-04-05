@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     const adminError = assertAdmin(mid.authContext!.clerkId);
     if (adminError) return adminError;
 
-    const rateLimitError = await rateLimitAdminRoute(mid.authContext!.clerkId, 'admin-moderation-appeals');
+    const rateLimitError = await rateLimitAdminRoute(mid.userId!, 'admin-moderation-appeals');
     if (rateLimitError) return rateLimitError;
 
     const db = getDb();
