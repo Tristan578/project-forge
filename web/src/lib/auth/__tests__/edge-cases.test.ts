@@ -45,8 +45,13 @@ const mockDb = {
   }),
 };
 
+const mockNeonSql = Object.assign(vi.fn().mockResolvedValue([]), {
+  transaction: vi.fn().mockResolvedValue([]),
+});
+
 vi.mock('@/lib/db/client', () => ({
   getDb: () => mockDb,
+  getNeonSql: () => mockNeonSql,
 }));
 
 // Stub drizzle sql/eq/and/gte — they just need to produce opaque tokens
@@ -213,10 +218,11 @@ describe('deductTokens — concurrent token deductions', () => {
 
   it('deducts from monthly tokens when sufficient', async () => {
     mockDbSelect.mockResolvedValue([makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0 })]);
-    // Simulate successful atomic update
-    mockDbUpdate.mockResolvedValue([{ id: 'user-1' }]);
-    mockDbInsert.mockResolvedValue([{ id: 'usage-uuid-1' }]);
-    // Second select for getTokenBalance after deduction
+    // neonSql tagged-template calls: first = UPDATE RETURNING, second = INSERT RETURNING
+    mockNeonSql
+      .mockResolvedValueOnce([{ id: 'user-1' }])      // UPDATE ... RETURNING id
+      .mockResolvedValueOnce([{ id: 'usage-uuid-1' }]); // INSERT ... RETURNING id
+    // getTokenBalance after deduction reads via Drizzle select
     mockDbSelect.mockResolvedValueOnce([makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0 })]);
     mockDbSelect.mockResolvedValueOnce([makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 100, addonTokens: 0 })]);
 
@@ -230,8 +236,8 @@ describe('deductTokens — concurrent token deductions', () => {
   it('retries on race condition (updateResult empty) up to 3 times, then returns INSUFFICIENT_TOKENS', async () => {
     // First read: user has enough balance
     mockDbSelect.mockResolvedValue([makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0 })]);
-    // Atomic update always returns [] — simulates perpetual race condition
-    mockDbUpdate.mockResolvedValue([]);
+    // Atomic neonSql UPDATE always returns [] — simulates perpetual race condition
+    mockNeonSql.mockResolvedValue([]);
 
     const result = await deductTokens('user-1', 'chat', 100, undefined, undefined, 3);
     // At retry count 3, should bail out with INSUFFICIENT_TOKENS
