@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { moderationAppeals, gameComments } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
+import { assertAdmin } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
@@ -21,13 +22,13 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
+    const mid = await withApiMiddleware(req, { requireAuth: true });
+    if (mid.error) return mid.error;
 
-    const adminError = assertAdmin(authResult.ctx.clerkId);
+    const adminError = assertAdmin(mid.authContext!.clerkId);
     if (adminError) return adminError;
 
-    const rateLimitError = await rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-moderation-appeals-review');
+    const rateLimitError = await rateLimitAdminRoute(mid.authContext!.clerkId, 'admin-moderation-appeals-review');
     if (rateLimitError) return rateLimitError;
 
     const { id } = await params;
@@ -68,7 +69,7 @@ export async function POST(
       .update(moderationAppeals)
       .set({
         status: newStatus,
-        reviewedBy: authResult.ctx.clerkId,
+        reviewedBy: mid.authContext!.clerkId,
         reviewNote: typeof note === 'string' ? note.trim() : null,
         reviewedAt: new Date(),
       })

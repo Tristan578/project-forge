@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
+import { assertAdmin } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { getDb } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
@@ -10,9 +11,9 @@ const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
 export async function GET(req: NextRequest) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-  const { clerkId } = authResult.ctx;
+  const mid = await withApiMiddleware(req, { requireAuth: true });
+  if (mid.error) return mid.error;
+  const { clerkId } = mid.authContext!;
 
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
