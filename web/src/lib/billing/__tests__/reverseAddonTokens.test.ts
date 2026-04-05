@@ -183,10 +183,9 @@ describe('reverseAddonTokens (PF-734, PF-7514, #8187)', () => {
     });
 
     it('SQL NOT EXISTS guard prevents duplicate refunds (idempotency)', async () => {
-      // Call twice — the SQL NOT EXISTS guard prevents double-deduction
-      // in production. In the mock, both calls will "succeed" because the
-      // mock doesn't maintain SQL state, but we verify the query structure
-      // includes the NOT EXISTS clause.
+      // The SQL NOT EXISTS guard prevents double-deduction in production.
+      // The mock doesn't maintain SQL state, so we verify the query
+      // structure includes the NOT EXISTS clause.
       await reverseAddonTokens('user-1', 'ch_abc', 500, 1000);
 
       const cteCall = findCteCall('audit');

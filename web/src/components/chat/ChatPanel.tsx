@@ -69,7 +69,7 @@ export function ChatPanel() {
   const handleRetry = useCallback(() => {
     const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
     if (lastUserMsg) {
-      void sendMessage(lastUserMsg.content);
+      void sendMessage(lastUserMsg.content, lastUserMsg.images, lastUserMsg.entityRefs);
     }
   }, [messages, sendMessage]);
 

@@ -471,8 +471,9 @@ export async function reverseAddonTokens(
         WHERE users.id = ${userId} AND d.tokens_to_deduct > 0
         RETURNING users.id
       `;
-      // If claim matched 0 rows (already refunded or amount_cents=0),
-      // the entire CTE chain produces no rows — done.
+      // If claim matched 0 rows (already refunded), the entire CTE chain
+      // produces no rows — done. If amount_cents=0 (comped purchase),
+      // NULLIF returns NULL and the deduction rounds to 0, skipping audit+update.
       return;
     }
   }
