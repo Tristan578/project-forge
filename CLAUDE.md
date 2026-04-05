@@ -76,7 +76,7 @@ All work tracked via taskboard. Use `/kanban` skill for full protocol.
 - **neon-http `db.transaction()` throws** — Use `getNeonSql()` -> `neonSql.transaction([...statements])`. INSERT...SELECT before UPDATE.
 - **vitest workspace drops coverage thresholds** — CI must use standalone `vitest.config.ts` (70/60/65/72 thresholds).
 - **Never merge PRs** — Claude creates PRs; user reviews and merges. Run review board first.
-- **Every PR must have `Closes #NNNN`** — GitHub issue number, not PF-XXX. Run sync-push first.
+- **Every PR must have `Closes #NNNN` AND `--milestone`** — GitHub issue number (not PF-XXX), plus a milestone (P0/P1/P2/P3). Hook enforces both on `gh pr create`. Run sync-push first.
 - **Every PR needs a changeset** — Run `npx changeset` (from repo root) or create `.changeset/<name>.md`. Use `skip changeset` label for docs/CI-only PRs.
 - **Sentry re-reviews every commit** — Reply with commit SHA + evidence, not "already fixed".
 - **`replace_all` double-prefix danger** — Renaming `X` to `PREFIX_X` when some are already `PREFIX_X` produces `PREFIX_PREFIX_X`.

@@ -73,6 +73,17 @@
       },
       {
         "matcher": "Bash",
+        "if": "Bash(gh pr create *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/check-pr-metadata.sh\"",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
         "if": "Bash(git push *)",
         "hooks": [
           {

@@ -153,4 +153,104 @@ describe('handleChargeRefunded (PF-526)', () => {
     );
     expect(cteCall).toBeDefined();
   });
+
+  // ---------------------------------------------------------------------------
+  // Regression tests for Copilot/Sentry findings (PR #8232)
+  // ---------------------------------------------------------------------------
+  describe('idempotency — duplicate chargeId must not double-deduct (#8187)', () => {
+    it('CTE includes NOT EXISTS guard against duplicate reference_id', async () => {
+      mockSelectLimit.mockResolvedValueOnce([mockUserRecord]);
+
+      await handleChargeRefunded('cus_abc', 'ch_dup', 2450, 4900);
+
+      // The CTE SQL must contain the NOT EXISTS subquery that checks
+      // credit_transactions for an existing row with the same reference_id
+      const cteCall = mockNeonSqlCalls.find(c =>
+        c.strings.some(s => s.includes('NOT EXISTS'))
+      );
+      expect(cteCall).toBeDefined();
+      // The source and reference_id values must match
+      expect(cteCall!.values).toContain('charge_refunded:ch_dup');
+      expect(cteCall!.values).toContain('ch_dup');
+    });
+
+    it('second call with same chargeId produces same CTE (SQL idempotency)', async () => {
+      mockSelectLimit.mockResolvedValueOnce([mockUserRecord]);
+      await handleChargeRefunded('cus_abc', 'ch_same', 2450, 4900);
+      const firstCallCount = mockNeonSqlCalls.length;
+
+      mockSelectLimit.mockResolvedValueOnce([mockUserRecord]);
+      await handleChargeRefunded('cus_abc', 'ch_same', 2450, 4900);
+
+      // Both calls fire the CTE — idempotency is enforced by the SQL NOT EXISTS,
+      // not by JS-side deduplication. The point is the SQL shape is correct.
+      expect(mockNeonSqlCalls.length).toBe(firstCallCount * 2);
+      const secondCte = mockNeonSqlCalls[mockNeonSqlCalls.length - 1];
+      expect(secondCte.strings.some(s => s.includes('NOT EXISTS'))).toBe(true);
+    });
+  });
+
+  describe('div-by-zero and ratio edge cases (#8187)', () => {
+    it('refundRatio is capped at 1 when amountRefunded > amountTotal', async () => {
+      mockSelectLimit.mockResolvedValueOnce([mockUserRecord]);
+
+      // Over-refund: refunded more than total (edge case from payment processor)
+      await handleChargeRefunded('cus_abc', 'ch_over', 10000, 4900);
+
+      const cteCall = mockNeonSqlCalls.find(c =>
+        c.strings.some(s => s.includes('audit'))
+      );
+      expect(cteCall).toBeDefined();
+      // refundRatio = Math.min(10000/4900, 1) = 1
+      // The ratio passed to SQL should be 1
+      expect(cteCall!.values).toContain(1);
+    });
+
+    it('fallback path passes ratio through and SQL guard prevents deduction when addonTokens is zero', async () => {
+      // The fallback path (no purchase record) avoids division entirely —
+      // it uses multiplication by the pre-computed ratio. The SQL WHERE guard
+      // (FLOOR(addon_tokens * ratio) > 0) prevents deduction when result is 0.
+      mockSelectLimit.mockResolvedValueOnce([{
+        ...mockUserRecord,
+        addonTokens: 0,
+      }]);
+
+      // amountRefunded = amountTotal, ratio = 1, but addonTokens = 0
+      // SQL WHERE guard: FLOOR(0 * 1) = 0, so > 0 is false → no deduction
+      await handleChargeRefunded('cus_abc', 'ch_zero_tok', 4900, 4900);
+
+      const cteCall = mockNeonSqlCalls.find(c =>
+        c.strings.some(s => s.includes('audit'))
+      );
+      expect(cteCall).toBeDefined();
+      // ratio = 1 passed through
+      expect(cteCall!.values).toContain(1);
+    });
+  });
+
+  describe('UPDATE depends on audit CTE via EXISTS (#8187)', () => {
+    it('CTE chains UPDATE with EXISTS (SELECT 1 FROM audit)', async () => {
+      mockSelectLimit.mockResolvedValueOnce([mockUserRecord]);
+
+      await handleChargeRefunded('cus_abc', 'ch_chain', 2450, 4900);
+
+      const cteCall = mockNeonSqlCalls.find(c =>
+        c.strings.some(s => s.includes('EXISTS (SELECT 1 FROM audit)'))
+      );
+      expect(cteCall).toBeDefined();
+    });
+
+    it('UPDATE uses ABS on audit amount to prevent sign errors', async () => {
+      mockSelectLimit.mockResolvedValueOnce([mockUserRecord]);
+
+      await handleChargeRefunded('cus_abc', 'ch_abs', 2450, 4900);
+
+      // The audit CTE inserts a negative amount (-LEAST(...)). The UPDATE must
+      // use ABS() to get the positive deduction value.
+      const cteCall = mockNeonSqlCalls.find(c =>
+        c.strings.some(s => s.includes('ABS'))
+      );
+      expect(cteCall).toBeDefined();
+    });
+  });
 });

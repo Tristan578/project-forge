@@ -104,10 +104,16 @@ Read tool: web/src/lib/game-creation/executors/sceneCreateExecutor.ts
 
 1. Read the file
 2. Apply the fix (Edit tool)
-3. Run: `cd web && npx tsc --noEmit` (at minimum)
-4. Commit: `git commit -m "fix: <description>"`
-5. Push: `git push`
-6. THEN reply with the commit SHA
+3. **Write a regression test** that would have caught the bug
+4. Run: `cd web && npx vitest run <test-file>` (validates both fix and test)
+5. Run: `cd web && npx tsc --noEmit` (at minimum)
+6. Commit: `git commit -m "fix: <description>"`
+7. Push: `git push`
+8. THEN reply with the commit SHA
+
+**Regression test is MANDATORY for every "Fixed" or "Needs fix" resolution.**
+No code fix ships without a test that prevents the same bug from recurring.
+The only exception is when the fix requires a schema migration (tag the issue for follow-up with a test).
 
 ### 3d: Post Reply on the Comment Thread
 
