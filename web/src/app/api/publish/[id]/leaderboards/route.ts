@@ -7,7 +7,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
  * Verify the authenticated user owns the published game.
- * Returns the game row or a 404 response.
+ * Returns the game row if found, or null if the game does not exist or is not owned by the user.
  */
 async function verifyGameOwnership(gameId: string, userId: string) {
   const db = getDb();
@@ -89,6 +89,15 @@ export async function POST(
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     if (!name || name.length > 64) {
       return NextResponse.json({ error: 'name is required and must be 64 characters or fewer' }, { status: 400 });
+    }
+    // Reject characters that would make the name unaddressable as a URL segment.
+    // Next.js already decodes route params, so a name containing '/' or '%' would
+    // create leaderboards that cannot be retrieved or deleted via /[name] routes.
+    if (/[\/\\%]/.test(name) || /[\x00-\x1f\x7f]/.test(name)) {
+      return NextResponse.json(
+        { error: 'name must not contain /, \\, %, or control characters' },
+        { status: 400 }
+      );
     }
 
     const sortOrder = body.sortOrder === 'asc' ? 'asc' as const : 'desc' as const;

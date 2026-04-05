@@ -37,6 +37,8 @@ export async function PATCH(
   });
   if (mid.error) return mid.error;
 
+  // Next.js already decodes route params — do not call decodeURIComponent again
+  // (double-decoding breaks names containing '%', e.g. '%25' → '%' → URIError).
   const { id: gameId, name: boardName } = await params;
 
   try {
@@ -45,14 +47,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
     }
 
-    let decodedBoardName: string;
-    try {
-      decodedBoardName = decodeURIComponent(boardName);
-    } catch {
-      return NextResponse.json({ error: 'Invalid leaderboard name' }, { status: 400 });
-    }
-
-    const board = await findBoard(gameId, decodedBoardName);
+    const board = await findBoard(gameId, boardName);
     if (!board) {
       return NextResponse.json({ error: 'Leaderboard not found' }, { status: 404 });
     }
@@ -73,9 +68,19 @@ export async function PATCH(
       : (typeof body.minScore === 'number' && Number.isFinite(body.minScore)) ? Math.round(body.minScore) : undefined;
     const maxScore = body.maxScore === null ? null
       : (typeof body.maxScore === 'number' && Number.isFinite(body.maxScore)) ? Math.round(body.maxScore) : undefined;
-    if (minScore !== undefined && maxScore !== undefined && minScore !== null && maxScore !== null && minScore > maxScore) {
+
+    // Validate the resulting min/max range using existing DB values for fields not in this update.
+    // A partial PATCH (e.g. only minScore) must still satisfy minScore <= maxScore after the update.
+    const nextMin = minScore !== undefined ? minScore : board.minScore;
+    const nextMax = maxScore !== undefined ? maxScore : board.maxScore;
+    if (
+      typeof nextMin === 'number' &&
+      typeof nextMax === 'number' &&
+      nextMin > nextMax
+    ) {
       return NextResponse.json({ error: 'minScore must be <= maxScore' }, { status: 400 });
     }
+
     if (minScore !== undefined) updates.minScore = minScore;
     if (maxScore !== undefined) updates.maxScore = maxScore;
 
@@ -105,6 +110,7 @@ export async function DELETE(
   });
   if (mid.error) return mid.error;
 
+  // Next.js already decodes route params — do not call decodeURIComponent again.
   const { id: gameId, name: boardName } = await params;
 
   try {
@@ -113,14 +119,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
     }
 
-    let decodedBoardName: string;
-    try {
-      decodedBoardName = decodeURIComponent(boardName);
-    } catch {
-      return NextResponse.json({ error: 'Invalid leaderboard name' }, { status: 400 });
-    }
-
-    const board = await findBoard(gameId, decodedBoardName);
+    const board = await findBoard(gameId, boardName);
     if (!board) {
       return NextResponse.json({ error: 'Leaderboard not found' }, { status: 404 });
     }
