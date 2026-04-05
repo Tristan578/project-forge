@@ -93,6 +93,15 @@ vi.mock('@/stores/editorStore', () => ({
   ),
 }));
 
+vi.mock('@/stores/userStore', () => ({
+  useUserStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
+    selector({
+      tier: 'creator',
+      canUseAI: () => true,
+    })
+  ),
+}));
+
 describe('ChatPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
