@@ -357,6 +357,8 @@ describe('POST /api/publish — negative cases', () => {
 
   it('returns 400 when projectId is missing', async () => {
     mockWithApiMiddleware.mockResolvedValue({
+      error: undefined,
+      userId: 'user-1',
       authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
     });
 
@@ -371,6 +373,8 @@ describe('POST /api/publish — negative cases', () => {
 
   it('returns 400 when title is missing', async () => {
     mockWithApiMiddleware.mockResolvedValue({
+      error: undefined,
+      userId: 'user-1',
       authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
     });
 
@@ -385,6 +389,8 @@ describe('POST /api/publish — negative cases', () => {
 
   it('returns 400 for invalid JSON body', async () => {
     mockWithApiMiddleware.mockResolvedValue({
+      error: undefined,
+      userId: 'user-1',
       authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
     });
 
@@ -396,6 +402,8 @@ describe('POST /api/publish — negative cases', () => {
 
   it('returns 400 when slug is too short', async () => {
     mockWithApiMiddleware.mockResolvedValue({
+      error: undefined,
+      userId: 'user-1',
       authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
     });
 
