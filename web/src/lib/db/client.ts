@@ -14,6 +14,7 @@ import { headers } from 'next/headers';
 import * as schema from './schema';
 import { withRetry, RetryOptions } from './withRetry';
 import { dbCircuitBreaker } from './circuitBreaker';
+import { checkDbRateLimit } from './dbRateLimit';
 import { setCurrentRoute } from './queryMonitor';
 
 // PF-525: Transaction support with neon-http driver.
@@ -112,5 +113,8 @@ export async function queryWithResilience<T>(
     // headers() throws outside of a request context (e.g. during tests or
     // background jobs). Swallow silently — route will remain 'unknown'.
   }
+  // Global rate limit check (Upstash Redis) prevents stampedes across all
+  // Vercel function instances. No-op when Upstash is not configured.
+  await checkDbRateLimit();
   return dbCircuitBreaker.execute(() => withRetry(operation, retryOptions));
 }
