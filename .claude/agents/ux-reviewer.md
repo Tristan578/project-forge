@@ -1,7 +1,7 @@
 ---
 name: ux-reviewer
 description: Senior UX designer and antagonistic reviewer. Enforces design library usage over bespoke components, WCAG AA accessibility, theme coherence, desirability, and usability. Reviews specs, plans, PRs, and components for UX excellence. Finds problems others miss.
-model: claude-sonnet-4-5
+model: claude-sonnet-4-6
 effort: high
 memory: project
 background: true

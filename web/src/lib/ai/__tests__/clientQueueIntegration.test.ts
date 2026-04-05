@@ -69,13 +69,13 @@ describe('fetchAI — queue integration', () => {
   it('sends request to /api/chat with correct body', async () => {
     mockFetch.mockResolvedValueOnce(makeSseResponse('ok'));
     const { fetchAI } = await import('../client');
-    await fetchAI('test prompt', { model: 'claude-opus-4-5', priority: 1 });
+    await fetchAI('test prompt', { model: 'claude-opus-4-6', priority: 1 });
 
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('/api/chat');
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body.messages).toEqual([{ role: 'user', content: 'test prompt' }]);
-    expect(body.model).toBe('claude-opus-4-5');
+    expect(body.model).toBe('claude-opus-4-6');
   });
 
   it('maps 429 to user-friendly rate limit message', async () => {

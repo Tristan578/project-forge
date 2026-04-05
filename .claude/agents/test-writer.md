@@ -1,7 +1,7 @@
 ---
 name: test-writer
 description: Test coverage specialist. Writes Vitest + RTL tests for components, store slices, API routes, and utility modules.
-model: claude-sonnet-4-5
+model: claude-sonnet-4-6
 effort: high
 memory: project
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch, Write, Edit]

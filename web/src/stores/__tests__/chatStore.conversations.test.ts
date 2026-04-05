@@ -27,7 +27,7 @@ function resetStore() {
   useChatStore.setState({
     messages: [],
     isStreaming: false,
-    activeModel: 'claude-sonnet-4-5-20250929',
+    activeModel: 'claude-sonnet-4-6',
     rightPanelTab: 'inspector',
     error: null,
     abortController: null,

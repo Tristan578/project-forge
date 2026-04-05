@@ -1,7 +1,7 @@
 ---
 name: builder
 description: Specialized implementation agent optimized for Rust/WASM coding speed and accuracy.
-model: claude-sonnet-4-5
+model: claude-sonnet-4-6
 effort: high
 memory: user
 isolation: worktree

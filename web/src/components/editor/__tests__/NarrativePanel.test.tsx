@@ -100,7 +100,7 @@ vi.mock('@/stores/dialogueStore', () => ({
 }));
 
 vi.mock('@/lib/ai/models', () => ({
-  AI_MODEL_PRIMARY: 'claude-sonnet-4-5',
+  AI_MODEL_PRIMARY: 'claude-sonnet-4-6',
 }));
 
 vi.mock('lucide-react', async () => {

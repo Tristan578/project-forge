@@ -361,7 +361,7 @@ describe('AIResponseCache', () => {
   // ---- computeKey ----
 
   it('computeKey returns a non-empty string', async () => {
-    const key = await cache.computeKey('claude-sonnet-4-5', 'system', 'hello');
+    const key = await cache.computeKey('claude-sonnet-4-6', 'system', 'hello');
     expect(typeof key).toBe('string');
     expect(key.length).toBeGreaterThan(0);
   });

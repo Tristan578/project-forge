@@ -18,7 +18,7 @@
  */
 
 /** Primary model for complex generation (GDD, world building, tutorials) */
-export const AI_MODEL_PRIMARY = 'claude-sonnet-4-5-20250929';
+export const AI_MODEL_PRIMARY = 'claude-sonnet-4-6';
 
 /** Fast model for simpler tasks (reviews, behavior trees, quick analysis) */
 export const AI_MODEL_FAST = 'claude-haiku-4-5-20251001';

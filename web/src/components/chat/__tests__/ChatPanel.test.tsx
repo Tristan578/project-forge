@@ -50,7 +50,7 @@ vi.mock('@/stores/chatStore', () => ({
         sessionTokens: { input: 0, output: 0 },
         rightPanelTab: 'chat',
         setRightPanelTab: vi.fn(),
-        activeModel: 'claude-sonnet-4-5-20250929',
+        activeModel: 'claude-sonnet-4-6',
         setModel: vi.fn(),
         thinkingEnabled: false,
         setThinkingEnabled: vi.fn(),
