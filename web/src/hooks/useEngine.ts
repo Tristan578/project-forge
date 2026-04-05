@@ -414,6 +414,14 @@ async function loadWasm(): Promise<WasmModule> {
           if (paths.length > 1) {
             emitEvent('wasm_loading', `CDN load failed, retrying from backup...`);
             addBreadcrumb({ category: 'wasm', message: `Load failed from ${basePath}: ${lastErr.message}`, level: 'warning' });
+            // Track CDN fallback for monitoring (#8250)
+            import('@/lib/analytics/posthog').then(({ trackEvent, AnalyticsEvent }) => {
+              trackEvent(AnalyticsEvent.WASM_CDN_FALLBACK, {
+                failedOrigin: basePath,
+                error: lastErr?.message,
+                backend: targetBackend,
+              });
+            }).catch(() => { /* analytics non-critical */ });
           }
         }
       }
