@@ -88,6 +88,7 @@ jobs:
       # github.ref == refs/heads/main so it is a no-op here, but false
       # makes the intent explicit.
       can-commit-ratchet: false
+    secrets: inherit
 
   # ---- CI-only checks ----
 

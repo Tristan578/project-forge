@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, fireEvent } from '@testing-library/react';
 import { axe } from 'jest-axe';
 import { THEME_NAMES, THEME_DEFINITIONS, type ThemeName } from '../../tokens';
 import { Accordion } from '../Accordion';
@@ -61,7 +61,7 @@ const PRIMITIVE_FIXTURES: Record<string, () => JSX.Element> = {
   Input: () => <Input aria-label="Name" placeholder="Enter name" />,
   Label: () => <Label htmlFor="test-input">Name</Label>,
   Popover: () => (
-    <Popover trigger={<button>Open</button>}>Popover content</Popover>
+    <Popover trigger={<button>Open</button>} content="Popover content" />
   ),
   Progress: () => <Progress value={50} aria-label="Upload progress" />,
   ScrollArea: () => (
@@ -103,11 +103,21 @@ const PRIMITIVE_FIXTURES: Record<string, () => JSX.Element> = {
 const primitiveNames = Object.keys(PRIMITIVE_FIXTURES);
 
 describe('Accessibility (axe-core)', () => {
+  // Components that need interaction to reveal content for a11y testing
+  const NEEDS_CLICK = new Set(['Popover']);
+
   describe.each(THEME_NAMES)('Theme: %s', (theme) => {
     it.each(primitiveNames)('%s has no axe violations', async (name) => {
       applyTheme(theme);
       const Fixture = PRIMITIVE_FIXTURES[name];
       const { container } = render(<Fixture />);
+
+      // Open interactive components so their panel markup is in the DOM
+      if (NEEDS_CLICK.has(name)) {
+        const trigger = container.querySelector('button');
+        if (trigger) fireEvent.click(trigger);
+      }
+
       const results = await axe(container);
       expect(results).toHaveNoViolations();
     });
