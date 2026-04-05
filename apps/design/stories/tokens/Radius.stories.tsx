@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { RADIUS } from '@spawnforge/ui/tokens';
+import { DEMO_RADIUS } from './vars';
 
 function RadiusReference() {
   return (
@@ -10,9 +11,9 @@ function RadiusReference() {
           <div
             key={key}
             className="text-center"
-            style={{ '--demo-r': value } as React.CSSProperties}
+            style={{ [DEMO_RADIUS]: value } as React.CSSProperties}
           >
-            <div className="w-20 h-20 bg-[var(--sf-accent)] rounded-[var(--demo-r)] mb-2" />
+            <div className={`w-20 h-20 bg-[var(--sf-accent)] rounded-[var(${DEMO_RADIUS})] mb-2`} />
             <div className="font-mono text-xs">RADIUS.{key}</div>
             <div className="font-mono text-[11px] opacity-60">{value}</div>
           </div>

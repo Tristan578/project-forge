@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { FONT_FAMILY, FONT_SIZE, FONT_WEIGHT } from '@spawnforge/ui/tokens';
+import { DEMO_FONT_FAMILY, DEMO_FONT_SIZE, DEMO_FONT_WEIGHT } from './vars';
 
 function TypographyReference() {
   return (
@@ -11,11 +12,11 @@ function TypographyReference() {
           Font Families
         </h3>
         {Object.entries(FONT_FAMILY).map(([key, value]) => (
-          <div key={key} className="mb-3" style={{ '--demo-ff': value } as React.CSSProperties}>
+          <div key={key} className="mb-3" style={{ [DEMO_FONT_FAMILY]: value } as React.CSSProperties}>
             <div className="font-mono text-xs opacity-50 mb-1">
               FONT_FAMILY.{key}
             </div>
-            <div className="font-[family-name:var(--demo-ff)] text-lg">
+            <div className={`font-[family-name:var(${DEMO_FONT_FAMILY})] text-lg`}>
               The quick brown fox jumps over the lazy dog
             </div>
           </div>
@@ -30,7 +31,7 @@ function TypographyReference() {
           <div
             key={key}
             className="flex items-baseline gap-4 mb-2"
-            style={{ '--demo-fs': value } as React.CSSProperties}
+            style={{ [DEMO_FONT_SIZE]: value } as React.CSSProperties}
           >
             <div className="w-[100px] font-mono text-xs opacity-50">
               FONT_SIZE.{key}
@@ -38,7 +39,7 @@ function TypographyReference() {
             <div className="w-[60px] font-mono text-xs opacity-50">
               {value}
             </div>
-            <div className="text-[length:var(--demo-fs)]">
+            <div className={`text-[length:var(${DEMO_FONT_SIZE})]`}>
               Sample text at {key}
             </div>
           </div>
@@ -53,7 +54,7 @@ function TypographyReference() {
           <div
             key={key}
             className="flex items-baseline gap-4 mb-2"
-            style={{ '--demo-fw': value } as React.CSSProperties}
+            style={{ [DEMO_FONT_WEIGHT]: value } as React.CSSProperties}
           >
             <div className="w-[100px] font-mono text-xs opacity-50">
               FONT_WEIGHT.{key}
@@ -61,7 +62,7 @@ function TypographyReference() {
             <div className="w-[40px] font-mono text-xs opacity-50">
               {value}
             </div>
-            <div className="font-[number:var(--demo-fw)] text-lg">
+            <div className={`font-[number:var(${DEMO_FONT_WEIGHT})] text-lg`}>
               Sample text at {key} weight
             </div>
           </div>
