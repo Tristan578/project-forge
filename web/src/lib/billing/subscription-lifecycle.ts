@@ -345,7 +345,7 @@ export async function handleInvoicePaymentFailed(
       balanceAfter: balance,
       source: `payment_failed:attempt_${attemptCount}`,
       referenceId: invoiceId,
-    })
+    }).onConflictDoNothing()
   );
 
   if (nextPaymentAttempt) {

@@ -220,6 +220,7 @@ export const creditTransactions = pgTable(
   },
   (table) => [
     index('idx_credit_txn_user_date').on(table.userId, table.createdAt),
+    uniqueIndex('idx_credit_txn_idempotent').on(table.userId, table.source, table.referenceId),
   ]
 );
 

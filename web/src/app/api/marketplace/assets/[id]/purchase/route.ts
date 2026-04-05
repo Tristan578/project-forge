@@ -175,6 +175,7 @@ export async function POST(
       .where(eq(marketplaceAssets.id, assetId)));
 
     // Record buyer transaction with actual post-update balance
+    // onConflictDoNothing: idempotent under retry (unique on userId+source+referenceId)
     await queryWithResilience(() => getDb().insert(creditTransactions).values({
       userId: user.id,
       transactionType: 'deduction',
@@ -182,17 +183,19 @@ export async function POST(
       balanceAfter: buyerBalanceAfter,
       source: 'marketplace_purchase',
       referenceId: assetId,
-    }));
+    }).onConflictDoNothing());
 
     // Record seller transaction with actual post-update balance from RETURNING
+    // referenceId must be unique per purchase (asset:buyer), not per asset —
+    // otherwise repeat sales of the same asset silently drop seller earnings.
     await queryWithResilience(() => getDb().insert(creditTransactions).values({
       userId: seller.id,
       transactionType: 'earned',
       amount: sellerEarnings,
       balanceAfter: sellerUpdate?.earnedCredits ?? (seller.earnedCredits + sellerEarnings),
       source: 'marketplace_sale',
-      referenceId: assetId,
-    }));
+      referenceId: `${assetId}:${user.id}`,
+    }).onConflictDoNothing());
 
     return NextResponse.json({
       success: true,
