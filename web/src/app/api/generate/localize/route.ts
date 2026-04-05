@@ -14,9 +14,9 @@ import {
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
+import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 
 const CHUNK_SIZE = 200;
-const TOKEN_COST_PER_CHUNK = 5;
 
 interface LocalizeParams {
   strings: TranslatableString[];
@@ -41,7 +41,7 @@ export const POST = createGenerationHandler<
   }),
   tokenCost: (params) => {
     const chunkCount = Math.ceil(params.strings.length / CHUNK_SIZE);
-    return chunkCount * params.targetLocales.length * TOKEN_COST_PER_CHUNK;
+    return chunkCount * params.targetLocales.length * TOKEN_COSTS.localize_cost_per_chunk;
   },
   validate: (body) => {
     const { strings, sourceLocale, targetLocales } = body as Record<string, unknown>;

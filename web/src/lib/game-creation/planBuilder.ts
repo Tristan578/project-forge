@@ -76,15 +76,19 @@ const ASSET_TIER_CAPS: Record<UserTier, number> = {
 };
 
 // --- Token cost estimates per operation (for U5) ---
-const TOKEN_COSTS: Record<string, { base: number; variance: number }> = {
+// Base costs are derived from pricing.ts TOKEN_COSTS where applicable.
+// Variance is the proportional uncertainty for cost estimation UI.
+import { TOKEN_COSTS as PRICING } from '@/lib/tokens/pricing';
+
+const PLAN_COST_ESTIMATES: Record<string, { base: number; variance: number }> = {
   scene_create: { base: 0, variance: 0 },
   physics_profile: { base: 0, variance: 0 },
   character_setup: { base: 0, variance: 0 },
-  entity_setup: { base: 2, variance: 0.1 },
-  asset_generate: { base: 15, variance: 0.4 },
-  custom_script_generate: { base: 8, variance: 0.3 },
+  entity_setup: { base: PRICING.plan_entity_setup, variance: 0.1 },
+  asset_generate: { base: PRICING.plan_asset_generate, variance: 0.4 },
+  custom_script_generate: { base: PRICING.plan_script_generate, variance: 0.3 },
   verify_all_scenes: { base: 0, variance: 0 },
-  auto_polish: { base: 5, variance: 0.2 },
+  auto_polish: { base: PRICING.plan_auto_polish, variance: 0.2 },
 };
 
 // [FIX: NB5] buildPlan() is called by the orchestrator entry point
@@ -353,7 +357,7 @@ export function buildPlan(
         assetList: cappedAssets.map(a => ({
           description: a.description,
           type: a.type,
-          estimatedTokenCost: TOKEN_COSTS.asset_generate.base,
+          estimatedTokenCost: PLAN_COST_ESTIMATES.asset_generate.base,
           hasFallback: FALLBACK_SCHEMA.safeParse(a.fallback).success,
         })),
       },
@@ -386,7 +390,7 @@ export function buildPlan(
   // close enough for a user-facing cost estimate.
   const costByCategory: Record<string, { tokens: number; varianceSumSq: number }> = {};
   for (const step of steps) {
-    const cost = TOKEN_COSTS[step.executor] ?? { base: 0, variance: 0 };
+    const cost = PLAN_COST_ESTIMATES[step.executor] ?? { base: 0, variance: 0 };
     const cat =
       step.executor === 'asset_generate'
         ? 'Asset creation'
