@@ -22,6 +22,7 @@ import {
   detectPromptInjection,
 } from '@/lib/chat/sanitizer';
 import { withApiMiddleware } from '@/lib/api/middleware';
+import { assertTier } from '@/lib/auth/api-auth';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { logCost } from '@/lib/costs/costLogger';
 import { buildDocContext } from '@/lib/chat/docContext';
@@ -275,12 +276,8 @@ export async function POST(request: NextRequest) {
   const auth = { ctx: mid.authContext! };
 
   // 1b. Tier gate — starter tier has no AI access
-  if (auth.ctx.user.tier === 'starter') {
-    return Response.json(
-      { error: 'AI features require a paid plan' },
-      { status: 403 }
-    );
-  }
+  const tierError = assertTier(auth.ctx.user, ['hobbyist', 'creator', 'pro']);
+  if (tierError) return tierError;
 
   // 2. Validate request size (max 1MB — generous limit for conversation history + scene context;
   //    the more precise MAX_INPUT_CHARS check below enforces the actual token budget)

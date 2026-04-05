@@ -201,7 +201,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
           icon={sceneEmpty ? Plus : MousePointerClick}
           title={sceneEmpty ? 'Empty scene' : 'Select an entity'}
           description={sceneEmpty
-            ? 'Right-click the viewport to add your first entity, or use the AI chat to describe what you want to build'
+            ? 'Use the Add Entity button to add your first entity, or use the AI chat to describe what you want to build'
             : 'Click an entity in the viewport or hierarchy to inspect its properties'}
           className="mb-4"
         />

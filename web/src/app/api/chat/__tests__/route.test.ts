@@ -16,6 +16,7 @@ import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/api-auth', () => ({
   authenticateRequest: vi.fn(),
+  assertTier: vi.fn(() => null),
 }));
 
 vi.mock('@/lib/rateLimit', () => ({
