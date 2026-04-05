@@ -46,7 +46,7 @@ describe('chatStore deep tests', () => {
     useChatStore.setState({
       messages: [],
       isStreaming: false,
-      activeModel: 'claude-sonnet-4-5-20250929',
+      activeModel: 'claude-sonnet-4-6',
       rightPanelTab: 'inspector',
       error: null,
       abortController: null,
@@ -104,8 +104,8 @@ describe('chatStore deep tests', () => {
     });
 
     it('sets model to claude-sonnet', () => {
-      useChatStore.getState().setModel('claude-sonnet-4-5-20250929');
-      expect(useChatStore.getState().activeModel).toBe('claude-sonnet-4-5-20250929');
+      useChatStore.getState().setModel('claude-sonnet-4-6');
+      expect(useChatStore.getState().activeModel).toBe('claude-sonnet-4-6');
     });
   });
 
@@ -512,7 +512,7 @@ describe('chatStore deep tests', () => {
       const state = useChatStore.getState();
       expect(state.messages).toEqual([]);
       expect(state.isStreaming).toBe(false);
-      expect(state.activeModel).toBe('claude-sonnet-4-5-20250929');
+      expect(state.activeModel).toBe('claude-sonnet-4-6');
       expect(state.rightPanelTab).toBe('inspector');
       expect(state.error).toBeNull();
       expect(state.abortController).toBeNull();

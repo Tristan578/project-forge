@@ -18,7 +18,7 @@ describe('chatStore', () => {
     useChatStore.setState({
       messages: [],
       isStreaming: false,
-      activeModel: 'claude-sonnet-4-5-20250929',
+      activeModel: 'claude-sonnet-4-6',
       rightPanelTab: 'inspector',
       error: null,
       abortController: null,
@@ -47,7 +47,7 @@ describe('chatStore', () => {
 
     it('should initialize with sonnet model', () => {
       const state = useChatStore.getState();
-      expect(state.activeModel).toBe('claude-sonnet-4-5-20250929');
+      expect(state.activeModel).toBe('claude-sonnet-4-6');
     });
 
     it('should initialize with inspector tab', () => {
@@ -650,7 +650,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-5-20250929',
+        activeModel: 'claude-sonnet-4-6',
         rightPanelTab: 'inspector',
         error: null,
         abortController: null,
@@ -683,7 +683,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-5-20250929',
+        activeModel: 'claude-sonnet-4-6',
         rightPanelTab: 'inspector',
         error: null,
         abortController: null,
@@ -711,7 +711,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: true,
-        activeModel: 'claude-sonnet-4-5-20250929',
+        activeModel: 'claude-sonnet-4-6',
         rightPanelTab: 'inspector',
         error: null,
         abortController: null,
@@ -739,7 +739,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-5-20250929',
+        activeModel: 'claude-sonnet-4-6',
         rightPanelTab: 'inspector', // not 'chat'
         error: null,
         abortController: null,
@@ -767,7 +767,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-5-20250929',
+        activeModel: 'claude-sonnet-4-6',
         rightPanelTab: 'inspector',
         error: null,
         abortController: null,
@@ -797,7 +797,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-5-20250929',
+        activeModel: 'claude-sonnet-4-6',
         rightPanelTab: 'inspector',
         error: null,
         abortController: null,
@@ -826,7 +826,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-5-20250929',
+        activeModel: 'claude-sonnet-4-6',
         rightPanelTab: 'chat',
         error: null,
         abortController: null,
@@ -855,7 +855,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-5-20250929',
+        activeModel: 'claude-sonnet-4-6',
         rightPanelTab: 'chat',
         error: null,
         abortController: null,
@@ -886,7 +886,7 @@ describe('chatStore', () => {
           { id: 'usr1', role: 'user', content: 'Hello', timestamp: 2000 },
         ] as ChatMessage[],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-5-20250929',
+        activeModel: 'claude-sonnet-4-6',
         rightPanelTab: 'chat',
         error: null,
         abortController: null,
@@ -917,7 +917,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-5-20250929',
+        activeModel: 'claude-sonnet-4-6',
         rightPanelTab: 'chat',
         error: null,
         abortController: null,

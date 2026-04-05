@@ -221,7 +221,7 @@ describe('streamChat', () => {
     mockFetchSSE(['data: {"type":"text_delta","text":"hi"}']);
     await streamChat({
       messages: [{ role: 'user', content: 'hello' }],
-      model: 'claude-sonnet-4-5-20250929',
+      model: 'claude-sonnet-4-6',
     });
 
     const fetchMock = vi.mocked(fetch);
@@ -230,7 +230,7 @@ describe('streamChat', () => {
     expect(url).toBe('/api/chat');
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body.messages).toEqual([{ role: 'user', content: 'hello' }]);
-    expect(body.model).toBe('claude-sonnet-4-5-20250929');
+    expect(body.model).toBe('claude-sonnet-4-6');
     expect(body.sceneContext).toBe('');
     expect(body.thinking).toBe(false);
   });

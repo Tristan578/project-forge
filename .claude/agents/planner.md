@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Specialized architect for high-level reasoning and spec generation.
-model: claude-opus-4-5
+model: claude-opus-4-6
 effort: high
 memory: user
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]

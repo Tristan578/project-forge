@@ -48,7 +48,7 @@ function setupStore(overrides: {
       sendMessage: mockSendMessage,
       stopStreaming: mockStopStreaming,
       isStreaming: overrides.isStreaming ?? false,
-      activeModel: 'claude-sonnet-4-5-20250929',
+      activeModel: 'claude-sonnet-4-6',
       setModel: mockSetModel,
       thinkingEnabled: overrides.thinkingEnabled ?? false,
       setThinkingEnabled: mockSetThinkingEnabled,

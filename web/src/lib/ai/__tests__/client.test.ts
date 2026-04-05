@@ -102,7 +102,7 @@ describe('fetchAI', () => {
 
     const { fetchAI } = await import('../client');
     await fetchAI('test prompt', {
-      model: 'claude-opus-4-5',
+      model: 'claude-opus-4-6',
       systemOverride: 'You are a test assistant',
       sceneContext: '{}',
       thinking: true,
@@ -113,7 +113,7 @@ describe('fetchAI', () => {
     expect(url).toBe('/api/chat');
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body.messages).toEqual([{ role: 'user', content: 'test prompt' }]);
-    expect(body.model).toBe('claude-opus-4-5');
+    expect(body.model).toBe('claude-opus-4-6');
     expect(body.systemOverride).toBe('You are a test assistant');
     expect(body.sceneContext).toBe('{}');
     expect(body.thinking).toBe(true);
@@ -310,12 +310,12 @@ describe('fetchAI response caching', () => {
     vi.resetModules();
     const { fetchAI } = await import('../client');
 
-    const first = await fetchAI('what is 2+2', { model: 'claude-sonnet-4-5' });
+    const first = await fetchAI('what is 2+2', { model: 'claude-sonnet-4-6' });
     expect(first).toBe('cached answer');
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
     // Second call with identical args — should hit cache, not call fetch again
-    const second = await fetchAI('what is 2+2', { model: 'claude-sonnet-4-5' });
+    const second = await fetchAI('what is 2+2', { model: 'claude-sonnet-4-6' });
     expect(second).toBe('cached answer');
     expect(mockFetch).toHaveBeenCalledTimes(1); // still 1 — no second network call
   });
@@ -338,8 +338,8 @@ describe('fetchAI response caching', () => {
     vi.resetModules();
     const { fetchAI } = await import('../client');
 
-    const a = await fetchAI('prompt A', { model: 'claude-sonnet-4-5' });
-    const b = await fetchAI('prompt B', { model: 'claude-sonnet-4-5' });
+    const a = await fetchAI('prompt A', { model: 'claude-sonnet-4-6' });
+    const b = await fetchAI('prompt B', { model: 'claude-sonnet-4-6' });
 
     expect(a).toBe('answer A');
     expect(b).toBe('answer B');
@@ -392,8 +392,8 @@ describe('fetchAI response caching', () => {
     vi.resetModules();
     const { fetchAI } = await import('../client');
 
-    const nonThinking = await fetchAI('same prompt', { model: 'claude-sonnet-4-5', thinking: false });
-    const withThinking = await fetchAI('same prompt', { model: 'claude-sonnet-4-5', thinking: true });
+    const nonThinking = await fetchAI('same prompt', { model: 'claude-sonnet-4-6', thinking: false });
+    const withThinking = await fetchAI('same prompt', { model: 'claude-sonnet-4-6', thinking: true });
 
     expect(nonThinking).toBe('non-thinking answer');
     expect(withThinking).toBe('thinking answer');
@@ -419,8 +419,8 @@ describe('fetchAI response caching', () => {
     const { fetchAI } = await import('../client');
 
     // Start two concurrent calls before the first resolves
-    const p1 = fetchAI('concurrent prompt', { model: 'claude-sonnet-4-5' });
-    const p2 = fetchAI('concurrent prompt', { model: 'claude-sonnet-4-5' });
+    const p1 = fetchAI('concurrent prompt', { model: 'claude-sonnet-4-6' });
+    const p2 = fetchAI('concurrent prompt', { model: 'claude-sonnet-4-6' });
 
     // Resolve the underlying stream
     resolveResponse();

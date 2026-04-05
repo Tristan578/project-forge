@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: Use when reviewing PRs, validating agent output, or auditing code changes for SpawnForge-specific bugs, security issues, and architecture violations. Trigger on "review PR", "check this code", "audit changes", "code review".
-model: claude-sonnet-4-5
+model: claude-sonnet-4-6
 effort: high
 memory: project
 background: true

@@ -50,6 +50,15 @@ export const TOKEN_COSTS = {
   // Voice batch generation (cost per item — multiply by items.length at call site)
   voice_batch_cost_per_item: 5,
 
+  // Localization (cost per chunk per target locale)
+  localize_cost_per_chunk: 5,
+
+  // Plan builder estimates (blended averages for cost estimation UI)
+  plan_asset_generate: 15,         // average across sprite providers (dalle3: 20, sdxl: 10)
+  plan_script_generate: 8,         // per custom script
+  plan_auto_polish: 5,             // per polish pass
+  plan_entity_setup: 2,            // per entity
+
   // Compound (estimated averages — actual cost may vary)
   compound_scene_simple: 50,
   compound_scene_complex: 300,
