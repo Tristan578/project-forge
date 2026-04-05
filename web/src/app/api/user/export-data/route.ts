@@ -33,8 +33,6 @@ export async function GET(req: NextRequest) {
   const userId = mid.userId!;
 
   try {
-    const db = getDb();
-
     const [
       userProfile,
       userProjects,
@@ -47,7 +45,9 @@ export async function GET(req: NextRequest) {
       userFeedback,
       userProviderKeys,
       userApiKeys,
-    ] = await Promise.all([
+    ] = await queryWithResilience(() => {
+      const db = getDb();
+      return Promise.all([
       db.select({
         id: users.id,
         email: users.email,
@@ -153,6 +153,7 @@ export async function GET(req: NextRequest) {
         createdAt: apiKeys.createdAt,
       }).from(apiKeys).where(eq(apiKeys.userId, userId)),
     ]);
+    });
 
     const exportData = {
       exportedAt: new Date().toISOString(),

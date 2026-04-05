@@ -1,5 +1,5 @@
 import { eq, and } from 'drizzle-orm';
-import { getDb } from '../db/client';
+import { getDb, queryWithResilience } from '../db/client';
 import { users, providerKeys } from '../db/schema';
 import type { Provider } from '../db/schema';
 import { decryptProviderKey } from './encryption';
@@ -56,14 +56,14 @@ export async function resolveApiKey(
   operation: string,
   metadata?: Record<string, unknown>
 ): Promise<ResolvedKey> {
-  const db = getDb();
-
   // 1. Check for BYOK key
-  const [byokKey] = await db
-    .select()
-    .from(providerKeys)
-    .where(and(eq(providerKeys.userId, userId), eq(providerKeys.provider, provider)))
-    .limit(1);
+  const [byokKey] = await queryWithResilience(() =>
+    getDb()
+      .select()
+      .from(providerKeys)
+      .where(and(eq(providerKeys.userId, userId), eq(providerKeys.provider, provider)))
+      .limit(1)
+  );
 
   if (byokKey) {
     return {
@@ -74,7 +74,9 @@ export async function resolveApiKey(
   }
 
   // 2. No BYOK — check user tier and token balance
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const [user] = await queryWithResilience(() =>
+    getDb().select().from(users).where(eq(users.id, userId)).limit(1)
+  );
   if (!user) throw new Error(`User not found: ${userId}`);
 
   // Pro tier always has platform key access
@@ -120,29 +122,30 @@ export async function storeProviderKey(
   provider: Provider,
   plainKey: string
 ): Promise<void> {
-  const db = getDb();
   const { encryptProviderKey } = await import('./encryption');
   const { encrypted, iv } = encryptProviderKey(plainKey);
 
   // Upsert: insert or update on conflict.
   // Note: createdAt is reset on key rotation (upsert). A proper updatedAt column
   // would preserve the original creation time, but requires a DB migration.
-  await db
-    .insert(providerKeys)
-    .values({
-      userId,
-      provider,
-      encryptedKey: encrypted,
-      iv,
-    })
-    .onConflictDoUpdate({
-      target: [providerKeys.userId, providerKeys.provider],
-      set: {
+  await queryWithResilience(() =>
+    getDb()
+      .insert(providerKeys)
+      .values({
+        userId,
+        provider,
         encryptedKey: encrypted,
         iv,
-        createdAt: new Date(),
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: [providerKeys.userId, providerKeys.provider],
+        set: {
+          encryptedKey: encrypted,
+          iv,
+          createdAt: new Date(),
+        },
+      })
+  );
 }
 
 /** Delete a BYOK key for a provider */

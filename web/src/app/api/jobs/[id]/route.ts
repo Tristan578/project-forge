@@ -23,14 +23,14 @@ export async function PATCH(
     const { id } = await params;
     const body = await req.json();
 
-    const db = getDb();
-
     // Verify ownership
-    const [existing] = await db
-      .select({ id: generationJobs.id })
-      .from(generationJobs)
-      .where(and(eq(generationJobs.id, id), eq(generationJobs.userId, mid.userId!)))
-      .limit(1);
+    const [existing] = await queryWithResilience(() =>
+      getDb()
+        .select({ id: generationJobs.id })
+        .from(generationJobs)
+        .where(and(eq(generationJobs.id, id), eq(generationJobs.userId, mid.userId!)))
+        .limit(1)
+    );
 
     if (!existing) {
       return NextResponse.json({ error: 'Job not found' }, { status: 404 });
@@ -62,10 +62,12 @@ export async function PATCH(
       updates.completedAt = new Date();
     }
 
-    await db
-      .update(generationJobs)
-      .set(updates)
-      .where(eq(generationJobs.id, id));
+    await queryWithResilience(() =>
+      getDb()
+        .update(generationJobs)
+        .set(updates)
+        .where(eq(generationJobs.id, id))
+    );
 
     return NextResponse.json({ updated: true });
   } catch (error) {

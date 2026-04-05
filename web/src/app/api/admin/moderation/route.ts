@@ -26,29 +26,30 @@ export async function GET(req: NextRequest) {
     const rateLimitError = await rateLimitAdminRoute(mid.userId!, 'admin-moderation');
     if (rateLimitError) return rateLimitError;
 
-    const db = getDb();
     const searchParams = req.nextUrl.searchParams;
     const { limit, offset } = parsePaginationParams(searchParams, { defaultLimit: 50 });
 
     // Fetch flagged comments with author and game info
-    const flaggedComments = await db
-      .select({
-        id: gameComments.id,
-        content: gameComments.content,
-        gameId: gameComments.gameId,
-        gameTitle: publishedGames.title,
-        authorId: gameComments.userId,
-        authorName: users.displayName,
-        authorEmail: users.email,
-        createdAt: gameComments.createdAt,
-      })
-      .from(gameComments)
-      .leftJoin(publishedGames, eq(gameComments.gameId, publishedGames.id))
-      .leftJoin(users, eq(gameComments.userId, users.id))
-      .where(eq(gameComments.flagged, 1))
-      .orderBy(desc(gameComments.createdAt))
-      .limit(limit)
-      .offset(offset);
+    const flaggedComments = await queryWithResilience(() =>
+      getDb()
+        .select({
+          id: gameComments.id,
+          content: gameComments.content,
+          gameId: gameComments.gameId,
+          gameTitle: publishedGames.title,
+          authorId: gameComments.userId,
+          authorName: users.displayName,
+          authorEmail: users.email,
+          createdAt: gameComments.createdAt,
+        })
+        .from(gameComments)
+        .leftJoin(publishedGames, eq(gameComments.gameId, publishedGames.id))
+        .leftJoin(users, eq(gameComments.userId, users.id))
+        .where(eq(gameComments.flagged, 1))
+        .orderBy(desc(gameComments.createdAt))
+        .limit(limit)
+        .offset(offset)
+    );
 
     return NextResponse.json({
       items: flaggedComments.map((c) => ({
@@ -90,7 +91,6 @@ export async function POST(req: NextRequest) {
     const rateLimitError = await rateLimitAdminRoute(mid.userId!, 'admin-moderation');
     if (rateLimitError) return rateLimitError;
 
-    const db = getDb();
     const body: unknown = await req.json();
     if (typeof body !== 'object' || body === null) {
       return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: 400 });
@@ -110,16 +110,20 @@ export async function POST(req: NextRequest) {
 
     if (action === 'approve') {
       // Unflag the comment (set flagged=0)
-      await db
-        .update(gameComments)
-        .set({ flagged: 0 })
-        .where(eq(gameComments.id, id));
+      await queryWithResilience(() =>
+        getDb()
+          .update(gameComments)
+          .set({ flagged: 0 })
+          .where(eq(gameComments.id, id))
+      );
 
       return NextResponse.json({ success: true, action: 'approved' });
     }
 
     // Delete the comment
-    await db.delete(gameComments).where(eq(gameComments.id, id));
+    await queryWithResilience(() =>
+      getDb().delete(gameComments).where(eq(gameComments.id, id))
+    );
 
     return NextResponse.json({ success: true, action: 'deleted' });
   } catch (error) {

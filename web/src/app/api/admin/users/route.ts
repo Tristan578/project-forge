@@ -29,8 +29,6 @@ export async function GET(req: NextRequest) {
   const search = (searchParams.get('search') ?? '').trim();
 
   try {
-    const db = getDb();
-
     const selectedFields = {
       id: users.id,
       email: users.email,
@@ -44,24 +42,26 @@ export async function GET(req: NextRequest) {
       createdAt: users.createdAt,
     };
 
-    let rows;
-    if (search) {
-      const pattern = `%${search}%`;
-      rows = await db
-        .select(selectedFields)
-        .from(users)
-        .where(or(ilike(users.email, pattern), ilike(users.displayName, pattern)))
-        .orderBy(desc(users.createdAt))
-        .limit(limit)
-        .offset(offset);
-    } else {
-      rows = await db
-        .select(selectedFields)
-        .from(users)
-        .orderBy(desc(users.createdAt))
-        .limit(limit)
-        .offset(offset);
-    }
+    const rows = await queryWithResilience(() => {
+      const db = getDb();
+      if (search) {
+        const pattern = `%${search}%`;
+        return db
+          .select(selectedFields)
+          .from(users)
+          .where(or(ilike(users.email, pattern), ilike(users.displayName, pattern)))
+          .orderBy(desc(users.createdAt))
+          .limit(limit)
+          .offset(offset);
+      } else {
+        return db
+          .select(selectedFields)
+          .from(users)
+          .orderBy(desc(users.createdAt))
+          .limit(limit)
+          .offset(offset);
+      }
+    });
 
     return NextResponse.json({ users: rows, limit, offset });
   } catch (error) {

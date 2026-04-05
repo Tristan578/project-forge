@@ -31,17 +31,17 @@ export async function POST(req: NextRequest) {
   if (!descResult.ok) return descResult.response;
 
   try {
-    const db = getDb();
-
-    const [record] = await db
-      .insert(feedback)
-      .values({
-        userId: user?.id ?? null,
-        type: typeResult.value,
-        description: descResult.value,
-        metadata: parsed.body.metadata ?? null,
-      })
-      .returning({ id: feedback.id });
+    const [record] = await queryWithResilience(() =>
+      getDb()
+        .insert(feedback)
+        .values({
+          userId: user?.id ?? null,
+          type: typeResult.value,
+          description: descResult.value,
+          metadata: parsed.body.metadata ?? null,
+        })
+        .returning({ id: feedback.id })
+    );
 
     return NextResponse.json({ success: true, id: record.id });
   } catch (err) {

@@ -51,16 +51,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const db = getDb();
-    const [appeal] = await db
-      .insert(moderationAppeals)
-      .values({
-        userId: mid.userId!,
-        contentId,
-        contentType,
-        reason: reason.trim(),
-      })
-      .returning();
+    const [appeal] = await queryWithResilience(() =>
+      getDb()
+        .insert(moderationAppeals)
+        .values({
+          userId: mid.userId!,
+          contentId,
+          contentType,
+          reason: reason.trim(),
+        })
+        .returning()
+    );
 
     return NextResponse.json({ id: appeal.id, status: appeal.status }, { status: 201 });
   } catch (error) {

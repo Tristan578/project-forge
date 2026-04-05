@@ -17,12 +17,13 @@ export async function DELETE(
   if (mid.error) return mid.error;
 
   const { id } = await params;
-  const db = getDb();
 
-  const deleted = await db
-    .delete(apiKeys)
-    .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, mid.userId!)))
-    .returning({ id: apiKeys.id });
+  const deleted = await queryWithResilience(() =>
+    getDb()
+      .delete(apiKeys)
+      .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, mid.userId!)))
+      .returning({ id: apiKeys.id })
+  );
 
   if (deleted.length === 0) {
     return NextResponse.json({ error: 'API key not found' }, { status: 404 });

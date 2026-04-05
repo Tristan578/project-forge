@@ -46,18 +46,19 @@ export async function POST(req: NextRequest) {
   const prefix = rawKey.slice(0, 12); // "forge_xxxx" — enough for identification
   const keyHash = await bcrypt.hash(rawKey, 12);
 
-  const db = getDb();
   try {
-  const [record] = await db
-    .insert(apiKeys)
-    .values({
-      userId: mid.userId!,
-      name,
-      keyHash,
-      keyPrefix: prefix,
-      scopes,
-    })
-    .returning({ id: apiKeys.id, createdAt: apiKeys.createdAt });
+  const [record] = await queryWithResilience(() =>
+    getDb()
+      .insert(apiKeys)
+      .values({
+        userId: mid.userId!,
+        name,
+        keyHash,
+        keyPrefix: prefix,
+        scopes,
+      })
+      .returning({ id: apiKeys.id, createdAt: apiKeys.createdAt })
+  );
 
   // Return the raw key ONCE — it's never stored in plaintext
   return NextResponse.json({
@@ -81,18 +82,19 @@ export async function GET(req: NextRequest) {
   if (mid.error) return mid.error;
 
   try {
-    const db = getDb();
-    const keys = await db
-      .select({
-        id: apiKeys.id,
-        name: apiKeys.name,
-        prefix: apiKeys.keyPrefix,
-        scopes: apiKeys.scopes,
-        lastUsed: apiKeys.lastUsed,
-        createdAt: apiKeys.createdAt,
-      })
-      .from(apiKeys)
-      .where(eq(apiKeys.userId, mid.userId!));
+    const keys = await queryWithResilience(() =>
+      getDb()
+        .select({
+          id: apiKeys.id,
+          name: apiKeys.name,
+          prefix: apiKeys.keyPrefix,
+          scopes: apiKeys.scopes,
+          lastUsed: apiKeys.lastUsed,
+          createdAt: apiKeys.createdAt,
+        })
+        .from(apiKeys)
+        .where(eq(apiKeys.userId, mid.userId!))
+    );
 
     return NextResponse.json({
       keys: keys.map((k) => ({
