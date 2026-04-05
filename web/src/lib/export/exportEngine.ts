@@ -67,6 +67,13 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
   // 6. Fetch WASM engine files for inlining
   const embeddedWasm = await fetchWasmForInlining();
 
+  if (Object.keys(embeddedWasm).length === 0) {
+    throw new Error(
+      'Failed to fetch WASM engine files for single-HTML export. ' +
+      'Ensure the engine has been built and deployed to the CDN, or use ZIP export instead.',
+    );
+  }
+
   // 7. Generate HTML with embedded WASM
   const html = generateGameHTML({
     title: options.title,
@@ -77,7 +84,7 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
     includeDebug: options.includeDebug,
     uiData: uiDataJson,
     mobileTouchConfig: mobileTouchConfigJson,
-    embeddedWasm: Object.keys(embeddedWasm).length > 0 ? embeddedWasm : undefined,
+    embeddedWasm,
     orientationLock: options.orientationLock,
   });
 
@@ -132,12 +139,19 @@ function injectUIData(sceneData: unknown): unknown {
 }
 
 function buildSceneFromStore(): unknown {
-  // Fallback: construct scene data from Zustand store
+  // Fallback: construct scene data from Zustand store when the engine
+  // export event doesn't fire. Include all store data needed to produce
+  // a playable scene — not just the entity graph (#8185).
   const store = useEditorStore.getState();
   return {
     name: store.sceneName || 'Untitled Game',
     entities: store.sceneGraph,
-    // Additional data would come from the engine
+    scripts: store.allScripts,
+    ambientLight: store.ambientLight,
+    environment: store.environment,
+    primaryMaterial: store.primaryMaterial,
+    primaryPhysics: store.primaryPhysics,
+    physicsEnabled: store.physicsEnabled,
   };
 }
 
