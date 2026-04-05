@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, projects, users } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
@@ -22,21 +22,19 @@ export async function GET(
   try {
     const { userId: clerkId, slug } = await params;
 
-    const db = getDb();
-
     // Look up the user by their Clerk ID
-    const [user] = await db
+    const [user] = await queryWithResilience(() => getDb()
       .select({ id: users.id, displayName: users.displayName })
       .from(users)
       .where(eq(users.clerkId, clerkId))
-      .limit(1);
+      .limit(1));
 
     if (!user) {
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
     }
 
     // Look up the published game by user ID + slug
-    const [game] = await db
+    const [game] = await queryWithResilience(() => getDb()
       .select()
       .from(publishedGames)
       .where(
@@ -45,7 +43,7 @@ export async function GET(
           eq(publishedGames.slug, slug)
         )
       )
-      .limit(1);
+      .limit(1));
 
     if (!game) {
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
@@ -59,11 +57,11 @@ export async function GET(
     }
 
     // Fetch the project scene data
-    const [project] = await db
+    const [project] = await queryWithResilience(() => getDb()
       .select({ sceneData: projects.sceneData })
       .from(projects)
       .where(eq(projects.id, game.projectId))
-      .limit(1);
+      .limit(1));
 
     if (!project) {
       return NextResponse.json(
@@ -73,9 +71,9 @@ export async function GET(
     }
 
     // Increment play count (fire-and-forget)
-    db.update(publishedGames)
+    queryWithResilience(() => getDb().update(publishedGames)
       .set({ playCount: sql`${publishedGames.playCount} + 1` })
-      .where(eq(publishedGames.id, game.id))
+      .where(eq(publishedGames.id, game.id)))
       .then(() => {})
       .catch(() => {});
 

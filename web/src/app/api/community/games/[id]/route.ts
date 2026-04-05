@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, users, gameLikes, gameRatings, gameTags, gameComments } from '@/lib/db/schema';
 import { eq, sql, and } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
@@ -14,11 +14,10 @@ export async function GET(
   const limited = await rateLimitPublicRoute(req, 'community-game', 30, 60_000);
   if (limited) return limited;
   try {
-    const db = getDb();
     const { id } = await params;
 
     // Fetch game with stats
-    const gameResult = await db
+    const gameResult = await queryWithResilience(() => getDb()
       .select({
         id: publishedGames.id,
         title: publishedGames.title,
@@ -50,7 +49,7 @@ export async function GET(
         publishedGames.status,
         publishedGames.createdAt,
         users.displayName
-      );
+      ));
 
     if (gameResult.length === 0) {
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
@@ -59,13 +58,13 @@ export async function GET(
     const game = gameResult[0];
 
     // Fetch tags
-    const tagsResult = await db
+    const tagsResult = await queryWithResilience(() => getDb()
       .select({ tag: gameTags.tag })
       .from(gameTags)
-      .where(eq(gameTags.gameId, id));
+      .where(eq(gameTags.gameId, id)));
 
     // Fetch comments with author info
-    const commentsResult = await db
+    const commentsResult = await queryWithResilience(() => getDb()
       .select({
         id: gameComments.id,
         content: gameComments.content,
@@ -76,17 +75,17 @@ export async function GET(
       })
       .from(gameComments)
       .leftJoin(users, eq(gameComments.userId, users.id))
-      .where(and(eq(gameComments.gameId, id), eq(gameComments.flagged, 0)));
+      .where(and(eq(gameComments.gameId, id), eq(gameComments.flagged, 0))));
 
     // Fetch rating breakdown (count per star)
-    const ratingBreakdown = await db
+    const ratingBreakdown = await queryWithResilience(() => getDb()
       .select({
         rating: gameRatings.rating,
         count: sql<number>`COUNT(*)`,
       })
       .from(gameRatings)
       .where(eq(gameRatings.gameId, id))
-      .groupBy(gameRatings.rating);
+      .groupBy(gameRatings.rating));
 
     const breakdown = [1, 2, 3, 4, 5].map((star) => ({
       rating: star,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { gameComments, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
@@ -20,10 +20,9 @@ export async function GET(
   if (limited) return limited;
 
   try {
-    const db = getDb();
     const { id: gameId } = await params;
 
-    const comments = await db
+    const comments = await queryWithResilience(() => getDb()
       .select({
         id: gameComments.id,
         content: gameComments.content,
@@ -34,7 +33,7 @@ export async function GET(
       })
       .from(gameComments)
       .leftJoin(users, eq(gameComments.userId, users.id))
-      .where(and(eq(gameComments.gameId, gameId), eq(gameComments.flagged, 0)));
+      .where(and(eq(gameComments.gameId, gameId), eq(gameComments.flagged, 0))));
 
     const formattedComments = comments.map((c: {
       id: string;
@@ -68,7 +67,6 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const db = getDb();
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
       rateLimit: true,
@@ -115,7 +113,7 @@ export async function POST(
     const shouldFlag = modResult.severity === 'flag' || keywordFlagged;
 
     // Insert comment (auto-flag if filter detects issues)
-    const [comment] = await db
+    const [comment] = await queryWithResilience(() => getDb()
       .insert(gameComments)
       .values({
         gameId,
@@ -124,16 +122,16 @@ export async function POST(
         parentId: parentResult.value ?? null,
         flagged: shouldFlag ? 1 : 0,
       })
-      .returning();
+      .returning());
 
     // Fetch author info
-    const author = await db
+    const author = await queryWithResilience(() => getDb()
       .select({
         displayName: users.displayName,
       })
       .from(users)
       .where(eq(users.id, mid.userId!))
-      .limit(1);
+      .limit(1));
 
     return NextResponse.json(
       {

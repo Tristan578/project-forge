@@ -1,27 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, leaderboards } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 async function verifyGameOwnership(gameId: string, userId: string) {
-  const db = getDb();
-  const [game] = await db
+  const [game] = await queryWithResilience(() => getDb()
     .select({ id: publishedGames.id })
     .from(publishedGames)
     .where(and(eq(publishedGames.id, gameId), eq(publishedGames.userId, userId)))
-    .limit(1);
+    .limit(1));
   return game ?? null;
 }
 
 async function findBoard(gameId: string, boardName: string) {
-  const db = getDb();
-  const [board] = await db
+  const [board] = await queryWithResilience(() => getDb()
     .select()
     .from(leaderboards)
     .where(and(eq(leaderboards.gameId, gameId), eq(leaderboards.name, boardName)))
-    .limit(1);
+    .limit(1));
   return board ?? null;
 }
 
@@ -95,8 +93,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
 
-    const db = getDb();
-    await db.update(leaderboards).set(updates).where(eq(leaderboards.id, board.id));
+    await queryWithResilience(() => getDb().update(leaderboards).set(updates).where(eq(leaderboards.id, board.id)));
 
     return NextResponse.json({ success: true, updated: Object.keys(updates) });
   } catch (err) {
@@ -136,9 +133,8 @@ export async function DELETE(
       return NextResponse.json({ error: 'Leaderboard not found' }, { status: 404 });
     }
 
-    const db = getDb();
     // Entries cascade-delete via FK constraint
-    await db.delete(leaderboards).where(eq(leaderboards.id, board.id));
+    await queryWithResilience(() => getDb().delete(leaderboards).where(eq(leaderboards.id, board.id)));
 
     return NextResponse.json({ success: true });
   } catch (err) {

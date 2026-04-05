@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, leaderboards } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -10,12 +10,11 @@ import { captureException } from '@/lib/monitoring/sentry-server';
  * Returns the game row if found, or null if the game does not exist or is not owned by the user.
  */
 async function verifyGameOwnership(gameId: string, userId: string) {
-  const db = getDb();
-  const [game] = await db
+  const [game] = await queryWithResilience(() => getDb()
     .select({ id: publishedGames.id })
     .from(publishedGames)
     .where(and(eq(publishedGames.id, gameId), eq(publishedGames.userId, userId)))
-    .limit(1);
+    .limit(1));
   return game ?? null;
 }
 
@@ -39,8 +38,7 @@ export async function GET(
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
     }
 
-    const db = getDb();
-    const boards = await db
+    const boards = await queryWithResilience(() => getDb()
       .select({
         name: leaderboards.name,
         sortOrder: leaderboards.sortOrder,
@@ -50,7 +48,7 @@ export async function GET(
         createdAt: leaderboards.createdAt,
       })
       .from(leaderboards)
-      .where(eq(leaderboards.gameId, gameId));
+      .where(eq(leaderboards.gameId, gameId)));
 
     return NextResponse.json({ leaderboards: boards });
   } catch (err) {
@@ -110,11 +108,10 @@ export async function POST(
       return NextResponse.json({ error: 'minScore must be <= maxScore' }, { status: 400 });
     }
 
-    const db = getDb();
-    const [board] = await db
+    const [board] = await queryWithResilience(() => getDb()
       .insert(leaderboards)
       .values({ gameId, name, sortOrder, maxEntries, minScore, maxScore })
-      .returning({ id: leaderboards.id, name: leaderboards.name });
+      .returning({ id: leaderboards.id, name: leaderboards.name }));
 
     return NextResponse.json({ leaderboard: board }, { status: 201 });
   } catch (err) {

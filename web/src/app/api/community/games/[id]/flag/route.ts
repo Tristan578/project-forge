@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { gameComments } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
@@ -28,14 +28,12 @@ export async function POST(
       return NextResponse.json({ error: 'commentId is required' }, { status: 400 });
     }
 
-    const db = getDb();
-
     // Verify comment belongs to this game and is not already flagged
-    const [comment] = await db
+    const [comment] = await queryWithResilience(() => getDb()
       .select({ id: gameComments.id, flagged: gameComments.flagged })
       .from(gameComments)
       .where(and(eq(gameComments.id, commentId), eq(gameComments.gameId, gameId)))
-      .limit(1);
+      .limit(1));
 
     if (!comment) {
       return NextResponse.json({ error: 'Comment not found' }, { status: 404 });
@@ -46,10 +44,10 @@ export async function POST(
     }
 
     // Flag the comment
-    await db
+    await queryWithResilience(() => getDb()
       .update(gameComments)
       .set({ flagged: 1 })
-      .where(eq(gameComments.id, commentId));
+      .where(eq(gameComments.id, commentId)));
 
     return NextResponse.json({ flagged: true });
   } catch (error) {

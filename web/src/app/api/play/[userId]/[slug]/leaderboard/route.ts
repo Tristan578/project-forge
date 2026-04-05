@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'crypto';
-import { getDb, getNeonSql } from '@/lib/db/client';
+import { getDb, getNeonSql, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, users, leaderboards, leaderboardEntries } from '@/lib/db/schema';
 import { eq, and, desc, asc, gt, count, lt } from 'drizzle-orm';
 import { rateLimitPublicRoute, getClientIp } from '@/lib/rateLimit';
@@ -17,21 +17,19 @@ export const dynamic = 'force-dynamic';
  * Returns { id } or null if not found / not published.
  */
 async function resolvePublishedGame(clerkId: string, slug: string) {
-  const db = getDb();
-
-  const [user] = await db
+  const [user] = await queryWithResilience(() => getDb()
     .select({ id: users.id })
     .from(users)
     .where(eq(users.clerkId, clerkId))
-    .limit(1);
+    .limit(1));
 
   if (!user) return null;
 
-  const [game] = await db
+  const [game] = await queryWithResilience(() => getDb()
     .select({ id: publishedGames.id, status: publishedGames.status })
     .from(publishedGames)
     .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.slug, slug)))
-    .limit(1);
+    .limit(1));
 
   if (!game || game.status !== 'published') return null;
   return game;
@@ -74,13 +72,11 @@ export async function GET(
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
     }
 
-    const db = getDb();
-
-    const [board] = await db
+    const [board] = await queryWithResilience(() => getDb()
       .select()
       .from(leaderboards)
       .where(and(eq(leaderboards.gameId, game.id), eq(leaderboards.name, boardName)))
-      .limit(1);
+      .limit(1));
 
     if (!board) {
       return NextResponse.json({ error: 'Leaderboard not found' }, { status: 404 });
@@ -88,7 +84,7 @@ export async function GET(
 
     const orderFn = board.sortOrder === 'asc' ? asc : desc;
 
-    const entries = await db
+    const entries = await queryWithResilience(() => getDb()
       .select({
         id: leaderboardEntries.id,
         playerName: leaderboardEntries.playerName,
@@ -99,7 +95,7 @@ export async function GET(
       .from(leaderboardEntries)
       .where(eq(leaderboardEntries.leaderboardId, board.id))
       .orderBy(orderFn(leaderboardEntries.score))
-      .limit(limit);
+      .limit(limit));
 
     const response = NextResponse.json({
       leaderboard: {
@@ -177,13 +173,11 @@ export async function POST(
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
     }
 
-    const db = getDb();
-
-    const [board] = await db
+    const [board] = await queryWithResilience(() => getDb()
       .select()
       .from(leaderboards)
       .where(and(eq(leaderboards.gameId, game.id), eq(leaderboards.name, boardName)))
-      .limit(1);
+      .limit(1));
 
     if (!board) {
       return NextResponse.json({ error: 'Leaderboard not found' }, { status: 404 });
@@ -255,10 +249,10 @@ export async function POST(
         ? gt(leaderboardEntries.score, scoreInt)
         : lt(leaderboardEntries.score, scoreInt);
 
-    const [{ cnt: betterCount }] = await db
+    const [{ cnt: betterCount }] = await queryWithResilience(() => getDb()
       .select({ cnt: count() })
       .from(leaderboardEntries)
-      .where(and(eq(leaderboardEntries.leaderboardId, board.id), betterScoreCondition));
+      .where(and(eq(leaderboardEntries.leaderboardId, board.id), betterScoreCondition)));
 
     const rank = Number(betterCount) + 1;
 
@@ -290,21 +284,20 @@ async function pruneLeaderboard(
   maxEntries: number,
   sortOrder: 'asc' | 'desc'
 ): Promise<void> {
-  const db = getDb();
   const orderFn = sortOrder === 'asc' ? asc : desc;
 
   // Fetch all entry IDs ordered by rank (best first)
-  const allEntries = await db
+  const allEntries = await queryWithResilience(() => getDb()
     .select({ id: leaderboardEntries.id })
     .from(leaderboardEntries)
     .where(eq(leaderboardEntries.leaderboardId, boardId))
-    .orderBy(orderFn(leaderboardEntries.score));
+    .orderBy(orderFn(leaderboardEntries.score)));
 
   if (allEntries.length <= maxEntries) return;
 
   // Entries beyond maxEntries are the tail — delete them
   const toDelete = allEntries.slice(maxEntries);
   for (const { id } of toDelete) {
-    await db.delete(leaderboardEntries).where(eq(leaderboardEntries.id, id));
+    await queryWithResilience(() => getDb().delete(leaderboardEntries).where(eq(leaderboardEntries.id, id)));
   }
 }
