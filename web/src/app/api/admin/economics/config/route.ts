@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
+import { assertAdmin } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
 import { tokenConfig, tierConfig } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -7,14 +8,14 @@ import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function PUT(request: NextRequest) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-  const { clerkId } = authResult.ctx;
+  const mid = await withApiMiddleware(request, { requireAuth: true });
+  if (mid.error) return mid.error;
+  const { clerkId } = mid.authContext!;
 
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
-  const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-economics-config');
+  const limited = await rateLimitAdminRoute(mid.userId!, 'admin-economics-config');
   if (limited) return limited;
 
   let body;

@@ -5,6 +5,7 @@ import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
+import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/db/client');
@@ -58,7 +59,7 @@ describe('/api/user/export-data', () => {
       response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/user/export-data'));
     expect(res.status).toBe(401);
   });
 
@@ -72,7 +73,7 @@ describe('/api/user/export-data', () => {
     const mockDb = makeMockDb();
     vi.mocked(getDb).mockReturnValue(mockDb as unknown as ReturnType<typeof getDb>);
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/user/export-data'));
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Disposition')).toBe(
       'attachment; filename="spawnforge-data-export.json"'
@@ -105,7 +106,7 @@ describe('/api/user/export-data', () => {
       throw new Error('DB connection failed');
     });
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/user/export-data'));
     expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.error).toBe('Failed to export user data');
@@ -124,7 +125,7 @@ describe('/api/user/export-data', () => {
     });
     vi.mocked(getDb).mockReturnValue(mockDb as unknown as ReturnType<typeof getDb>);
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/user/export-data'));
     const data = await res.json();
 
     // Provider keys should not have encryptedKey or iv
@@ -149,7 +150,7 @@ describe('/api/user/export-data', () => {
     const mockDb = makeMockDb({ users: [] });
     vi.mocked(getDb).mockReturnValue(mockDb as unknown as ReturnType<typeof getDb>);
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/user/export-data'));
     const data = await res.json();
     expect(data.profile).toBeNull();
   });

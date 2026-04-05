@@ -1,23 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { parseJsonBody, requireString, requireOneOf } from '@/lib/apiValidation';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 const VALID_CATEGORIES = ['model_3d', 'sprite', 'texture', 'audio', 'script', 'prefab', 'template', 'shader', 'animation'] as const;
 const VALID_LICENSES = ['standard', 'extended'] as const;
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-    const { user } = authResult.ctx;
-
-    const rl = await rateLimit(`user:seller-assets-list:${user.id}`, 30, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `user:seller-assets-list:${id}`, max: 30, windowSeconds: 60, distributed: false },
+    });
+    if (mid.error) return mid.error;
+    const { user } = mid.authContext!;
 
     const db = getDb();
 
@@ -50,12 +50,13 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-    const { user } = authResult.ctx;
-
-    const rl = await rateLimit(`user:seller-assets-create:${user.id}`, 10, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `user:seller-assets-create:${id}`, max: 10, windowSeconds: 60, distributed: false },
+    });
+    if (mid.error) return mid.error;
+    const { user } = mid.authContext!;
 
     const db = getDb();
 
@@ -95,7 +96,7 @@ export async function POST(req: NextRequest) {
         name: nameResult.value,
         description: descResult.value,
         category: catResult.value,
-        priceTokens: (priceTokens as number) || 0,
+        priceTokens: (priceTokens as number) ?? 0,
         license: licenseResult.value,
         tags,
         status: 'draft' as const,

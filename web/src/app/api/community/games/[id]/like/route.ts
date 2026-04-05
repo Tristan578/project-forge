@@ -2,24 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { gameLikes } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const db = getDb();
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-
-    // Rate limit: 30 like/unlike actions per minute per user
-    const rl = await rateLimit(`like:${authResult.ctx.user.id}`, 30, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `like:${id}`, max: 30, windowSeconds: 60 },
+    });
+    if (mid.error) return mid.error;
 
     const { id: gameId } = await params;
 
@@ -28,7 +27,7 @@ export async function POST(
     const inserted = await db.insert(gameLikes)
       .values({
         gameId,
-        userId: authResult.ctx.user.id,
+        userId: mid.userId!,
       })
       .onConflictDoNothing({
         target: [gameLikes.gameId, gameLikes.userId],
@@ -58,24 +57,24 @@ export async function POST(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const db = getDb();
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-
-    // Rate limit: 30 like/unlike actions per minute per user (PF-899)
-    const rl = await rateLimit(`like:${authResult.ctx.user.id}`, 30, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `like:${id}`, max: 30, windowSeconds: 60 },
+    });
+    if (mid.error) return mid.error;
 
     const { id: gameId } = await params;
 
     // Remove like
     await db
       .delete(gameLikes)
-      .where(and(eq(gameLikes.gameId, gameId), eq(gameLikes.userId, authResult.ctx.user.id)));
+      .where(and(eq(gameLikes.gameId, gameId), eq(gameLikes.userId, mid.userId!)));
 
     // Get new count
     const count = await db

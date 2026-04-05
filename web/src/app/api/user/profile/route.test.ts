@@ -22,7 +22,7 @@ describe('/api/user/profile', () => {
         response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
       });
 
-      const res = await GET();
+      const res = await GET(new NextRequest('http://localhost/api/user/profile'));
       expect(res.status).toBe(401);
     });
 
@@ -34,7 +34,7 @@ describe('/api/user/profile', () => {
       });
       vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
 
-      const res = await GET();
+      const res = await GET(new NextRequest('http://localhost/api/user/profile'));
       const data = await res.json();
       
       expect(res.status).toBe(200);

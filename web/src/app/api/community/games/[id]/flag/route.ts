@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { gameComments } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
@@ -14,12 +13,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-
-    // Rate limit: 10 flags per minute per user
-    const rl = await rateLimit(`flag:${authResult.ctx.user.id}`, 10, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `flag:${id}`, max: 10, windowSeconds: 60 },
+    });
+    if (mid.error) return mid.error;
 
     const { id: gameId } = await params;
     const body = await req.json();

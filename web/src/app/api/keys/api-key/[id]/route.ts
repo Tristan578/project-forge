@@ -1,27 +1,27 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
 import { apiKeys } from '@/lib/db/schema';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 /** DELETE /api/keys/api-key/:id — revoke an API key */
 export async function DELETE(
-  _req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  const rl = await rateLimit(`user:api-key-delete:${authResult.ctx.user.id}`, 10, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `user:api-key-delete:${id}`, max: 10, windowSeconds: 60, distributed: false },
+  });
+  if (mid.error) return mid.error;
 
   const { id } = await params;
   const db = getDb();
 
   const deleted = await db
     .delete(apiKeys)
-    .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, authResult.ctx.user.id)))
+    .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, mid.userId!)))
     .returning({ id: apiKeys.id });
 
   if (deleted.length === 0) {

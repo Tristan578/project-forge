@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { gameRatings } from '@/lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
@@ -14,12 +13,12 @@ export async function POST(
 ) {
   try {
     const db = getDb();
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
-
-    // Rate limit: 30 rating actions per minute per user
-    const rl = await rateLimit(`rate:${authResult.ctx.user.id}`, 30, 60_000);
-    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      rateLimit: true,
+      rateLimitConfig: { key: (id) => `rate:${id}`, max: 30, windowSeconds: 60 },
+    });
+    if (mid.error) return mid.error;
 
     const { id: gameId } = await params;
     let body;
@@ -44,7 +43,7 @@ export async function POST(
     await db.insert(gameRatings)
       .values({
         gameId,
-        userId: authResult.ctx.user.id,
+        userId: mid.userId!,
         rating,
       })
       .onConflictDoUpdate({

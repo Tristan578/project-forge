@@ -2,22 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { featuredGames, publishedGames, users } from '@/lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
-import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
+import { assertAdmin } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
 // GET: List currently featured games (admin)
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
+    const mid = await withApiMiddleware(req, { requireAuth: true });
+    if (mid.error) return mid.error;
 
-    const adminError = assertAdmin(authResult.ctx.clerkId);
+    const adminError = assertAdmin(mid.authContext!.clerkId);
     if (adminError) return adminError;
 
-    const rateLimitError = await rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-featured');
+    const rateLimitError = await rateLimitAdminRoute(mid.userId!, 'admin-featured');
     if (rateLimitError) return rateLimitError;
 
     const db = getDb();
@@ -63,13 +64,13 @@ export async function GET() {
 // POST: Feature a game (admin)
 export async function POST(req: NextRequest) {
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
+    const mid = await withApiMiddleware(req, { requireAuth: true });
+    if (mid.error) return mid.error;
 
-    const adminError = assertAdmin(authResult.ctx.clerkId);
+    const adminError = assertAdmin(mid.authContext!.clerkId);
     if (adminError) return adminError;
 
-    const rateLimitError = await rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-featured');
+    const rateLimitError = await rateLimitAdminRoute(mid.userId!, 'admin-featured');
     if (rateLimitError) return rateLimitError;
 
     const body = await req.json();
@@ -127,13 +128,13 @@ export async function POST(req: NextRequest) {
 // DELETE: Unfeature a game (admin)
 export async function DELETE(req: NextRequest) {
   try {
-    const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
+    const mid = await withApiMiddleware(req, { requireAuth: true });
+    if (mid.error) return mid.error;
 
-    const adminError = assertAdmin(authResult.ctx.clerkId);
+    const adminError = assertAdmin(mid.authContext!.clerkId);
     if (adminError) return adminError;
 
-    const rateLimitError = await rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-featured');
+    const rateLimitError = await rateLimitAdminRoute(mid.userId!, 'admin-featured');
     if (rateLimitError) return rateLimitError;
 
     const { searchParams } = new URL(req.url);

@@ -1,8 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import {
   users,
@@ -23,13 +22,15 @@ import {
  * GDPR data export endpoint. Returns all user data as a JSON download.
  * Requires authentication. Sensitive fields (encrypted keys, hashes) are excluded.
  */
-export async function GET() {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
+export async function GET(req: NextRequest) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `user:export-data:${id}`, max: 5, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
-  const userId = authResult.ctx.user.id;
-  const rl = await rateLimit(`user:export-data:${userId}`, 5, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+  const userId = mid.userId!;
 
   try {
     const db = getDb();

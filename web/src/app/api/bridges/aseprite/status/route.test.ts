@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { discoverTool } from '@/lib/bridges/bridgeManager';
@@ -38,12 +38,12 @@ describe('GET /api/bridges/aseprite/status', () => {
       response: new NextResponse('Unauthorized', { status: 401 }),
     });
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/bridges/aseprite/status'));
     expect(res.status).toBe(401);
   });
 
   it('returns 200 with status and version on success', async () => {
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/bridges/aseprite/status'));
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('connected');
@@ -61,7 +61,7 @@ describe('GET /api/bridges/aseprite/status', () => {
       activeVersion: null,
     });
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/bridges/aseprite/status'));
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('not_found');
@@ -71,7 +71,7 @@ describe('GET /api/bridges/aseprite/status', () => {
   it('returns 500 when discoverTool throws', async () => {
     vi.mocked(discoverTool).mockRejectedValue(new Error('Config file corrupted'));
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/bridges/aseprite/status'));
     expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.error).toBe('Config file corrupted');
@@ -80,7 +80,7 @@ describe('GET /api/bridges/aseprite/status', () => {
   it('returns 500 with fallback message when error is not an Error instance', async () => {
     vi.mocked(discoverTool).mockRejectedValue(null);
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/bridges/aseprite/status'));
     expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.error).toBe('Status check failed');

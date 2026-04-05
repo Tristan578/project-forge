@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SpriteClient } from '@/lib/generate/spriteClient';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { DB_PROVIDER } from '@/lib/config/providers';
 
 export async function GET(request: NextRequest) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  const rl = await rateLimit(`user:generate-tileset-status:${authResult.ctx.user.id}`, 60, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+  const mid = await withApiMiddleware(request, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `user:generate-tileset-status:${id}`, max: 60, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
   const { searchParams } = new URL(request.url);
   const jobId = searchParams.get('jobId');
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   let apiKey: string;
   try {
     const resolved = await resolveApiKey(
-      authResult.ctx.user.id,
+      mid.userId!,
       DB_PROVIDER.sprite,
       0,
       'status_check'

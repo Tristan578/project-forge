@@ -1,10 +1,9 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
+import { assertTier } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import type { TokenPackage } from '@/lib/tokens/pricing';
 import { TOKEN_PACKAGES } from '@/lib/tokens/pricing';
-import { rateLimitResponse } from '@/lib/rateLimit';
-import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { badRequest, validationError, internalError } from '@/lib/api/errors';
 
@@ -20,16 +19,16 @@ const PACKAGE_PRICE_IDS: Record<string, string | undefined> = {
   inferno: process.env.STRIPE_PRICE_TOKEN_INFERNO,
 };
 
-export async function POST(req: Request) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  // Rate limit: 5 purchase requests per minute per user (distributed across instances)
-  const rl = await distributedRateLimit(`tokens-purchase:${authResult.ctx.user.id}`, 5, 60);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+export async function POST(req: NextRequest) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `tokens-purchase:${id}`, max: 5, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
   // Only paid tiers can buy tokens
-  const tierCheck = assertTier(authResult.ctx.user, ['hobbyist', 'creator', 'pro']);
+  const tierCheck = assertTier(mid.authContext!.user, ['hobbyist', 'creator', 'pro']);
   if (tierCheck) return tierCheck;
 
   let body;
@@ -50,7 +49,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const user = authResult.ctx.user;
+    const user = mid.authContext!.user;
     const pkgInfo = TOKEN_PACKAGES[pkg as TokenPackage];
 
     // Create Stripe Checkout session for one-time payment

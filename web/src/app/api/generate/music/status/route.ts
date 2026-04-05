@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SunoClient } from '@/lib/generate/sunoClient';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
 
 export async function GET(request: NextRequest) {
-  // 1. Authenticate
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  const rl = await rateLimit(`user:generate-music-status:${authResult.ctx.user.id}`, 60, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+  const mid = await withApiMiddleware(request, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `user:generate-music-status:${id}`, max: 60, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
   // 2. Parse query params
   const { searchParams } = new URL(request.url);
@@ -27,7 +26,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const resolved = await resolveApiKey(
-      authResult.ctx.user.id,
+      mid.userId!,
       DB_PROVIDER.music,
       0,
       'status_check'

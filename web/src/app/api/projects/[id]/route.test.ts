@@ -3,6 +3,7 @@ vi.mock('server-only', () => ({}));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getProject, updateProject, deleteProject } from '@/lib/projects/service';
+import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/projects/service');
@@ -24,7 +25,7 @@ describe('GET /api/projects/[id]', () => {
     });
 
     const { GET } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects/p1');
+    const req = new NextRequest('http://localhost:3000/api/projects/p1');
     const res = await GET(req, { params: Promise.resolve({ id: 'p1' }) });
 
     expect(res.status).toBe(401);
@@ -34,7 +35,7 @@ describe('GET /api/projects/[id]', () => {
     vi.mocked(getProject).mockResolvedValue({ id: 'p1', name: 'My Project' } as never);
 
     const { GET } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects/p1');
+    const req = new NextRequest('http://localhost:3000/api/projects/p1');
     const res = await GET(req, { params: Promise.resolve({ id: 'p1' }) });
     const body = await res.json();
 
@@ -46,7 +47,7 @@ describe('GET /api/projects/[id]', () => {
     vi.mocked(getProject).mockResolvedValue(null as never);
 
     const { GET } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects/missing');
+    const req = new NextRequest('http://localhost:3000/api/projects/missing');
     const res = await GET(req, { params: Promise.resolve({ id: 'missing' }) });
     const body = await res.json();
 
@@ -72,7 +73,7 @@ describe('PUT /api/projects/[id]', () => {
     });
 
     const { PUT } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects/p1', {
+    const req = new NextRequest('http://localhost:3000/api/projects/p1', {
       method: 'PUT',
       body: JSON.stringify({ name: 'Updated' }),
     });
@@ -85,7 +86,7 @@ describe('PUT /api/projects/[id]', () => {
     vi.mocked(updateProject).mockResolvedValue({ id: 'p1', name: 'Updated' } as never);
 
     const { PUT } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects/p1', {
+    const req = new NextRequest('http://localhost:3000/api/projects/p1', {
       method: 'PUT',
       body: JSON.stringify({ name: 'Updated' }),
     });
@@ -100,7 +101,7 @@ describe('PUT /api/projects/[id]', () => {
     vi.mocked(updateProject).mockResolvedValue(null as never);
 
     const { PUT } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects/missing', {
+    const req = new NextRequest('http://localhost:3000/api/projects/missing', {
       method: 'PUT',
       body: JSON.stringify({ name: 'Updated' }),
     });
@@ -113,7 +114,7 @@ describe('PUT /api/projects/[id]', () => {
 
   it('should return 400 for null name', async () => {
     const { PUT } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects/p1', {
+    const req = new NextRequest('http://localhost:3000/api/projects/p1', {
       method: 'PUT',
       body: JSON.stringify({ name: null }),
     });
@@ -123,7 +124,7 @@ describe('PUT /api/projects/[id]', () => {
 
   it('should return 400 for null sceneData', async () => {
     const { PUT } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects/p1', {
+    const req = new NextRequest('http://localhost:3000/api/projects/p1', {
       method: 'PUT',
       body: JSON.stringify({ sceneData: null }),
     });
@@ -133,7 +134,7 @@ describe('PUT /api/projects/[id]', () => {
 
   it('should return 422 for non-integer entityCount (regression: was 400, valid JSON with invalid numeric value)', async () => {
     const { PUT } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects/p1', {
+    const req = new NextRequest('http://localhost:3000/api/projects/p1', {
       method: 'PUT',
       body: JSON.stringify({ entityCount: 3.5 }),
     });
@@ -143,7 +144,7 @@ describe('PUT /api/projects/[id]', () => {
 
   it('should return 422 for negative entityCount (regression: was 400, valid JSON with invalid numeric value)', async () => {
     const { PUT } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects/p1', {
+    const req = new NextRequest('http://localhost:3000/api/projects/p1', {
       method: 'PUT',
       body: JSON.stringify({ entityCount: -1 }),
     });
@@ -155,7 +156,7 @@ describe('PUT /api/projects/[id]', () => {
     vi.mocked(updateProject).mockResolvedValue({ id: 'p1', name: 'Test', thumbnail: null } as never);
 
     const { PUT } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects/p1', {
+    const req = new NextRequest('http://localhost:3000/api/projects/p1', {
       method: 'PUT',
       body: JSON.stringify({ thumbnail: null }),
     });
@@ -182,7 +183,7 @@ describe('DELETE /api/projects/[id]', () => {
     });
 
     const { DELETE } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects/p1', { method: 'DELETE' });
+    const req = new NextRequest('http://localhost:3000/api/projects/p1', { method: 'DELETE' });
     const res = await DELETE(req, { params: Promise.resolve({ id: 'p1' }) });
 
     expect(res.status).toBe(401);
@@ -192,7 +193,7 @@ describe('DELETE /api/projects/[id]', () => {
     vi.mocked(deleteProject).mockResolvedValue(true as never);
 
     const { DELETE } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects/p1', { method: 'DELETE' });
+    const req = new NextRequest('http://localhost:3000/api/projects/p1', { method: 'DELETE' });
     const res = await DELETE(req, { params: Promise.resolve({ id: 'p1' }) });
 
     expect(res.status).toBe(204);
@@ -202,7 +203,7 @@ describe('DELETE /api/projects/[id]', () => {
     vi.mocked(deleteProject).mockResolvedValue(false as never);
 
     const { DELETE } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects/missing', { method: 'DELETE' });
+    const req = new NextRequest('http://localhost:3000/api/projects/missing', { method: 'DELETE' });
     const res = await DELETE(req, { params: Promise.resolve({ id: 'missing' }) });
     const body = await res.json();
 
