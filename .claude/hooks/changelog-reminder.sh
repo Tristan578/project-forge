@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
-# SessionStart hook: remind about changelog review for upgrade/migration sessions.
-# Lightweight — just checks if any deps are significantly behind and prints a nudge.
+# SessionStart hook: remind about pending changesets and changelog review.
 
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo '.')"
-PKG="$ROOT/web/package.json"
 
-if [ ! -f "$PKG" ]; then
-  exit 0
+# Check for pending changeset files (not yet consumed by `changeset version`)
+CHANGESET_DIR="$ROOT/.changeset"
+if [ -d "$CHANGESET_DIR" ]; then
+  PENDING=$(find "$CHANGESET_DIR" -name '*.md' ! -name 'README.md' 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$PENDING" -gt 0 ]; then
+    echo "CHANGESETS: ${PENDING} pending changeset(s) found. Run 'npm run changeset:version' to consume them before release."
+  fi
 fi
 
-# Check how long since last changelog review (stored in a timestamp file)
+# Check how long since last changelog review (for dependency upgrade sessions)
 LAST_REVIEW_FILE="$ROOT/.claude/.changelog-last-review"
 NOW=$(date +%s)
 STALE_THRESHOLD=259200  # 3 days in seconds
@@ -20,7 +23,6 @@ if [ -f "$LAST_REVIEW_FILE" ]; then
   LAST_REVIEW=$(cat "$LAST_REVIEW_FILE" 2>/dev/null || echo "0")
   AGE=$((NOW - LAST_REVIEW))
   if [ "$AGE" -lt "$STALE_THRESHOLD" ]; then
-    # Reviewed recently — no nudge needed
     exit 0
   fi
   DAYS_AGO=$((AGE / 86400))
