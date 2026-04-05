@@ -23,6 +23,8 @@ for PR in $OPEN_PRS; do
     [.[] | {id, user: .user.login, in_reply_to_id}] |
     [.[].in_reply_to_id // empty] as $replied |
     [.[] | select(.user == "sentry[bot]" or .user == "Copilot") | select(.id | IN($replied[]) | not)] |
+    # NOTE: IN($replied[]) streams scalar IDs correctly in jq 1.7+.
+    # For jq < 1.7, use: select([.id] | inside($replied) | not)
     length
   ' 2>/dev/null || echo "0")
 
