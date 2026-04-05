@@ -452,9 +452,6 @@ jobs:
         working-directory: web
         run: npm audit --audit-level=critical
 
-      - run: npm ci
-        working-directory: mcp-server
-
       - name: npm audit (mcp-server)
         working-directory: mcp-server
         run: npm audit --audit-level=critical
