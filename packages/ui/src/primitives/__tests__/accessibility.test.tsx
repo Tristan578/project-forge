@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 import { axe } from 'jest-axe';
 import { THEME_NAMES, THEME_DEFINITIONS, type ThemeName } from '../../tokens';
+import { applyThemeTokens } from '../../utils/applyThemeTokens';
 import { Accordion } from '../Accordion';
 import { Avatar } from '../Avatar';
 import { Badge } from '../Badge';
@@ -25,14 +26,13 @@ import { Tooltip } from '../Tooltip';
 
 /**
  * Applies a theme's CSS custom properties to the document root for testing.
- * This simulates the runtime theme application.
+ * Uses the shared applyThemeTokens helper (single source of truth for
+ * style.setProperty) plus sets the data attribute for effect routing.
  */
 function applyTheme(theme: ThemeName) {
   const tokens = THEME_DEFINITIONS[theme];
   document.documentElement.setAttribute('data-sf-theme', theme);
-  for (const [key, value] of Object.entries(tokens)) {
-    document.documentElement.style.setProperty(key, value);
-  }
+  applyThemeTokens({ tokens });
 }
 
 /**

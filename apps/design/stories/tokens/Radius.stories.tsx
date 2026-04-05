@@ -12,7 +12,7 @@ function RadiusReference() {
               style={{
                 width: 80,
                 height: 80,
-                backgroundColor: 'var(--sf-accent, #3b82f6)',
+                backgroundColor: 'var(--sf-accent)',
                 borderRadius: value,
                 marginBottom: 8,
               }}

@@ -18,7 +18,7 @@ function SpacingScale() {
               style={{
                 height: 24,
                 width: value,
-                backgroundColor: 'var(--sf-accent, #3b82f6)',
+                backgroundColor: 'var(--sf-accent)',
                 borderRadius: 4,
                 transition: 'width 200ms',
               }}

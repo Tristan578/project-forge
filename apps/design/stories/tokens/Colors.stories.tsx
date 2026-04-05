@@ -10,7 +10,7 @@ function ColorSwatch({ token, value }: { token: string; value: string }) {
           height: 40,
           borderRadius: 6,
           backgroundColor: value,
-          border: '1px solid rgba(128,128,128,0.3)',
+          border: '1px solid var(--sf-border)',
           flexShrink: 0,
         }}
       />
