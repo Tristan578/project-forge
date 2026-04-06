@@ -383,4 +383,49 @@ describe('gameCameraModes', () => {
       expect(result!.screenReader).toBeDefined();
     });
   });
+
+  describe('Export Preset', () => {
+    it('should set export preset', () => {
+      const preset = {
+        name: 'Web Optimized',
+        description: 'Test',
+        format: 'zip' as const,
+        includeSourceMaps: false,
+        compressTextures: true,
+        resolution: 'responsive' as const,
+        includeDebug: false,
+        loadingScreen: {
+          backgroundColor: '#1a1a1a',
+          progressBarColor: '#6366f1',
+          progressStyle: 'bar' as const,
+        },
+      };
+      store.getState().setExportPreset('web-optimized', preset);
+      expect(store.getState().exportPreset).toEqual({ presetKey: 'web-optimized', config: preset });
+    });
+
+    it('should clear export preset', () => {
+      store.getState().setExportPreset('web-optimized', {
+        name: 'Web Optimized',
+        description: 'Test',
+        format: 'zip' as const,
+        includeSourceMaps: false,
+        compressTextures: true,
+        resolution: 'responsive' as const,
+        includeDebug: false,
+        loadingScreen: {
+          backgroundColor: '#1a1a1a',
+          progressBarColor: '#6366f1',
+          progressStyle: 'bar' as const,
+        },
+      });
+
+      store.getState().clearExportPreset();
+      expect(store.getState().exportPreset).toBeNull();
+    });
+
+    it('should default to null', () => {
+      expect(store.getState().exportPreset).toBeNull();
+    });
+  });
 });
