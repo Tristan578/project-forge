@@ -125,7 +125,16 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   setAccessibilityProfile: (profile) => set({ accessibilityProfile: profile }),
   updateAccessibilityProfile: (partial) => {
     const current = get().accessibilityProfile ?? createDefaultProfile();
-    set({ accessibilityProfile: { ...current, ...partial } });
+    // Deep merge each top-level section to preserve nested required fields
+    set({
+      accessibilityProfile: {
+        colorblindMode: { ...current.colorblindMode, ...partial.colorblindMode },
+        screenReader: { ...current.screenReader, ...partial.screenReader },
+        inputRemapping: { ...current.inputRemapping, ...partial.inputRemapping },
+        subtitles: { ...current.subtitles, ...partial.subtitles },
+        fontSize: partial.fontSize ?? current.fontSize,
+      },
+    });
   },
   play: () => {
     if (dispatchCommand) dispatchCommand('play', {});

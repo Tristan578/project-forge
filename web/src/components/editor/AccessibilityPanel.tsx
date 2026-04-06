@@ -379,8 +379,8 @@ function InputRemappingSection({
 }
 
 // ---------------------------------------------------------------------------
-// Colorblind CSS filter matrix values (SVG feColorMatrix)
-// Applied to #game-canvas via inline CSS filter when enabled.
+// Colorblind CSS filter simulation
+// Applied to #game-canvas via inline CSS filter (saturate + hue-rotate).
 // ---------------------------------------------------------------------------
 
 // Colorblind simulation filter parameters: [saturate, hue-rotate (deg)]
@@ -437,7 +437,9 @@ function dispatchInputRemappings(remappings: AccessibilityProfile['inputRemappin
 
 export function AccessibilityPanel() {
   const [audit, setAudit] = useState<AccessibilityAudit | null>(null);
-  const [profile, setProfile] = useState<AccessibilityProfile>(createDefaultProfile);
+  const [profile, setProfile] = useState<AccessibilityProfile>(
+    () => useEditorStore.getState().accessibilityProfile ?? createDefaultProfile(),
+  );
   const [isGenerating, setIsGenerating] = useState(false);
 
   const sceneGraph = useEditorStore((s) => s.sceneGraph);
@@ -458,11 +460,15 @@ export function AccessibilityPanel() {
     return () => applyColorblindFilter(null, 0);
   }, [cbEnabled, cbMode, cbStrength]);
 
-  // Dispatch input remappings to engine when they change
+  // Dispatch input remappings to engine when they change; cleanup on unmount
   const irEnabled = profile.inputRemapping.enabled;
   const irRemappings = profile.inputRemapping.remappings;
   useEffect(() => {
     dispatchInputRemappings(irRemappings, irEnabled);
+    return () => {
+      // Remove all custom bindings on unmount so engine reverts to defaults
+      dispatchInputRemappings(irRemappings, false);
+    };
   }, [irEnabled, irRemappings]);
 
   const handleRunAudit = useCallback(() => {
