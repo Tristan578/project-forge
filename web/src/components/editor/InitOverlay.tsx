@@ -186,7 +186,15 @@ export function InitOverlay() {
 
             {error && !isTimedOut && (
               <div className="mt-4 rounded bg-red-900/50 px-3 py-2 text-sm text-red-200">
-                Error: {error}
+                <p>Error: {error}</p>
+                {canRetry && (
+                  <button
+                    onClick={retry}
+                    className="mt-2 rounded bg-red-800 px-3 py-1.5 text-sm text-red-100 hover:bg-red-700"
+                  >
+                    Retry
+                  </button>
+                )}
               </div>
             )}
 
