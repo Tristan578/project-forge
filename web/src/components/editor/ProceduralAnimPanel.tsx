@@ -56,6 +56,13 @@ export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
 
   const [customBoneInput, setCustomBoneInput] = useState('');
 
+  // Reset custom bone input when the selected entity changes (prev-value pattern)
+  const [prevPrimaryId, setPrevPrimaryId] = useState(primaryId);
+  if (prevPrimaryId !== primaryId) {
+    setPrevPrimaryId(primaryId);
+    setCustomBoneInput('');
+  }
+
   // Derive bone names: 2D skeleton > custom input > default humanoid
   const { boneNames, boneSource } = useMemo(() => {
     if (primaryId && skeletons2d[primaryId]) {
@@ -68,10 +75,12 @@ export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
       }
     }
     if (customBoneInput.trim()) {
-      const parsed = customBoneInput
-        .split(/[,\n]/)
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const parsed = [...new Set(
+        customBoneInput
+          .split(/[,\n]/) 
+          .map((s) => s.trim())
+          .filter(Boolean)
+      )];
       if (parsed.length > 0) {
         return { boneNames: parsed, boneSource: 'custom' as const };
       }
@@ -213,7 +222,7 @@ export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
           )}
         </label>
 
-        {boneSource === 'default' && (
+        {boneSource === 'default' && primaryId && (
           <div className="mb-2 rounded bg-amber-900/30 px-2 py-1.5 text-[11px] text-amber-300" role="alert">
             Using default humanoid bones. For GLTF models, paste your actual bone names below.
           </div>
