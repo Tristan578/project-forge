@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
+const mockCaptureException = vi.fn();
+vi.mock('@/lib/monitoring/sentry-server', () => ({
+  captureException: (...args: unknown[]) => mockCaptureException(...args),
+}));
+
 import { CircuitBreaker, CircuitBreakerOpenError } from '../circuitBreaker';
 
 function makeBreaker(options?: { failureThreshold?: number; openTimeoutMs?: number }) {
@@ -14,6 +19,7 @@ function makeBreaker(options?: { failureThreshold?: number; openTimeoutMs?: numb
 describe('CircuitBreaker', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    mockCaptureException.mockClear();
   });
 
   afterEach(() => {
@@ -200,6 +206,54 @@ describe('CircuitBreaker', () => {
     await expect(cb.execute(() => Promise.reject(new Error('connection terminated')))).rejects.toThrow();
     const stats = cb.getStats();
     expect(stats.lastOpenedAt).toBeGreaterThanOrEqual(before);
+  });
+
+  // -- Sentry alerting (#8244) --
+
+  it('fires a Sentry alert when the circuit opens', async () => {
+    const cb = makeBreaker({ failureThreshold: 2 });
+    await expect(cb.execute(() => Promise.reject(new Error('connection timeout')))).rejects.toThrow();
+    expect(mockCaptureException).not.toHaveBeenCalled();
+
+    await expect(cb.execute(() => Promise.reject(new Error('connection timeout')))).rejects.toThrow();
+    expect(cb.getState()).toBe('open');
+    expect(mockCaptureException).toHaveBeenCalledOnce();
+    expect(mockCaptureException.mock.calls[0][0]).toBeInstanceOf(Error);
+    expect(mockCaptureException.mock.calls[0][0].message).toContain('circuit breaker opened');
+    expect(mockCaptureException.mock.calls[0][1]).toMatchObject({
+      from: 'closed',
+      to: 'open',
+      consecutiveFailures: 2,
+    });
+  });
+
+  it('does not fire Sentry alert for half-open or closed transitions', async () => {
+    const cb = makeBreaker({ failureThreshold: 1, openTimeoutMs: 1_000 });
+    await expect(cb.execute(() => Promise.reject(new Error('connection timeout')))).rejects.toThrow();
+    mockCaptureException.mockClear();
+
+    // half-open transition — no alert
+    vi.advanceTimersByTime(1_000);
+    expect(cb.getState()).toBe('half-open');
+    expect(mockCaptureException).not.toHaveBeenCalled();
+
+    // closed transition — no alert
+    await cb.execute(() => Promise.resolve('ok'));
+    expect(cb.getState()).toBe('closed');
+    expect(mockCaptureException).not.toHaveBeenCalled();
+  });
+
+  it('fires Sentry alert again when circuit reopens from half-open', async () => {
+    const cb = makeBreaker({ failureThreshold: 1, openTimeoutMs: 1_000 });
+    await expect(cb.execute(() => Promise.reject(new Error('connection timeout')))).rejects.toThrow();
+    expect(mockCaptureException).toHaveBeenCalledOnce();
+    mockCaptureException.mockClear();
+
+    vi.advanceTimersByTime(1_000);
+    // Probe fails — back to open
+    await expect(cb.execute(() => Promise.reject(new Error('connection timeout')))).rejects.toThrow();
+    expect(cb.getState()).toBe('open');
+    expect(mockCaptureException).toHaveBeenCalledOnce();
   });
 
   // -- reset --

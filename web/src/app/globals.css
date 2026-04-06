@@ -228,3 +228,18 @@ body {
   outline: 2px solid var(--sf-accent, #3b82f6);
   outline-offset: 2px;
 }
+
+/* Global reduced-motion: kill non-essential animations and transitions.
+   Elements with [role="progressbar"] or [data-essential-animation] are exempted. */
+@media (prefers-reduced-motion: reduce) {
+  *:not([role="progressbar"]):not([data-essential-animation]),
+  *:not([role="progressbar"]):not([data-essential-animation])::before,
+  *:not([role="progressbar"]):not([data-essential-animation])::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
+import { useAIGeneration } from '@/hooks/useAIGeneration';
 
 interface GenerateMusicDialogProps {
   isOpen: boolean;
@@ -18,7 +19,9 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
   const [duration, setDuration] = useState(30);
   const [instrumental, setInstrumental] = useState(true);
   const [attachToEntity, setAttachToEntity] = useState(!!entityId);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { execute, cancel, isLoading: isSubmitting } = useAIGeneration({
+    onError: (msg) => toast.error(msg),
+  });
 
   const tokenBalance = useUserStore((s) => s.tokenBalance);
   const primaryName = useEditorStore((s) => s.primaryName);
@@ -32,11 +35,15 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
     tokenBalance !== null &&
     tokenBalance.total >= tokenCost;
 
-  const handleSubmit = async () => {
+  const handleClose = useCallback(() => {
+    cancel();
+    onClose();
+  }, [cancel, onClose]);
+
+  const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
 
-    setIsSubmitting(true);
-    try {
+    const result = await execute(async (signal) => {
       const response = await fetch('/api/generate/music', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -46,6 +53,7 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
           instrumental,
           entityId: attachToEntity && entityId ? entityId : undefined,
         }),
+        signal,
       });
 
       if (!response.ok) {
@@ -53,15 +61,14 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
         throw new Error(err.error ?? 'Generation failed');
       }
 
-      // Job started successfully
+      return true;
+    });
+
+    if (result) {
       onClose();
       setPrompt('');
-    } catch (err) {
-      toast.error((err as Error).message);
-    } finally {
-      setIsSubmitting(false);
     }
-  };
+  }, [canSubmit, execute, prompt, duration, instrumental, attachToEntity, entityId, onClose]);
 
   if (!isOpen) return null;
 
@@ -81,9 +88,8 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
             <h2 id="generate-music-dialog-title" className="text-base font-semibold text-zinc-100">Generate Music</h2>
           </div>
           <button
-            onClick={onClose}
-            disabled={isSubmitting}
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
+            onClick={handleClose}
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
           >
             <X size={18} />
           </button>
@@ -181,9 +187,8 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
         {/* Footer */}
         <div className="flex gap-2 border-t border-zinc-700 px-4 py-3">
           <button
-            onClick={onClose}
-            disabled={isSubmitting}
-            className="flex-1 rounded bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
+            onClick={handleClose}
+            className="flex-1 rounded bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-700"
           >
             Cancel
           </button>

@@ -610,7 +610,8 @@ class AudioManager {
       setTimeout(() => this.stop(fromEntityId, fromSlot), durationMs);
     }
     if (toInstance) {
-      const targetVolume = toInstance.gainNode.gain.value || 1.0;
+      const rawCrossfadeGain = toInstance.gainNode.gain.value;
+      const targetVolume = Number.isFinite(rawCrossfadeGain) && rawCrossfadeGain > 0 ? rawCrossfadeGain : 1.0;
       toInstance.gainNode.gain.cancelScheduledValues(now);
       toInstance.gainNode.gain.setValueAtTime(0, now);
       toInstance.gainNode.gain.linearRampToValueAtTime(targetVolume, now + duration);
@@ -626,7 +627,8 @@ class AudioManager {
     const key = this.instanceKey(entityId, slot);
     const instance = this.instances.get(key);
     if (!instance) return;
-    const targetVolume = instance.gainNode.gain.value || 1.0;
+    const rawFadeInGain = instance.gainNode.gain.value;
+    const targetVolume = Number.isFinite(rawFadeInGain) && rawFadeInGain > 0 ? rawFadeInGain : 1.0;
     instance.gainNode.gain.cancelScheduledValues(now);
     instance.gainNode.gain.setValueAtTime(0, now);
     instance.gainNode.gain.linearRampToValueAtTime(targetVolume, now + durationMs / 1000);

@@ -71,6 +71,11 @@ const OPTIONAL_VARS: OptionalVar[] = [
     description: 'Cloudflare account ID for R2 asset storage',
     defaultValue: '',
   },
+  {
+    key: 'ADMIN_USER_IDS',
+    description: 'Comma-separated Clerk user IDs for admin access (admin panel, economics)',
+    defaultValue: '',
+  },
 ];
 
 export interface EnvValidationResult {

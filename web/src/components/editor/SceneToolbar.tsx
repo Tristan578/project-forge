@@ -89,7 +89,7 @@ export function SceneToolbar() {
     if (sceneModified) {
       // TODO(PF): Replace window.confirm() with an inline confirmation dialog.
       // confirm() blocks the main thread, is inaccessible to screen readers, and
-      // cannot be styled to match the SpawnForge design system. Tracked in PF-XXX.
+      // cannot be styled to match the SpawnForge design system.
       if (!confirm('Discard unsaved changes and create a new scene?')) return;
     }
     newScene();

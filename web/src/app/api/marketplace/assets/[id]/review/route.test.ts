@@ -122,7 +122,9 @@ describe('POST /api/marketplace/assets/[id]/review', () => {
         .mockReturnValueOnce(existingReviewChain)
         .mockReturnValueOnce(allReviewsChain),
       insert: vi.fn().mockReturnValue({
-        values: vi.fn().mockResolvedValue(undefined),
+        values: vi.fn().mockReturnValue({
+          onConflictDoNothing: vi.fn().mockResolvedValue(undefined),
+        }),
       }),
       update: vi.fn().mockReturnValue({
         set: vi.fn().mockReturnThis(),

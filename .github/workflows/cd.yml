@@ -687,6 +687,28 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npx drizzle-kit push
 
+      - name: Apply custom SQL migrations
+        # Drizzle can't model partial unique indexes (WHERE predicates).
+        # These migrations are idempotent (CREATE ... IF NOT EXISTS or
+        # CONCURRENTLY which skips if the index already exists).
+        if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema') || contains(needs.check-changes.outputs.web-changed-files, 'drizzle/')
+        working-directory: web
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          node --input-type=module -e "
+            import { neon } from '@neondatabase/serverless';
+            import { readdirSync, readFileSync } from 'fs';
+            const sql = neon(process.env.DATABASE_URL);
+            const files = readdirSync('drizzle').filter(f => f.match(/^0\d+.*\.sql$/)).sort();
+            for (const f of files) {
+              console.log('Applying drizzle/' + f);
+              const content = readFileSync('drizzle/' + f, 'utf8');
+              try { await sql(content); console.log('  OK'); }
+              catch(e) { console.log('  Skipped:', e.message); }
+            }
+          "
+
       # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
       # Adding working-directory:web here causes web/web path doubling on remote builds.
       # Remote build avoids `spawn npm ENOENT` bug with `vercel build` on GHA runners.

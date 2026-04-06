@@ -56,19 +56,21 @@ export async function POST(
 
     // For free assets, just record purchase
     if (price === 0) {
-      await queryWithResilience(() => getDb().insert(assetPurchases).values({
+      const inserted = await queryWithResilience(() => getDb().insert(assetPurchases).values({
         buyerId: user.id,
         assetId,
         priceTokens: 0,
         license: asset.license,
-      }));
+      }).onConflictDoNothing().returning({ id: assetPurchases.id }));
 
-      // Increment download count atomically to avoid lost updates under
-      // concurrent free-asset purchases (PF-111).
-      await queryWithResilience(() => getDb()
-        .update(marketplaceAssets)
-        .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
-        .where(eq(marketplaceAssets.id, assetId)));
+      // Only increment download count when a new purchase row was actually
+      // inserted. On retry (conflict → no insert), skip to avoid double-counting.
+      if (inserted.length > 0) {
+        await queryWithResilience(() => getDb()
+          .update(marketplaceAssets)
+          .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
+          .where(eq(marketplaceAssets.id, assetId)));
+      }
 
       return NextResponse.json({ success: true, downloadUrl: asset.assetFileUrl });
     }
@@ -77,6 +79,41 @@ export async function POST(
     const totalBalance = user.monthlyTokens - user.monthlyTokensUsed + user.addonTokens + user.earnedCredits;
     if (totalBalance < price) {
       return paymentRequired('Insufficient tokens');
+    }
+
+    // IDEMPOTENCY GATE: Insert purchase row FIRST. If a concurrent request
+    // already inserted, onConflictDoNothing returns empty → abort before
+    // touching any balances. This prevents the double-charge race condition
+    // where two requests both pass the `existing` check, both mutate balances,
+    // but only one purchase row is actually created.
+    const purchaseInserted = await queryWithResilience(() => getDb().insert(assetPurchases).values({
+      buyerId: user.id,
+      assetId,
+      priceTokens: price,
+      license: asset.license,
+    }).onConflictDoNothing().returning({ id: assetPurchases.id }));
+
+    if (purchaseInserted.length === 0) {
+      // Conflict — but was the buyer actually charged? If the INSERT committed
+      // on a previous attempt but the HTTP response was lost (neon-http retry),
+      // the purchase row exists but balance mutations never ran. Check for the
+      // deduction credit_transaction to distinguish "fully completed" from
+      // "orphan row from lost-ack retry" (Copilot review finding).
+      const [existingTxn] = await queryWithResilience(() => getDb()
+        .select({ id: creditTransactions.id })
+        .from(creditTransactions)
+        .where(and(
+          eq(creditTransactions.userId, user.id),
+          eq(creditTransactions.source, 'marketplace_purchase'),
+          eq(creditTransactions.referenceId, assetId),
+        ))
+        .limit(1));
+
+      if (existingTxn) {
+        // Fully completed — buyer was already charged
+        return conflict('Already purchased');
+      }
+      // Orphan purchase row — fall through to charge the buyer
     }
 
     // Deduct tokens (use earned credits first, then addon, then monthly)
@@ -131,6 +168,12 @@ export async function POST(
       .returning({ id: users.id }));
 
     if (updateResult.length === 0) {
+      // Balance changed after purchase insert — roll back the purchase row so
+      // user can retry. Without this delete, the idempotency gate permanently
+      // blocks the user from completing the purchase (Sentry HIGH severity).
+      await queryWithResilience(() => getDb()
+        .delete(assetPurchases)
+        .where(and(eq(assetPurchases.buyerId, user.id), eq(assetPurchases.assetId, assetId))));
       return NextResponse.json({ error: 'Balance changed, please retry' }, { status: 409 });
     }
 
@@ -160,21 +203,14 @@ export async function POST(
       ? buyerBalance.earnedCredits + buyerBalance.addonTokens + (buyerBalance.monthlyTokens - buyerBalance.monthlyTokensUsed)
       : totalBalance - price;
 
-    // Record purchase
-    await queryWithResilience(() => getDb().insert(assetPurchases).values({
-      buyerId: user.id,
-      assetId,
-      priceTokens: price,
-      license: asset.license,
-    }));
-
-    // Increment download count atomically
+    // Increment download count (purchase row was successfully inserted above)
     await queryWithResilience(() => getDb()
       .update(marketplaceAssets)
       .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
       .where(eq(marketplaceAssets.id, assetId)));
 
     // Record buyer transaction with actual post-update balance
+    // onConflictDoNothing: idempotent under retry (unique on userId+source+referenceId)
     await queryWithResilience(() => getDb().insert(creditTransactions).values({
       userId: user.id,
       transactionType: 'deduction',
@@ -182,17 +218,19 @@ export async function POST(
       balanceAfter: buyerBalanceAfter,
       source: 'marketplace_purchase',
       referenceId: assetId,
-    }));
+    }).onConflictDoNothing());
 
-    // Record seller transaction with actual post-update balance from RETURNING
+    // Record seller transaction with actual post-update balance from RETURNING.
+    // referenceId must be unique per purchase (asset:buyer), not per asset —
+    // otherwise repeat sales of the same asset silently drop seller earnings.
     await queryWithResilience(() => getDb().insert(creditTransactions).values({
       userId: seller.id,
       transactionType: 'earned',
       amount: sellerEarnings,
       balanceAfter: sellerUpdate?.earnedCredits ?? (seller.earnedCredits + sellerEarnings),
       source: 'marketplace_sale',
-      referenceId: assetId,
-    }));
+      referenceId: `${assetId}:${user.id}`,
+    }).onConflictDoNothing());
 
     return NextResponse.json({
       success: true,
