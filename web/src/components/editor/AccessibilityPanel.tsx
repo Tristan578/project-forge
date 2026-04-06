@@ -440,19 +440,21 @@ export function AccessibilityPanel() {
   }, [profile]);
 
   // Apply colorblind simulation filter to game canvas
+  const { colorblindMode } = profile;
+  const cbEnabled = colorblindMode.enabled;
+  const cbMode = colorblindMode.mode;
+  const cbStrength = colorblindMode.filterStrength;
   useEffect(() => {
-    const { colorblindMode } = profile;
-    applyColorblindFilter(
-      colorblindMode.enabled ? colorblindMode.mode : null,
-      colorblindMode.filterStrength,
-    );
+    applyColorblindFilter(cbEnabled ? cbMode : null, cbStrength);
     return () => applyColorblindFilter(null, 0);
-  }, [profile.colorblindMode.enabled, profile.colorblindMode.mode, profile.colorblindMode.filterStrength]);
+  }, [cbEnabled, cbMode, cbStrength]);
 
   // Dispatch input remappings to engine when they change
+  const irEnabled = profile.inputRemapping.enabled;
+  const irRemappings = profile.inputRemapping.remappings;
   useEffect(() => {
-    dispatchInputRemappings(profile.inputRemapping.remappings, profile.inputRemapping.enabled);
-  }, [profile.inputRemapping.enabled, profile.inputRemapping.remappings]);
+    dispatchInputRemappings(irRemappings, irEnabled);
+  }, [irEnabled, irRemappings]);
 
   const handleRunAudit = useCallback(() => {
     const ctx = buildSceneContextFromStore();
