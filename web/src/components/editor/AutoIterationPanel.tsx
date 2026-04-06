@@ -216,7 +216,7 @@ function AutoIterationPanel() {
   }), [avgPlayTime, completionRate, engagementScore, quitScene, quitPercentage, spikeScene, spikeDeathRate]);
 
   const buildSceneContext = useCallback((): SceneContext => {
-    const nodes = Object.values(sceneGraph);
+    const nodes = Object.values(sceneGraph.nodes);
     return {
       sceneName: quitScene || 'Main',
       entityCount: nodes.length,

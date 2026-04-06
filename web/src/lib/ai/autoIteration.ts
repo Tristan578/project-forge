@@ -480,7 +480,8 @@ export function applyFixes(
       } else {
         dispatch(change.command, {
           entityId: change.entityId,
-          [change.property]: change.newValue,
+          componentType: change.component,
+          properties: { [change.property]: change.newValue },
         });
       }
     }
