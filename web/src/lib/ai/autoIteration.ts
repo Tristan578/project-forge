@@ -365,7 +365,7 @@ function generateFixForIssue(
         description: `Improve visual interest in "${issue.affectedArea}"`,
         changes: [{
           component: 'environment',
-          property: 'ambientBrightness',
+          property: 'brightness',
           oldValue: 0.3,
           newValue: 0.5,
           command: 'update_ambient_light',

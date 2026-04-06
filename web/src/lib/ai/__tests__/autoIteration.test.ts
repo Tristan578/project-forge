@@ -575,7 +575,7 @@ describe('applyFixes', () => {
         changes: [
           {
             component: 'environment',
-            property: 'ambientBrightness',
+            property: 'brightness',
             oldValue: 0.3,
             newValue: 0.5,
             command: 'update_ambient_light',
@@ -587,7 +587,7 @@ describe('applyFixes', () => {
     ];
     applyFixes(fixes, dispatch, 1);
     expect(dispatch).toHaveBeenCalledWith('update_ambient_light', {
-      ambientBrightness: 0.5,
+      brightness: 0.5,
     });
   });
 });
