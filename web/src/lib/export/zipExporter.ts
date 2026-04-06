@@ -81,7 +81,6 @@ export async function exportAsZip(
   sceneData: unknown,
   scripts: Record<string, ScriptData>,
   options: ZipExportOptions,
-  signal?: AbortSignal
 ): Promise<Blob> {
   const { signal } = options;
 

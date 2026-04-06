@@ -69,9 +69,10 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
       bgColor: options.bgColor,
       includeDebug: options.includeDebug,
       orientationLock: options.orientationLock,
+      signal,
     };
 
-    return await exportAsZip(sceneData, store.allScripts, zipOptions, options.signal);
+    return await exportAsZip(sceneData, store.allScripts, zipOptions);
   }
 
   // Default: Single HTML export
