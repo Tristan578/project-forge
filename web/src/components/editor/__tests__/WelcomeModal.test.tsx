@@ -91,14 +91,13 @@ describe('WelcomeModal', () => {
   });
 
   it('renders modal when localStorage throws (private browsing)', () => {
-    const origGetItem = localStorage.getItem.bind(localStorage);
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new DOMException('Access denied');
     });
 
     render(<WelcomeModal />);
     expect(screen.getByRole('heading', { name: /Welcome to SpawnForge/i })).toBeInTheDocument();
 
-    vi.mocked(Storage.prototype.getItem).mockImplementation(origGetItem);
+    spy.mockRestore();
   });
 });
