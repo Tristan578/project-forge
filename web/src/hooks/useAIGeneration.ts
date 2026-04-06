@@ -15,7 +15,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 
 export interface UseAIGenerationOptions {
-  /** Called when a request is cancelled (either manually or on unmount). */
+  /** Called when a request is manually cancelled via cancel(). Not called on unmount. */
   onCancel?: () => void;
   /** Called when a non-abort error occurs. Useful for toast notifications. */
   onError?: (message: string) => void;
@@ -63,10 +63,9 @@ export function useAIGeneration<T = unknown>(
   }, []);
 
   const cancel = useCallback(() => {
-    if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
-    }
+    if (!abortRef.current) return; // No in-flight request — no-op
+    abortRef.current.abort();
+    abortRef.current = null;
     if (mountedRef.current) {
       setIsLoading(false);
       setError(null);
@@ -90,10 +89,9 @@ export function useAIGeneration<T = unknown>(
 
       try {
         const result = await fn(controller.signal);
-        if (mountedRef.current) {
-          setIsLoading(false);
-        }
         abortRef.current = null;
+        if (!mountedRef.current) return undefined;
+        setIsLoading(false);
         return result;
       } catch (err) {
         abortRef.current = null;

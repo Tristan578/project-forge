@@ -250,9 +250,8 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
         {/* Footer */}
         <div className="flex gap-2 border-t border-zinc-700 px-4 py-3">
           <button
-            onClick={onClose}
-            disabled={isSubmitting}
-            className="flex-1 rounded bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
+            onClick={handleClose}
+            className="flex-1 rounded bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-700"
           >
             Cancel
           </button>
