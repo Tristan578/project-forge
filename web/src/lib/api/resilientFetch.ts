@@ -22,6 +22,9 @@ export async function resilientFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
+  // Clone Request inputs upfront — fetch() consumes the body, making
+  // subsequent clone() calls throw TypeError on Request objects with bodies.
+  const retryInput = input instanceof Request ? input.clone() : input;
   const response = await fetch(input, init);
 
   if (response.status !== 503) return response;
@@ -50,11 +53,9 @@ export async function resilientFetch(
 
   await new Promise((r) => setTimeout(r, retryAfterMs));
 
-  // Single retry attempt — re-create request to ensure body is fresh.
-  // If input is a Request, clone it; otherwise re-use input+init (string/URL
-  // bodies in init are not consumed by fetch).
-  if (input instanceof Request) {
-    return fetch(input.clone(), init);
+  // Single retry with the pre-cloned input (body is unconsumed)
+  if (retryInput instanceof Request) {
+    return fetch(retryInput, init);
   }
-  return fetch(input, init);
+  return fetch(retryInput, init);
 }
