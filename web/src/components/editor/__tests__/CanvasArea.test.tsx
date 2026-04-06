@@ -86,7 +86,6 @@ describe('CanvasArea', () => {
   it('does not show dimension indicator when not ready', () => {
     mockEditorStore();
     const { container } = render(<CanvasArea />);
-    // isReady is false, so no dimension indicator
     expect(container.textContent).not.toContain('1280');
   });
 

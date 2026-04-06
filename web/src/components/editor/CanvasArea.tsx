@@ -1,18 +1,32 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useViewport } from '@/hooks/useViewport';
 import { useEngineEvents } from '@/hooks/useEngineEvents';
 import { usePointerLock } from '@/hooks/usePointerLock';
 import { getWasmModule } from '@/hooks/useEngine';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
+import { getCanvasKeyMap, eventToKeyCombo } from '@/lib/workspace/keybindings';
 import { InitOverlay } from './InitOverlay';
 import { ViewPresetButtons } from './ViewPresetButtons';
 import { UICanvasOverlay } from './ui-builder/UICanvasOverlay';
 import { UIRuntimeRenderer } from './ui-builder/UIRuntimeRenderer';
 
 const CANVAS_ID = 'game-canvas';
+
+/** Map keybinding action names to WASM engine commands. */
+const ACTION_COMMANDS: Record<string, (wasm: ReturnType<typeof getWasmModule>) => void> = {
+  translate: (w) => w?.handle_command('set_gizmo_mode', { mode: 'translate' }),
+  rotate: (w) => w?.handle_command('set_gizmo_mode', { mode: 'rotate' }),
+  scale: (w) => w?.handle_command('set_gizmo_mode', { mode: 'scale' }),
+  delete: (w) => w?.handle_command('delete_entities', { entityIds: Array.from(useEditorStore.getState().selectedIds) }),
+  duplicate: (w) => { const id = useEditorStore.getState().primaryId; if (id) w?.handle_command('duplicate_entity', { entityId: id }); },
+  undo: (w) => w?.handle_command('undo', {}),
+  redo: (w) => w?.handle_command('redo', {}),
+  focus: (w) => { const id = useEditorStore.getState().primaryId; if (id) w?.handle_command('focus_camera', { entityId: id }); },
+  deselect: (w) => w?.handle_command('clear_selection', {}),
+};
 
 export function CanvasArea() {
   const { dimensions, isReady } = useViewport(CANVAS_ID);
@@ -25,6 +39,10 @@ export function CanvasArea() {
 
   // Pointer lock for FirstPerson camera mouse look
   usePointerLock(CANVAS_ID);
+
+  // Build key→action map from customizable registry (re-reads on each render
+  // so localStorage changes take effect immediately)
+  const keyMap = useMemo(() => getCanvasKeyMap(), []);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
     // Play/Paused mode: Bevy handles keyboard natively, except Escape to exit
@@ -40,65 +58,18 @@ export function CanvasArea() {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
-    const wasm = getWasmModule();
-    const ctrl = e.ctrlKey || e.metaKey;
+    const combo = eventToKeyCombo(e.nativeEvent);
+    if (!combo) return;
 
-    switch (e.key) {
-      // Gizmo modes
-      case 'w':
-      case 'W':
-        if (!ctrl) { wasm?.handle_command('set_gizmo_mode', { mode: 'translate' }); e.preventDefault(); }
-        break;
-      case 'e':
-      case 'E':
-        if (!ctrl) { wasm?.handle_command('set_gizmo_mode', { mode: 'rotate' }); e.preventDefault(); }
-        break;
-      case 'r':
-      case 'R':
-        if (!ctrl) { wasm?.handle_command('set_gizmo_mode', { mode: 'scale' }); e.preventDefault(); }
-        break;
+    const action = keyMap.get(combo);
+    if (!action) return;
 
-      // Delete
-      case 'Delete':
-      case 'Backspace':
-        wasm?.handle_command('delete_entities', { entityIds: Array.from(useEditorStore.getState().selectedIds) });
-        e.preventDefault();
-        break;
-
-      // Duplicate
-      case 'd':
-      case 'D':
-        if (ctrl) {
-          const primaryId = useEditorStore.getState().primaryId;
-          if (primaryId) { wasm?.handle_command('duplicate_entity', { entityId: primaryId }); }
-          e.preventDefault();
-        }
-        break;
-
-      // Undo/Redo
-      case 'z':
-      case 'Z':
-        if (ctrl && e.shiftKey) { wasm?.handle_command('redo', {}); e.preventDefault(); }
-        else if (ctrl) { wasm?.handle_command('undo', {}); e.preventDefault(); }
-        break;
-
-      // Focus selected
-      case 'f':
-      case 'F':
-        if (!ctrl) {
-          const focusId = useEditorStore.getState().primaryId;
-          if (focusId) { wasm?.handle_command('focus_camera', { entityId: focusId }); }
-          e.preventDefault();
-        }
-        break;
-
-      // Deselect all
-      case 'Escape':
-        wasm?.handle_command('clear_selection', {});
-        e.preventDefault();
-        break;
+    const handler = ACTION_COMMANDS[action];
+    if (handler) {
+      handler(getWasmModule());
+      e.preventDefault();
     }
-  }, [engineMode]);
+  }, [engineMode, keyMap]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-zinc-900">
