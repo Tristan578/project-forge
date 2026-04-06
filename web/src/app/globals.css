@@ -220,25 +220,17 @@ body {
   animation: shimmer-sweep 1.5s ease-in-out infinite;
 }
 
-/* Global reduced-motion preference — removes ALL animations and transitions
-   for users who have enabled "Reduce motion" in their OS settings.
-   Individual components can opt out with `animation: ... !important` if
-   the animation is essential for understanding (e.g. a loading spinner). */
+/* Global reduced-motion: kill non-essential animations and transitions.
+   Elements with [role="progressbar"] or [data-essential-animation] are exempted. */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  *:not([role="progressbar"]):not([data-essential-animation]),
+  *:not([role="progressbar"]):not([data-essential-animation])::before,
+  *:not([role="progressbar"]):not([data-essential-animation])::after {
     animation-duration: 0.01ms !important;
-    animation-delay: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
-    transition-delay: 0.01ms !important;
+    transition-delay: 0ms !important;
     scroll-behavior: auto !important;
-  }
-
-  /* Exempt loading spinners — they convey essential "in progress" state */
-  .animate-spin {
-    animation-duration: 1s !important;
-    animation-iteration-count: infinite !important;
   }
 }

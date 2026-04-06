@@ -489,7 +489,7 @@ function parseAIResponse(raw: string): { config: SaveSystemConfig; checkpoints: 
   const data = JSON.parse(jsonMatch[1]);
 
   const config: SaveSystemConfig = {
-    saveSlots: Math.min(20, Math.max(1, Number(data.config?.saveSlots) || 3)),
+    saveSlots: Math.min(20, Math.max(1, data.config?.saveSlots != null && data.config.saveSlots !== '' && Number.isFinite(Number(data.config.saveSlots)) ? Number(data.config.saveSlots) : 3)),
     autoSaveInterval: Math.max(0, Number.isFinite(Number(data.config?.autoSaveInterval)) ? Number(data.config.autoSaveInterval) : 60),
     checkpointTriggers: Array.isArray(data.config?.checkpointTriggers)
       ? data.config.checkpointTriggers.filter((t: string) =>

@@ -57,7 +57,7 @@ describe('canAccessPanel', () => {
   });
 
   describe('hobbyist panels', () => {
-    const hobbyistPanels = ['review', 'tutorial', 'design-teacher', 'idea-generator', 'accessibility'];
+    const hobbyistPanels = ['review', 'tutorial', 'design-teacher', 'idea-generator', 'accessibility', 'ai-chat', 'generate-texture', 'generate-sound', 'generate-music', 'generate-sprite', 'generate-pixel-art'];
 
     it('blocks starter from hobbyist panels', () => {
       for (const panelId of hobbyistPanels) {
@@ -76,6 +76,8 @@ describe('canAccessPanel', () => {
 
   describe('creator panels', () => {
     const creatorPanels = [
+      'generate-model',
+      'generate-skybox',
       'world-builder',
       'narrative',
       'economy',
@@ -175,7 +177,9 @@ describe('getAvailablePanels', () => {
 describe('getRequiredTier', () => {
   it('returns the required tier for gated panels', () => {
     expect(getRequiredTier('review')).toBe('hobbyist');
+    expect(getRequiredTier('generate-sound')).toBe('hobbyist');
     expect(getRequiredTier('world-builder')).toBe('creator');
+    expect(getRequiredTier('generate-model')).toBe('creator');
     expect(getRequiredTier('auto-iteration')).toBe('pro');
   });
 

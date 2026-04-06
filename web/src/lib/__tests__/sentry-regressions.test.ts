@@ -72,17 +72,17 @@ describe('Lesson #3: NaN guard — Number(undefined) ?? fallback', () => {
     expect(correctDefault).toBe(0);
   });
 
-  it('saveSlots formula works correctly for undefined input (regression for saveSystemGenerator)', () => {
-    // Regression: `Math.min(20, Math.max(1, Number(undefined) || 3))`
-    // Number(undefined) is NaN; NaN || 3 is 3 (|| correctly catches NaN)
-    // So saveSlots formula using || is actually SAFE for this particular case
-    const bugPattern = (val: unknown) => Math.min(20, Math.max(1, Number(val) || 3));
-    expect(bugPattern(undefined)).toBe(3);
-    expect(bugPattern(null)).toBe(3);
-    expect(bugPattern('10')).toBe(10);
-    expect(bugPattern(0)).toBe(3); // 0 is treated as falsy — should this be 1 or 3?
+  it('saveSlots formula uses Number.isFinite guard (fixed from || pattern)', () => {
+    // Fixed: saveSystemGenerator now uses Number.isFinite pattern for saveSlots
+    // (was: `Number(val) || 3` which treated 0 as falsy)
+    const fixedPattern = (val: unknown) =>
+      Math.min(20, Math.max(1, Number.isFinite(Number(val)) ? Number(val) : 3));
+    expect(fixedPattern(undefined)).toBe(3);
+    expect(fixedPattern(null)).toBe(1); // Number(null) === 0, isFinite(0) → true, clamped to min 1
+    expect(fixedPattern('10')).toBe(10);
+    expect(fixedPattern(0)).toBe(1); // 0 is valid input, clamped to min 1 (not silently replaced with 3)
 
-    // The autoSaveInterval formula uses the correct pattern (Number.isFinite)
+    // The autoSaveInterval formula also uses the correct pattern (Number.isFinite)
     const safePattern = (val: unknown) =>
       Math.max(0, Number.isFinite(Number(val)) ? Number(val) : 60);
     expect(safePattern(undefined)).toBe(60);

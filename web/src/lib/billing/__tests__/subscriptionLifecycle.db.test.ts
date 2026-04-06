@@ -32,7 +32,9 @@ let mockUser: Partial<User> | null = null;
 let selectCallCount = 0;
 
 // Drizzle ORM mock (used for SELECT reads only)
-const mockInsert = vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue([]) });
+const mockInsert = vi.fn().mockReturnValue({
+  values: vi.fn().mockReturnValue({ onConflictDoNothing: vi.fn().mockResolvedValue([]) }),
+});
 const mockUpdate = vi.fn().mockReturnValue({
   set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
 });
@@ -135,7 +137,9 @@ function resetMocks(): void {
     return buildSelectChain(mockUser ? [mockUser] : []);
   });
 
-  mockInsert.mockReturnValue({ values: vi.fn().mockResolvedValue([]) });
+  mockInsert.mockReturnValue({
+    values: vi.fn().mockReturnValue({ onConflictDoNothing: vi.fn().mockResolvedValue([]) }),
+  });
   mockUpdate.mockReturnValue({
     set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
   });
@@ -501,6 +505,15 @@ describe('handleInvoicePaymentFailed', () => {
 
     const txn = mockInsert.mock.results[0].value.values.mock.calls[0][0];
     expect(txn.source).toBe('payment_failed:attempt_3');
+  });
+
+  it('uses onConflictDoNothing for idempotent retry safety (#8261)', async () => {
+    mockUser = makeUser();
+    await handleInvoicePaymentFailed('cus_abc123', 'inv_123', 1, null);
+
+    // The insert chain must call onConflictDoNothing() to be idempotent
+    const valuesResult = mockInsert.mock.results[0].value.values.mock.results[0].value;
+    expect(valuesResult.onConflictDoNothing).toHaveBeenCalledOnce();
   });
 });
 

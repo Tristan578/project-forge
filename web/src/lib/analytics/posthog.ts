@@ -25,6 +25,7 @@ export enum AnalyticsEvent {
   FEATURE_FLAG_EVALUATED = 'feature_flag_evaluated',
   TIER_UPGRADE_PROMPTED = 'tier_upgrade_prompted',
   TEMPLATE_APPLIED = 'template_applied',
+  WASM_CDN_FALLBACK = 'wasm_cdn_fallback',
 }
 
 const POSTHOG_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY ?? '';
