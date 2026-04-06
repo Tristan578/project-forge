@@ -8,6 +8,8 @@ export interface CircuitBreakerOptions {
   failureThreshold?: number;
   /** Milliseconds in open state before transitioning to half-open. Default: 30000 */
   openTimeoutMs?: number;
+  /** Callback fired on state transitions for observability (Sentry, logging). */
+  onTransition?: (from: CircuitState, to: CircuitState) => void;
 }
 
 export class CircuitBreakerOpenError extends Error {
@@ -23,10 +25,12 @@ export class CircuitBreaker {
   private lastOpenedAt: number | null = null;
   private readonly failureThreshold: number;
   private readonly openTimeoutMs: number;
+  private readonly onTransition?: (from: CircuitState, to: CircuitState) => void;
 
   constructor(options: CircuitBreakerOptions = {}) {
     this.failureThreshold = options.failureThreshold ?? 5;
     this.openTimeoutMs = options.openTimeoutMs ?? 30_000;
+    this.onTransition = options.onTransition;
   }
 
   getState(): CircuitState {
@@ -77,20 +81,31 @@ export class CircuitBreaker {
     };
   }
 
+  private _transition(to: CircuitState): void {
+    const from = this.state;
+    if (from === to) return;
+    this.state = to;
+    try {
+      this.onTransition?.(from, to);
+    } catch {
+      // Observer errors must not break circuit breaker logic
+    }
+  }
+
   private _maybeTransitionToHalfOpen(): void {
     if (
       this.state === 'open' &&
       this.lastOpenedAt !== null &&
       Date.now() - this.lastOpenedAt >= this.openTimeoutMs
     ) {
-      this.state = 'half-open';
+      this._transition('half-open');
     }
   }
 
   private _onSuccess(): void {
     if (this.state === 'half-open') {
       // Probe succeeded — close the circuit
-      this.state = 'closed';
+      this._transition('closed');
       this.consecutiveFailures = 0;
       this.lastOpenedAt = null;
     } else if (this.state === 'closed') {
@@ -104,17 +119,43 @@ export class CircuitBreaker {
 
     if (this.state === 'half-open') {
       // Probe failed — go back to open
-      this.state = 'open';
+      this._transition('open');
       this.lastOpenedAt = Date.now();
     } else if (this.state === 'closed' && this.consecutiveFailures >= this.failureThreshold) {
-      this.state = 'open';
+      this._transition('open');
       this.lastOpenedAt = Date.now();
     }
   }
 }
 
+const DB_FAILURE_THRESHOLD = 5;
+const DB_OPEN_TIMEOUT_MS = 30_000;
+
 /** Singleton circuit breaker for the Neon DB connection. */
 export const dbCircuitBreaker = new CircuitBreaker({
-  failureThreshold: 5,
-  openTimeoutMs: 30_000,
+  failureThreshold: DB_FAILURE_THRESHOLD,
+  openTimeoutMs: DB_OPEN_TIMEOUT_MS,
+  onTransition: (from, to) => {
+    // Lazy import to avoid circular deps — sentry-server is lightweight
+    import('@/lib/monitoring/sentry-server').then(({ addBreadcrumb, captureMessage }) => {
+      addBreadcrumb({
+        category: 'db.circuit_breaker',
+        message: `Circuit breaker: ${from} → ${to}`,
+        level: to === 'open' ? 'error' : to === 'closed' ? 'info' : 'warning',
+        data: { from, to },
+      });
+
+      // Alert-level message when circuit opens (DB down) or closes (recovered)
+      if (to === 'open') {
+        captureMessage(
+          `DB circuit breaker opened — refusing connections after ${DB_FAILURE_THRESHOLD} consecutive failures`,
+          'error',
+        );
+      } else if (to === 'closed' && from === 'half-open') {
+        captureMessage('DB circuit breaker closed — database connection recovered', 'info');
+      }
+    }).catch(() => {
+      // Sentry unavailable — non-critical
+    });
+  },
 });
