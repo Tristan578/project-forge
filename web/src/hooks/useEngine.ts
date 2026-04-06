@@ -412,6 +412,8 @@ async function loadWasm(): Promise<WasmModule> {
           return mod;
         } catch (err) {
           lastErr = err instanceof Error ? err : new Error(String(err));
+          // AbortError = user navigated away — rethrow immediately, no fallback
+          if (lastErr.name === 'AbortError') throw lastErr;
           // Only emit fallback event when there's another path to try (not on final failure)
           if (i < paths.length - 1) {
             emitEvent('wasm_loading', `CDN load failed, retrying from backup...`);
