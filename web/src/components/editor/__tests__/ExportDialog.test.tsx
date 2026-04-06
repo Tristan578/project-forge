@@ -288,9 +288,9 @@ describe('ExportDialog', () => {
   it('shows Cancel Export button when exporting', () => {
     setupStore({ isExporting: true });
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
-    const cancelBtn = screen.getByText('Cancel Export');
-    expect(cancelBtn).toBeTruthy();
-    expect(cancelBtn.hasAttribute('disabled')).toBe(false);
+    const cancelBtn = screen.getByRole('button', { name: /Cancel Export/i });
+    expect(cancelBtn).toBeInTheDocument();
+    expect(cancelBtn).not.toBeDisabled();
   });
 
   it('disables close X button when exporting', () => {

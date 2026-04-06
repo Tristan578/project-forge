@@ -98,19 +98,22 @@ describe('WelcomeModal', () => {
   });
 
   it('shows error message when tutorial data is unavailable', () => {
-    // Override TUTORIALS to be empty so handleStartTutorial sets tutorialError=true
-    mockTutorials.TUTORIALS = [];
+    // Clear the array in-place so the existing ESM named export reference observes the change
+    const saved = [...mockTutorials.TUTORIALS];
+    mockTutorials.TUTORIALS.splice(0, mockTutorials.TUTORIALS.length);
 
-    render(<WelcomeModal />);
-    fireEvent.click(screen.getByRole('button', { name: /Start Tutorial/i }));
+    try {
+      render(<WelcomeModal />);
+      fireEvent.click(screen.getByRole('button', { name: /Start Tutorial/i }));
 
-    // After clicking, tutorialError should be true and the error message shown
-    expect(screen.getByText(/Tutorial data unavailable/i)).toBeInTheDocument();
-    // Start Tutorial button should be replaced with error text
-    expect(screen.queryByRole('button', { name: /Start Tutorial/i })).toBeNull();
-
-    // Restore for subsequent tests
-    mockTutorials.TUTORIALS = [{ id: 'first-scene', name: 'First Scene', steps: [] }];
+      // After clicking, tutorialError should be true and the error message shown
+      expect(screen.getByText(/Tutorial data unavailable/i)).toBeInTheDocument();
+      // Start Tutorial button should be replaced with error text
+      expect(screen.queryByRole('button', { name: /Start Tutorial/i })).toBeNull();
+    } finally {
+      // Restore for subsequent tests without replacing the exported array object
+      mockTutorials.TUTORIALS.splice(0, mockTutorials.TUTORIALS.length, ...saved);
+    }
   });
 
   it('starts tutorial and dismisses modal when tutorial data exists', () => {
