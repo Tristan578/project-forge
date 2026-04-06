@@ -149,8 +149,11 @@ export const dbCircuitBreaker = new CircuitBreaker({
 
       // Alert-level message when circuit opens (DB down) or closes (recovered)
       if (to === 'open') {
+        const reason = from === 'half-open'
+          ? 'probe request failed during half-open recovery'
+          : `${DB_FAILURE_THRESHOLD} consecutive failures`;
         captureMessage(
-          `DB circuit breaker opened — refusing connections after ${DB_FAILURE_THRESHOLD} consecutive failures`,
+          `DB circuit breaker opened — refusing connections (${reason})`,
           'error',
         );
       } else if (to === 'closed' && from === 'half-open') {

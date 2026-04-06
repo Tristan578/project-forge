@@ -288,4 +288,31 @@ describe('CircuitBreaker', () => {
     cb.reset();
     expect(onTransition).not.toHaveBeenCalled();
   });
+
+  // -- Transition origin distinguishable (regression: alert message accuracy) --
+
+  it('onTransition receives half-open as from state when probe fails', async () => {
+    const transitions: Array<[string, string]> = [];
+    const cb = makeBreaker({
+      failureThreshold: 1,
+      openTimeoutMs: 1_000,
+      onTransition: (from, to) => transitions.push([from, to]),
+    });
+
+    // closed → open (initial trip)
+    await expect(cb.execute(() => Promise.reject(new Error('connection timeout')))).rejects.toThrow();
+    expect(transitions).toContainEqual(['closed', 'open']);
+
+    // open → half-open (timeout elapsed)
+    vi.advanceTimersByTime(1_000);
+    cb.getState();
+    expect(transitions).toContainEqual(['open', 'half-open']);
+
+    // half-open → open (probe failed — must be a transient error to trip breaker)
+    await expect(cb.execute(() => Promise.reject(new Error('connection refused')))).rejects.toThrow();
+    const openTransitions = transitions.filter(([_from, to]) => to === 'open');
+    expect(openTransitions).toHaveLength(2);
+    expect(openTransitions[0]).toEqual(['closed', 'open']);
+    expect(openTransitions[1]).toEqual(['half-open', 'open']);
+  });
 });
