@@ -1,5 +1,5 @@
 import 'server-only';
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
 import {
   runAllHealthChecks,
@@ -30,10 +30,12 @@ function isAuthorizedCron(req: NextRequest): boolean {
   if (!cronSecret) return false;
   const authHeader = req.headers.get('authorization');
   if (!authHeader) return false;
-  const expected = Buffer.from(`Bearer ${cronSecret}`);
-  const actual = Buffer.from(authHeader);
-  if (expected.length !== actual.length) return false;
-  return timingSafeEqual(expected, actual);
+  // Compare fixed-length HMAC digests to avoid leaking secret length
+  // through the early-return on mismatched Buffer lengths.
+  const hmacKey = 'spawnforge-cron-auth';
+  const expectedDigest = createHmac('sha256', hmacKey).update(`Bearer ${cronSecret}`).digest();
+  const actualDigest = createHmac('sha256', hmacKey).update(authHeader).digest();
+  return timingSafeEqual(expectedDigest, actualDigest);
 }
 
 function reportFailuresToSentry(

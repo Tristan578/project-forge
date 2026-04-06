@@ -73,6 +73,7 @@ export function SaveSystemPanel() {
   // Store selectors — primitive values only
   const sceneGraph = useEditorStore((s) => s.sceneGraph);
   const allGameComponents = useEditorStore((s) => s.allGameComponents);
+  const primaryId = useEditorStore((s) => s.primaryId);
 
   // Local state
   const [detectedFields, setDetectedFields] = useState<PersistedField[]>([]);
@@ -339,7 +340,7 @@ export function SaveSystemPanel() {
               className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium transition-colors duration-150 focus:ring-2 focus:ring-purple-500 focus:outline-none"
             >
               <CheckCircle size={12} />
-              Copy Script to Clipboard
+              {primaryId ? 'Apply Script to Entity' : 'Copy Script to Clipboard'}
             </button>
           </section>
         )}

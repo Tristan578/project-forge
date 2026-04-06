@@ -162,11 +162,18 @@ export function enrichPrompt(
     ? `, for scene "${ctx.sceneName}"`
     : '';
 
-  // Append locked art style modifier when a style is locked
-  const lockedStyle = loadLockedStyle();
-  const styleSuffix = lockedStyle
-    ? `. ${generateStylePromptModifier(lockedStyle.style)}`
-    : '';
+  // Append locked art style modifier when a style is locked.
+  // localStorage-backed data can be stale or malformed, so ignore invalid locks
+  // rather than breaking prompt enrichment.
+  let styleSuffix = '';
+  try {
+    const lockedStyle = loadLockedStyle();
+    if (lockedStyle) {
+      styleSuffix = `. ${generateStylePromptModifier(lockedStyle.style)}`;
+    }
+  } catch {
+    // Invalid/corrupt localStorage data — skip style modifier
+  }
 
   return `${prefix}${sceneHint}: ${userPrompt}${styleSuffix}`;
 }
