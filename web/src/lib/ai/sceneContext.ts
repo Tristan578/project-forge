@@ -4,7 +4,7 @@
  * that can be included in AI prompts for modification planning.
  */
 
-import type { SceneGraph, SceneNode } from '@/stores/slices/types';
+import type { SceneGraph, SceneNode, AmbientLightData, EnvironmentData, EngineMode } from '@/stores/slices/types';
 
 /** Lightweight entity representation for AI context. */
 export interface EntitySummary {
@@ -17,13 +17,9 @@ export interface EntitySummary {
 }
 
 export interface SceneSettings {
-  ambientLight: { color: [number, number, number]; brightness: number };
-  environment: {
-    clearColor: [number, number, number];
-    fogEnabled: boolean;
-    skyboxPreset: string | null;
-  };
-  engineMode: string;
+  ambientLight: AmbientLightData;
+  environment: Pick<EnvironmentData, 'clearColor' | 'fogEnabled' | 'skyboxPreset'>;
+  engineMode: EngineMode;
 }
 
 /** Structured scene context for AI modification planning. */
@@ -37,13 +33,9 @@ export interface SceneContext {
 export interface SceneContextStore {
   sceneGraph: SceneGraph;
   selectedIds: Set<string>;
-  ambientLight: { color: [number, number, number]; brightness: number };
-  environment: {
-    clearColor: [number, number, number];
-    fogEnabled: boolean;
-    skyboxPreset: string | null;
-  };
-  engineMode: string;
+  ambientLight: AmbientLightData;
+  environment: Pick<EnvironmentData, 'clearColor' | 'fogEnabled' | 'skyboxPreset'>;
+  engineMode: EngineMode;
 }
 
 /**
