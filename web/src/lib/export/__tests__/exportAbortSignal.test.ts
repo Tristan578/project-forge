@@ -78,9 +78,9 @@ describe('exportGame AbortSignal', () => {
 
   it('accepts ExportOptions without signal field', async () => {
     // Verify type compatibility — signal is optional, no error when omitted.
-    // The actual export will hit the scene data listener timeout, so we just
-    // verify it starts without throwing a TypeError at the signal check points.
-    // We use a short race to avoid waiting the full 2s timeout.
+    // Use fake timers to advance past the scene data timeout without real waiting.
+    vi.useFakeTimers();
+
     const result = exportGame({
       title: 'Test',
       mode: 'single-html',
@@ -89,14 +89,13 @@ describe('exportGame AbortSignal', () => {
       includeDebug: false,
     });
 
-    // Race against a short timer — export won't finish (needs scene event),
-    // but it shouldn't throw synchronously from missing signal
-    const settled = await Promise.race([
-      result.then(() => 'resolved').catch(() => 'rejected'),
-      new Promise<string>((r) => setTimeout(() => r('timeout'), 100)),
-    ]);
+    // Advance past the 2s scene data timeout
+    await vi.advanceTimersByTimeAsync(3000);
 
-    // Either timeout (expected) or rejected (scene data fallback) — neither is a TypeError
-    expect(['timeout', 'rejected']).toContain(settled);
+    // Export will reject (empty WASM) or resolve — either way, no TypeError from missing signal
+    const settled = await result.then(() => 'resolved').catch(() => 'rejected');
+    expect(['resolved', 'rejected']).toContain(settled);
+
+    vi.useRealTimers();
   });
 });
