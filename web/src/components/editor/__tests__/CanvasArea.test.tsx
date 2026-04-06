@@ -59,7 +59,7 @@ function mockEditorStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
     hudElements: [],
     engineMode: 'edit',
-    selectedEntityIds: ['entity-1'],
+    selectedIds: new Set(['entity-1']),
     ...overrides,
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

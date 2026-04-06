@@ -61,7 +61,7 @@ export function CanvasArea() {
       // Delete
       case 'Delete':
       case 'Backspace':
-        wasm?.handle_command('delete_entities', { entityIds: useEditorStore.getState().selectedEntityIds });
+        wasm?.handle_command('delete_entities', { entityIds: Array.from(useEditorStore.getState().selectedIds) });
         e.preventDefault();
         break;
 
