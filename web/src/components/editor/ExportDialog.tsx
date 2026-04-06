@@ -166,7 +166,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         onClose();
       }
     } catch (err) {
-      if (controller.signal.aborted) {
+      if (controller.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
         // User cancelled — not an error
         return;
       }

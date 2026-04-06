@@ -19,13 +19,22 @@ export interface ExportOptions {
   signal?: AbortSignal;
 }
 
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException('Export cancelled', 'AbortError');
+  }
+}
+
 export async function exportGame(options: ExportOptions): Promise<Blob> {
+  const { signal } = options;
   const store = useEditorStore.getState();
 
   // 1. Get scene data (trigger export from engine)
-  const sceneData = await getSceneData();
+  throwIfAborted(signal);
+  const sceneData = await getSceneData(signal);
 
   // 2. Bundle scripts
+  throwIfAborted(signal);
   const scripts = bundleScripts(store.allScripts);
 
   // 3. Get UI data
@@ -46,6 +55,7 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
   const mobileTouchConfigJson = mobileTouchConfig?.enabled ? JSON.stringify(mobileTouchConfig) : undefined;
 
   // 5. Branch based on export mode
+  throwIfAborted(signal);
   if (options.mode === 'zip' || options.mode === 'pwa' || options.mode === 'embed') {
     // ZIP, PWA, or Embed export with separated assets
     const zipOptions: ZipExportOptions = {
@@ -59,14 +69,16 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
       bgColor: options.bgColor,
       includeDebug: options.includeDebug,
       orientationLock: options.orientationLock,
+      signal,
     };
 
-    return await exportAsZip(sceneData, store.allScripts, zipOptions, options.signal);
+    return await exportAsZip(sceneData, store.allScripts, zipOptions);
   }
 
   // Default: Single HTML export
   // 6. Fetch WASM engine files for inlining
-  const embeddedWasm = await fetchWasmForInlining();
+  throwIfAborted(signal);
+  const embeddedWasm = await fetchWasmForInlining(signal);
 
   if (Object.keys(embeddedWasm).length === 0) {
     throw new Error(
@@ -92,22 +104,43 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
   return new Blob([html], { type: 'text/html' });
 }
 
-async function getSceneData(): Promise<unknown> {
+async function getSceneData(signal?: AbortSignal): Promise<unknown> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (value: unknown) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener('forge:scene-exported', handler);
+      resolve(value);
+    };
+
+    // Listen for abort signal to cancel immediately
+    if (signal) {
+      if (signal.aborted) {
+        reject(new DOMException('Export cancelled', 'AbortError'));
+        return;
+      }
+      signal.addEventListener('abort', () => {
+        if (!settled) {
+          settled = true;
+          window.removeEventListener('forge:scene-exported', handler);
+          reject(new DOMException('Export cancelled', 'AbortError'));
+        }
+      }, { once: true });
+    }
+
     // Listen for the export response event
     const handler = (event: Event) => {
       clearTimeout(timeoutId);
       const customEvent = event as CustomEvent;
-      window.removeEventListener('forge:scene-exported', handler);
-      // The event contains { json, name }, parse the json
       try {
         const sceneData = JSON.parse(customEvent.detail.json);
         // Inject UI data from uiBuilderStore
         const uiData = injectUIData(sceneData);
-        resolve(uiData);
+        settle(uiData);
       } catch (err) {
         console.error('[Export] Failed to parse scene data:', err);
-        resolve(buildSceneFromStore());
+        settle(buildSceneFromStore());
       }
     };
     window.addEventListener('forge:scene-exported', handler);
@@ -166,20 +199,21 @@ function buildSceneFromStore(): unknown {
  * Fetch WASM engine files for inlining into single-HTML export.
  * Returns base64-encoded JS glue and WASM binary for each available variant.
  */
-async function fetchWasmForInlining(): Promise<Record<string, EmbeddedWasmData>> {
+async function fetchWasmForInlining(signal?: AbortSignal): Promise<Record<string, EmbeddedWasmData>> {
   const result: Record<string, EmbeddedWasmData> = {};
   const variants = ['webgl2', 'webgpu'];
 
   for (const variant of variants) {
+    throwIfAborted(signal);
     const runtimeBase = `/engine-pkg-${variant}-runtime/`;
     const editorBase = `/engine-pkg-${variant}/`;
 
     try {
-      let jsResponse = await fetch(runtimeBase + 'forge_engine.js');
-      if (!jsResponse.ok) jsResponse = await fetch(editorBase + 'forge_engine.js');
+      let jsResponse = await fetch(runtimeBase + 'forge_engine.js', { signal });
+      if (!jsResponse.ok) jsResponse = await fetch(editorBase + 'forge_engine.js', { signal });
 
-      let wasmResponse = await fetch(runtimeBase + 'forge_engine_bg.wasm');
-      if (!wasmResponse.ok) wasmResponse = await fetch(editorBase + 'forge_engine_bg.wasm');
+      let wasmResponse = await fetch(runtimeBase + 'forge_engine_bg.wasm', { signal });
+      if (!wasmResponse.ok) wasmResponse = await fetch(editorBase + 'forge_engine_bg.wasm', { signal });
 
       if (jsResponse.ok && wasmResponse.ok) {
         const jsText = await jsResponse.text();
@@ -189,7 +223,8 @@ async function fetchWasmForInlining(): Promise<Record<string, EmbeddedWasmData>>
           wasmBase64: arrayBufferToBase64(wasmBuffer),
         };
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err;
       console.warn(`[Export] Could not fetch WASM for ${variant}, skipping`);
     }
   }
