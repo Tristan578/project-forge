@@ -129,10 +129,13 @@ export class CircuitBreaker {
 
 }
 
+const DB_FAILURE_THRESHOLD = 5;
+const DB_OPEN_TIMEOUT_MS = 30_000;
+
 /** Singleton circuit breaker for the Neon DB connection. */
 export const dbCircuitBreaker = new CircuitBreaker({
-  failureThreshold: 5,
-  openTimeoutMs: 30_000,
+  failureThreshold: DB_FAILURE_THRESHOLD,
+  openTimeoutMs: DB_OPEN_TIMEOUT_MS,
   onTransition: (from, to) => {
     // Lazy import to avoid circular deps — sentry-server is lightweight
     import('@/lib/monitoring/sentry-server').then(({ addBreadcrumb, captureMessage }) => {
@@ -146,7 +149,7 @@ export const dbCircuitBreaker = new CircuitBreaker({
       // Alert-level message when circuit opens (DB down) or closes (recovered)
       if (to === 'open') {
         captureMessage(
-          `DB circuit breaker opened — refusing connections after ${5} consecutive failures`,
+          `DB circuit breaker opened — refusing connections after ${DB_FAILURE_THRESHOLD} consecutive failures`,
           'error',
         );
       } else if (to === 'closed' && from === 'half-open') {
