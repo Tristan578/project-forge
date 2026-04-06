@@ -206,9 +206,9 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       router.register('ai', createAiHandler({ fetchJson }));
       router.register('asset', createAssetHandler({ fetchJson }));
       // Multiplayer channel — stub handler until networking backend exists.
-      // Returns a clear error instead of "Unknown async channel".
+      // Returns a structured error instead of throwing to avoid noisy console.error logs.
       router.register('multiplayer', async (_method, _args) => {
-        throw new Error('Multiplayer is not yet available. This feature will be enabled in a future update.');
+        return { error: 'MULTIPLAYER_NOT_AVAILABLE', message: 'Multiplayer is not yet available. This feature will be enabled in a future update.' };
       });
 
       routerRef.current = router;
