@@ -318,11 +318,6 @@ const TOOL_LABELS: Record<string, string> = {
   stop_cutscene: 'Stop Cutscene',
   list_cutscenes: 'List Cutscenes',
   delete_cutscene: 'Delete Cutscene',
-  // Leaderboards
-  create_leaderboard: 'Create Leaderboard',
-  list_leaderboards: 'List Leaderboards',
-  configure_leaderboard: 'Configure Leaderboard',
-  delete_leaderboard: 'Delete Leaderboard',
 };
 
 function summarizeInput(name: string, input: Record<string, unknown>): string {

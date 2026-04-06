@@ -12,12 +12,16 @@ vi.mock('@/lib/rateLimit', () => ({
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
-vi.mock('crypto', () => ({
-  createHash: vi.fn().mockReturnValue({
-    update: vi.fn().mockReturnThis(),
-    digest: vi.fn().mockReturnValue('a'.repeat(64)),
-  }),
-}));
+vi.mock('crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('crypto')>();
+  return {
+    ...actual,
+    createHash: vi.fn().mockReturnValue({
+      update: vi.fn().mockReturnThis(),
+      digest: vi.fn().mockReturnValue('a'.repeat(64)),
+    }),
+  };
+});
 vi.mock('@/lib/db/schema', () => ({
   publishedGames: { id: 'id', userId: 'userId', slug: 'slug', status: 'status' },
   users: { id: 'id', clerkId: 'clerkId' },
@@ -230,7 +234,7 @@ describe('POST /api/play/[userId]/[slug]/leaderboard', () => {
   // a Drizzle insert chain. The select sequence is: user → game → board (3 selects
   // via getDb), then neonSql for the CTE, then countChain for rank, then
   // allEntriesChain for pruneLeaderboard.
-  function makePostDb(board = BOARD_DESC) {
+  function makePostDb(board: { id: string; gameId: string; name: string; sortOrder: string; maxEntries: number; minScore: number | null; maxScore: number | null } = BOARD_DESC) {
     const userChain = makeSelectChain([{ id: 'u1' }]);
     const gameChain = makeSelectChain([PUBLISHED_GAME]);
     const boardChain = makeSelectChain([board]);
