@@ -329,11 +329,11 @@ describe('zipExporter', () => {
 
     it('fetches WASM engine files during export', async () => {
       await exportAsZip(mockSceneData, mockScripts, defaultOptions);
-      // Should attempt to fetch both variants
-      expect(mockFetch).toHaveBeenCalledWith('/engine-pkg-webgl2/forge_engine.js');
-      expect(mockFetch).toHaveBeenCalledWith('/engine-pkg-webgl2/forge_engine_bg.wasm');
-      expect(mockFetch).toHaveBeenCalledWith('/engine-pkg-webgpu/forge_engine.js');
-      expect(mockFetch).toHaveBeenCalledWith('/engine-pkg-webgpu/forge_engine_bg.wasm');
+      // Should attempt runtime variants first, then fall back to editor variants
+      expect(mockFetch).toHaveBeenCalledWith('/engine-pkg-webgl2-runtime/forge_engine.js', { signal: undefined });
+      expect(mockFetch).toHaveBeenCalledWith('/engine-pkg-webgl2-runtime/forge_engine_bg.wasm', { signal: undefined });
+      expect(mockFetch).toHaveBeenCalledWith('/engine-pkg-webgpu-runtime/forge_engine.js', { signal: undefined });
+      expect(mockFetch).toHaveBeenCalledWith('/engine-pkg-webgpu-runtime/forge_engine_bg.wasm', { signal: undefined });
     });
 
     it('includes WASM files when fetch succeeds', async () => {
