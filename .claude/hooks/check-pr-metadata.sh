@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PreToolUse hook: fires on `gh pr create` commands.
 # Validates that the command includes --milestone and Closes #NNNN in the body.
-# Exits 1 to BLOCK the command if metadata is missing.
+# Exits 2 to BLOCK the command if metadata is missing.
 
 set -euo pipefail
 

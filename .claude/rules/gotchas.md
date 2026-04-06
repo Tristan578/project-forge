@@ -71,7 +71,7 @@ These are lower-frequency gotchas moved from CLAUDE.md. The most common ones rem
 - **Taskboard `localProjectId` drifts** — Verify sync config against `curl http://localhost:3010/api/projects`.
 
 ## Enforcement Hooks
-- **`block-deferred-fixes.sh` fails closed** — If body extraction fails, the hook BLOCKS (exit 1), not allows (exit 0). Previous behavior silently let unparseable replies through.
+- **`block-deferred-fixes.sh` fails closed** — If body extraction fails, the hook BLOCKS (exit 2), not allows (exit 0). Previous behavior silently let unparseable replies through.
 - **Subagent hook inheritance gap** — `.claude/settings.json` PreToolUse hooks do NOT fire for subagents. The `block-deferred-fixes.sh` hook only catches the main agent. Subagents must self-enforce via the banned-phrase list embedded in `/resolve-pr-comments` SKILL.md.
 - **Bare SHA is not enough** — A reply must contain BOTH a commit SHA AND an action verb ("Fixed in", "Addressed in"). A reply like "Good catch abc1234" is blocked — it has a SHA but no action verb, so it's likely deferred-fix language with an unrelated hex string.
 - **`#NNNN` ticket reference is acceptable** — A deferred reply with a real GitHub issue number (#8307) is allowed. The rule is "fix it or track it", not "fix it or die".

@@ -12,10 +12,13 @@
 # FAIL-CLOSED: if body extraction fails, the command is BLOCKED (not allowed).
 # This prevents parse-failure bypasses.
 
-set -euo pipefail
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/hook-utils.sh"
+if ! source "$SCRIPT_DIR/hook-utils.sh"; then
+  echo "BLOCKED: Failed to source hook-utils.sh — fail-closed per Boy Scout Rule"
+  exit 2
+fi
 
 COMMAND=$(get_bash_command)
 
@@ -24,7 +27,7 @@ if [[ "$COMMAND" != *"gh api"* ]]; then
   exit 0
 fi
 
-# Must be a POST to a replies or comments endpoint
+# Must target a replies or comments endpoint
 if ! echo "$COMMAND" | grep -qiE '(replies|comments)'; then
   exit 0
 fi
