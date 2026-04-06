@@ -402,7 +402,8 @@ async function loadWasm(): Promise<WasmModule> {
     async function tryLoadFromPaths(targetBackend: 'webgpu' | 'webgl2'): Promise<WasmModule> {
       const paths = getWasmBasePaths(targetBackend);
       let lastErr: Error | null = null;
-      for (const basePath of paths) {
+      for (let i = 0; i < paths.length; i++) {
+        const basePath = paths[i];
         try {
           setLoadingState({ phase: 'downloading', progress: 0 });
           const mod = await loadWasmFromPath(basePath, jsFile, wasmFile, signal, (pct) => {
@@ -411,7 +412,8 @@ async function loadWasm(): Promise<WasmModule> {
           return mod;
         } catch (err) {
           lastErr = err instanceof Error ? err : new Error(String(err));
-          if (paths.length > 1) {
+          // Only emit fallback event when there's another path to try (not on final failure)
+          if (i < paths.length - 1) {
             emitEvent('wasm_loading', `CDN load failed, retrying from backup...`);
             addBreadcrumb({ category: 'wasm', message: `Load failed from ${basePath}: ${lastErr.message}`, level: 'warning' });
             // Track CDN fallback for monitoring (#8250)
