@@ -118,6 +118,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   }, [isExporting, onClose]);
 
   const handleExport = useCallback(async () => {
+    if (abortRef.current) return; // Guard against rapid double-click before re-render
     const controller = new AbortController();
     abortRef.current = controller;
     setExporting(true);
@@ -142,6 +143,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         customLoadingScreen: showLoadingCustomization ? loadingConfig : undefined,
         orientationLock: orientationLock === 'none' ? undefined : orientationLock,
         textureCompressionConfig,
+        signal: controller.signal,
       });
 
       // If user cancelled during export, skip download

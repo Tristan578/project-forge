@@ -7,6 +7,7 @@ import {
   resetBinding,
   resetAllBindings,
   getMergedBindings,
+  getCanvasKeyMap,
   eventToKeyCombo,
   groupByCategory,
   type KeyBinding,
@@ -105,6 +106,11 @@ describe('eventToKeyCombo', () => {
     expect(eventToKeyCombo(makeEvent({ key: 'Escape' }))).toBe('Escape');
   });
 
+  it('should normalize Backspace to Delete (Mac laptop keyboard)', () => {
+    expect(eventToKeyCombo(makeEvent({ key: 'Backspace' }))).toBe('Delete');
+    expect(eventToKeyCombo(makeEvent({ key: 'Backspace', ctrlKey: true }))).toBe('Ctrl+Delete');
+  });
+
   it('should treat Meta as Ctrl', () => {
     expect(eventToKeyCombo(makeEvent({ key: 's', metaKey: true }))).toBe('Ctrl+S');
   });
@@ -182,5 +188,47 @@ describe('localStorage functions', () => {
     const merged = getMergedBindings();
     const redo = merged.find(b => b.action === 'redo');
     expect(redo!.customKey).toBeNull();
+  });
+});
+
+describe('context field', () => {
+  it('canvas bindings include gizmo modes, delete, undo/redo, focus, deselect', () => {
+    const canvasActions = DEFAULT_BINDINGS.filter(b => b.context === 'canvas').map(b => b.action);
+    expect(canvasActions).toContain('translate');
+    expect(canvasActions).toContain('rotate');
+    expect(canvasActions).toContain('scale');
+    expect(canvasActions).toContain('delete');
+    expect(canvasActions).toContain('undo');
+    expect(canvasActions).toContain('redo');
+    expect(canvasActions).toContain('focus');
+    expect(canvasActions).toContain('deselect');
+    expect(canvasActions).toContain('duplicate');
+  });
+
+  it('global bindings include save and select-all', () => {
+    const globalActions = DEFAULT_BINDINGS.filter(b => b.context === 'global').map(b => b.action);
+    expect(globalActions).toContain('save');
+    expect(globalActions).toContain('select-all');
+  });
+});
+
+describe('getCanvasKeyMap', () => {
+  it('maps default keys to canvas actions', () => {
+    const map = getCanvasKeyMap();
+    expect(map.get('W')).toBe('translate');
+    expect(map.get('E')).toBe('rotate');
+    expect(map.get('R')).toBe('scale');
+    expect(map.get('Delete')).toBe('delete');
+    expect(map.get('Ctrl+Z')).toBe('undo');
+    expect(map.get('Ctrl+Shift+Z')).toBe('redo');
+    expect(map.get('F')).toBe('focus');
+    expect(map.get('Escape')).toBe('deselect');
+    expect(map.get('Ctrl+D')).toBe('duplicate');
+  });
+
+  it('does not include global-context bindings', () => {
+    const map = getCanvasKeyMap();
+    expect(map.has('Ctrl+S')).toBe(false); // save is global
+    expect(map.has('Ctrl+A')).toBe(false); // select-all is global
   });
 });
