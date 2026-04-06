@@ -178,12 +178,20 @@ describe('CanvasArea', () => {
     expect(mockHandleCommand).toHaveBeenCalledWith('redo', {});
   });
 
-  it('F key dispatches focus_camera', () => {
+  it('F key dispatches focus_camera with primaryId', () => {
     mockEditorStore();
     const { container } = render(<CanvasArea />);
     const canvas = container.querySelector('canvas')!;
     fireEvent.keyDown(canvas, { key: 'f' });
-    expect(mockHandleCommand).toHaveBeenCalledWith('focus_camera', {});
+    expect(mockHandleCommand).toHaveBeenCalledWith('focus_camera', { entityId: 'entity-1' });
+  });
+
+  it('F key does nothing when no primaryId', () => {
+    mockEditorStore({ primaryId: null });
+    const { container } = render(<CanvasArea />);
+    const canvas = container.querySelector('canvas')!;
+    fireEvent.keyDown(canvas, { key: 'f' });
+    expect(mockHandleCommand).not.toHaveBeenCalledWith('focus_camera', expect.anything());
   });
 
   it('Escape dispatches clear_selection in edit mode', () => {

@@ -85,7 +85,11 @@ export function CanvasArea() {
       // Focus selected
       case 'f':
       case 'F':
-        if (!ctrl) { wasm?.handle_command('focus_camera', {}); e.preventDefault(); }
+        if (!ctrl) {
+          const focusId = useEditorStore.getState().primaryId;
+          if (focusId) { wasm?.handle_command('focus_camera', { entityId: focusId }); }
+          e.preventDefault();
+        }
         break;
 
       // Deselect all
