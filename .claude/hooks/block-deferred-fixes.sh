@@ -31,14 +31,14 @@ if ! echo "$COMMAND" | grep -qiE '(-f|--field)\s+body='; then
   exit 0
 fi
 
-# Extract the body content from the command
-BODY=$(echo "$COMMAND" | sed -n 's/.*-f body="\([^"]*\)".*/\1/p')
+# Extract the body content from the command (-f body= or --field body=)
+BODY=$(echo "$COMMAND" | sed -En 's/.*(-f|--field)[[:space:]]+body="([^"]*)".*/\2/p')
 if [ -z "$BODY" ]; then
-  BODY=$(echo "$COMMAND" | sed -n "s/.*-f body='\([^']*\)'.*/\1/p")
+  BODY=$(echo "$COMMAND" | sed -En "s/.*(-f|--field)[[:space:]]+body='([^']*)'.*/\2/p")
 fi
 if [ -z "$BODY" ]; then
   # Try without quotes (single-word bodies or heredoc-style)
-  BODY=$(echo "$COMMAND" | sed -n 's/.*-f body=\([^ ]*\).*/\1/p')
+  BODY=$(echo "$COMMAND" | sed -En 's/.*(-f|--field)[[:space:]]+body=([^ ]*).*/\2/p')
 fi
 
 # If we couldn't extract the body, let it through (don't block on parse failure)
