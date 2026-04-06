@@ -54,6 +54,7 @@ vi.mock('../ui-builder/UIRuntimeRenderer', () => ({
 }));
 
 import { useEditorStore } from '@/stores/editorStore';
+import { useViewport } from '@/hooks/useViewport';
 
 function mockEditorStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
@@ -96,6 +97,19 @@ describe('CanvasArea', () => {
     const { container } = render(<CanvasArea />);
     const canvas = container.querySelector('canvas');
     expect(canvas?.tabIndex).toBe(-1);
+  });
+
+  it('canvas has tabIndex=0 when ready', () => {
+    vi.mocked(useViewport).mockReturnValue({
+      dimensions: { width: 1280, height: 720, dpr: 1, breakpoint: 'laptop' },
+      isReady: true,
+      error: null,
+      sendCommand: vi.fn(),
+    });
+    mockEditorStore();
+    const { container } = render(<CanvasArea />);
+    const canvas = container.querySelector('canvas');
+    expect(canvas?.tabIndex).toBe(0);
   });
 
   it('canvas has role="application"', () => {
