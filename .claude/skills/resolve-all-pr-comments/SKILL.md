@@ -59,6 +59,17 @@ After processing all PRs, output a summary table:
 Total: X comments resolved across Y PRs.
 ```
 
+
+## Boy Scout Rule Enforcement (Inherited from /resolve-pr-comments)
+
+**Subagents do NOT inherit settings.json hooks.** The `block-deferred-fixes.sh` hook only
+fires for the main agent. When this skill dispatches `/resolve-pr-comments` per PR, the
+subagent MUST self-enforce the banned-phrase list. See `/resolve-pr-comments` Step 3b
+"HARD RULE" section for the complete banned-phrase list and valid reply patterns.
+
+**Zero tolerance**: if any reply in any PR contains deferred-fix language without a commit
+SHA + action verb or a GitHub issue number (#NNNN), the entire batch resolution FAILS.
+
 ## Rules
 
 - **Sequential processing**: One PR at a time to avoid merge conflicts
