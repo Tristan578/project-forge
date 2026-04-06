@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { ScanSearch, Wand2, ChevronDown, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
 import {
@@ -460,14 +460,32 @@ export function AccessibilityPanel() {
     return () => applyColorblindFilter(null, 0);
   }, [cbEnabled, cbMode, cbStrength]);
 
-  // Dispatch input remappings to engine when they change; cleanup on unmount
+  // Dispatch input remappings to engine when they change; cleanup on unmount.
+  // Track previously-applied actions so stale bindings are removed when the
+  // remappings list changes (e.g., a remap is deleted while enabled).
   const irEnabled = profile.inputRemapping.enabled;
   const irRemappings = profile.inputRemapping.remappings;
+  const prevAppliedActionsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
+    const dispatch = getCommandDispatcher();
+    const currentActions = new Set(irRemappings.map((r) => r.action));
+
+    if (dispatch) {
+      // Remove any previously-applied actions that are no longer in the list
+      for (const action of prevAppliedActionsRef.current) {
+        if (!currentActions.has(action)) {
+          dispatch('remove_input_binding', { actionName: action });
+        }
+      }
+    }
+
     dispatchInputRemappings(irRemappings, irEnabled);
+    prevAppliedActionsRef.current = irEnabled ? currentActions : new Set();
+
     return () => {
       // Remove all custom bindings on unmount so engine reverts to defaults
       dispatchInputRemappings(irRemappings, false);
+      prevAppliedActionsRef.current = new Set();
     };
   }, [irEnabled, irRemappings]);
 
