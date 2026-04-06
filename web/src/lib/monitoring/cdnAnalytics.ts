@@ -118,7 +118,15 @@ export async function fetchWithRetry(
       lastError = error;
     }
     if (attempt < clampedAttempts - 1) {
-      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+      const delay = 1000 * Math.pow(2, attempt);
+      await new Promise<void>((r) => {
+        const timer = setTimeout(r, delay);
+        if (signal) {
+          const onAbort = () => { clearTimeout(timer); r(); };
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+      });
+      if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
     }
   }
   throw lastError!;
