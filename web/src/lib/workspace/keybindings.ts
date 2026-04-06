@@ -130,6 +130,7 @@ export function eventToKeyCombo(e: KeyboardEvent): string | null {
   let normalized = key;
   if (key === ' ') normalized = 'Space';
   else if (key === 'Escape') normalized = 'Escape';
+  else if (key === 'Backspace') normalized = 'Delete';
   else if (key.length === 1) normalized = key.toUpperCase();
   // F-keys and special keys keep their name
 
