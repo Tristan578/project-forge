@@ -54,6 +54,7 @@ describe('WelcomeModal', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     cleanup();
   });
 
@@ -98,14 +99,13 @@ describe('WelcomeModal', () => {
   });
 
   it('renders modal when localStorage throws (private browsing)', () => {
-    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new DOMException('Access denied', 'SecurityError');
     });
 
     render(<WelcomeModal />);
     expect(screen.getByRole('heading', { name: /Welcome to SpawnForge/i })).toBeInTheDocument();
-
-    spy.mockRestore();
+    // Spy restored by afterEach via vi.restoreAllMocks()
   });
 
   it('does not throw when dismissing with "Don\'t show again" and setItem throws', async () => {
