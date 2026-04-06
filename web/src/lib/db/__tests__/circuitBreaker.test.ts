@@ -4,10 +4,11 @@ vi.mock('server-only', () => ({}));
 
 import { CircuitBreaker, CircuitBreakerOpenError } from '../circuitBreaker';
 
-function makeBreaker(options?: { failureThreshold?: number; openTimeoutMs?: number }) {
+function makeBreaker(options?: { failureThreshold?: number; openTimeoutMs?: number; onTransition?: (from: string, to: string) => void }) {
   return new CircuitBreaker({
     failureThreshold: options?.failureThreshold ?? 3,
     openTimeoutMs: options?.openTimeoutMs ?? 30_000,
+    onTransition: options?.onTransition,
   });
 }
 
@@ -200,6 +201,51 @@ describe('CircuitBreaker', () => {
     await expect(cb.execute(() => Promise.reject(new Error('connection terminated')))).rejects.toThrow();
     const stats = cb.getStats();
     expect(stats.lastOpenedAt).toBeGreaterThanOrEqual(before);
+  });
+
+  // -- onTransition callback --
+
+  it('fires onTransition when state changes from closed to open', async () => {
+    const onTransition = vi.fn();
+    const cb = makeBreaker({ failureThreshold: 2, onTransition });
+    await expect(cb.execute(() => Promise.reject(new Error('connection timeout')))).rejects.toThrow();
+    await expect(cb.execute(() => Promise.reject(new Error('connection timeout')))).rejects.toThrow();
+    expect(onTransition).toHaveBeenCalledWith('closed', 'open');
+  });
+
+  it('fires onTransition when state changes from open to half-open', async () => {
+    const onTransition = vi.fn();
+    const cb = makeBreaker({ failureThreshold: 1, openTimeoutMs: 1_000, onTransition });
+    await expect(cb.execute(() => Promise.reject(new Error('connection timeout')))).rejects.toThrow();
+    onTransition.mockClear();
+    vi.advanceTimersByTime(1_000);
+    cb.getState(); // triggers transition check
+    expect(onTransition).toHaveBeenCalledWith('open', 'half-open');
+  });
+
+  it('fires onTransition when state changes from half-open to closed', async () => {
+    const onTransition = vi.fn();
+    const cb = makeBreaker({ failureThreshold: 1, openTimeoutMs: 1_000, onTransition });
+    await expect(cb.execute(() => Promise.reject(new Error('connection timeout')))).rejects.toThrow();
+    vi.advanceTimersByTime(1_000);
+    onTransition.mockClear();
+    await cb.execute(() => Promise.resolve('ok'));
+    expect(onTransition).toHaveBeenCalledWith('half-open', 'closed');
+  });
+
+  it('does not fire onTransition when state does not change', async () => {
+    const onTransition = vi.fn();
+    const cb = makeBreaker({ failureThreshold: 3, onTransition });
+    await cb.execute(() => Promise.resolve('ok'));
+    expect(onTransition).not.toHaveBeenCalled();
+  });
+
+  it('does not break circuit breaker if onTransition throws', async () => {
+    const onTransition = vi.fn().mockImplementation(() => { throw new Error('observer error'); });
+    const cb = makeBreaker({ failureThreshold: 1, onTransition });
+    await expect(cb.execute(() => Promise.reject(new Error('connection timeout')))).rejects.toThrow('connection timeout');
+    expect(cb.getState()).toBe('open');
+    expect(onTransition).toHaveBeenCalled();
   });
 
   // -- reset --
