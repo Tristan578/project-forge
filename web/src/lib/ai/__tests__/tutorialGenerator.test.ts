@@ -375,7 +375,7 @@ describe('tutorialPlanToScript', () => {
     expect(script).toContain('Use WASD to move.');
     expect(script).toContain('Welcome!');
     expect(script).toContain('Well done!');
-    expect(script).toContain('forge.on');
+    expect(script).toContain('function onStart');
     expect(script).toContain('1 minute');
     expect(script).toContain('beginner');
   });

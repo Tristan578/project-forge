@@ -441,7 +441,8 @@ function showStep(step) {
   }
 }
 
-function onInit() {
+// onStart is called automatically by the script sandbox when play begins
+function onStart() {
   forge.ui.showText('tutorial-intro', ${JSON.stringify(plan.introText)}, 50, 10, { fontSize: 20, color: 'white' });
 
   setTimeout(() => {
@@ -452,7 +453,8 @@ function onInit() {
   }, 3500);
 }
 
-function advanceStep() {
+// Call forge.state.set so other scripts can trigger advanceStep via state
+forge.state.set('tutorialAdvance', function() {
   currentStep++;
   if (currentStep >= TUTORIAL_STEPS.length) {
     forge.ui.removeText('tutorial-step');
@@ -462,10 +464,6 @@ function advanceStep() {
     return;
   }
   showStep(TUTORIAL_STEPS[currentStep]);
-}
-
-// Export for the forge runtime
-forge.on('init', onInit);
-forge.on('tutorial_advance', advanceStep);
+});
 `;
 }
