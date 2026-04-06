@@ -76,6 +76,32 @@ describe('exportGame AbortSignal', () => {
     }
   });
 
+  it('rejects immediately when aborted during getSceneData instead of waiting 2s timeout', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const controller = new AbortController();
+
+      const result = exportGame({
+        title: 'Test',
+        mode: 'single-html',
+        resolution: '1920x1080',
+        bgColor: '#000000',
+        includeDebug: false,
+        signal: controller.signal,
+      });
+
+      // Abort after 100ms — well before the 2s timeout
+      await vi.advanceTimersByTimeAsync(100);
+      controller.abort();
+
+      // Should reject with AbortError, not wait for the 2s timeout
+      await expect(result).rejects.toThrow('Export cancelled');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('accepts ExportOptions without signal field', async () => {
     // Verify type compatibility — signal is optional, no error when omitted.
     // Use fake timers to advance past the scene data timeout without real waiting.

@@ -31,7 +31,7 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
 
   // 1. Get scene data (trigger export from engine)
   throwIfAborted(signal);
-  const sceneData = await getSceneData();
+  const sceneData = await getSceneData(signal);
 
   // 2. Bundle scripts
   throwIfAborted(signal);
@@ -103,22 +103,43 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
   return new Blob([html], { type: 'text/html' });
 }
 
-async function getSceneData(): Promise<unknown> {
+async function getSceneData(signal?: AbortSignal): Promise<unknown> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (value: unknown) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener('forge:scene-exported', handler);
+      resolve(value);
+    };
+
+    // Listen for abort signal to cancel immediately
+    if (signal) {
+      if (signal.aborted) {
+        reject(new DOMException('Export cancelled', 'AbortError'));
+        return;
+      }
+      signal.addEventListener('abort', () => {
+        if (!settled) {
+          settled = true;
+          window.removeEventListener('forge:scene-exported', handler);
+          reject(new DOMException('Export cancelled', 'AbortError'));
+        }
+      }, { once: true });
+    }
+
     // Listen for the export response event
     const handler = (event: Event) => {
       clearTimeout(timeoutId);
       const customEvent = event as CustomEvent;
-      window.removeEventListener('forge:scene-exported', handler);
-      // The event contains { json, name }, parse the json
       try {
         const sceneData = JSON.parse(customEvent.detail.json);
         // Inject UI data from uiBuilderStore
         const uiData = injectUIData(sceneData);
-        resolve(uiData);
+        settle(uiData);
       } catch (err) {
         console.error('[Export] Failed to parse scene data:', err);
-        resolve(buildSceneFromStore());
+        settle(buildSceneFromStore());
       }
     };
     window.addEventListener('forge:scene-exported', handler);
