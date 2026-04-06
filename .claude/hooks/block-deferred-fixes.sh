@@ -30,7 +30,7 @@ if ! echo "$COMMAND" | grep -qiE '(replies|comments)'; then
 fi
 
 # Must have a body field (-f body= or --field body= or -F body=)
-if ! echo "$COMMAND" | grep -qiE '(-[fF]|--field)\s+body='; then
+if ! echo "$COMMAND" | grep -qiE '(-[fF]|--field)[[:space:]]+body='; then
   exit 0
 fi
 
