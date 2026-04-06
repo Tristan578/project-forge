@@ -10,6 +10,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { getRecentProjects } from '@/lib/workspace/recentProjects';
 import { TUTORIALS } from '@/data/tutorials';
 import type { GameIdea } from '@/lib/ai/ideaGenerator';
+import { safeGetItem, safeSetItem } from '@/lib/storage/safeLocalStorage';
 
 const STORAGE_KEY = 'forge-welcomed';
 
@@ -21,10 +22,7 @@ export function WelcomeModal() {
   // client returns true if not yet welcomed — React handles the transition after hydration
   const shouldShow = useSyncExternalStore(
     noop,
-    () => {
-      try { return !localStorage.getItem(STORAGE_KEY); }
-      catch { return true; }
-    },
+    () => !safeGetItem(STORAGE_KEY),
     () => false,
   );
   const [dismissed, setDismissed] = useState(false);
@@ -52,8 +50,7 @@ export function WelcomeModal() {
   const handleDismiss = useCallback(() => {
     setDismissed(true);
     if (dontShowAgain) {
-      try { localStorage.setItem(STORAGE_KEY, '1'); }
-      catch { /* Private browsing — silently skip persistence */ }
+      safeSetItem(STORAGE_KEY, '1');
     }
   }, [dontShowAgain]);
 
