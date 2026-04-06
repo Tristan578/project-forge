@@ -133,6 +133,20 @@ describe('useAIGeneration', () => {
     });
   });
 
+  it('calls onError callback on failure', async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useAIGeneration({ onError }));
+
+    await act(async () => {
+      await result.current.execute(async () => {
+        throw new Error('Network error');
+      });
+    });
+
+    expect(onError).toHaveBeenCalledWith('Network error');
+    expect(result.current.error).toBe('Network error');
+  });
+
   it('suppresses AbortError after cancel', async () => {
     const { result } = renderHook(() => useAIGeneration());
 

@@ -42,6 +42,14 @@ export function useAIGeneration<T = unknown>(
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
 
+  // Store callbacks in refs so execute/cancel don't depend on options identity
+  const onCancelRef = useRef(options?.onCancel);
+  const onErrorRef = useRef(options?.onError);
+  useEffect(() => {
+    onCancelRef.current = options?.onCancel;
+    onErrorRef.current = options?.onError;
+  });
+
   // Cleanup on unmount — abort any in-flight request
   useEffect(() => {
     mountedRef.current = true;
@@ -63,8 +71,8 @@ export function useAIGeneration<T = unknown>(
       setIsLoading(false);
       setError(null);
     }
-    options?.onCancel?.();
-  }, [options]);
+    onCancelRef.current?.();
+  }, []);
 
   const clearError = useCallback(() => {
     setError(null);
@@ -100,7 +108,7 @@ export function useAIGeneration<T = unknown>(
         const message = err instanceof Error ? err.message : 'Generation failed';
         setError(message);
         setIsLoading(false);
-        options?.onError?.(message);
+        onErrorRef.current?.(message);
         return undefined;
       }
     },
