@@ -76,7 +76,7 @@ describe('exportGame AbortSignal', () => {
     }
   });
 
-  it('rejects immediately when aborted during getSceneData instead of waiting 2s timeout', async () => {
+  it('rejects immediately when aborted during getSceneData instead of waiting 5s timeout', async () => {
     vi.useFakeTimers();
 
     try {
@@ -91,11 +91,11 @@ describe('exportGame AbortSignal', () => {
         signal: controller.signal,
       });
 
-      // Abort after 100ms — well before the 2s timeout
+      // Abort after 100ms — well before the 5s timeout
       await vi.advanceTimersByTimeAsync(100);
       controller.abort();
 
-      // Should reject with AbortError, not wait for the 2s timeout
+      // Should reject with AbortError, not wait for the 5s timeout
       await expect(result).rejects.toThrow('Export cancelled');
     } finally {
       vi.useRealTimers();
