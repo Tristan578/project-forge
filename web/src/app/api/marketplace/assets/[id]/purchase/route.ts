@@ -56,19 +56,21 @@ export async function POST(
 
     // For free assets, just record purchase
     if (price === 0) {
-      await queryWithResilience(() => getDb().insert(assetPurchases).values({
+      const inserted = await queryWithResilience(() => getDb().insert(assetPurchases).values({
         buyerId: user.id,
         assetId,
         priceTokens: 0,
         license: asset.license,
-      }));
+      }).onConflictDoNothing().returning({ id: assetPurchases.id }));
 
-      // Increment download count atomically to avoid lost updates under
-      // concurrent free-asset purchases (PF-111).
-      await queryWithResilience(() => getDb()
-        .update(marketplaceAssets)
-        .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
-        .where(eq(marketplaceAssets.id, assetId)));
+      // Only increment download count when a new purchase row was actually
+      // inserted. On retry (conflict → no insert), skip to avoid double-counting.
+      if (inserted.length > 0) {
+        await queryWithResilience(() => getDb()
+          .update(marketplaceAssets)
+          .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
+          .where(eq(marketplaceAssets.id, assetId)));
+      }
 
       return NextResponse.json({ success: true, downloadUrl: asset.assetFileUrl });
     }
@@ -162,18 +164,21 @@ export async function POST(
 
     // Record purchase — onConflictDoNothing makes this idempotent under retry
     // (unique constraint on buyerId+assetId prevents duplicate rows)
-    await queryWithResilience(() => getDb().insert(assetPurchases).values({
+    const purchaseInserted = await queryWithResilience(() => getDb().insert(assetPurchases).values({
       buyerId: user.id,
       assetId,
       priceTokens: price,
       license: asset.license,
-    }).onConflictDoNothing());
+    }).onConflictDoNothing().returning({ id: assetPurchases.id }));
 
-    // Increment download count atomically
-    await queryWithResilience(() => getDb()
-      .update(marketplaceAssets)
-      .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
-      .where(eq(marketplaceAssets.id, assetId)));
+    // Only increment download count when a new purchase row was actually
+    // inserted. On retry (conflict → no insert), skip to avoid double-counting.
+    if (purchaseInserted.length > 0) {
+      await queryWithResilience(() => getDb()
+        .update(marketplaceAssets)
+        .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
+        .where(eq(marketplaceAssets.id, assetId)));
+    }
 
     // Record buyer transaction with actual post-update balance
     // onConflictDoNothing: idempotent under retry (unique on userId+source+referenceId)
