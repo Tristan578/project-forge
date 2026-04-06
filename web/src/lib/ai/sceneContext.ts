@@ -16,11 +16,21 @@ export interface EntitySummary {
   parentId: string | null;
 }
 
+export interface SceneSettings {
+  ambientLight: { color: [number, number, number]; brightness: number };
+  environment: {
+    clearColor: [number, number, number];
+    fogEnabled: boolean;
+    skyboxPreset: string | null;
+  };
+  engineMode: string;
+}
+
 /** Structured scene context for AI modification planning. */
 export interface SceneContext {
   entities: EntitySummary[];
   selectedIds: string[];
-  sceneSettings: Record<string, unknown>;
+  sceneSettings: SceneSettings;
 }
 
 /** Minimal store interface needed by buildSceneContext. */
@@ -68,7 +78,7 @@ export function buildSceneContext(state: SceneContextStore): SceneContext {
     });
   }
 
-  const sceneSettings: Record<string, unknown> = {
+  const sceneSettings: SceneSettings = {
     ambientLight: {
       color: ambientLight.color,
       brightness: ambientLight.brightness,
