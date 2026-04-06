@@ -55,13 +55,15 @@ export async function POST(
         .set({ rating: ratingResult.value, content: contentResult.value ?? null })
         .where(eq(assetReviews.id, existingReview.id)));
     } else {
-      // Insert new review
+      // Insert new review — onConflictDoNothing makes this idempotent under
+      // queryWithResilience retry (if INSERT succeeds but response is lost,
+      // the retry won't fail with a duplicate key error).
       await queryWithResilience(() => getDb().insert(assetReviews).values({
         assetId,
         userId: user.id,
         rating: ratingResult.value,
         content: contentResult.value ?? null,
-      }));
+      }).onConflictDoNothing());
     }
 
     // Recalculate average rating (stored as rating * 100)

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('sonner', () => ({
   toast: {
@@ -22,6 +22,7 @@ describe('resilientFetch', () => {
     vi.restoreAllMocks();
     vi.useFakeTimers();
   });
+  afterEach(() => { vi.useRealTimers(); });
 
   it('passes through non-503 responses unchanged', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mockResponse(200, { ok: true }));
