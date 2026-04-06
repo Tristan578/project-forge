@@ -126,8 +126,8 @@ export const exportHandlers: Record<string, ToolHandler> = {
     }
 
     return {
-      success: false,
-      error: `Export preset "${preset.name}" recognized but not yet persisted. Export preset storage requires editor store integration planned for a future release.`,
+      success: true,
+      message: `Export preset "${preset.name}" details: format=${preset.format}, compress=${preset.compressTextures}, resolution=${preset.resolution}, debug=${preset.includeDebug}. Pass these settings to export_project_zip or export_project_pwa to apply them.`,
     };
   },
 };

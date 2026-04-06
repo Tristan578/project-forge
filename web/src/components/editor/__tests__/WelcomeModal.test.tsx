@@ -97,6 +97,17 @@ describe('WelcomeModal', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('renders modal when localStorage throws (private browsing)', () => {
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('Access denied');
+    });
+
+    render(<WelcomeModal />);
+    expect(screen.getByRole('heading', { name: /Welcome to SpawnForge/i })).toBeInTheDocument();
+
+    spy.mockRestore();
+  });
+
   it('shows error message when tutorial data is unavailable', () => {
     // Clear the array in-place so the existing ESM named export reference observes the change
     const saved = [...mockTutorials.TUTORIALS];

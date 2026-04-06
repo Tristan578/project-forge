@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useMemo, memo } from 'react';
-import { getCommandDispatcher } from '@/stores/editorStore';
+import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
 import {
   diagnoseIssues,
   generateFixes,
@@ -201,6 +201,9 @@ function AutoIterationPanel() {
   const [reports, setReports] = useState<IterationReport[]>([]);
   const [phase, setPhase] = useState<'input' | 'diagnosed' | 'fixes'>('input');
 
+  // Scene graph for entity context
+  const sceneGraph = useEditorStore((s) => s.sceneGraph);
+
   // Iteration counter
   const iterationCount = reports.length;
 
@@ -212,11 +215,20 @@ function AutoIterationPanel() {
     engagementScore,
   }), [avgPlayTime, completionRate, engagementScore, quitScene, quitPercentage, spikeScene, spikeDeathRate]);
 
-  const buildSceneContext = useCallback((): SceneContext => ({
-    sceneName: quitScene || 'Main',
-    entityCount: 0,
-    entities: [],
-  }), [quitScene]);
+  const buildSceneContext = useCallback((): SceneContext => {
+    const nodes = Object.values(sceneGraph.nodes);
+    return {
+      sceneName: quitScene || 'Main',
+      entityCount: nodes.length,
+      entities: nodes.map((n) => ({
+        id: n.entityId,
+        name: n.name,
+        type: n.components[0] ?? 'unknown',
+        components: n.components,
+        properties: {},
+      })),
+    };
+  }, [quitScene, sceneGraph]);
 
   const handleDiagnose = useCallback(() => {
     const metrics = buildMetrics();
@@ -255,7 +267,12 @@ function AutoIterationPanel() {
     const selected = fixes.filter((_, i) => selectedFixIds.has(i));
     if (selected.length === 0) return;
 
-    const report = applyFixes(selected, dispatcher, iterationCount + 1);
+    const report = applyFixes(
+      selected,
+      dispatcher,
+      iterationCount + 1,
+      () => useEditorStore.getState().primaryId,
+    );
     report.issuesFound = issues;
     setReports((prev) => [report, ...prev]);
     setPhase('input');
