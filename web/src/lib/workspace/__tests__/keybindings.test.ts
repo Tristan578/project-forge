@@ -106,6 +106,11 @@ describe('eventToKeyCombo', () => {
     expect(eventToKeyCombo(makeEvent({ key: 'Escape' }))).toBe('Escape');
   });
 
+  it('should normalize Backspace to Delete (Mac laptop keyboard)', () => {
+    expect(eventToKeyCombo(makeEvent({ key: 'Backspace' }))).toBe('Delete');
+    expect(eventToKeyCombo(makeEvent({ key: 'Backspace', ctrlKey: true }))).toBe('Ctrl+Delete');
+  });
+
   it('should treat Meta as Ctrl', () => {
     expect(eventToKeyCombo(makeEvent({ key: 's', metaKey: true }))).toBe('Ctrl+S');
   });
