@@ -127,9 +127,9 @@ describe('useAIGeneration', () => {
 
     // Cleanup — reject the dangling promise so it doesn't leak
     reject(new DOMException('Aborted', 'AbortError'));
-    // Wait for the promise rejection to be handled
+    // Flush microtasks
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
+      await Promise.resolve();
     });
   });
 
@@ -163,8 +163,8 @@ describe('useAIGeneration', () => {
 
     await act(async () => {
       result.current.cancel();
-      // Let microtasks settle
-      await new Promise((r) => setTimeout(r, 10));
+      // Flush microtasks
+      await Promise.resolve();
     });
 
     expect(result.current.error).toBeNull();
