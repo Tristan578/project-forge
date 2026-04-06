@@ -20,7 +20,10 @@ export function WelcomeModal() {
   // client returns true if not yet welcomed — React handles the transition after hydration
   const shouldShow = useSyncExternalStore(
     noop,
-    () => !localStorage.getItem(STORAGE_KEY),
+    () => {
+      try { return !localStorage.getItem(STORAGE_KEY); }
+      catch { return true; }
+    },
     () => false,
   );
   const [dismissed, setDismissed] = useState(false);
@@ -48,7 +51,8 @@ export function WelcomeModal() {
   const handleDismiss = useCallback(() => {
     setDismissed(true);
     if (dontShowAgain) {
-      localStorage.setItem(STORAGE_KEY, '1');
+      try { localStorage.setItem(STORAGE_KEY, '1'); }
+      catch { /* Private browsing — silently skip persistence */ }
     }
   }, [dontShowAgain]);
 

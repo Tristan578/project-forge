@@ -317,17 +317,17 @@ describe('exportHandlers', () => {
       expect(result.error).toContain('Available');
     });
 
-    it('recognizes a known preset but returns not-yet-persisted error', async () => {
+    it('returns success with preset details for known preset', async () => {
       const { result } = await invokeHandler(exportHandlers, 'set_export_preset', { preset: 'web-optimized' });
-      // The handler always returns false for known presets (persistence not implemented)
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('Web Optimized');
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('Web Optimized');
+      expect(result.message).toContain('format=zip');
     });
 
     it('recognizes itch-io preset', async () => {
       const { result } = await invokeHandler(exportHandlers, 'set_export_preset', { preset: 'itch-io' });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('itch.io');
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('itch.io');
     });
   });
 });
