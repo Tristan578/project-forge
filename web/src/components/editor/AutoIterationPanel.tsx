@@ -271,7 +271,7 @@ function AutoIterationPanel() {
       selected,
       dispatcher,
       iterationCount + 1,
-      () => useEditorStore.getState().selectedEntityId,
+      () => useEditorStore.getState().primaryId,
     );
     report.issuesFound = issues;
     setReports((prev) => [report, ...prev]);
