@@ -104,6 +104,7 @@ describe('eventToKeyCombo', () => {
   it('should handle special keys', () => {
     expect(eventToKeyCombo(makeEvent({ key: 'Delete' }))).toBe('Delete');
     expect(eventToKeyCombo(makeEvent({ key: 'Escape' }))).toBe('Escape');
+    expect(eventToKeyCombo(makeEvent({ key: 'Backspace' }))).toBe('Delete');
   });
 
   it('should normalize Backspace to Delete (Mac laptop keyboard)', () => {
