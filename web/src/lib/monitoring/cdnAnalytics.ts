@@ -84,21 +84,11 @@ export function reportWasmLoadMetric(metric: WasmLoadMetric): void {
 }
 
 /**
- * Wrap a WASM fetch with cache status detection and timing.
- *
- * Measures time from `startTimeMs` until HTTP response headers are received
- * (fetch resolution). This does NOT include body download or WASM compilation
- * time — those happen asynchronously after the Response is consumed by the
- * caller. The metric captures network latency + CDN cache behavior.
- *
- * @param url - The WASM binary URL being fetched
- * @param backend - Which engine backend is being loaded
- * @param startTimeMs - performance.now() value from before the fetch started
- */
-/**
  * Fetch with exponential backoff retry for transient failures (#8246).
  *
- * Retries on 5xx and network errors. Fails fast on 4xx (permanent errors).
+ * Up to `maxAttempts` attempts (default 3) with exponential backoff between
+ * them (1s, 2s). Retries on 5xx and network errors. Fails fast on 4xx
+ * (permanent errors). Throws on all non-2xx responses after retries exhaust.
  * Respects AbortSignal — aborted fetches are never retried.
  */
 export async function fetchWithRetry(
@@ -134,6 +124,13 @@ export async function fetchWithRetry(
   throw lastError!;
 }
 
+/**
+ * Fetch a WASM binary with retry, cache status detection, and timing.
+ *
+ * Uses `fetchWithRetry` internally — throws on all non-2xx responses (4xx
+ * immediately, 5xx after retries exhaust). Measures network latency from
+ * `startTimeMs` and reports CDN cache metrics via Vercel Analytics.
+ */
 export async function fetchWasmWithMetrics(
   url: string,
   backend: 'webgpu' | 'webgl2',

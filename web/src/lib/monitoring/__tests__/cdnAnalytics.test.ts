@@ -130,7 +130,11 @@ describe('fetchWithRetry', () => {
   // vi.restoreAllMocks() in vitest.setup.ts runs after each test — must
   // re-create spy in beforeEach so each test has a fresh mock.
   let fetchSpy: ReturnType<typeof vi.spyOn>;
-  beforeEach(() => { fetchSpy = vi.spyOn(globalThis, 'fetch'); });
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+  });
+  afterEach(() => { vi.useRealTimers(); });
 
   it('fails fast on 404 without retrying', async () => {
     fetchSpy.mockResolvedValueOnce(new Response(null, { status: 404, statusText: 'Not Found' }));
@@ -151,20 +155,25 @@ describe('fetchWithRetry', () => {
     fetchSpy
       .mockResolvedValueOnce(new Response(null, { status: 502, statusText: 'Bad Gateway' }))
       .mockResolvedValueOnce(new Response('ok', { status: 200 }));
-    const result = await fetchWithRetry('https://cdn.example.com/engine.wasm', undefined, 2);
+    const promise = fetchWithRetry('https://cdn.example.com/engine.wasm', undefined, 2);
+    await vi.advanceTimersByTimeAsync(1000); // 1s backoff after first attempt
+    const result = await promise;
     expect(result.status).toBe(200);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
-  }, 10000);
+  });
 
   it('throws after max attempts on persistent 503', async () => {
     fetchSpy
       .mockResolvedValueOnce(new Response(null, { status: 503, statusText: 'Service Unavailable' }))
       .mockResolvedValueOnce(new Response(null, { status: 503, statusText: 'Service Unavailable' }));
-    await expect(
-      fetchWithRetry('https://cdn.example.com/engine.wasm', undefined, 2),
-    ).rejects.toThrow('WASM fetch failed: 503');
+    const promise = fetchWithRetry('https://cdn.example.com/engine.wasm', undefined, 2)
+      .catch((e: Error) => e); // Capture rejection to prevent unhandled promise warning
+    await vi.advanceTimersByTimeAsync(1000); // 1s backoff after first attempt
+    const result = await promise;
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toContain('WASM fetch failed: 503');
     expect(fetchSpy).toHaveBeenCalledTimes(2);
-  }, 10000);
+  });
 
   it('throws immediately when signal is already aborted (never calls fetch)', async () => {
     const controller = new AbortController();

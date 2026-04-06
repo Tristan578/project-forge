@@ -185,7 +185,7 @@ export async function POST(
       referenceId: assetId,
     }).onConflictDoNothing());
 
-    // Record seller transaction with actual post-update balance from RETURNING
+    // Record seller transaction with actual post-update balance from RETURNING.
     // referenceId must be unique per purchase (asset:buyer), not per asset —
     // otherwise repeat sales of the same asset silently drop seller earnings.
     await queryWithResilience(() => getDb().insert(creditTransactions).values({

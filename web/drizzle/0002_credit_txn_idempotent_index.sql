@@ -1,9 +1,8 @@
 -- Partial unique index for idempotent credit transaction inserts (#8261).
--- Only enforces when reference_id IS NOT NULL — PostgreSQL treats NULL as
--- distinct in unique indexes, so without the WHERE clause, audit rows that
--- omit reference_id (deductCredits, grantMonthlyCredits, processRollover)
--- would bypass the constraint entirely. The partial index protects the
--- retry-sensitive paths that always supply a reference_id:
+-- PostgreSQL treats NULL values as distinct in unique indexes, so rows with
+-- NULL reference_id would never conflict regardless. The WHERE clause excludes
+-- those rows from the index entirely, reducing index size and write overhead.
+-- Retry-sensitive paths that always supply a reference_id are protected:
 --   - handleInvoicePaymentFailed (subscription-lifecycle.ts)
 --   - marketplace purchase (purchase/route.ts)
 --   - refundCredits (creditManager.ts — uses NOT EXISTS guard too)
