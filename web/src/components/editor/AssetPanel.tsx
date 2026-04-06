@@ -290,8 +290,7 @@ export const AssetPanel = memo(function AssetPanel() {
                         key={id}
                         role="menuitem"
                         onClick={() => { if (allowed) { open(true); setShowAiDropdown(false); } }}
-                        disabled={!allowed}
-                        aria-disabled={!allowed}
+                        aria-disabled={!allowed || undefined}
                         className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs ${
                           allowed ? 'text-zinc-300 hover:bg-zinc-800' : 'cursor-not-allowed text-zinc-500'
                         }`}

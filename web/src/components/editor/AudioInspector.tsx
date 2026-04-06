@@ -178,7 +178,7 @@ export function AudioInspector() {
         <div className="flex gap-1">
           <button
             onClick={() => canGenerateSound && setGenerateSoundOpen(true)}
-            disabled={!canGenerateSound}
+            aria-disabled={!canGenerateSound || undefined}
             className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] ${
               canGenerateSound
                 ? 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50'
@@ -191,7 +191,7 @@ export function AudioInspector() {
           </button>
           <button
             onClick={() => canGenerateMusic && setGenerateMusicOpen(true)}
-            disabled={!canGenerateMusic}
+            aria-disabled={!canGenerateMusic || undefined}
             className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] ${
               canGenerateMusic
                 ? 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50'
