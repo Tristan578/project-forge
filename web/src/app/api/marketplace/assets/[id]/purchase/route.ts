@@ -150,6 +150,12 @@ export async function POST(
       .returning({ id: users.id }));
 
     if (updateResult.length === 0) {
+      // Balance changed after purchase insert — roll back the purchase row so
+      // user can retry. Without this delete, the idempotency gate permanently
+      // blocks the user from completing the purchase (Sentry HIGH severity).
+      await queryWithResilience(() => getDb()
+        .delete(assetPurchases)
+        .where(and(eq(assetPurchases.buyerId, user.id), eq(assetPurchases.assetId, assetId))));
       return NextResponse.json({ error: 'Balance changed, please retry' }, { status: 409 });
     }
 
