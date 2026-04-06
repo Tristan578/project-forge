@@ -1,9 +1,11 @@
 /**
  * Integration test for the chat executor pipeline.
- * Verifies: executeToolCall → real handler → store action → state update.
+ * Verifies: executeToolCall → real handler → correct store method invocation.
  *
  * Unlike executorDispatch.test.ts (which mocks all handlers), this test
- * uses REAL handler implementations to verify the full flow.
+ * uses REAL handler implementations to verify that each handler calls the
+ * correct store actions with the right arguments. The store itself uses
+ * vi.fn() stubs to capture calls (not a real Zustand store).
  *
  * @vitest-environment jsdom
  */
@@ -31,8 +33,8 @@ function makeStore(overrides: Partial<EditorState> = {}): EditorState {
     sceneName: 'Test Scene',
     sceneGraph: {
       nodes: {
-        'entity-1': { id: 'entity-1', name: 'Cube', type: 'cube', parentId: null, childIds: [], visible: true },
-        'entity-2': { id: 'entity-2', name: 'Light', type: 'point_light', parentId: null, childIds: [], visible: true },
+        'entity-1': { entityId: 'entity-1', name: 'Cube', type: 'cube', parentId: null, children: [], components: [], visible: true },
+        'entity-2': { entityId: 'entity-2', name: 'Light', type: 'point_light', parentId: null, children: [], components: [], visible: true },
       },
       rootIds: ['entity-1', 'entity-2'],
     },
@@ -114,7 +116,7 @@ describe('Chat executor integration: executeToolCall → handler → store', () 
     expect(store.duplicateSelectedEntity).toHaveBeenCalled();
   });
 
-  it('update_transform: calls store.setTransform with position', async () => {
+  it('update_transform: calls store.updateTransform with position', async () => {
     const store = makeStore();
     const result = await executeToolCall(
       'update_transform',
@@ -154,18 +156,17 @@ describe('Chat executor integration: executeToolCall → handler → store', () 
     expect(result.error).toContain('Unknown tool');
   });
 
-  it('dispatchCommand is wired and callable from handler context', async () => {
+  it('dispatchCommand is wired: set_entity_lod calls dispatchCommand with engine payload', async () => {
     const store = makeStore();
-
-    // select_all handler uses dispatchCommand
     const result = await executeToolCall(
-      'spawn_entity',
-      { entityType: 'cube' },
+      'set_entity_lod',
+      { entityId: 'entity-1' },
       store,
     );
 
     expect(result.success).toBe(true);
-    // The dispatcher was provided to the context
-    expect(typeof mocks.dispatchCommand).toBe('function');
+    expect(mocks.dispatchCommand).toHaveBeenCalledWith('set_lod', expect.objectContaining({
+      entityId: 'entity-1',
+    }));
   });
 });
