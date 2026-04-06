@@ -6,6 +6,7 @@ import { StateCreator } from 'zustand';
 import type { GameComponentData, GameCameraData, MobileTouchConfig, HudElement, EngineMode } from './types';
 import type { LoadingScreenConfig } from '@/lib/export/loadingScreen';
 import type { AccessibilityProfile } from '@/lib/ai/accessibilityGenerator';
+import { createDefaultProfile } from '@/lib/ai/accessibilityGenerator';
 
 export interface GameSlice {
   allGameComponents: Record<string, GameComponentData[]>;
@@ -123,10 +124,8 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   setLoadingScreenConfig: (config) => set({ loadingScreenConfig: config }),
   setAccessibilityProfile: (profile) => set({ accessibilityProfile: profile }),
   updateAccessibilityProfile: (partial) => {
-    const current = get().accessibilityProfile;
-    if (current) {
-      set({ accessibilityProfile: { ...current, ...partial } });
-    }
+    const current = get().accessibilityProfile ?? createDefaultProfile();
+    set({ accessibilityProfile: { ...current, ...partial } });
   },
   play: () => {
     if (dispatchCommand) dispatchCommand('play', {});

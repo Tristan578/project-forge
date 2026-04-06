@@ -411,7 +411,15 @@ function applyColorblindFilter(mode: ColorblindType | null, strength: number): v
 
 function dispatchInputRemappings(remappings: AccessibilityProfile['inputRemapping']['remappings'], enabled: boolean): void {
   const dispatch = getCommandDispatcher();
-  if (!dispatch || !enabled) return;
+  if (!dispatch) return;
+
+  if (!enabled) {
+    // Clear any previously-applied custom bindings so the engine reverts to defaults
+    for (const remap of remappings) {
+      dispatch('remove_input_binding', { actionName: remap.action });
+    }
+    return;
+  }
 
   for (const remap of remappings) {
     const sources = [remap.primaryKey, ...remap.alternativeKeys].filter(Boolean);

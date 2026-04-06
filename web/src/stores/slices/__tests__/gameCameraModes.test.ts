@@ -370,12 +370,17 @@ describe('gameCameraModes', () => {
       expect(updated!.screenReader.enabled).toBe(true);
     });
 
-    it('should not crash when updating profile that is null', () => {
+    it('should initialize from defaults when updating null profile', () => {
       store.getState().updateAccessibilityProfile({
         colorblindMode: { enabled: true, mode: 'tritanopia', filterStrength: 0.5 },
       });
-      // Profile stays null — no crash
-      expect(store.getState().accessibilityProfile).toBeNull();
+      const result = store.getState().accessibilityProfile;
+      // Profile initialized from defaults, then merged with partial
+      expect(result).not.toBeNull();
+      expect(result!.colorblindMode.mode).toBe('tritanopia');
+      expect(result!.colorblindMode.enabled).toBe(true);
+      // Other fields get defaults
+      expect(result!.screenReader).toBeDefined();
     });
   });
 });

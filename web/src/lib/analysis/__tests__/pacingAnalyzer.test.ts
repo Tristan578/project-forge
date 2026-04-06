@@ -102,12 +102,13 @@ describe('pacingAnalyzer', () => {
       ],
     }));
 
-    // Should detect unmuted audio buses (2 of 3)
+    // Should detect unmuted audio buses (2 of 3 are unmuted)
     const audioSignals = withAudio.curve.segments.flatMap(s =>
       s.signals.filter(sig => sig.type === 'audio_intensity')
     );
-    // Audio signal exists when there are unmuted buses
-    expect(audioSignals.length).toBeGreaterThanOrEqual(0);
+    expect(audioSignals.length).toBeGreaterThan(0);
+    // 2 unmuted buses / 8 = 0.25
+    expect(audioSignals[0].value).toBe(0.25);
   });
 
   it('score is between 0 and 100', () => {
