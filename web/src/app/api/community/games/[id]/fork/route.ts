@@ -59,8 +59,16 @@ export async function POST(
       .from(projects)
       .where(eq(projects.userId, mid.userId!)));
 
-    const tier = (user?.tier || 'starter') as keyof typeof PROJECT_LIMITS;
-    const limit = PROJECT_LIMITS[tier];
+    // Fork limits cap pro at 999 (unlike PROJECT_LIMITS.pro = Infinity)
+    // to keep the fork table manageable for community queries.
+    const FORK_LIMITS: Record<string, number> = {
+      starter: PROJECT_LIMITS.starter,
+      hobbyist: PROJECT_LIMITS.hobbyist,
+      creator: PROJECT_LIMITS.creator,
+      pro: 999,
+    };
+    const tier = user?.tier ?? 'starter';
+    const limit = FORK_LIMITS[tier] ?? FORK_LIMITS.starter;
     if (userProjects.length >= limit) {
       return NextResponse.json(
         { error: 'Project limit reached for your tier' },
