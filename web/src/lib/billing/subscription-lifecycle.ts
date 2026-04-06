@@ -76,6 +76,7 @@ export async function handleSubscriptionCreated(
                ${allocation} + addon_tokens + earned_credits,
                ${`subscription_created:${tier}`}, ${subscriptionId}
         FROM users WHERE id = ${user.id}
+        ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
       `,
     ])
   );
@@ -168,6 +169,7 @@ export async function handleSubscriptionUpdated(
                  GREATEST(0, monthly_tokens - monthly_tokens_used) + addon_tokens + earned_credits,
                  ${`upgrade:${currentTier}->${newTier}`}, ${subscriptionId}
           FROM users WHERE id = ${user.id}
+          ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
         `,
       ])
     );
@@ -191,6 +193,7 @@ export async function handleSubscriptionUpdated(
                  ${newAllocation} + addon_tokens + earned_credits,
                  ${`downgrade:${currentTier}->${newTier}`}, ${subscriptionId}
           FROM users WHERE id = ${user.id}
+          ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
         `,
       ])
     );
@@ -230,6 +233,7 @@ export async function handleSubscriptionDeleted(
                ${starterAllocation} + addon_tokens + earned_credits,
                ${`cancellation:${previousTier}->starter`}, ${subscriptionId}
         FROM users WHERE id = ${user.id}
+        ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
       `,
       neonSql`
         UPDATE users
@@ -292,6 +296,7 @@ export async function handleInvoicePaid(
                + LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${allocation}),
              ${`renewal_rollover:${tier}`}, ${invoiceId}
       FROM users WHERE id = ${user.id}
+      ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
     `);
 
     statements.push(neonSql`
@@ -319,6 +324,7 @@ export async function handleInvoicePaid(
            ${allocation} + addon_tokens + earned_credits,
            ${`renewal:${tier}`}, ${invoiceId}
     FROM users WHERE id = ${user.id}
+    ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
   `);
 
   await queryWithResilience(() => neonSql.transaction(statements));
