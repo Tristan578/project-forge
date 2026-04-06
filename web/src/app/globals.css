@@ -235,4 +235,10 @@ body {
     transition-delay: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
+  /* Exempt loading spinners — they convey essential "in progress" state */
+  .animate-spin {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
+  }
 }
