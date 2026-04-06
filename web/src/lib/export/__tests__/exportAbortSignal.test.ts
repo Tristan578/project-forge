@@ -116,8 +116,8 @@ describe('exportGame AbortSignal', () => {
         includeDebug: false,
       });
 
-      // Advance past the 2s scene data timeout
-      await vi.advanceTimersByTimeAsync(3000);
+      // Advance past the 5s scene data timeout
+      await vi.advanceTimersByTimeAsync(6000);
 
       // Export will reject (empty WASM) or resolve — either way, no TypeError from missing signal
       const settled = await result.then(() => 'resolved').catch(() => 'rejected');
