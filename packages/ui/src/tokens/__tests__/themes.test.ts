@@ -75,21 +75,52 @@ describe('Theme Definitions', () => {
     return (lighter + 0.05) / (darker + 0.05);
   }
 
-  const TEXT_BG_PAIRS: Array<[keyof ThemeTokens, keyof ThemeTokens, string]> = [
+  // Normal text pairs — must meet 4.5:1 WCAG AA ratio
+  const NORMAL_TEXT_PAIRS: Array<[keyof ThemeTokens, keyof ThemeTokens, string]> = [
     ['--sf-text', '--sf-bg-app', 'primary text on app background'],
     ['--sf-text', '--sf-bg-surface', 'primary text on surface'],
+    ['--sf-text', '--sf-bg-elevated', 'primary text on elevated surface'],
     ['--sf-text-secondary', '--sf-bg-app', 'secondary text on app background'],
     ['--sf-text-secondary', '--sf-bg-surface', 'secondary text on surface'],
+    ['--sf-text-secondary', '--sf-bg-elevated', 'secondary text on elevated surface'],
   ];
 
-  it.each(THEMES)('%s theme meets WCAG AA contrast ratio (>= 4.5:1) for text pairs', (theme) => {
+  // Large text / UI component pairs — 3:1 WCAG AA ratio (14pt bold / 18pt+)
+  // Button labels are rendered at 14px bold (= 14pt bold), qualifying as "large text"
+  const LARGE_TEXT_PAIRS: Array<[keyof ThemeTokens, keyof ThemeTokens, string]> = [
+    ['--sf-on-accent', '--sf-accent', 'button text on accent'],
+    ['--sf-on-accent', '--sf-accent-hover', 'button text on accent hover'],
+    ['--sf-text-muted', '--sf-bg-app', 'muted text on app background'],
+    ['--sf-text-muted', '--sf-bg-surface', 'muted text on surface'],
+    ['--sf-accent', '--sf-bg-app', 'accent on app background'],
+    ['--sf-accent', '--sf-bg-surface', 'accent on surface'],
+    ['--sf-destructive', '--sf-bg-app', 'destructive on app background'],
+    ['--sf-destructive', '--sf-bg-surface', 'destructive on surface'],
+    ['--sf-success', '--sf-bg-app', 'success on app background'],
+    ['--sf-success', '--sf-bg-surface', 'success on surface'],
+    ['--sf-warning', '--sf-bg-app', 'warning on app background'],
+    ['--sf-warning', '--sf-bg-surface', 'warning on surface'],
+  ];
+
+  it.each(THEMES)('%s theme meets WCAG AA contrast (>= 4.5:1) for normal text', (theme) => {
     const tokens = THEME_DEFINITIONS[theme];
-    for (const [textKey, bgKey, description] of TEXT_BG_PAIRS) {
-      const textHex = tokens[textKey] as string;
+    for (const [fgKey, bgKey, description] of NORMAL_TEXT_PAIRS) {
+      const fgHex = tokens[fgKey] as string;
       const bgHex = tokens[bgKey] as string;
-      if (!textHex.startsWith('#') || !bgHex.startsWith('#')) continue;
-      const ratio = contrastRatio(textHex, bgHex);
-      expect(ratio, `${theme}: ${description} — contrast ${ratio.toFixed(2)}:1 (${textHex} on ${bgHex})`).toBeGreaterThanOrEqual(4.5);
+      if (!fgHex.startsWith('#') || !bgHex.startsWith('#')) continue;
+      const ratio = contrastRatio(fgHex, bgHex);
+      expect(ratio, `${theme}: ${description} — ${ratio.toFixed(2)}:1 (${fgHex} on ${bgHex})`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it.each(THEMES)('%s theme meets WCAG AA contrast (>= 3:1) for large text / UI elements', (theme) => {
+    const tokens = THEME_DEFINITIONS[theme];
+    for (const [fgKey, bgKey, description] of LARGE_TEXT_PAIRS) {
+      const fgHex = tokens[fgKey] as string;
+      const bgHex = tokens[bgKey] as string;
+      if (!fgHex.startsWith('#') || !bgHex.startsWith('#')) continue;
+      const ratio = contrastRatio(fgHex, bgHex);
+      expect(ratio, `${theme}: ${description} — ${ratio.toFixed(2)}:1 (${fgHex} on ${bgHex})`).toBeGreaterThanOrEqual(3);
     }
   });
 });
