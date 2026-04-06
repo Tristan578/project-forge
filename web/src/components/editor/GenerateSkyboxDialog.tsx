@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
+import { useAIGeneration } from '@/hooks/useAIGeneration';
 
 interface GenerateSkyboxDialogProps {
   isOpen: boolean;
@@ -16,7 +17,9 @@ type SkyboxStyle = 'realistic' | 'fantasy' | 'sci-fi' | 'cartoon';
 export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogProps) {
   const [prompt, setPrompt] = useState('');
   const [style, setStyle] = useState<SkyboxStyle>('realistic');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { execute, cancel, isLoading: isSubmitting } = useAIGeneration({
+    onError: (msg) => toast.error(msg),
+  });
 
   const tokenBalance = useUserStore((s) => s.tokenBalance);
   const dialogRef = useDialogA11y(onClose);
@@ -29,11 +32,15 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
     tokenBalance !== null &&
     tokenBalance.total >= tokenCost;
 
-  const handleSubmit = async () => {
+  const handleClose = useCallback(() => {
+    cancel();
+    onClose();
+  }, [cancel, onClose]);
+
+  const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
 
-    setIsSubmitting(true);
-    try {
+    const result = await execute(async (signal) => {
       const response = await fetch('/api/generate/skybox', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -41,6 +48,7 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
           prompt: prompt.trim(),
           style,
         }),
+        signal,
       });
 
       if (!response.ok) {
@@ -48,15 +56,14 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
         throw new Error(err.error ?? 'Generation failed');
       }
 
-      // Job started successfully
+      return true;
+    });
+
+    if (result) {
       onClose();
       setPrompt('');
-    } catch (err) {
-      toast.error((err as Error).message);
-    } finally {
-      setIsSubmitting(false);
     }
-  };
+  }, [canSubmit, execute, prompt, style, onClose]);
 
   if (!isOpen) return null;
 
@@ -76,9 +83,8 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
             <h2 id="generate-skybox-dialog-title" className="text-base font-semibold text-zinc-100">Generate Skybox</h2>
           </div>
           <button
-            onClick={onClose}
-            disabled={isSubmitting}
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
+            onClick={handleClose}
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
           >
             <X size={18} />
           </button>
@@ -135,9 +141,8 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
         {/* Footer */}
         <div className="flex gap-2 border-t border-zinc-700 px-4 py-3">
           <button
-            onClick={onClose}
-            disabled={isSubmitting}
-            className="flex-1 rounded bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
+            onClick={handleClose}
+            className="flex-1 rounded bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-700"
           >
             Cancel
           </button>

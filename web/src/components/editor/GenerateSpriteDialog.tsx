@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
+import { useAIGeneration } from '@/hooks/useAIGeneration';
 
 interface GenerateSpriteDialogProps {
   isOpen: boolean;
@@ -24,7 +25,9 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
   const [frameCount, setFrameCount] = useState(4);
   const [tileSize, setTileSize] = useState<16 | 32 | 48 | 64>(32);
   const [gridSize, setGridSize] = useState<'4x4' | '8x8' | '16x16'>('8x8');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { execute, cancel, isLoading: isSubmitting } = useAIGeneration({
+    onError: (msg) => toast.error(msg),
+  });
 
   const tokenBalance = useUserStore((s) => s.tokenBalance);
   const addJob = useGenerationStore((s) => s.addJob);
@@ -38,11 +41,15 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
     tokenBalance !== null &&
     tokenBalance.total >= tokenCost;
 
-  const handleSubmit = async () => {
+  const handleClose = useCallback(() => {
+    cancel();
+    onClose();
+  }, [cancel, onClose]);
+
+  const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
 
-    setIsSubmitting(true);
-    try {
+    const result = await execute(async (signal) => {
       let endpoint = '';
       let body: Record<string, unknown> = {};
 
@@ -75,6 +82,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal,
       });
 
       if (!response.ok) {
@@ -100,15 +108,14 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
           : undefined,
       });
 
-      // Job started successfully
+      return true;
+    });
+
+    if (result) {
       onClose();
       setPrompt('');
-    } catch (err) {
-      toast.error((err as Error).message);
-    } finally {
-      setIsSubmitting(false);
     }
-  };
+  }, [canSubmit, execute, activeTab, prompt, style, size, frameCount, tileSize, gridSize, addJob, onClose]);
 
   if (!isOpen) return null;
 
@@ -128,9 +135,8 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
             <h2 id="generate-sprite-dialog-title" className="text-base font-semibold text-zinc-100">Generate Sprite</h2>
           </div>
           <button
-            onClick={onClose}
-            disabled={isSubmitting}
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
+            onClick={handleClose}
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
           >
             <X size={18} />
           </button>
