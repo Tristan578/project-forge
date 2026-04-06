@@ -106,8 +106,11 @@ export async function fetchWithRetry(
   signal: AbortSignal | undefined,
   maxAttempts = 3,
 ): Promise<Response> {
+  const clampedAttempts = Math.max(1, Math.floor(maxAttempts));
   let lastError: Error | null = null;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  for (let attempt = 0; attempt < clampedAttempts; attempt++) {
+    // Check abort before each attempt (including after backoff sleep)
+    if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
     try {
       const response = await fetch(url, signal ? { signal } : {});
       if (response.ok) return response;
@@ -124,7 +127,7 @@ export async function fetchWithRetry(
       if (error.message.startsWith('WASM fetch failed:')) throw error;
       lastError = error;
     }
-    if (attempt < maxAttempts - 1) {
+    if (attempt < clampedAttempts - 1) {
       await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
     }
   }

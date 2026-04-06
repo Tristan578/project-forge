@@ -166,14 +166,13 @@ describe('fetchWithRetry', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   }, 10000);
 
-  it('does not retry when signal is aborted', async () => {
+  it('throws immediately when signal is already aborted (never calls fetch)', async () => {
     const controller = new AbortController();
     controller.abort();
-    fetchSpy.mockRejectedValueOnce(new DOMException('aborted', 'AbortError'));
     await expect(
       fetchWithRetry('https://cdn.example.com/engine.wasm', controller.signal, 3),
-    ).rejects.toThrow();
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    ).rejects.toThrow('aborted');
+    expect(fetchSpy).toHaveBeenCalledTimes(0);
   });
 });
 
