@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { ScanSearch, Wand2, ChevronDown, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
-import { useEditorStore } from '@/stores/editorStore';
+import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
 import {
   analyzeAccessibility,
   generateAccessibilityProfile,
@@ -379,6 +379,50 @@ function InputRemappingSection({
 }
 
 // ---------------------------------------------------------------------------
+// Colorblind CSS filter matrix values (SVG feColorMatrix)
+// Applied to #game-canvas via inline CSS filter when enabled.
+// ---------------------------------------------------------------------------
+
+const COLORBLIND_FILTERS: Record<ColorblindType, string> = {
+  protanopia:     'saturate(0.8) hue-rotate(-10deg)',
+  deuteranopia:   'saturate(0.7) hue-rotate(20deg)',
+  tritanopia:     'saturate(0.75) hue-rotate(-40deg)',
+  achromatopsia:  'grayscale(1)',
+};
+
+function applyColorblindFilter(mode: ColorblindType | null, strength: number): void {
+  const canvas = document.getElementById('game-canvas');
+  if (!canvas) return;
+
+  if (!mode || strength <= 0) {
+    canvas.style.filter = '';
+    return;
+  }
+
+  const baseFilter = COLORBLIND_FILTERS[mode];
+  // Scale filter strength: at 0.5 strength, blend with identity
+  if (strength < 1) {
+    canvas.style.filter = `${baseFilter} opacity(${0.5 + strength * 0.5})`;
+  } else {
+    canvas.style.filter = baseFilter;
+  }
+}
+
+function dispatchInputRemappings(remappings: AccessibilityProfile['inputRemapping']['remappings'], enabled: boolean): void {
+  const dispatch = getCommandDispatcher();
+  if (!dispatch || !enabled) return;
+
+  for (const remap of remappings) {
+    const sources = [remap.primaryKey, ...remap.alternativeKeys].filter(Boolean);
+    dispatch('set_input_binding', {
+      actionName: remap.action,
+      actionType: 'digital',
+      sources,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main Panel
 // ---------------------------------------------------------------------------
 
@@ -390,6 +434,26 @@ export function AccessibilityPanel() {
   const sceneGraph = useEditorStore((s) => s.sceneGraph);
   const entityCount = useMemo(() => Object.keys(sceneGraph.nodes).length, [sceneGraph]);
 
+  // Sync profile to store whenever it changes so it persists and is available to export
+  useEffect(() => {
+    useEditorStore.getState().setAccessibilityProfile(profile);
+  }, [profile]);
+
+  // Apply colorblind simulation filter to game canvas
+  useEffect(() => {
+    const { colorblindMode } = profile;
+    applyColorblindFilter(
+      colorblindMode.enabled ? colorblindMode.mode : null,
+      colorblindMode.filterStrength,
+    );
+    return () => applyColorblindFilter(null, 0);
+  }, [profile.colorblindMode.enabled, profile.colorblindMode.mode, profile.colorblindMode.filterStrength]);
+
+  // Dispatch input remappings to engine when they change
+  useEffect(() => {
+    dispatchInputRemappings(profile.inputRemapping.remappings, profile.inputRemapping.enabled);
+  }, [profile.inputRemapping.enabled, profile.inputRemapping.remappings]);
+
   const handleRunAudit = useCallback(() => {
     const ctx = buildSceneContextFromStore();
     const result = analyzeAccessibility(ctx);
@@ -398,7 +462,6 @@ export function AccessibilityPanel() {
 
   const handleAutoGenerate = useCallback(() => {
     setIsGenerating(true);
-    // Use setTimeout to avoid blocking UI while generating
     setTimeout(() => {
       try {
         const ctx = buildSceneContextFromStore();
