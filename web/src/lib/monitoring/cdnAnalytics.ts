@@ -97,6 +97,7 @@ export async function fetchWithRetry(
   url: string,
   signal: AbortSignal | undefined,
   maxAttempts = 3,
+  perAttemptTimeoutMs = 30_000,
 ): Promise<Response> {
   const clampedAttempts = Math.max(1, Math.floor(maxAttempts));
   let lastError: Error | null = null;
@@ -104,7 +105,10 @@ export async function fetchWithRetry(
     // Check abort before each attempt (including after backoff sleep)
     if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
     try {
-      const response = await fetch(url, signal ? { signal } : {});
+      // Combine caller abort signal with per-attempt timeout to prevent hanging fetches
+      const timeoutSignal = AbortSignal.timeout(perAttemptTimeoutMs);
+      const fetchSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+      const response = await fetch(url, { signal: fetchSignal });
       if (response.ok) return response;
       // 4xx = permanent error, fail fast (do NOT retry)
       if (response.status < 500) {

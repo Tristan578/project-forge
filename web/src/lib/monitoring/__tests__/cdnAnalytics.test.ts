@@ -228,10 +228,10 @@ describe('fetchWasmWithMetrics', () => {
       0,
       controller.signal,
     );
-    // Verify fetch was called with the signal
+    // Verify fetch was called with a signal (combined with per-attempt timeout)
     expect(fetchSpy).toHaveBeenCalledWith(
       'https://cdn.example.com/engine.wasm',
-      { signal: controller.signal },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 

@@ -420,9 +420,13 @@ async function loadWasm(): Promise<WasmModule> {
             addBreadcrumb({ category: 'wasm', message: `Load failed from ${basePath}: ${lastErr.message}`, level: 'warning' });
             // Track CDN fallback for monitoring (#8250)
             import('@/lib/analytics/posthog').then(({ trackEvent, AnalyticsEvent }) => {
+              // Strip path from origin (avoid leaking version SHAs to PostHog)
+              // Use status code only, not attacker-controllable statusText
+              const originHost = (() => { try { return new URL(basePath, window.location.origin).hostname; } catch { return 'unknown'; } })();
+              const statusMatch = lastErr?.message?.match(/(\d{3})/);
               trackEvent(AnalyticsEvent.WASM_CDN_FALLBACK, {
-                failedOrigin: basePath,
-                error: lastErr?.message,
+                failedOrigin: originHost,
+                errorStatus: statusMatch ? Number(statusMatch[1]) : 0,
                 backend: targetBackend,
               });
             }).catch(() => { /* analytics non-critical */ });
