@@ -10,28 +10,12 @@ import { useChatStore } from '@/stores/chatStore';
 import { getRecentProjects } from '@/lib/workspace/recentProjects';
 import { TUTORIALS } from '@/data/tutorials';
 import type { GameIdea } from '@/lib/ai/ideaGenerator';
+import { safeGetItem, safeSetItem } from '@/lib/storage/safeLocalStorage';
 
 const STORAGE_KEY = 'forge-welcomed';
 
 // No-op subscribe — localStorage doesn't fire events in same tab
 const noop = () => () => {};
-
-/** Safe localStorage access — returns null if storage is unavailable (private browsing, strict tracking prevention). */
-function safeGetItem(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function safeSetItem(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // Storage unavailable — silently ignore
-  }
-}
 
 export function WelcomeModal() {
   // useSyncExternalStore: server returns false (no modal in SSR HTML),
