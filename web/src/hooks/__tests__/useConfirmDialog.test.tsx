@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, act, cleanup } from '@testing-library/react';
+import { render, screen, act, cleanup, within } from '@testing-library/react';
 import { useConfirmDialog } from '../useConfirmDialog';
 
 function TestHarness() {
@@ -14,7 +14,8 @@ function TestHarness() {
         data-testid="trigger"
         onClick={async () => {
           const result = await confirm('Are you sure?');
-          document.getElementById('result')!.textContent = String(result);
+          const el = document.getElementById('result');
+          if (el) el.textContent = String(result);
         }}
       >
         Trigger
@@ -47,11 +48,9 @@ describe('useConfirmDialog', () => {
     await act(async () => {
       screen.getByTestId('trigger').click();
     });
-    // Find the Confirm button inside the alertdialog
     const dialog = screen.getByRole('alertdialog');
-    const confirmBtn = dialog.querySelector('button:last-child')!;
     await act(async () => {
-      (confirmBtn as HTMLElement).click();
+      within(dialog).getByRole('button', { name: /confirm/i }).click();
     });
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(screen.getByTestId('result').textContent).toBe('true');
@@ -63,11 +62,26 @@ describe('useConfirmDialog', () => {
       screen.getByTestId('trigger').click();
     });
     const dialog = screen.getByRole('alertdialog');
-    const cancelBtn = dialog.querySelector('button:first-of-type')!;
     await act(async () => {
-      (cancelBtn as HTMLElement).click();
+      within(dialog).getByRole('button', { name: /cancel/i }).click();
     });
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(screen.getByTestId('result').textContent).toBe('false');
+  });
+
+  it('uses unique ARIA IDs per instance', async () => {
+    render(<TestHarness />);
+    await act(async () => {
+      screen.getByTestId('trigger').click();
+    });
+    const dialog = screen.getByRole('alertdialog');
+    const labelledBy = dialog.getAttribute('aria-labelledby');
+    const describedBy = dialog.getAttribute('aria-describedby');
+    expect(labelledBy).toBeTruthy();
+    expect(describedBy).toBeTruthy();
+    expect(labelledBy).not.toBe(describedBy);
+    // IDs should include React's useId prefix (colon-delimited)
+    expect(labelledBy).toContain('confirm-title-');
+    expect(describedBy).toContain('confirm-desc-');
   });
 });
