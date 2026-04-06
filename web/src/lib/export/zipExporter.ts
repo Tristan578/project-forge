@@ -109,9 +109,7 @@ export async function exportAsZip(
 
   // Add extracted assets (with optional texture compression)
   for (const asset of assets) {
-    if (signal?.aborted) {
-      throw new DOMException('Export cancelled', 'AbortError');
-    }
+    if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
     let assetBlob = asset.blob;
 
     if (options.compressTextures && asset.blob.type.startsWith('image/')) {

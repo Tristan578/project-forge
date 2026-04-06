@@ -178,7 +178,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       abortRef.current = null;
       setExporting(false);
     }
-  }, [title, mode, resolution, bgColor, includeDebug, selectedPreset, showLoadingCustomization, loadingConfig, orientationLock, compressionPreset, compressionQuality, setExporting, onClose]);
+  }, [isExporting, title, mode, resolution, bgColor, includeDebug, selectedPreset, showLoadingCustomization, loadingConfig, orientationLock, compressionPreset, compressionQuality, setExporting, onClose]);
 
   const handleCopySnippet = useCallback(() => {
     if (!embedSnippet) return;
