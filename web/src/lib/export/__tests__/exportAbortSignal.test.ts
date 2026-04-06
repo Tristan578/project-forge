@@ -81,21 +81,23 @@ describe('exportGame AbortSignal', () => {
     // Use fake timers to advance past the scene data timeout without real waiting.
     vi.useFakeTimers();
 
-    const result = exportGame({
-      title: 'Test',
-      mode: 'single-html',
-      resolution: '1920x1080',
-      bgColor: '#000000',
-      includeDebug: false,
-    });
+    try {
+      const result = exportGame({
+        title: 'Test',
+        mode: 'single-html',
+        resolution: '1920x1080',
+        bgColor: '#000000',
+        includeDebug: false,
+      });
 
-    // Advance past the 2s scene data timeout
-    await vi.advanceTimersByTimeAsync(3000);
+      // Advance past the 2s scene data timeout
+      await vi.advanceTimersByTimeAsync(3000);
 
-    // Export will reject (empty WASM) or resolve — either way, no TypeError from missing signal
-    const settled = await result.then(() => 'resolved').catch(() => 'rejected');
-    expect(['resolved', 'rejected']).toContain(settled);
-
-    vi.useRealTimers();
+      // Export will reject (empty WASM) or resolve — either way, no TypeError from missing signal
+      const settled = await result.then(() => 'resolved').catch(() => 'rejected');
+      expect(['resolved', 'rejected']).toContain(settled);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

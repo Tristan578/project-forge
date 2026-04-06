@@ -64,7 +64,8 @@ async function fetchWasmEngineFiles(signal?: AbortSignal): Promise<ZipEntry[]> {
             content: blob,
           });
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') throw err;
         console.warn(`[ZipExporter] Could not fetch WASM for ${variant}/${file}, skipping`);
       }
     }
@@ -130,6 +131,7 @@ export async function exportAsZip(
   }
 
   // 4. Fetch and include WASM engine files
+  if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
   const wasmEntries = await fetchWasmEngineFiles(signal);
   for (const entry of wasmEntries) {
     entries.push(entry);
