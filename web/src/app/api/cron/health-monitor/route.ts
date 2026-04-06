@@ -1,4 +1,5 @@
 import 'server-only';
+import { timingSafeEqual } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
 import {
   runAllHealthChecks,
@@ -28,7 +29,11 @@ function isAuthorizedCron(req: NextRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) return false;
   const authHeader = req.headers.get('authorization');
-  return authHeader === `Bearer ${cronSecret}`;
+  if (!authHeader) return false;
+  const expected = Buffer.from(`Bearer ${cronSecret}`);
+  const actual = Buffer.from(authHeader);
+  if (expected.length !== actual.length) return false;
+  return timingSafeEqual(expected, actual);
 }
 
 function reportFailuresToSentry(
