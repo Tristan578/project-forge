@@ -375,6 +375,17 @@ describe('zipExporter', () => {
       expect(foundEOCD).toBe(true);
     });
 
+    it('propagates AbortError from WASM fetch instead of swallowing it', async () => {
+      const controller = new AbortController();
+      mockFetch.mockImplementation(async () => {
+        throw new DOMException('The operation was aborted', 'AbortError');
+      });
+
+      await expect(
+        exportAsZip(mockSceneData, mockScripts, { ...defaultOptions, signal: controller.signal }),
+      ).rejects.toThrow('The operation was aborted');
+    });
+
     it('includes UI root and touch overlay elements', async () => {
       const blob = await exportAsZip(mockSceneData, mockScripts, defaultOptions);
       const buffer = await blob.arrayBuffer();
