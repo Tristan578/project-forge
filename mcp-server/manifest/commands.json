@@ -11599,6 +11599,161 @@
       "tokenCost": 0,
       "requiredScope": "scene:write",
       "visibility": "public"
+    },
+    {
+      "name": "generate_quest",
+      "description": "Procedurally generate a quest chain from a template and player description. Creates a full chain of linked quests with objectives, rewards, and NPCs. Returns a chainId to reference with get_quest, update_quest_objective, and delete_quest.",
+      "category": "quest",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "templateId": {
+            "type": "string",
+            "enum": [
+              "hero_origin",
+              "mystery_investigation",
+              "faction_loyalty",
+              "resource_expedition",
+              "revenge_arc"
+            ],
+            "description": "Quest chain template that determines the narrative structure"
+          },
+          "playerDescription": {
+            "type": "string",
+            "description": "Short description of the player character (1\u2013200 chars), used to personalise quest flavour text"
+          },
+          "difficulty": {
+            "type": "number",
+            "description": "Difficulty rating 1\u201310 that scales enemy counts, objective targets, and rewards"
+          },
+          "questCount": {
+            "type": "number",
+            "description": "Number of quests in the chain (1\u201320, default determined by template)"
+          }
+        },
+        "required": [
+          "templateId",
+          "playerDescription",
+          "difficulty"
+        ]
+      },
+      "tokenCost": 5,
+      "requiredScope": "scene:write",
+      "visibility": "public"
+    },
+    {
+      "name": "list_quests",
+      "description": "List all quest chains currently stored in the project, including their IDs, names, template types, quest counts, and creation timestamps.",
+      "category": "quest",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "visibility": "public"
+    },
+    {
+      "name": "get_quest",
+      "description": "Retrieve full details of a quest chain including all quests, objectives, rewards, and NPC references.",
+      "category": "quest",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "chainId": {
+            "type": "string",
+            "description": "ID of the quest chain (returned by generate_quest or list_quests)"
+          }
+        },
+        "required": [
+          "chainId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "visibility": "public"
+    },
+    {
+      "name": "update_quest_objective",
+      "description": "Modify a single objective within a quest chain. Only provided fields are updated; unspecified fields are preserved.",
+      "category": "quest",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "chainId": {
+            "type": "string",
+            "description": "ID of the quest chain"
+          },
+          "questId": {
+            "type": "string",
+            "description": "ID of the quest within the chain"
+          },
+          "objectiveId": {
+            "type": "string",
+            "description": "ID of the objective to update"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "kill_count",
+              "collect_items",
+              "reach_location",
+              "talk_to_npc",
+              "survive_time",
+              "protect_target",
+              "solve_puzzle",
+              "craft_item",
+              "deliver_item",
+              "explore_area"
+            ],
+            "description": "New objective type"
+          },
+          "description": {
+            "type": "string",
+            "description": "New objective description text"
+          },
+          "target": {
+            "type": "string",
+            "description": "New target reference (entity name, item name, or location)"
+          },
+          "required": {
+            "type": "number",
+            "description": "New required count to complete the objective"
+          },
+          "optional": {
+            "type": "boolean",
+            "description": "Set to true to make the objective optional (bonus), false to make it required"
+          }
+        },
+        "required": [
+          "chainId",
+          "questId",
+          "objectiveId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "visibility": "public"
+    },
+    {
+      "name": "delete_quest",
+      "description": "Permanently delete a quest chain from the project by ID.",
+      "category": "quest",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "chainId": {
+            "type": "string",
+            "description": "ID of the quest chain to delete"
+          }
+        },
+        "required": [
+          "chainId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "visibility": "public"
     }
   ],
   "resources": [

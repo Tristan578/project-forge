@@ -318,6 +318,12 @@ const TOOL_LABELS: Record<string, string> = {
   stop_cutscene: 'Stop Cutscene',
   list_cutscenes: 'List Cutscenes',
   delete_cutscene: 'Delete Cutscene',
+  // Quest
+  generate_quest: 'Generate Quest Chain',
+  list_quests: 'List Quests',
+  get_quest: 'Get Quest',
+  update_quest_objective: 'Update Objective',
+  delete_quest: 'Delete Quest',
 };
 
 function summarizeInput(name: string, input: Record<string, unknown>): string {
