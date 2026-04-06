@@ -383,11 +383,14 @@ function InputRemappingSection({
 // Applied to #game-canvas via inline CSS filter when enabled.
 // ---------------------------------------------------------------------------
 
-const COLORBLIND_FILTERS: Record<ColorblindType, string> = {
-  protanopia:     'saturate(0.8) hue-rotate(-10deg)',
-  deuteranopia:   'saturate(0.7) hue-rotate(20deg)',
-  tritanopia:     'saturate(0.75) hue-rotate(-40deg)',
-  achromatopsia:  'grayscale(1)',
+// Colorblind simulation filter parameters: [saturate, hue-rotate (deg)]
+// At full strength, these approximate the named condition. At partial
+// strength, parameters are interpolated toward identity (saturate=1, rotate=0).
+const COLORBLIND_PARAMS: Record<ColorblindType, { saturate: number; hueRotate: number }> = {
+  protanopia:     { saturate: 0.8, hueRotate: -10 },
+  deuteranopia:   { saturate: 0.7, hueRotate: 20 },
+  tritanopia:     { saturate: 0.75, hueRotate: -40 },
+  achromatopsia:  { saturate: 0, hueRotate: 0 }, // grayscale = saturate(0)
 };
 
 function applyColorblindFilter(mode: ColorblindType | null, strength: number): void {
@@ -399,13 +402,11 @@ function applyColorblindFilter(mode: ColorblindType | null, strength: number): v
     return;
   }
 
-  const baseFilter = COLORBLIND_FILTERS[mode];
-  // Scale filter strength: at 0.5 strength, blend with identity
-  if (strength < 1) {
-    canvas.style.filter = `${baseFilter} opacity(${0.5 + strength * 0.5})`;
-  } else {
-    canvas.style.filter = baseFilter;
-  }
+  const params = COLORBLIND_PARAMS[mode];
+  // Interpolate toward identity (saturate=1, hueRotate=0) based on strength
+  const sat = 1 + (params.saturate - 1) * strength;
+  const hue = params.hueRotate * strength;
+  canvas.style.filter = `saturate(${sat}) hue-rotate(${hue}deg)`;
 }
 
 function dispatchInputRemappings(remappings: AccessibilityProfile['inputRemapping']['remappings'], enabled: boolean): void {
