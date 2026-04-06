@@ -91,11 +91,11 @@ describe('CanvasArea', () => {
 
   // -- ARIA attributes (#8252) --
 
-  it('canvas has tabIndex=0 for keyboard focus', () => {
+  it('canvas has tabIndex=-1 when not ready', () => {
     mockEditorStore();
     const { container } = render(<CanvasArea />);
     const canvas = container.querySelector('canvas');
-    expect(canvas?.tabIndex).toBe(0);
+    expect(canvas?.tabIndex).toBe(-1);
   });
 
   it('canvas has role="application"', () => {

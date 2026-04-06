@@ -100,11 +100,11 @@ export function CanvasArea() {
     <div className="relative h-full w-full overflow-hidden bg-zinc-950">
       <canvas
         id={CANVAS_ID}
-        tabIndex={0}
+        tabIndex={isReady ? 0 : -1}
         role="application"
         aria-label="3D viewport — use keyboard shortcuts to navigate"
         onKeyDown={handleKeyDown}
-        className={`block h-full w-full focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-purple-500/50${isReady ? '' : ' invisible'}`}
+        className={`block h-full w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-purple-500/50${isReady ? '' : ' invisible'}`}
       />
 
       {/* Game HUD overlay - visible during play mode */}
