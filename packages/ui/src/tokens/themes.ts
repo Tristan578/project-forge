@@ -40,7 +40,7 @@ export const THEME_DEFINITIONS: Record<ThemeName, ThemeTokens> = {
     '--sf-bg-overlay': '#e4e4e7',
     '--sf-text': '#18181b',
     '--sf-text-secondary': '#52525b',
-    '--sf-text-muted': '#a1a1aa',
+    '--sf-text-muted': '#71717a', // darkened from #a1a1aa for WCAG AA (4.83:1 on white)
     '--sf-text-disabled': '#d4d4d8',
     '--sf-border': '#e4e4e7',
     '--sf-border-strong': '#a1a1aa',
@@ -48,8 +48,8 @@ export const THEME_DEFINITIONS: Record<ThemeName, ThemeTokens> = {
     '--sf-accent-hover': '#1d4ed8',
     '--sf-on-accent': '#ffffff',
     '--sf-destructive': '#dc2626',
-    '--sf-success': '#16a34a',
-    '--sf-warning': '#ca8a04',
+    '--sf-success': '#15803d', // darkened from #16a34a for WCAG AA (5.02:1 on white)
+    '--sf-warning': '#a16207', // darkened from #ca8a04 for WCAG AA (4.92:1 on white)
     '--sf-radius-md': '6px',
     '--sf-radius-lg': '8px',
     '--sf-radius-xl': '12px',
