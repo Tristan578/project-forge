@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { Plus, Trash2, Eye, EyeOff, Shield } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 
 interface _TilemapLayer {
   name: string;
@@ -19,6 +20,7 @@ export function TilemapInspector() {
 
   const setTilemapData = useEditorStore((s) => s.setTilemapData);
   const removeTilemapData = useEditorStore((s) => s.removeTilemapData);
+  const { confirm, ConfirmDialogPortal } = useConfirmDialog();
 
   const handleAddTilemap = useCallback(() => {
     if (!primaryId) return;
@@ -31,13 +33,12 @@ export function TilemapInspector() {
     });
   }, [primaryId, setTilemapData]);
 
-  const handleRemoveTilemap = useCallback(() => {
+  const handleRemoveTilemap = useCallback(async () => {
     if (!primaryId) return;
-    // TODO(PF): Replace confirm() with an inline confirmation dialog (accessible, styled).
-    if (confirm('Remove tilemap from this entity?')) {
+    if (await confirm('Remove tilemap from this entity?')) {
       removeTilemapData(primaryId);
     }
-  }, [primaryId, removeTilemapData]);
+  }, [primaryId, removeTilemapData, confirm]);
 
   const handleUpdateTileset = useCallback((tilesetId: string) => {
     if (!primaryId || !tilemapData) return;
@@ -62,13 +63,12 @@ export function TilemapInspector() {
     setTilemapData(primaryId, { ...tilemapData, layers: [...tilemapData.layers, newLayer] });
   }, [primaryId, tilemapData, setTilemapData]);
 
-  const handleRemoveLayer = useCallback((layerIndex: number) => {
+  const handleRemoveLayer = useCallback(async (layerIndex: number) => {
     if (!primaryId || !tilemapData) return;
-    // TODO(PF): Replace confirm() with an inline confirmation dialog (accessible, styled).
-    if (confirm(`Remove layer "${tilemapData.layers[layerIndex].name}"?`)) {
+    if (await confirm(`Remove layer "${tilemapData.layers[layerIndex].name}"?`)) {
       setTilemapData(primaryId, { ...tilemapData, layers: tilemapData.layers.filter((_, i) => i !== layerIndex) });
     }
-  }, [primaryId, tilemapData, setTilemapData]);
+  }, [primaryId, tilemapData, setTilemapData, confirm]);
 
   const handleUpdateLayer = useCallback((layerIndex: number, partial: Partial<_TilemapLayer>) => {
     if (!primaryId || !tilemapData) return;
@@ -284,6 +284,7 @@ export function TilemapInspector() {
           Remove Tilemap
         </button>
       </div>
+      <ConfirmDialogPortal />
     </div>
   );
 }
