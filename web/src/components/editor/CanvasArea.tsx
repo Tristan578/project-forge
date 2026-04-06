@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback } from 'react';
 import { useViewport } from '@/hooks/useViewport';
 import { useEngineEvents } from '@/hooks/useEngineEvents';
 import { usePointerLock } from '@/hooks/usePointerLock';
@@ -42,7 +42,7 @@ export function CanvasArea() {
 
   // Build key→action map from customizable registry (re-reads on each render
   // so localStorage changes take effect immediately)
-  const keyMap = useMemo(() => getCanvasKeyMap(), []);
+  const keyMap = getCanvasKeyMap();
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
     // Play/Paused mode: Bevy handles keyboard natively, except Escape to exit
