@@ -1,8 +1,10 @@
 'use client';
 
 import { useCallback, useRef, memo, useState, useEffect } from 'react';
-import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette, Sparkles, ChevronDown, Loader2 } from 'lucide-react';
+import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette, Sparkles, ChevronDown, Loader2, Lock } from 'lucide-react';
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
+import { useUserStore } from '@/stores/userStore';
+import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
 import { showError } from '@/lib/toast';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { MaterialLibraryPanel } from './MaterialLibraryPanel';
@@ -81,6 +83,8 @@ export const AssetPanel = memo(function AssetPanel() {
   const [isDragging, setIsDragging] = useState(false);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
   const dragCounterRef = useRef(0);
+
+  const tier = useUserStore((s) => s.tier);
 
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
   const importGltf = useEditorStore((s) => s.importGltf);
@@ -272,41 +276,37 @@ export const AssetPanel = memo(function AssetPanel() {
               </button>
               {showAiDropdown && (
                 <div role="menu" aria-label="AI generation options" className="absolute right-0 top-full z-50 mt-1 w-48 rounded border border-zinc-700 bg-zinc-900 shadow-xl">
-                  <button
-                    role="menuitem"
-                    onClick={() => { setGenerateModelOpen(true); setShowAiDropdown(false); }}
-                    className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
-                  >
-                    Generate 3D Model
-                  </button>
-                  <button
-                    role="menuitem"
-                    onClick={() => { setGenerateTextureOpen(true); setShowAiDropdown(false); }}
-                    className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
-                  >
-                    Generate Texture
-                  </button>
-                  <button
-                    role="menuitem"
-                    onClick={() => { setGenerateSoundOpen(true); setShowAiDropdown(false); }}
-                    className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
-                  >
-                    Generate Sound
-                  </button>
-                  <button
-                    role="menuitem"
-                    onClick={() => { setGenerateMusicOpen(true); setShowAiDropdown(false); }}
-                    className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
-                  >
-                    Generate Music
-                  </button>
-                  <button
-                    role="menuitem"
-                    onClick={() => { setGenerateSkyboxOpen(true); setShowAiDropdown(false); }}
-                    className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
-                  >
-                    Generate Skybox
-                  </button>
+                  {([
+                    { id: 'generate-model', label: 'Generate 3D Model', open: setGenerateModelOpen },
+                    { id: 'generate-texture', label: 'Generate Texture', open: setGenerateTextureOpen },
+                    { id: 'generate-sound', label: 'Generate Sound', open: setGenerateSoundOpen },
+                    { id: 'generate-music', label: 'Generate Music', open: setGenerateMusicOpen },
+                    { id: 'generate-skybox', label: 'Generate Skybox', open: setGenerateSkyboxOpen },
+                  ] as const).map(({ id, label, open }) => {
+                    const allowed = canAccessPanel(id, tier);
+                    const required = getRequiredTier(id);
+                    return (
+                      <button
+                        key={id}
+                        role="menuitem"
+                        onClick={() => { if (allowed) { open(true); setShowAiDropdown(false); } }}
+                        disabled={!allowed}
+                        aria-disabled={!allowed}
+                        className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs ${
+                          allowed ? 'text-zinc-300 hover:bg-zinc-800' : 'cursor-not-allowed text-zinc-500'
+                        }`}
+                        title={allowed ? label : `Requires ${required ? TIER_LABELS[required] : ''} tier`}
+                      >
+                        <span>{label}</span>
+                        {!allowed && (
+                          <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+                            <Lock size={10} />
+                            {required ? TIER_LABELS[required] : ''}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
