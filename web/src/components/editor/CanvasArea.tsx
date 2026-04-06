@@ -1,5 +1,6 @@
 'use client';
 
+import { useCallback } from 'react';
 import { useViewport } from '@/hooks/useViewport';
 import { useEngineEvents } from '@/hooks/useEngineEvents';
 import { usePointerLock } from '@/hooks/usePointerLock';
@@ -25,11 +26,99 @@ export function CanvasArea() {
   // Pointer lock for FirstPerson camera mouse look
   usePointerLock(CANVAS_ID);
 
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    // Play mode: Bevy handles keyboard natively, except Escape to exit
+    if (engineMode === 'play') {
+      if (e.key === 'Escape') {
+        getWasmModule()?.handle_command('set_engine_mode', { mode: 'edit' });
+        e.preventDefault();
+      }
+      return;
+    }
+
+    // Skip when focus is in an input/textarea (shouldn't happen on canvas, but guard)
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+    const wasm = getWasmModule();
+    const ctrl = e.ctrlKey || e.metaKey;
+
+    switch (e.key) {
+      // Gizmo modes
+      case 'w':
+      case 'W':
+        if (!ctrl) { wasm?.handle_command('set_gizmo_mode', { mode: 'translate' }); e.preventDefault(); }
+        break;
+      case 'e':
+      case 'E':
+        if (!ctrl) { wasm?.handle_command('set_gizmo_mode', { mode: 'rotate' }); e.preventDefault(); }
+        break;
+      case 'r':
+      case 'R':
+        if (!ctrl) { wasm?.handle_command('set_gizmo_mode', { mode: 'scale' }); e.preventDefault(); }
+        break;
+
+      // Delete
+      case 'Delete':
+      case 'Backspace':
+        wasm?.handle_command('delete_entities', { entityIds: useEditorStore.getState().selectedEntityIds });
+        e.preventDefault();
+        break;
+
+      // Duplicate
+      case 'd':
+      case 'D':
+        if (ctrl) { wasm?.handle_command('duplicate_entities', {}); e.preventDefault(); }
+        break;
+
+      // Undo/Redo
+      case 'z':
+      case 'Z':
+        if (ctrl && e.shiftKey) { wasm?.handle_command('redo', {}); e.preventDefault(); }
+        else if (ctrl) { wasm?.handle_command('undo', {}); e.preventDefault(); }
+        break;
+
+      // Focus selected
+      case 'f':
+      case 'F':
+        if (!ctrl) { wasm?.handle_command('focus_selected', {}); e.preventDefault(); }
+        break;
+
+      // Deselect all
+      case 'Escape':
+        wasm?.handle_command('deselect_all', {});
+        e.preventDefault();
+        break;
+
+      // Arrow keys for orbit camera
+      case 'ArrowLeft':
+        wasm?.handle_command('orbit_camera', { deltaYaw: -15, deltaPitch: 0 });
+        e.preventDefault();
+        break;
+      case 'ArrowRight':
+        wasm?.handle_command('orbit_camera', { deltaYaw: 15, deltaPitch: 0 });
+        e.preventDefault();
+        break;
+      case 'ArrowUp':
+        wasm?.handle_command('orbit_camera', { deltaYaw: 0, deltaPitch: -15 });
+        e.preventDefault();
+        break;
+      case 'ArrowDown':
+        wasm?.handle_command('orbit_camera', { deltaYaw: 0, deltaPitch: 15 });
+        e.preventDefault();
+        break;
+    }
+  }, [engineMode]);
+
   return (
     <div className="relative h-full w-full overflow-hidden bg-zinc-950">
       <canvas
         id={CANVAS_ID}
-        className={`block h-full w-full${isReady ? '' : ' invisible'}`}
+        tabIndex={0}
+        role="application"
+        aria-label="3D viewport — use keyboard shortcuts to navigate"
+        onKeyDown={handleKeyDown}
+        className={`block h-full w-full focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-purple-500/50${isReady ? '' : ' invisible'}`}
       />
 
       {/* Game HUD overlay - visible during play mode */}
