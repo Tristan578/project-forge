@@ -51,8 +51,10 @@ describe('asyncTypes', () => {
     expect(config.maxConcurrent).toBe(3);
   });
 
-  it('multiplayer has empty allowed methods set', () => {
-    expect(CHANNEL_ALLOWED_METHODS.multiplayer.size).toBe(0);
+  it('multiplayer has stub methods defined', () => {
+    expect(CHANNEL_ALLOWED_METHODS.multiplayer.size).toBeGreaterThan(0);
+    expect(CHANNEL_ALLOWED_METHODS.multiplayer.has('connect')).toBe(true);
+    expect(CHANNEL_ALLOWED_METHODS.multiplayer.has('send')).toBe(true);
   });
 
   it('physics allowed methods include raycast', () => {

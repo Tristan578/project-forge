@@ -571,7 +571,6 @@ describe('applyFixes', () => {
     });
 
     // add_game_component scheduled for next animation frame
-    // Trigger requestAnimationFrame callbacks
     vi.advanceTimersByTime(16);
 
     expect(dispatch).toHaveBeenCalledWith('add_game_component', {
@@ -617,6 +616,31 @@ describe('applyFixes', () => {
     });
 
     vi.useRealTimers();
+  });
+
+  it('dispatches update_ambient_light with property directly', () => {
+    const dispatch = vi.fn();
+    const fixes: IssueFix[] = [
+      {
+        issueId: 'issue-light',
+        description: 'Improve lighting',
+        changes: [
+          {
+            component: 'environment',
+            property: 'brightness',
+            oldValue: 0.3,
+            newValue: 0.5,
+            command: 'update_ambient_light',
+          },
+        ],
+        confidence: 0.5,
+        estimatedImpact: 'test',
+      },
+    ];
+    applyFixes(fixes, dispatch, 1);
+    expect(dispatch).toHaveBeenCalledWith('update_ambient_light', {
+      brightness: 0.5,
+    });
   });
 });
 

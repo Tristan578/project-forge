@@ -8,6 +8,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useChatStore } from '@/stores/chatStore';
 import { getRecentProjects } from '@/lib/workspace/recentProjects';
+import { TUTORIALS } from '@/data/tutorials';
 import type { GameIdea } from '@/lib/ai/ideaGenerator';
 
 const STORAGE_KEY = 'forge-welcomed';
@@ -83,7 +84,14 @@ export function WelcomeModal() {
     handleDismiss();
   }, [navigateDocs, handleDismiss]);
 
+  const [tutorialError, setTutorialError] = useState(false);
+
   const handleStartTutorial = useCallback(() => {
+    const exists = TUTORIALS.some((t) => t.id === 'first-scene');
+    if (!exists) {
+      setTutorialError(true);
+      return;
+    }
     startTutorial('first-scene');
     handleDismiss();
   }, [startTutorial, handleDismiss]);
@@ -205,12 +213,16 @@ export function WelcomeModal() {
             <p className="mb-3 text-xs text-zinc-400">
               Take a 3-minute guided tutorial to learn the basics of building 3D scenes.
             </p>
-            <button
-              onClick={handleStartTutorial}
-              className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-colors"
-            >
-              Start Tutorial
-            </button>
+            {tutorialError ? (
+              <p className="text-xs text-red-400">Tutorial data unavailable. Try the docs instead.</p>
+            ) : (
+              <button
+                onClick={handleStartTutorial}
+                className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-colors"
+              >
+                Start Tutorial
+              </button>
+            )}
           </div>
 
           {/* Template selection section */}

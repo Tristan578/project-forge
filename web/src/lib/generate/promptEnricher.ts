@@ -7,6 +7,7 @@
  */
 
 import type { EditorState } from '@/stores/editorStore';
+import { loadLockedStyle, generateStylePromptModifier } from '@/lib/ai/artStyleEngine';
 
 export type GenerationCategory =
   | 'model'
@@ -161,7 +162,20 @@ export function enrichPrompt(
     ? `, for scene "${ctx.sceneName}"`
     : '';
 
-  return `${prefix}${sceneHint}: ${userPrompt}`;
+  // Append locked art style modifier when a style is locked.
+  // localStorage-backed data can be stale or malformed, so ignore invalid locks
+  // rather than breaking prompt enrichment.
+  let styleSuffix = '';
+  try {
+    const lockedStyle = loadLockedStyle();
+    if (lockedStyle) {
+      styleSuffix = `. ${generateStylePromptModifier(lockedStyle.style)}`;
+    }
+  } catch {
+    // Invalid/corrupt localStorage data — skip style modifier
+  }
+
+  return `${prefix}${sceneHint}: ${userPrompt}${styleSuffix}`;
 }
 
 /**

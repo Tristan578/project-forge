@@ -80,5 +80,7 @@ All work tracked via taskboard. Use `/kanban` skill for full protocol.
 - **Every PR needs a changeset** — Run `npx changeset` (from repo root) or create `.changeset/<name>.md`. Use `skip changeset` label for docs/CI-only PRs.
 - **Sentry re-reviews every commit** — Reply with commit SHA + evidence, not "already fixed".
 - **`replace_all` double-prefix danger** — Renaming `X` to `PREFIX_X` when some are already `PREFIX_X` produces `PREFIX_PREFIX_X`.
+- **Route `[name]` param validation** — Next.js decodes route params, but names containing `/%\` or control chars must be rejected early (before DB access) to match POST validation. Tests will pass locally with mocks but fail in production without it.
+- **Replicate API `model` vs `version`** — `version: 'owner/name:sha'` is deprecated. Use `model: 'owner/name'` field. Constant: `REPLICATE_MODEL_SDXL` in `models.ts`.
 
 See `.claude/rules/gotchas.md` for 40+ additional context-specific gotchas.

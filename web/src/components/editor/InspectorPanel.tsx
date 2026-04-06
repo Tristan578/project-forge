@@ -523,9 +523,10 @@ export const InspectorPanel = memo(function InspectorPanel() {
         </button>
       </CollapsibleSection>
 
-      {/* Show skeleton if we have selection but no transform yet */}
+      {/* Show skeleton if we have selection but no transform yet (engine still loading) */}
       {!primaryTransform && (
         <div className="mt-4 space-y-3">
+          <p className="text-xs text-zinc-500">Waiting for engine data...</p>
           <div className="h-3 w-24 animate-pulse rounded bg-[var(--sf-bg-surface)]" />
           <div className="h-8 w-full animate-pulse rounded bg-[var(--sf-bg-surface)]" />
           <div className="h-8 w-full animate-pulse rounded bg-[var(--sf-bg-surface)]" />

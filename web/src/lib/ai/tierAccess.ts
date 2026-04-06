@@ -47,8 +47,16 @@ export const PANEL_TIER_REQUIREMENTS: Partial<Record<string, Tier>> = {
   'idea-generator': 'hobbyist',
   accessibility: 'hobbyist',
   'gdd-generator': 'hobbyist',
+  'ai-chat': 'hobbyist',
+  'generate-texture': 'hobbyist',
+  'generate-sound': 'hobbyist',
+  'generate-music': 'hobbyist',
+  'generate-sprite': 'hobbyist',
+  'generate-pixel-art': 'hobbyist',
 
   // ---------- Creator+ ----------
+  'generate-model': 'creator',
+  'generate-skybox': 'creator',
   'world-builder': 'creator',
   narrative: 'creator',
   economy: 'creator',

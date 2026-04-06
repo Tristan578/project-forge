@@ -155,10 +155,8 @@ describe('buildSceneContext', () => {
       ambientLight: { color: [0.5, 0.5, 0.5], brightness: 0.8 },
     });
     const ctx = buildSceneContext(store);
-    const settings = ctx.sceneSettings as Record<string, unknown>;
-    const ambient = settings.ambientLight as { color: number[]; brightness: number };
-    expect(ambient.color).toEqual([0.5, 0.5, 0.5]);
-    expect(ambient.brightness).toBe(0.8);
+    expect(ctx.sceneSettings.ambientLight.color).toEqual([0.5, 0.5, 0.5]);
+    expect(ctx.sceneSettings.ambientLight.brightness).toBe(0.8);
   });
 
   it('includes environment settings in sceneSettings', () => {
@@ -170,22 +168,15 @@ describe('buildSceneContext', () => {
       },
     });
     const ctx = buildSceneContext(store);
-    const settings = ctx.sceneSettings as Record<string, unknown>;
-    const env = settings.environment as {
-      clearColor: number[];
-      fogEnabled: boolean;
-      skyboxPreset: string | null;
-    };
-    expect(env.clearColor).toEqual([0.2, 0.3, 0.4]);
-    expect(env.fogEnabled).toBe(true);
-    expect(env.skyboxPreset).toBe('sunset');
+    expect(ctx.sceneSettings.environment.clearColor).toEqual([0.2, 0.3, 0.4]);
+    expect(ctx.sceneSettings.environment.fogEnabled).toBe(true);
+    expect(ctx.sceneSettings.environment.skyboxPreset).toBe('sunset');
   });
 
   it('includes engineMode in sceneSettings', () => {
     const store = makeStore({ engineMode: 'play' });
     const ctx = buildSceneContext(store);
-    const settings = ctx.sceneSettings as Record<string, unknown>;
-    expect(settings.engineMode).toBe('play');
+    expect(ctx.sceneSettings.engineMode).toBe('play');
   });
 
   it('handles null skyboxPreset', () => {
@@ -197,9 +188,7 @@ describe('buildSceneContext', () => {
       },
     });
     const ctx = buildSceneContext(store);
-    const settings = ctx.sceneSettings as Record<string, unknown>;
-    const env = settings.environment as { skyboxPreset: string | null };
-    expect(env.skyboxPreset).toBeNull();
+    expect(ctx.sceneSettings.environment.skyboxPreset).toBeNull();
   });
 
   // ---- multi-entity scene ----

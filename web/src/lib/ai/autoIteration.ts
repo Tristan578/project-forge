@@ -107,6 +107,14 @@ indicating how likely it is to improve the situation.`;
 // Severity thresholds
 // ---------------------------------------------------------------------------
 
+/** Maps fix component names to engine entity types for spawn_entity. */
+const SPAWN_ENTITY_TYPE_MAP: Record<string, string> = {
+  checkpoint: 'cube',
+  collectible: 'cube',
+  triggerZone: 'cube',
+  light: 'point_light',
+};
+
 const CRITICAL_QUIT_PERCENTAGE = 40;
 const MAJOR_QUIT_PERCENTAGE = 25;
 const CRITICAL_DEATH_RATE = 0.7;
@@ -357,10 +365,10 @@ function generateFixForIssue(
         description: `Improve visual interest in "${issue.affectedArea}"`,
         changes: [{
           component: 'environment',
-          property: 'ambientBrightness',
+          property: 'brightness',
           oldValue: 0.3,
           newValue: 0.5,
-          command: 'set_ambient_light',
+          command: 'update_ambient_light',
         }],
         confidence: 0.5,
         estimatedImpact: `Better lighting makes scene more inviting`,
@@ -488,7 +496,7 @@ export function applyFixes(
     for (const change of fix.changes) {
       if (change.command === 'spawn_entity') {
         dispatch(change.command, {
-          entityType: change.component === 'light' ? 'point_light' : 'cube',
+          entityType: SPAWN_ENTITY_TYPE_MAP[change.component] ?? 'cube',
           name: change.component,
         });
         // Queue game component attachment for the next frame
@@ -500,6 +508,10 @@ export function applyFixes(
             value: change.newValue,
           });
         }
+      } else if (change.command === 'update_ambient_light') {
+        dispatch(change.command, {
+          [change.property]: change.newValue,
+        });
       } else {
         dispatch(change.command, {
           entityId: change.entityId,

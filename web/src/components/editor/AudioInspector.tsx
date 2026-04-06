@@ -3,10 +3,12 @@
 import { useCallback, useState } from 'react';
 import { useEditorStore, type AudioData } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { Play, StopCircle, Sparkles, HelpCircle } from 'lucide-react';
+import { Play, StopCircle, Sparkles, HelpCircle, Lock } from 'lucide-react';
 import { GenerateSoundDialog } from './GenerateSoundDialog';
 import { GenerateMusicDialog } from './GenerateMusicDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
+import { useUserStore } from '@/stores/userStore';
+import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
 
 interface SliderRowProps {
   label: string;
@@ -102,6 +104,10 @@ export function AudioInspector() {
   const [generateSoundOpen, setGenerateSoundOpen] = useState(false);
   const [generateMusicOpen, setGenerateMusicOpen] = useState(false);
 
+  const tier = useUserStore((s) => s.tier);
+  const canGenerateSound = canAccessPanel('generate-sound', tier);
+  const canGenerateMusic = canAccessPanel('generate-music', tier);
+
   const primaryId = useEditorStore((s) => s.primaryId);
   const primaryAudio = useEditorStore((s) => s.primaryAudio);
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
@@ -171,19 +177,29 @@ export function AudioInspector() {
         </div>
         <div className="flex gap-1">
           <button
-            onClick={() => setGenerateSoundOpen(true)}
-            className="flex items-center gap-1 rounded bg-purple-900/30 px-2 py-0.5 text-[10px] text-purple-400 hover:bg-purple-900/50"
-            title="Generate sound with AI"
+            onClick={() => canGenerateSound && setGenerateSoundOpen(true)}
+            aria-disabled={!canGenerateSound || undefined}
+            className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] ${
+              canGenerateSound
+                ? 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50'
+                : 'cursor-not-allowed bg-zinc-800 text-zinc-500'
+            }`}
+            title={canGenerateSound ? 'Generate sound with AI' : `Requires ${TIER_LABELS[getRequiredTier('generate-sound') ?? 'hobbyist']} tier`}
           >
-            <Sparkles size={10} />
+            {canGenerateSound ? <Sparkles size={10} /> : <Lock size={10} />}
             Sound
           </button>
           <button
-            onClick={() => setGenerateMusicOpen(true)}
-            className="flex items-center gap-1 rounded bg-purple-900/30 px-2 py-0.5 text-[10px] text-purple-400 hover:bg-purple-900/50"
-            title="Generate music with AI"
+            onClick={() => canGenerateMusic && setGenerateMusicOpen(true)}
+            aria-disabled={!canGenerateMusic || undefined}
+            className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] ${
+              canGenerateMusic
+                ? 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50'
+                : 'cursor-not-allowed bg-zinc-800 text-zinc-500'
+            }`}
+            title={canGenerateMusic ? 'Generate music with AI' : `Requires ${TIER_LABELS[getRequiredTier('generate-music') ?? 'hobbyist']} tier`}
           >
-            <Sparkles size={10} />
+            {canGenerateMusic ? <Sparkles size={10} /> : <Lock size={10} />}
             Music
           </button>
         </div>

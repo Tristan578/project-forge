@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, cleanup, fireEvent } from '@/test/utils/componentTestUtils';
 import { WelcomeModal } from '../WelcomeModal';
 import { useWorkspaceStore, type WorkspaceState } from '@/stores/workspaceStore';
 import { useOnboardingStore, type OnboardingState } from '@/stores/onboardingStore';
@@ -32,6 +32,13 @@ vi.mock('@/components/editor/TemplateGallery', () => ({
 vi.mock('@/components/editor/IdeaGeneratorModal', () => ({
   IdeaGeneratorModal: () => null,
 }));
+
+// Controllable TUTORIALS mock — default includes 'first-scene', tests can override
+const mockTutorials = vi.hoisted(() => ({
+  TUTORIALS: [{ id: 'first-scene', name: 'First Scene', steps: [] }],
+}));
+
+vi.mock('@/data/tutorials', () => mockTutorials);
 
 describe('WelcomeModal', () => {
   beforeEach(() => {
@@ -99,5 +106,37 @@ describe('WelcomeModal', () => {
     expect(screen.getByRole('heading', { name: /Welcome to SpawnForge/i })).toBeInTheDocument();
 
     spy.mockRestore();
+  });
+
+  it('shows error message when tutorial data is unavailable', () => {
+    // Clear the array in-place so the existing ESM named export reference observes the change
+    const saved = [...mockTutorials.TUTORIALS];
+    mockTutorials.TUTORIALS.splice(0, mockTutorials.TUTORIALS.length);
+
+    try {
+      render(<WelcomeModal />);
+      fireEvent.click(screen.getByRole('button', { name: /Start Tutorial/i }));
+
+      // After clicking, tutorialError should be true and the error message shown
+      expect(screen.getByText(/Tutorial data unavailable/i)).toBeInTheDocument();
+      // Start Tutorial button should be replaced with error text
+      expect(screen.queryByRole('button', { name: /Start Tutorial/i })).toBeNull();
+    } finally {
+      // Restore for subsequent tests without replacing the exported array object
+      mockTutorials.TUTORIALS.splice(0, mockTutorials.TUTORIALS.length, ...saved);
+    }
+  });
+
+  it('starts tutorial and dismisses modal when tutorial data exists', () => {
+    const mockStartTutorial = vi.fn();
+    const onboardingState = { startTutorial: mockStartTutorial } as unknown as OnboardingState;
+    vi.mocked(useOnboardingStore).mockImplementation((selector) => selector(onboardingState));
+
+    render(<WelcomeModal />);
+    fireEvent.click(screen.getByRole('button', { name: /Start Tutorial/i }));
+
+    expect(mockStartTutorial).toHaveBeenCalledWith('first-scene');
+    // Modal should be dismissed (dialog gone)
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
