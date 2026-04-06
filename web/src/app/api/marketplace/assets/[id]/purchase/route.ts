@@ -81,6 +81,23 @@ export async function POST(
       return paymentRequired('Insufficient tokens');
     }
 
+    // IDEMPOTENCY GATE: Insert purchase row FIRST. If a concurrent request
+    // already inserted, onConflictDoNothing returns empty → abort before
+    // touching any balances. This prevents the double-charge race condition
+    // where two requests both pass the `existing` check, both mutate balances,
+    // but only one purchase row is actually created.
+    const purchaseInserted = await queryWithResilience(() => getDb().insert(assetPurchases).values({
+      buyerId: user.id,
+      assetId,
+      priceTokens: price,
+      license: asset.license,
+    }).onConflictDoNothing().returning({ id: assetPurchases.id }));
+
+    if (purchaseInserted.length === 0) {
+      // Race: another request already completed this purchase
+      return conflict('Already purchased');
+    }
+
     // Deduct tokens (use earned credits first, then addon, then monthly)
     let remaining = price;
     let earnedUsed = 0;
@@ -162,23 +179,11 @@ export async function POST(
       ? buyerBalance.earnedCredits + buyerBalance.addonTokens + (buyerBalance.monthlyTokens - buyerBalance.monthlyTokensUsed)
       : totalBalance - price;
 
-    // Record purchase — onConflictDoNothing makes this idempotent under retry
-    // (unique constraint on buyerId+assetId prevents duplicate rows)
-    const purchaseInserted = await queryWithResilience(() => getDb().insert(assetPurchases).values({
-      buyerId: user.id,
-      assetId,
-      priceTokens: price,
-      license: asset.license,
-    }).onConflictDoNothing().returning({ id: assetPurchases.id }));
-
-    // Only increment download count when a new purchase row was actually
-    // inserted. On retry (conflict → no insert), skip to avoid double-counting.
-    if (purchaseInserted.length > 0) {
-      await queryWithResilience(() => getDb()
-        .update(marketplaceAssets)
-        .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
-        .where(eq(marketplaceAssets.id, assetId)));
-    }
+    // Increment download count (purchase row was successfully inserted above)
+    await queryWithResilience(() => getDb()
+      .update(marketplaceAssets)
+      .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
+      .where(eq(marketplaceAssets.id, assetId)));
 
     // Record buyer transaction with actual post-update balance
     // onConflictDoNothing: idempotent under retry (unique on userId+source+referenceId)

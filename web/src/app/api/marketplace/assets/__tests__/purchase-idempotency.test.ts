@@ -167,11 +167,11 @@ describe('POST /api/marketplace/assets/[id]/purchase — downloadCount idempoten
     setupDbChain([
       { type: 'select', result: [paidAsset] },       // get asset
       { type: 'select', result: [] },                 // check existing purchase
+      { type: 'insert', result: [{ id: 'purchase-1' }] }, // purchase INSERT succeeds (idempotency gate)
       { type: 'select', result: [seller] },           // get seller
       { type: 'update', result: [{ id: 'buyer-1' }] }, // buyer balance deduction
       { type: 'update', result: [{ earnedCredits: 270 }] }, // seller balance credit
       { type: 'select', result: [{ earnedCredits: 400, addonTokens: 0, monthlyTokens: 1000, monthlyTokensUsed: 100 }] }, // buyer balance read
-      { type: 'insert', result: [{ id: 'purchase-1' }] }, // purchase INSERT succeeds
       { type: 'update', result: [paidAsset] },        // downloadCount increment
       { type: 'insert', result: [{ id: 'txn-1' }] }, // buyer transaction
       { type: 'insert', result: [{ id: 'txn-2' }] }, // seller transaction
@@ -186,25 +186,19 @@ describe('POST /api/marketplace/assets/[id]/purchase — downloadCount idempoten
     expect(mockUpdate).toHaveBeenCalledTimes(3);
   });
 
-  it('does NOT increment downloadCount on retry paid purchase (insert conflicts)', async () => {
+  it('returns 409 on retry paid purchase — no balance mutations (insert conflicts)', async () => {
     setupDbChain([
       { type: 'select', result: [paidAsset] },       // get asset
-      { type: 'select', result: [] },                 // check existing purchase
-      { type: 'select', result: [seller] },           // get seller
-      { type: 'update', result: [{ id: 'buyer-1' }] }, // buyer balance deduction
-      { type: 'update', result: [{ earnedCredits: 270 }] }, // seller balance credit
-      { type: 'select', result: [{ earnedCredits: 400, addonTokens: 0, monthlyTokens: 1000, monthlyTokensUsed: 100 }] }, // buyer balance read
-      { type: 'insert', result: [] },                 // purchase INSERT conflicts — empty returning
-      { type: 'insert', result: [] },                 // buyer transaction (may also conflict)
-      { type: 'insert', result: [] },                 // seller transaction (may also conflict)
+      { type: 'select', result: [] },                 // check existing purchase (race: not found yet)
+      { type: 'insert', result: [] },                 // purchase INSERT conflicts — idempotency gate blocks
     ]);
 
     const { POST } = await import('@/app/api/marketplace/assets/[id]/purchase/route');
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: 'asset-1' }) });
-    const body = await res.json();
 
-    expect(body.success).toBe(true);
-    // Only 2 updates: buyer balance, seller balance. No downloadCount increment.
-    expect(mockUpdate).toHaveBeenCalledTimes(2);
+    // With insert-first pattern, conflict returns 409 before any balance mutation
+    expect(res.status).toBe(409);
+    // No balance updates should have happened
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 });
