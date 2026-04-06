@@ -164,7 +164,7 @@ export function InitOverlay() {
   const showFailedState = retryCount >= 3 || (!canRetry && (isTimedOut || error));
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-950/95">
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-950">
       <div className="w-full max-w-md rounded-lg border border-zinc-800 bg-zinc-900 p-6 shadow-xl">
         {showFailedState ? (
           <FailedState onCopyLog={handleCopyLog} copied={copied} onSwitchToWebGL2={handleSwitchToWebGL2} />
