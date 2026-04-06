@@ -23,12 +23,14 @@ These are lower-frequency gotchas moved from CLAUDE.md. The most common ones rem
 - **`secrets` context forbidden in workflow_call step `if:`** — Use an env var in a prior step and check step outputs instead. GitHub Actions only allows `env`, `github`, `inputs`, `steps` etc. in step conditions inside reusable workflows.
 
 ## Database
+- **Always use `queryWithResilience()`** — Only call `getDb()` inside the `queryWithResilience()` callback, never assign it to a standalone variable. Example: `queryWithResilience(() => getDb().select()...)`. ESLint `no-restricted-syntax` flags the `const db = getDb()` assignment pattern across `src/**`.
 - **`onConflictDoUpdate` field completeness** — List EVERY mutable field in `.set()`. Missing fields keep original values.
 - **Delete children before insert on upsert** — `db.delete(childTable).where(eq(parentId))` before inserting.
 - **ZADD member uniqueness** — `Date.now()` collides in same ms. Use `` `${Date.now()}:${Math.random().toString(36).slice(2,8)}` ``.
 - **CTE `FOR UPDATE` required for row locking** — Without it, concurrent requests snapshot the same pre-update value.
 - **neonSql.transaction must include ALL related writes** — Never split claim and deduction across separate operations.
 - **neon-http tagged template returns `Row[]`** — Use `.length` to check results, not `.rowCount`.
+- **Circuit breaker trips at 5 consecutive transient failures** — Stays open for 30s, then half-open (1 probe). Non-transient errors (auth, syntax) don't count. Opening fires a Sentry alert (#8244); half-open/closed transitions are silent.
 
 ## API & Security
 - **usageId in generate route responses** — NEVER remove. Client needs it for async job refunds.
@@ -52,6 +54,7 @@ These are lower-frequency gotchas moved from CLAUDE.md. The most common ones rem
 - **Hook input: two patterns, not interchangeable** — Edit/Write hooks get `TOOL_INPUT_<field>` env vars (e.g. `TOOL_INPUT_file_path`). Bash hooks get stdin JSON parsed with `jq -r '.tool_input.command'`. Using the wrong pattern = silent no-op. For Bash hooks, source `.claude/hooks/hook-utils.sh` and call `get_bash_command()`. See `check-pr-metadata.sh` for the canonical Bash hook pattern.
 
 ## Infrastructure
+- **WASM CDN fallback — same-origin requires JS glue + WASM from same origin** — `useEngine.ts` tries CDN first, falls back to `/engine-pkg-*/`. Both JS glue and WASM binary must come from the same origin (CDN or same-origin) due to wasm-bindgen import path coupling. To force same-origin: unset `NEXT_PUBLIC_ENGINE_CDN_URL`. AbortError from navigation is suppressed in the `useEngine` `.catch` handler (not inside `loadWasm` itself) so it doesn't surface as a user-visible error.
 - **Vercel account scope** — ALWAYS use `--scope tnolan`. Never `nolantj-livecoms-projects`.
 - **Worktree branch loss** — Nested worktrees lose branches. Never nest. Always rebase onto main first.
 - **Schema changes need migrations** — `db:push` works in dev but production needs `ALTER TABLE`.
