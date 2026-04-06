@@ -16,6 +16,7 @@ export interface ExportOptions {
   customLoadingScreen?: LoadingScreenConfig;
   orientationLock?: 'landscape' | 'portrait' | 'none';
   textureCompressionConfig?: CompressionConfig;
+  signal?: AbortSignal;
 }
 
 export async function exportGame(options: ExportOptions): Promise<Blob> {
@@ -60,7 +61,7 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
       orientationLock: options.orientationLock,
     };
 
-    return await exportAsZip(sceneData, store.allScripts, zipOptions);
+    return await exportAsZip(sceneData, store.allScripts, zipOptions, options.signal);
   }
 
   // Default: Single HTML export

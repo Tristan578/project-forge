@@ -45,6 +45,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   const [exportError, setExportError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Close on Escape key + focus trap
   useEffect(() => {
@@ -142,6 +143,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         customLoadingScreen: showLoadingCustomization ? loadingConfig : undefined,
         orientationLock: orientationLock === 'none' ? undefined : orientationLock,
         textureCompressionConfig,
+        signal: controller.signal,
       });
 
       // If user cancelled during export, skip download
@@ -176,7 +178,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       abortRef.current = null;
       setExporting(false);
     }
-  }, [title, mode, resolution, bgColor, includeDebug, selectedPreset, showLoadingCustomization, loadingConfig, orientationLock, compressionPreset, compressionQuality, setExporting, onClose]);
+  }, [isExporting, title, mode, resolution, bgColor, includeDebug, selectedPreset, showLoadingCustomization, loadingConfig, orientationLock, compressionPreset, compressionQuality, setExporting, onClose]);
 
   const handleCopySnippet = useCallback(() => {
     if (!embedSnippet) return;
