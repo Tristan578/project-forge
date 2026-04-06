@@ -29,7 +29,7 @@ export function CanvasArea() {
     <div className="relative h-full w-full overflow-hidden bg-zinc-900">
       <canvas
         id={CANVAS_ID}
-        className={`block h-full w-full${isReady ? '' : ' hidden'}`}
+        className={`block h-full w-full${isReady ? '' : ' invisible'}`}
       />
 
       {/* Game HUD overlay - visible during play mode */}
