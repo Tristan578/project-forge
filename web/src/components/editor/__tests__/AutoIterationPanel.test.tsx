@@ -19,9 +19,12 @@ vi.mock('@/stores/editorStore', () => ({
   getCommandDispatcher: vi.fn(() => vi.fn()),
 }));
 
-const mockDiagnoseIssues = vi.fn(() => []);
-const mockGenerateFixes = vi.fn(() => []);
-const mockApplyFixes = vi.fn(() => ({
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockDiagnoseIssues = vi.fn((..._args: any[]) => []);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockGenerateFixes = vi.fn((..._args: any[]) => []);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockApplyFixes = vi.fn((..._args: any[]) => ({
   iterationNumber: 1,
   timestamp: Date.now(),
   summary: 'Applied',
@@ -30,9 +33,9 @@ const mockApplyFixes = vi.fn(() => ({
 }));
 
 vi.mock('@/lib/ai/autoIteration', () => ({
-  diagnoseIssues: (...args: unknown[]) => mockDiagnoseIssues(...args),
-  generateFixes: (...args: unknown[]) => mockGenerateFixes(...args),
-  applyFixes: (...args: unknown[]) => mockApplyFixes(...args),
+  diagnoseIssues: mockDiagnoseIssues,
+  generateFixes: mockGenerateFixes,
+  applyFixes: mockApplyFixes,
   severityColor: vi.fn(() => ''),
   severityLabel: vi.fn(() => ''),
   categoryLabel: vi.fn(() => ''),
@@ -61,7 +64,7 @@ describe('AutoIterationPanel', () => {
     fireEvent.click(diagnoseButton);
 
     expect(mockDiagnoseIssues).toHaveBeenCalledTimes(1);
-    const [_metrics, ctx] = mockDiagnoseIssues.mock.calls[0];
+    const ctx = mockDiagnoseIssues.mock.calls[0][1];
     expect(ctx.entityCount).toBe(2);
     expect(ctx.entities).toHaveLength(2);
     expect(ctx.entities).toEqual(
@@ -83,7 +86,7 @@ describe('AutoIterationPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Diagnose/i }));
 
-    const [_metrics, ctx] = mockDiagnoseIssues.mock.calls[0];
+    const ctx = mockDiagnoseIssues.mock.calls[0][1];
     expect(ctx.entityCount).toBe(0);
     expect(ctx.entities).toHaveLength(0);
   });
