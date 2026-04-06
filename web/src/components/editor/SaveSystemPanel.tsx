@@ -163,12 +163,18 @@ export function SaveSystemPanel() {
     setIsGenerating(false);
   }, [detectedFields, enabledPaths, saveSlots, autoSaveInterval, checkpoints, compression]);
 
-  // -- Apply to project (copies script to clipboard) --
+  // -- Apply to project: attach script to selected entity, or copy to clipboard --
   const handleApply = useCallback(() => {
     if (!generatedSystem) return;
-    navigator.clipboard.writeText(generatedSystem.script).catch(() => {
-      // Clipboard API may not be available; silent fail
-    });
+    const { primaryId, setScript } = useEditorStore.getState();
+    if (primaryId) {
+      setScript(primaryId, generatedSystem.script, true);
+    } else {
+      // No entity selected — fall back to clipboard copy
+      navigator.clipboard.writeText(generatedSystem.script).catch(() => {
+        // Clipboard API may not be available; silent fail
+      });
+    }
   }, [generatedSystem]);
 
   return (
