@@ -16,15 +16,29 @@ const STORAGE_KEY = 'forge-welcomed';
 // No-op subscribe — localStorage doesn't fire events in same tab
 const noop = () => () => {};
 
+/** Safe localStorage access — returns null if storage is unavailable (private browsing, strict tracking prevention). */
+function safeGetItem(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSetItem(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Storage unavailable — silently ignore
+  }
+}
+
 export function WelcomeModal() {
   // useSyncExternalStore: server returns false (no modal in SSR HTML),
   // client returns true if not yet welcomed — React handles the transition after hydration
   const shouldShow = useSyncExternalStore(
     noop,
-    () => {
-      try { return !localStorage.getItem(STORAGE_KEY); }
-      catch { return true; }
-    },
+    () => !safeGetItem(STORAGE_KEY),
     () => false,
   );
   const [dismissed, setDismissed] = useState(false);
@@ -52,8 +66,7 @@ export function WelcomeModal() {
   const handleDismiss = useCallback(() => {
     setDismissed(true);
     if (dontShowAgain) {
-      try { localStorage.setItem(STORAGE_KEY, '1'); }
-      catch { /* Private browsing — silently skip persistence */ }
+      safeSetItem(STORAGE_KEY, '1');
     }
   }, [dontShowAgain]);
 
