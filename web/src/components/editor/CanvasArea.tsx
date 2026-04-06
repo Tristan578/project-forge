@@ -30,7 +30,7 @@ export function CanvasArea() {
     // Play mode: Bevy handles keyboard natively, except Escape to exit
     if (engineMode === 'play') {
       if (e.key === 'Escape') {
-        getWasmModule()?.handle_command('set_engine_mode', { mode: 'edit' });
+        getWasmModule()?.handle_command('stop', {});
         e.preventDefault();
       }
       return;
@@ -68,7 +68,11 @@ export function CanvasArea() {
       // Duplicate
       case 'd':
       case 'D':
-        if (ctrl) { wasm?.handle_command('duplicate_entities', {}); e.preventDefault(); }
+        if (ctrl) {
+          const primaryId = useEditorStore.getState().primaryId;
+          if (primaryId) { wasm?.handle_command('duplicate_entity', { entityId: primaryId }); }
+          e.preventDefault();
+        }
         break;
 
       // Undo/Redo
@@ -81,30 +85,12 @@ export function CanvasArea() {
       // Focus selected
       case 'f':
       case 'F':
-        if (!ctrl) { wasm?.handle_command('focus_selected', {}); e.preventDefault(); }
+        if (!ctrl) { wasm?.handle_command('focus_camera', {}); e.preventDefault(); }
         break;
 
       // Deselect all
       case 'Escape':
-        wasm?.handle_command('deselect_all', {});
-        e.preventDefault();
-        break;
-
-      // Arrow keys for orbit camera
-      case 'ArrowLeft':
-        wasm?.handle_command('orbit_camera', { deltaYaw: -15, deltaPitch: 0 });
-        e.preventDefault();
-        break;
-      case 'ArrowRight':
-        wasm?.handle_command('orbit_camera', { deltaYaw: 15, deltaPitch: 0 });
-        e.preventDefault();
-        break;
-      case 'ArrowUp':
-        wasm?.handle_command('orbit_camera', { deltaYaw: 0, deltaPitch: -15 });
-        e.preventDefault();
-        break;
-      case 'ArrowDown':
-        wasm?.handle_command('orbit_camera', { deltaYaw: 0, deltaPitch: 15 });
+        wasm?.handle_command('clear_selection', {});
         e.preventDefault();
         break;
     }

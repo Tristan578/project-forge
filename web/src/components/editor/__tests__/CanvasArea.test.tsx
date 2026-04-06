@@ -60,11 +60,12 @@ function mockEditorStore(overrides: Record<string, unknown> = {}) {
     hudElements: [],
     engineMode: 'edit',
     selectedIds: new Set(['entity-1']),
+    primaryId: 'entity-1',
     ...overrides,
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(useEditorStore).mockImplementation((selector: any) => selector(state));
-  // Mock getState for imperative access (used in Delete handler)
+  // Mock getState for imperative access (used in Delete/Duplicate handlers)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (useEditorStore as any).getState = () => state;
 }
@@ -145,6 +146,22 @@ describe('CanvasArea', () => {
     expect(mockHandleCommand).toHaveBeenCalledWith('delete_entities', { entityIds: ['entity-1'] });
   });
 
+  it('Ctrl+D dispatches duplicate_entity with primaryId', () => {
+    mockEditorStore();
+    const { container } = render(<CanvasArea />);
+    const canvas = container.querySelector('canvas')!;
+    fireEvent.keyDown(canvas, { key: 'd', ctrlKey: true });
+    expect(mockHandleCommand).toHaveBeenCalledWith('duplicate_entity', { entityId: 'entity-1' });
+  });
+
+  it('Ctrl+D does nothing when no primaryId', () => {
+    mockEditorStore({ primaryId: null });
+    const { container } = render(<CanvasArea />);
+    const canvas = container.querySelector('canvas')!;
+    fireEvent.keyDown(canvas, { key: 'd', ctrlKey: true });
+    expect(mockHandleCommand).not.toHaveBeenCalledWith('duplicate_entity', expect.anything());
+  });
+
   it('Ctrl+Z dispatches undo', () => {
     mockEditorStore();
     const { container } = render(<CanvasArea />);
@@ -161,20 +178,28 @@ describe('CanvasArea', () => {
     expect(mockHandleCommand).toHaveBeenCalledWith('redo', {});
   });
 
-  it('Escape dispatches deselect_all in edit mode', () => {
+  it('F key dispatches focus_camera', () => {
+    mockEditorStore();
+    const { container } = render(<CanvasArea />);
+    const canvas = container.querySelector('canvas')!;
+    fireEvent.keyDown(canvas, { key: 'f' });
+    expect(mockHandleCommand).toHaveBeenCalledWith('focus_camera', {});
+  });
+
+  it('Escape dispatches clear_selection in edit mode', () => {
     mockEditorStore();
     const { container } = render(<CanvasArea />);
     const canvas = container.querySelector('canvas')!;
     fireEvent.keyDown(canvas, { key: 'Escape' });
-    expect(mockHandleCommand).toHaveBeenCalledWith('deselect_all', {});
+    expect(mockHandleCommand).toHaveBeenCalledWith('clear_selection', {});
   });
 
-  it('Escape in play mode dispatches set_engine_mode edit', () => {
+  it('Escape in play mode dispatches stop', () => {
     mockEditorStore({ engineMode: 'play' });
     const { container } = render(<CanvasArea />);
     const canvas = container.querySelector('canvas')!;
     fireEvent.keyDown(canvas, { key: 'Escape' });
-    expect(mockHandleCommand).toHaveBeenCalledWith('set_engine_mode', { mode: 'edit' });
+    expect(mockHandleCommand).toHaveBeenCalledWith('stop', {});
   });
 
   it('keyboard shortcuts are no-op in play mode (except Escape)', () => {
@@ -186,15 +211,5 @@ describe('CanvasArea', () => {
     // Only Escape should work in play mode
     expect(mockHandleCommand).not.toHaveBeenCalledWith('set_gizmo_mode', expect.anything());
     expect(mockHandleCommand).not.toHaveBeenCalledWith('delete_entities', expect.anything());
-  });
-
-  it('arrow keys dispatch orbit_camera', () => {
-    mockEditorStore();
-    const { container } = render(<CanvasArea />);
-    const canvas = container.querySelector('canvas')!;
-    fireEvent.keyDown(canvas, { key: 'ArrowLeft' });
-    expect(mockHandleCommand).toHaveBeenCalledWith('orbit_camera', { deltaYaw: -15, deltaPitch: 0 });
-    fireEvent.keyDown(canvas, { key: 'ArrowUp' });
-    expect(mockHandleCommand).toHaveBeenCalledWith('orbit_camera', { deltaYaw: 0, deltaPitch: -15 });
   });
 });
