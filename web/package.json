@@ -52,7 +52,6 @@
     "dockview-react": "^5.1.0",
     "dotenv": "^17.3.1",
     "drizzle-orm": "0.45.2",
-    "fast-xml-parser": "^5.5.10",
     "jsfxr": "^1.4.0",
     "lucide-react": "^1.0.1",
     "next": "^16.2.2",
