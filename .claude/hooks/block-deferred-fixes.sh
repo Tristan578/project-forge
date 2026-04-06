@@ -65,7 +65,7 @@ if [ -z "$BODY" ]; then
   echo ""
   echo "  Use standard quoting: -f body=\"your reply text here\""
   echo "================================================================"
-  exit 1
+  exit 2
 fi
 
 BODY_LOWER=$(echo "$BODY" | tr '[:upper:]' '[:lower:]')
@@ -209,4 +209,4 @@ echo "    - \"Tracked in #NNNN. <description>\"  (with real GH issue)"
 echo ""
 echo "  BLOCKED phrases: ${FOUND_PHRASES[*]}"
 echo "================================================================"
-exit 1
+exit 2

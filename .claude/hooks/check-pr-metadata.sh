@@ -47,7 +47,7 @@ if [[ ${#ERRORS[@]} -gt 0 ]]; then
   echo "    P2: Degraded Experience"
   echo "    P3: Tech Debt"
   echo "================================================================"
-  exit 1
+  exit 2
 fi
 
 exit 0
