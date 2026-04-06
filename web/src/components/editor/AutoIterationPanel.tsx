@@ -267,7 +267,12 @@ function AutoIterationPanel() {
     const selected = fixes.filter((_, i) => selectedFixIds.has(i));
     if (selected.length === 0) return;
 
-    const report = applyFixes(selected, dispatcher, iterationCount + 1);
+    const report = applyFixes(
+      selected,
+      dispatcher,
+      iterationCount + 1,
+      () => useEditorStore.getState().selectedEntityId,
+    );
     report.issuesFound = issues;
     setReports((prev) => [report, ...prev]);
     setPhase('input');

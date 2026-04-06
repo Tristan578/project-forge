@@ -539,6 +539,85 @@ describe('applyFixes', () => {
     expect(report.fixesApplied).toHaveLength(5);
     expect(dispatch).toHaveBeenCalledTimes(5);
   });
+
+  it('schedules add_game_component after spawn_entity for game component types', () => {
+    vi.useFakeTimers();
+    const dispatch = vi.fn();
+    const getSelectedEntityId = vi.fn().mockReturnValue('spawned-entity-42');
+    const fixes: IssueFix[] = [
+      {
+        issueId: 'issue-spawn',
+        description: 'Add checkpoint',
+        changes: [
+          {
+            component: 'checkpoint',
+            property: 'autoSave',
+            oldValue: undefined,
+            newValue: true,
+            command: 'spawn_entity',
+          },
+        ],
+        confidence: 0.8,
+        estimatedImpact: 'Add checkpoint',
+      },
+    ];
+
+    applyFixes(fixes, dispatch, 1, getSelectedEntityId);
+
+    // spawn_entity dispatched synchronously
+    expect(dispatch).toHaveBeenCalledWith('spawn_entity', {
+      entityType: 'cube',
+      name: 'checkpoint',
+    });
+
+    // add_game_component scheduled for next animation frame
+    // Trigger requestAnimationFrame callbacks
+    vi.advanceTimersByTime(16);
+
+    expect(dispatch).toHaveBeenCalledWith('add_game_component', {
+      entityId: 'spawned-entity-42',
+      componentType: 'Checkpoint',
+      properties: { autoSave: true },
+    });
+    expect(getSelectedEntityId).toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
+  it('does not schedule add_game_component for non-game-component spawns (e.g. light)', () => {
+    vi.useFakeTimers();
+    const dispatch = vi.fn();
+    const getSelectedEntityId = vi.fn().mockReturnValue('light-entity');
+    const fixes: IssueFix[] = [
+      {
+        issueId: 'issue-light',
+        description: 'Add light',
+        changes: [
+          {
+            component: 'light',
+            property: 'intensity',
+            oldValue: 800,
+            newValue: 1200,
+            command: 'spawn_entity',
+          },
+        ],
+        confidence: 0.5,
+        estimatedImpact: 'Better lighting',
+      },
+    ];
+
+    applyFixes(fixes, dispatch, 1, getSelectedEntityId);
+    vi.advanceTimersByTime(16);
+
+    // Only spawn_entity dispatched, no add_game_component for 'light'
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledWith('spawn_entity', {
+      entityType: 'point_light',
+      name: 'light',
+    });
+
+    vi.useRealTimers();
+  });
 });
 
 // ---------------------------------------------------------------------------
