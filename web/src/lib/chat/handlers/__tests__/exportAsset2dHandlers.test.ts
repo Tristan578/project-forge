@@ -25,6 +25,9 @@ const mockEditorState = {
   sceneName: 'TestScene' as string | null,
   loadingScreenConfig: null as unknown,
   setLoadingScreenConfig: vi.fn(),
+  exportPreset: null as unknown,
+  setExportPreset: vi.fn(),
+  clearExportPreset: vi.fn(),
 };
 
 vi.mock('@/stores/editorStore', () => ({
@@ -43,6 +46,9 @@ describe('exportHandlers', () => {
     mockEditorState.sceneName = 'TestScene';
     mockEditorState.loadingScreenConfig = null;
     mockEditorState.setLoadingScreenConfig = vi.fn();
+    mockEditorState.exportPreset = null;
+    mockEditorState.setExportPreset = vi.fn();
+    mockEditorState.clearExportPreset = vi.fn();
 
     const { exportGame, downloadBlob } = await import('@/lib/export/exportEngine');
     (exportGame as ReturnType<typeof vi.fn>).mockResolvedValue(new Blob(['game'], { type: 'application/zip' }));
@@ -88,6 +94,27 @@ describe('exportHandlers', () => {
       // web-optimized preset has bgColor '#1a1a1a'
       expect(exportGame).toHaveBeenCalledWith(expect.objectContaining({
         bgColor: '#1a1a1a',
+      }));
+    });
+
+    it('falls back to stored exportPreset when no preset arg given', async () => {
+      mockEditorState.exportPreset = {
+        name: 'itch-io',
+        config: {
+          name: 'itch.io',
+          format: 'zip',
+          includeSourceMaps: false,
+          compressTextures: true,
+          resolution: 'responsive',
+          includeDebug: false,
+          loadingScreen: { backgroundColor: '#fa5c5c', progressBarColor: '#ffffff', progressStyle: 'bar' },
+        },
+      };
+      const { exportGame } = await import('@/lib/export/exportEngine');
+      const { result } = await invokeHandler(exportHandlers, 'export_project_zip', {});
+      expect(result.success).toBe(true);
+      expect(exportGame).toHaveBeenCalledWith(expect.objectContaining({
+        bgColor: '#fa5c5c',
       }));
     });
 
@@ -317,17 +344,24 @@ describe('exportHandlers', () => {
       expect(result.error).toContain('Available');
     });
 
-    it('returns success with preset details for known preset', async () => {
+    it('persists a known preset to the store', async () => {
       const { result } = await invokeHandler(exportHandlers, 'set_export_preset', { preset: 'web-optimized' });
       expect(result.success).toBe(true);
       expect(result.message).toContain('Web Optimized');
-      expect(result.message).toContain('format=zip');
+      expect(mockEditorState.setExportPreset).toHaveBeenCalledWith('web-optimized', expect.objectContaining({
+        name: 'Web Optimized',
+        format: 'zip',
+      }));
     });
 
-    it('recognizes itch-io preset', async () => {
+    it('persists itch-io preset', async () => {
       const { result } = await invokeHandler(exportHandlers, 'set_export_preset', { preset: 'itch-io' });
       expect(result.success).toBe(true);
       expect(result.message).toContain('itch.io');
+      expect(mockEditorState.setExportPreset).toHaveBeenCalledWith('itch-io', expect.objectContaining({
+        name: 'itch.io',
+        format: 'zip',
+      }));
     });
   });
 });

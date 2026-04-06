@@ -7,6 +7,7 @@ import type { GameComponentData, GameCameraData, MobileTouchConfig, HudElement, 
 import type { LoadingScreenConfig } from '@/lib/export/loadingScreen';
 import type { AccessibilityProfile } from '@/lib/ai/accessibilityGenerator';
 import { createDefaultProfile } from '@/lib/ai/accessibilityGenerator';
+import type { ExportPreset } from '@/lib/export/presets';
 
 export interface GameSlice {
   allGameComponents: Record<string, GameComponentData[]>;
@@ -19,6 +20,7 @@ export interface GameSlice {
   engineMode: EngineMode;
   loadingScreenConfig: LoadingScreenConfig | null;
   accessibilityProfile: AccessibilityProfile | null;
+  exportPreset: { name: string; config: ExportPreset } | null;
 
   addGameComponent: (entityId: string, component: GameComponentData) => void;
   updateGameComponent: (entityId: string, component: GameComponentData) => void;
@@ -35,6 +37,8 @@ export interface GameSlice {
   setLoadingScreenConfig: (config: LoadingScreenConfig | null) => void;
   setAccessibilityProfile: (profile: AccessibilityProfile | null) => void;
   updateAccessibilityProfile: (partial: Partial<AccessibilityProfile>) => void;
+  setExportPreset: (name: string, config: ExportPreset) => void;
+  clearExportPreset: () => void;
   play: () => void;
   stop: () => void;
   pause: () => void;
@@ -67,6 +71,7 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   engineMode: 'edit',
   loadingScreenConfig: null,
   accessibilityProfile: null,
+  exportPreset: null,
 
   addGameComponent: (entityId, component) => {
     set(state => ({
@@ -136,6 +141,8 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
       },
     });
   },
+  setExportPreset: (name, config) => set({ exportPreset: { name, config } }),
+  clearExportPreset: () => set({ exportPreset: null }),
   play: () => {
     if (dispatchCommand) dispatchCommand('play', {});
     import('@/lib/analytics/events').then(m => m.trackPlayModeStarted()).catch(() => { /* analytics non-critical */ });

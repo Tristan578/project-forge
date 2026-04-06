@@ -21,7 +21,7 @@ export const exportHandlers: Record<string, ToolHandler> = {
 
     const store = useEditorStore.getState();
     const gameTitle = p.data.title || store.sceneName || 'Game';
-    const presetConfig = p.data.preset ? getPreset(p.data.preset) : undefined;
+    const presetConfig = p.data.preset ? getPreset(p.data.preset) : store.exportPreset?.config;
 
     try {
       const blob = await exportGame({
@@ -125,9 +125,11 @@ export const exportHandlers: Record<string, ToolHandler> = {
       };
     }
 
+    useEditorStore.getState().setExportPreset(p.data.preset, preset);
+
     return {
       success: true,
-      message: `Export preset "${preset.name}" details: format=${preset.format}, compress=${preset.compressTextures}, resolution=${preset.resolution}, debug=${preset.includeDebug}. Pass these settings to export_project_zip or export_project_pwa to apply them.`,
+      message: `Export preset set to "${preset.name}" (${preset.format}, ${preset.resolution}). Next export will use these settings.`,
     };
   },
 };
