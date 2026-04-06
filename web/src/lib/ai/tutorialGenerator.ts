@@ -434,21 +434,18 @@ const TUTORIAL_STEPS = ${stepsJson};
 let currentStep = 0;
 
 function showStep(step) {
-  forge.ui.showOverlay({
-    text: step.instruction,
-    hint: step.hint || null,
-    position: 'bottom-center',
-  });
+  forge.ui.removeText('tutorial-hint');
+  forge.ui.showText('tutorial-step', step.instruction, 50, 90, { fontSize: 18, color: 'white' });
+  if (step.hint) {
+    forge.ui.showText('tutorial-hint', step.hint, 50, 95, { fontSize: 14, color: '#aaa' });
+  }
 }
 
 function onInit() {
-  forge.ui.showOverlay({
-    text: ${JSON.stringify(plan.introText)},
-    position: 'top-center',
-    duration: 3000,
-  });
+  forge.ui.showText('tutorial-intro', ${JSON.stringify(plan.introText)}, 50, 10, { fontSize: 20, color: 'white' });
 
   setTimeout(() => {
+    forge.ui.removeText('tutorial-intro');
     if (TUTORIAL_STEPS.length > 0) {
       showStep(TUTORIAL_STEPS[0]);
     }
@@ -458,11 +455,10 @@ function onInit() {
 function advanceStep() {
   currentStep++;
   if (currentStep >= TUTORIAL_STEPS.length) {
-    forge.ui.showOverlay({
-      text: ${JSON.stringify(plan.completionText)},
-      position: 'center',
-      duration: 5000,
-    });
+    forge.ui.removeText('tutorial-step');
+    forge.ui.removeText('tutorial-hint');
+    forge.ui.showText('tutorial-complete', ${JSON.stringify(plan.completionText)}, 50, 50, { fontSize: 22, color: 'white' });
+    setTimeout(() => forge.ui.removeText('tutorial-complete'), 5000);
     return;
   }
   showStep(TUTORIAL_STEPS[currentStep]);
