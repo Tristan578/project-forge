@@ -158,7 +158,7 @@ DEFERRED_PATTERNS=(
 
 FOUND_PHRASES=()
 for pattern in "${DEFERRED_PATTERNS[@]}"; do
-  if echo "$BODY_LOWER" | grep -qi "$pattern"; then
+  if echo "$BODY_LOWER" | grep -qiw "$pattern"; then
     FOUND_PHRASES+=("$pattern")
   fi
 done
