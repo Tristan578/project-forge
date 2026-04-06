@@ -57,7 +57,7 @@ export const exportHandlers: Record<string, ToolHandler> = {
 
     const store = useEditorStore.getState();
     const gameTitle = p.data.title || store.sceneName || 'Game';
-    const presetConfig = p.data.preset ? getPreset(p.data.preset) : getPreset('pwa-mobile');
+    const presetConfig = p.data.preset ? getPreset(p.data.preset) : undefined;
 
     try {
       const blob = await exportGame({
