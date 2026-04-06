@@ -219,3 +219,17 @@ body {
 .animate-shimmer-sweep {
   animation: shimmer-sweep 1.5s ease-in-out infinite;
 }
+
+/* Global reduced-motion: kill non-essential animations and transitions.
+   Essential animations (e.g. loading spinners) can override with
+   animation: <value> !important in their specific selector. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
