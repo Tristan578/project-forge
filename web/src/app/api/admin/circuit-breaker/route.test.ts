@@ -13,7 +13,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { getAllBreakerStats, resetProviderBreaker, resetAllBreakers } from '@/lib/providers/circuitBreaker';
 
 describe('/api/admin/circuit-breaker', () => {
