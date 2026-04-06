@@ -113,11 +113,11 @@ export class CircuitBreaker {
     }
   }
 
-  /** Log state transition to Sentry for incident response (#8244). */
+  /** Alert to Sentry when the circuit opens (#8244). Non-open transitions are silent. */
   private _transition(from: CircuitState, to: CircuitState): void {
     this.state = to;
-    // Opening the circuit is an operational alert — capture as exception
-    // so Sentry fires alerts configured for the DB subsystem (#8244).
+    // Only opening is an operational alert — half-open and closed are
+    // normal recovery and don't warrant Sentry noise.
     if (to === 'open') {
       captureException(
         new Error(`DB circuit breaker opened after ${this.consecutiveFailures} consecutive failures`),
