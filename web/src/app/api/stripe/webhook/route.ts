@@ -10,7 +10,7 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { eq } from 'drizzle-orm';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import type { Tier } from '@/lib/db/schema';
 import { creditAddonTokens } from '@/lib/tokens/service';
@@ -113,8 +113,6 @@ export async function POST(req: Request) {
 }
 
 async function processEvent(event: Stripe.Event): Promise<void> {
-  const db = getDb();
-
   switch (event.type) {
     // -----------------------------------------------------------
     // New subscription created
@@ -250,11 +248,11 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         if (session.customer) {
           const stripeCustomerId = resolveCustomerId(session.customer);
           if (stripeCustomerId) {
-            const [user] = await db
+            const [user] = await queryWithResilience(() => getDb()
               .select({ id: users.id, stripeCustomerId: users.stripeCustomerId })
               .from(users)
               .where(eq(users.id, userId))
-              .limit(1);
+              .limit(1));
 
             if (user && !user.stripeCustomerId) {
               await updateUserStripe(userId, stripeCustomerId);

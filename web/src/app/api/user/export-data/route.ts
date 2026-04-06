@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import {
   users,
@@ -33,8 +33,6 @@ export async function GET(req: NextRequest) {
   const userId = mid.userId!;
 
   try {
-    const db = getDb();
-
     const [
       userProfile,
       userProjects,
@@ -47,7 +45,10 @@ export async function GET(req: NextRequest) {
       userFeedback,
       userProviderKeys,
       userApiKeys,
-    ] = await Promise.all([
+    ] = await queryWithResilience(() => {
+      // eslint-disable-next-line no-restricted-syntax -- db ref needed for Promise.all inside queryWithResilience
+      const db = getDb();
+      return Promise.all([
       db.select({
         id: users.id,
         email: users.email,
@@ -153,6 +154,7 @@ export async function GET(req: NextRequest) {
         createdAt: apiKeys.createdAt,
       }).from(apiKeys).where(eq(apiKeys.userId, userId)),
     ]);
+    });
 
     const exportData = {
       exportedAt: new Date().toISOString(),

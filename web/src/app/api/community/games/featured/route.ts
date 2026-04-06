@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, users, gameLikes, gameRatings, gameTags, gameComments, featuredGames } from '@/lib/db/schema';
 import { eq, sql, and, gt, or, isNull } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
@@ -12,10 +12,8 @@ export async function GET(req: NextRequest) {
   if (limited) return limited;
 
   try {
-    const db = getDb();
-
     // Get featured game IDs
-    const featured = await db
+    const featured = await queryWithResilience(() => getDb()
       .select({ gameId: featuredGames.gameId })
       .from(featuredGames)
       .where(
@@ -26,7 +24,7 @@ export async function GET(req: NextRequest) {
       )
       .leftJoin(publishedGames, eq(featuredGames.gameId, publishedGames.id))
       .orderBy(featuredGames.position)
-      .limit(5);
+      .limit(5));
 
     if (featured.length === 0) {
       return NextResponse.json({ games: [] });
@@ -35,7 +33,7 @@ export async function GET(req: NextRequest) {
     const gameIds = featured.map((f: { gameId: string }) => f.gameId);
 
     // Fetch full game details with stats
-    const games = await db
+    const games = await queryWithResilience(() => getDb()
       .select({
         id: publishedGames.id,
         title: publishedGames.title,
@@ -69,15 +67,15 @@ export async function GET(req: NextRequest) {
         publishedGames.cdnUrl,
         publishedGames.createdAt,
         users.displayName
-      );
+      ));
 
     // Fetch tags for each game
-    const tagsResult = await db
+    const tagsResult = await queryWithResilience(() => getDb()
       .select({ gameId: gameTags.gameId, tag: gameTags.tag })
       .from(gameTags)
       .where(
         sql`${gameTags.gameId} IN (${sql.join(gameIds.map((id: string) => sql`${id}`), sql`, `)})`
-      );
+      ));
 
     const tagsByGame: Record<string, string[]> = {};
     for (const t of tagsResult) {

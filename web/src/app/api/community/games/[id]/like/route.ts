@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { gameLikes } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
@@ -12,7 +12,6 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const db = getDb();
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
       rateLimit: true,
@@ -24,7 +23,7 @@ export async function POST(
 
     // Atomic upsert — eliminates TOCTOU race where concurrent likes both
     // pass the existence check. Uses unique index uq_game_likes_user_game.
-    const inserted = await db.insert(gameLikes)
+    const inserted = await queryWithResilience(() => getDb().insert(gameLikes)
       .values({
         gameId,
         userId: mid.userId!,
@@ -32,22 +31,22 @@ export async function POST(
       .onConflictDoNothing({
         target: [gameLikes.gameId, gameLikes.userId],
       })
-      .returning({ id: gameLikes.id });
+      .returning({ id: gameLikes.id }));
 
     if (inserted.length === 0) {
       // Already liked — return current count
-      const count = await db
+      const count = await queryWithResilience(() => getDb()
         .select({ count: sql<number>`COUNT(*)` })
         .from(gameLikes)
-        .where(eq(gameLikes.gameId, gameId));
+        .where(eq(gameLikes.gameId, gameId)));
       return NextResponse.json({ liked: true, likeCount: Number(count[0].count) });
     }
 
     // Get new count
-    const count = await db
+    const count = await queryWithResilience(() => getDb()
       .select({ count: sql<number>`COUNT(*)` })
       .from(gameLikes)
-      .where(eq(gameLikes.gameId, gameId));
+      .where(eq(gameLikes.gameId, gameId)));
 
     return NextResponse.json({ liked: true, likeCount: Number(count[0].count) });
   } catch (error) {
@@ -61,7 +60,6 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const db = getDb();
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
       rateLimit: true,
@@ -72,15 +70,15 @@ export async function DELETE(
     const { id: gameId } = await params;
 
     // Remove like
-    await db
+    await queryWithResilience(() => getDb()
       .delete(gameLikes)
-      .where(and(eq(gameLikes.gameId, gameId), eq(gameLikes.userId, mid.userId!)));
+      .where(and(eq(gameLikes.gameId, gameId), eq(gameLikes.userId, mid.userId!))));
 
     // Get new count
-    const count = await db
+    const count = await queryWithResilience(() => getDb()
       .select({ count: sql<number>`COUNT(*)` })
       .from(gameLikes)
-      .where(eq(gameLikes.gameId, gameId));
+      .where(eq(gameLikes.gameId, gameId)));
 
     return NextResponse.json({ liked: false, likeCount: Number(count[0].count) });
   } catch (error) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, projects, gameForks, users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
@@ -12,7 +12,6 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const db = getDb();
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
       rateLimit: true,
@@ -23,22 +22,22 @@ export async function POST(
     const { id: gameId } = await params;
 
     // Fetch the published game
-    const [game] = await db
+    const [game] = await queryWithResilience(() => getDb()
       .select()
       .from(publishedGames)
       .where(eq(publishedGames.id, gameId))
-      .limit(1);
+      .limit(1));
 
     if (!game) {
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
     }
 
     // Fetch the original project to get scene data
-    const [originalProject] = await db
+    const [originalProject] = await queryWithResilience(() => getDb()
       .select()
       .from(projects)
       .where(eq(projects.id, game.projectId))
-      .limit(1);
+      .limit(1));
 
     if (!originalProject) {
       return NextResponse.json(
@@ -48,16 +47,16 @@ export async function POST(
     }
 
     // Check project limit for user's tier
-    const [user] = await db
+    const [user] = await queryWithResilience(() => getDb()
       .select({ tier: users.tier })
       .from(users)
       .where(eq(users.id, mid.userId!))
-      .limit(1);
+      .limit(1));
 
-    const userProjects = await db
+    const userProjects = await queryWithResilience(() => getDb()
       .select({ id: projects.id })
       .from(projects)
-      .where(eq(projects.userId, mid.userId!));
+      .where(eq(projects.userId, mid.userId!)));
 
     // Intentional: fork limits are deliberately more generous than publish limits
     // to encourage community remixing. They differ from publish limits and are
@@ -80,7 +79,7 @@ export async function POST(
     }
 
     // Create new project with forked data
-    const [newProject] = await db
+    const [newProject] = await queryWithResilience(() => getDb()
       .insert(projects)
       .values({
         userId: mid.userId!,
@@ -89,14 +88,14 @@ export async function POST(
         entityCount: originalProject.entityCount,
         formatVersion: originalProject.formatVersion,
       })
-      .returning();
+      .returning());
 
     // Record the fork
-    await db.insert(gameForks).values({
+    await queryWithResilience(() => getDb().insert(gameForks).values({
       originalGameId: gameId,
       forkedProjectId: newProject.id,
       userId: mid.userId!,
-    });
+    }));
 
     return NextResponse.json({ projectId: newProject.id }, { status: 201 });
   } catch (error) {

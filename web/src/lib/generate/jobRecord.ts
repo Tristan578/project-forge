@@ -3,7 +3,7 @@
  * Called from each generation API route after the provider returns a task ID.
  */
 
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { generationJobs } from '@/lib/db/schema';
 
 interface CreateJobParams {
@@ -20,23 +20,23 @@ interface CreateJobParams {
 }
 
 export async function createJobRecord(params: CreateJobParams): Promise<string> {
-  const db = getDb();
-
-  const [job] = await db
-    .insert(generationJobs)
-    .values({
-      userId: params.userId,
-      projectId: params.projectId ?? null,
-      provider: params.provider,
-      providerJobId: params.providerJobId,
-      type: params.type,
-      prompt: params.prompt,
-      parameters: params.parameters ?? {},
-      tokenCost: params.tokenCost,
-      tokenUsageId: params.tokenUsageId ?? null,
-      entityId: params.entityId ?? null,
-    })
-    .returning({ id: generationJobs.id });
+  const [job] = await queryWithResilience(() =>
+    getDb()
+      .insert(generationJobs)
+      .values({
+        userId: params.userId,
+        projectId: params.projectId ?? null,
+        provider: params.provider,
+        providerJobId: params.providerJobId,
+        type: params.type,
+        prompt: params.prompt,
+        parameters: params.parameters ?? {},
+        tokenCost: params.tokenCost,
+        tokenUsageId: params.tokenUsageId ?? null,
+        entityId: params.entityId ?? null,
+      })
+      .returning({ id: generationJobs.id })
+  );
 
   return job.id;
 }
@@ -55,8 +55,6 @@ export async function updateJobStatus(
     errorMessage?: string;
   }
 ): Promise<void> {
-  const db = getDb();
-
   const setValues: Record<string, unknown> = {
     status: updates.status,
     updatedAt: new Date(),
@@ -71,10 +69,11 @@ export async function updateJobStatus(
     setValues.completedAt = new Date();
   }
 
-  // Find by provider job ID (not DB id) — this is what we have from provider responses
   const { eq } = await import('drizzle-orm');
-  await db
-    .update(generationJobs)
-    .set(setValues)
-    .where(eq(generationJobs.id, jobId));
+  await queryWithResilience(() =>
+    getDb()
+      .update(generationJobs)
+      .set(setValues)
+      .where(eq(generationJobs.id, jobId))
+  );
 }

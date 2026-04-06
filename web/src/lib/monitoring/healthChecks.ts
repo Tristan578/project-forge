@@ -14,6 +14,7 @@
  */
 import 'server-only';
 import { getMetrics, DEGRADED_AVG_THRESHOLD_MS } from '@/lib/db/queryMonitor';
+import { dbCircuitBreaker } from '@/lib/db/circuitBreaker';
 import { DB_PROVIDER } from '@/lib/config/providers';
 
 export type ServiceStatus = 'healthy' | 'degraded' | 'down';
@@ -93,6 +94,25 @@ export async function checkDatabase(): Promise<ServiceHealth> {
     );
     // Check query monitor metrics: flag as degraded if average query time is too high
     const metrics = getMetrics();
+    const cbStats = dbCircuitBreaker.getStats();
+
+    // Circuit breaker open = DB is effectively down
+    if (cbStats.state === 'open') {
+      return {
+        name: 'Database (Neon)',
+        status: 'down',
+        latencyMs,
+        lastChecked: new Date().toISOString(),
+        error: 'Circuit breaker is open — DB connections refused to prevent cascading failures',
+        details: {
+          circuitBreaker: cbStats,
+          avgQueryTimeMs: metrics.totalQueryCount > 0 ? Math.round(metrics.avgQueryTimeMs) : undefined,
+          slowQueryCount: metrics.slowQueryCount,
+          totalQueryCount: metrics.totalQueryCount,
+        },
+      };
+    }
+
     if (metrics.totalQueryCount > 0 && metrics.avgQueryTimeMs > DEGRADED_AVG_THRESHOLD_MS) {
       return {
         name: 'Database (Neon)',
@@ -101,6 +121,7 @@ export async function checkDatabase(): Promise<ServiceHealth> {
         lastChecked: new Date().toISOString(),
         error: `Average query time ${Math.round(metrics.avgQueryTimeMs)}ms exceeds ${DEGRADED_AVG_THRESHOLD_MS}ms threshold`,
         details: {
+          circuitBreaker: cbStats,
           avgQueryTimeMs: Math.round(metrics.avgQueryTimeMs),
           slowQueryCount: metrics.slowQueryCount,
           totalQueryCount: metrics.totalQueryCount,
@@ -110,17 +131,17 @@ export async function checkDatabase(): Promise<ServiceHealth> {
 
     return {
       name: 'Database (Neon)',
-      status: 'healthy',
+      status: cbStats.state === 'half-open' ? 'degraded' : 'healthy',
       latencyMs,
       lastChecked: new Date().toISOString(),
-      details:
-        metrics.totalQueryCount > 0
-          ? {
-              avgQueryTimeMs: Math.round(metrics.avgQueryTimeMs),
-              slowQueryCount: metrics.slowQueryCount,
-              totalQueryCount: metrics.totalQueryCount,
-            }
-          : undefined,
+      details: {
+        circuitBreaker: cbStats,
+        ...(metrics.totalQueryCount > 0 && {
+          avgQueryTimeMs: Math.round(metrics.avgQueryTimeMs),
+          slowQueryCount: metrics.slowQueryCount,
+          totalQueryCount: metrics.totalQueryCount,
+        }),
+      },
     };
   } catch (err) {
     return {

@@ -4,7 +4,7 @@
  */
 
 import { eq, and, desc, count } from 'drizzle-orm';
-import { getDb } from '../db/client';
+import { getDb, queryWithResilience } from '../db/client';
 import { projects, users, type Project } from '../db/schema';
 import { PROJECT_LIMITS } from './limits';
 
@@ -12,32 +12,32 @@ import { PROJECT_LIMITS } from './limits';
  * List all projects for a user, ordered by last updated.
  */
 export async function listProjects(userId: string) {
-  const db = getDb();
-  const result = await db
-    .select({
-      id: projects.id,
-      name: projects.name,
-      thumbnail: projects.thumbnail,
-      entityCount: projects.entityCount,
-      updatedAt: projects.updatedAt,
-    })
-    .from(projects)
-    .where(eq(projects.userId, userId))
-    .orderBy(desc(projects.updatedAt));
-
-  return result;
+  return queryWithResilience(() =>
+    getDb()
+      .select({
+        id: projects.id,
+        name: projects.name,
+        thumbnail: projects.thumbnail,
+        entityCount: projects.entityCount,
+        updatedAt: projects.updatedAt,
+      })
+      .from(projects)
+      .where(eq(projects.userId, userId))
+      .orderBy(desc(projects.updatedAt))
+  );
 }
 
 /**
  * Get a single project by ID. Returns null if not found or user doesn't own it.
  */
 export async function getProject(userId: string, projectId: string): Promise<Project | null> {
-  const db = getDb();
-  const result = await db
-    .select()
-    .from(projects)
-    .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
-    .limit(1);
+  const result = await queryWithResilience(() =>
+    getDb()
+      .select()
+      .from(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
+      .limit(1)
+  );
 
   return result[0] ?? null;
 }
@@ -51,10 +51,10 @@ export async function createProject(
   name: string,
   sceneData: unknown
 ): Promise<Project> {
-  const db = getDb();
-
   // Get user's tier
-  const userResult = await db.select({ tier: users.tier }).from(users).where(eq(users.id, userId)).limit(1);
+  const userResult = await queryWithResilience(() =>
+    getDb().select({ tier: users.tier }).from(users).where(eq(users.id, userId)).limit(1)
+  );
   if (!userResult[0]) {
     throw new Error('User not found');
   }
@@ -70,16 +70,18 @@ export async function createProject(
   }
 
   // Create project
-  const result = await db
-    .insert(projects)
-    .values({
-      userId,
-      name,
-      sceneData,
-      entityCount: 0,
-      formatVersion: 1,
-    })
-    .returning();
+  const result = await queryWithResilience(() =>
+    getDb()
+      .insert(projects)
+      .values({
+        userId,
+        name,
+        sceneData,
+        entityCount: 0,
+        formatVersion: 1,
+      })
+      .returning()
+  );
 
   return result[0];
 }
@@ -97,16 +99,16 @@ export async function updateProject(
     entityCount?: number;
   }
 ): Promise<Project | null> {
-  const db = getDb();
-
-  const result = await db
-    .update(projects)
-    .set({
-      ...updates,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
-    .returning();
+  const result = await queryWithResilience(() =>
+    getDb()
+      .update(projects)
+      .set({
+        ...updates,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
+      .returning()
+  );
 
   return result[0] ?? null;
 }
@@ -115,12 +117,12 @@ export async function updateProject(
  * Delete a project. Returns true if deleted, false if not found.
  */
 export async function deleteProject(userId: string, projectId: string): Promise<boolean> {
-  const db = getDb();
-
-  const result = await db
-    .delete(projects)
-    .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
-    .returning();
+  const result = await queryWithResilience(() =>
+    getDb()
+      .delete(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
+      .returning()
+  );
 
   return result.length > 0;
 }
@@ -129,12 +131,12 @@ export async function deleteProject(userId: string, projectId: string): Promise<
  * Get the count of projects for a user.
  */
 export async function getProjectCount(userId: string): Promise<number> {
-  const db = getDb();
-
-  const result = await db
-    .select({ count: count() })
-    .from(projects)
-    .where(eq(projects.userId, userId));
+  const result = await queryWithResilience(() =>
+    getDb()
+      .select({ count: count() })
+      .from(projects)
+      .where(eq(projects.userId, userId))
+  );
 
   return result[0]?.count ?? 0;
 }

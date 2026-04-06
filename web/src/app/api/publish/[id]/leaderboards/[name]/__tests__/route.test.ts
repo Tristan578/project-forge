@@ -14,6 +14,7 @@ vi.mock('@/lib/api/middleware', () => ({
 
 const mockGetDb = vi.fn();
 vi.mock('@/lib/db/client', () => ({
+  queryWithResilience: vi.fn((fn: () => unknown) => fn()),
   getDb: () => mockGetDb(),
 }));
 

@@ -43,6 +43,7 @@ const {
 // ---------------------------------------------------------------------------
 
 vi.mock('@/lib/db/client', () => ({
+  queryWithResilience: vi.fn((fn: () => unknown) => fn()),
   getDb: vi.fn(() => ({
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { users, marketplaceAssets, assetPurchases, creditTransactions } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -21,14 +21,12 @@ export async function POST(
     if (mid.error) return mid.error;
     const { user } = mid.authContext!;
 
-    const db = getDb();
-
     // Get asset
-    const [asset] = await db
+    const [asset] = await queryWithResilience(() => getDb()
       .select()
       .from(marketplaceAssets)
       .where(eq(marketplaceAssets.id, assetId))
-      .limit(1);
+      .limit(1));
 
     if (!asset) {
       return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
@@ -39,11 +37,11 @@ export async function POST(
     }
 
     // Check if already purchased
-    const [existing] = await db
+    const [existing] = await queryWithResilience(() => getDb()
       .select()
       .from(assetPurchases)
       .where(and(eq(assetPurchases.buyerId, user.id), eq(assetPurchases.assetId, assetId)))
-      .limit(1);
+      .limit(1));
 
     if (existing) {
       return conflict('Already purchased');
@@ -58,19 +56,19 @@ export async function POST(
 
     // For free assets, just record purchase
     if (price === 0) {
-      await db.insert(assetPurchases).values({
+      await queryWithResilience(() => getDb().insert(assetPurchases).values({
         buyerId: user.id,
         assetId,
         priceTokens: 0,
         license: asset.license,
-      });
+      }));
 
       // Increment download count atomically to avoid lost updates under
       // concurrent free-asset purchases (PF-111).
-      await db
+      await queryWithResilience(() => getDb()
         .update(marketplaceAssets)
         .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
-        .where(eq(marketplaceAssets.id, assetId));
+        .where(eq(marketplaceAssets.id, assetId)));
 
       return NextResponse.json({ success: true, downloadUrl: asset.assetFileUrl });
     }
@@ -111,13 +109,13 @@ export async function POST(
     const sellerEarnings = Math.floor(price * 0.7);
 
     // Get seller
-    const [seller] = await db.select().from(users).where(eq(users.id, asset.sellerId)).limit(1);
+    const [seller] = await queryWithResilience(() => getDb().select().from(users).where(eq(users.id, asset.sellerId)).limit(1));
     if (!seller) {
       return NextResponse.json({ error: 'Seller not found' }, { status: 404 });
     }
 
     // Update buyer balance atomically — WHERE guards prevent race conditions
-    const updateResult = await db
+    const updateResult = await queryWithResilience(() => getDb()
       .update(users)
       .set({
         earnedCredits: sql`${users.earnedCredits} - ${earnedUsed}`,
@@ -130,7 +128,7 @@ export async function POST(
         sql`${users.addonTokens} >= ${addonUsed}`,
         sql`(${users.monthlyTokens} - ${users.monthlyTokensUsed}) >= ${monthlyUsed}`,
       ))
-      .returning({ id: users.id });
+      .returning({ id: users.id }));
 
     if (updateResult.length === 0) {
       return NextResponse.json({ error: 'Balance changed, please retry' }, { status: 409 });
@@ -139,16 +137,16 @@ export async function POST(
     // Update seller balance atomically — use SQL expression to avoid lost
     // updates under concurrent purchases (PF-974). RETURNING gives us the
     // actual post-update balance for the audit log, not a stale in-memory value.
-    const [sellerUpdate] = await db
+    const [sellerUpdate] = await queryWithResilience(() => getDb()
       .update(users)
       .set({
         earnedCredits: sql`${users.earnedCredits} + ${sellerEarnings}`,
       })
       .where(eq(users.id, seller.id))
-      .returning({ earnedCredits: users.earnedCredits });
+      .returning({ earnedCredits: users.earnedCredits }));
 
     // Read buyer's actual post-deduction balance from DB for accurate audit log.
-    const [buyerBalance] = await db
+    const [buyerBalance] = await queryWithResilience(() => getDb()
       .select({
         earnedCredits: users.earnedCredits,
         addonTokens: users.addonTokens,
@@ -157,44 +155,44 @@ export async function POST(
       })
       .from(users)
       .where(eq(users.id, user.id))
-      .limit(1);
+      .limit(1));
     const buyerBalanceAfter = buyerBalance
       ? buyerBalance.earnedCredits + buyerBalance.addonTokens + (buyerBalance.monthlyTokens - buyerBalance.monthlyTokensUsed)
       : totalBalance - price;
 
     // Record purchase
-    await db.insert(assetPurchases).values({
+    await queryWithResilience(() => getDb().insert(assetPurchases).values({
       buyerId: user.id,
       assetId,
       priceTokens: price,
       license: asset.license,
-    });
+    }));
 
     // Increment download count atomically
-    await db
+    await queryWithResilience(() => getDb()
       .update(marketplaceAssets)
       .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
-      .where(eq(marketplaceAssets.id, assetId));
+      .where(eq(marketplaceAssets.id, assetId)));
 
     // Record buyer transaction with actual post-update balance
-    await db.insert(creditTransactions).values({
+    await queryWithResilience(() => getDb().insert(creditTransactions).values({
       userId: user.id,
       transactionType: 'deduction',
       amount: -price,
       balanceAfter: buyerBalanceAfter,
       source: 'marketplace_purchase',
       referenceId: assetId,
-    });
+    }));
 
     // Record seller transaction with actual post-update balance from RETURNING
-    await db.insert(creditTransactions).values({
+    await queryWithResilience(() => getDb().insert(creditTransactions).values({
       userId: seller.id,
       transactionType: 'earned',
       amount: sellerEarnings,
       balanceAfter: sellerUpdate?.earnedCredits ?? (seller.earnedCredits + sellerEarnings),
       source: 'marketplace_sale',
       referenceId: assetId,
-    });
+    }));
 
     return NextResponse.json({
       success: true,

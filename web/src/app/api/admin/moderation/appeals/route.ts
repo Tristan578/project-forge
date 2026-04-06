@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { moderationAppeals, users } from '@/lib/db/schema';
 import { eq, desc, count } from 'drizzle-orm';
 import { assertAdmin } from '@/lib/auth/api-auth';
@@ -25,7 +25,6 @@ export async function GET(req: NextRequest) {
     const rateLimitError = await rateLimitAdminRoute(mid.userId!, 'admin-moderation-appeals');
     if (rateLimitError) return rateLimitError;
 
-    const db = getDb();
     const searchParams = req.nextUrl.searchParams;
     const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 100);
     const offset = parseInt(searchParams.get('offset') || '0', 10);
@@ -41,31 +40,35 @@ export async function GET(req: NextRequest) {
 
     const statusValue = statusFilter as 'pending' | 'approved' | 'rejected';
 
-    const [appeals, countResult] = await Promise.all([
-      db
-        .select({
-          id: moderationAppeals.id,
-          contentId: moderationAppeals.contentId,
-          contentType: moderationAppeals.contentType,
-          reason: moderationAppeals.reason,
-          status: moderationAppeals.status,
-          userId: moderationAppeals.userId,
-          userName: users.displayName,
-          userEmail: users.email,
-          createdAt: moderationAppeals.createdAt,
-          reviewedAt: moderationAppeals.reviewedAt,
-        })
-        .from(moderationAppeals)
-        .leftJoin(users, eq(moderationAppeals.userId, users.id))
-        .where(eq(moderationAppeals.status, statusValue))
-        .orderBy(desc(moderationAppeals.createdAt))
-        .limit(limit)
-        .offset(offset),
-      db
-        .select({ total: count() })
-        .from(moderationAppeals)
-        .where(eq(moderationAppeals.status, statusValue)),
-    ]);
+    const [appeals, countResult] = await queryWithResilience(() => {
+      // eslint-disable-next-line no-restricted-syntax -- db ref needed for Promise.all inside queryWithResilience
+      const db = getDb();
+      return Promise.all([
+        db
+          .select({
+            id: moderationAppeals.id,
+            contentId: moderationAppeals.contentId,
+            contentType: moderationAppeals.contentType,
+            reason: moderationAppeals.reason,
+            status: moderationAppeals.status,
+            userId: moderationAppeals.userId,
+            userName: users.displayName,
+            userEmail: users.email,
+            createdAt: moderationAppeals.createdAt,
+            reviewedAt: moderationAppeals.reviewedAt,
+          })
+          .from(moderationAppeals)
+          .leftJoin(users, eq(moderationAppeals.userId, users.id))
+          .where(eq(moderationAppeals.status, statusValue))
+          .orderBy(desc(moderationAppeals.createdAt))
+          .limit(limit)
+          .offset(offset),
+        db
+          .select({ total: count() })
+          .from(moderationAppeals)
+          .where(eq(moderationAppeals.status, statusValue)),
+      ]);
+    });
 
     const total = countResult[0]?.total ?? 0;
 

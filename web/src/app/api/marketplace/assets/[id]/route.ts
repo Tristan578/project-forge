@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { marketplaceAssets, sellerProfiles, assetReviews, users } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
@@ -14,10 +14,8 @@ export async function GET(
   const { id } = await context.params;
 
   try {
-    const db = getDb();
-
     // Fetch asset with seller info
-    const [asset] = await db
+    const [asset] = await queryWithResilience(() => getDb()
       .select({
         id: marketplaceAssets.id,
         name: marketplaceAssets.name,
@@ -43,14 +41,14 @@ export async function GET(
       .from(marketplaceAssets)
       .leftJoin(sellerProfiles, eq(marketplaceAssets.sellerId, sellerProfiles.userId))
       .where(eq(marketplaceAssets.id, id))
-      .limit(1);
+      .limit(1));
 
     if (!asset) {
       return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
     }
 
     // Fetch reviews
-    const reviews = await db
+    const reviews = await queryWithResilience(() => getDb()
       .select({
         id: assetReviews.id,
         rating: assetReviews.rating,
@@ -62,7 +60,7 @@ export async function GET(
       .leftJoin(users, eq(assetReviews.userId, users.id))
       .where(eq(assetReviews.assetId, id))
       .orderBy(desc(assetReviews.createdAt))
-      .limit(10);
+      .limit(10));
 
     const formattedReviews = reviews.map((r: {
       id: string;

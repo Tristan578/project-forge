@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, projects, gameTags } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { moderateContent } from '@/lib/moderation/contentFilter';
@@ -98,14 +98,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const db = getDb();
-
   // Check tier publish limits
   const tierLimits: Record<string, number> = { starter: 1, hobbyist: 3, creator: 10, pro: 100 };
   const maxPublished = tierLimits[user.tier] ?? 1;
-  const existingPublished = await db.select({ id: publishedGames.id })
+  const existingPublished = await queryWithResilience(() => getDb().select({ id: publishedGames.id })
     .from(publishedGames)
-    .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.status, 'published')));
+    .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.status, 'published'))));
 
   if (existingPublished.length >= maxPublished) {
     reqLogAuth.warn('Publish limit reached', { tier: user.tier, maxPublished });
@@ -113,15 +111,15 @@ export async function POST(request: NextRequest) {
   }
 
   // Check slug availability (for this user)
-  const existingSlug = await db.select({ id: publishedGames.id, version: publishedGames.version })
+  const existingSlug = await queryWithResilience(() => getDb().select({ id: publishedGames.id, version: publishedGames.version })
     .from(publishedGames)
     .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.slug, slugResult.value)))
-    .limit(1);
+    .limit(1));
 
   // Get project data (verify ownership)
-  const [project] = await db.select().from(projects)
+  const [project] = await queryWithResilience(() => getDb().select().from(projects)
     .where(and(eq(projects.id, projectIdResult.value), eq(projects.userId, user.id)))
-    .limit(1);
+    .limit(1));
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
 
   const gameUrl = `/play/${clerkId}/${slugResult.value}`;
@@ -137,7 +135,7 @@ export async function POST(request: NextRequest) {
     // Update existing publication (republish)
     const gameDbId = existingSlug[0].id;
     const newVersion = existingSlug[0].version + 1;
-    await db.update(publishedGames)
+    await queryWithResilience(() => getDb().update(publishedGames)
       .set({
         title: titleResult.value,
         description: descResult.value ?? null,
@@ -147,14 +145,14 @@ export async function POST(request: NextRequest) {
         thumbnail,
         updatedAt: new Date(),
       })
-      .where(eq(publishedGames.id, gameDbId));
+      .where(eq(publishedGames.id, gameDbId)));
 
     // Replace tags
-    await db.delete(gameTags).where(eq(gameTags.gameId, gameDbId));
+    await queryWithResilience(() => getDb().delete(gameTags).where(eq(gameTags.gameId, gameDbId)));
     if (validTags.length > 0) {
-      await db.insert(gameTags).values(
+      await queryWithResilience(() => getDb().insert(gameTags).values(
         validTags.map((tag) => ({ gameId: gameDbId, tag }))
-      );
+      ));
     }
 
     reqLogAuth.info('Game republished', {
@@ -163,14 +161,14 @@ export async function POST(request: NextRequest) {
       version: newVersion,
     });
 
-    const [updated] = await db.select().from(publishedGames).where(eq(publishedGames.id, gameDbId));
+    const [updated] = await queryWithResilience(() => getDb().select().from(publishedGames).where(eq(publishedGames.id, gameDbId)));
     return NextResponse.json({ publication: { ...updated, url: gameUrl } });
   }
 
   // Create new publication — use onConflictDoUpdate to handle concurrent
   // publishes with the same slug atomically (PF-212: TOCTOU fix).
   // The unique index uq_published_games_slug(userId, slug) prevents duplicates.
-  const [publication] = await db.insert(publishedGames)
+  const [publication] = await queryWithResilience(() => getDb().insert(publishedGames)
     .values({
       userId: user.id,
       projectId: projectIdResult.value,
@@ -194,15 +192,15 @@ export async function POST(request: NextRequest) {
         updatedAt: new Date(),
       },
     })
-    .returning();
+    .returning());
 
   // Replace tags atomically — delete old tags first to prevent duplicates
   // on concurrent publishes hitting the ON CONFLICT DO UPDATE path.
-  await db.delete(gameTags).where(eq(gameTags.gameId, publication.id));
+  await queryWithResilience(() => getDb().delete(gameTags).where(eq(gameTags.gameId, publication.id)));
   if (validTags.length > 0) {
-    await db.insert(gameTags).values(
+    await queryWithResilience(() => getDb().insert(gameTags).values(
       validTags.map((tag) => ({ gameId: publication.id, tag }))
-    );
+    ));
   }
 
   reqLogAuth.info('Game published', {

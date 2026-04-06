@@ -43,6 +43,7 @@ vi.mock('../../db/client', () => ({
     update: mockUpdate,
   }),
   getNeonSql: () => mockNeonSqlFn,
+  queryWithResilience: vi.fn((fn: () => Promise<unknown>) => fn()),
 }));
 
 // Mock schema so eq/sql import paths resolve without a real DB

@@ -64,6 +64,7 @@ vi.mock('@/lib/db/client', () => ({
     delete: mockDelete,
   }),
   getNeonSql: () => mockNeonSql,
+  queryWithResilience: vi.fn((fn: () => Promise<unknown>) => fn()),
 }));
 
 vi.mock('@/lib/db/schema', () => ({

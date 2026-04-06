@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { gameRatings } from '@/lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
@@ -12,7 +12,6 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const db = getDb();
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
       rateLimit: true,
@@ -40,7 +39,7 @@ export async function POST(
     // Atomic upsert — eliminates TOCTOU race where concurrent requests
     // both pass the "already rated?" check and both INSERT duplicates.
     // Uses unique index uq_game_ratings_user_game(gameId, userId).
-    await db.insert(gameRatings)
+    await queryWithResilience(() => getDb().insert(gameRatings)
       .values({
         gameId,
         userId: mid.userId!,
@@ -49,16 +48,16 @@ export async function POST(
       .onConflictDoUpdate({
         target: [gameRatings.gameId, gameRatings.userId],
         set: { rating, updatedAt: new Date() },
-      });
+      }));
 
     // Get new average and count
-    const stats = await db
+    const stats = await queryWithResilience(() => getDb()
       .select({
         avgRating: sql<number>`AVG(${gameRatings.rating})`,
         ratingCount: sql<number>`COUNT(*)`,
       })
       .from(gameRatings)
-      .where(eq(gameRatings.gameId, gameId));
+      .where(eq(gameRatings.gameId, gameId)));
 
     return NextResponse.json({
       avgRating: Number(stats[0].avgRating),

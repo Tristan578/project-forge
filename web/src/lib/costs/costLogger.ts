@@ -1,4 +1,4 @@
-import { getDb } from '../db/client';
+import { getDb, queryWithResilience } from '../db/client';
 import { costLog } from '../db/schema';
 
 /**
@@ -13,17 +13,18 @@ export async function logCost(
   tokensCharged: number,
   metadata?: Record<string, unknown>
 ): Promise<string> {
-  const db = getDb();
-  const [record] = await db
-    .insert(costLog)
-    .values({
-      userId,
-      actionType,
-      provider,
-      actualCostCents,
-      tokensCharged,
-      requestMetadata: metadata ?? null,
-    })
-    .returning({ id: costLog.id });
+  const [record] = await queryWithResilience(() =>
+    getDb()
+      .insert(costLog)
+      .values({
+        userId,
+        actionType,
+        provider,
+        actualCostCents,
+        tokensCharged,
+        requestMetadata: metadata ?? null,
+      })
+      .returning({ id: costLog.id })
+  );
   return record.id;
 }

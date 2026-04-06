@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
@@ -27,8 +27,9 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const db = getDb();
-    const [user] = await db.select().from(users).where(eq(users.id, id));
+    const [user] = await queryWithResilience(() =>
+      getDb().select().from(users).where(eq(users.id, id))
+    );
 
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -96,12 +97,13 @@ export async function PATCH(
   }
 
   try {
-    const db = getDb();
-    const [updated] = await db
-      .update(users)
-      .set({ ...updates, updatedAt: new Date() })
-      .where(eq(users.id, id))
-      .returning();
+    const [updated] = await queryWithResilience(() =>
+      getDb()
+        .update(users)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(eq(users.id, id))
+        .returning()
+    );
 
     if (!updated) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });

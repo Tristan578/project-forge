@@ -48,8 +48,26 @@ function makeStoreState(overrides: Record<string, unknown> = {}) {
     sceneName: 'Test Scene',
     sceneGraph: { nodes: {}, rootIds: [] },
     saveScene: mocks.saveScene,
+    ambientLight: { color: [1, 1, 1], brightness: 300 },
+    environment: {},
+    primaryMaterial: null,
+    primaryPhysics: null,
+    physicsEnabled: false,
     ...overrides,
   };
+}
+
+/** Mock fetch that returns minimal WASM data so single-HTML export succeeds. */
+function mockFetchWithWasm() {
+  global.fetch = vi.fn().mockImplementation((url: string) => {
+    if (typeof url === 'string' && url.includes('forge_engine.js')) {
+      return Promise.resolve({ ok: true, text: () => Promise.resolve('// wasm glue') });
+    }
+    if (typeof url === 'string' && url.includes('forge_engine_bg.wasm')) {
+      return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) });
+    }
+    return Promise.resolve({ ok: false });
+  });
 }
 
 // Simulate the forge:scene-exported event being dispatched after saveScene().
@@ -70,9 +88,9 @@ function scheduleSceneExportedEvent(detail: unknown, delayMs = 50) {
 describe('exportGame: missing scene data', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Mock fetch used by fetchWasmForInlining — fail all variants so the
-    // function returns an empty record (no embedded WASM).
-    global.fetch = vi.fn().mockResolvedValue({ ok: false });
+    // Mock fetch to return minimal WASM data so single-HTML export succeeds.
+    // These tests focus on scene data fallback, not WASM inlining.
+    mockFetchWithWasm();
   });
 
   afterEach(() => {
@@ -171,7 +189,8 @@ describe('exportGame: missing scene data', () => {
 describe('exportGame: empty entity list', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    global.fetch = vi.fn().mockResolvedValue({ ok: false });
+    // Mock fetch to return minimal WASM data so single-HTML export succeeds.
+    mockFetchWithWasm();
   });
 
   afterEach(() => {

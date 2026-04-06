@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { generationJobs } from '@/lib/db/schema';
 import { eq, and, inArray, desc } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
@@ -24,22 +24,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const db = getDb();
-
-    const [job] = await db
-      .insert(generationJobs)
-      .values({
-        userId: mid.userId!,
-        providerJobId,
-        provider,
-        type,
-        prompt: String(prompt).slice(0, 500),
-        parameters: parameters ?? {},
-        tokenCost: typeof tokenCost === 'number' ? tokenCost : 0,
-        tokenUsageId: tokenUsageId ?? null,
-        entityId: entityId ?? null,
-      })
-      .returning();
+    const [job] = await queryWithResilience(() =>
+      getDb()
+        .insert(generationJobs)
+        .values({
+          userId: mid.userId!,
+          providerJobId,
+          provider,
+          type,
+          prompt: String(prompt).slice(0, 500),
+          parameters: parameters ?? {},
+          tokenCost: typeof tokenCost === 'number' ? tokenCost : 0,
+          tokenUsageId: tokenUsageId ?? null,
+          entityId: entityId ?? null,
+        })
+        .returning()
+    );
 
     return NextResponse.json({ job: { id: job.id } }, { status: 201 });
   } catch (error) {
@@ -57,7 +57,6 @@ export async function GET(req: NextRequest) {
     const mid = await withApiMiddleware(req, { requireAuth: true });
     if (mid.error) return mid.error;
 
-    const db = getDb();
     const searchParams = req.nextUrl.searchParams;
     const statusFilter = searchParams.get('status'); // 'active' | 'all' | specific status
 
@@ -76,12 +75,14 @@ export async function GET(req: NextRequest) {
       conditions = eq(generationJobs.userId, mid.userId!);
     }
 
-    const jobs = await db
-      .select()
-      .from(generationJobs)
-      .where(conditions)
-      .orderBy(desc(generationJobs.createdAt))
-      .limit(50);
+    const jobs = await queryWithResilience(() =>
+      getDb()
+        .select()
+        .from(generationJobs)
+        .where(conditions)
+        .orderBy(desc(generationJobs.createdAt))
+        .limit(50)
+    );
 
     return NextResponse.json({
       jobs: jobs.map((j) => ({

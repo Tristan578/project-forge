@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { assetPurchases, assetReviews, marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { parseJsonBody, requireInteger, optionalString } from '@/lib/apiValidation';
@@ -21,8 +21,6 @@ export async function POST(
     if (mid.error) return mid.error;
     const { user } = mid.authContext!;
 
-    const db = getDb();
-
     const parsed = await parseJsonBody(req);
     if (!parsed.ok) return parsed.response;
 
@@ -33,54 +31,56 @@ export async function POST(
     if (!contentResult.ok) return contentResult.response;
 
     // Check if user purchased the asset
-    const [purchase] = await db
+    const [purchase] = await queryWithResilience(() => getDb()
       .select()
       .from(assetPurchases)
       .where(and(eq(assetPurchases.buyerId, user.id), eq(assetPurchases.assetId, assetId)))
-      .limit(1);
+      .limit(1));
 
     if (!purchase) {
       return NextResponse.json({ error: 'Must purchase asset before reviewing' }, { status: 403 });
     }
 
     // Check if already reviewed
-    const [existingReview] = await db
+    const [existingReview] = await queryWithResilience(() => getDb()
       .select()
       .from(assetReviews)
       .where(and(eq(assetReviews.assetId, assetId), eq(assetReviews.userId, user.id)))
-      .limit(1);
+      .limit(1));
 
     if (existingReview) {
       // Update existing review
-      await db
+      await queryWithResilience(() => getDb()
         .update(assetReviews)
         .set({ rating: ratingResult.value, content: contentResult.value ?? null })
-        .where(eq(assetReviews.id, existingReview.id));
+        .where(eq(assetReviews.id, existingReview.id)));
     } else {
-      // Insert new review
-      await db.insert(assetReviews).values({
+      // Insert new review — onConflictDoNothing makes this idempotent under
+      // queryWithResilience retry (if INSERT succeeds but response is lost,
+      // the retry won't fail with a duplicate key error).
+      await queryWithResilience(() => getDb().insert(assetReviews).values({
         assetId,
         userId: user.id,
         rating: ratingResult.value,
         content: contentResult.value ?? null,
-      });
+      }).onConflictDoNothing());
     }
 
     // Recalculate average rating (stored as rating * 100)
-    const reviews = await db
+    const reviews = await queryWithResilience(() => getDb()
       .select({ rating: assetReviews.rating })
       .from(assetReviews)
-      .where(eq(assetReviews.assetId, assetId));
+      .where(eq(assetReviews.assetId, assetId)));
 
     const avgRating = Math.round((reviews.reduce((sum: number, r: { rating: number }) => sum + r.rating, 0) / reviews.length) * 100);
 
-    await db
+    await queryWithResilience(() => getDb()
       .update(marketplaceAssets)
       .set({
         avgRating,
         ratingCount: reviews.length,
       })
-      .where(eq(marketplaceAssets.id, assetId));
+      .where(eq(marketplaceAssets.id, assetId)));
 
     return NextResponse.json({ success: true });
   } catch (error) {

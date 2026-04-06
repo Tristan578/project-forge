@@ -33,6 +33,7 @@ vi.mock('@/lib/rateLimit/distributed', () => ({
 }));
 
 vi.mock('@/lib/db/client', () => ({
+  queryWithResilience: vi.fn((fn: () => unknown) => fn()),
   getDb: vi.fn(),
 }));
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, users, gameLikes, gameRatings, gameTags, gameComments } from '@/lib/db/schema';
 import { eq, sql, and, or, ilike, desc } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
@@ -13,7 +13,6 @@ export async function GET(req: NextRequest) {
   if (limited) return limited;
 
   try {
-    const db = getDb();
     const searchParams = req.nextUrl.searchParams;
     const query = searchParams.get('q') || '';
     const sort = searchParams.get('sort') || 'trending';
@@ -41,10 +40,10 @@ export async function GET(req: NextRequest) {
 
     // Add tag filter
     if (tag) {
-      const gamesWithTag = await db
+      const gamesWithTag = await queryWithResilience(() => getDb()
         .select({ gameId: gameTags.gameId })
         .from(gameTags)
-        .where(eq(gameTags.tag, tag));
+        .where(eq(gameTags.tag, tag)));
 
       const gameIds = gamesWithTag.map((g: { gameId: string }) => g.gameId);
       if (gameIds.length > 0) {
@@ -59,72 +58,74 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Fetch games with aggregated stats
-    const gamesQuery = db
-      .select({
-        id: publishedGames.id,
-        title: publishedGames.title,
-        description: publishedGames.description,
-        slug: publishedGames.slug,
-        authorId: publishedGames.userId,
-        authorName: users.displayName,
-        playCount: publishedGames.playCount,
-        cdnUrl: publishedGames.cdnUrl,
-        thumbnail: publishedGames.thumbnail,
-        createdAt: publishedGames.createdAt,
-        likeCount: sql<number>`COALESCE(COUNT(DISTINCT ${gameLikes.id}), 0)`,
-        avgRating: sql<number>`COALESCE(AVG(${gameRatings.rating}), 0)`,
-        ratingCount: sql<number>`COALESCE(COUNT(DISTINCT ${gameRatings.id}), 0)`,
-        commentCount: sql<number>`COALESCE(COUNT(DISTINCT ${gameComments.id}), 0)`,
-      })
-      .from(publishedGames)
-      .leftJoin(users, eq(publishedGames.userId, users.id))
-      .leftJoin(gameLikes, eq(publishedGames.id, gameLikes.gameId))
-      .leftJoin(gameRatings, eq(publishedGames.id, gameRatings.gameId))
-      .leftJoin(gameComments, eq(publishedGames.id, gameComments.gameId))
-      .where(and(...baseConditions))
-      .groupBy(
-        publishedGames.id,
-        publishedGames.title,
-        publishedGames.description,
-        publishedGames.slug,
-        publishedGames.userId,
-        publishedGames.playCount,
-        publishedGames.cdnUrl,
-        publishedGames.thumbnail,
-        publishedGames.createdAt,
-        users.displayName
-      );
+    // Fetch games with aggregated stats + apply sorting
+    const results = await queryWithResilience(() => {
+      // eslint-disable-next-line no-restricted-syntax -- db ref needed for complex join inside queryWithResilience
+      const db = getDb();
+      const gamesQuery = db
+        .select({
+          id: publishedGames.id,
+          title: publishedGames.title,
+          description: publishedGames.description,
+          slug: publishedGames.slug,
+          authorId: publishedGames.userId,
+          authorName: users.displayName,
+          playCount: publishedGames.playCount,
+          cdnUrl: publishedGames.cdnUrl,
+          thumbnail: publishedGames.thumbnail,
+          createdAt: publishedGames.createdAt,
+          likeCount: sql<number>`COALESCE(COUNT(DISTINCT ${gameLikes.id}), 0)`,
+          avgRating: sql<number>`COALESCE(AVG(${gameRatings.rating}), 0)`,
+          ratingCount: sql<number>`COALESCE(COUNT(DISTINCT ${gameRatings.id}), 0)`,
+          commentCount: sql<number>`COALESCE(COUNT(DISTINCT ${gameComments.id}), 0)`,
+        })
+        .from(publishedGames)
+        .leftJoin(users, eq(publishedGames.userId, users.id))
+        .leftJoin(gameLikes, eq(publishedGames.id, gameLikes.gameId))
+        .leftJoin(gameRatings, eq(publishedGames.id, gameRatings.gameId))
+        .leftJoin(gameComments, eq(publishedGames.id, gameComments.gameId))
+        .where(and(...baseConditions))
+        .groupBy(
+          publishedGames.id,
+          publishedGames.title,
+          publishedGames.description,
+          publishedGames.slug,
+          publishedGames.userId,
+          publishedGames.playCount,
+          publishedGames.cdnUrl,
+          publishedGames.thumbnail,
+          publishedGames.createdAt,
+          users.displayName
+        );
 
-    // Apply sorting and fetch
-    let results;
-    if (sort === 'trending') {
-      // Trending: (likes * 3 + plays) / age_hours
-      results = await gamesQuery
-        .orderBy(
-          desc(
-            sql`(COALESCE(COUNT(DISTINCT ${gameLikes.id}), 0) * 3 + ${publishedGames.playCount}) / GREATEST(EXTRACT(EPOCH FROM (NOW() - ${publishedGames.createdAt})) / 3600, 1)`
+      if (sort === 'trending') {
+        // Trending: (likes * 3 + plays) / age_hours
+        return gamesQuery
+          .orderBy(
+            desc(
+              sql`(COALESCE(COUNT(DISTINCT ${gameLikes.id}), 0) * 3 + ${publishedGames.playCount}) / GREATEST(EXTRACT(EPOCH FROM (NOW() - ${publishedGames.createdAt})) / 3600, 1)`
+            )
           )
-        )
-        .limit(limit + 1)
-        .offset(offset);
-    } else if (sort === 'newest') {
-      results = await gamesQuery
-        .orderBy(desc(publishedGames.createdAt))
-        .limit(limit + 1)
-        .offset(offset);
-    } else if (sort === 'top_rated') {
-      results = await gamesQuery
-        .orderBy(desc(sql`COALESCE(AVG(${gameRatings.rating}), 0)`))
-        .limit(limit + 1)
-        .offset(offset);
-    } else {
-      // most_played
-      results = await gamesQuery
-        .orderBy(desc(publishedGames.playCount))
-        .limit(limit + 1)
-        .offset(offset);
-    }
+          .limit(limit + 1)
+          .offset(offset);
+      } else if (sort === 'newest') {
+        return gamesQuery
+          .orderBy(desc(publishedGames.createdAt))
+          .limit(limit + 1)
+          .offset(offset);
+      } else if (sort === 'top_rated') {
+        return gamesQuery
+          .orderBy(desc(sql`COALESCE(AVG(${gameRatings.rating}), 0)`))
+          .limit(limit + 1)
+          .offset(offset);
+      } else {
+        // most_played
+        return gamesQuery
+          .orderBy(desc(publishedGames.playCount))
+          .limit(limit + 1)
+          .offset(offset);
+      }
+    });
 
     const hasMore = results.length > limit;
     const games = results.slice(0, limit);
@@ -132,12 +133,12 @@ export async function GET(req: NextRequest) {
     // Fetch tags for each game
     const gameIds = games.map((g: { id: string }) => g.id);
     const tagsResult = gameIds.length > 0
-      ? await db
+      ? await queryWithResilience(() => getDb()
           .select({ gameId: gameTags.gameId, tag: gameTags.tag })
           .from(gameTags)
           .where(
             sql`${gameTags.gameId} IN (${sql.join(gameIds.map((id: string) => sql`${id}`), sql`, `)})`
-          )
+          ))
       : [];
 
     const tagsByGame: Record<string, string[]> = {};

@@ -89,7 +89,7 @@ function setupStore(overrides: {
   primaryLight?: unknown;
   allScripts?: Record<string, { source: string; enabled: boolean } | undefined>;
   projectType?: '2d' | '3d';
-  sceneGraph?: { nodes: Record<string, { components: string[] }> };
+  sceneGraph?: { nodes: Record<string, { components: string[] }>; rootIds: string[] };
   skeletons2d?: Record<string, unknown>;
 } = {}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -107,7 +107,7 @@ function setupStore(overrides: {
       renameEntity: mockRenameEntity,
       allScripts: overrides.allScripts ?? {},
       projectType: overrides.projectType ?? '3d',
-      sceneGraph: overrides.sceneGraph ?? { nodes: { 'ent-1': { components: [] } } },
+      sceneGraph: overrides.sceneGraph ?? { nodes: { 'ent-1': { components: [] } }, rootIds: ['ent-1'] },
       skeletons2d: overrides.skeletons2d ?? {},
     };
     return selector(state);
@@ -266,7 +266,7 @@ describe('InspectorPanel', () => {
   it('renders Sprite section for 2D sprite entity', () => {
     setupStore({
       projectType: '2d',
-      sceneGraph: { nodes: { 'ent-1': { components: ['Sprite'] } } },
+      sceneGraph: { nodes: { 'ent-1': { components: ['Sprite'] } }, rootIds: ['ent-1'] },
     });
     render(<InspectorPanel />);
     expect(screen.getByText('SpriteInspector').textContent).toBe('SpriteInspector');

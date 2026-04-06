@@ -24,6 +24,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
+    "typecheck": "NODE_OPTIONS='--max-old-space-size=4096' tsc --noEmit",
     "check:command-parity": "node scripts/check-command-parity.js",
     "check:bundle-size": "node scripts/check-bundle-size.js"
   },

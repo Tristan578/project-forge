@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { moderationAppeals } from '@/lib/db/schema';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
@@ -51,16 +51,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const db = getDb();
-    const [appeal] = await db
-      .insert(moderationAppeals)
-      .values({
-        userId: mid.userId!,
-        contentId,
-        contentType,
-        reason: reason.trim(),
-      })
-      .returning();
+    const [appeal] = await queryWithResilience(() =>
+      getDb()
+        .insert(moderationAppeals)
+        .values({
+          userId: mid.userId!,
+          contentId,
+          contentType,
+          reason: reason.trim(),
+        })
+        .returning()
+    );
 
     return NextResponse.json({ id: appeal.id, status: appeal.status }, { status: 201 });
   } catch (error) {

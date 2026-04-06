@@ -102,6 +102,27 @@ const eslintConfig = defineConfig([
     },
   },
   {
+    // DB resilience: flag `const db = getDb()` pattern outside client.ts (#8240).
+    // All DB operations should go through queryWithResilience() for circuit
+    // breaker protection. The pattern `const db = getDb()` followed by `db.select/insert/update/delete`
+    // bypasses retry/circuit breaker. Correct usage: queryWithResilience(() => getDb().select()...)
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
+    ignores: [
+      'src/lib/db/client.ts',
+      'src/lib/db/__tests__/**',
+      'src/lib/monitoring/**',
+      'src/**/*.{test,spec}.{ts,tsx}',
+    ],
+    rules: {
+      'no-restricted-syntax': ['warn',
+        {
+          selector: "VariableDeclarator[init.callee.name='getDb']",
+          message: 'Do not assign getDb() to a variable — this bypasses automatic retries and circuit-breaker recovery for DB outages. Wrap with queryWithResilience(() => getDb().select()...) instead. If multiple queries share a db ref inside a queryWithResilience callback, add eslint-disable-next-line.',
+        },
+      ],
+    },
+  },
+  {
     files: ['src/**/*.{test,spec}.{ts,tsx,js,jsx}'],
     rules: {
       'no-restricted-syntax': [

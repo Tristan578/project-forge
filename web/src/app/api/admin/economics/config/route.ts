@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { tokenConfig, tierConfig } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
@@ -26,8 +26,6 @@ export async function PUT(request: NextRequest) {
   }
 
   try {
-    const db = getDb();
-
     if (typeof body.id !== 'string' || !body.id) {
       return NextResponse.json({ error: 'id is required' }, { status: 400 });
     }
@@ -39,14 +37,16 @@ export async function PUT(request: NextRequest) {
       if (typeof body.estimatedCostCents !== 'number' || !Number.isFinite(body.estimatedCostCents) || body.estimatedCostCents < 0) {
         return NextResponse.json({ error: 'estimatedCostCents must be a non-negative finite number' }, { status: 400 });
       }
-      await db.update(tokenConfig)
-        .set({
-          tokenCost: body.tokenCost,
-          estimatedCostCents: body.estimatedCostCents,
-          active: body.active ? 1 : 0,
-          updatedAt: new Date(),
-        })
-        .where(eq(tokenConfig.id, body.id));
+      await queryWithResilience(() =>
+        getDb().update(tokenConfig)
+          .set({
+            tokenCost: body.tokenCost,
+            estimatedCostCents: body.estimatedCostCents,
+            active: body.active ? 1 : 0,
+            updatedAt: new Date(),
+          })
+          .where(eq(tokenConfig.id, body.id))
+      );
     } else if (body.type === 'tier_config') {
       const numFields = ['monthlyTokens', 'maxProjects', 'maxPublished', 'priceCentsMonthly'] as const;
       for (const field of numFields) {
@@ -54,15 +54,17 @@ export async function PUT(request: NextRequest) {
           return NextResponse.json({ error: `${field} must be a non-negative finite number` }, { status: 400 });
         }
       }
-      await db.update(tierConfig)
-        .set({
-          monthlyTokens: body.monthlyTokens,
-          maxProjects: body.maxProjects,
-          maxPublished: body.maxPublished,
-          priceCentsMonthly: body.priceCentsMonthly,
-          updatedAt: new Date(),
-        })
-        .where(eq(tierConfig.id, body.id));
+      await queryWithResilience(() =>
+        getDb().update(tierConfig)
+          .set({
+            monthlyTokens: body.monthlyTokens,
+            maxProjects: body.maxProjects,
+            maxPublished: body.maxPublished,
+            priceCentsMonthly: body.priceCentsMonthly,
+            updatedAt: new Date(),
+          })
+          .where(eq(tierConfig.id, body.id))
+      );
     } else {
       return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
     }

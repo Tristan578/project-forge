@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { moderationAppeals, gameComments } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { assertAdmin } from '@/lib/auth/api-auth';
@@ -42,14 +42,14 @@ export async function POST(
       );
     }
 
-    const db = getDb();
-
     // Fetch the appeal
-    const [appeal] = await db
-      .select()
-      .from(moderationAppeals)
-      .where(eq(moderationAppeals.id, id))
-      .limit(1);
+    const [appeal] = await queryWithResilience(() =>
+      getDb()
+        .select()
+        .from(moderationAppeals)
+        .where(eq(moderationAppeals.id, id))
+        .limit(1)
+    );
 
     if (!appeal) {
       return NextResponse.json({ error: 'Appeal not found' }, { status: 404 });
@@ -65,22 +65,26 @@ export async function POST(
     const newStatus = decision === 'approve' ? 'approved' : 'rejected';
 
     // Update the appeal
-    await db
-      .update(moderationAppeals)
-      .set({
-        status: newStatus,
-        reviewedBy: mid.authContext!.clerkId,
-        reviewNote: typeof note === 'string' ? note.trim() : null,
-        reviewedAt: new Date(),
-      })
-      .where(eq(moderationAppeals.id, id));
+    await queryWithResilience(() =>
+      getDb()
+        .update(moderationAppeals)
+        .set({
+          status: newStatus,
+          reviewedBy: mid.authContext!.clerkId,
+          reviewNote: typeof note === 'string' ? note.trim() : null,
+          reviewedAt: new Date(),
+        })
+        .where(eq(moderationAppeals.id, id))
+    );
 
     // If approved and the content is a comment, unflag it
     if (decision === 'approve' && appeal.contentType === 'comment') {
-      await db
-        .update(gameComments)
-        .set({ flagged: 0 })
-        .where(eq(gameComments.id, appeal.contentId));
+      await queryWithResilience(() =>
+        getDb()
+          .update(gameComments)
+          .set({ flagged: 0 })
+          .where(eq(gameComments.id, appeal.contentId))
+      );
     }
 
     return NextResponse.json({

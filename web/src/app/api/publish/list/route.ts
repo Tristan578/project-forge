@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { authenticateClerkSession } from '@/lib/auth/api-auth';
 import { getUserByClerkId } from '@/lib/auth/user-service';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
@@ -17,12 +17,10 @@ export async function GET() {
   const user = await getUserByClerkId(clerkId);
   if (!user) return NextResponse.json({ publications: [] });
 
-  const db = getDb();
-
-  const publications = await db.select()
+  const publications = await queryWithResilience(() => getDb().select()
     .from(publishedGames)
     .where(eq(publishedGames.userId, user.id))
-    .orderBy(desc(publishedGames.updatedAt));
+    .orderBy(desc(publishedGames.updatedAt)));
 
   return NextResponse.json({
     publications: publications.map(p => ({

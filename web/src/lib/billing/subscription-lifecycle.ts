@@ -13,7 +13,7 @@
  */
 
 import { and, eq } from 'drizzle-orm';
-import { getDb, getNeonSql } from '@/lib/db/client';
+import { getDb, getNeonSql, queryWithResilience } from '@/lib/db/client';
 import { users, creditTransactions, tokenPurchases } from '@/lib/db/schema';
 import type { Tier, User } from '@/lib/db/schema';
 import { TIER_MONTHLY_TOKENS } from '@/lib/tokens/pricing';
@@ -23,12 +23,13 @@ import { TIER_MONTHLY_TOKENS } from '@/lib/tokens/pricing';
  * Returns null if no user is found (graceful handling for orphan events).
  */
 export async function findUserByStripeCustomer(customerId: string): Promise<User | null> {
-  const db = getDb();
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(eq(users.stripeCustomerId, customerId))
-    .limit(1);
+  const [user] = await queryWithResilience(() =>
+    getDb()
+      .select()
+      .from(users)
+      .where(eq(users.stripeCustomerId, customerId))
+      .limit(1)
+  );
   return user ?? null;
 }
 
@@ -57,25 +58,27 @@ export async function handleSubscriptionCreated(
 
   // balanceAfter computed via INSERT...SELECT to read addon_tokens and
   // earned_credits at execution time, avoiding stale snapshot values.
-  await neonSql.transaction([
-    neonSql`
-      UPDATE users
-      SET tier                   = ${tier},
-          stripe_subscription_id = ${subscriptionId},
-          monthly_tokens         = ${allocation},
-          monthly_tokens_used    = 0,
-          billing_cycle_start    = ${now},
-          updated_at             = ${now}
-      WHERE id = ${user.id}
-    `,
-    neonSql`
-      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-      SELECT ${user.id}, 'monthly_grant', ${allocation},
-             ${allocation} + addon_tokens + earned_credits,
-             ${`subscription_created:${tier}`}, ${subscriptionId}
-      FROM users WHERE id = ${user.id}
-    `,
-  ]);
+  await queryWithResilience(() =>
+    neonSql.transaction([
+      neonSql`
+        UPDATE users
+        SET tier                   = ${tier},
+            stripe_subscription_id = ${subscriptionId},
+            monthly_tokens         = ${allocation},
+            monthly_tokens_used    = 0,
+            billing_cycle_start    = ${now},
+            updated_at             = ${now}
+        WHERE id = ${user.id}
+      `,
+      neonSql`
+        INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+        SELECT ${user.id}, 'monthly_grant', ${allocation},
+               ${allocation} + addon_tokens + earned_credits,
+               ${`subscription_created:${tier}`}, ${subscriptionId}
+        FROM users WHERE id = ${user.id}
+      `,
+    ])
+  );
 }
 
 /**
@@ -108,25 +111,29 @@ export async function handleSubscriptionUpdated(
   // If subscription is past_due or unpaid, only update the subscription ID
   // -- let the invoice.payment_failed handler deal with grace period
   if (subscriptionStatus === 'past_due' || subscriptionStatus === 'unpaid') {
-    await neonSql`
-      UPDATE users
-      SET stripe_subscription_id = ${subscriptionId},
-          updated_at             = ${now}
-      WHERE id = ${user.id}
-    `;
+    await queryWithResilience(() =>
+      neonSql`
+        UPDATE users
+        SET stripe_subscription_id = ${subscriptionId},
+            updated_at             = ${now}
+        WHERE id = ${user.id}
+      `
+    );
     return;
   }
 
   if (!tierChanged) {
     // No tier change -- update tier + subscription ID in case out of sync,
     // but don't reset tokens. Handles status changes like active -> trialing.
-    await neonSql`
-      UPDATE users
-      SET tier                   = ${newTier},
-          stripe_subscription_id = ${subscriptionId},
-          updated_at             = ${now}
-      WHERE id = ${user.id}
-    `;
+    await queryWithResilience(() =>
+      neonSql`
+        UPDATE users
+        SET tier                   = ${newTier},
+            stripe_subscription_id = ${subscriptionId},
+            updated_at             = ${now}
+        WHERE id = ${user.id}
+      `
+    );
     return;
   }
 
@@ -144,45 +151,49 @@ export async function handleSubscriptionUpdated(
     // at execution time so concurrent deductions are not lost.
     const difference = newAllocation - oldAllocation;
 
-    await neonSql.transaction([
-      neonSql`
-        UPDATE users
-        SET tier                   = ${newTier},
-            stripe_subscription_id = ${subscriptionId},
-            monthly_tokens         = GREATEST(0, monthly_tokens - monthly_tokens_used) + ${difference},
-            monthly_tokens_used    = 0,
-            updated_at             = ${now}
-        WHERE id = ${user.id}
-      `,
-      neonSql`
-        INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-        SELECT ${user.id}, 'adjustment', ${difference},
-               GREATEST(0, monthly_tokens - monthly_tokens_used) + addon_tokens + earned_credits,
-               ${`upgrade:${currentTier}->${newTier}`}, ${subscriptionId}
-        FROM users WHERE id = ${user.id}
-      `,
-    ]);
+    await queryWithResilience(() =>
+      neonSql.transaction([
+        neonSql`
+          UPDATE users
+          SET tier                   = ${newTier},
+              stripe_subscription_id = ${subscriptionId},
+              monthly_tokens         = GREATEST(0, monthly_tokens - monthly_tokens_used) + ${difference},
+              monthly_tokens_used    = 0,
+              updated_at             = ${now}
+          WHERE id = ${user.id}
+        `,
+        neonSql`
+          INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+          SELECT ${user.id}, 'adjustment', ${difference},
+                 GREATEST(0, monthly_tokens - monthly_tokens_used) + addon_tokens + earned_credits,
+                 ${`upgrade:${currentTier}->${newTier}`}, ${subscriptionId}
+          FROM users WHERE id = ${user.id}
+        `,
+      ])
+    );
   } else {
     // Downgrade: cap monthly tokens to new allocation, reset used counter.
     // User keeps any addon tokens they purchased.
-    await neonSql.transaction([
-      neonSql`
-        UPDATE users
-        SET tier                   = ${newTier},
-            stripe_subscription_id = ${subscriptionId},
-            monthly_tokens         = ${newAllocation},
-            monthly_tokens_used    = 0,
-            updated_at             = ${now}
-        WHERE id = ${user.id}
-      `,
-      neonSql`
-        INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-        SELECT ${user.id}, 'adjustment', ${newAllocation - oldAllocation},
-               ${newAllocation} + addon_tokens + earned_credits,
-               ${`downgrade:${currentTier}->${newTier}`}, ${subscriptionId}
-        FROM users WHERE id = ${user.id}
-      `,
-    ]);
+    await queryWithResilience(() =>
+      neonSql.transaction([
+        neonSql`
+          UPDATE users
+          SET tier                   = ${newTier},
+              stripe_subscription_id = ${subscriptionId},
+              monthly_tokens         = ${newAllocation},
+              monthly_tokens_used    = 0,
+              updated_at             = ${now}
+          WHERE id = ${user.id}
+        `,
+        neonSql`
+          INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+          SELECT ${user.id}, 'adjustment', ${newAllocation - oldAllocation},
+                 ${newAllocation} + addon_tokens + earned_credits,
+                 ${`downgrade:${currentTier}->${newTier}`}, ${subscriptionId}
+          FROM users WHERE id = ${user.id}
+        `,
+      ])
+    );
   }
 }
 
@@ -210,25 +221,27 @@ export async function handleSubscriptionDeleted(
 
   // INSERT before UPDATE: the audit record must read pre-cancellation state
   // (remaining tokens, addon balance) before the UPDATE resets them.
-  await neonSql.transaction([
-    neonSql`
-      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-      SELECT ${user.id}, 'adjustment',
-             -GREATEST(0, monthly_tokens - monthly_tokens_used),
-             ${starterAllocation} + addon_tokens + earned_credits,
-             ${`cancellation:${previousTier}->starter`}, ${subscriptionId}
-      FROM users WHERE id = ${user.id}
-    `,
-    neonSql`
-      UPDATE users
-      SET tier                   = 'starter',
-          stripe_subscription_id = NULL,
-          monthly_tokens         = ${starterAllocation},
-          monthly_tokens_used    = 0,
-          updated_at             = ${now}
-      WHERE id = ${user.id}
-    `,
-  ]);
+  await queryWithResilience(() =>
+    neonSql.transaction([
+      neonSql`
+        INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+        SELECT ${user.id}, 'adjustment',
+               -GREATEST(0, monthly_tokens - monthly_tokens_used),
+               ${starterAllocation} + addon_tokens + earned_credits,
+               ${`cancellation:${previousTier}->starter`}, ${subscriptionId}
+        FROM users WHERE id = ${user.id}
+      `,
+      neonSql`
+        UPDATE users
+        SET tier                   = 'starter',
+            stripe_subscription_id = NULL,
+            monthly_tokens         = ${starterAllocation},
+            monthly_tokens_used    = 0,
+            updated_at             = ${now}
+        WHERE id = ${user.id}
+      `,
+    ])
+  );
 }
 
 /**
@@ -308,7 +321,7 @@ export async function handleInvoicePaid(
     FROM users WHERE id = ${user.id}
   `);
 
-  await neonSql.transaction(statements);
+  await queryWithResilience(() => neonSql.transaction(statements));
 }
 
 /**
@@ -323,17 +336,17 @@ export async function handleInvoicePaymentFailed(
   const user = await findUserByStripeCustomer(customerId);
   if (!user) return;
 
-  const db = getDb();
-
   const balance = await getTotalBalance(user.id);
-  await db.insert(creditTransactions).values({
-    userId: user.id,
-    transactionType: 'adjustment',
-    amount: 0,
-    balanceAfter: balance,
-    source: `payment_failed:attempt_${attemptCount}`,
-    referenceId: invoiceId,
-  });
+  await queryWithResilience(() =>
+    getDb().insert(creditTransactions).values({
+      userId: user.id,
+      transactionType: 'adjustment',
+      amount: 0,
+      balanceAfter: balance,
+      source: `payment_failed:attempt_${attemptCount}`,
+      referenceId: invoiceId,
+    })
+  );
 
   if (nextPaymentAttempt) {
     console.warn(
@@ -390,21 +403,22 @@ export async function reverseAddonTokens(
   amountTotal: number,
   paymentIntentId?: string | null
 ): Promise<void> {
-  const db = getDb();
   const neonSql = getNeonSql();
 
   // --- Try to find the original token purchase for precise reversal ---
   if (paymentIntentId) {
-    const [purchase] = await db
-      .select()
-      .from(tokenPurchases)
-      .where(
-        and(
-          eq(tokenPurchases.userId, userId),
-          eq(tokenPurchases.stripePaymentIntent, paymentIntentId)
+    const [purchase] = await queryWithResilience(() =>
+      getDb()
+        .select()
+        .from(tokenPurchases)
+        .where(
+          and(
+            eq(tokenPurchases.userId, userId),
+            eq(tokenPurchases.stripePaymentIntent, paymentIntentId)
+          )
         )
-      )
-      .limit(1);
+        .limit(1)
+    );
 
     if (purchase) {
       // Atomic claim-then-deduct using a CTE (PF-7514 / #8187).
@@ -428,7 +442,8 @@ export async function reverseAddonTokens(
       //
       // RETURNING reads post-UPDATE values, so we capture pre-UPDATE state
       // via a separate SELECT...FOR UPDATE CTE.
-      await neonSql`
+      await queryWithResilience(() =>
+        neonSql`
         WITH old_state AS (
           SELECT refunded_cents, tokens, amount_cents
           FROM token_purchases
@@ -470,7 +485,8 @@ export async function reverseAddonTokens(
         FROM deduction d
         WHERE users.id = ${userId} AND d.tokens_to_deduct > 0
         RETURNING users.id
-      `;
+      `
+      );
       // If claim matched 0 rows (already refunded), the entire CTE chain
       // produces no rows — done. If amount_cents=0 (comped purchase),
       // NULLIF returns NULL and the deduction rounds to 0, skipping audit+update.
@@ -492,32 +508,34 @@ export async function reverseAddonTokens(
   const source = `charge_refunded:${chargeId}`;
   const now = new Date().toISOString();
 
-  await neonSql`
-    WITH audit AS (
-      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-      SELECT ${userId}, 'adjustment',
-             -LEAST(FLOOR(u.addon_tokens * ${refundRatio})::int, u.addon_tokens),
-             GREATEST(0, u.monthly_tokens - u.monthly_tokens_used)
-               + GREATEST(0, u.addon_tokens - FLOOR(u.addon_tokens * ${refundRatio})::int)
-               + u.earned_credits,
-             ${source}, ${chargeId}
-      FROM users u
-      WHERE u.id = ${userId}
-        AND FLOOR(u.addon_tokens * ${refundRatio})::int > 0
-        AND NOT EXISTS (
-          SELECT 1 FROM credit_transactions ct
-          WHERE ct.user_id = ${userId}
-            AND ct.reference_id = ${chargeId}
-            AND ct.source = ${source}
-        )
-      RETURNING amount
-    )
-    UPDATE users
-    SET addon_tokens = GREATEST(0, addon_tokens - ABS((SELECT amount FROM audit))),
-        updated_at   = ${now}
-    WHERE id = ${userId}
-      AND EXISTS (SELECT 1 FROM audit)
-  `;
+  await queryWithResilience(() =>
+    neonSql`
+      WITH audit AS (
+        INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+        SELECT ${userId}, 'adjustment',
+               -LEAST(FLOOR(u.addon_tokens * ${refundRatio})::int, u.addon_tokens),
+               GREATEST(0, u.monthly_tokens - u.monthly_tokens_used)
+                 + GREATEST(0, u.addon_tokens - FLOOR(u.addon_tokens * ${refundRatio})::int)
+                 + u.earned_credits,
+               ${source}, ${chargeId}
+        FROM users u
+        WHERE u.id = ${userId}
+          AND FLOOR(u.addon_tokens * ${refundRatio})::int > 0
+          AND NOT EXISTS (
+            SELECT 1 FROM credit_transactions ct
+            WHERE ct.user_id = ${userId}
+              AND ct.reference_id = ${chargeId}
+              AND ct.source = ${source}
+          )
+        RETURNING amount
+      )
+      UPDATE users
+      SET addon_tokens = GREATEST(0, addon_tokens - ABS((SELECT amount FROM audit))),
+          updated_at   = ${now}
+      WHERE id = ${userId}
+        AND EXISTS (SELECT 1 FROM audit)
+    `
+  );
 }
 
 /**
@@ -526,17 +544,18 @@ export async function reverseAddonTokens(
  * Used by handleInvoicePaymentFailed which doesn't need transactional writes.
  */
 async function getTotalBalance(userId: string): Promise<number> {
-  const db = getDb();
-  const [user] = await db
-    .select({
-      monthlyTokens: users.monthlyTokens,
-      monthlyTokensUsed: users.monthlyTokensUsed,
-      addonTokens: users.addonTokens,
-      earnedCredits: users.earnedCredits,
-    })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
+  const [user] = await queryWithResilience(() =>
+    getDb()
+      .select({
+        monthlyTokens: users.monthlyTokens,
+        monthlyTokensUsed: users.monthlyTokensUsed,
+        addonTokens: users.addonTokens,
+        earnedCredits: users.earnedCredits,
+      })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+  );
 
   if (!user) return 0;
   const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);

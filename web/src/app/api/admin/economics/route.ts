@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { users, costLog, creditTransactions, tokenConfig, tierConfig } from '@/lib/db/schema';
 import { sql, count, sum, desc } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -19,44 +19,48 @@ export async function GET(req: NextRequest) {
   if (rateLimitError) return rateLimitError;
 
   try {
-  const db = getDb();
+  const [userStats, costSummary, recentTransactions, tokenConfigs, tierConfigs] = await queryWithResilience(() => {
+    // eslint-disable-next-line no-restricted-syntax -- db ref needed for Promise.all inside queryWithResilience
+    const db = getDb();
+    return Promise.all([
+      // Overview stats
+      db.select({
+        totalUsers: count(),
+        starterCount: count(sql`CASE WHEN ${users.tier} = 'starter' THEN 1 END`),
+        hobbyistCount: count(sql`CASE WHEN ${users.tier} = 'hobbyist' THEN 1 END`),
+        creatorCount: count(sql`CASE WHEN ${users.tier} = 'creator' THEN 1 END`),
+        proCount: count(sql`CASE WHEN ${users.tier} = 'pro' THEN 1 END`),
+      }).from(users),
 
-  // Overview stats
-  const [userStats] = await db.select({
-    totalUsers: count(),
-    starterCount: count(sql`CASE WHEN ${users.tier} = 'starter' THEN 1 END`),
-    hobbyistCount: count(sql`CASE WHEN ${users.tier} = 'hobbyist' THEN 1 END`),
-    creatorCount: count(sql`CASE WHEN ${users.tier} = 'creator' THEN 1 END`),
-    proCount: count(sql`CASE WHEN ${users.tier} = 'pro' THEN 1 END`),
-  }).from(users);
+      // Cost summary (last 30 days)
+      db.select({
+        actionType: costLog.actionType,
+        provider: costLog.provider,
+        totalCost: sum(costLog.actualCostCents),
+        totalTokens: sum(costLog.tokensCharged),
+        count: count(),
+      })
+        .from(costLog)
+        .where(sql`${costLog.createdAt} > NOW() - INTERVAL '30 days'`)
+        .groupBy(costLog.actionType, costLog.provider)
+        .orderBy(desc(sql`${sum(costLog.tokensCharged)}`)),
 
-  // Cost summary (last 30 days)
-  const costSummary = await db.select({
-    actionType: costLog.actionType,
-    provider: costLog.provider,
-    totalCost: sum(costLog.actualCostCents),
-    totalTokens: sum(costLog.tokensCharged),
-    count: count(),
-  })
-    .from(costLog)
-    .where(sql`${costLog.createdAt} > NOW() - INTERVAL '30 days'`)
-    .groupBy(costLog.actionType, costLog.provider)
-    .orderBy(desc(sql`${sum(costLog.tokensCharged)}`));
+      // Recent transactions
+      db.select()
+        .from(creditTransactions)
+        .orderBy(desc(creditTransactions.createdAt))
+        .limit(50),
 
-  // Recent transactions
-  const recentTransactions = await db.select()
-    .from(creditTransactions)
-    .orderBy(desc(creditTransactions.createdAt))
-    .limit(50);
+      // Token config
+      db.select().from(tokenConfig),
 
-  // Token config
-  const tokenConfigs = await db.select().from(tokenConfig);
-
-  // Tier config
-  const tierConfigs = await db.select().from(tierConfig);
+      // Tier config
+      db.select().from(tierConfig),
+    ]);
+  });
 
   return NextResponse.json({
-    userStats,
+    userStats: userStats[0],
     costSummary,
     recentTransactions,
     tokenConfigs,

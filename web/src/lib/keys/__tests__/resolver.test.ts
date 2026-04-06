@@ -39,6 +39,7 @@ function makeDeleteChain() {
 
 vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn(() => mockDbChain),
+  queryWithResilience: vi.fn((fn: () => unknown) => fn()),
 }));
 
 vi.mock('@/lib/db/schema', () => ({

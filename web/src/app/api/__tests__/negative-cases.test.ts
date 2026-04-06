@@ -48,6 +48,7 @@ vi.mock('@/lib/tokens/service', () => ({
 }));
 
 vi.mock('@/lib/db/client', () => ({
+  queryWithResilience: vi.fn((fn: () => unknown) => fn()),
   getDb: () => mockGetDb(),
 }));
 
@@ -325,9 +326,8 @@ describe('POST /api/publish — negative cases', () => {
   });
 
   it('returns 401 when not authenticated', async () => {
-    mockAuthenticateRequest.mockResolvedValue({
-      ok: false,
-      response: makeUnauthedResponse(),
+    mockWithApiMiddleware.mockResolvedValue({
+      error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
     });
 
     const { POST } = await import('@/app/api/publish/route');
@@ -341,12 +341,9 @@ describe('POST /api/publish — negative cases', () => {
   });
 
   it('returns 429 when rate limit is exceeded', async () => {
-    mockAuthenticateRequest.mockResolvedValue({
-      ok: true,
-      ctx: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+    mockWithApiMiddleware.mockResolvedValue({
+      error: NextResponse.json({ error: 'Rate limited' }, { status: 429 }),
     });
-    mockDistributedRateLimit.mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
-    mockRateLimitResponse.mockReturnValue(makeRateLimitedResponse());
 
     const { POST } = await import('@/app/api/publish/route');
     const req = makeRequest('http://localhost/api/publish', {
@@ -359,11 +356,11 @@ describe('POST /api/publish — negative cases', () => {
   });
 
   it('returns 400 when projectId is missing', async () => {
-    mockAuthenticateRequest.mockResolvedValue({
-      ok: true,
-      ctx: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+    mockWithApiMiddleware.mockResolvedValue({
+      error: undefined,
+      userId: 'user-1',
+      authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
     });
-    mockDistributedRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: 0 });
 
     const { POST } = await import('@/app/api/publish/route');
     const req = makeRequest('http://localhost/api/publish', {
@@ -375,11 +372,11 @@ describe('POST /api/publish — negative cases', () => {
   });
 
   it('returns 400 when title is missing', async () => {
-    mockAuthenticateRequest.mockResolvedValue({
-      ok: true,
-      ctx: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+    mockWithApiMiddleware.mockResolvedValue({
+      error: undefined,
+      userId: 'user-1',
+      authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
     });
-    mockDistributedRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: 0 });
 
     const { POST } = await import('@/app/api/publish/route');
     const req = makeRequest('http://localhost/api/publish', {
@@ -391,11 +388,11 @@ describe('POST /api/publish — negative cases', () => {
   });
 
   it('returns 400 for invalid JSON body', async () => {
-    mockAuthenticateRequest.mockResolvedValue({
-      ok: true,
-      ctx: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+    mockWithApiMiddleware.mockResolvedValue({
+      error: undefined,
+      userId: 'user-1',
+      authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
     });
-    mockDistributedRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: 0 });
 
     const { POST } = await import('@/app/api/publish/route');
     const req = makeRequestRaw('http://localhost/api/publish', '{broken json');
@@ -404,11 +401,11 @@ describe('POST /api/publish — negative cases', () => {
   });
 
   it('returns 400 when slug is too short', async () => {
-    mockAuthenticateRequest.mockResolvedValue({
-      ok: true,
-      ctx: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+    mockWithApiMiddleware.mockResolvedValue({
+      error: undefined,
+      userId: 'user-1',
+      authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
     });
-    mockDistributedRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: 0 });
 
     const { POST } = await import('@/app/api/publish/route');
     const req = makeRequest('http://localhost/api/publish', {

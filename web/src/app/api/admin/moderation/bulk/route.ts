@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { gameComments } from '@/lib/db/schema';
 import { inArray } from 'drizzle-orm';
 import { assertAdmin } from '@/lib/auth/api-auth';
@@ -61,21 +61,24 @@ export async function POST(req: NextRequest) {
     const ids = commentIds as string[];
     const errors: string[] = [];
     let processed = 0;
-    const db = getDb();
 
     try {
       if (action === 'approve') {
-        const result = await db
-          .update(gameComments)
-          .set({ flagged: 0 })
-          .where(inArray(gameComments.id, ids))
-          .returning({ id: gameComments.id });
+        const result = await queryWithResilience(() =>
+          getDb()
+            .update(gameComments)
+            .set({ flagged: 0 })
+            .where(inArray(gameComments.id, ids))
+            .returning({ id: gameComments.id })
+        );
         processed = result.length;
       } else {
-        const result = await db
-          .delete(gameComments)
-          .where(inArray(gameComments.id, ids))
-          .returning({ id: gameComments.id });
+        const result = await queryWithResilience(() =>
+          getDb()
+            .delete(gameComments)
+            .where(inArray(gameComments.id, ids))
+            .returning({ id: gameComments.id })
+        );
         processed = result.length;
       }
     } catch (err) {

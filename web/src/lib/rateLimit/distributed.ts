@@ -6,6 +6,7 @@
  */
 
 import { rateLimit, type RateLimitResult } from '../rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
  * Alias of the canonical RateLimitResult from rateLimit.ts.
@@ -130,8 +131,11 @@ export async function distributedRateLimit(
 
   try {
     return await upstashSlidingWindow(key, limit, windowSeconds);
-  } catch {
-    // On any Upstash error, fall back to in-memory to avoid blocking requests
+  } catch (err) {
+    // Report Upstash failure to Sentry so silent fallbacks are visible (#8210)
+    // Strip user-identifying suffixes from key to avoid PII in Sentry extra context
+    captureException(err, { component: 'distributedRateLimit', keyPrefix: key.split(':')[0], limit, windowSeconds });
+    // Fall back to in-memory to avoid blocking requests
     const result = await rateLimit(key, limit, windowSeconds * 1000);
     return result;
   }

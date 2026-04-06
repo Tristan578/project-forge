@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { GamePlayer } from '@/components/play/GamePlayer';
@@ -18,18 +18,17 @@ export async function generateMetadata({
   const { userId: clerkId, slug } = await params;
 
   try {
-    const db = getDb();
-    const [user] = await db
+    const [user] = await queryWithResilience(() => getDb()
       .select({ id: users.id })
       .from(users)
       .where(eq(users.clerkId, clerkId))
-      .limit(1);
+      .limit(1));
 
     if (!user) {
       return { title: 'Game Not Found - SpawnForge' };
     }
 
-    const [game] = await db
+    const [game] = await queryWithResilience(() => getDb()
       .select({ title: publishedGames.title, description: publishedGames.description })
       .from(publishedGames)
       .where(
@@ -38,7 +37,7 @@ export async function generateMetadata({
           eq(publishedGames.slug, slug)
         )
       )
-      .limit(1);
+      .limit(1));
 
     if (!game) {
       return { title: 'Game Not Found - SpawnForge' };

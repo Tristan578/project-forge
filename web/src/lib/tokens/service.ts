@@ -1,5 +1,5 @@
 import { eq, and, gte } from 'drizzle-orm';
-import { getDb, getNeonSql } from '../db/client';
+import { getDb, getNeonSql, queryWithResilience } from '../db/client';
 import { users, tokenUsage } from '../db/schema';
 import type { TokenPackage } from './pricing';
 import { TOKEN_PACKAGES, TIER_MONTHLY_TOKENS } from './pricing';
@@ -27,8 +27,9 @@ export interface DeductError {
 
 /** Get current token balance for a user */
 export async function getTokenBalance(userId: string): Promise<TokenBalance> {
-  const db = getDb();
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const [user] = await queryWithResilience(() =>
+    getDb().select().from(users).where(eq(users.id, userId)).limit(1)
+  );
   if (!user) throw new Error(`User not found: ${userId}`);
 
   const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
@@ -67,10 +68,10 @@ export async function deductTokens(
     };
   }
 
-  const db = getDb();
-
   // Read current balance
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const [user] = await queryWithResilience(() =>
+    getDb().select().from(users).where(eq(users.id, userId)).limit(1)
+  );
   if (!user) throw new Error(`User not found: ${userId}`);
 
   const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
@@ -124,16 +125,18 @@ export async function deductTokens(
   const neonSql = getNeonSql();
   const now = new Date().toISOString();
   const metadataJson = metadata ? JSON.stringify(metadata) : null;
-  const updateRows = await neonSql`
-    UPDATE users
-    SET monthly_tokens_used = monthly_tokens_used + ${monthlyDeduct},
-        addon_tokens = addon_tokens - ${addonDeduct},
-        updated_at = ${now}
-    WHERE id = ${userId}
-      AND (monthly_tokens - monthly_tokens_used) >= ${monthlyDeduct}
-      AND addon_tokens >= ${addonDeduct}
-    RETURNING id
-  `;
+  const updateRows = await queryWithResilience(() =>
+    neonSql`
+      UPDATE users
+      SET monthly_tokens_used = monthly_tokens_used + ${monthlyDeduct},
+          addon_tokens = addon_tokens - ${addonDeduct},
+          updated_at = ${now}
+      WHERE id = ${userId}
+        AND (monthly_tokens - monthly_tokens_used) >= ${monthlyDeduct}
+        AND addon_tokens >= ${addonDeduct}
+      RETURNING id
+    `
+  );
 
   if (updateRows.length === 0) {
     // Race condition: balance changed between read and update. Retry up to 3 times.
@@ -152,11 +155,13 @@ export async function deductTokens(
   // user lost tokens without a usage record, but this is extremely rare and
   // recoverable via admin tooling). We don't wrap in a transaction because
   // the UPDATE's WHERE guard is the critical atomicity point.
-  const usageResult = await neonSql`
-    INSERT INTO token_usage (user_id, operation, tokens, source, provider, metadata)
-    VALUES (${userId}, ${operation}, ${tokenCost}, ${source}, ${provider ?? null}, ${metadataJson}::jsonb)
-    RETURNING id
-  `;
+  const usageResult = await queryWithResilience(() =>
+    neonSql`
+      INSERT INTO token_usage (user_id, operation, tokens, source, provider, metadata)
+      VALUES (${userId}, ${operation}, ${tokenCost}, ${source}, ${provider ?? null}, ${metadataJson}::jsonb)
+      RETURNING id
+    `
+  );
 
   const usageId = (usageResult[0] as { id: string }).id;
   const remaining = await getTokenBalance(userId);
@@ -177,14 +182,14 @@ export interface RefundResult {
 export async function refundTokens(userId: string, usageId: string): Promise<RefundResult> {
   if (usageId === 'free') return { refunded: false };
 
-  const db = getDb();
-
   // 1. Look up the original usage record
-  const [record] = await db
-    .select()
-    .from(tokenUsage)
-    .where(and(eq(tokenUsage.id, usageId), eq(tokenUsage.userId, userId)))
-    .limit(1);
+  const [record] = await queryWithResilience(() =>
+    getDb()
+      .select()
+      .from(tokenUsage)
+      .where(and(eq(tokenUsage.id, usageId), eq(tokenUsage.userId, userId)))
+      .limit(1)
+  );
 
   if (!record) return { refunded: false };
 
@@ -201,24 +206,26 @@ export async function refundTokens(userId: string, usageId: string): Promise<Ref
     ? neonSql`monthly_tokens_used = GREATEST(0, monthly_tokens_used - ${record.tokens})`
     : neonSql`addon_tokens = addon_tokens + ${record.tokens}`;
 
-  const result = await neonSql`
-    WITH ins AS (
-      INSERT INTO token_usage (user_id, operation, tokens, source, provider, metadata)
-      SELECT ${userId}::uuid, 'refund', ${-record.tokens}, ${record.source}, ${record.provider}, ${refundMetadata}::jsonb
-      WHERE NOT EXISTS (
-        SELECT 1 FROM token_usage
-        WHERE user_id = ${userId}::uuid
-          AND operation = 'refund'
-          AND metadata->>'refundedUsageId' = ${usageId}
+  const result = await queryWithResilience(() =>
+    neonSql`
+      WITH ins AS (
+        INSERT INTO token_usage (user_id, operation, tokens, source, provider, metadata)
+        SELECT ${userId}::uuid, 'refund', ${-record.tokens}, ${record.source}, ${record.provider}, ${refundMetadata}::jsonb
+        WHERE NOT EXISTS (
+          SELECT 1 FROM token_usage
+          WHERE user_id = ${userId}::uuid
+            AND operation = 'refund'
+            AND metadata->>'refundedUsageId' = ${usageId}
+        )
+        RETURNING id
       )
+      UPDATE users
+      SET ${setClause}, updated_at = NOW()
+      WHERE id = ${userId}::uuid
+        AND EXISTS (SELECT 1 FROM ins)
       RETURNING id
-    )
-    UPDATE users
-    SET ${setClause}, updated_at = NOW()
-    WHERE id = ${userId}::uuid
-      AND EXISTS (SELECT 1 FROM ins)
-    RETURNING id
-  `;
+    `
+  );
   // If the CTE idempotency guard skipped the INSERT, the UPDATE also
   // does nothing (EXISTS check), so result is empty → already refunded.
   return { refunded: result.length > 0 };
@@ -246,16 +253,16 @@ export async function refundTokenAmount(
 ): Promise<void> {
   if (tokens <= 0) return;
 
-  const db = getDb();
-
   // Determine the original source so we credit the right pool.
   let source: 'monthly' | 'addon' | 'mixed' = 'addon';
   if (usageId) {
-    const [record] = await db
-      .select({ source: tokenUsage.source })
-      .from(tokenUsage)
-      .where(and(eq(tokenUsage.id, usageId), eq(tokenUsage.userId, userId)))
-      .limit(1);
+    const [record] = await queryWithResilience(() =>
+      getDb()
+        .select({ source: tokenUsage.source })
+        .from(tokenUsage)
+        .where(and(eq(tokenUsage.id, usageId), eq(tokenUsage.userId, userId)))
+        .limit(1)
+    );
     if (record) source = record.source as 'monthly' | 'addon' | 'mixed';
   }
 
@@ -276,36 +283,40 @@ export async function refundTokenAmount(
 
   if (usageId) {
     // Idempotent path: CTE INSERT + UPDATE in a single statement
-    await neonSql`
-      WITH ins AS (
-        INSERT INTO token_usage (user_id, operation, tokens, source, metadata)
-        SELECT ${userId}, 'partial_refund', ${-tokens}, ${source}, ${metadata}::jsonb
-        WHERE NOT EXISTS (
-          SELECT 1 FROM token_usage
-          WHERE user_id = ${userId}
-            AND operation = 'partial_refund'
-            AND metadata->>'refundedUsageId' = ${usageId}
+    await queryWithResilience(() =>
+      neonSql`
+        WITH ins AS (
+          INSERT INTO token_usage (user_id, operation, tokens, source, metadata)
+          SELECT ${userId}, 'partial_refund', ${-tokens}, ${source}, ${metadata}::jsonb
+          WHERE NOT EXISTS (
+            SELECT 1 FROM token_usage
+            WHERE user_id = ${userId}
+              AND operation = 'partial_refund'
+              AND metadata->>'refundedUsageId' = ${usageId}
+          )
+          RETURNING id
         )
-        RETURNING id
-      )
-      UPDATE users
-      SET ${setClause}, updated_at = NOW()
-      WHERE id = ${userId}
-        AND EXISTS (SELECT 1 FROM ins)
-    `;
-  } else {
-    // No usageId: no idempotency guard needed, use transaction for atomicity
-    await neonSql.transaction([
-      neonSql`
-        INSERT INTO token_usage (user_id, operation, tokens, source, metadata)
-        VALUES (${userId}, 'partial_refund', ${-tokens}, ${source}, ${metadata}::jsonb)
-      `,
-      neonSql`
         UPDATE users
         SET ${setClause}, updated_at = NOW()
         WHERE id = ${userId}
-      `,
-    ]);
+          AND EXISTS (SELECT 1 FROM ins)
+      `
+    );
+  } else {
+    // No usageId: no idempotency guard needed, use transaction for atomicity
+    await queryWithResilience(() =>
+      neonSql.transaction([
+        neonSql`
+          INSERT INTO token_usage (user_id, operation, tokens, source, metadata)
+          VALUES (${userId}, 'partial_refund', ${-tokens}, ${source}, ${metadata}::jsonb)
+        `,
+        neonSql`
+          UPDATE users
+          SET ${setClause}, updated_at = NOW()
+          WHERE id = ${userId}
+        `,
+      ])
+    );
   }
 }
 
@@ -323,18 +334,20 @@ export async function creditAddonTokens(
   //   1. Increment addon_tokens on the user row
   //   2. Insert the purchase record
   // If either statement fails, neither is committed (PF-977).
-  await neonSql.transaction([
-    neonSql`
-      UPDATE users
-      SET addon_tokens = addon_tokens + ${pkgInfo.tokens},
-          updated_at   = ${now}
-      WHERE id = ${userId}
-    `,
-    neonSql`
-      INSERT INTO token_purchases (user_id, stripe_payment_intent, package, tokens, amount_cents)
-      VALUES (${userId}, ${stripePaymentIntent}, ${pkg}, ${pkgInfo.tokens}, ${pkgInfo.priceCents})
-    `,
-  ]);
+  await queryWithResilience(() =>
+    neonSql.transaction([
+      neonSql`
+        UPDATE users
+        SET addon_tokens = addon_tokens + ${pkgInfo.tokens},
+            updated_at   = ${now}
+        WHERE id = ${userId}
+      `,
+      neonSql`
+        INSERT INTO token_purchases (user_id, stripe_payment_intent, package, tokens, amount_cents)
+        VALUES (${userId}, ${stripePaymentIntent}, ${pkg}, ${pkgInfo.tokens}, ${pkgInfo.priceCents})
+      `,
+    ])
+  );
 }
 
 /** Reset monthly tokens on billing cycle renewal */
@@ -342,18 +355,19 @@ export async function resetMonthlyTokens(
   userId: string,
   tier: 'starter' | 'hobbyist' | 'creator' | 'pro'
 ): Promise<void> {
-  const db = getDb();
   const allocation = TIER_MONTHLY_TOKENS[tier];
 
-  await db
-    .update(users)
-    .set({
-      monthlyTokens: allocation,
-      monthlyTokensUsed: 0,
-      billingCycleStart: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
+  await queryWithResilience(() =>
+    getDb()
+      .update(users)
+      .set({
+        monthlyTokens: allocation,
+        monthlyTokensUsed: 0,
+        billingCycleStart: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+  );
 }
 
 /** Get usage history for a user (last 30 days by default) */
@@ -361,17 +375,18 @@ export async function getUsageHistory(
   userId: string,
   days: number = 30
 ): Promise<{ operation: string; tokens: number; provider: string | null; createdAt: Date }[]> {
-  const db = getDb();
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-  return db
-    .select({
-      operation: tokenUsage.operation,
-      tokens: tokenUsage.tokens,
-      provider: tokenUsage.provider,
-      createdAt: tokenUsage.createdAt,
-    })
-    .from(tokenUsage)
-    .where(and(eq(tokenUsage.userId, userId), gte(tokenUsage.createdAt, since)))
-    .orderBy(tokenUsage.createdAt);
+  return queryWithResilience(() =>
+    getDb()
+      .select({
+        operation: tokenUsage.operation,
+        tokens: tokenUsage.tokens,
+        provider: tokenUsage.provider,
+        createdAt: tokenUsage.createdAt,
+      })
+      .from(tokenUsage)
+      .where(and(eq(tokenUsage.userId, userId), gte(tokenUsage.createdAt, since)))
+      .orderBy(tokenUsage.createdAt)
+  );
 }

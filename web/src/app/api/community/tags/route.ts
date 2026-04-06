@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { gameTags } from '@/lib/db/schema';
 import { sql } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
@@ -11,10 +11,8 @@ export async function GET(req: NextRequest) {
   const limited = await rateLimitPublicRoute(req, 'community-tags', 30, 60_000);
   if (limited) return limited;
   try {
-    const db = getDb();
-
     // Get top 20 tags by frequency
-    const tags = await db
+    const tags = await queryWithResilience(() => getDb()
       .select({
         tag: gameTags.tag,
         count: sql<number>`COUNT(*)`,
@@ -22,7 +20,7 @@ export async function GET(req: NextRequest) {
       .from(gameTags)
       .groupBy(gameTags.tag)
       .orderBy(sql`COUNT(*) DESC`)
-      .limit(20);
+      .limit(20));
 
     const response = NextResponse.json({
       tags: tags.map((t: { tag: string; count: number }) => ({

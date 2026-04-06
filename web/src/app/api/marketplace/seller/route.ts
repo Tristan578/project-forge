@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { sellerProfiles } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
@@ -16,13 +16,11 @@ export async function GET(req: NextRequest) {
     if (mid.error) return mid.error;
     const { user } = mid.authContext!;
 
-    const db = getDb();
-
-    const [profile] = await db
+    const [profile] = await queryWithResilience(() => getDb()
       .select()
       .from(sellerProfiles)
       .where(eq(sellerProfiles.userId, user.id))
-      .limit(1);
+      .limit(1));
 
     if (!profile) {
       return NextResponse.json({ profile: null });
@@ -55,8 +53,6 @@ export async function POST(req: NextRequest) {
     if (mid.error) return mid.error;
     const { user } = mid.authContext!;
 
-    const db = getDb();
-
     const parsed = await parseJsonBody(req);
     if (!parsed.ok) return parsed.response;
 
@@ -70,30 +66,30 @@ export async function POST(req: NextRequest) {
     if (!urlResult.ok) return urlResult.response;
 
     // Check if profile exists
-    const [existing] = await db
+    const [existing] = await queryWithResilience(() => getDb()
       .select()
       .from(sellerProfiles)
       .where(eq(sellerProfiles.userId, user.id))
-      .limit(1);
+      .limit(1));
 
     if (existing) {
       // Update
-      await db
+      await queryWithResilience(() => getDb()
         .update(sellerProfiles)
         .set({
           displayName: nameResult.value,
           bio: bioResult.value ?? null,
           portfolioUrl: urlResult.value ?? null,
         })
-        .where(eq(sellerProfiles.userId, user.id));
+        .where(eq(sellerProfiles.userId, user.id)));
     } else {
       // Create
-      await db.insert(sellerProfiles).values({
+      await queryWithResilience(() => getDb().insert(sellerProfiles).values({
         userId: user.id,
         displayName: nameResult.value,
         bio: bioResult.value ?? null,
         portfolioUrl: urlResult.value ?? null,
-      });
+      }));
     }
 
     return NextResponse.json({ success: true });

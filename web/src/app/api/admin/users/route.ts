@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
-import { getDb } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { ilike, or, desc } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -29,8 +29,6 @@ export async function GET(req: NextRequest) {
   const search = (searchParams.get('search') ?? '').trim();
 
   try {
-    const db = getDb();
-
     const selectedFields = {
       id: users.id,
       email: users.email,
@@ -44,24 +42,27 @@ export async function GET(req: NextRequest) {
       createdAt: users.createdAt,
     };
 
-    let rows;
-    if (search) {
-      const pattern = `%${search}%`;
-      rows = await db
-        .select(selectedFields)
-        .from(users)
-        .where(or(ilike(users.email, pattern), ilike(users.displayName, pattern)))
-        .orderBy(desc(users.createdAt))
-        .limit(limit)
-        .offset(offset);
-    } else {
-      rows = await db
-        .select(selectedFields)
-        .from(users)
-        .orderBy(desc(users.createdAt))
-        .limit(limit)
-        .offset(offset);
-    }
+    const rows = await queryWithResilience(() => {
+      // eslint-disable-next-line no-restricted-syntax -- db ref needed for branching inside queryWithResilience
+      const db = getDb();
+      if (search) {
+        const pattern = `%${search}%`;
+        return db
+          .select(selectedFields)
+          .from(users)
+          .where(or(ilike(users.email, pattern), ilike(users.displayName, pattern)))
+          .orderBy(desc(users.createdAt))
+          .limit(limit)
+          .offset(offset);
+      } else {
+        return db
+          .select(selectedFields)
+          .from(users)
+          .orderBy(desc(users.createdAt))
+          .limit(limit)
+          .offset(offset);
+      }
+    });
 
     return NextResponse.json({ users: rows, limit, offset });
   } catch (error) {
