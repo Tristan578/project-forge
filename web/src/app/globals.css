@@ -219,3 +219,13 @@ body {
 .animate-shimmer-sweep {
   animation: shimmer-sweep 1.5s ease-in-out infinite;
 }
+
+/* Global focus-visible ring — ensures all interactive elements show a visible
+   focus indicator for keyboard navigation (WCAG 2.4.7 Focus Visible).
+   Uses :focus-visible so mouse clicks don't show the ring. Components can
+   override with their own focus styles. */
+:focus-visible {
+  outline: 2px solid var(--sf-accent, #3b82f6);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
