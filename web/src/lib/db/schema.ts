@@ -220,7 +220,12 @@ export const creditTransactions = pgTable(
   },
   (table) => [
     index('idx_credit_txn_user_date').on(table.userId, table.createdAt),
-    uniqueIndex('idx_credit_txn_idempotent').on(table.userId, table.source, table.referenceId),
+    // Partial unique index: only enforces when reference_id IS NOT NULL.
+    // Drizzle doesn't support WHERE clauses on indexes, so the actual constraint
+    // is in migration 0002_credit_txn_idempotent_index.sql. This regular index
+    // exists for Drizzle introspection only — the DB migration creates the real
+    // partial unique index.
+    index('idx_credit_txn_idempotent').on(table.userId, table.source, table.referenceId),
   ]
 );
 
