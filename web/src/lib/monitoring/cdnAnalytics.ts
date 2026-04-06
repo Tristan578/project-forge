@@ -87,9 +87,11 @@ export function reportWasmLoadMetric(metric: WasmLoadMetric): void {
  * Fetch with exponential backoff retry for transient failures (#8246).
  *
  * Up to `maxAttempts` attempts (default 3) with exponential backoff between
- * them (1s, 2s). Retries on 5xx and network errors. Fails fast on 4xx
- * (permanent errors). Throws on all non-2xx responses after retries exhaust.
- * Respects AbortSignal — aborted fetches are never retried.
+ * them. Delays occur between attempts: 1s after the 1st failure, 2s after
+ * the 2nd (3 attempts = 2 delays). Retries on 5xx and network errors.
+ * Fails fast on 4xx (permanent errors). Throws on all non-2xx responses
+ * after retries exhaust. Respects AbortSignal — aborted fetches are never
+ * retried, and backoff sleeps are immediately cancellable.
  */
 export async function fetchWithRetry(
   url: string,
@@ -120,9 +122,13 @@ export async function fetchWithRetry(
     if (attempt < clampedAttempts - 1) {
       const delay = 1000 * Math.pow(2, attempt);
       await new Promise<void>((r) => {
-        const timer = setTimeout(r, delay);
+        let onAbort: (() => void) | undefined;
+        const timer = setTimeout(() => {
+          if (onAbort && signal) signal.removeEventListener('abort', onAbort);
+          r();
+        }, delay);
         if (signal) {
-          const onAbort = () => { clearTimeout(timer); r(); };
+          onAbort = () => { clearTimeout(timer); r(); };
           signal.addEventListener('abort', onAbort, { once: true });
         }
       });

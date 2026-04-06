@@ -160,13 +160,14 @@ export async function POST(
       ? buyerBalance.earnedCredits + buyerBalance.addonTokens + (buyerBalance.monthlyTokens - buyerBalance.monthlyTokensUsed)
       : totalBalance - price;
 
-    // Record purchase
+    // Record purchase — onConflictDoNothing makes this idempotent under retry
+    // (unique constraint on buyerId+assetId prevents duplicate rows)
     await queryWithResilience(() => getDb().insert(assetPurchases).values({
       buyerId: user.id,
       assetId,
       priceTokens: price,
       license: asset.license,
-    }));
+    }).onConflictDoNothing());
 
     // Increment download count atomically
     await queryWithResilience(() => getDb()
