@@ -94,8 +94,26 @@ export async function POST(
     }).onConflictDoNothing().returning({ id: assetPurchases.id }));
 
     if (purchaseInserted.length === 0) {
-      // Race: another request already completed this purchase
-      return conflict('Already purchased');
+      // Conflict — but was the buyer actually charged? If the INSERT committed
+      // on a previous attempt but the HTTP response was lost (neon-http retry),
+      // the purchase row exists but balance mutations never ran. Check for the
+      // deduction credit_transaction to distinguish "fully completed" from
+      // "orphan row from lost-ack retry" (Copilot review finding).
+      const [existingTxn] = await queryWithResilience(() => getDb()
+        .select({ id: creditTransactions.id })
+        .from(creditTransactions)
+        .where(and(
+          eq(creditTransactions.userId, user.id),
+          eq(creditTransactions.source, 'marketplace_purchase'),
+          eq(creditTransactions.referenceId, assetId),
+        ))
+        .limit(1));
+
+      if (existingTxn) {
+        // Fully completed — buyer was already charged
+        return conflict('Already purchased');
+      }
+      // Orphan purchase row — fall through to charge the buyer
     }
 
     // Deduct tokens (use earned credits first, then addon, then monthly)

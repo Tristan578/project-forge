@@ -186,19 +186,42 @@ describe('POST /api/marketplace/assets/[id]/purchase — downloadCount idempoten
     expect(mockUpdate).toHaveBeenCalledTimes(3);
   });
 
-  it('returns 409 on retry paid purchase — no balance mutations (insert conflicts)', async () => {
+  it('returns 409 on retry paid purchase when credit_transaction exists (fully completed)', async () => {
     setupDbChain([
       { type: 'select', result: [paidAsset] },       // get asset
       { type: 'select', result: [] },                 // check existing purchase (race: not found yet)
-      { type: 'insert', result: [] },                 // purchase INSERT conflicts — idempotency gate blocks
+      { type: 'insert', result: [] },                 // purchase INSERT conflicts — idempotency gate
+      { type: 'select', result: [{ id: 'txn-existing' }] }, // credit_transaction EXISTS → fully completed
     ]);
 
     const { POST } = await import('@/app/api/marketplace/assets/[id]/purchase/route');
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: 'asset-1' }) });
 
-    // With insert-first pattern, conflict returns 409 before any balance mutation
     expect(res.status).toBe(409);
-    // No balance updates should have happened
     expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('completes charging on orphan purchase row (insert committed but balance never deducted)', async () => {
+    setupDbChain([
+      { type: 'select', result: [paidAsset] },       // get asset
+      { type: 'select', result: [] },                 // check existing purchase (race: not found yet)
+      { type: 'insert', result: [] },                 // purchase INSERT conflicts — orphan row
+      { type: 'select', result: [] },                 // credit_transaction NOT found → orphan
+      { type: 'select', result: [seller] },           // get seller
+      { type: 'update', result: [{ id: 'buyer-1' }] }, // buyer balance deduction
+      { type: 'update', result: [{ earnedCredits: 270 }] }, // seller balance credit
+      { type: 'select', result: [{ earnedCredits: 400, addonTokens: 0, monthlyTokens: 1000, monthlyTokensUsed: 100 }] }, // buyer balance read
+      { type: 'update', result: [paidAsset] },        // downloadCount increment
+      { type: 'insert', result: [{ id: 'txn-1' }] }, // buyer transaction
+      { type: 'insert', result: [{ id: 'txn-2' }] }, // seller transaction
+    ]);
+
+    const { POST } = await import('@/app/api/marketplace/assets/[id]/purchase/route');
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: 'asset-1' }) });
+    const body = await res.json();
+
+    expect(body.success).toBe(true);
+    // Balance mutations should have happened (3 updates: buyer, seller, downloadCount)
+    expect(mockUpdate).toHaveBeenCalledTimes(3);
   });
 });
