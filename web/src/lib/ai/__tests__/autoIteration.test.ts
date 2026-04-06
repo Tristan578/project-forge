@@ -454,9 +454,7 @@ describe('applyFixes', () => {
     expect(dispatch).toHaveBeenCalledTimes(2);
     expect(dispatch).toHaveBeenCalledWith('update_game_component', {
       entityId: 'dz-1',
-      component: 'game_component',
-      property: 'damagePerSecond',
-      value: 15,
+      damagePerSecond: 15,
     });
   });
 

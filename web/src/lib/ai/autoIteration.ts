@@ -472,12 +472,17 @@ export function applyFixes(
 
   for (const fix of fixes) {
     for (const change of fix.changes) {
-      dispatch(change.command, {
-        entityId: change.entityId,
-        component: change.component,
-        property: change.property,
-        value: change.newValue,
-      });
+      if (change.command === 'spawn_entity') {
+        dispatch(change.command, {
+          entityType: change.component === 'light' ? 'point_light' : 'cube',
+          name: change.component,
+        });
+      } else {
+        dispatch(change.command, {
+          entityId: change.entityId,
+          [change.property]: change.newValue,
+        });
+      }
     }
     appliedFixes.push(fix);
   }
