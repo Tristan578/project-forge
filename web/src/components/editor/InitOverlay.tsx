@@ -196,7 +196,7 @@ export function InitOverlay() {
                 {retryCount > 0 && ` | Attempt ${retryCount + 1}/3`}
               </div>
 
-              {canRetry && isTimedOut && (
+              {canRetry && (isTimedOut || error) && (
                 <div className="flex gap-2">
                   <button
                     onClick={retry}

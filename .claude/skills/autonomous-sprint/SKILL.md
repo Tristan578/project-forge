@@ -128,20 +128,19 @@ Move to the next item in the priority queue. Repeat the loop.
 
 Lessons from prior runs. **Boot sequence validates these against live state and deletes stale entries.**
 
-### Session 2026-04-05 (run 4)
-- **Resolved**: All 11 Copilot + 2 Sentry comments on PR #8232 with commit SHAs and fixes
-- **Boy Scout fixes**: hook env var convention, SKILL.md naming, gotchas.md typo, misleading UX copy, inconsistent tier gate
-- **Created**: 3 P0 epics (#8233/#8234/#8235) with 21 atomic stories (#8236-#8256)
-- **Tests added**: ChatPanel canUseAI=false and handleRetry with attachments
+### Session 2026-04-05
+- **Shipped**: PR #8231 (model names, token costs, leaderboard API, Replicate model fix, boardName validation). Closes #8174, #8200, #8173, #8172, #7512, #8175.
+- **Shipped**: PR #8232 (Stripe refund race, AI tier gate via `assertTier()`, 7 UX fixes, ChatPanel tests).
+- **Resolved**: 16 Copilot + 2 Sentry comments across 3 rounds with commit SHAs and code fixes.
+- **Boy Scout fixes**: hook env var convention, SKILL.md naming, gotchas.md typo, misleading UX copy, inconsistent tier gate.
+- **Created**: 3 P0 epics (#8233/#8234/#8235) with 21 atomic stories (#8236-#8256).
+- **Specs written**: 3 P0 architecture specs (DB resilience, CDN redundancy, keyboard nav).
 - **Lessons**:
-  - "Filed for follow-up" on a pre-existing bug is Boy Scout Rule violation — fix it or don't reply.
+  - `vi.clearAllMocks()` does NOT clear `mockReturnValue` — use `mockReturnValueOnce` for test-scoped overrides.
   - Hook env vars use `TOOL_INPUT_file_path`, not `$TOOL_INPUT` JSON parsing.
   - `assertTier()` returns consistent `{ error: 'TIER_REQUIRED', currentTier }` — never hand-roll tier checks.
-
-### Session 2026-04-05 (runs 1-3)
-- **Shipped**: PR #8231 (model names, leaderboard API). PR #8232 (Stripe refund race, AI tier gate, 7 UX fixes).
-- **Specs written**: 3 P0 architecture specs (DB resilience, CDN redundancy, keyboard nav)
-- **Key lessons**: Vercel serverless singletons are per-request (use Upstash), WASM JS glue+binary are origin-coupled, Play mode double-dispatch risk.
+  - Copilot re-reviews every push. Must `/resolve-pr-comments` after EVERY push, not just once.
+  - "Filed for follow-up" on a pre-existing bug is Boy Scout Rule violation — fix it or don't reply.
 
 ## Session End Protocol
 

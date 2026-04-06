@@ -84,16 +84,70 @@ export function reportWasmLoadMetric(metric: WasmLoadMetric): void {
 }
 
 /**
- * Wrap a WASM fetch with cache status detection and timing.
+ * Fetch with exponential backoff retry for transient failures (#8246).
  *
- * Measures time from `startTimeMs` until HTTP response headers are received
- * (fetch resolution). This does NOT include body download or WASM compilation
- * time — those happen asynchronously after the Response is consumed by the
- * caller. The metric captures network latency + CDN cache behavior.
+ * Up to `maxAttempts` attempts (default 3) with exponential backoff between
+ * them. Delays occur between attempts: 1s after the 1st failure, 2s after
+ * the 2nd (3 attempts = 2 delays). Retries on 5xx and network errors.
+ * Fails fast on 4xx (permanent errors). Throws on all non-2xx responses
+ * after retries exhaust. Respects AbortSignal — aborted fetches are never
+ * retried, and backoff sleeps are immediately cancellable.
+ */
+export async function fetchWithRetry(
+  url: string,
+  signal: AbortSignal | undefined,
+  maxAttempts = 3,
+  perAttemptTimeoutMs = 30_000,
+): Promise<Response> {
+  const clampedAttempts = Math.max(1, Math.floor(maxAttempts));
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < clampedAttempts; attempt++) {
+    // Check abort before each attempt (including after backoff sleep)
+    if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+    try {
+      // Combine caller abort signal with per-attempt timeout to prevent hanging fetches
+      const timeoutSignal = AbortSignal.timeout(perAttemptTimeoutMs);
+      const fetchSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+      const response = await fetch(url, { signal: fetchSignal });
+      if (response.ok) return response;
+      // 4xx = permanent error, fail fast (do NOT retry)
+      if (response.status < 500) {
+        throw new Error(`WASM fetch failed: ${response.status} ${response.statusText}`);
+      }
+      // 5xx = transient, retry
+      lastError = new Error(`WASM fetch failed: ${response.status} ${response.statusText}`);
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      const error = err instanceof Error ? err : new Error(String(err));
+      // Rethrow permanent (4xx) errors — only retry transient failures
+      if (error.message.startsWith('WASM fetch failed:')) throw error;
+      lastError = error;
+    }
+    if (attempt < clampedAttempts - 1) {
+      const delay = 1000 * Math.pow(2, attempt);
+      await new Promise<void>((r) => {
+        let onAbort: (() => void) | undefined;
+        const timer = setTimeout(() => {
+          if (onAbort && signal) signal.removeEventListener('abort', onAbort);
+          r();
+        }, delay);
+        if (signal) {
+          onAbort = () => { clearTimeout(timer); r(); };
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+      });
+      if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+    }
+  }
+  throw lastError!;
+}
+
+/**
+ * Fetch a WASM binary with retry, cache status detection, and timing.
  *
- * @param url - The WASM binary URL being fetched
- * @param backend - Which engine backend is being loaded
- * @param startTimeMs - performance.now() value from before the fetch started
+ * Uses `fetchWithRetry` internally — throws on all non-2xx responses (4xx
+ * immediately, 5xx after retries exhaust). Measures network latency from
+ * `startTimeMs` and reports CDN cache metrics via Vercel Analytics.
  */
 export async function fetchWasmWithMetrics(
   url: string,
@@ -101,18 +155,16 @@ export async function fetchWasmWithMetrics(
   startTimeMs: number,
   signal?: AbortSignal,
 ): Promise<Response> {
-  const response = await fetch(url, signal ? { signal } : {});
+  const response = await fetchWithRetry(url, signal);
 
-  if (response.ok) {
-    const cacheStatus = readCfCacheStatus(response);
-    const fetchTimeMs = performance.now() - startTimeMs;
-    const cdnEnabled = !url.startsWith('/') && !url.startsWith(window.location.origin);
+  const cacheStatus = readCfCacheStatus(response);
+  const fetchTimeMs = performance.now() - startTimeMs;
+  const cdnEnabled = !url.startsWith('/') && !url.startsWith(window.location.origin);
 
-    // Schedule metric reporting without blocking the load path
-    queueMicrotask(() => {
-      reportWasmLoadMetric({ loadTimeMs: fetchTimeMs, backend, cacheStatus, cdnEnabled });
-    });
-  }
+  // Schedule metric reporting without blocking the load path
+  queueMicrotask(() => {
+    reportWasmLoadMetric({ loadTimeMs: fetchTimeMs, backend, cacheStatus, cdnEnabled });
+  });
 
   return response;
 }
