@@ -1,5 +1,6 @@
 import 'server-only';
 import { isTransientError } from './withRetry';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export type CircuitState = 'closed' | 'open' | 'half-open';
 
@@ -83,14 +84,14 @@ export class CircuitBreaker {
       this.lastOpenedAt !== null &&
       Date.now() - this.lastOpenedAt >= this.openTimeoutMs
     ) {
-      this.state = 'half-open';
+      this._transition('open', 'half-open');
     }
   }
 
   private _onSuccess(): void {
     if (this.state === 'half-open') {
       // Probe succeeded — close the circuit
-      this.state = 'closed';
+      this._transition('half-open', 'closed');
       this.consecutiveFailures = 0;
       this.lastOpenedAt = null;
     } else if (this.state === 'closed') {
@@ -104,11 +105,24 @@ export class CircuitBreaker {
 
     if (this.state === 'half-open') {
       // Probe failed — go back to open
-      this.state = 'open';
+      this._transition('half-open', 'open');
       this.lastOpenedAt = Date.now();
     } else if (this.state === 'closed' && this.consecutiveFailures >= this.failureThreshold) {
-      this.state = 'open';
+      this._transition('closed', 'open');
       this.lastOpenedAt = Date.now();
+    }
+  }
+
+  /** Log state transition to Sentry for incident response (#8244). */
+  private _transition(from: CircuitState, to: CircuitState): void {
+    this.state = to;
+    // Opening the circuit is an operational alert — capture as exception
+    // so Sentry fires alerts configured for the DB subsystem (#8244).
+    if (to === 'open') {
+      captureException(
+        new Error(`DB circuit breaker opened after ${this.consecutiveFailures} consecutive failures`),
+        { from, to, consecutiveFailures: this.consecutiveFailures, openTimeoutMs: this.openTimeoutMs },
+      );
     }
   }
 }
