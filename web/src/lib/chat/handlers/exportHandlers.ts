@@ -129,7 +129,7 @@ export const exportHandlers: Record<string, ToolHandler> = {
 
     return {
       success: true,
-      message: `Export preset set to "${preset.name}" (${preset.format}, ${preset.resolution}). Next export will use these settings.`,
+      message: `Export preset "${preset.name}" saved (${preset.format}, ${preset.resolution}). The preset is stored for reference — individual export commands determine the actual output format.`,
     };
   },
 };
