@@ -610,7 +610,7 @@ class AudioManager {
       setTimeout(() => this.stop(fromEntityId, fromSlot), durationMs);
     }
     if (toInstance) {
-      const targetVolume = toInstance.gainNode.gain.value || 1.0;
+      const targetVolume = toInstance.gainNode.gain.value ?? 1.0;
       toInstance.gainNode.gain.cancelScheduledValues(now);
       toInstance.gainNode.gain.setValueAtTime(0, now);
       toInstance.gainNode.gain.linearRampToValueAtTime(targetVolume, now + duration);
@@ -626,7 +626,7 @@ class AudioManager {
     const key = this.instanceKey(entityId, slot);
     const instance = this.instances.get(key);
     if (!instance) return;
-    const targetVolume = instance.gainNode.gain.value || 1.0;
+    const targetVolume = instance.gainNode.gain.value ?? 1.0;
     instance.gainNode.gain.cancelScheduledValues(now);
     instance.gainNode.gain.setValueAtTime(0, now);
     instance.gainNode.gain.linearRampToValueAtTime(targetVolume, now + durationMs / 1000);
