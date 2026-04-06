@@ -43,6 +43,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   const [embedSnippet, setEmbedSnippet] = useState<string | null>(null);
   const [snippetCopied, setSnippetCopied] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   // Close on Escape key + focus trap
@@ -107,7 +108,18 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
     setSelectedPreset(presetName);
   }, []);
 
+  const handleCancel = useCallback(() => {
+    if (isExporting && abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    } else {
+      onClose();
+    }
+  }, [isExporting, onClose]);
+
   const handleExport = useCallback(async () => {
+    const controller = new AbortController();
+    abortRef.current = controller;
     setExporting(true);
     setExportError(null);
     try {
@@ -132,6 +144,9 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         textureCompressionConfig,
       });
 
+      // If user cancelled during export, skip download
+      if (controller.signal.aborted) return;
+
       const extension = mode === 'single-html' ? 'html' : 'zip';
       const filename = `${title.replace(/[^a-z0-9_-]/gi, '_')}.${extension}`;
       downloadBlob(blob, filename);
@@ -149,11 +164,16 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         onClose();
       }
     } catch (err) {
+      if (controller.signal.aborted) {
+        // User cancelled — not an error
+        return;
+      }
       console.error('[Export] Failed to export game:', err);
       const message = err instanceof Error ? err.message : String(err);
       setExportError(message);
       showError(`Export failed: ${message}`);
     } finally {
+      abortRef.current = null;
       setExporting(false);
     }
   }, [title, mode, resolution, bgColor, includeDebug, selectedPreset, showLoadingCustomization, loadingConfig, orientationLock, compressionPreset, compressionQuality, setExporting, onClose]);
@@ -539,11 +559,10 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 border-t border-zinc-700 px-4 py-3">
           <button
-            onClick={onClose}
-            disabled={isExporting}
-            className="rounded px-3 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
+            onClick={handleCancel}
+            className="rounded px-3 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
           >
-            Cancel
+            {isExporting ? 'Cancel Export' : 'Cancel'}
           </button>
           <button
             onClick={handleExport}

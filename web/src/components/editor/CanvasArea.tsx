@@ -26,7 +26,7 @@ export function CanvasArea() {
   usePointerLock(CANVAS_ID);
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-zinc-950">
+    <div className="relative h-full w-full overflow-hidden bg-zinc-900">
       <canvas
         id={CANVAS_ID}
         className={`block h-full w-full${isReady ? '' : ' invisible'}`}
