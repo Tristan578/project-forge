@@ -267,4 +267,25 @@ describe('CircuitBreaker', () => {
     expect(stats.consecutiveFailures).toBe(0);
     expect(stats.lastOpenedAt).toBeNull();
   });
+
+  it('reset() fires onTransition callback when state changes', async () => {
+    const onTransition = vi.fn();
+    const cb = makeBreaker({ failureThreshold: 1, onTransition });
+    await expect(cb.execute(() => Promise.reject(new Error('connection terminated')))).rejects.toThrow();
+    expect(cb.getState()).toBe('open');
+
+    onTransition.mockClear();
+    cb.reset();
+
+    expect(onTransition).toHaveBeenCalledWith('open', 'closed');
+  });
+
+  it('reset() does not fire onTransition when already closed', () => {
+    const onTransition = vi.fn();
+    const cb = makeBreaker({ onTransition });
+    expect(cb.getState()).toBe('closed');
+
+    cb.reset();
+    expect(onTransition).not.toHaveBeenCalled();
+  });
 });

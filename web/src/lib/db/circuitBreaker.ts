@@ -64,9 +64,10 @@ export class CircuitBreaker {
     }
   }
 
-  /** Reset the circuit breaker to closed state (useful for testing). */
+  /** Reset the circuit breaker to closed state (useful for testing).
+   * Routes through `_transition()` so `onTransition` observers are notified. */
   reset(): void {
-    this.state = 'closed';
+    this._transition('closed');
     this.consecutiveFailures = 0;
     this.lastOpenedAt = null;
   }
