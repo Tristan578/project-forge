@@ -144,6 +144,9 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         textureCompressionConfig,
       });
 
+      // If user cancelled during export, skip download
+      if (controller.signal.aborted) return;
+
       const extension = mode === 'single-html' ? 'html' : 'zip';
       const filename = `${title.replace(/[^a-z0-9_-]/gi, '_')}.${extension}`;
       downloadBlob(blob, filename);
