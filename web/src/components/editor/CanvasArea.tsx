@@ -27,8 +27,8 @@ export function CanvasArea() {
   usePointerLock(CANVAS_ID);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
-    // Play mode: Bevy handles keyboard natively, except Escape to exit
-    if (engineMode === 'play') {
+    // Play/Paused mode: Bevy handles keyboard natively, except Escape to exit
+    if (engineMode === 'play' || engineMode === 'paused') {
       if (e.key === 'Escape') {
         getWasmModule()?.handle_command('stop', {});
         e.preventDefault();

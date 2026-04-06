@@ -220,4 +220,25 @@ describe('CanvasArea', () => {
     expect(mockHandleCommand).not.toHaveBeenCalledWith('set_gizmo_mode', expect.anything());
     expect(mockHandleCommand).not.toHaveBeenCalledWith('delete_entities', expect.anything());
   });
+
+  // Regression: Sentry bug — paused mode must also block edit shortcuts
+  it('keyboard shortcuts are no-op in paused mode (except Escape)', () => {
+    mockEditorStore({ engineMode: 'paused' });
+    const { container } = render(<CanvasArea />);
+    const canvas = container.querySelector('canvas')!;
+    fireEvent.keyDown(canvas, { key: 'w' });
+    fireEvent.keyDown(canvas, { key: 'Delete' });
+    fireEvent.keyDown(canvas, { key: 'f' });
+    expect(mockHandleCommand).not.toHaveBeenCalledWith('set_gizmo_mode', expect.anything());
+    expect(mockHandleCommand).not.toHaveBeenCalledWith('delete_entities', expect.anything());
+    expect(mockHandleCommand).not.toHaveBeenCalledWith('focus_camera', expect.anything());
+  });
+
+  it('Escape in paused mode dispatches stop', () => {
+    mockEditorStore({ engineMode: 'paused' });
+    const { container } = render(<CanvasArea />);
+    const canvas = container.querySelector('canvas')!;
+    fireEvent.keyDown(canvas, { key: 'Escape' });
+    expect(mockHandleCommand).toHaveBeenCalledWith('stop', {});
+  });
 });
