@@ -99,7 +99,7 @@ describe('exportHandlers', () => {
 
     it('falls back to stored exportPreset when no preset arg given', async () => {
       mockEditorState.exportPreset = {
-        name: 'itch-io',
+        presetKey: 'itch-io',
         config: {
           name: 'itch.io',
           format: 'zip',

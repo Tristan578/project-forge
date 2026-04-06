@@ -401,7 +401,7 @@ describe('gameCameraModes', () => {
         },
       };
       store.getState().setExportPreset('web-optimized', preset);
-      expect(store.getState().exportPreset).toEqual({ name: 'web-optimized', config: preset });
+      expect(store.getState().exportPreset).toEqual({ presetKey: 'web-optimized', config: preset });
     });
 
     it('should clear export preset', () => {

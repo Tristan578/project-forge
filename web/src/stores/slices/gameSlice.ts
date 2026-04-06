@@ -20,7 +20,7 @@ export interface GameSlice {
   engineMode: EngineMode;
   loadingScreenConfig: LoadingScreenConfig | null;
   accessibilityProfile: AccessibilityProfile | null;
-  exportPreset: { name: string; config: ExportPreset } | null;
+  exportPreset: { presetKey: string; config: ExportPreset } | null;
 
   addGameComponent: (entityId: string, component: GameComponentData) => void;
   updateGameComponent: (entityId: string, component: GameComponentData) => void;
@@ -37,7 +37,7 @@ export interface GameSlice {
   setLoadingScreenConfig: (config: LoadingScreenConfig | null) => void;
   setAccessibilityProfile: (profile: AccessibilityProfile | null) => void;
   updateAccessibilityProfile: (partial: Partial<AccessibilityProfile>) => void;
-  setExportPreset: (name: string, config: ExportPreset) => void;
+  setExportPreset: (presetKey: string, config: ExportPreset) => void;
   clearExportPreset: () => void;
   play: () => void;
   stop: () => void;
@@ -141,7 +141,7 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
       },
     });
   },
-  setExportPreset: (name, config) => set({ exportPreset: { name, config } }),
+  setExportPreset: (presetKey, config) => set({ exportPreset: { presetKey, config } }),
   clearExportPreset: () => set({ exportPreset: null }),
   play: () => {
     if (dispatchCommand) dispatchCommand('play', {});
