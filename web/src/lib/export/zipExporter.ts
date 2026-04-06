@@ -25,6 +25,7 @@ export interface ZipExportOptions {
   bgColor: string;
   includeDebug: boolean;
   orientationLock?: 'landscape' | 'portrait' | 'none';
+  signal?: AbortSignal;
 }
 
 interface ZipEntry {
@@ -81,7 +82,10 @@ export async function exportAsZip(
   options: ZipExportOptions,
   signal?: AbortSignal
 ): Promise<Blob> {
+  const { signal } = options;
+
   // 1. Extract embedded assets
+  if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
   const { modifiedScene, assets } = await extractAssets(sceneData);
 
   // 2. Bundle scripts

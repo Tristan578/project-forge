@@ -119,7 +119,7 @@ describe('POST /api/marketplace/assets/[id]/review', () => {
     vi.mocked(requireInteger).mockReturnValue({ ok: true, value: 5 } as never);
     vi.mocked(optionalString).mockReturnValue({ ok: true, value: 'Great asset!' } as never);
 
-    // The route makes 4 DB calls via queryWithResilience:
+    // The route makes 5 DB calls via queryWithResilience:
     // 1. select purchase (with .limit) → found
     // 2. select existing review (with .limit) → not found
     // 3. insert review (with .onConflictDoNothing)
