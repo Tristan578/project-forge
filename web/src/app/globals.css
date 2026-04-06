@@ -221,12 +221,11 @@ body {
 }
 
 /* Global reduced-motion: kill non-essential animations and transitions.
-   Essential animations (e.g. loading spinners) can override with
-   animation: <value> !important in their specific selector. */
+   Essential animations (loading spinners, progress bars) are exempted. */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  *:not([role="progressbar"]):not([data-essential-animation]),
+  *:not([role="progressbar"]):not([data-essential-animation])::before,
+  *:not([role="progressbar"]):not([data-essential-animation])::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
