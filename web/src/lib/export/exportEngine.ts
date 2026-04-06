@@ -92,9 +92,10 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
 }
 
 async function getSceneData(): Promise<unknown> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     // Listen for the export response event
     const handler = (event: Event) => {
+      clearTimeout(timeoutId);
       const customEvent = event as CustomEvent;
       window.removeEventListener('forge:scene-exported', handler);
       // The event contains { json, name }, parse the json
@@ -110,16 +111,21 @@ async function getSceneData(): Promise<unknown> {
     };
     window.addEventListener('forge:scene-exported', handler);
 
+    // Timeout — if engine doesn't respond, reject rather than producing a
+    // broken export with only entity names and no materials/physics/scripts.
+    // The 5s timeout gives the engine time for large scenes (#8185).
+    // Set BEFORE saveScene() so clearTimeout works even if the event fires synchronously.
+    const timeoutId = setTimeout(() => {
+      window.removeEventListener('forge:scene-exported', handler);
+      reject(new Error(
+        'Engine did not respond to export request within 5 seconds. ' +
+        'Ensure the engine is loaded and the scene is ready before exporting.',
+      ));
+    }, 5000);
+
     // Trigger export_scene command
     const store = useEditorStore.getState();
     store.saveScene(); // Uses the existing saveScene action which calls export_scene
-
-    // Timeout fallback — use current store state if export event doesn't fire
-    setTimeout(() => {
-      window.removeEventListener('forge:scene-exported', handler);
-      // Build scene data from store state as fallback
-      resolve(buildSceneFromStore());
-    }, 2000);
   });
 }
 
