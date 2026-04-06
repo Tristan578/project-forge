@@ -132,7 +132,7 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
         screenReader: { ...current.screenReader, ...partial.screenReader },
         inputRemapping: { ...current.inputRemapping, ...partial.inputRemapping },
         subtitles: { ...current.subtitles, ...partial.subtitles },
-        fontSize: partial.fontSize ?? current.fontSize,
+        fontSize: { ...current.fontSize, ...partial.fontSize },
       },
     });
   },
