@@ -58,7 +58,7 @@ function getInstance() {
   return _instance;
 }
 
-export function getDb() {
+export function getDb(): ReturnType<typeof createDb>['db'] {
   return getInstance().db;
 }
 
@@ -77,7 +77,7 @@ export function getDb() {
  *     sql`INSERT INTO token_purchases (...) VALUES (...)`,
  *   ]);
  */
-export function getNeonSql() {
+export function getNeonSql(): ReturnType<typeof createDb>['sql'] {
   return getInstance().sql;
 }
 
