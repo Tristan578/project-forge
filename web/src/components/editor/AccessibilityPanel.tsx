@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { ScanSearch, Wand2, ChevronDown, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
-import { useEditorStore } from '@/stores/editorStore';
+import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
 import {
   analyzeAccessibility,
   generateAccessibilityProfile,
@@ -379,16 +379,115 @@ function InputRemappingSection({
 }
 
 // ---------------------------------------------------------------------------
+// Colorblind CSS filter simulation
+// Applied to #game-canvas via inline CSS filter (saturate + hue-rotate).
+// ---------------------------------------------------------------------------
+
+// Colorblind simulation filter parameters: [saturate, hue-rotate (deg)]
+// At full strength, these approximate the named condition. At partial
+// strength, parameters are interpolated toward identity (saturate=1, rotate=0).
+const COLORBLIND_PARAMS: Record<ColorblindType, { saturate: number; hueRotate: number }> = {
+  protanopia:     { saturate: 0.8, hueRotate: -10 },
+  deuteranopia:   { saturate: 0.7, hueRotate: 20 },
+  tritanopia:     { saturate: 0.75, hueRotate: -40 },
+  achromatopsia:  { saturate: 0, hueRotate: 0 }, // grayscale = saturate(0)
+};
+
+function applyColorblindFilter(mode: ColorblindType | null, strength: number): void {
+  const canvas = document.getElementById('game-canvas');
+  if (!canvas) return;
+
+  if (!mode || strength <= 0) {
+    canvas.style.filter = '';
+    return;
+  }
+
+  const params = COLORBLIND_PARAMS[mode];
+  // Interpolate toward identity (saturate=1, hueRotate=0) based on strength
+  const sat = 1 + (params.saturate - 1) * strength;
+  const hue = params.hueRotate * strength;
+  canvas.style.filter = `saturate(${sat}) hue-rotate(${hue}deg)`;
+}
+
+function dispatchInputRemappings(remappings: AccessibilityProfile['inputRemapping']['remappings'], enabled: boolean): void {
+  const dispatch = getCommandDispatcher();
+  if (!dispatch) return;
+
+  if (!enabled) {
+    // Clear any previously-applied custom bindings so the engine reverts to defaults
+    for (const remap of remappings) {
+      dispatch('remove_input_binding', { actionName: remap.action });
+    }
+    return;
+  }
+
+  for (const remap of remappings) {
+    const sources = [remap.primaryKey, ...remap.alternativeKeys].filter(Boolean);
+    dispatch('set_input_binding', {
+      actionName: remap.action,
+      actionType: 'digital',
+      sources,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main Panel
 // ---------------------------------------------------------------------------
 
 export function AccessibilityPanel() {
   const [audit, setAudit] = useState<AccessibilityAudit | null>(null);
-  const [profile, setProfile] = useState<AccessibilityProfile>(createDefaultProfile);
+  const [profile, setProfile] = useState<AccessibilityProfile>(
+    () => useEditorStore.getState().accessibilityProfile ?? createDefaultProfile(),
+  );
   const [isGenerating, setIsGenerating] = useState(false);
 
   const sceneGraph = useEditorStore((s) => s.sceneGraph);
   const entityCount = useMemo(() => Object.keys(sceneGraph.nodes).length, [sceneGraph]);
+
+  // Sync profile to store whenever it changes so it persists and is available to export
+  useEffect(() => {
+    useEditorStore.getState().setAccessibilityProfile(profile);
+  }, [profile]);
+
+  // Apply colorblind simulation filter to game canvas
+  const { colorblindMode } = profile;
+  const cbEnabled = colorblindMode.enabled;
+  const cbMode = colorblindMode.mode;
+  const cbStrength = colorblindMode.filterStrength;
+  useEffect(() => {
+    applyColorblindFilter(cbEnabled ? cbMode : null, cbStrength);
+    return () => applyColorblindFilter(null, 0);
+  }, [cbEnabled, cbMode, cbStrength]);
+
+  // Dispatch input remappings to engine when they change; cleanup on unmount.
+  // Track previously-applied actions so stale bindings are removed when the
+  // remappings list changes (e.g., a remap is deleted while enabled).
+  const irEnabled = profile.inputRemapping.enabled;
+  const irRemappings = profile.inputRemapping.remappings;
+  const prevAppliedActionsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const dispatch = getCommandDispatcher();
+    const currentActions = new Set(irRemappings.map((r) => r.action));
+
+    if (dispatch) {
+      // Remove any previously-applied actions that are no longer in the list
+      for (const action of prevAppliedActionsRef.current) {
+        if (!currentActions.has(action)) {
+          dispatch('remove_input_binding', { actionName: action });
+        }
+      }
+    }
+
+    dispatchInputRemappings(irRemappings, irEnabled);
+    prevAppliedActionsRef.current = irEnabled ? currentActions : new Set();
+
+    return () => {
+      // Remove all custom bindings on unmount so engine reverts to defaults
+      dispatchInputRemappings(irRemappings, false);
+      prevAppliedActionsRef.current = new Set();
+    };
+  }, [irEnabled, irRemappings]);
 
   const handleRunAudit = useCallback(() => {
     const ctx = buildSceneContextFromStore();
@@ -398,7 +497,6 @@ export function AccessibilityPanel() {
 
   const handleAutoGenerate = useCallback(() => {
     setIsGenerating(true);
-    // Use setTimeout to avoid blocking UI while generating
     setTimeout(() => {
       try {
         const ctx = buildSceneContextFromStore();

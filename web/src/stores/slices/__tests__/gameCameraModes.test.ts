@@ -333,4 +333,54 @@ describe('gameCameraModes', () => {
       expect(store.getState().loadingScreenConfig).toBeNull();
     });
   });
+
+  describe('Accessibility Profile (#8207)', () => {
+    const mockProfile = {
+      colorblindMode: { enabled: true, mode: 'protanopia' as const, filterStrength: 0.8 },
+      screenReader: { enabled: true, entityDescriptions: new Map(), navigationAnnouncements: true },
+      inputRemapping: { enabled: false, remappings: [], onScreenControls: false },
+      subtitles: { enabled: false, fontSize: 'medium' as const, backgroundColor: '#000', textColor: '#fff', opacity: 1 },
+      fontSize: { enabled: false, scale: 1.0, minSize: 12 },
+    };
+
+    it('should default accessibilityProfile to null', () => {
+      expect(store.getState().accessibilityProfile).toBeNull();
+    });
+
+    it('should set accessibility profile', () => {
+      store.getState().setAccessibilityProfile(mockProfile);
+      expect(store.getState().accessibilityProfile).toEqual(mockProfile);
+    });
+
+    it('should clear accessibility profile', () => {
+      store.getState().setAccessibilityProfile(mockProfile);
+      store.getState().setAccessibilityProfile(null);
+      expect(store.getState().accessibilityProfile).toBeNull();
+    });
+
+    it('should update partial accessibility profile', () => {
+      store.getState().setAccessibilityProfile(mockProfile);
+      store.getState().updateAccessibilityProfile({
+        colorblindMode: { enabled: false, mode: 'deuteranopia', filterStrength: 1.0 },
+      });
+      const updated = store.getState().accessibilityProfile;
+      expect(updated!.colorblindMode.mode).toBe('deuteranopia');
+      expect(updated!.colorblindMode.enabled).toBe(false);
+      // Other fields unchanged
+      expect(updated!.screenReader.enabled).toBe(true);
+    });
+
+    it('should initialize from defaults when updating null profile', () => {
+      store.getState().updateAccessibilityProfile({
+        colorblindMode: { enabled: true, mode: 'tritanopia', filterStrength: 0.5 },
+      });
+      const result = store.getState().accessibilityProfile;
+      // Profile initialized from defaults, then merged with partial
+      expect(result).not.toBeNull();
+      expect(result!.colorblindMode.mode).toBe('tritanopia');
+      expect(result!.colorblindMode.enabled).toBe(true);
+      // Other fields get defaults
+      expect(result!.screenReader).toBeDefined();
+    });
+  });
 });
