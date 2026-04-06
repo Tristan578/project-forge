@@ -93,8 +93,11 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
 
 async function getSceneData(): Promise<unknown> {
   return new Promise((resolve, reject) => {
+    let timeoutId: ReturnType<typeof setTimeout>;
+
     // Listen for the export response event
     const handler = (event: Event) => {
+      clearTimeout(timeoutId);
       const customEvent = event as CustomEvent;
       window.removeEventListener('forge:scene-exported', handler);
       // The event contains { json, name }, parse the json
@@ -117,7 +120,7 @@ async function getSceneData(): Promise<unknown> {
     // Timeout — if engine doesn't respond, reject rather than producing a
     // broken export with only entity names and no materials/physics/scripts.
     // The 5s timeout gives the engine time for large scenes (#8185).
-    setTimeout(() => {
+    timeoutId = setTimeout(() => {
       window.removeEventListener('forge:scene-exported', handler);
       reject(new Error(
         'Engine did not respond to export request within 5 seconds. ' +

@@ -282,6 +282,44 @@ describe('exportGame: empty entity list', () => {
   });
 });
 
+describe('exportGame: WASM fetch failure (#8186)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // All WASM fetches fail — simulates CDN down or engine not built
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 503 });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('rejects with WASM-unavailable error when fetch returns empty', async () => {
+    vi.useFakeTimers();
+
+    mocks.getState.mockReturnValue(makeStoreState({ sceneName: 'WASM Fail Scene' }));
+
+    const { exportGame } = await import('../exportEngine');
+
+    const exportPromise = exportGame({
+      title: 'WASM Fail',
+      mode: 'single-html',
+      resolution: 'responsive',
+      bgColor: '#000000',
+      includeDebug: false,
+    }).catch((e: Error) => e);
+
+    // Dispatch valid scene data so getSceneData resolves
+    scheduleSceneExportedEvent({ json: JSON.stringify({ name: 'WASM Fail Scene', entities: [] }) }, 50);
+    await vi.advanceTimersByTimeAsync(100);
+
+    const result = await exportPromise;
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toContain('Failed to fetch WASM engine files');
+
+    vi.useRealTimers();
+  });
+});
+
 describe('downloadBlob: zero-byte blob', () => {
   let createObjectURLSpy: ReturnType<typeof vi.fn>;
   let revokeObjectURLSpy: ReturnType<typeof vi.fn>;
