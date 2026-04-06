@@ -7,6 +7,7 @@
  */
 
 import type { EditorState } from '@/stores/editorStore';
+import { loadLockedStyle, generateStylePromptModifier } from '@/lib/ai/artStyleEngine';
 
 export type GenerationCategory =
   | 'model'
@@ -161,7 +162,13 @@ export function enrichPrompt(
     ? `, for scene "${ctx.sceneName}"`
     : '';
 
-  return `${prefix}${sceneHint}: ${userPrompt}`;
+  // Append locked art style modifier when a style is locked
+  const lockedStyle = loadLockedStyle();
+  const styleSuffix = lockedStyle
+    ? `. ${generateStylePromptModifier(lockedStyle.style)}`
+    : '';
+
+  return `${prefix}${sceneHint}: ${userPrompt}${styleSuffix}`;
 }
 
 /**
