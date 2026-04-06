@@ -127,7 +127,7 @@ export const exportHandlers: Record<string, ToolHandler> = {
 
     return {
       success: true,
-      message: `Export preset "${preset.name}" selected: format=${preset.format}, compress=${preset.compressTextures}, resolution=${preset.resolution}, debug=${preset.includeDebug}. Use export_game to export with these settings.`,
+      message: `Export preset "${preset.name}" details: format=${preset.format}, compress=${preset.compressTextures}, resolution=${preset.resolution}, debug=${preset.includeDebug}. Pass these settings to export_project_zip or export_project_pwa to apply them.`,
     };
   },
 };
