@@ -33,6 +33,14 @@ const TYPE_ICONS: Record<AnimationType, string> = {
 // Component
 // ---------------------------------------------------------------------------
 
+const DEFAULT_HUMANOID_BONES = [
+  'hips', 'spine', 'head', 'neck',
+  'left_arm', 'left_forearm', 'left_hand',
+  'right_arm', 'right_forearm', 'right_hand',
+  'left_leg', 'left_shin', 'left_foot',
+  'right_leg', 'right_shin', 'right_foot',
+];
+
 export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
   const primaryId = useEditorStore((s) => s.primaryId);
   const addClipKeyframe = useEditorStore((s) => s.addClipKeyframe);
@@ -46,23 +54,30 @@ export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
   const [style, setStyle] = useState<AnimationParams['style']>('realistic');
   const [generatedAnim, setGeneratedAnim] = useState<ProceduralAnimation | null>(null);
 
-  // Derive bone names from skeleton data or use a default humanoid set
-  const boneNames = useMemo(() => {
+  const [customBoneInput, setCustomBoneInput] = useState('');
+
+  // Derive bone names: 2D skeleton > custom input > default humanoid
+  const { boneNames, boneSource } = useMemo(() => {
     if (primaryId && skeletons2d[primaryId]) {
       const skel = skeletons2d[primaryId];
-      if (skel.bones && Array.isArray(skel.bones)) {
-        return skel.bones.map((b: { name: string }) => b.name);
+      if (skel.bones && Array.isArray(skel.bones) && skel.bones.length > 0) {
+        return {
+          boneNames: skel.bones.map((b: { name: string }) => b.name),
+          boneSource: 'skeleton' as const,
+        };
       }
     }
-    // Default humanoid skeleton for 3D entities
-    return [
-      'hips', 'spine', 'head', 'neck',
-      'left_arm', 'left_forearm', 'left_hand',
-      'right_arm', 'right_forearm', 'right_hand',
-      'left_leg', 'left_shin', 'left_foot',
-      'right_leg', 'right_shin', 'right_foot',
-    ];
-  }, [primaryId, skeletons2d]);
+    if (customBoneInput.trim()) {
+      const parsed = customBoneInput
+        .split(/[,\n]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (parsed.length > 0) {
+        return { boneNames: parsed, boneSource: 'custom' as const };
+      }
+    }
+    return { boneNames: DEFAULT_HUMANOID_BONES, boneSource: 'default' as const };
+  }, [primaryId, skeletons2d, customBoneInput]);
 
   const typeInfo = useMemo(() => getAnimationTypeInfo(selectedType), [selectedType]);
 
@@ -190,7 +205,20 @@ export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
       <div className="border-b border-zinc-700 p-3">
         <label className="mb-1 block text-xs font-medium text-zinc-400">
           Bones ({boneNames.length})
+          {boneSource === 'skeleton' && (
+            <span className="ml-1 text-green-400">(from skeleton)</span>
+          )}
+          {boneSource === 'custom' && (
+            <span className="ml-1 text-blue-400">(custom)</span>
+          )}
         </label>
+
+        {boneSource === 'default' && (
+          <div className="mb-2 rounded bg-amber-900/30 px-2 py-1.5 text-[11px] text-amber-300" role="alert">
+            Using default humanoid bones. For GLTF models, paste your actual bone names below.
+          </div>
+        )}
+
         <div className="flex max-h-20 flex-wrap gap-1 overflow-y-auto">
           {boneNames.map((name) => (
             <span
@@ -201,6 +229,23 @@ export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
             </span>
           ))}
         </div>
+
+        {/* Custom bone input (visible when no skeleton detected) */}
+        {boneSource !== 'skeleton' && (
+          <div className="mt-2">
+            <label htmlFor="proc-anim-custom-bones" className="mb-1 block text-[10px] text-zinc-500">
+              Custom bones (comma or newline separated)
+            </label>
+            <textarea
+              id="proc-anim-custom-bones"
+              value={customBoneInput}
+              onChange={(e) => setCustomBoneInput(e.target.value)}
+              placeholder="hips, spine, head, left_arm, ..."
+              rows={3}
+              className="w-full rounded bg-zinc-800 px-2 py-1 text-[11px] text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        )}
       </div>
 
       {/* Generate button */}

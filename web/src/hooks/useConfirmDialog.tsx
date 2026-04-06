@@ -47,14 +47,14 @@ function ConfirmDialog({ state, onConfirm, onCancel, titleId, descId }: ConfirmD
           <button
             type="button"
             onClick={onCancel}
-            className="rounded px-3 py-1.5 text-sm text-[var(--sf-text-secondary)] hover:bg-[var(--sf-bg-hover)]"
+            className="rounded px-3 py-1.5 text-sm text-[var(--sf-text-secondary)] hover:bg-[var(--sf-bg-elevated)]"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="rounded bg-[var(--sf-danger,#dc2626)] px-3 py-1.5 text-sm text-[var(--sf-text-on-danger,#fff)] hover:opacity-90"
+            className="rounded bg-[var(--sf-destructive)] px-3 py-1.5 text-sm text-[var(--sf-on-accent)] hover:opacity-90"
           >
             Confirm
           </button>
