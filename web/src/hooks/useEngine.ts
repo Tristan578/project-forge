@@ -224,6 +224,21 @@ const ENGINE_CDN_ROOT = ENGINE_CDN_BASE
   : '';
 
 /**
+ * Return ordered list of base paths for WASM loading (#8247).
+ * Primary: R2 CDN (when configured). Fallback: same-origin (Vercel static).
+ * Both JS glue and WASM binary MUST come from the same origin.
+ */
+export function getWasmBasePaths(backend: 'webgpu' | 'webgl2'): string[] {
+  const paths: string[] = [];
+  if (ENGINE_CDN_ROOT) {
+    paths.push(`${ENGINE_CDN_ROOT}/engine-pkg-${backend}/`);
+  }
+  // Same-origin fallback (served from web/public/ via Vercel)
+  paths.push(`/engine-pkg-${backend}/`);
+  return paths;
+}
+
+/**
  * Fetch the wasm-manifest.json from the given base path and return the
  * content hash. Returns null when the manifest is absent (e.g. local dev
  * without a WASM build, or legacy deployments). Never throws.
@@ -376,19 +391,53 @@ async function loadWasm(): Promise<WasmModule> {
 
     setLoadingState({ phase: 'detecting', progress: 100 });
 
-    // Phase 2: Download WASM module
+    // Phase 2: Download WASM module — try each base path (CDN then same-origin) (#8247)
     setLoadingState({ phase: 'downloading', progress: 0 });
     emitEvent('wasm_loading', `Fetching WASM module (${backend})...`);
 
-    const basePath = `${ENGINE_CDN_ROOT}/engine-pkg-${backend}/`;
     const jsFile = 'forge_engine.js';
     const wasmFile = 'forge_engine_bg.wasm';
 
+    // Try loading from each base path in order (CDN first, same-origin fallback)
+    async function tryLoadFromPaths(targetBackend: 'webgpu' | 'webgl2'): Promise<WasmModule> {
+      const paths = getWasmBasePaths(targetBackend);
+      let lastErr: Error | null = null;
+      for (let i = 0; i < paths.length; i++) {
+        const basePath = paths[i];
+        try {
+          setLoadingState({ phase: 'downloading', progress: 0 });
+          const mod = await loadWasmFromPath(basePath, jsFile, wasmFile, signal, (pct) => {
+            setLoadingState({ phase: 'downloading', progress: pct });
+          });
+          return mod;
+        } catch (err) {
+          lastErr = err instanceof Error ? err : new Error(String(err));
+          // AbortError = user navigated away — rethrow immediately, no fallback
+          if (lastErr.name === 'AbortError') throw lastErr;
+          // Only emit fallback event when there's another path to try (not on final failure)
+          if (i < paths.length - 1) {
+            emitEvent('wasm_loading', `CDN load failed, retrying from backup...`);
+            addBreadcrumb({ category: 'wasm', message: `Load failed from ${basePath}: ${lastErr.message}`, level: 'warning' });
+            // Track CDN fallback for monitoring (#8250)
+            import('@/lib/analytics/posthog').then(({ trackEvent, AnalyticsEvent }) => {
+              // Strip path from origin (avoid leaking version SHAs to PostHog)
+              // Use status code only, not attacker-controllable statusText
+              const originHost = (() => { try { return new URL(basePath, window.location.origin).hostname; } catch { return 'unknown'; } })();
+              const statusMatch = lastErr?.message?.match(/(\d{3})/);
+              trackEvent(AnalyticsEvent.WASM_CDN_FALLBACK, {
+                failedOrigin: originHost,
+                errorStatus: statusMatch ? Number(statusMatch[1]) : 0,
+                backend: targetBackend,
+              });
+            }).catch(() => { /* analytics non-critical */ });
+          }
+        }
+      }
+      throw lastErr!;
+    }
+
     try {
-      setLoadingState({ phase: 'downloading', progress: 0 });
-      wasmModule = await loadWasmFromPath(basePath, jsFile, wasmFile, signal, (pct) => {
-        setLoadingState({ phase: 'downloading', progress: pct });
-      });
+      wasmModule = await tryLoadFromPaths(backend);
       setLoadingState({ phase: 'downloading', progress: 100 });
       emitEvent('wasm_loaded', `WASM JS module loaded (${backend}), initializing...`);
 
@@ -398,15 +447,11 @@ async function loadWasm(): Promise<WasmModule> {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
 
-      // If WebGPU failed, try falling back to WebGL2
+      // If WebGPU failed, try falling back to WebGL2 (all origins)
       if (useWebGPU) {
         emitEvent('wasm_loading', 'WebGPU load failed, falling back to WebGL2...');
-        setLoadingState({ phase: 'downloading', progress: 0 });
-        const fallbackPath = `${ENGINE_CDN_ROOT}/engine-pkg-webgl2/`;
         try {
-          wasmModule = await loadWasmFromPath(fallbackPath, jsFile, wasmFile, signal, (pct) => {
-            setLoadingState({ phase: 'downloading', progress: pct });
-          });
+          wasmModule = await tryLoadFromPaths('webgl2');
           resolvedBackend = 'webgl2';
           setLoadingState({ phase: 'initializing', progress: 0 });
           return wasmModule;

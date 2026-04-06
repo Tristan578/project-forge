@@ -256,6 +256,7 @@ function onStart() {
   levelStartTime = forge.time.elapsed;
   lastAdjustTime = levelStartTime;
   deaths = 0;
+  forge.ui.showText('dda-level', 'Difficulty: 50%', 90, 5, { fontSize: 14, color: '#ccc' });
 }
 
 function onUpdate(dt) {
@@ -283,7 +284,7 @@ function onUpdate(dt) {
   );
 
   // Apply multipliers via HUD so the player can see the current difficulty
-  forge.ui.setText('dda-level', 'Difficulty: ' + Math.round(currentLevel * 100) + '%');
+  forge.ui.updateText('dda-level', 'Difficulty: ' + Math.round(currentLevel * 100) + '%');
 }
 
 // Hook into the collision system to detect player deaths

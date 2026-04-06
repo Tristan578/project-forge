@@ -5,6 +5,7 @@ import { X, Wand2, Loader2 } from 'lucide-react';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useUserStore } from '@/stores/userStore';
 import { PALETTES, type PaletteId } from '@/lib/generate/palettes';
+import { useAIGeneration } from '@/hooks/useAIGeneration';
 
 interface Props {
   isOpen: boolean;
@@ -28,8 +29,7 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
   const [style, setStyle] = useState<(typeof STYLES)[number]>('character');
   const [dithering, setDithering] = useState<string>('none');
   const [ditheringIntensity, setDitheringIntensity] = useState(0.5);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { execute, cancel, isLoading: isSubmitting, error } = useAIGeneration();
 
   const tokenBalance = useUserStore((s) => s.tokenBalance?.total ?? 0);
   const addJob = useGenerationStore((s) => s.addJob);
@@ -37,12 +37,15 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
   const tokenCost = 10; // SDXL default
   const canSubmit = prompt.length >= 3 && tokenBalance >= tokenCost && !isSubmitting;
 
+  const handleClose = useCallback(() => {
+    cancel();
+    onClose();
+  }, [cancel, onClose]);
+
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
-    setIsSubmitting(true);
-    setError(null);
 
-    try {
+    const result = await execute(async (signal) => {
       const response = await fetch('/api/generate/pixel-art', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -54,12 +57,12 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
           ditheringIntensity: dithering === 'none' ? 0 : ditheringIntensity,
           style,
         }),
+        signal,
       });
 
       const data = await response.json();
       if (!response.ok) {
-        setError(data.error ?? 'Generation failed');
-        return;
+        throw new Error(data.error ?? 'Generation failed');
       }
 
       addJob({
@@ -75,13 +78,13 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
         metadata: { targetSize, palette, dithering, ditheringIntensity: dithering === 'none' ? 0 : ditheringIntensity, style },
       });
 
+      return true;
+    });
+
+    if (result) {
       onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setIsSubmitting(false);
     }
-  }, [canSubmit, prompt, targetSize, palette, dithering, ditheringIntensity, style, addJob, onClose]);
+  }, [canSubmit, execute, prompt, targetSize, palette, dithering, ditheringIntensity, style, addJob, onClose]);
 
   if (!isOpen) return null;
 
@@ -94,7 +97,7 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
             <Wand2 size={18} className="text-blue-400" />
             <h2 id="pixel-art-dialog-title" className="text-sm font-semibold text-zinc-100">Generate Pixel Art</h2>
           </div>
-          <button onClick={onClose} aria-label="Close" className="text-zinc-400 hover:text-zinc-200">
+          <button onClick={handleClose} aria-label="Close" className="text-zinc-400 hover:text-zinc-200">
             <X size={16} />
           </button>
         </div>

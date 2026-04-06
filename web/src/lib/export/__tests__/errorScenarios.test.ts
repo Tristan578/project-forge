@@ -115,9 +115,10 @@ describe('exportGame: missing scene data', () => {
     });
 
     // Dispatch a bad event (no .detail.json) so the try/catch inside the
-    // handler resolves via buildSceneFromStore, then advance past the 2 s timeout.
+    // handler resolves via buildSceneFromStore — this still produces valid output
+    // because the fallback runs before the 5 s timeout fires.
     scheduleSceneExportedEvent({ json: null }, 50);
-    await vi.advanceTimersByTimeAsync(2500);
+    await vi.advanceTimersByTimeAsync(100);
 
     const blob = await exportPromise;
 
@@ -128,9 +129,9 @@ describe('exportGame: missing scene data', () => {
     vi.useRealTimers();
   });
 
-  it('falls back to buildSceneFromStore when engine never fires the export event (timeout)', async () => {
-    // saveScene is a no-op — the timeout fallback fires after 2 s.
-    // We use a fake timer to accelerate the test.
+  it('rejects when engine never fires the export event (timeout)', async () => {
+    // saveScene is a no-op — the timeout fires after 5 s and rejects
+    // with a clear error rather than producing an unplayable shell (#8185).
     vi.useFakeTimers();
 
     mocks.getState.mockReturnValue(
@@ -145,42 +146,41 @@ describe('exportGame: missing scene data', () => {
       resolution: 'responsive',
       bgColor: '#111111',
       includeDebug: false,
-    });
+    }).catch((e: Error) => e);
 
-    // Advance past the 2000 ms timeout inside getSceneData.
-    await vi.advanceTimersByTimeAsync(2500);
+    // Advance past the 5000 ms timeout inside getSceneData.
+    await vi.advanceTimersByTimeAsync(5500);
 
-    const blob = await exportPromise;
-
-    expect(blob).toBeInstanceOf(Blob);
-    expect(blob.size).toBeGreaterThan(0);
+    const result = await exportPromise;
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toContain('Engine did not respond');
 
     vi.useRealTimers();
   });
 
-  it('uses sceneName from store in fallback scene data', async () => {
+  it('rejects with descriptive error on timeout (not silent failure)', async () => {
     vi.useFakeTimers();
 
-    const customName = 'My Custom Game Name';
     mocks.getState.mockReturnValue(
-      makeStoreState({ sceneName: customName })
+      makeStoreState({ sceneName: 'My Custom Game Name' })
     );
 
     const { exportGame } = await import('../exportEngine');
 
     const exportPromise = exportGame({
-      title: customName,
+      title: 'My Custom Game Name',
       mode: 'single-html',
       resolution: 'responsive',
       bgColor: '#000000',
       includeDebug: false,
-    });
+    }).catch((e: Error) => e);
 
-    await vi.advanceTimersByTimeAsync(2500);
-    const blob = await exportPromise;
+    await vi.advanceTimersByTimeAsync(5500);
+    const result = await exportPromise;
 
-    const html = await blob.text();
-    expect(html).toContain(customName);
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toContain('5 seconds');
+    expect((result as Error).message).toContain('engine is loaded');
 
     vi.useRealTimers();
   });
@@ -197,7 +197,7 @@ describe('exportGame: empty entity list', () => {
     vi.restoreAllMocks();
   });
 
-  it('produces a valid Blob when sceneGraph has no nodes', async () => {
+  it('produces a valid Blob when sceneGraph has no nodes (event fires)', async () => {
     vi.useFakeTimers();
 
     mocks.getState.mockReturnValue(
@@ -217,7 +217,10 @@ describe('exportGame: empty entity list', () => {
       includeDebug: false,
     });
 
-    await vi.advanceTimersByTimeAsync(2500);
+    // Dispatch a valid scene-exported event with empty entities
+    scheduleSceneExportedEvent({ json: JSON.stringify({ name: 'Empty Scene', entities: [] }) }, 50);
+    await vi.advanceTimersByTimeAsync(100);
+
     const blob = await exportPromise;
 
     expect(blob).toBeInstanceOf(Blob);
@@ -227,7 +230,7 @@ describe('exportGame: empty entity list', () => {
     vi.useRealTimers();
   });
 
-  it('does not throw when allScripts is empty', async () => {
+  it('does not throw when allScripts is empty (event fires)', async () => {
     vi.useFakeTimers();
 
     mocks.getState.mockReturnValue(
@@ -244,13 +247,15 @@ describe('exportGame: empty entity list', () => {
       includeDebug: false,
     });
 
-    await vi.advanceTimersByTimeAsync(2500);
+    scheduleSceneExportedEvent({ json: JSON.stringify({ name: 'No Scripts', entities: [] }) }, 50);
+    await vi.advanceTimersByTimeAsync(100);
+
     await expect(exportPromise).resolves.toBeInstanceOf(Blob);
 
     vi.useRealTimers();
   });
 
-  it('generates HTML that includes the game-canvas element', async () => {
+  it('generates HTML that includes the game-canvas element (event fires)', async () => {
     vi.useFakeTimers();
 
     mocks.getState.mockReturnValue(makeStoreState());
@@ -265,11 +270,51 @@ describe('exportGame: empty entity list', () => {
       includeDebug: false,
     });
 
-    await vi.advanceTimersByTimeAsync(2500);
+    scheduleSceneExportedEvent({ json: JSON.stringify({ name: 'Canvas Check', entities: [] }) }, 50);
+    await vi.advanceTimersByTimeAsync(100);
+
     const blob = await exportPromise;
     const html = await blob.text();
 
     expect(html).toContain('game-canvas');
+
+    vi.useRealTimers();
+  });
+});
+
+describe('exportGame: WASM fetch failure (#8186)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // All WASM fetches fail — simulates CDN down or engine not built
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 503 });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('rejects with WASM-unavailable error when fetch returns empty', async () => {
+    vi.useFakeTimers();
+
+    mocks.getState.mockReturnValue(makeStoreState({ sceneName: 'WASM Fail Scene' }));
+
+    const { exportGame } = await import('../exportEngine');
+
+    const exportPromise = exportGame({
+      title: 'WASM Fail',
+      mode: 'single-html',
+      resolution: 'responsive',
+      bgColor: '#000000',
+      includeDebug: false,
+    }).catch((e: Error) => e);
+
+    // Dispatch valid scene data so getSceneData resolves
+    scheduleSceneExportedEvent({ json: JSON.stringify({ name: 'WASM Fail Scene', entities: [] }) }, 50);
+    await vi.advanceTimersByTimeAsync(100);
+
+    const result = await exportPromise;
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toContain('Failed to fetch WASM engine files');
 
     vi.useRealTimers();
   });

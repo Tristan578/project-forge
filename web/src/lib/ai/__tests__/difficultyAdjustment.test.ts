@@ -329,7 +329,8 @@ describe('generateDDAScript', () => {
   it('references forge APIs', () => {
     const script = generateDDAScript(DDA_PRESETS.standard);
     expect(script).toContain('forge.time.elapsed');
-    expect(script).toContain('forge.ui.setText');
+    expect(script).toContain('forge.ui.updateText');
+    expect(script).toContain('forge.ui.showText');
   });
 
   it('includes cooldown check', () => {

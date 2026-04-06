@@ -48,5 +48,5 @@ export const CHANNEL_ALLOWED_METHODS: Record<AsyncChannel, Set<string>> = {
   audio:       new Set(['detectLoopPoints', 'getWaveform']),
   ai:          new Set(['generateTexture', 'generateModel', 'generateSound', 'generateVoice', 'generateMusic']),
   asset:       new Set(['loadImage', 'loadModel']),
-  multiplayer: new Set([]),
+  multiplayer: new Set(['connect', 'disconnect', 'send', 'broadcast', 'getPlayers', 'onMessage']),
 };

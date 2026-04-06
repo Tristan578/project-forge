@@ -4,6 +4,7 @@ import { publishedGames, projects, gameForks, users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { PROJECT_LIMITS } from '@/lib/projects/limits';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,19 +59,16 @@ export async function POST(
       .from(projects)
       .where(eq(projects.userId, mid.userId!)));
 
-    // Intentional: fork limits are deliberately more generous than publish limits
-    // to encourage community remixing. They differ from publish limits and are
-    // not imported from a shared constant to keep the fork policy independent.
-    // TODO(PF): Consider extracting to web/src/lib/config/tierLimits.ts when
-    // a third consumer of project-count limits is added.
-    const tierLimits: Record<string, number> = {
-      starter: 3,
-      hobbyist: 10,
-      creator: 50,
+    // Fork limits cap pro at 999 (unlike PROJECT_LIMITS.pro = Infinity)
+    // to keep the fork table manageable for community queries.
+    const FORK_LIMITS: Record<string, number> = {
+      starter: PROJECT_LIMITS.starter,
+      hobbyist: PROJECT_LIMITS.hobbyist,
+      creator: PROJECT_LIMITS.creator,
       pro: 999,
     };
-
-    const limit = tierLimits[user?.tier || 'starter'];
+    const tier = user?.tier ?? 'starter';
+    const limit = FORK_LIMITS[tier] ?? FORK_LIMITS.starter;
     if (userProjects.length >= limit) {
       return NextResponse.json(
         { error: 'Project limit reached for your tier' },

@@ -454,9 +454,8 @@ describe('applyFixes', () => {
     expect(dispatch).toHaveBeenCalledTimes(2);
     expect(dispatch).toHaveBeenCalledWith('update_game_component', {
       entityId: 'dz-1',
-      component: 'game_component',
-      property: 'damagePerSecond',
-      value: 15,
+      componentType: 'game_component',
+      properties: { damagePerSecond: 15 },
     });
   });
 
@@ -539,6 +538,57 @@ describe('applyFixes', () => {
     const report = applyFixes(fixes, dispatch, 2);
     expect(report.fixesApplied).toHaveLength(5);
     expect(dispatch).toHaveBeenCalledTimes(5);
+  });
+
+  it('dispatches spawn_entity with entityType and name', () => {
+    const dispatch = vi.fn();
+    const fixes: IssueFix[] = [
+      {
+        issueId: 'issue-spawn',
+        description: 'Add checkpoint',
+        changes: [
+          {
+            component: 'checkpoint',
+            property: 'autoSave',
+            oldValue: undefined,
+            newValue: true,
+            command: 'spawn_entity',
+          },
+        ],
+        confidence: 0.8,
+        estimatedImpact: 'test',
+      },
+    ];
+    applyFixes(fixes, dispatch, 1);
+    expect(dispatch).toHaveBeenCalledWith('spawn_entity', {
+      entityType: 'cube',
+      name: 'checkpoint',
+    });
+  });
+
+  it('dispatches update_ambient_light with property directly', () => {
+    const dispatch = vi.fn();
+    const fixes: IssueFix[] = [
+      {
+        issueId: 'issue-light',
+        description: 'Improve lighting',
+        changes: [
+          {
+            component: 'environment',
+            property: 'brightness',
+            oldValue: 0.3,
+            newValue: 0.5,
+            command: 'update_ambient_light',
+          },
+        ],
+        confidence: 0.5,
+        estimatedImpact: 'test',
+      },
+    ];
+    applyFixes(fixes, dispatch, 1);
+    expect(dispatch).toHaveBeenCalledWith('update_ambient_light', {
+      brightness: 0.5,
+    });
   });
 });
 
