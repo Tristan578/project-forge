@@ -415,4 +415,18 @@ describe('EditorLayout', () => {
     // Should focus the first region (sidebar)
     expect(document.activeElement).toBe(sidebar);
   });
+
+  it('F6 is disabled in compact mode', () => {
+    setupStores('compact');
+    render(<EditorLayout />);
+
+    const prevActive = document.activeElement;
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'F6', bubbles: true }));
+    });
+
+    // Focus should not have moved
+    expect(document.activeElement).toBe(prevActive);
+  });
 });

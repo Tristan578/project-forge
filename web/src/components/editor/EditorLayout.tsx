@@ -448,7 +448,8 @@ export function EditorLayout() {
       }
 
       // F6 / Shift+F6: Cycle focus between editor regions (standard IDE pattern)
-      if (e.key === 'F6') {
+      // Disabled in compact mode where regions are inside conditional drawers
+      if (e.key === 'F6' && layout.mode !== 'compact') {
         e.preventDefault();
         const regions = ['sidebar', 'hierarchy', 'canvas', 'right-panel'] as const;
         const targetEl = e.target instanceof HTMLElement ? e.target : null;
@@ -503,7 +504,7 @@ export function EditorLayout() {
         });
       }
     },
-    [toggleChatOverlay]
+    [toggleChatOverlay, layout.mode]
   );
 
   useEffect(() => {
