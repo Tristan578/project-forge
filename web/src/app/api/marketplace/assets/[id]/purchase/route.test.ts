@@ -111,7 +111,7 @@ describe('POST /api/marketplace/assets/[id]/purchase', () => {
 
     // Reset withApiMiddleware to default (authenticated user)
     vi.mocked(withApiMiddleware).mockResolvedValue({
-      error: null,
+      error: undefined,
       authContext: { user: { ...mockUser } },
     } as never);
   });
@@ -197,5 +197,57 @@ describe('POST /api/marketplace/assets/[id]/purchase', () => {
     expect(res.status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.downloadUrl).toBe('https://cdn.example.com/file');
+  });
+
+  it('should return 400 when asset is not published', async () => {
+    mockSelect
+      .mockReturnValueOnce(selectChain([{ id: 'a1', status: 'draft', sellerId: 'other', priceTokens: 100 }]));
+
+    const { POST } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/purchase');
+    const res = await POST(req, { params: Promise.resolve({ id: 'a1' }) });
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('Asset not available');
+  });
+
+  it('should return 404 when seller not found (paid asset)', async () => {
+    mockSelect
+      .mockReturnValueOnce(selectChain([{ id: 'a1', status: 'published', sellerId: 'ghost-seller', priceTokens: 100, assetFileUrl: 'url', license: 'standard', downloadCount: 0 }]))
+      .mockReturnValueOnce(selectChain([]))  // no existing purchase
+      .mockReturnValueOnce(selectChain([])); // seller not found
+    mockInsert.mockReturnValueOnce(insertChain([{ id: 'purchase-1' }]));
+
+    const { POST } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/purchase');
+    const res = await POST(req, { params: Promise.resolve({ id: 'a1' }) });
+    const body = await res.json();
+
+    expect(res.status).toBe(404);
+    expect(body.error).toBe('Seller not found');
+  });
+
+  it('should return 409 and rollback purchase when balance changed during deduction', async () => {
+    mockSelect
+      .mockReturnValueOnce(selectChain([{ id: 'a1', status: 'published', sellerId: 'other', priceTokens: 100, assetFileUrl: 'url', license: 'standard', downloadCount: 0 }]))
+      .mockReturnValueOnce(selectChain([]))  // no existing purchase
+      .mockReturnValueOnce(selectChain([{ id: 'seller-1', earnedCredits: 200, addonTokens: 0, monthlyTokens: 0, monthlyTokensUsed: 0 }])); // seller found
+    mockInsert.mockReturnValueOnce(insertChain([{ id: 'purchase-1' }]));
+    // buyer balance UPDATE returns [] — WHERE guard failed (balance changed)
+    mockUpdate.mockReturnValueOnce(updateChain([]));
+    // delete chain for rollback
+    mockDelete.mockReturnValueOnce({
+      where: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const { POST } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/purchase');
+    const res = await POST(req, { params: Promise.resolve({ id: 'a1' }) });
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.error).toBe('Balance changed, please retry');
+    expect(mockDelete).toHaveBeenCalled();
   });
 });
