@@ -27,7 +27,7 @@ export function Avatar({ className, src, alt, name, size = 'md', ...props }: Ava
     'rounded-full overflow-hidden',
     'bg-[var(--sf-bg-elevated)]',
     'text-[var(--sf-text-secondary)] font-medium',
-    'border border-[length:var(--sf-border-width)] border-[var(--sf-border)]',
+    'border border-[length:var(--sf-border-width)] border-[var(--sf-border-strong)]',
     sizeStyles[size],
     className,
   );
