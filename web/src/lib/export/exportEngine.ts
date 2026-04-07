@@ -19,7 +19,7 @@ export interface ExportOptions {
   signal?: AbortSignal;
 }
 
-function throwIfAborted(signal?: AbortSignal) {
+function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw new DOMException('Export cancelled', 'AbortError');
   }
@@ -37,6 +37,8 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
   throwIfAborted(signal);
   const scripts = bundleScripts(store.allScripts);
 
+  throwIfAborted(signal);
+
   // 3. Get UI data
   let uiDataJson: string | undefined;
   try {
@@ -53,6 +55,8 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
   // 4. Get mobile touch config
   const mobileTouchConfig = store.mobileTouchConfig;
   const mobileTouchConfigJson = mobileTouchConfig?.enabled ? JSON.stringify(mobileTouchConfig) : undefined;
+
+  throwIfAborted(signal);
 
   // 5. Branch based on export mode
   throwIfAborted(signal);
@@ -106,51 +110,49 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
 
 async function getSceneData(signal?: AbortSignal): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    let settled = false;
-    const settle = (value: unknown) => {
-      if (settled) return;
-      settled = true;
-      window.removeEventListener('forge:scene-exported', handler);
-      resolve(value);
-    };
+    // eslint-disable-next-line prefer-const -- timeoutId must be declared before cleanup but assigned after
+    let timeoutId: ReturnType<typeof setTimeout>;
 
-    // Listen for abort signal to cancel immediately
-    if (signal) {
-      if (signal.aborted) {
-        reject(new DOMException('Export cancelled', 'AbortError'));
-        return;
-      }
-      signal.addEventListener('abort', () => {
-        if (!settled) {
-          settled = true;
-          window.removeEventListener('forge:scene-exported', handler);
-          reject(new DOMException('Export cancelled', 'AbortError'));
-        }
-      }, { once: true });
-    }
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('forge:scene-exported', handler);
+      signal?.removeEventListener('abort', onAbort);
+    };
 
     // Listen for the export response event
     const handler = (event: Event) => {
-      clearTimeout(timeoutId);
+      cleanup();
       const customEvent = event as CustomEvent;
       try {
         const sceneData = JSON.parse(customEvent.detail.json);
-        // Inject UI data from uiBuilderStore
         const uiData = injectUIData(sceneData);
-        settle(uiData);
+        resolve(uiData);
       } catch (err) {
         console.error('[Export] Failed to parse scene data:', err);
-        settle(buildSceneFromStore());
+        resolve(buildSceneFromStore());
       }
     };
+
+    // Abort signal listener
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException('Export cancelled', 'AbortError'));
+    };
+
+    // Check if already aborted before setting up listeners
+    if (signal?.aborted) {
+      reject(new DOMException('Export cancelled', 'AbortError'));
+      return;
+    }
+
     window.addEventListener('forge:scene-exported', handler);
+    signal?.addEventListener('abort', onAbort);
 
     // Timeout — if engine doesn't respond, reject rather than producing a
     // broken export with only entity names and no materials/physics/scripts.
     // The 5s timeout gives the engine time for large scenes (#8185).
-    // Set BEFORE saveScene() so clearTimeout works even if the event fires synchronously.
-    const timeoutId = setTimeout(() => {
-      window.removeEventListener('forge:scene-exported', handler);
+    timeoutId = setTimeout(() => {
+      cleanup();
       reject(new Error(
         'Engine did not respond to export request within 5 seconds. ' +
         'Ensure the engine is loaded and the scene is ready before exporting.',
@@ -159,7 +161,7 @@ async function getSceneData(signal?: AbortSignal): Promise<unknown> {
 
     // Trigger export_scene command
     const store = useEditorStore.getState();
-    store.saveScene(); // Uses the existing saveScene action which calls export_scene
+    store.saveScene();
   });
 }
 

@@ -17,9 +17,9 @@ jobs:
     name: Version Packages
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
@@ -44,12 +44,12 @@ jobs:
     # head_commit.message is safe here — used in an `if:` expression, not a shell command.
     if: "startsWith(github.event.head_commit.message, 'chore: version packages')"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           fetch-tags: true
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm

@@ -117,6 +117,8 @@ Move to the next item in the priority queue. Repeat the loop.
 11. **Read before writing.** Understand existing code before suggesting modifications.
 12. **Validate route params.** If POST validates name characters, PATCH/DELETE on `[name]` must too.
 
+13. **Subagents self-enforce Boy Scout Rule.** `block-deferred-fixes.sh` only fires for the main agent. Every dispatched agent must self-check replies against the banned-phrase list in `/resolve-pr-comments` SKILL.md before posting.
+
 ## Context Files
 
 - `.claude/rules/gotchas.md` — 40+ anti-patterns with real examples

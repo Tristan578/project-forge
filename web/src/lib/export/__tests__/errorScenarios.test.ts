@@ -320,6 +320,104 @@ describe('exportGame: WASM fetch failure (#8186)', () => {
   });
 });
 
+describe('exportGame: AbortSignal cancellation (#8266)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetchWithWasm();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('rejects with AbortError when signal is already aborted', async () => {
+    mocks.getState.mockReturnValue(makeStoreState());
+
+    const { exportGame } = await import('../exportEngine');
+
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await exportGame({
+      title: 'Abort Test',
+      mode: 'single-html',
+      resolution: 'responsive',
+      bgColor: '#000000',
+      includeDebug: false,
+      signal: controller.signal,
+    }).catch((e: Error) => e);
+
+    expect(result).toBeInstanceOf(DOMException);
+    expect((result as DOMException).name).toBe('AbortError');
+  });
+
+  it('rejects with AbortError when aborted during getSceneData', async () => {
+    vi.useFakeTimers();
+
+    mocks.getState.mockReturnValue(makeStoreState());
+
+    const { exportGame } = await import('../exportEngine');
+
+    const controller = new AbortController();
+
+    const exportPromise = exportGame({
+      title: 'Abort During Scene',
+      mode: 'single-html',
+      resolution: 'responsive',
+      bgColor: '#000000',
+      includeDebug: false,
+      signal: controller.signal,
+    }).catch((e: Error) => e);
+
+    // Abort after 100ms (before the 5s timeout, before scene event fires)
+    // eslint-disable-next-line no-restricted-syntax
+    setTimeout(() => controller.abort(), 100);
+    await vi.advanceTimersByTimeAsync(200);
+
+    const result = await exportPromise;
+    expect(result).toBeInstanceOf(DOMException);
+    expect((result as DOMException).name).toBe('AbortError');
+
+    vi.useRealTimers();
+  });
+
+  it('passes signal to fetch calls for WASM inlining', async () => {
+    vi.useFakeTimers();
+
+    mocks.getState.mockReturnValue(makeStoreState());
+
+    const { exportGame } = await import('../exportEngine');
+
+    const controller = new AbortController();
+
+    const exportPromise = exportGame({
+      title: 'Signal to Fetch',
+      mode: 'single-html',
+      resolution: 'responsive',
+      bgColor: '#000000',
+      includeDebug: false,
+      signal: controller.signal,
+    });
+
+    // Let scene data resolve so we reach the WASM fetch stage
+    scheduleSceneExportedEvent({ json: JSON.stringify({ name: 'Test', entities: [] }) }, 50);
+    await vi.advanceTimersByTimeAsync(100);
+
+    const blob = await exportPromise;
+    expect(blob).toBeInstanceOf(Blob);
+
+    // Verify fetch was called with signal option
+    const fetchCalls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
+    const hasSignal = fetchCalls.some((call: unknown[]) => {
+      const opts = call[1] as { signal?: AbortSignal } | undefined;
+      return opts?.signal === controller.signal;
+    });
+    expect(hasSignal).toBe(true);
+
+    vi.useRealTimers();
+  });
+});
+
 describe('downloadBlob: zero-byte blob', () => {
   let createObjectURLSpy: ReturnType<typeof vi.fn>;
   let revokeObjectURLSpy: ReturnType<typeof vi.fn>;

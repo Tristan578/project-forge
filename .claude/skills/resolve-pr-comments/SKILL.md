@@ -167,6 +167,46 @@ All <N> review comments addressed in \`<SHA>\`.
 ..."
 ```
 
+## HARD RULE: Boy Scout Rule Enforcement (Subagent-Safe)
+
+**This section exists because subagents do NOT inherit settings.json hooks.**
+The `block-deferred-fixes.sh` PreToolUse hook only fires for the main agent.
+Subagents running this skill MUST self-enforce these rules.
+
+### BANNED reply phrases (will be blocked by hook for main agent, must be self-enforced by subagents)
+
+These phrases are NEVER acceptable in a PR comment reply unless accompanied by
+a commit SHA with an action verb ("Fixed in `abc1234`") or a GitHub issue number (#NNNN):
+
+- "will add/fix/address/update/monitor/consider/implement/track/look into"
+- "follow-up", "follow up", "next commit/batch/push/pr/sprint"
+- "tracked in", "tracking in", "filed for", "defer to", "punt to"
+- "pre-existing", "preexisting", "out of scope", "not addressing"
+- "good point", "valid point", "valid finding", "fair point"
+- "acknowledged", "noted", "makes sense", "agree with"
+- "good catch", "nice catch", "looking into"
+- "known limitation", "known issue", "low-priority", "low priority"
+- "acceptable tradeoff", "maybe later", "minor enough", "not critical"
+- "cosmetic", "non-blocking", "nice to have", "future refactor"
+- "separate pr", "separate issue", "if this becomes", "todo"
+
+### Before posting ANY reply, self-check:
+
+1. Does my reply contain ANY phrase from the banned list above?
+2. If yes: did I include a commit SHA with "Fixed in"/"Addressed in"?
+3. If yes: did I include a GitHub issue number (#NNNN)?
+4. If NEITHER SHA+action NOR ticket number: **STOP. Fix the code first.**
+
+### Valid reply patterns (the ONLY acceptable forms):
+
+| Pattern | Example |
+|---------|---------|
+| Fix + SHA | "Fixed in `abc1234`. Added null check at line 42." |
+| Already fixed + SHA | "Already addressed in `abc1234`. The guard was added in the previous commit." |
+| By design | "By design. The `setTimeout` at line 58 is intentional for debouncing — removing it causes UI flicker." |
+| False positive | "False positive — `rateLimitPublicRoute()` is awaited at line 31, the `await` is on the parent `handleRequest` call." |
+| Tracked with ticket | "Tracked in #8307. Requires schema migration that can't ship in this PR." |
+
 ## Anti-Patterns (What Went Wrong Before)
 
 1. **Only posting a summary comment without thread replies** — User has no way to see which specific comment was addressed without clicking through each thread
@@ -174,7 +214,8 @@ All <N> review comments addressed in \`<SHA>\`.
 3. **Counting wrong** — There may be multiple rounds of bot comments (Sentry/Copilot re-review on each push). Count ALL bot comments, not just the first batch
 4. **Replying to stale code** — The diff hunk in the comment is from when it was posted. Always read the CURRENT file before replying
 5. **Assuming prior replies covered everything** — New push = new bot comments. Check AFTER every push
-6. **Reading files from the wrong branch** — On 2026-04-04, a valid Sentry bug (wrong `cwd` in pre-push hook) was dismissed as "false positive" because the file was read from `main` (123 lines, no changeset section) instead of the PR branch (141 lines, with the buggy changeset check at line 130). The file "seemed fine" because it was a completely different version. Step 0 exists to prevent this. If a file seems shorter or different than the diff hunk suggests, **you are on the wrong branch**.
+6. **Deferred-fix language without action** — On 2026-04-06, 7 PR comment replies contained phrases like "low-priority follow-up", "known limitation", "out of scope" without code fixes or ticket numbers. The `block-deferred-fixes.sh` hook missed them due to: (a) missing phrases in the pattern list, (b) silent exit-0 on body parse failure, (c) subagents not inheriting settings.json hooks. All three failure modes are now fixed.
+7. **Reading files from the wrong branch** — On 2026-04-04, a valid Sentry bug (wrong `cwd` in pre-push hook) was dismissed as "false positive" because the file was read from `main` (123 lines, no changeset section) instead of the PR branch (141 lines, with the buggy changeset check at line 130). The file "seemed fine" because it was a completely different version. Step 0 exists to prevent this. If a file seems shorter or different than the diff hunk suggests, **you are on the wrong branch**.
 
 ## When to Use This Skill
 

@@ -84,6 +84,7 @@ export async function exportAsZip(
 ): Promise<Blob> {
   const { signal } = options;
 
+
   // 1. Extract embedded assets
   if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
   const { modifiedScene, assets } = await extractAssets(sceneData);
