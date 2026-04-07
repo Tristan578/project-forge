@@ -49,7 +49,7 @@ export const THEME_DEFINITIONS: Record<ThemeName, ThemeTokens> = {
     '--sf-on-accent': '#ffffff',
     '--sf-destructive': '#dc2626',
     '--sf-success': '#16a34a',
-    '--sf-warning': '#ca8a04',
+    '--sf-warning': '#b8790a',
     '--sf-radius-md': '6px',
     '--sf-radius-lg': '8px',
     '--sf-radius-xl': '12px',
