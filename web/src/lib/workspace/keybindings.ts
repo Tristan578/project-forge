@@ -18,28 +18,30 @@ export interface KeyBinding {
   defaultKey: string;
   /** User-customized key combo (null = use default) */
   customKey: string | null;
+  /** Where this binding is active ("canvas" = 3D viewport, "global" = everywhere) */
+  context?: 'canvas' | 'global';
 }
 
 /** All available shortcut actions with their defaults. */
 export const DEFAULT_BINDINGS: KeyBinding[] = [
   // Selection
-  { action: 'select-all', label: 'Select all', category: 'Selection', defaultKey: 'Ctrl+A', customKey: null },
-  { action: 'deselect', label: 'Deselect all', category: 'Selection', defaultKey: 'Escape', customKey: null },
+  { action: 'select-all', label: 'Select all', category: 'Selection', defaultKey: 'Ctrl+A', customKey: null, context: 'global' },
+  { action: 'deselect', label: 'Deselect all', category: 'Selection', defaultKey: 'Escape', customKey: null, context: 'canvas' },
 
   // Transform
-  { action: 'translate', label: 'Translate mode', category: 'Transform', defaultKey: 'W', customKey: null },
-  { action: 'rotate', label: 'Rotate mode', category: 'Transform', defaultKey: 'E', customKey: null },
-  { action: 'scale', label: 'Scale mode', category: 'Transform', defaultKey: 'R', customKey: null },
+  { action: 'translate', label: 'Translate mode', category: 'Transform', defaultKey: 'W', customKey: null, context: 'canvas' },
+  { action: 'rotate', label: 'Rotate mode', category: 'Transform', defaultKey: 'E', customKey: null, context: 'canvas' },
+  { action: 'scale', label: 'Scale mode', category: 'Transform', defaultKey: 'R', customKey: null, context: 'canvas' },
 
   // History
-  { action: 'undo', label: 'Undo', category: 'History', defaultKey: 'Ctrl+Z', customKey: null },
-  { action: 'redo', label: 'Redo', category: 'History', defaultKey: 'Ctrl+Shift+Z', customKey: null },
+  { action: 'undo', label: 'Undo', category: 'History', defaultKey: 'Ctrl+Z', customKey: null, context: 'canvas' },
+  { action: 'redo', label: 'Redo', category: 'History', defaultKey: 'Ctrl+Shift+Z', customKey: null, context: 'canvas' },
 
   // Scene
-  { action: 'save', label: 'Save scene', category: 'Scene', defaultKey: 'Ctrl+S', customKey: null },
-  { action: 'duplicate', label: 'Duplicate selected', category: 'Scene', defaultKey: 'Ctrl+D', customKey: null },
-  { action: 'delete', label: 'Delete selected', category: 'Scene', defaultKey: 'Delete', customKey: null },
-  { action: 'focus', label: 'Focus on selected', category: 'Scene', defaultKey: 'F', customKey: null },
+  { action: 'save', label: 'Save scene', category: 'Scene', defaultKey: 'Ctrl+S', customKey: null, context: 'global' },
+  { action: 'duplicate', label: 'Duplicate selected', category: 'Scene', defaultKey: 'Ctrl+D', customKey: null, context: 'canvas' },
+  { action: 'delete', label: 'Delete selected', category: 'Scene', defaultKey: 'Delete', customKey: null, context: 'canvas' },
+  { action: 'focus', label: 'Focus on selected', category: 'Scene', defaultKey: 'F', customKey: null, context: 'canvas' },
 
   // View
   { action: 'view-top', label: 'Top view', category: 'View', defaultKey: '1', customKey: null },
@@ -129,12 +131,26 @@ export function eventToKeyCombo(e: KeyboardEvent): string | null {
   // Normalize key names
   let normalized = key;
   if (key === ' ') normalized = 'Space';
+  else if (key === 'Backspace') normalized = 'Delete'; // Mac "delete" key sends Backspace
   else if (key === 'Escape') normalized = 'Escape';
+  else if (key === 'Backspace') normalized = 'Delete';
   else if (key.length === 1) normalized = key.toUpperCase();
   // F-keys and special keys keep their name
 
   parts.push(normalized);
   return parts.join('+');
+}
+
+/** Get a map of key combo → action for canvas-context bindings. */
+export function getCanvasKeyMap(): Map<string, string> {
+  const bindings = getMergedBindings();
+  const map = new Map<string, string>();
+  for (const b of bindings) {
+    if (b.context === 'canvas') {
+      map.set(getEffectiveKey(b), b.action);
+    }
+  }
+  return map;
 }
 
 /** Group bindings by category. */

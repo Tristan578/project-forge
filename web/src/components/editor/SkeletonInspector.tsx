@@ -4,6 +4,7 @@ import { type ReactElement, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import type { Bone2dDef } from '@/stores/slices/types';
 
 export function SkeletonInspector({ entityId }: { entityId: string }) {
@@ -14,6 +15,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
   const setSkeleton2d = useEditorStore((s) => s.setSkeleton2d);
   const removeSkeleton2d = useEditorStore((s) => s.removeSkeleton2d);
   const playAnimation = useEditorStore((s) => s.playAnimation);
+  const { confirm, ConfirmDialogPortal } = useConfirmDialog();
 
   const [newBoneName, setNewBoneName] = useState('');
   const [selectedSkin, setSelectedSkin] = useState(skeleton?.activeSkin ?? 'default');
@@ -300,9 +302,8 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
 
       {/* Remove Skeleton */}
       <button
-        onClick={() => {
-          // TODO(PF): Replace confirm() with an inline confirmation dialog (accessible, styled).
-          if (confirm('Remove skeleton data?')) {
+        onClick={async () => {
+          if (await confirm('Remove skeleton data?')) {
             removeSkeleton2d(entityId);
             setSelectedBone(null);
           }
@@ -312,6 +313,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
         <Trash2 className="w-4 h-4" />
         Remove Skeleton
       </button>
+      <ConfirmDialogPortal />
     </div>
   );
 }
