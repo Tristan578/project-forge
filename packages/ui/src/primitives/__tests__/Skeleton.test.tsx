@@ -22,10 +22,10 @@ describe('Skeleton', () => {
     expect(el?.className).toContain('var(--sf-bg-elevated)');
   });
 
-  it('has animate-pulse class for shimmer', () => {
+  it('has motion-safe:animate-pulse class for shimmer', () => {
     const { container } = render(<Skeleton />);
     const el = container.firstChild as HTMLElement;
-    expect(el?.className).toContain('animate-pulse');
+    expect(el?.className).toContain('motion-safe:animate-pulse');
   });
 
   it.each(THEME_NAMES)('renders without error in %s theme', (theme) => {

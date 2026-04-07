@@ -44,7 +44,7 @@ describe('Checkbox', () => {
     const { container } = render(<Checkbox label="Test" />);
     expect(container.querySelector('input[type="checkbox"]')).not.toBeNull();
     const allClasses = Array.from(container.querySelectorAll('[class]'))
-      .flatMap((el) => el.className.split(' '));
+      .flatMap((el) => (el.getAttribute('class') ?? '').split(' '));
     const leaks = allClasses.filter((c) => /zinc-|stone-|slate-/.test(c));
     expect(leaks, `Hardcoded primitives found: ${leaks.join(', ')}`).toHaveLength(0);
   });

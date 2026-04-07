@@ -40,8 +40,10 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
         role="tablist"
         onKeyDown={handleKeyDown}
         className={cn(
-          'flex',
-          'border-b border-[length:var(--sf-border-width)] border-[var(--sf-border)]',
+          'flex gap-0.5',
+          'bg-[var(--sf-bg-app)] p-1',
+          'rounded-[var(--sf-radius-md)]',
+          'border border-[var(--sf-border)]',
         )}
       >
         {tabs.map((tab) => {
@@ -56,13 +58,14 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
               tabIndex={isActive ? 0 : -1}
               onClick={() => onChange(tab.id)}
               className={cn(
-                'px-4 py-2 text-sm font-medium',
-                'border-b-2 -mb-px',
-                'transition-colors duration-[var(--sf-transition)]',
+                'flex-1 px-3 py-1.5 text-sm font-medium',
+                'rounded-[calc(var(--sf-radius-md)_-_2px)]',
+                'transition-all duration-[var(--sf-transition)]',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]',
+                'select-none',
                 isActive
-                  ? 'border-[var(--sf-accent)] text-[var(--sf-accent)]'
-                  : 'border-transparent text-[var(--sf-text-secondary)] hover:text-[var(--sf-text)] hover:border-[var(--sf-border-strong)]',
+                  ? 'bg-[var(--sf-bg-elevated)] text-[var(--sf-text)] shadow-[0_1px_3px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.05)]'
+                  : 'text-[var(--sf-text-muted)] hover:text-[var(--sf-text-secondary)] hover:bg-[var(--sf-bg-surface)]',
               )}
             >
               {tab.label}

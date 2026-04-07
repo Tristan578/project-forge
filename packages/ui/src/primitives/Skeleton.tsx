@@ -16,9 +16,11 @@ export function Skeleton({ className, width, height, style, ...props }: Skeleton
   return (
     <div
       className={cn(
-        'animate-pulse',
+        'motion-safe:animate-pulse',
         'rounded-[var(--sf-radius-md)]',
         'bg-[var(--sf-bg-elevated)]',
+        'bg-gradient-to-r from-[var(--sf-bg-elevated)] via-[var(--sf-bg-overlay)] to-[var(--sf-bg-elevated)]',
+        'bg-[length:200%_100%]',
         className,
       )}
       style={computedStyle}

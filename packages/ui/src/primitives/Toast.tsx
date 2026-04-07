@@ -13,17 +13,26 @@ export interface ToastProps {
 }
 
 const variantStyles: Record<ToastVariant, string> = {
-  info: 'border-[var(--sf-border)] bg-[var(--sf-bg-elevated)]',
-  success: 'border-[var(--sf-success)] bg-[color-mix(in_srgb,var(--sf-success)_10%,var(--sf-bg-elevated))]',
-  warning: 'border-[var(--sf-warning)] bg-[color-mix(in_srgb,var(--sf-warning)_10%,var(--sf-bg-elevated))]',
-  error: 'border-[var(--sf-destructive)] bg-[color-mix(in_srgb,var(--sf-destructive)_10%,var(--sf-bg-elevated))]',
+  info: 'border-[var(--sf-border-strong)] bg-[var(--sf-bg-surface)]',
+  success: [
+    'border-[color-mix(in_srgb,var(--sf-success)_40%,transparent)]',
+    'bg-[color-mix(in_srgb,var(--sf-success)_8%,var(--sf-bg-surface))]',
+  ].join(' '),
+  warning: [
+    'border-[color-mix(in_srgb,var(--sf-warning)_40%,transparent)]',
+    'bg-[color-mix(in_srgb,var(--sf-warning)_8%,var(--sf-bg-surface))]',
+  ].join(' '),
+  error: [
+    'border-[color-mix(in_srgb,var(--sf-destructive)_40%,transparent)]',
+    'bg-[color-mix(in_srgb,var(--sf-destructive)_8%,var(--sf-bg-surface))]',
+  ].join(' '),
 };
 
-const variantIconColor: Record<ToastVariant, string> = {
-  info: 'text-[var(--sf-text-secondary)]',
-  success: 'text-[var(--sf-success)]',
-  warning: 'text-[var(--sf-warning)]',
-  error: 'text-[var(--sf-destructive)]',
+const variantAccent: Record<ToastVariant, string> = {
+  info: 'bg-[var(--sf-accent)]',
+  success: 'bg-[var(--sf-success)]',
+  warning: 'bg-[var(--sf-warning)]',
+  error: 'bg-[var(--sf-destructive)]',
 };
 
 export function Toast({ message, variant = 'info', onDismiss, duration = 5000, className }: ToastProps) {
@@ -36,12 +45,12 @@ export function Toast({ message, variant = 'info', onDismiss, duration = 5000, c
   return (
     <div
       className={cn(
-        'flex items-start gap-3',
+        'relative flex items-start gap-3 overflow-hidden',
         'rounded-[var(--sf-radius-md)]',
-        'border border-[length:var(--sf-border-width)]',
+        'border',
         'px-4 py-3',
         'text-sm text-[var(--sf-text)]',
-        'shadow-md',
+        'shadow-[0_4px_16px_rgba(0,0,0,0.4),0_1px_4px_rgba(0,0,0,0.3)]',
         variantStyles[variant],
         className,
       )}
@@ -50,12 +59,14 @@ export function Toast({ message, variant = 'info', onDismiss, duration = 5000, c
       aria-live="assertive"
       aria-atomic="true"
     >
-      <span className={cn('flex-1', variantIconColor[variant])}>{message}</span>
+      {/* Left accent bar */}
+      <div className={cn('absolute left-0 top-0 bottom-0 w-0.5', variantAccent[variant])} />
+      <span className="flex-1 pl-1">{message}</span>
       <button
         type="button"
         onClick={onDismiss}
         className={cn(
-          'shrink-0',
+          'shrink-0 p-0.5',
           'text-[var(--sf-text-muted)] hover:text-[var(--sf-text)]',
           'transition-colors duration-[var(--sf-transition)]',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]',

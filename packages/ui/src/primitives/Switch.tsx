@@ -12,7 +12,7 @@ export function Switch({ className, label, size = 'md', id: providedId, ...props
   const inputId = providedId ?? generatedId;
 
   return (
-    <div className={cn('flex items-center gap-2', className)}>
+    <div className={cn('flex items-center gap-2.5', className)}>
       <div className="relative">
         <input
           type="checkbox"
@@ -29,28 +29,29 @@ export function Switch({ className, label, size = 'md', id: providedId, ...props
             size === 'sm' ? 'h-5 w-9 min-h-[44px] sm:min-h-0' : 'h-6 w-11',
             'rounded-[var(--sf-radius-full)]',
             'bg-[var(--sf-bg-elevated)]',
-            'border border-[length:var(--sf-border-width)] border-[var(--sf-border)]',
-            'transition-colors duration-[var(--sf-transition)]',
+            'border border-[var(--sf-border-strong)]',
+            'shadow-[inset_0_1px_3px_rgba(0,0,0,0.3)]',
+            'transition-all duration-[var(--sf-transition)]',
             'peer-checked:bg-[var(--sf-accent)] peer-checked:border-[var(--sf-accent)]',
-            'peer-disabled:opacity-50 peer-disabled:cursor-not-allowed',
-            'peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--sf-accent)]',
+            'peer-checked:shadow-[inset_0_1px_3px_rgba(0,0,0,0.2),0_0_8px_color-mix(in_srgb,var(--sf-accent)_30%,transparent)]',
+            'peer-disabled:opacity-40 peer-disabled:cursor-not-allowed',
+            'peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--sf-accent)] peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[var(--sf-bg-app)]',
           )}
           aria-hidden="true"
         />
-        {/* Thumb — CSS variable --sw-travel is set via data-size and toggled via peer-checked:left-* */}
+        {/* Thumb */}
         <span
           className={cn(
             'pointer-events-none absolute top-0.5',
-            'rounded-full bg-[var(--sf-bg-surface)] shadow',
+            'rounded-full bg-[var(--sf-text)]',
+            'shadow-[0_1px_3px_rgba(0,0,0,0.4)]',
             size === 'sm' ? 'h-4 w-4' : 'h-5 w-5',
-            // Unchecked: left-0.5 (2px). Checked: shift to track-width - thumb-width - inset
-            // sm: 36-16-2=18px → peer-checked:left-[18px]; md: 44-20-2=22px → peer-checked:left-[22px]
             size === 'sm'
               ? 'left-0.5 peer-checked:left-[18px]'
               : 'left-0.5 peer-checked:left-[22px]',
           )}
           style={{
-            transition: 'left var(--sf-transition, 150ms)',
+            transition: 'left var(--sf-transition, 150ms) ease-out',
           }}
         />
       </div>

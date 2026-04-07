@@ -13,16 +13,17 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         className={cn(
           'flex h-9 w-full',
           'rounded-[var(--sf-radius-md)]',
-          'border border-[length:var(--sf-border-width)]',
-          error
-            ? 'border-[var(--sf-destructive)]'
-            : 'border-[var(--sf-border)]',
-          'bg-[var(--sf-bg-surface)] text-[var(--sf-text)]',
+          'border border-[var(--sf-border-strong)]',
+          'bg-[var(--sf-bg-app)] text-[var(--sf-text)]',
           'px-3 py-1 text-sm',
+          'shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)]',
           'placeholder:text-[var(--sf-text-muted)]',
-          'transition-colors duration-[var(--sf-transition)]',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]',
-          'disabled:opacity-50 disabled:cursor-not-allowed',
+          'transition-all duration-[var(--sf-transition)]',
+          'hover:border-[var(--sf-text-muted)]',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--sf-bg-app)]',
+          'focus-visible:border-[var(--sf-accent)]',
+          'disabled:opacity-40 disabled:cursor-not-allowed',
+          error && 'border-[var(--sf-destructive)] focus-visible:ring-[var(--sf-destructive)]',
           className,
         )}
         {...props}

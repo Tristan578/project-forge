@@ -66,7 +66,7 @@ const PRIMITIVE_FIXTURES: Record<string, () => JSX.Element> = {
     </>
   ),
   Popover: () => (
-    <Popover trigger={<button>Open</button>} content="Popover content" />
+    <Popover trigger={<span>Open</span>} content="Popover content" />
   ),
   Progress: () => <Progress value={50} aria-label="Upload progress" />,
   ScrollArea: () => (

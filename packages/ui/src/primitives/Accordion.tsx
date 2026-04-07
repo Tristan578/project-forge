@@ -25,8 +25,11 @@ export function Accordion({ items, defaultOpen, className }: AccordionProps) {
       className={cn(
         'w-full',
         'divide-y divide-[var(--sf-border)]',
-        'rounded-[var(--sf-radius-md)]',
-        'border border-[length:var(--sf-border-width)] border-[var(--sf-border)]',
+        'rounded-[var(--sf-radius-lg)]',
+        'border border-[var(--sf-border)]',
+        'bg-[var(--sf-bg-surface)]',
+        'shadow-[0_1px_4px_rgba(0,0,0,0.2)]',
+        'overflow-hidden',
         className,
       )}
     >
@@ -45,8 +48,9 @@ export function Accordion({ items, defaultOpen, className }: AccordionProps) {
                 'px-4 py-3 text-sm font-medium text-left',
                 'text-[var(--sf-text)]',
                 'hover:bg-[var(--sf-bg-elevated)]',
-                'transition-colors duration-[var(--sf-transition)]',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]',
+                'transition-all duration-[var(--sf-transition)]',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sf-accent)]',
+                isOpen && 'bg-[var(--sf-bg-app)]/30',
               )}
             >
               <span>{item.title}</span>
@@ -62,7 +66,7 @@ export function Accordion({ items, defaultOpen, className }: AccordionProps) {
                 strokeLinejoin="round"
                 className={cn(
                   'shrink-0 text-[var(--sf-text-muted)]',
-                  'transition-transform duration-[var(--sf-transition)]',
+                  'transition-transform duration-200 ease-out',
                   isOpen && 'rotate-180',
                 )}
                 aria-hidden="true"
@@ -70,14 +74,12 @@ export function Accordion({ items, defaultOpen, className }: AccordionProps) {
                 <path d="m6 9 6 6 6-6" />
               </svg>
             </button>
-            {/* Keep content in DOM so aria-controls always points to a mounted element.
-                Use hidden attribute to hide it from AT and layout when collapsed. */}
             <div
               id={`accordion-content-${item.id}`}
               role="region"
               aria-labelledby={`accordion-trigger-${item.id}`}
               hidden={!isOpen}
-              className="px-4 pb-3 text-sm text-[var(--sf-text-secondary)]"
+              className="px-4 pb-3 text-sm text-[var(--sf-text-secondary)] leading-relaxed"
             >
               {item.content}
             </div>

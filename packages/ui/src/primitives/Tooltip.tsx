@@ -7,15 +7,14 @@ export interface TooltipProps {
   content: ReactNode;
   children: ReactNode;
   side?: 'top' | 'bottom' | 'left' | 'right';
-  delay?: number;
   className?: string;
 }
 
 const sidePositions: Record<NonNullable<TooltipProps['side']>, string> = {
-  top: 'bottom-full mb-1',
-  bottom: 'top-full mt-1',
-  left: 'right-full mr-1',
-  right: 'left-full ml-1',
+  top: 'bottom-full mb-2',
+  bottom: 'top-full mt-2',
+  left: 'right-full mr-2',
+  right: 'left-full ml-2',
 };
 
 const sideAlignStyles: Record<NonNullable<TooltipProps['side']>, React.CSSProperties> = {
@@ -29,8 +28,6 @@ export function Tooltip({ content, children, side = 'top', className }: TooltipP
   const [visible, setVisible] = useState(false);
   const tooltipId = useId();
 
-  // Inject aria-describedby on the direct child element so assistive technology
-  // can announce the tooltip content when the element is focused.
   const childWithAriaDescribedBy = isValidElement(children)
     ? cloneElement(children as React.ReactElement<HTMLAttributes<HTMLElement>>, {
         'aria-describedby': tooltipId,
@@ -51,10 +48,11 @@ export function Tooltip({ content, children, side = 'top', className }: TooltipP
         role="tooltip"
         className={cn(
           'absolute pointer-events-none',
-          'px-2 py-1 text-xs',
-          'rounded-[var(--sf-radius-sm)]',
+          'px-2.5 py-1.5 text-xs font-medium',
+          'rounded-[var(--sf-radius-md)]',
           'bg-[var(--sf-bg-overlay)] text-[var(--sf-text)]',
-          'border border-[length:var(--sf-border-width)] border-[var(--sf-border)]',
+          'border border-[var(--sf-border-strong)]',
+          'shadow-[0_4px_12px_rgba(0,0,0,0.4)]',
           'whitespace-nowrap',
           'transition-opacity duration-[var(--sf-transition)]',
           visible ? 'opacity-100' : 'opacity-0',
@@ -69,7 +67,6 @@ export function Tooltip({ content, children, side = 'top', className }: TooltipP
   );
 }
 
-// Helper type for elements that want to describe their own tooltip
 export interface TooltipTriggerProps extends HTMLAttributes<HTMLElement> {
   'aria-describedby'?: string;
 }

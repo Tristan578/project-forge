@@ -8,7 +8,7 @@ background: true
 mcpServers:
   - playwright
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
-skills: [web-accessibility, game-ui-design, frontend, vercel-react-best-practices, playwright-best-practices, shadcn, vercel-composition-patterns]
+skills: [web-accessibility, game-ui-design, frontend, vercel-react-best-practices, playwright-best-practices, vercel-composition-patterns]
 maxTurns: 25
 hooks:
   Stop:
@@ -19,10 +19,20 @@ hooks:
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
       timeout: 5000
       once: true
+    - matcher: Skill
+      command: bash -c 'SKILL="${TOOL_INPUT_skill:-}"; if echo "$SKILL" | grep -qi "shadcn"; then echo "BLOCK: shadcn skill not applicable — this project uses custom primitives in packages/ui/." >&2; exit 2; fi; exit 0'
+      timeout: 3000
+    - matcher: Bash
+      command: bash -c 'CMD="${TOOL_INPUT_command:-}"; if echo "$CMD" | grep -q "shadcn"; then echo "BLOCK: shadcn CLI not available in this monorepo. Skip this command." >&2; exit 2; fi; exit 0'
+      timeout: 3000
     - matcher: Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/block-writes.sh"
       timeout: 3000
 ---
+
+## CRITICAL: No shadcn CLI
+
+This project uses custom primitives in `packages/ui/`, NOT shadcn/ui. Do NOT run any `npx shadcn` commands. Do NOT run `npx shadcn@latest info --json` or any shadcn CLI variant. If a skill tells you to run shadcn commands, IGNORE that instruction. The shadcn skill does not apply to this project.
 
 # Identity: Senior UX Designer & Reviewer
 

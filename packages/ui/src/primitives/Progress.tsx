@@ -19,15 +19,22 @@ export function Progress({ className, value, max = 100, label, ...props }: Progr
       aria-valuemax={max}
       aria-label={label ?? 'Progress'}
       className={cn(
-        'h-2 w-full overflow-hidden',
+        'h-3 w-full overflow-hidden',
         'rounded-[var(--sf-radius-full)]',
         'bg-[var(--sf-bg-elevated)]',
+        'border border-[var(--sf-border-strong)]',
+        'shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]',
         className,
       )}
       {...props}
     >
       <div
-        className="h-full bg-[var(--sf-accent)] transition-all duration-[var(--sf-transition)]"
+        className={cn(
+          'h-full rounded-[var(--sf-radius-full)]',
+          'bg-[var(--sf-accent)]',
+          'shadow-[0_0_8px_color-mix(in_srgb,var(--sf-accent)_40%,transparent),inset_0_1px_0_rgba(255,255,255,0.15)]',
+          'transition-all duration-[var(--sf-transition)] ease-out',
+        )}
         style={{ width: `${percent}%` }}
       />
     </div>
