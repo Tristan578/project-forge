@@ -54,6 +54,7 @@ describe('WelcomeModal', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     cleanup();
   });
 
@@ -94,6 +95,33 @@ describe('WelcomeModal', () => {
   it('does not render when localStorage has dismissed key', () => {
     localStorage.setItem('forge-welcomed', '1');
     render(<WelcomeModal />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('renders modal when localStorage throws (private browsing)', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('Access denied', 'SecurityError');
+    });
+
+    render(<WelcomeModal />);
+    expect(screen.getByRole('heading', { name: /Welcome to SpawnForge/i })).toBeInTheDocument();
+    // Spy restored by afterEach via vi.restoreAllMocks()
+  });
+
+  it('does not throw when dismissing with "Don\'t show again" and setItem throws', async () => {
+    const { userEvent } = await import('@testing-library/user-event');
+    const user = userEvent.setup();
+
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    });
+
+    render(<WelcomeModal />);
+    const checkbox = screen.getByRole('checkbox', { name: /Don't show again/i });
+    await user.click(checkbox);
+    const skipBtn = screen.getByRole('button', { name: /Skip/i });
+    // Should not throw — dismissal succeeds even if write fails
+    await user.click(skipBtn);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
