@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup } from '@/test/utils/componentTestUtils';
+import { render, cleanup, fireEvent } from '@/test/utils/componentTestUtils';
 import { ProceduralAnimPanel } from '../ProceduralAnimPanel';
 import { useEditorStore } from '@/stores/editorStore';
 
@@ -75,6 +75,43 @@ describe('ProceduralAnimPanel', () => {
     mockStore({ primaryId: 'ent1' });
     const { getByLabelText } = render(<ProceduralAnimPanel />);
     expect(getByLabelText(/custom bones/i)).toBeTruthy();
+  });
+
+  it('clears custom bone input when entity selection changes', () => {
+    mockStore({ primaryId: 'ent1' });
+    // Use key to force React to unmount/remount when entity changes (simulates
+    // what the editor does — panels re-key on primaryId)
+    const { getByLabelText, unmount } = render(<ProceduralAnimPanel />);
+    const textarea = getByLabelText(/custom bones/i) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'hip, shoulder' } });
+    expect(textarea.value).toBe('hip, shoulder');
+
+    // Switch to a different entity — remount to trigger prev-value pattern
+    unmount();
+    mockStore({ primaryId: 'ent2' });
+    const { getByLabelText: getByLabelText2 } = render(<ProceduralAnimPanel />);
+    const textarea2 = getByLabelText2(/custom bones/i) as HTMLTextAreaElement;
+    expect(textarea2.value).toBe('');
+  });
+
+  it('clears generated animation when entity selection changes', () => {
+    mockStore({ primaryId: 'ent1' });
+    const { getByText, queryByText, unmount } = render(<ProceduralAnimPanel />);
+
+    // Generate an animation
+    const generateBtn = getByText(/generate/i);
+    fireEvent.click(generateBtn);
+
+    // Should show apply button after generation
+    expect(queryByText(/apply/i)).toBeTruthy();
+
+    // Switch entity — remount
+    unmount();
+    mockStore({ primaryId: 'ent2' });
+    const result2 = render(<ProceduralAnimPanel />);
+
+    // Apply button should be gone (generatedAnim reset on fresh mount)
+    expect(result2.queryByText(/apply to entity/i)).toBeNull();
   });
 
   it('hides custom bone input when skeleton is attached', () => {

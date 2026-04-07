@@ -229,6 +229,11 @@ body {
   outline-offset: 2px;
 }
 
+/* Suppress global outline when Tailwind focus-visible ring utilities are present */
+[class*="focus-visible\:ring"]:focus-visible {
+  outline: none;
+}
+
 /* Global reduced-motion: kill non-essential animations and transitions.
    Elements with [role="progressbar"] or [data-essential-animation] are exempted. */
 @media (prefers-reduced-motion: reduce) {

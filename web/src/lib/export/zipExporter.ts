@@ -25,6 +25,7 @@ export interface ZipExportOptions {
   bgColor: string;
   includeDebug: boolean;
   orientationLock?: 'landscape' | 'portrait' | 'none';
+  signal?: AbortSignal;
 }
 
 interface ZipEntry {
@@ -63,7 +64,8 @@ async function fetchWasmEngineFiles(signal?: AbortSignal): Promise<ZipEntry[]> {
             content: blob,
           });
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') throw err;
         console.warn(`[ZipExporter] Could not fetch WASM for ${variant}/${file}, skipping`);
       }
     }
@@ -79,9 +81,11 @@ export async function exportAsZip(
   sceneData: unknown,
   scripts: Record<string, ScriptData>,
   options: ZipExportOptions,
-  signal?: AbortSignal
 ): Promise<Blob> {
+  const { signal } = options;
+
   // 1. Extract embedded assets
+  if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
   const { modifiedScene, assets } = await extractAssets(sceneData);
 
   // 2. Bundle scripts
@@ -104,9 +108,7 @@ export async function exportAsZip(
 
   // Add extracted assets (with optional texture compression)
   for (const asset of assets) {
-    if (signal?.aborted) {
-      throw new DOMException('Export cancelled', 'AbortError');
-    }
+    if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
     let assetBlob = asset.blob;
 
     if (options.compressTextures && asset.blob.type.startsWith('image/')) {
@@ -126,6 +128,7 @@ export async function exportAsZip(
   }
 
   // 4. Fetch and include WASM engine files
+  if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
   const wasmEntries = await fetchWasmEngineFiles(signal);
   for (const entry of wasmEntries) {
     entries.push(entry);
