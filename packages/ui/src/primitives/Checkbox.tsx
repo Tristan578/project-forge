@@ -19,7 +19,7 @@ export function Checkbox({ className, label, id: providedId, ...props }: Checkbo
         className={cn(
           'h-4 w-4 shrink-0',
           'rounded-[var(--sf-radius-sm)]',
-          'border border-[length:var(--sf-border-width)] border-[var(--sf-border)]',
+          'border border-[length:var(--sf-border-width)] border-[var(--sf-border-strong)]',
           'bg-[var(--sf-bg-surface)]',
           'text-[var(--sf-accent)]',
           'accent-[var(--sf-accent)]',

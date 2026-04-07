@@ -29,7 +29,7 @@ export function Switch({ className, label, size = 'md', id: providedId, ...props
             size === 'sm' ? 'h-5 w-9 min-h-[44px] sm:min-h-0' : 'h-6 w-11',
             'rounded-[var(--sf-radius-full)]',
             'bg-[var(--sf-bg-elevated)]',
-            'border border-[length:var(--sf-border-width)] border-[var(--sf-border)]',
+            'border border-[length:var(--sf-border-width)] border-[var(--sf-border-strong)]',
             'transition-colors duration-[var(--sf-transition)]',
             'peer-checked:bg-[var(--sf-accent)] peer-checked:border-[var(--sf-accent)]',
             'peer-disabled:opacity-50 peer-disabled:cursor-not-allowed',

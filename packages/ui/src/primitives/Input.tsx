@@ -16,7 +16,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           'border border-[length:var(--sf-border-width)]',
           error
             ? 'border-[var(--sf-destructive)]'
-            : 'border-[var(--sf-border)]',
+            : 'border-[var(--sf-border-strong)]',
           'bg-[var(--sf-bg-surface)] text-[var(--sf-text)]',
           'px-3 py-1 text-sm',
           'placeholder:text-[var(--sf-text-muted)]',

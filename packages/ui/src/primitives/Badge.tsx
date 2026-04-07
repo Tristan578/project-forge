@@ -19,7 +19,7 @@ export function Badge({ className, variant = 'default', children, ...props }: Ba
         'inline-flex items-center',
         'rounded-[var(--sf-radius-full)]',
         'px-2.5 py-0.5 text-xs font-medium',
-        'border border-[length:var(--sf-border-width)] border-[var(--sf-border)]',
+        'border border-[length:var(--sf-border-width)] border-[var(--sf-border-strong)]',
         'transition-colors duration-[var(--sf-transition)]',
         variantStyles[variant],
         className,

@@ -21,7 +21,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           className={cn(
             'flex h-9 w-full appearance-none',
             'rounded-[var(--sf-radius-md)]',
-            'border border-[length:var(--sf-border-width)] border-[var(--sf-border)]',
+            'border border-[length:var(--sf-border-width)] border-[var(--sf-border-strong)]',
             'bg-[var(--sf-bg-surface)] text-[var(--sf-text)]',
             'px-3 pr-8 py-1 text-sm',
             'transition-colors duration-[var(--sf-transition)]',
