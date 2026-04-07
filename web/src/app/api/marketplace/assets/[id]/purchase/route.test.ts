@@ -26,7 +26,7 @@ const mockUser = {
 
 vi.mock('@/lib/api/middleware', () => ({
   withApiMiddleware: vi.fn().mockResolvedValue({
-    error: null,
+    error: undefined,
     authContext: {
       user: { ...mockUser },
     },
