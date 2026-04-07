@@ -452,7 +452,13 @@ export function EditorLayout() {
       // Skip when focus is in a text input to avoid interrupting typing
       if (e.key === 'F6' && layout.mode !== 'compact' && !isInput) {
         e.preventDefault();
-        const regions = ['sidebar', 'hierarchy', 'canvas', 'right-panel'] as const;
+        // Filter to regions currently mounted in the DOM (right-panel only
+        // exists inside compact mode drawers, not in desktop Dockview layout)
+        const allRegions = ['sidebar', 'hierarchy', 'canvas', 'right-panel'] as const;
+        const regions = allRegions.filter(
+          (r) => document.querySelector(`[data-editor-region="${r}"]`) !== null,
+        );
+        if (regions.length === 0) return;
         const targetEl = e.target instanceof HTMLElement ? e.target : null;
         const current = targetEl?.closest('[data-editor-region]')?.getAttribute('data-editor-region');
         const currentIdx = current ? regions.indexOf(current as typeof regions[number]) : -1;
