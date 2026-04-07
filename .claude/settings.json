@@ -94,6 +94,18 @@
         ]
       },
       {
+        "matcher": "Bash",
+        "if": "Bash(gh api *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/block-deferred-fixes.sh\"",
+            "timeout": 5000,
+            "statusMessage": "Checking for Boy Scout Rule violations"
+          }
+        ]
+      },
+      {
         "matcher": "Edit|Write",
         "hooks": [
           {
