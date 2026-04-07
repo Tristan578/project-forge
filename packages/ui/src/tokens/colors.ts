@@ -11,7 +11,9 @@ export interface ThemeColorTokens {
   '--sf-text-secondary': string;
   '--sf-text-muted': string;
   '--sf-text-disabled': string;
+  /** Structural/layout borders: cards, dividers, section separators */
   '--sf-border': string;
+  /** Interactive element borders: inputs, checkboxes, switches, badges, selects */
   '--sf-border-strong': string;
   '--sf-accent': string;
   '--sf-accent-hover': string;
