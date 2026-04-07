@@ -55,6 +55,8 @@ export const DEFAULT_BINDINGS: KeyBinding[] = [
   { action: 'open-docs', label: 'Open docs', category: 'Panels', defaultKey: 'F1', customKey: null },
   { action: 'show-shortcuts', label: 'Show shortcuts', category: 'Panels', defaultKey: '?', customKey: null },
   { action: 'toggle-taskboard', label: 'Toggle taskboard', category: 'Panels', defaultKey: 'Alt+T', customKey: null },
+  { action: 'cycle-region', label: 'Cycle editor region', category: 'Panels', defaultKey: 'F6', customKey: null },
+  { action: 'cycle-region-back', label: 'Cycle region (reverse)', category: 'Panels', defaultKey: 'Shift+F6', customKey: null },
 ];
 
 /** Get the effective key for a binding (custom or default). */

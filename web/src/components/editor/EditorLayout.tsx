@@ -241,7 +241,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
 
 function RightPanelContent({ activeTab }: { activeTab: RightPanelTab }) {
   return (
-    <div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
+    <div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`} data-editor-region="right-panel" tabIndex={-1} className="outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/50">
       {activeTab === 'inspector' && <InspectorPanel />}
       <Suspense fallback={<div className="p-4 text-zinc-400">Loading...</div>}>
         {activeTab === 'script' && <ScriptEditorPanel />}
@@ -444,6 +444,20 @@ export function EditorLayout() {
       if (e.key === 'k' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         toggleChatOverlay();
+        return;
+      }
+
+      // F6 / Shift+F6: Cycle focus between editor regions (standard IDE pattern)
+      if (e.key === 'F6') {
+        e.preventDefault();
+        const regions = ['sidebar', 'hierarchy', 'canvas', 'right-panel'] as const;
+        const targetEl = e.target instanceof HTMLElement ? e.target : null;
+        const current = targetEl?.closest('[data-editor-region]')?.getAttribute('data-editor-region');
+        const currentIdx = current ? regions.indexOf(current as typeof regions[number]) : -1;
+        const direction = e.shiftKey ? -1 : 1;
+        const nextIdx = (currentIdx + direction + regions.length) % regions.length;
+        const nextEl = document.querySelector(`[data-editor-region="${regions[nextIdx]}"]`) as HTMLElement | null;
+        nextEl?.focus();
         return;
       }
 

@@ -411,7 +411,8 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
 
       {/* Tree view */}
       <div
-        className="flex-1 overflow-y-auto py-1 outline-none"
+        className="flex-1 overflow-y-auto py-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/50"
+        data-editor-region="hierarchy"
         tabIndex={0}
         role="tree"
         aria-label="Scene hierarchy"

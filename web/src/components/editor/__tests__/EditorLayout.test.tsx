@@ -53,9 +53,9 @@ vi.mock('@clerk/nextjs', () => ({
 }));
 
 // Mock all child components to isolate EditorLayout
-vi.mock('../Sidebar', () => ({ Sidebar: () => <div data-testid="sidebar">Sidebar</div> }));
-vi.mock('../CanvasArea', () => ({ CanvasArea: () => <div data-testid="canvas-area">Canvas</div> }));
-vi.mock('../SceneHierarchy', () => ({ SceneHierarchy: () => <div data-testid="scene-hierarchy">Hierarchy</div> }));
+vi.mock('../Sidebar', () => ({ Sidebar: () => <div data-testid="sidebar" data-editor-region="sidebar" tabIndex={-1}>Sidebar</div> }));
+vi.mock('../CanvasArea', () => ({ CanvasArea: () => <div data-testid="canvas-area"><canvas data-editor-region="canvas" tabIndex={0}>Canvas</canvas></div> }));
+vi.mock('../SceneHierarchy', () => ({ SceneHierarchy: () => <div data-testid="scene-hierarchy"><div data-editor-region="hierarchy" tabIndex={0}>Hierarchy</div></div> }));
 vi.mock('../InspectorPanel', () => ({ InspectorPanel: () => <div data-testid="inspector">Inspector</div> }));
 vi.mock('../ScriptEditorPanel', () => ({ ScriptEditorPanel: () => <div data-testid="script-editor">Script</div> }));
 vi.mock('../UIBuilderPanel', () => ({ UIBuilderPanel: () => <div data-testid="ui-builder">UI</div> }));
@@ -395,5 +395,24 @@ describe('EditorLayout', () => {
     mockSetRightPanelTab.mockClear();
     fireEvent.keyDown(tablist, { key: 'ArrowLeft' });
     expect(mockSetRightPanelTab).toHaveBeenCalledWith('behavior');
+  });
+
+  // ── F6 region cycling (P0: keyboard navigation) ──────────────────────
+
+  it('F6 cycles focus to the sidebar when no region is focused', () => {
+    setupStores('desktop');
+    render(<EditorLayout />);
+
+    // The sidebar region exists in the desktop layout (direct child, not inside WorkspaceProvider)
+    const sidebar = document.querySelector('[data-editor-region="sidebar"]');
+    expect(sidebar).not.toBeNull();
+
+    // Dispatch F6 from body (not inside any region)
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'F6', bubbles: true }));
+    });
+
+    // Should focus the first region (sidebar)
+    expect(document.activeElement).toBe(sidebar);
   });
 });
