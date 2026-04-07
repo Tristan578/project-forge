@@ -13,7 +13,7 @@ export interface ThemeColorTokens {
   '--sf-text-disabled': string;
   /** Structural/layout borders: cards, dividers, section separators */
   '--sf-border': string;
-  /** Interactive element borders: inputs, checkboxes, switches, badges, selects */
+  /** Interactive/emphasized element borders: inputs, selects, checkboxes, switches, badges, avatars, button outlines */
   '--sf-border-strong': string;
   '--sf-accent': string;
   '--sf-accent-hover': string;
