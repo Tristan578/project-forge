@@ -48,7 +48,7 @@ describe('POST /api/marketplace/assets/[id]/review', () => {
 
   it('should return 400 when body parsing fails', async () => {
     vi.mocked(withApiMiddleware).mockResolvedValue({
-      error: null,
+      error: undefined,
       authContext: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } },
     } as never);
     const badResponse = new Response(JSON.stringify({ error: 'Invalid body' }), { status: 400 });
@@ -65,7 +65,7 @@ describe('POST /api/marketplace/assets/[id]/review', () => {
 
   it('should return 403 when user has not purchased asset', async () => {
     vi.mocked(withApiMiddleware).mockResolvedValue({
-      error: null,
+      error: undefined,
       authContext: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } },
     } as never);
     vi.mocked(parseJsonBody).mockResolvedValue({ ok: true, body: { rating: 5 } } as never);
@@ -94,7 +94,7 @@ describe('POST /api/marketplace/assets/[id]/review', () => {
 
   it('should return 400 when rating is invalid', async () => {
     vi.mocked(withApiMiddleware).mockResolvedValue({
-      error: null,
+      error: undefined,
       authContext: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } },
     } as never);
     vi.mocked(parseJsonBody).mockResolvedValue({ ok: true, body: { rating: 99 } } as never);
@@ -112,7 +112,7 @@ describe('POST /api/marketplace/assets/[id]/review', () => {
 
   it('should create a review and recalculate rating', async () => {
     vi.mocked(withApiMiddleware).mockResolvedValue({
-      error: null,
+      error: undefined,
       authContext: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } },
     } as never);
     vi.mocked(parseJsonBody).mockResolvedValue({ ok: true, body: { rating: 5, content: 'Great asset!' } } as never);
