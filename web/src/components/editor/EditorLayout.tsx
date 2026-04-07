@@ -241,7 +241,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
 
 function RightPanelContent({ activeTab }: { activeTab: RightPanelTab }) {
   return (
-    <div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
+    <div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`} data-editor-region="right-panel" tabIndex={-1} className="outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/50">
       {activeTab === 'inspector' && <InspectorPanel />}
       <Suspense fallback={<div className="p-4 text-zinc-400">Loading...</div>}>
         {activeTab === 'script' && <ScriptEditorPanel />}
@@ -447,6 +447,31 @@ export function EditorLayout() {
         return;
       }
 
+      // F6 / Shift+F6: Cycle focus between editor regions (standard IDE pattern)
+      // Disabled in compact mode where regions are inside conditional drawers
+      // Skip when focus is in a text input to avoid interrupting typing
+      if (e.key === 'F6' && layout.mode !== 'compact' && !isInput) {
+        e.preventDefault();
+        // Filter to regions currently mounted in the DOM (right-panel only
+        // exists inside compact mode drawers, not in desktop Dockview layout)
+        const allRegions = ['sidebar', 'hierarchy', 'canvas', 'right-panel'] as const;
+        const regions = allRegions.filter(
+          (r) => document.querySelector(`[data-editor-region="${r}"]`) !== null,
+        );
+        if (regions.length === 0) return;
+        const targetEl = e.target instanceof HTMLElement ? e.target : null;
+        const current = targetEl?.closest('[data-editor-region]')?.getAttribute('data-editor-region');
+        const currentIdx = current ? regions.indexOf(current as typeof regions[number]) : -1;
+        const direction = e.shiftKey ? -1 : 1;
+        // When unfocused (currentIdx=-1), forward starts at 0, backward at last
+        const nextIdx = currentIdx === -1
+          ? (direction === 1 ? 0 : regions.length - 1)
+          : (currentIdx + direction + regions.length) % regions.length;
+        const nextEl = document.querySelector(`[data-editor-region="${regions[nextIdx]}"]`) as HTMLElement | null;
+        nextEl?.focus();
+        return;
+      }
+
       // F1: Open docs panel
       if (e.key === 'F1') {
         e.preventDefault();
@@ -489,7 +514,7 @@ export function EditorLayout() {
         });
       }
     },
-    [toggleChatOverlay]
+    [toggleChatOverlay, layout.mode]
   );
 
   useEffect(() => {
@@ -639,7 +664,7 @@ export function EditorLayout() {
       <TokenWarningBanner />
 
       {/* Main area: Sidebar + Dockview */}
-      <div className="flex flex-1 overflow-hidden">
+      <main className="flex flex-1 overflow-hidden" aria-label="Editor workspace">
         {/* Tool sidebar */}
         <Sidebar />
 
@@ -647,7 +672,7 @@ export function EditorLayout() {
         <div className="flex-1 overflow-hidden">
           <WorkspaceProvider />
         </div>
-      </div>
+      </main>
 
       <AutoSaveRecovery />
       <ChatOverlay />

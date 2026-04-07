@@ -181,7 +181,7 @@ export function Sidebar() {
   const showCombineButton = selectedArray.length >= 2;
 
   return (
-    <aside data-testid="editor-sidebar" role="toolbar" aria-label="Editor tools" className="flex h-full w-14 flex-col items-center gap-1 border-r border-zinc-800 bg-zinc-900 py-3">
+    <aside data-testid="editor-sidebar" data-editor-region="sidebar" role="toolbar" aria-label="Editor tools" tabIndex={-1} className="flex h-full w-14 flex-col items-center gap-1 border-r border-zinc-800 bg-zinc-900 py-3 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/50">
       {/* Add Entity Menu */}
       <AddEntityMenu onSpawn={handleSpawnEntity} />
 

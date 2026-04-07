@@ -75,6 +75,7 @@ export function CanvasArea() {
     <div className="relative h-full w-full overflow-hidden bg-zinc-900">
       <canvas
         id={CANVAS_ID}
+        data-editor-region="canvas"
         tabIndex={isReady ? 0 : -1}
         role="application"
         aria-label="3D viewport — use keyboard shortcuts to navigate"
