@@ -51,7 +51,7 @@ describe('Input', () => {
   it('uses --sf-border-strong for default border (not --sf-border)', () => {
     const { container } = render(<Input />);
     const input = container.querySelector('input');
-    expect(input?.className).toContain('--sf-border-strong');
+    expect(input?.className).toContain('border-[var(--sf-border-strong)]');
     expect(input?.className).not.toMatch(/border-\[var\(--sf-border\)\]/);
   });
 });
