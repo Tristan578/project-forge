@@ -558,8 +558,10 @@ export function applyFixes(
             properties: { [item.property]: item.value },
           });
         }
-        // Process next spawn on the following frame
-        requestAnimationFrame(processNext);
+        // Process next spawn on the following frame (only if items remain)
+        if (idx < spawnQueue.length) {
+          requestAnimationFrame(processNext);
+        }
       });
     }
     processNext();
