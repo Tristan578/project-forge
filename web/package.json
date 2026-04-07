@@ -85,7 +85,7 @@
     "eslint": "^9",
     "eslint-config-next": "^16.2.2",
     "jsdom": "^29.0.1",
-    "portless": "^0.7.2",
+    "portless": "^0.9.6",
     "tailwindcss": "^4",
     "typescript": "^6",
     "vitest": "^4.1.2"
