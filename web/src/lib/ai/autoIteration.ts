@@ -467,16 +467,30 @@ function generateFixForIssue(
 
 export type CommandDispatcher = (command: string, payload: unknown) => void;
 
+/** Game component types that should be attached after spawning an entity. */
+const SPAWN_GAME_COMPONENTS: Record<string, string> = {
+  checkpoint: 'Checkpoint',
+  collectible: 'Collectible',
+  triggerZone: 'TriggerZone',
+};
+
 /**
  * Apply selected fixes through the engine command system.
  * Returns an iteration report documenting what was changed.
+ *
+ * For spawn_entity changes with a game component type (checkpoint, collectible,
+ * triggerZone), a follow-up add_game_component dispatch is scheduled on the
+ * next animation frame so the engine has time to process the spawn and update
+ * the selected entity ID.
  */
 export function applyFixes(
   fixes: IssueFix[],
   dispatch: CommandDispatcher,
   iterationNumber: number,
+  getSelectedEntityId?: () => string | null,
 ): IterationReport {
   const appliedFixes: IssueFix[] = [];
+  const pendingGameComponents: Array<{ component: string; property: string; value: unknown }> = [];
 
   for (const fix of fixes) {
     for (const change of fix.changes) {
@@ -485,6 +499,15 @@ export function applyFixes(
           entityType: SPAWN_ENTITY_TYPE_MAP[change.component] ?? 'cube',
           name: change.component,
         });
+        // Queue game component attachment for the next frame
+        const gameComponentType = SPAWN_GAME_COMPONENTS[change.component];
+        if (gameComponentType) {
+          pendingGameComponents.push({
+            component: gameComponentType,
+            property: change.property,
+            value: change.newValue,
+          });
+        }
       } else if (change.command === 'update_ambient_light') {
         dispatch(change.command, {
           [change.property]: change.newValue,
@@ -498,6 +521,22 @@ export function applyFixes(
       }
     }
     appliedFixes.push(fix);
+  }
+
+  // Attach game components after the engine processes the spawns
+  if (pendingGameComponents.length > 0 && getSelectedEntityId) {
+    requestAnimationFrame(() => {
+      for (const pending of pendingGameComponents) {
+        const entityId = getSelectedEntityId();
+        if (entityId) {
+          dispatch('add_game_component', {
+            entityId,
+            componentType: pending.component,
+            properties: { [pending.property]: pending.value },
+          });
+        }
+      }
+    });
   }
 
   const totalChanges = appliedFixes.reduce((sum, f) => sum + f.changes.length, 0);

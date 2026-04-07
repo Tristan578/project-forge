@@ -5,6 +5,7 @@ import { HelpCircle } from 'lucide-react';
 import { useEditorStore, type Physics2dData } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 
 interface CheckboxRowProps {
   label: string;
@@ -83,6 +84,7 @@ export function Physics2dInspector() {
   const togglePhysics2d = useEditorStore((s) => s.togglePhysics2d);
   const removePhysics2d = useEditorStore((s) => s.removePhysics2d);
   const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
+  const { confirm, ConfirmDialogPortal } = useConfirmDialog();
 
   const handleUpdate = useCallback(
     (partial: Partial<Physics2dData>) => {
@@ -122,12 +124,11 @@ export function Physics2dInspector() {
     [primaryId, physics2d, updatePhysics2d, togglePhysics2d]
   );
 
-  const handleRemove = useCallback(() => {
-    // TODO(PF): Replace window.confirm() with an inline confirmation dialog (accessible, styled).
-    if (primaryId && window.confirm('Remove 2D physics from this entity?')) {
+  const handleRemove = useCallback(async () => {
+    if (primaryId && await confirm('Remove 2D physics from this entity?')) {
       removePhysics2d(primaryId);
     }
-  }, [primaryId, removePhysics2d]);
+  }, [primaryId, removePhysics2d, confirm]);
 
   const isDynamic = physics2d?.bodyType === 'dynamic';
   const isStatic = physics2d?.bodyType === 'static';
@@ -325,6 +326,7 @@ export function Physics2dInspector() {
           </>
         )}
       </div>
+      <ConfirmDialogPortal />
     </div>
   );
 }

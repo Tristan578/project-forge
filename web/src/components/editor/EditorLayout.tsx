@@ -56,6 +56,7 @@ import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { useGenerationPolling } from '@/hooks/useGenerationPolling';
 import { startAutoSave } from '@/lib/storage/autoSave';
+import { safeGetItem, safeSetItem } from '@/lib/storage/safeLocalStorage';
 import { UserButton } from '@clerk/nextjs';
 
 // Clerk validates key format — skip rendering Clerk components without a valid key (CI E2E)
@@ -258,7 +259,7 @@ function RightPanelContent({ activeTab }: { activeTab: RightPanelTab }) {
 
 function isMobileBannerDismissed(): boolean {
   if (typeof localStorage === 'undefined') return true;
-  return !!localStorage.getItem(MOBILE_DISMISSED_KEY);
+  return !!safeGetItem(MOBILE_DISMISSED_KEY);
 }
 
 function MobileBanner() {
@@ -266,7 +267,7 @@ function MobileBanner() {
 
   const handleDismiss = () => {
     setDismissed(true);
-    localStorage.setItem(MOBILE_DISMISSED_KEY, '1');
+    safeSetItem(MOBILE_DISMISSED_KEY, '1');
   };
 
   if (dismissed) return null;
@@ -353,22 +354,22 @@ function OnboardingGate() {
   const legacyDone = useSyncExternalStore(
     noopSubscribe,
     () =>
-      !!localStorage.getItem(LEGACY_QUICKSTART_KEY) ||
-      !!localStorage.getItem(LEGACY_WELCOME_KEY),
+      !!safeGetItem(LEGACY_QUICKSTART_KEY) ||
+      !!safeGetItem(LEGACY_WELCOME_KEY),
     () => true, // SSR: treat as done to avoid hydration mismatch
   );
 
   // Check if new onboarding was completed (separate from legacy)
   const onboardingDone = useSyncExternalStore(
     noopSubscribe,
-    () => !!localStorage.getItem(ONBOARDING_COMPLETED_KEY),
+    () => !!safeGetItem(ONBOARDING_COMPLETED_KEY),
     () => false,
   );
 
   const [wizardDismissed, setWizardDismissed] = useState(false);
 
   const handleWizardComplete = useCallback(() => {
-    localStorage.setItem(ONBOARDING_COMPLETED_KEY, '1');
+    safeSetItem(ONBOARDING_COMPLETED_KEY, '1');
     completeOnboarding();
     setWizardDismissed(true);
   }, [completeOnboarding]);

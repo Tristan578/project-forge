@@ -25,6 +25,7 @@ export interface ZipExportOptions {
   bgColor: string;
   includeDebug: boolean;
   orientationLock?: 'landscape' | 'portrait' | 'none';
+  signal?: AbortSignal;
 }
 
 interface ZipEntry {
@@ -37,7 +38,7 @@ interface ZipEntry {
  * Uses runtime variants (stripped editor systems) for smaller exported games.
  * Falls back to editor variants if runtime variants aren't available.
  */
-async function fetchWasmEngineFiles(): Promise<ZipEntry[]> {
+async function fetchWasmEngineFiles(signal?: AbortSignal): Promise<ZipEntry[]> {
   const entries: ZipEntry[] = [];
   const variants = ['webgl2', 'webgpu'];
   const files = ['forge_engine.js', 'forge_engine_bg.wasm'];
@@ -51,10 +52,10 @@ async function fetchWasmEngineFiles(): Promise<ZipEntry[]> {
       const exportPath = `engine-pkg-${variant}/${file}`;
 
       try {
-        let response = await fetch(runtimeUrl);
+        let response = await fetch(runtimeUrl, { signal });
         if (!response.ok) {
           // Fall back to editor variant
-          response = await fetch(editorUrl);
+          response = await fetch(editorUrl, { signal });
         }
         if (response.ok) {
           const blob = await response.blob();
@@ -63,7 +64,8 @@ async function fetchWasmEngineFiles(): Promise<ZipEntry[]> {
             content: blob,
           });
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') throw err;
         console.warn(`[ZipExporter] Could not fetch WASM for ${variant}/${file}, skipping`);
       }
     }
@@ -78,9 +80,12 @@ async function fetchWasmEngineFiles(): Promise<ZipEntry[]> {
 export async function exportAsZip(
   sceneData: unknown,
   scripts: Record<string, ScriptData>,
-  options: ZipExportOptions
+  options: ZipExportOptions,
 ): Promise<Blob> {
+  const { signal } = options;
+
   // 1. Extract embedded assets
+  if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
   const { modifiedScene, assets } = await extractAssets(sceneData);
 
   // 2. Bundle scripts
@@ -103,6 +108,7 @@ export async function exportAsZip(
 
   // Add extracted assets (with optional texture compression)
   for (const asset of assets) {
+    if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
     let assetBlob = asset.blob;
 
     if (options.compressTextures && asset.blob.type.startsWith('image/')) {
@@ -122,7 +128,8 @@ export async function exportAsZip(
   }
 
   // 4. Fetch and include WASM engine files
-  const wasmEntries = await fetchWasmEngineFiles();
+  if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+  const wasmEntries = await fetchWasmEngineFiles(signal);
   for (const entry of wasmEntries) {
     entries.push(entry);
   }

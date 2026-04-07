@@ -1,6 +1,7 @@
 'use client';
 
 import { useUIBuilderStore } from '@/stores/uiBuilderStore';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 
 export function ScreenSettingsPanel() {
   const activeScreenId = useUIBuilderStore((s) => s.activeScreenId);
@@ -9,6 +10,7 @@ export function ScreenSettingsPanel() {
   const renameScreen = useUIBuilderStore((s) => s.renameScreen);
   const deleteScreen = useUIBuilderStore((s) => s.deleteScreen);
 
+  const { confirm, ConfirmDialogPortal } = useConfirmDialog();
   const activeScreen = screens.find((s) => s.id === activeScreenId);
 
   if (!activeScreen) return null;
@@ -23,8 +25,8 @@ export function ScreenSettingsPanel() {
     });
   };
 
-  const handleDelete = () => {
-    if (confirm(`Delete screen "${activeScreen.name}"?`)) {
+  const handleDelete = async () => {
+    if (await confirm(`Delete screen "${activeScreen.name}"?`)) {
       deleteScreen(activeScreen.id);
     }
   };
@@ -154,6 +156,7 @@ export function ScreenSettingsPanel() {
       >
         Delete Screen
       </button>
+      <ConfirmDialogPortal />
     </div>
   );
 }
