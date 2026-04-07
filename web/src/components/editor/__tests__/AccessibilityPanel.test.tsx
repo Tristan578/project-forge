@@ -5,6 +5,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { AccessibilityPanel } from '../AccessibilityPanel';
 
+const mockSetAccessibilityProfile = vi.fn();
+const mockDispatcher = vi.fn();
+
 vi.mock('@/stores/editorStore', () => {
   const mockGetState = vi.fn(() => ({
     sceneGraph: { nodes: {} },
@@ -14,12 +17,16 @@ vi.mock('@/stores/editorStore', () => {
     allScripts: {},
     inputBindings: [],
     allGameComponents: {},
+    setAccessibilityProfile: mockSetAccessibilityProfile,
   }));
   // useEditorStore is both a React hook (called with selector) and has getState
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const useEditorStore: any = vi.fn();
   useEditorStore.getState = mockGetState;
-  return { useEditorStore };
+  return {
+    useEditorStore,
+    getCommandDispatcher: () => mockDispatcher,
+  };
 });
 
 vi.mock('@/lib/ai/accessibilityGenerator', () => ({
@@ -90,6 +97,7 @@ function mockStore(overrides: Record<string, unknown> = {}) {
     allScripts: {},
     inputBindings: [],
     allGameComponents: {},
+    setAccessibilityProfile: mockSetAccessibilityProfile,
     ...overrides,
   } as unknown as ReturnType<typeof mockedStore.getState>);
 }
@@ -201,5 +209,61 @@ describe('AccessibilityPanel', () => {
   it('renders font scale section', () => {
     render(<AccessibilityPanel />);
     expect(screen.getByText('Font Scale')).toBeInTheDocument();
+  });
+
+  it('syncs profile to store on mount (#8207)', () => {
+    render(<AccessibilityPanel />);
+    // useEffect fires on mount, syncing the default profile to the store
+    expect(mockSetAccessibilityProfile).toHaveBeenCalled();
+    const savedProfile = mockSetAccessibilityProfile.mock.calls[0][0];
+    expect(savedProfile).toHaveProperty('colorblindMode');
+    expect(savedProfile).toHaveProperty('screenReader');
+    expect(savedProfile).toHaveProperty('inputRemapping');
+  });
+
+  it('applies colorblind CSS filter to game canvas when mode is enabled (#8207)', () => {
+    // Create a mock canvas element
+    const canvas = document.createElement('div');
+    canvas.id = 'game-canvas';
+    document.body.appendChild(canvas);
+
+    render(<AccessibilityPanel />);
+    // Enable colorblind mode by clicking a mode button
+    fireEvent.click(screen.getByLabelText('Simulate Protanopia'));
+
+    // The canvas should now have a CSS filter applied
+    expect(canvas.style.filter).not.toBe('');
+
+    document.body.removeChild(canvas);
+  });
+
+  it('removes colorblind CSS filter when mode is disabled (#8207)', () => {
+    const canvas = document.createElement('div');
+    canvas.id = 'game-canvas';
+    document.body.appendChild(canvas);
+
+    render(<AccessibilityPanel />);
+    // Enable via mode button
+    fireEvent.click(screen.getByLabelText('Simulate Protanopia'));
+    expect(canvas.style.filter).not.toBe('');
+    // Disable via the Active/Off toggle button
+    fireEvent.click(screen.getByLabelText('Disable colorblind simulation'));
+    expect(canvas.style.filter).toBe('');
+
+    document.body.removeChild(canvas);
+  });
+
+  it('updates store when profile changes (#8207)', () => {
+    render(<AccessibilityPanel />);
+    mockSetAccessibilityProfile.mockClear();
+
+    // Toggle screen reader
+    const srToggle = screen.getByLabelText(/able screen reader/i);
+    fireEvent.click(srToggle);
+
+    // Store should be updated with screenReader.enabled = true
+    expect(mockSetAccessibilityProfile).toHaveBeenCalled();
+    const latestCall = mockSetAccessibilityProfile.mock.calls[mockSetAccessibilityProfile.mock.calls.length - 1][0];
+    expect(latestCall.screenReader.enabled).toBe(true);
   });
 });

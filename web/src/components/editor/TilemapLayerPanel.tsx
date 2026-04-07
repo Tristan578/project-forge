@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { Plus, Trash2, Eye, EyeOff, Shield, GripVertical } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 
 interface _TilemapLayer {
   name: string;
@@ -18,6 +19,7 @@ export function TilemapLayerPanel() {
   const setActiveLayerIndex = useEditorStore((s) => s.setTilemapActiveLayerIndex);
 
   const setTilemapData = useEditorStore((s) => s.setTilemapData);
+  const { confirm, ConfirmDialogPortal } = useConfirmDialog();
 
   const handleAddLayer = useCallback(() => {
     if (!primaryId || !tilemapData) return;
@@ -27,14 +29,13 @@ export function TilemapLayerPanel() {
     setTilemapData(primaryId, { ...tilemapData, layers: [...tilemapData.layers, newLayer] });
   }, [primaryId, tilemapData, setTilemapData]);
 
-  const handleRemoveLayer = useCallback((layerIndex: number) => {
+  const handleRemoveLayer = useCallback(async (layerIndex: number) => {
     if (!primaryId || !tilemapData) return;
     const layer = tilemapData.layers[layerIndex];
-    // TODO(PF): Replace confirm() with an inline confirmation dialog (accessible, styled).
-    if (confirm(`Remove layer "${layer.name}"?`)) {
+    if (await confirm(`Remove layer "${layer.name}"?`)) {
       setTilemapData(primaryId, { ...tilemapData, layers: tilemapData.layers.filter((_, i) => i !== layerIndex) });
     }
-  }, [primaryId, tilemapData, setTilemapData]);
+  }, [primaryId, tilemapData, setTilemapData, confirm]);
 
   const handleUpdateLayer = useCallback((layerIndex: number, partial: Partial<_TilemapLayer>) => {
     if (!primaryId || !tilemapData) return;
@@ -171,6 +172,7 @@ export function TilemapLayerPanel() {
           </div>
         </div>
       )}
+      <ConfirmDialogPortal />
     </div>
   );
 }

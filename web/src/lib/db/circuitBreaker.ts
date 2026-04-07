@@ -1,6 +1,5 @@
 import 'server-only';
 import { isTransientError } from './withRetry';
-import { captureException } from '@/lib/monitoring/sentry-server';
 
 export type CircuitState = 'closed' | 'open' | 'half-open';
 
@@ -9,6 +8,8 @@ export interface CircuitBreakerOptions {
   failureThreshold?: number;
   /** Milliseconds in open state before transitioning to half-open. Default: 30000 */
   openTimeoutMs?: number;
+  /** Callback fired on state transitions for observability (Sentry, logging). */
+  onTransition?: (from: CircuitState, to: CircuitState) => void;
 }
 
 export class CircuitBreakerOpenError extends Error {
@@ -24,10 +25,12 @@ export class CircuitBreaker {
   private lastOpenedAt: number | null = null;
   private readonly failureThreshold: number;
   private readonly openTimeoutMs: number;
+  private readonly onTransition?: (from: CircuitState, to: CircuitState) => void;
 
   constructor(options: CircuitBreakerOptions = {}) {
     this.failureThreshold = options.failureThreshold ?? 5;
     this.openTimeoutMs = options.openTimeoutMs ?? 30_000;
+    this.onTransition = options.onTransition;
   }
 
   getState(): CircuitState {
@@ -61,9 +64,10 @@ export class CircuitBreaker {
     }
   }
 
-  /** Reset the circuit breaker to closed state (useful for testing). */
+  /** Reset the circuit breaker to closed state (useful for testing).
+   * Routes through `_transition()` so `onTransition` observers are notified. */
   reset(): void {
-    this.state = 'closed';
+    this._transition('closed');
     this.consecutiveFailures = 0;
     this.lastOpenedAt = null;
   }
@@ -78,20 +82,31 @@ export class CircuitBreaker {
     };
   }
 
+  private _transition(to: CircuitState): void {
+    const from = this.state;
+    if (from === to) return;
+    this.state = to;
+    try {
+      this.onTransition?.(from, to);
+    } catch {
+      // Observer errors must not break circuit breaker logic
+    }
+  }
+
   private _maybeTransitionToHalfOpen(): void {
     if (
       this.state === 'open' &&
       this.lastOpenedAt !== null &&
       Date.now() - this.lastOpenedAt >= this.openTimeoutMs
     ) {
-      this._transition('open', 'half-open');
+      this._transition('half-open');
     }
   }
 
   private _onSuccess(): void {
     if (this.state === 'half-open') {
       // Probe succeeded — close the circuit
-      this._transition('half-open', 'closed');
+      this._transition('closed');
       this.consecutiveFailures = 0;
       this.lastOpenedAt = null;
     } else if (this.state === 'closed') {
@@ -105,30 +120,47 @@ export class CircuitBreaker {
 
     if (this.state === 'half-open') {
       // Probe failed — go back to open
-      this._transition('half-open', 'open');
+      this._transition('open');
       this.lastOpenedAt = Date.now();
     } else if (this.state === 'closed' && this.consecutiveFailures >= this.failureThreshold) {
-      this._transition('closed', 'open');
+      this._transition('open');
       this.lastOpenedAt = Date.now();
     }
   }
 
-  /** Alert to Sentry when the circuit opens (#8244). Non-open transitions are silent. */
-  private _transition(from: CircuitState, to: CircuitState): void {
-    this.state = to;
-    // Only opening is an operational alert — half-open and closed are
-    // normal recovery and don't warrant Sentry noise.
-    if (to === 'open') {
-      captureException(
-        new Error(`DB circuit breaker opened after ${this.consecutiveFailures} consecutive failures`),
-        { from, to, consecutiveFailures: this.consecutiveFailures, openTimeoutMs: this.openTimeoutMs },
-      );
-    }
-  }
 }
+
+const DB_FAILURE_THRESHOLD = 5;
+const DB_OPEN_TIMEOUT_MS = 30_000;
 
 /** Singleton circuit breaker for the Neon DB connection. */
 export const dbCircuitBreaker = new CircuitBreaker({
-  failureThreshold: 5,
-  openTimeoutMs: 30_000,
+  failureThreshold: DB_FAILURE_THRESHOLD,
+  openTimeoutMs: DB_OPEN_TIMEOUT_MS,
+  onTransition: (from, to) => {
+    // Lazy import to avoid circular deps — sentry-server is lightweight
+    import('@/lib/monitoring/sentry-server').then(({ addBreadcrumb, captureMessage }) => {
+      addBreadcrumb({
+        category: 'db.circuit_breaker',
+        message: `Circuit breaker: ${from} → ${to}`,
+        level: to === 'open' ? 'error' : to === 'closed' ? 'info' : 'warning',
+        data: { from, to },
+      });
+
+      // Alert-level message when circuit opens (DB down) or closes (recovered)
+      if (to === 'open') {
+        const reason = from === 'half-open'
+          ? 'probe request failed during half-open recovery'
+          : `${DB_FAILURE_THRESHOLD} consecutive failures`;
+        captureMessage(
+          `DB circuit breaker opened — refusing connections (${reason})`,
+          'error',
+        );
+      } else if (to === 'closed' && from === 'half-open') {
+        captureMessage('DB circuit breaker closed — database connection recovered', 'info');
+      }
+    }).catch(() => {
+      // Sentry unavailable — non-critical
+    });
+  },
 });
