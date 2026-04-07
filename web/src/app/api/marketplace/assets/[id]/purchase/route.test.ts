@@ -2,22 +2,15 @@ vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit } from '@/lib/rateLimit';
-import { getDb } from '@/lib/db/client';
 
-vi.mock('@/lib/auth/api-auth');
-vi.mock('@/lib/rateLimit', () => ({
-  rateLimit: vi.fn(),
-  rateLimitResponse: vi.fn(() => new Response('Rate limited', { status: 429 })),
-}));
-vi.mock('@/lib/db/client');
-vi.mock('@/lib/db/schema', () => ({
-  users: { id: 'id', earnedCredits: 'earnedCredits', addonTokens: 'addonTokens', monthlyTokens: 'monthlyTokens', monthlyTokensUsed: 'monthlyTokensUsed' },
-  marketplaceAssets: { id: 'id', sellerId: 'sellerId', status: 'status', priceTokens: 'priceTokens', downloadCount: 'downloadCount', assetFileUrl: 'assetFileUrl', license: 'license' },
-  assetPurchases: { buyerId: 'buyerId', assetId: 'assetId', priceTokens: 'priceTokens', license: 'license' },
-  creditTransactions: { userId: 'userId', transactionType: 'transactionType', amount: 'amount', balanceAfter: 'balanceAfter', source: 'source', referenceId: 'referenceId' },
-}));
+// ---------------------------------------------------------------------------
+// Mocks — must match the actual imports in route.ts
+// ---------------------------------------------------------------------------
+
+const mockInsert = vi.fn();
+const mockUpdate = vi.fn();
+const mockSelect = vi.fn();
+const mockDelete = vi.fn();
 
 const mockUser = {
   id: 'user_1',
@@ -31,22 +24,103 @@ const mockUser = {
   email: 'test@test.com',
 };
 
+vi.mock('@/lib/api/middleware', () => ({
+  withApiMiddleware: vi.fn().mockResolvedValue({
+    error: null,
+    authContext: {
+      user: { ...mockUser },
+    },
+  }),
+}));
+
+vi.mock('@/lib/db/client', () => ({
+  queryWithResilience: vi.fn((fn: () => unknown) => fn()),
+  getDb: vi.fn(() => ({
+    insert: mockInsert,
+    update: mockUpdate,
+    select: mockSelect,
+    delete: mockDelete,
+  })),
+}));
+
+vi.mock('@/lib/monitoring/sentry-server', () => ({
+  captureException: vi.fn(),
+}));
+
+vi.mock('@/lib/api/errors', () => ({
+  validationError: vi.fn((msg: string) => new Response(JSON.stringify({ error: msg }), { status: 400 })),
+  conflict: vi.fn((msg: string) => new Response(JSON.stringify({ error: msg }), { status: 409 })),
+  forbidden: vi.fn((msg: string) => new Response(JSON.stringify({ error: msg }), { status: 403 })),
+  paymentRequired: vi.fn((msg: string) => new Response(JSON.stringify({ error: msg }), { status: 402 })),
+  internalError: vi.fn((msg: string) => new Response(JSON.stringify({ error: msg }), { status: 500 })),
+}));
+
+vi.mock('@/lib/db/schema', () => ({
+  users: { id: 'id', earnedCredits: 'earnedCredits', addonTokens: 'addonTokens', monthlyTokens: 'monthlyTokens', monthlyTokensUsed: 'monthlyTokensUsed' },
+  marketplaceAssets: { id: 'id', sellerId: 'sellerId', status: 'status', priceTokens: 'priceTokens', downloadCount: 'downloadCount', assetFileUrl: 'assetFileUrl', license: 'license' },
+  assetPurchases: { id: 'id', buyerId: 'buyerId', assetId: 'assetId', priceTokens: 'priceTokens', license: 'license' },
+  creditTransactions: { id: 'id', userId: 'userId', transactionType: 'transactionType', amount: 'amount', balanceAfter: 'balanceAfter', source: 'source', referenceId: 'referenceId' },
+}));
+
+vi.mock('drizzle-orm', () => ({
+  eq: vi.fn((_col, val) => ({ type: 'eq', val })),
+  and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
+  sql: Object.assign(
+    vi.fn((...args: unknown[]) => ({ type: 'sql', args })),
+    { raw: vi.fn((s: string) => ({ type: 'sql_raw', s })) },
+  ),
+}));
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function selectChain(results: unknown[]) {
+  return {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue(results),
+  };
+}
+
+function insertChain(returning: unknown[] = []) {
+  return {
+    values: vi.fn().mockReturnValue({
+      onConflictDoNothing: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue(returning),
+      }),
+    }),
+  };
+}
+
+function updateChain(returning: unknown[] = [{ id: 'ok' }]) {
+  return {
+    set: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue(returning),
+      }),
+    }),
+  };
+}
+
+const { withApiMiddleware } = await import('@/lib/api/middleware');
+
 describe('POST /api/marketplace/assets/[id]/purchase', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: true as const,
-      ctx: { clerkId: 'clerk_1', user: mockUser as never },
-    });
-    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
+
+    // Reset withApiMiddleware to default (authenticated user)
+    vi.mocked(withApiMiddleware).mockResolvedValue({
+      error: null,
+      authContext: { user: { ...mockUser } },
+    } as never);
   });
 
   it('should return 401 when not authenticated', async () => {
-    const mockResponse = new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
-    vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: false as const,
-      response: mockResponse as never,
-    });
+    vi.mocked(withApiMiddleware).mockResolvedValue({
+      error: new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+      authContext: null,
+    } as never);
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/purchase');
@@ -56,7 +130,10 @@ describe('POST /api/marketplace/assets/[id]/purchase', () => {
   });
 
   it('should return 429 when rate limited', async () => {
-    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    vi.mocked(withApiMiddleware).mockResolvedValue({
+      error: new Response(JSON.stringify({ error: 'Rate limited' }), { status: 429 }),
+      authContext: null,
+    } as never);
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/purchase');
@@ -66,15 +143,7 @@ describe('POST /api/marketplace/assets/[id]/purchase', () => {
   });
 
   it('should return 404 when asset not found', async () => {
-    const selectChain = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([]),
-    };
-    const mockDb = {
-      select: vi.fn().mockReturnValue(selectChain),
-    };
-    vi.mocked(getDb).mockReturnValue(mockDb as never);
+    mockSelect.mockReturnValueOnce(selectChain([]));
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/marketplace/assets/missing/purchase');
@@ -85,23 +154,10 @@ describe('POST /api/marketplace/assets/[id]/purchase', () => {
     expect(body.error).toBe('Asset not found');
   });
 
-  it('should return 409 when already purchased (regression: was 400, is a conflict not malformed request)', async () => {
-    const assetChain = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([{ id: 'a1', status: 'published', sellerId: 'other-user', priceTokens: 100, assetFileUrl: 'url', license: 'standard', downloadCount: 0 }]),
-    };
-    const purchaseChain = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([{ id: 'p1' }]),
-    };
-    const mockDb = {
-      select: vi.fn()
-        .mockReturnValueOnce(assetChain)
-        .mockReturnValueOnce(purchaseChain),
-    };
-    vi.mocked(getDb).mockReturnValue(mockDb as never);
+  it('should return 409 when already purchased', async () => {
+    mockSelect
+      .mockReturnValueOnce(selectChain([{ id: 'a1', status: 'published', sellerId: 'other-user', priceTokens: 100, assetFileUrl: 'url', license: 'standard', downloadCount: 0 }]))
+      .mockReturnValueOnce(selectChain([{ id: 'p1' }]));
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/purchase');
@@ -112,23 +168,10 @@ describe('POST /api/marketplace/assets/[id]/purchase', () => {
     expect(body.error).toBe('Already purchased');
   });
 
-  it('should return 403 when buying own asset (regression: was 400, is a permission violation)', async () => {
-    const assetChain = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([{ id: 'a1', status: 'published', sellerId: 'user_1', priceTokens: 100 }]),
-    };
-    const purchaseChain = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([]),
-    };
-    const mockDb = {
-      select: vi.fn()
-        .mockReturnValueOnce(assetChain)
-        .mockReturnValueOnce(purchaseChain),
-    };
-    vi.mocked(getDb).mockReturnValue(mockDb as never);
+  it('should return 403 when buying own asset', async () => {
+    mockSelect
+      .mockReturnValueOnce(selectChain([{ id: 'a1', status: 'published', sellerId: 'user_1', priceTokens: 100 }]))
+      .mockReturnValueOnce(selectChain([]));
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/purchase');
@@ -140,29 +183,11 @@ describe('POST /api/marketplace/assets/[id]/purchase', () => {
   });
 
   it('should handle free asset purchase', async () => {
-    const assetChain = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([{ id: 'a1', status: 'published', sellerId: 'other', priceTokens: 0, assetFileUrl: 'https://cdn.example.com/file', license: 'standard', downloadCount: 5 }]),
-    };
-    const purchaseChain = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([]),
-    };
-    const mockDb = {
-      select: vi.fn()
-        .mockReturnValueOnce(assetChain)
-        .mockReturnValueOnce(purchaseChain),
-      insert: vi.fn().mockReturnValue({
-        values: vi.fn().mockResolvedValue(undefined),
-      }),
-      update: vi.fn().mockReturnValue({
-        set: vi.fn().mockReturnThis(),
-        where: vi.fn().mockResolvedValue(undefined),
-      }),
-    };
-    vi.mocked(getDb).mockReturnValue(mockDb as never);
+    mockSelect
+      .mockReturnValueOnce(selectChain([{ id: 'a1', status: 'published', sellerId: 'other', priceTokens: 0, assetFileUrl: 'https://cdn.example.com/file', license: 'standard', downloadCount: 5 }]))
+      .mockReturnValueOnce(selectChain([]));
+    mockInsert.mockReturnValueOnce(insertChain([{ id: 'purchase-1' }]));
+    mockUpdate.mockReturnValueOnce(updateChain());
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/purchase');
