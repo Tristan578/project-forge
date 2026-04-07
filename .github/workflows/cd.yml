@@ -705,7 +705,12 @@ jobs:
               console.log('Applying drizzle/' + f);
               const content = readFileSync('drizzle/' + f, 'utf8');
               try { await sql(content); console.log('  OK'); }
-              catch(e) { console.log('  Skipped:', e.message); }
+              catch(e) {
+                const msg = e.message || '';
+                const isIdempotent = msg.includes('already exists') || msg.includes('duplicate key') || msg.includes('relation') && msg.includes('already');
+                if (isIdempotent) { console.log('  Skipped (idempotent):', msg); }
+                else { console.error('  FAILED:', msg); process.exitCode = 1; }
+              }
             }
           "
 

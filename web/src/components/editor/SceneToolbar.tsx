@@ -7,6 +7,7 @@ import { saveSceneToCloud } from '@/lib/projects/cloudSave';
 import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, Redo2, Layers } from 'lucide-react';
 import { ExportDialog } from './ExportDialog';
 import { SceneBrowser } from './SceneBrowser';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 
 export function SceneToolbar() {
   const sceneName = useEditorStore((s) => s.sceneName);
@@ -28,6 +29,7 @@ export function SceneToolbar() {
   const setCloudSaveStatus = useEditorStore((s) => s.setCloudSaveStatus);
   const setLastCloudSave = useEditorStore((s) => s.setLastCloudSave);
 
+  const { confirm, ConfirmDialogPortal } = useConfirmDialog();
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(sceneName);
   const [showExportDialog, setShowExportDialog] = useState(false);
@@ -85,15 +87,12 @@ export function SceneToolbar() {
     }
   }, [loadScene]);
 
-  const handleNew = useCallback(() => {
+  const handleNew = useCallback(async () => {
     if (sceneModified) {
-      // TODO(PF): Replace window.confirm() with an inline confirmation dialog.
-      // confirm() blocks the main thread, is inaccessible to screen readers, and
-      // cannot be styled to match the SpawnForge design system.
-      if (!confirm('Discard unsaved changes and create a new scene?')) return;
+      if (!await confirm('Discard unsaved changes and create a new scene?')) return;
     }
     newScene();
-  }, [newScene, sceneModified]);
+  }, [newScene, sceneModified, confirm]);
 
   // Ctrl+S shortcut
   useEffect(() => {
@@ -267,6 +266,7 @@ export function SceneToolbar() {
         <Download size={13} />
       </button>
     </div>
+    <ConfirmDialogPortal />
     </>
   );
 }
