@@ -21,7 +21,10 @@ function cycleRegion(direction: 1 | -1): void {
   const targetEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const current = targetEl?.closest('[data-editor-region]')?.getAttribute('data-editor-region');
   const currentIdx = current ? REGIONS.indexOf(current as typeof REGIONS[number]) : -1;
-  const nextIdx = (currentIdx + direction + REGIONS.length) % REGIONS.length;
+  // When unfocused (currentIdx=-1), forward starts at 0, backward at last
+  const nextIdx = currentIdx === -1
+    ? (direction === 1 ? 0 : REGIONS.length - 1)
+    : (currentIdx + direction + REGIONS.length) % REGIONS.length;
   const nextEl = document.querySelector(`[data-editor-region="${REGIONS[nextIdx]}"]`) as HTMLElement | null;
   nextEl?.focus();
 }
@@ -50,9 +53,14 @@ describe('F6 region focus cycling', () => {
     document.body.removeChild(container);
   });
 
-  it('cycles to sidebar when nothing is focused', () => {
+  it('cycles to sidebar when nothing is focused (F6 forward)', () => {
     cycleRegion(1);
     expect(document.activeElement?.getAttribute('data-editor-region')).toBe('sidebar');
+  });
+
+  it('cycles to right-panel when nothing is focused (Shift+F6 backward)', () => {
+    cycleRegion(-1);
+    expect(document.activeElement?.getAttribute('data-editor-region')).toBe('right-panel');
   });
 
   it('cycles forward: sidebar → hierarchy → canvas → right-panel → sidebar', () => {

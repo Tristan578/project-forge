@@ -449,14 +449,18 @@ export function EditorLayout() {
 
       // F6 / Shift+F6: Cycle focus between editor regions (standard IDE pattern)
       // Disabled in compact mode where regions are inside conditional drawers
-      if (e.key === 'F6' && layout.mode !== 'compact') {
+      // Skip when focus is in a text input to avoid interrupting typing
+      if (e.key === 'F6' && layout.mode !== 'compact' && !isInput) {
         e.preventDefault();
         const regions = ['sidebar', 'hierarchy', 'canvas', 'right-panel'] as const;
         const targetEl = e.target instanceof HTMLElement ? e.target : null;
         const current = targetEl?.closest('[data-editor-region]')?.getAttribute('data-editor-region');
         const currentIdx = current ? regions.indexOf(current as typeof regions[number]) : -1;
         const direction = e.shiftKey ? -1 : 1;
-        const nextIdx = (currentIdx + direction + regions.length) % regions.length;
+        // When unfocused (currentIdx=-1), forward starts at 0, backward at last
+        const nextIdx = currentIdx === -1
+          ? (direction === 1 ? 0 : regions.length - 1)
+          : (currentIdx + direction + regions.length) % regions.length;
         const nextEl = document.querySelector(`[data-editor-region="${regions[nextIdx]}"]`) as HTMLElement | null;
         nextEl?.focus();
         return;
