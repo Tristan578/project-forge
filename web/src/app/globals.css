@@ -220,6 +220,20 @@ body {
   animation: shimmer-sweep 1.5s ease-in-out infinite;
 }
 
+/* Global focus-visible ring — ensures all interactive elements show a visible
+   focus indicator for keyboard navigation (WCAG 2.4.7 Focus Visible).
+   Uses :focus-visible so mouse clicks don't show the ring. Components can
+   override with their own focus styles. */
+:focus-visible {
+  outline: 2px solid var(--sf-accent, #3b82f6);
+  outline-offset: 2px;
+}
+
+/* Suppress global outline when Tailwind focus-visible ring utilities are present */
+[class*="focus-visible\:ring"]:focus-visible {
+  outline: none;
+}
+
 /* Global reduced-motion: kill non-essential animations and transitions.
    Elements with [role="progressbar"] or [data-essential-animation] are exempted. */
 @media (prefers-reduced-motion: reduce) {

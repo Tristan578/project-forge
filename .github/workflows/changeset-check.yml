@@ -3,6 +3,7 @@ name: Changeset Check
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   contents: read
