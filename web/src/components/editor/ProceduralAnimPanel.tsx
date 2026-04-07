@@ -61,6 +61,7 @@ export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
   if (prevPrimaryId !== primaryId) {
     setPrevPrimaryId(primaryId);
     setCustomBoneInput('');
+    setGeneratedAnim(null);
   }
 
   // Derive bone names: 2D skeleton > custom input > default humanoid
