@@ -479,9 +479,10 @@ const SPAWN_GAME_COMPONENTS: Record<string, string> = {
  * Returns an iteration report documenting what was changed.
  *
  * For spawn_entity changes with a game component type (checkpoint, collectible,
- * triggerZone), a follow-up add_game_component dispatch is scheduled on the
- * next animation frame so the engine has time to process the spawn and update
- * the selected entity ID.
+ * triggerZone), spawns are chained sequentially — each spawn waits one frame
+ * for the engine to update the selected entity ID, then attaches the component,
+ * then processes the next spawn. This prevents all components from attaching
+ * to the last spawned entity (bug #8311).
  */
 export function applyFixes(
   fixes: IssueFix[],
@@ -490,22 +491,35 @@ export function applyFixes(
   getSelectedEntityId?: () => string | null,
 ): IterationReport {
   const appliedFixes: IssueFix[] = [];
-  const pendingGameComponents: Array<{ component: string; property: string; value: unknown }> = [];
+  // Collect spawn commands that need game component attachment.
+  // These are dispatched sequentially (one per frame) so each
+  // getSelectedEntityId() call returns the correct entity.
+  const spawnQueue: Array<{
+    entityType: string;
+    name: string;
+    gameComponent: string;
+    property: string;
+    value: unknown;
+  }> = [];
 
   for (const fix of fixes) {
     for (const change of fix.changes) {
       if (change.command === 'spawn_entity') {
-        dispatch(change.command, {
-          entityType: SPAWN_ENTITY_TYPE_MAP[change.component] ?? 'cube',
-          name: change.component,
-        });
-        // Queue game component attachment for the next frame
         const gameComponentType = SPAWN_GAME_COMPONENTS[change.component];
-        if (gameComponentType) {
-          pendingGameComponents.push({
-            component: gameComponentType,
+        if (gameComponentType && getSelectedEntityId) {
+          // Queue for sequential dispatch
+          spawnQueue.push({
+            entityType: SPAWN_ENTITY_TYPE_MAP[change.component] ?? 'cube',
+            name: change.component,
+            gameComponent: gameComponentType,
             property: change.property,
             value: change.newValue,
+          });
+        } else {
+          // No game component needed — dispatch immediately
+          dispatch(change.command, {
+            entityType: SPAWN_ENTITY_TYPE_MAP[change.component] ?? 'cube',
+            name: change.component,
           });
         }
       } else if (change.command === 'update_ambient_light') {
@@ -523,20 +537,34 @@ export function applyFixes(
     appliedFixes.push(fix);
   }
 
-  // Attach game components after the engine processes the spawns
-  if (pendingGameComponents.length > 0 && getSelectedEntityId) {
-    requestAnimationFrame(() => {
-      for (const pending of pendingGameComponents) {
-        const entityId = getSelectedEntityId();
+  // Process spawn queue sequentially: spawn entity, wait a frame for the
+  // engine to update selectedEntityId, then attach the game component.
+  // Chains RAFs so each spawn-attach pair gets its own frame.
+  if (spawnQueue.length > 0 && getSelectedEntityId) {
+    let idx = 0;
+    function processNext() {
+      if (idx >= spawnQueue.length) return;
+      const item = spawnQueue[idx++];
+      dispatch('spawn_entity', {
+        entityType: item.entityType,
+        name: item.name,
+      });
+      requestAnimationFrame(() => {
+        const entityId = getSelectedEntityId!();
         if (entityId) {
           dispatch('add_game_component', {
             entityId,
-            componentType: pending.component,
-            properties: { [pending.property]: pending.value },
+            componentType: item.gameComponent,
+            properties: { [item.property]: item.value },
           });
         }
-      }
-    });
+        // Process next spawn on the following frame (only if items remain)
+        if (idx < spawnQueue.length) {
+          requestAnimationFrame(processNext);
+        }
+      });
+    }
+    processNext();
   }
 
   const totalChanges = appliedFixes.reduce((sum, f) => sum + f.changes.length, 0);

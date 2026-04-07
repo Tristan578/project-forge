@@ -583,6 +583,76 @@ describe('applyFixes', () => {
     vi.useRealTimers();
   });
 
+  it('chains multi-spawn game components sequentially to prevent stale selectedEntityId (regression: #8311)', () => {
+    vi.useFakeTimers();
+    const dispatch = vi.fn();
+    // Return different entity IDs on successive calls
+    const getSelectedEntityId = vi.fn()
+      .mockReturnValueOnce('entity-checkpoint')
+      .mockReturnValueOnce('entity-collectible');
+    const fixes: IssueFix[] = [
+      {
+        issueId: 'issue-multi',
+        description: 'Add checkpoint and collectible',
+        changes: [
+          {
+            component: 'checkpoint',
+            property: 'autoSave',
+            oldValue: undefined,
+            newValue: true,
+            command: 'spawn_entity',
+          },
+          {
+            component: 'collectible',
+            property: 'value',
+            oldValue: undefined,
+            newValue: 10,
+            command: 'spawn_entity',
+          },
+        ],
+        confidence: 0.7,
+        estimatedImpact: 'Multiple spawns',
+      },
+    ];
+
+    applyFixes(fixes, dispatch, 1, getSelectedEntityId);
+
+    // First spawn dispatched immediately by processNext()
+    expect(dispatch).toHaveBeenCalledWith('spawn_entity', {
+      entityType: 'cube',
+      name: 'checkpoint',
+    });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+
+    // First frame: attach game component to first entity, then spawn second
+    vi.advanceTimersByTime(16);
+    expect(dispatch).toHaveBeenCalledWith('add_game_component', {
+      entityId: 'entity-checkpoint',
+      componentType: 'Checkpoint',
+      properties: { autoSave: true },
+    });
+
+    // Second frame: second spawn_entity
+    vi.advanceTimersByTime(16);
+    expect(dispatch).toHaveBeenCalledWith('spawn_entity', {
+      entityType: 'cube',
+      name: 'collectible',
+    });
+
+    // Third frame: attach second game component to second entity
+    vi.advanceTimersByTime(16);
+    expect(dispatch).toHaveBeenCalledWith('add_game_component', {
+      entityId: 'entity-collectible',
+      componentType: 'Collectible',
+      properties: { value: 10 },
+    });
+
+    // Each getSelectedEntityId call returned a DIFFERENT entity
+    expect(getSelectedEntityId).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
+  });
+
   it('does not schedule add_game_component for non-game-component spawns (e.g. light)', () => {
     vi.useFakeTimers();
     const dispatch = vi.fn();
