@@ -113,7 +113,13 @@ export async function POST(
         // Fully completed — buyer was already charged
         return conflict('Already purchased');
       }
-      // Orphan purchase row — fall through to charge the buyer
+      // Orphan purchase row — another request may be in-flight completing
+      // the charge. Return 409 so the client retries; the next attempt will
+      // either see a completed transaction or try again safely.
+      return NextResponse.json(
+        { error: 'Purchase in progress, please retry' },
+        { status: 409 },
+      );
     }
 
     // Deduct tokens (use earned credits first, then addon, then monthly)

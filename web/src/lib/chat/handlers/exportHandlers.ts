@@ -21,7 +21,7 @@ export const exportHandlers: Record<string, ToolHandler> = {
 
     const store = useEditorStore.getState();
     const gameTitle = p.data.title || store.sceneName || 'Game';
-    const presetConfig = p.data.preset ? getPreset(p.data.preset) : undefined;
+    const presetConfig = p.data.preset ? getPreset(p.data.preset) : store.exportPreset?.config;
 
     try {
       const blob = await exportGame({
@@ -57,7 +57,7 @@ export const exportHandlers: Record<string, ToolHandler> = {
 
     const store = useEditorStore.getState();
     const gameTitle = p.data.title || store.sceneName || 'Game';
-    const presetConfig = p.data.preset ? getPreset(p.data.preset) : getPreset('pwa-mobile');
+    const presetConfig = p.data.preset ? getPreset(p.data.preset) : undefined;
 
     try {
       const blob = await exportGame({
@@ -125,9 +125,11 @@ export const exportHandlers: Record<string, ToolHandler> = {
       };
     }
 
+    useEditorStore.getState().setExportPreset(p.data.preset, preset);
+
     return {
-      success: false,
-      error: `Export preset "${preset.name}" recognized but not yet persisted. Export preset storage requires editor store integration planned for a future release.`,
+      success: true,
+      message: `Export preset "${preset.name}" saved (${preset.format}, ${preset.resolution}). The preset is stored for reference — individual export commands determine the actual output format.`,
     };
   },
 };

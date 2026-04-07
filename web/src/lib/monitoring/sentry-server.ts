@@ -31,6 +31,21 @@ export function captureMessage(
 }
 
 /**
+ * Add a breadcrumb to the current Sentry scope (server-side).
+ * No-ops silently when SENTRY_DSN is not configured.
+ */
+export function addBreadcrumb(breadcrumb: {
+  category?: string;
+  message: string;
+  level?: 'info' | 'warning' | 'error';
+  data?: Record<string, unknown>;
+}): void {
+  if (!DSN) return;
+
+  Sentry.addBreadcrumb(breadcrumb);
+}
+
+/**
  * Start a performance span (server-side).
  * When Sentry is not configured, the callback is still executed and its
  * return value is forwarded to the caller.

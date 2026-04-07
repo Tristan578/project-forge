@@ -3,6 +3,7 @@
 import { ChevronDown, ChevronRight, Trash2, Copy } from 'lucide-react';
 import { useState } from 'react';
 import { useUIBuilderStore } from '@/stores/uiBuilderStore';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 
 export function WidgetTree() {
   const activeScreenId = useUIBuilderStore((s) => s.activeScreenId);
@@ -13,6 +14,7 @@ export function WidgetTree() {
   const duplicateWidget = useUIBuilderStore((s) => s.duplicateWidget);
   const reorderWidget = useUIBuilderStore((s) => s.reorderWidget);
 
+  const { confirm, ConfirmDialogPortal } = useConfirmDialog();
   const [expandedWidgets, setExpandedWidgets] = useState<Set<string>>(new Set());
 
   const activeScreen = screens.find((s) => s.id === activeScreenId);
@@ -28,9 +30,9 @@ export function WidgetTree() {
     setExpandedWidgets(newExpanded);
   };
 
-  const handleRemove = (widgetId: string) => {
+  const handleRemove = async (widgetId: string) => {
     if (!activeScreenId) return;
-    if (confirm('Delete this widget?')) {
+    if (await confirm('Delete this widget?')) {
       removeWidget(activeScreenId, widgetId);
     }
   };
@@ -154,6 +156,7 @@ export function WidgetTree() {
           </div>
         );
       })}
+      <ConfirmDialogPortal />
     </div>
   );
 }

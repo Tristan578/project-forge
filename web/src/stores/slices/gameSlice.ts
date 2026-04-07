@@ -5,6 +5,9 @@
 import { StateCreator } from 'zustand';
 import type { GameComponentData, GameCameraData, MobileTouchConfig, HudElement, EngineMode } from './types';
 import type { LoadingScreenConfig } from '@/lib/export/loadingScreen';
+import type { AccessibilityProfile } from '@/lib/ai/accessibilityGenerator';
+import { createDefaultProfile } from '@/lib/ai/accessibilityGenerator';
+import type { ExportPreset } from '@/lib/export/presets';
 
 export interface GameSlice {
   allGameComponents: Record<string, GameComponentData[]>;
@@ -16,6 +19,8 @@ export interface GameSlice {
   hudElements: HudElement[];
   engineMode: EngineMode;
   loadingScreenConfig: LoadingScreenConfig | null;
+  accessibilityProfile: AccessibilityProfile | null;
+  exportPreset: { presetKey: string; config: ExportPreset } | null;
 
   addGameComponent: (entityId: string, component: GameComponentData) => void;
   updateGameComponent: (entityId: string, component: GameComponentData) => void;
@@ -30,6 +35,10 @@ export interface GameSlice {
   updateMobileTouchConfig: (partial: Partial<MobileTouchConfig>) => void;
   setHudElements: (elements: HudElement[]) => void;
   setLoadingScreenConfig: (config: LoadingScreenConfig | null) => void;
+  setAccessibilityProfile: (profile: AccessibilityProfile | null) => void;
+  updateAccessibilityProfile: (partial: Partial<AccessibilityProfile>) => void;
+  setExportPreset: (presetKey: string, config: ExportPreset) => void;
+  clearExportPreset: () => void;
   play: () => void;
   stop: () => void;
   pause: () => void;
@@ -61,6 +70,8 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   hudElements: [],
   engineMode: 'edit',
   loadingScreenConfig: null,
+  accessibilityProfile: null,
+  exportPreset: null,
 
   addGameComponent: (entityId, component) => {
     set(state => ({
@@ -116,6 +127,22 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   },
   setHudElements: (elements) => set({ hudElements: elements }),
   setLoadingScreenConfig: (config) => set({ loadingScreenConfig: config }),
+  setAccessibilityProfile: (profile) => set({ accessibilityProfile: profile }),
+  updateAccessibilityProfile: (partial) => {
+    const current = get().accessibilityProfile ?? createDefaultProfile();
+    // Deep merge each top-level section to preserve nested required fields
+    set({
+      accessibilityProfile: {
+        colorblindMode: { ...current.colorblindMode, ...partial.colorblindMode },
+        screenReader: { ...current.screenReader, ...partial.screenReader },
+        inputRemapping: { ...current.inputRemapping, ...partial.inputRemapping },
+        subtitles: { ...current.subtitles, ...partial.subtitles },
+        fontSize: { ...current.fontSize, ...partial.fontSize },
+      },
+    });
+  },
+  setExportPreset: (presetKey, config) => set({ exportPreset: { presetKey, config } }),
+  clearExportPreset: () => set({ exportPreset: null }),
   play: () => {
     if (dispatchCommand) dispatchCommand('play', {});
     import('@/lib/analytics/events').then(m => m.trackPlayModeStarted()).catch(() => { /* analytics non-critical */ });
