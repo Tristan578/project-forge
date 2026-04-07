@@ -135,7 +135,6 @@ export function eventToKeyCombo(e: KeyboardEvent): string | null {
   if (key === ' ') normalized = 'Space';
   else if (key === 'Backspace') normalized = 'Delete'; // Mac "delete" key sends Backspace
   else if (key === 'Escape') normalized = 'Escape';
-  else if (key === 'Backspace') normalized = 'Delete';
   else if (key.length === 1) normalized = key.toUpperCase();
   // F-keys and special keys keep their name
 
