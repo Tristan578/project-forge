@@ -653,7 +653,7 @@ export function EditorLayout() {
       <TokenWarningBanner />
 
       {/* Main area: Sidebar + Dockview */}
-      <div className="flex flex-1 overflow-hidden">
+      <main className="flex flex-1 overflow-hidden" aria-label="Editor workspace">
         {/* Tool sidebar */}
         <Sidebar />
 
@@ -661,7 +661,7 @@ export function EditorLayout() {
         <div className="flex-1 overflow-hidden">
           <WorkspaceProvider />
         </div>
-      </div>
+      </main>
 
       <AutoSaveRecovery />
       <ChatOverlay />
