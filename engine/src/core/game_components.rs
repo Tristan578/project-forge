@@ -1290,13 +1290,10 @@ fn system_projectile(
 
 /// Win condition system: check score/collectAll/reachGoal
 fn system_win_condition(
-    runtime: Option<Res<GameComponentRuntime>>,
-    mut runtime_mut: Option<ResMut<GameComponentRuntime>>,
+    mut runtime: Option<ResMut<GameComponentRuntime>>,
     entities: Query<(&EntityId, &GameComponents, &Transform)>,
 ) {
-
-
-    let Some(runtime) = runtime else { return; };
+    let Some(runtime) = runtime.as_mut() else { return; };
 
     for (_eid, gc, _transform) in entities.iter() {
         if let Some(GameComponentData::WinCondition(data)) = gc.get("win_condition") {
@@ -1308,21 +1305,17 @@ fn system_win_condition(
                     runtime.total_collectibles > 0 && runtime.collected_count >= runtime.total_collectibles
                 }
                 WinConditionType::ReachGoal => {
-                    // Known limitation: handled via script API (forge.physics.onCollisionEnter)
                     false
                 }
             };
 
             if condition_met && !runtime.game_won {
-                // Emit game win event
-                if let Some(runtime_mut) = runtime_mut.as_mut() {
-                    runtime_mut.game_won = true;
-                    runtime_mut.pending_events.push(GameEvent {
-                        event_name: "game_win".to_string(),
-                        source_entity_id: None,
-                        target_entity_id: None,
-                    });
-                }
+                runtime.game_won = true;
+                runtime.pending_events.push(GameEvent {
+                    event_name: "game_win".to_string(),
+                    source_entity_id: None,
+                    target_entity_id: None,
+                });
             }
         }
     }

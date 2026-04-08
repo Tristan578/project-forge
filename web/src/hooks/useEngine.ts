@@ -304,12 +304,14 @@ async function loadWasmFromPath(
   signal?: AbortSignal,
   onProgress?: (pct: number) => void,
 ): Promise<WasmModule> {
-  const wasm = await import(/* webpackIgnore: true */ `${basePath}${jsFile}`);
-
-  // Append content hash as a query param so browsers re-fetch after deployments.
-  // Falls back to the plain filename when no manifest exists.
+  // Fetch the content hash BEFORE importing so both JS glue and WASM binary
+  // use the same cache-busting param. Without this, browsers with stale
+  // immutable-cached JS files (missing Content-Type) fail the dynamic import.
   const hash = await fetchWasmHash(basePath, signal);
-  const wasmUrl = hash ? `${basePath}${wasmFile}?v=${hash}` : `${basePath}${wasmFile}`;
+  const cacheBuster = hash ? `?v=${hash}` : '';
+  const wasm = await import(/* webpackIgnore: true */ `${basePath}${jsFile}${cacheBuster}`);
+
+  const wasmUrl = `${basePath}${wasmFile}${cacheBuster}`;
 
   // Determine backend from the base path for CDN metrics
   const backend: 'webgpu' | 'webgl2' = basePath.includes('webgpu') ? 'webgpu' : 'webgl2';
