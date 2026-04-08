@@ -3,24 +3,26 @@ import { withSentryConfig } from "@sentry/nextjs";
 import withBundleAnalyzer from "@next/bundle-analyzer";
 import createNextIntlPlugin from "next-intl/plugin";
 
-const analyzer = withBundleAnalyzer({ enabled: process.env.ANALYZE === "true" });
+const analyzer = withBundleAnalyzer({
+  enabled: process.env.ANALYZE === "true",
+});
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 // CDN origin for WASM engine files (e.g. "https://cdn.spawnforge.ai")
-const engineCdn = process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '';
-const cdnDirective = engineCdn ? ` ${engineCdn}` : '';
+const engineCdn = process.env.NEXT_PUBLIC_ENGINE_CDN_URL || "";
+const cdnDirective = engineCdn ? ` ${engineCdn}` : "";
 
 const cspDirectives = [
   "default-src 'self'",
   // 'unsafe-inline' is required for Clerk's sign-in/sign-up inline scripts in production.
   // Since 'unsafe-eval' is already allowed (for WASM), 'unsafe-inline' does not
   // meaningfully reduce CSP security. The /play/:path* route keeps a strict CSP.
-  `script-src 'self' 'unsafe-eval' 'unsafe-inline' 'wasm-unsafe-eval' https://*.clerk.accounts.dev https://challenges.cloudflare.com${cdnDirective}`,
+  `script-src 'self' 'unsafe-eval' 'unsafe-inline' 'wasm-unsafe-eval' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://challenges.cloudflare.com${cdnDirective}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://img.clerk.com",
+  "img-src 'self' data: blob: https://img.clerk.com https://clerk.spawnforge.ai",
   "font-src 'self' data:",
-  `connect-src 'self' https://*.clerk.accounts.dev https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
-  "frame-src 'self' https://*.clerk.accounts.dev https://challenges.cloudflare.com",
+  `connect-src 'self' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
+  "frame-src 'self' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://challenges.cloudflare.com",
   "worker-src 'self' blob:",
   "media-src 'self' blob:",
   "form-action 'self'",
@@ -32,7 +34,10 @@ const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-XSS-Protection", value: "1; mode=block" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  {
+    key: "Permissions-Policy",
+    value: "camera=(), microphone=(), geolocation=()",
+  },
   {
     key: "Content-Security-Policy",
     value: cspDirectives.join("; "),
@@ -40,7 +45,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  transpilePackages: ['@spawnforge/ui'],
+  transpilePackages: ["@spawnforge/ui"],
   compress: true,
   // This is a top-level config option that gates the experimental caching
   // a build error: "Error: Caching is not enabled in the current environment."
@@ -70,12 +75,12 @@ const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
       {
-        protocol: 'https',
-        hostname: 'img.clerk.com',
+        protocol: "https",
+        hostname: "img.clerk.com",
       },
       {
-        protocol: 'https',
-        hostname: 'gravatar.com',
+        protocol: "https",
+        hostname: "gravatar.com",
       },
     ],
   },
@@ -142,7 +147,10 @@ const nextConfig: NextConfig = {
         source: "/engine-pkg-webgl2/:file*.wasm",
         headers: [
           { key: "Content-Type", value: "application/wasm" },
-          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
           { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
         ],
@@ -151,7 +159,10 @@ const nextConfig: NextConfig = {
         source: "/engine-pkg-webgpu/:file*.wasm",
         headers: [
           { key: "Content-Type", value: "application/wasm" },
-          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
           { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
         ],
@@ -160,7 +171,10 @@ const nextConfig: NextConfig = {
         source: "/engine-pkg-webgl2-runtime/:file*.wasm",
         headers: [
           { key: "Content-Type", value: "application/wasm" },
-          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
           { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
         ],
@@ -169,7 +183,10 @@ const nextConfig: NextConfig = {
         source: "/engine-pkg-webgpu-runtime/:file*.wasm",
         headers: [
           { key: "Content-Type", value: "application/wasm" },
-          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
           { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
         ],
@@ -183,8 +200,8 @@ export default withSentryConfig(withNextIntl(analyzer(nextConfig)), {
   silent: false,
 
   // Upload source maps for production builds
-  org: process.env.SENTRY_ORG || 'tristan-nolan',
-  project: process.env.SENTRY_PROJECT || 'spawnforge-ai',
+  org: process.env.SENTRY_ORG || "tristan-nolan",
+  project: process.env.SENTRY_PROJECT || "spawnforge-ai",
 
   // Auth token for source map upload (set SENTRY_AUTH_TOKEN in env)
   authToken: process.env.SENTRY_AUTH_TOKEN,
@@ -199,7 +216,7 @@ export default withSentryConfig(withNextIntl(analyzer(nextConfig)), {
 
   // Route Sentry events through /monitoring to bypass ad-blockers.
   // Replaces the manual /api/sentry tunnel route.
-  tunnelRoute: '/monitoring',
+  tunnelRoute: "/monitoring",
 
   // Source map configuration
   sourcemaps: {
