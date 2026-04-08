@@ -1,5 +1,5 @@
-import { forwardRef, type SelectHTMLAttributes } from 'react';
-import { cn } from '../utils/cn';
+import { forwardRef, type SelectHTMLAttributes } from "react";
+import { cn } from "../utils/cn";
 
 export interface SelectOption {
   value: string;
@@ -7,7 +7,8 @@ export interface SelectOption {
   disabled?: boolean;
 }
 
-export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'children'> {
+export interface SelectProps
+  extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "children"> {
   options: SelectOption[];
   placeholder?: string;
 }
@@ -15,22 +16,23 @@ export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
   ({ className, options, placeholder, ...props }, ref) => {
     return (
-      <div className="relative">
+      <div className="relative w-full">
         <select
           ref={ref}
           className={cn(
-            'flex h-9 w-full appearance-none',
-            'rounded-[var(--sf-radius-md)]',
-            'border border-[var(--sf-border-strong)]',
-            'bg-[var(--sf-bg-app)] text-[var(--sf-text)]',
-            'px-3 pr-9 py-1 text-sm',
-            'shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)]',
-            'transition-all duration-[var(--sf-transition)]',
-            'hover:border-[var(--sf-text-muted)]',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--sf-bg-app)]',
-            'focus-visible:border-[var(--sf-accent)]',
-            'disabled:opacity-40 disabled:cursor-not-allowed',
-            className,
+            "flex h-9 w-full appearance-none",
+            "rounded-[var(--sf-radius-md)]",
+            "border-[length:var(--sf-border-width)] border-[var(--sf-border-strong)]",
+            "border-b-[color-mix(in_srgb,var(--sf-accent)_25%,var(--sf-border-strong))]",
+            "bg-[var(--sf-bg-app)] text-[var(--sf-text)]",
+            "px-3 pr-9 py-1 text-sm",
+            "shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)]",
+            "transition-all duration-[var(--sf-transition)]",
+            "hover:border-[var(--sf-text-muted)]",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--sf-bg-app)]",
+            "focus-visible:border-[var(--sf-accent)]",
+            "disabled:opacity-40 disabled:cursor-not-allowed",
+            className
           )}
           {...props}
         >
@@ -46,7 +48,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           ))}
         </select>
         {/* Chevron icon */}
-        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-[var(--sf-text-muted)]">
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-[var(--sf-accent)]/60">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="14"
@@ -67,4 +69,4 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
   }
 );
 
-Select.displayName = 'Select';
+Select.displayName = "Select";

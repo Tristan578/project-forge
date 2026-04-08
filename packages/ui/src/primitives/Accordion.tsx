@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react';
-import { cn } from '../utils/cn';
+import { useState, type ReactNode } from "react";
+import { cn } from "../utils/cn";
 
 export interface AccordionItem {
   id: string;
@@ -23,14 +23,14 @@ export function Accordion({ items, defaultOpen, className }: AccordionProps) {
   return (
     <div
       className={cn(
-        'w-full',
-        'divide-y divide-[var(--sf-border)]',
-        'rounded-[var(--sf-radius-lg)]',
-        'border border-[var(--sf-border)]',
-        'bg-[var(--sf-bg-surface)]',
-        'shadow-[0_1px_4px_rgba(0,0,0,0.2)]',
-        'overflow-hidden',
-        className,
+        "w-full",
+        "divide-y divide-[var(--sf-border)]",
+        "rounded-[var(--sf-radius-lg)]",
+        "border border-[var(--sf-border)]",
+        "bg-[var(--sf-bg-surface)]",
+        "shadow-[0_1px_4px_rgba(0,0,0,0.2)]",
+        "overflow-hidden",
+        className
       )}
     >
       {items.map((item) => {
@@ -44,13 +44,14 @@ export function Accordion({ items, defaultOpen, className }: AccordionProps) {
               id={`accordion-trigger-${item.id}`}
               onClick={() => toggle(item.id)}
               className={cn(
-                'flex w-full items-center justify-between',
-                'px-4 py-3 text-sm font-medium text-left',
-                'text-[var(--sf-text)]',
-                'hover:bg-[var(--sf-bg-elevated)]',
-                'transition-all duration-[var(--sf-transition)]',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sf-accent)]',
-                isOpen && 'bg-[var(--sf-bg-app)]/30',
+                "flex w-full items-center justify-between",
+                "px-4 py-3 text-sm font-medium text-left",
+                "text-[var(--sf-text)]",
+                "hover:bg-[var(--sf-bg-elevated)]",
+                "transition-all duration-[var(--sf-transition)]",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sf-accent)]",
+                isOpen &&
+                  "bg-[color-mix(in_srgb,var(--sf-accent)_5%,var(--sf-bg-app))]"
               )}
             >
               <span>{item.title}</span>
@@ -65,9 +66,11 @@ export function Accordion({ items, defaultOpen, className }: AccordionProps) {
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 className={cn(
-                  'shrink-0 text-[var(--sf-text-muted)]',
-                  'transition-transform duration-200 ease-out',
-                  isOpen && 'rotate-180',
+                  "shrink-0",
+                  "transition-all duration-200 ease-out",
+                  isOpen
+                    ? "rotate-180 text-[var(--sf-accent)]"
+                    : "text-[var(--sf-text-muted)]"
                 )}
                 aria-hidden="true"
               >
@@ -89,3 +92,5 @@ export function Accordion({ items, defaultOpen, className }: AccordionProps) {
     </div>
   );
 }
+
+Accordion.displayName = "Accordion";

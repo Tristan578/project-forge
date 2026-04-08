@@ -1,28 +1,28 @@
-import { describe, it, expect } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
-import { axe } from 'jest-axe';
-import { THEME_NAMES, THEME_DEFINITIONS, type ThemeName } from '../../tokens';
-import { applyThemeTokens } from '../../utils/applyThemeTokens';
-import { Accordion } from '../Accordion';
-import { Avatar } from '../Avatar';
-import { Badge } from '../Badge';
-import { Button } from '../Button';
-import { Card } from '../Card';
-import { Checkbox } from '../Checkbox';
-import { Dialog } from '../Dialog';
-import { Input } from '../Input';
-import { Label } from '../Label';
-import { Popover } from '../Popover';
-import { Progress } from '../Progress';
-import { ScrollArea } from '../ScrollArea';
-import { Select } from '../Select';
-import { Separator } from '../Separator';
-import { Skeleton } from '../Skeleton';
-import { Switch } from '../Switch';
-import { Tabs } from '../Tabs';
-import { Textarea } from '../Textarea';
-import { Toast } from '../Toast';
-import { Tooltip } from '../Tooltip';
+import { describe, it, expect } from "vitest";
+import { render, fireEvent } from "@testing-library/react";
+import { axe } from "jest-axe";
+import { THEME_NAMES, THEME_DEFINITIONS, type ThemeName } from "../../tokens";
+import { applyThemeTokens } from "../../utils/applyThemeTokens";
+import { Accordion } from "../Accordion";
+import { Avatar } from "../Avatar";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { Card } from "../Card";
+import { Checkbox } from "../Checkbox";
+import { Dialog } from "../Dialog";
+import { Input } from "../Input";
+import { Label } from "../Label";
+import { Popover } from "../Popover";
+import { Progress } from "../Progress";
+import { ScrollArea } from "../ScrollArea";
+import { Select } from "../Select";
+import { Separator } from "../Separator";
+import { Skeleton } from "../Skeleton";
+import { Switch } from "../Switch";
+import { Tabs } from "../Tabs";
+import { Textarea } from "../Textarea";
+import { Toast } from "../Toast";
+import { Tooltip } from "../Tooltip";
 
 /**
  * Applies a theme's CSS custom properties to the document root for testing.
@@ -31,7 +31,7 @@ import { Tooltip } from '../Tooltip';
  */
 function applyTheme(theme: ThemeName) {
   const tokens = THEME_DEFINITIONS[theme];
-  document.documentElement.setAttribute('data-sf-theme', theme);
+  document.documentElement.setAttribute("data-sf-theme", theme);
   applyThemeTokens({ tokens });
 }
 
@@ -43,12 +43,12 @@ const PRIMITIVE_FIXTURES: Record<string, () => JSX.Element> = {
   Accordion: () => (
     <Accordion
       items={[
-        { id: 'a1', title: 'Section 1', content: 'Content 1' },
-        { id: 'a2', title: 'Section 2', content: 'Content 2' },
+        { id: "a1", title: "Section 1", content: "Content 1" },
+        { id: "a2", title: "Section 2", content: "Content 2" },
       ]}
     />
   ),
-  Avatar: () => <Avatar alt="User avatar" fallback="TN" />,
+  Avatar: () => <Avatar name="TN" alt="User avatar" />,
   Badge: () => <Badge>Active</Badge>,
   Button: () => <Button>Click me</Button>,
   Card: () => <Card title="Card title">Card content</Card>,
@@ -78,8 +78,8 @@ const PRIMITIVE_FIXTURES: Record<string, () => JSX.Element> = {
     <Select
       aria-label="Color"
       options={[
-        { value: 'red', label: 'Red' },
-        { value: 'blue', label: 'Blue' },
+        { value: "red", label: "Red" },
+        { value: "blue", label: "Blue" },
       ]}
     />
   ),
@@ -89,15 +89,17 @@ const PRIMITIVE_FIXTURES: Record<string, () => JSX.Element> = {
   Tabs: () => (
     <Tabs
       tabs={[
-        { id: 't1', label: 'Tab 1', content: 'Tab 1 content' },
-        { id: 't2', label: 'Tab 2', content: 'Tab 2 content' },
+        { id: "t1", label: "Tab 1", content: "Tab 1 content" },
+        { id: "t2", label: "Tab 2", content: "Tab 2 content" },
       ]}
       activeTab="t1"
       onChange={() => {}}
     />
   ),
   Textarea: () => <Textarea aria-label="Message" placeholder="Type here" />,
-  Toast: () => <Toast message="Success!" variant="success" onDismiss={() => {}} />,
+  Toast: () => (
+    <Toast message="Success!" variant="success" onDismiss={() => {}} />
+  ),
   Tooltip: () => (
     <Tooltip content="Help text">
       <button>Hover me</button>
@@ -107,19 +109,19 @@ const PRIMITIVE_FIXTURES: Record<string, () => JSX.Element> = {
 
 const primitiveNames = Object.keys(PRIMITIVE_FIXTURES);
 
-describe('Accessibility (axe-core)', () => {
+describe("Accessibility (axe-core)", () => {
   // Components that need interaction to reveal content for a11y testing
-  const NEEDS_CLICK = new Set(['Popover']);
+  const NEEDS_CLICK = new Set(["Popover"]);
 
-  describe.each(THEME_NAMES)('Theme: %s', (theme) => {
-    it.each(primitiveNames)('%s has no axe violations', async (name) => {
+  describe.each(THEME_NAMES)("Theme: %s", (theme) => {
+    it.each(primitiveNames)("%s has no axe violations", async (name) => {
       applyTheme(theme);
       const Fixture = PRIMITIVE_FIXTURES[name];
       const { container } = render(<Fixture />);
 
       // Open interactive components so their panel markup is in the DOM
       if (NEEDS_CLICK.has(name)) {
-        const trigger = container.querySelector('button');
+        const trigger = container.querySelector("button");
         if (trigger) fireEvent.click(trigger);
       }
 

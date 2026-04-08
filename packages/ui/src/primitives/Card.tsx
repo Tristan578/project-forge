@@ -1,21 +1,30 @@
-import { type HTMLAttributes, type ReactNode } from 'react';
-import { cn } from '../utils/cn';
+import { type HTMLAttributes, type ReactNode } from "react";
+import { cn } from "../utils/cn";
 
 export interface CardProps extends HTMLAttributes<HTMLDivElement> {
   title?: string;
   footer?: ReactNode;
 }
 
-export function Card({ className, title, footer, children, ...props }: CardProps) {
+export function Card({
+  className,
+  title,
+  footer,
+  children,
+  ...props
+}: CardProps) {
   return (
     <div
       className={cn(
-        'rounded-[var(--sf-radius-lg)]',
-        'border border-[var(--sf-border)]',
-        'bg-[var(--sf-bg-surface)]',
-        'text-[var(--sf-text)]',
-        'shadow-[0_2px_8px_rgba(0,0,0,0.3),0_1px_2px_rgba(0,0,0,0.2)]',
-        className,
+        "rounded-[var(--sf-radius-lg)]",
+        "border border-[var(--sf-border)]",
+        "bg-[var(--sf-bg-surface)]",
+        "text-[var(--sf-text)]",
+        "shadow-[0_2px_8px_rgba(0,0,0,0.3),0_1px_2px_rgba(0,0,0,0.2)]",
+        "transition-all duration-[var(--sf-transition)]",
+        "hover:border-[color-mix(in_srgb,var(--sf-accent)_40%,var(--sf-border))]",
+        "hover:shadow-[0_4px_16px_rgba(0,0,0,0.4),0_1px_4px_rgba(0,0,0,0.2)]",
+        className
       )}
       {...props}
     >
@@ -33,3 +42,5 @@ export function Card({ className, title, footer, children, ...props }: CardProps
     </div>
   );
 }
+
+Card.displayName = "Card";
