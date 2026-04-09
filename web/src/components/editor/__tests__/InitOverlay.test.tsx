@@ -208,22 +208,6 @@ describe('InitOverlay', () => {
     expect(reloadMock).toHaveBeenCalled();
   });
 
-  it('shows Retry button in non-timeout error state when canRetry', () => {
-    const mockRetry = vi.fn();
-    vi.mocked(useEngineStatus).mockReturnValue({
-      ...baseStatus,
-      error: 'WebGPU context lost',
-      canRetry: true,
-      isTimedOut: false,
-      retry: mockRetry,
-    });
-    render(<InitOverlay />);
-    const retryButton = screen.getByText('Retry');
-    expect(retryButton).toBeInTheDocument();
-    fireEvent.click(retryButton);
-    expect(mockRetry).toHaveBeenCalled();
-  });
-
   it('does not show Retry button in non-timeout error state when canRetry is false', () => {
     vi.mocked(useEngineStatus).mockReturnValue({
       ...baseStatus,

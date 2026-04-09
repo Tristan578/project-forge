@@ -14,6 +14,14 @@ vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
 }));
 
+vi.mock('@/stores/userStore', () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  useUserStore: vi.fn((selector?: (s: any) => any) => {
+    const state = { tier: 'pro', tokenBalance: { total: 9999 } };
+    return selector ? selector(state) : state;
+  }),
+}));
+
 vi.mock('../MaterialLibraryPanel', () => ({
   MaterialLibraryPanel: () => <div data-testid="material-library">Material Library</div>,
 }));

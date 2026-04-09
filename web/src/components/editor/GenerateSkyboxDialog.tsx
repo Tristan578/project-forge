@@ -68,7 +68,7 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" data-testid="gen-skybox-dialog">
       <div
         ref={dialogRef}
         role="dialog"

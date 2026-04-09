@@ -86,7 +86,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" data-testid="gen-model-dialog">
       <div
         ref={dialogRef}
         role="dialog"
