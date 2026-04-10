@@ -1,7 +1,7 @@
-import { type ReactNode } from 'react';
-import { cn } from '../utils/cn';
-import { useDialogA11y } from '../hooks/useDialogA11y';
-import { Z_INDEX } from '../tokens';
+import { type ReactNode } from "react";
+import { cn } from "../utils/cn";
+import { useDialogA11y } from "../hooks/useDialogA11y";
+import { Z_INDEX } from "../tokens";
 
 export interface DialogProps {
   open: boolean;
@@ -13,8 +13,20 @@ export interface DialogProps {
   className?: string;
 }
 
-export function Dialog({ open, onClose, title, description, children, actions, className }: DialogProps) {
-  const { dialogProps, titleProps } = useDialogA11y({ title, isOpen: open, onClose });
+export function Dialog({
+  open,
+  onClose,
+  title,
+  description,
+  children,
+  actions,
+  className,
+}: DialogProps) {
+  const { dialogProps, titleProps } = useDialogA11y({
+    title,
+    isOpen: open,
+    onClose,
+  });
 
   if (!open) return null;
 
@@ -23,42 +35,48 @@ export function Dialog({ open, onClose, title, description, children, actions, c
       {/* Backdrop */}
       <div
         data-dialog-overlay
-        className="fixed inset-0 bg-[var(--sf-bg-app)]/80 backdrop-blur-sm"
+        className="fixed inset-0 bg-[color-mix(in_srgb,var(--sf-bg-app)_70%,transparent)] backdrop-blur-sm"
         style={{ zIndex: Z_INDEX.modals - 1 }}
         onClick={onClose}
         aria-hidden="true"
       />
-      {/* Dialog panel — tabIndex allows focus to land here when no focusable children exist */}
+      {/* Dialog panel */}
       <div
         {...dialogProps}
         tabIndex={-1}
         className={cn(
-          'fixed',
-          'w-full max-w-md',
-          'rounded-[var(--sf-radius-lg)]',
-          'border border-[length:var(--sf-border-width)] border-[var(--sf-border)]',
-          'bg-[var(--sf-bg-surface)] text-[var(--sf-text)]',
-          'shadow-lg',
-          'p-6',
-          'flex flex-col gap-4',
-          className,
+          "fixed",
+          "w-full max-w-md",
+          "rounded-[var(--sf-radius-xl)]",
+          "border border-[var(--sf-border)]",
+          "bg-[var(--sf-bg-surface)] text-[var(--sf-text)]",
+          "shadow-[0_8px_32px_rgba(0,0,0,0.5),0_2px_8px_rgba(0,0,0,0.3)]",
+          "flex flex-col",
+          className
         )}
-        style={{ zIndex: Z_INDEX.modals, left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
+        style={{
+          zIndex: Z_INDEX.modals,
+          left: "50%",
+          top: "50%",
+          transform: "translate(-50%, -50%)",
+        }}
       >
-        <div>
-          <h2
-            {...titleProps}
-            className="text-lg font-semibold"
-          >
+        {/* Header */}
+        <div className="px-6 pt-6 pb-2">
+          <h2 {...titleProps} className="text-lg font-semibold tracking-tight">
             {title}
           </h2>
           {description && (
-            <p className="mt-1 text-sm text-[var(--sf-text-secondary)]">{description}</p>
+            <p className="mt-1.5 text-sm text-[var(--sf-text-secondary)] leading-relaxed">
+              {description}
+            </p>
           )}
         </div>
-        {children && <div className="text-sm">{children}</div>}
+        {/* Body */}
+        {children && <div className="px-6 py-3 text-sm">{children}</div>}
+        {/* Actions */}
         {actions && (
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 px-6 py-4 border-t border-[var(--sf-border)] bg-[var(--sf-bg-app)]/30 rounded-b-[var(--sf-radius-xl)]">
             {actions}
           </div>
         )}
@@ -66,3 +84,5 @@ export function Dialog({ open, onClose, title, description, children, actions, c
     </>
   );
 }
+
+Dialog.displayName = "Dialog";

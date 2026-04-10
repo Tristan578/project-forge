@@ -7,19 +7,22 @@
     "build-storybook": "storybook build -o storybook-static"
   },
   "dependencies": {
+    "@spawnforge/ui": "file:./vendored/spawnforge-ui",
+    "@tailwindcss/postcss": "^4.2.2",
+    "@tailwindcss/vite": "^4.2.2",
     "react": "^19",
     "react-dom": "^19",
-    "@spawnforge/ui": "file:./vendored/spawnforge-ui"
+    "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
-    "storybook": "^8.6",
-    "@storybook/react": "^8.6",
-    "@storybook/react-vite": "^8.6",
     "@storybook/addon-a11y": "^8.6",
     "@storybook/addon-essentials": "^8.6",
+    "@storybook/react": "^8.6",
+    "@storybook/react-vite": "^8.6",
     "@storybook/test": "^8.6",
     "@vitejs/plugin-react": "^4",
     "chromatic": "^11",
-    "vite": "^6"
+    "storybook": "^8.6",
+    "vite": "^6.4.2"
   }
 }

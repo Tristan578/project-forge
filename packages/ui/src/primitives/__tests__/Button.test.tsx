@@ -27,7 +27,14 @@ describe('Button', () => {
     expect(btn.className).toContain('sf-destructive');
 
     rerender(<Button variant="outline">Outline</Button>);
-    expect(screen.getByRole('button').className).toContain('sf-border');
+    expect(screen.getByRole('button').className).toContain('border-[var(--sf-border-strong)]');
+  });
+
+  it('outline variant uses --sf-border-strong (not --sf-border)', () => {
+    render(<Button variant="outline">Outline</Button>);
+    const btn = screen.getByRole('button');
+    expect(btn.className).toContain('border-[var(--sf-border-strong)]');
+    expect(btn.className).not.toMatch(/border-\[var\(--sf-border\)\]/);
   });
 
   it('forwards ref', () => {

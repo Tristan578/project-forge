@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react';
-import { cn } from '../utils/cn';
+import { useState, type ReactNode } from "react";
+import { cn } from "../utils/cn";
 
 export interface AccordionItem {
   id: string;
@@ -23,11 +23,14 @@ export function Accordion({ items, defaultOpen, className }: AccordionProps) {
   return (
     <div
       className={cn(
-        'w-full',
-        'divide-y divide-[var(--sf-border)]',
-        'rounded-[var(--sf-radius-md)]',
-        'border border-[length:var(--sf-border-width)] border-[var(--sf-border)]',
-        className,
+        "w-full",
+        "divide-y divide-[var(--sf-border)]",
+        "rounded-[var(--sf-radius-lg)]",
+        "border border-[var(--sf-border)]",
+        "bg-[var(--sf-bg-surface)]",
+        "shadow-[0_1px_4px_rgba(0,0,0,0.2)]",
+        "overflow-hidden",
+        className
       )}
     >
       {items.map((item) => {
@@ -41,12 +44,14 @@ export function Accordion({ items, defaultOpen, className }: AccordionProps) {
               id={`accordion-trigger-${item.id}`}
               onClick={() => toggle(item.id)}
               className={cn(
-                'flex w-full items-center justify-between',
-                'px-4 py-3 text-sm font-medium text-left',
-                'text-[var(--sf-text)]',
-                'hover:bg-[var(--sf-bg-elevated)]',
-                'transition-colors duration-[var(--sf-transition)]',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]',
+                "flex w-full items-center justify-between",
+                "px-4 py-3 text-sm font-medium text-left",
+                "text-[var(--sf-text)]",
+                "hover:bg-[var(--sf-bg-elevated)]",
+                "transition-all duration-[var(--sf-transition)]",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sf-accent)]",
+                isOpen &&
+                  "bg-[color-mix(in_srgb,var(--sf-accent)_5%,var(--sf-bg-app))]"
               )}
             >
               <span>{item.title}</span>
@@ -61,23 +66,23 @@ export function Accordion({ items, defaultOpen, className }: AccordionProps) {
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 className={cn(
-                  'shrink-0 text-[var(--sf-text-muted)]',
-                  'transition-transform duration-[var(--sf-transition)]',
-                  isOpen && 'rotate-180',
+                  "shrink-0",
+                  "transition-all duration-200 ease-out",
+                  isOpen
+                    ? "rotate-180 text-[var(--sf-accent)]"
+                    : "text-[var(--sf-text-muted)]"
                 )}
                 aria-hidden="true"
               >
                 <path d="m6 9 6 6 6-6" />
               </svg>
             </button>
-            {/* Keep content in DOM so aria-controls always points to a mounted element.
-                Use hidden attribute to hide it from AT and layout when collapsed. */}
             <div
               id={`accordion-content-${item.id}`}
               role="region"
               aria-labelledby={`accordion-trigger-${item.id}`}
               hidden={!isOpen}
-              className="px-4 pb-3 text-sm text-[var(--sf-text-secondary)]"
+              className="px-4 pb-3 text-sm text-[var(--sf-text-secondary)] leading-relaxed"
             >
               {item.content}
             </div>
@@ -87,3 +92,5 @@ export function Accordion({ items, defaultOpen, className }: AccordionProps) {
     </div>
   );
 }
+
+Accordion.displayName = "Accordion";

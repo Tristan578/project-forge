@@ -44,8 +44,17 @@ describe('Checkbox', () => {
     const { container } = render(<Checkbox label="Test" />);
     expect(container.querySelector('input[type="checkbox"]')).not.toBeNull();
     const allClasses = Array.from(container.querySelectorAll('[class]'))
-      .flatMap((el) => el.className.split(' '));
+      .flatMap((el) => (el.getAttribute('class') ?? '').split(' '));
     const leaks = allClasses.filter((c) => /zinc-|stone-|slate-/.test(c));
     expect(leaks, `Hardcoded primitives found: ${leaks.join(', ')}`).toHaveLength(0);
+  });
+
+  it('uses --sf-border-strong for default border (not --sf-border)', () => {
+    // Visible checkbox is rendered as a sibling <label> (peer pattern) since the
+    // real <input> is sr-only. Border classes live on that visible label.
+    const { container } = render(<Checkbox label="Test" />);
+    const visible = container.querySelector('label[aria-hidden="true"]');
+    expect(visible?.className).toContain('border-[var(--sf-border-strong)]');
+    expect(visible?.className).not.toMatch(/border-\[var\(--sf-border\)\]/);
   });
 });
