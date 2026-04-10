@@ -349,6 +349,67 @@ describe('withApiMiddleware', () => {
       expect(res.status).toBe(422);
     });
 
+    it('does not leak Zod details in production environment', async () => {
+      // Regression test for security audit finding: Zod's formatted error tree
+      // discloses server-side schema field paths. Production responses must
+      // carry only the fixed 'Validation failed' + code, with no details tree.
+      const originalEnv = process.env.NODE_ENV;
+      try {
+        // @ts-expect-error — test override of readonly NODE_ENV
+        process.env.NODE_ENV = 'production';
+        const handler = withApiMiddleware(
+          async () => NextResponse.json({ ok: true }),
+          {
+            requireAuth: false,
+            validate: z.object({ secretInternalField: z.string() }),
+          },
+        );
+        const req = new NextRequest('http://localhost/api/test', {
+          method: 'POST',
+          body: JSON.stringify({ wrongField: 'x' }),
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const res = await handler(req);
+        expect(res.status).toBe(422);
+        const body = await res.json();
+        expect(body.error).toBe('Validation failed');
+        expect(body.code).toBe('VALIDATION_ERROR');
+        expect(body.details).toBeUndefined();
+        // Field name must NOT appear anywhere in the response body
+        expect(JSON.stringify(body)).not.toContain('secretInternalField');
+      } finally {
+        // @ts-expect-error — restore readonly NODE_ENV
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    it('includes Zod details in development environment', async () => {
+      const originalEnv = process.env.NODE_ENV;
+      try {
+        // @ts-expect-error — test override of readonly NODE_ENV
+        process.env.NODE_ENV = 'development';
+        const handler = withApiMiddleware(
+          async () => NextResponse.json({ ok: true }),
+          {
+            requireAuth: false,
+            validate: z.object({ name: z.string() }),
+          },
+        );
+        const req = new NextRequest('http://localhost/api/test', {
+          method: 'POST',
+          body: JSON.stringify({ name: 123 }),
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const res = await handler(req);
+        const body = await res.json();
+        expect(res.status).toBe(422);
+        expect(body.details).toBeDefined();
+      } finally {
+        // @ts-expect-error — restore readonly NODE_ENV
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
     it('does not run validation when validate option is not provided', async () => {
       const handlerFn = vi.fn(async () => NextResponse.json({ ok: true }));
       const handler = withApiMiddleware(handlerFn, { requireAuth: false });

@@ -37,8 +37,10 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     captureException(err, { route: '/api/bridges/discover' });
+    // Return a generic error message to avoid leaking internal paths or
+    // child-process error text. Full error is captured by Sentry above.
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Discovery failed' },
+      { error: 'Discovery failed' },
       { status: 500 }
     );
   }

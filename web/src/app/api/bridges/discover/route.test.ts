@@ -88,13 +88,15 @@ describe('POST /api/bridges/discover', () => {
     expect(data.paths).toBeUndefined();
   });
 
-  it('returns 500 when discoverTool throws', async () => {
-    vi.mocked(discoverTool).mockRejectedValue(new Error('Bridge config read failed'));
+  it('returns 500 when discoverTool throws, without leaking internal error', async () => {
+    vi.mocked(discoverTool).mockRejectedValue(new Error('Bridge config read failed: /private/path/to/config.json'));
 
     const res = await POST(makeRequest({ toolId: 'aseprite' }));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Bridge config read failed');
+    // Generic message — internal paths must not leak to the client
+    expect(data.error).toBe('Discovery failed');
+    expect(data.error).not.toContain('/private/path');
   });
 
   it('returns 500 with fallback message when error is not an Error instance', async () => {

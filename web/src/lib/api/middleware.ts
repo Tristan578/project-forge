@@ -262,7 +262,13 @@ async function runMiddlewarePipeline(
     const parsed = options.validate.safeParse(rawBody);
     if (!parsed.success) {
       const { apiError } = await import('@/lib/api/errors');
-      const errResponse = apiError(422, 'Validation failed', 'VALIDATION_ERROR', parsed.error.format());
+      // Only expose Zod's formatted details in development — in production
+      // the nested field-path tree discloses server-side schema shape, which
+      // is an unnecessary information leak. Production clients receive the
+      // fixed 'Validation failed' + VALIDATION_ERROR code and should rely on
+      // the status + code rather than parsing detail trees.
+      const details = process.env.NODE_ENV === 'production' ? undefined : parsed.error.format();
+      const errResponse = apiError(422, 'Validation failed', 'VALIDATION_ERROR', details);
       if (handler) return errResponse;
       return { error: errResponse, userId: null, authContext: null, body: undefined };
     }
