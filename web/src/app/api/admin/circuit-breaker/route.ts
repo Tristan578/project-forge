@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
@@ -9,6 +10,14 @@ import {
 } from '@/lib/providers/circuitBreaker';
 import { PROVIDER_NAMES, type ProviderName } from '@/lib/config/providers';
 import { captureException } from '@/lib/monitoring/sentry-server';
+
+const circuitBreakerActionSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('reset_all') }),
+  z.object({
+    action: z.literal('reset_provider'),
+    provider: z.enum(PROVIDER_NAMES as readonly [string, ...string[]]),
+  }),
+]);
 
 /**
  * GET /api/admin/circuit-breaker
@@ -57,7 +66,10 @@ export async function GET(req: NextRequest) {
  * Body: { action: 'reset_all' } | { action: 'reset_provider', provider: string }
  */
 export async function POST(request: NextRequest) {
-  const mid = await withApiMiddleware(request, { requireAuth: true });
+  const mid = await withApiMiddleware(request, {
+    requireAuth: true,
+    validate: circuitBreakerActionSchema,
+  });
   if (mid.error) return mid.error;
   const { clerkId } = mid.authContext!;
 
@@ -68,20 +80,9 @@ export async function POST(request: NextRequest) {
   if (rateLimitError) return rateLimitError;
 
   try {
-    let body: unknown;
-    try {
-      body = await request.json();
-    } catch {
-      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-    }
+    const body = mid.body as z.infer<typeof circuitBreakerActionSchema>;
 
-    if (typeof body !== 'object' || body === null) {
-      return NextResponse.json({ error: 'Body must be a JSON object' }, { status: 400 });
-    }
-
-    const { action, provider } = body as Record<string, unknown>;
-
-    if (action === 'reset_all') {
+    if (body.action === 'reset_all') {
       resetAllBreakers();
       return NextResponse.json({
         success: true,
@@ -89,32 +90,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    if (action === 'reset_provider') {
-      if (typeof provider !== 'string' || !provider) {
-        return NextResponse.json(
-          { error: 'Missing provider field for reset_provider action' },
-          { status: 400 }
-        );
-      }
-
-      if (!(PROVIDER_NAMES as readonly string[]).includes(provider)) {
-        return NextResponse.json(
-          { error: `Unknown provider: ${provider}. Valid providers: ${PROVIDER_NAMES.join(', ')}` },
-          { status: 400 }
-        );
-      }
-
-      resetProviderBreaker(provider as ProviderName);
-      return NextResponse.json({
-        success: true,
-        message: `Circuit breaker for ${provider} reset to CLOSED`,
-      });
-    }
-
-    return NextResponse.json(
-      { error: 'Unknown action. Valid actions: reset_all, reset_provider' },
-      { status: 400 }
-    );
+    resetProviderBreaker(body.provider as ProviderName);
+    return NextResponse.json({
+      success: true,
+      message: `Circuit breaker for ${body.provider} reset to CLOSED`,
+    });
   } catch (error) {
     captureException(error, { route: '/api/admin/circuit-breaker', method: 'POST' });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
