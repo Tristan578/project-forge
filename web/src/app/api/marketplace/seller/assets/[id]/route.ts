@@ -7,8 +7,8 @@ import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 const patchAssetSchema = z.object({
-  name: z.string().min(1).max(200).optional(),
-  description: z.string().min(1).max(5000).optional(),
+  name: z.string().trim().min(1).max(200).optional(),
+  description: z.string().trim().min(1).max(5000).optional(),
   priceTokens: z.number().int().nonnegative().optional(),
   license: z.string().max(50).optional(),
   tags: z.array(z.string()).max(20).optional(),

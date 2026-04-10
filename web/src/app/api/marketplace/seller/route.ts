@@ -7,9 +7,9 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { z } from 'zod';
 
 const sellerProfileSchema = z.object({
-  displayName: z.string().min(2).max(100),
-  bio: z.string().max(1000).optional(),
-  portfolioUrl: z.string().max(500).optional(),
+  displayName: z.string().trim().min(2).max(100),
+  bio: z.string().trim().max(1000).optional(),
+  portfolioUrl: z.string().trim().max(500).optional(),
 });
 
 export async function GET(req: NextRequest) {

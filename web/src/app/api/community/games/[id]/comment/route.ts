@@ -10,7 +10,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { z } from 'zod';
 
 const commentSchema = z.object({
-  content: z.string().min(1).max(1000),
+  content: z.string().trim().min(1).max(1000),
   parentId: z.string().max(100).optional(),
 });
 

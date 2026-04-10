@@ -10,7 +10,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 
 const feedbackSchema = z.object({
   type: z.enum(['bug', 'feature', 'general']),
-  description: z.string().min(10).max(5000),
+  description: z.string().trim().min(10).max(5000),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 

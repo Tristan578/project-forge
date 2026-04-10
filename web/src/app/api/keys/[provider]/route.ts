@@ -9,7 +9,7 @@ import { BYOK_PROVIDERS } from '@/lib/config/providers';
 import { z } from 'zod';
 
 const keySchema = z.object({
-  key: z.string().min(8).max(500),
+  key: z.string().trim().min(8).max(500),
 });
 
 /** PUT /api/keys/:provider — store/update a BYOK key */

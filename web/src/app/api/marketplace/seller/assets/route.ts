@@ -7,8 +7,8 @@ import { eq } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 const createAssetSchema = z.object({
-  name: z.string().min(1).max(200),
-  description: z.string().min(1).max(5000),
+  name: z.string().trim().min(1).max(200),
+  description: z.string().trim().min(1).max(5000),
   category: z.enum(['model_3d', 'sprite', 'texture', 'audio', 'script', 'prefab', 'template', 'shader', 'animation']),
   license: z.enum(['standard', 'extended']).optional().default('standard'),
   priceTokens: z.number().int().nonnegative().optional().default(0),

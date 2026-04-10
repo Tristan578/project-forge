@@ -118,5 +118,19 @@ describe('/api/user/profile', () => {
       expect(res.status).toBe(422);
       expect(data.code).toBe('VALIDATION_ERROR');
     });
+
+    it('returns 422 for whitespace-only displayName (regression: Sentry #13124255)', async () => {
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser() } });
+
+      const req = new NextRequest('http://localhost/api/user/profile', {
+        method: 'PUT',
+        body: JSON.stringify({ displayName: '    ' }), // trimmed to empty → fails min(2)
+      });
+      const res = await PUT(req);
+      const data = await res.json();
+
+      expect(res.status).toBe(422);
+      expect(data.code).toBe('VALIDATION_ERROR');
+    });
   });
 });

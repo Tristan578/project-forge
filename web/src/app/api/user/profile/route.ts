@@ -6,7 +6,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { internalError } from '@/lib/api/errors';
 
 const profileUpdateSchema = z.object({
-  displayName: z.string().min(2).max(100),
+  displayName: z.string().trim().min(2).max(100),
 });
 
 /**

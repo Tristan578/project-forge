@@ -10,10 +10,10 @@ import { extractRequestId } from '@/lib/logging/requestContext';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 const publishSchema = z.object({
-  projectId: z.string().min(1).max(100),
-  title: z.string().min(1).max(200),
-  slug: z.string().min(3).max(50),
-  description: z.string().max(5000).optional(),
+  projectId: z.string().trim().min(1).max(100),
+  title: z.string().trim().min(1).max(200),
+  slug: z.string().trim().min(3).max(50),
+  description: z.string().trim().max(5000).optional(),
   // thumbnail/tags are intentionally lenient — non-string thumbnails and
   // non-array tags are silently ignored (not rejected) to match legacy behavior.
   thumbnail: z.unknown().optional(),

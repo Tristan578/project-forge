@@ -6,7 +6,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { notFound, internalError } from '@/lib/api/errors';
 
 const updateProjectSchema = z.object({
-  name: z.string().min(1).max(200).optional(),
+  name: z.string().trim().min(1).max(200).optional(),
   sceneData: z.record(z.string(), z.unknown()).optional(),
   thumbnail: z.string().max(500_000).nullable().optional(),
   entityCount: z.number().int().nonnegative().optional(),
