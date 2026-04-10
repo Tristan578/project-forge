@@ -33,13 +33,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
-# Try Portless URL first, fall back to direct port
+# Use Portless for all traffic (project rule — keeps us off stale direct ports).
+#
+# Portless 302-redirects plain HTTP to HTTPS. urllib's default redirect handler
+# downgrades POST/PUT to GET on a 302 (per RFC 7231), which silently turned
+# every ticket create into a list-fetch and exploded with "'list' object has
+# no attribute 'get'". Fix: hit HTTPS directly, and accept Portless's
+# self-signed cert via an unverified SSL context.
+import ssl
 import urllib.request
+TB_API = "https://taskboard.localhost:1355/api"
+TB_API_WRITE = TB_API  # Back-compat alias; all traffic goes through Portless.
+_TB_SSL_CTX = ssl._create_unverified_context()
+
 try:
-    urllib.request.urlopen("http://taskboard.localhost:1355/api/board", timeout=1)
-    TB_API = "http://taskboard.localhost:1355/api"
+    urllib.request.urlopen(f"{TB_API}/board", timeout=2, context=_TB_SSL_CTX)
 except Exception:
+    # Portless not running (e.g. CI) — fall back to direct localhost:3010.
     TB_API = "http://localhost:3010/api"
+    TB_API_WRITE = TB_API
+    _TB_SSL_CTX = None
 
 
 # ---------------------------------------------------------------------------
@@ -546,9 +559,15 @@ def sync_subtasks_from_github(ticket_id, gh_subtasks):
 # Taskboard API helpers
 # ---------------------------------------------------------------------------
 
+def _tb_urlopen(req_or_url, timeout):
+    if _TB_SSL_CTX is not None:
+        return urllib.request.urlopen(req_or_url, timeout=timeout, context=_TB_SSL_CTX)
+    return urllib.request.urlopen(req_or_url, timeout=timeout)
+
+
 def tb_available():
     try:
-        urllib.request.urlopen(f"{TB_API}/board", timeout=2)
+        _tb_urlopen(f"{TB_API}/board", timeout=2)
         return True
     except Exception:
         return False
@@ -556,7 +575,7 @@ def tb_available():
 
 def tb_get(path):
     try:
-        resp = urllib.request.urlopen(f"{TB_API}{path}", timeout=5)
+        resp = _tb_urlopen(f"{TB_API}{path}", timeout=5)
         return json.loads(resp.read())
     except Exception:
         return None
@@ -570,7 +589,7 @@ def tb_post(path, data):
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    resp = urllib.request.urlopen(req, timeout=10)
+    resp = _tb_urlopen(req, timeout=10)
     return json.loads(resp.read())
 
 
@@ -582,7 +601,7 @@ def tb_put(path, data):
         headers={"Content-Type": "application/json"},
         method="PUT",
     )
-    resp = urllib.request.urlopen(req, timeout=10)
+    resp = _tb_urlopen(req, timeout=10)
     return json.loads(resp.read())
 
 
@@ -1185,9 +1204,13 @@ def pull():
             elif meta_project and meta_project != project_id:
                 # Also accept the canonical project ID from config (the ID may have
                 # changed if the local DB was recreated, but the GitHub issues still
-                # reference the original ID)
+                # reference the original ID), plus any legacy project IDs from
+                # prior DB incarnations. Issues that predate the current taskboard
+                # DB still carry their old projectId in metadata — syncRepo already
+                # uniquely scopes them to this repo, so legacy IDs are safe to accept.
                 canonical_id = config.get("localProjectId", "")
-                if meta_project != canonical_id:
+                legacy_ids = set(config.get("legacyProjectIds", []) or [])
+                if meta_project != canonical_id and meta_project not in legacy_ids:
                     filtered += 1
                     continue
         elif content_type in ("Issue", "DraftIssue", ""):
@@ -1302,7 +1325,16 @@ def pull():
         # --- Create new local ticket (truly new — no local match) ---
         priority = parsed.get("priority") or "medium"
         description = parsed.get("description") or body
+        # Parsed teamId may point at a stale team from a prior DB incarnation
+        # (the taskboard FK then rejects it with HTTP 500). Validate against
+        # the current team list and fall back to the configured default.
         team_id = parsed.get("teamId")
+        if team_id:
+            teams_now = tb_get("/teams") or []
+            if not any(t.get("id") == team_id for t in teams_now):
+                team_id = None
+        if not team_id:
+            team_id = resolve_team_id(config)
 
         try:
             create_data = {
