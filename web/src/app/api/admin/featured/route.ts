@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { featuredGames, publishedGames, users } from '@/lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
@@ -8,6 +9,12 @@ import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
+
+const featureGameSchema = z.object({
+  gameId: z.string().min(1).max(100),
+  position: z.number().int().min(0).max(100).optional(),
+  expiresAt: z.string().datetime().optional().nullable(),
+});
 
 // GET: List currently featured games (admin)
 export async function GET(req: NextRequest) {
@@ -73,12 +80,14 @@ export async function POST(req: NextRequest) {
     const rateLimitError = await rateLimitAdminRoute(mid.userId!, 'admin-featured');
     if (rateLimitError) return rateLimitError;
 
-    const body = await req.json();
-    const { gameId, position, expiresAt } = body;
-
-    if (!gameId || typeof gameId !== 'string') {
-      return NextResponse.json({ error: 'gameId is required' }, { status: 400 });
+    const parsed = featureGameSchema.safeParse(await req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Validation failed', issues: parsed.error.issues },
+        { status: 400 }
+      );
     }
+    const { gameId, position, expiresAt } = parsed.data;
 
     // Verify game exists and is published
     const [game] = await queryWithResilience(() =>

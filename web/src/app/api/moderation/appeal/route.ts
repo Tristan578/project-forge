@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { moderationAppeals } from '@/lib/db/schema';
 import { withApiMiddleware } from '@/lib/api/middleware';
@@ -7,7 +8,11 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
-const VALID_CONTENT_TYPES = ['comment', 'asset', 'game'];
+const appealSchema = z.object({
+  contentId: z.string().min(1).max(100),
+  contentType: z.enum(['comment', 'asset', 'game']),
+  reason: z.string().trim().min(10).max(2000),
+});
 
 /**
  * POST /api/moderation/appeal
@@ -20,36 +25,10 @@ export async function POST(req: NextRequest) {
   if (limited) return limited;
 
   try {
-    const mid = await withApiMiddleware(req, { requireAuth: true });
+    const mid = await withApiMiddleware(req, { requireAuth: true, validate: appealSchema });
     if (mid.error) return mid.error;
 
-    const body = await req.json();
-    const { contentId, contentType, reason } = body;
-
-    if (!contentId || typeof contentId !== 'string' || contentId.length > 100) {
-      return NextResponse.json({ error: 'Missing or invalid contentId' }, { status: 400 });
-    }
-
-    if (!contentType || !VALID_CONTENT_TYPES.includes(contentType)) {
-      return NextResponse.json(
-        { error: `contentType must be one of: ${VALID_CONTENT_TYPES.join(', ')}` },
-        { status: 400 }
-      );
-    }
-
-    if (!reason || typeof reason !== 'string' || reason.trim().length < 10) {
-      return NextResponse.json(
-        { error: 'Reason must be at least 10 characters' },
-        { status: 400 }
-      );
-    }
-
-    if (reason.length > 2000) {
-      return NextResponse.json(
-        { error: 'Reason must be at most 2000 characters' },
-        { status: 400 }
-      );
-    }
+    const { contentId, contentType, reason } = mid.body as z.infer<typeof appealSchema>;
 
     const [appeal] = await queryWithResilience(() =>
       getDb()
@@ -58,7 +37,7 @@ export async function POST(req: NextRequest) {
           userId: mid.userId!,
           contentId,
           contentType,
-          reason: reason.trim(),
+          reason,
         })
         .returning()
     );

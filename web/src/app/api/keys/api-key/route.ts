@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
@@ -10,12 +11,18 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { API_KEY_SCOPES, findInvalidScopes, type ApiKeyScope } from '@/lib/config/scopes';
 import { RATE_LIMIT_ADMIN_WINDOW_MS } from '@/lib/config/timeouts';
 
+const createApiKeySchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  scopes: z.array(z.string()).optional(),
+});
+
 /** POST /api/keys/api-key — generate a new MCP API key */
 export async function POST(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
     rateLimitConfig: { key: (id) => `apikey-gen:${id}`, max: 5, windowSeconds: RATE_LIMIT_ADMIN_WINDOW_MS / 1000, distributed: false },
+    validate: createApiKeySchema,
   });
   if (mid.error) return mid.error;
 
@@ -23,14 +30,9 @@ export async function POST(req: NextRequest) {
   const tierCheck = assertTier(mid.authContext!.user, ['creator', 'pro']);
   if (tierCheck) return tierCheck;
 
-  let body: { name?: unknown; scopes?: unknown };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
-  const name = (typeof body.name === 'string' && body.name.trim()) ? body.name.trim() : 'Default';
-  const scopes: ApiKeyScope[] = Array.isArray(body.scopes) ? (body.scopes as ApiKeyScope[]) : [...API_KEY_SCOPES];
+  const body = mid.body as z.infer<typeof createApiKeySchema>;
+  const name = body.name && body.name.length > 0 ? body.name : 'Default';
+  const scopes: ApiKeyScope[] = body.scopes ? (body.scopes as ApiKeyScope[]) : [...API_KEY_SCOPES];
 
   // Validate scopes
   const invalidScopes = findInvalidScopes(scopes);
