@@ -1,5 +1,5 @@
-import { type ReactNode, type KeyboardEvent } from 'react';
-import { cn } from '../utils/cn';
+import { type ReactNode, type KeyboardEvent } from "react";
+import { cn } from "../utils/cn";
 
 export interface TabItem {
   id: string;
@@ -18,30 +18,30 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
   const activeIndex = tabs.findIndex((t) => t.id === activeTab);
 
   function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    if (e.key === 'ArrowRight') {
+    if (e.key === "ArrowRight") {
       const next = (activeIndex + 1) % tabs.length;
       onChange(tabs[next].id);
-    } else if (e.key === 'ArrowLeft') {
+    } else if (e.key === "ArrowLeft") {
       const prev = (activeIndex - 1 + tabs.length) % tabs.length;
       onChange(tabs[prev].id);
-    } else if (e.key === 'Home') {
+    } else if (e.key === "Home") {
       onChange(tabs[0].id);
-    } else if (e.key === 'End') {
+    } else if (e.key === "End") {
       onChange(tabs[tabs.length - 1].id);
     }
   }
 
-  const activeTabContent = tabs.find((t) => t.id === activeTab)?.content;
-
   return (
-    <div className={cn('w-full', className)}>
+    <div className={cn("w-full", className)}>
       {/* Tab list */}
       <div
         role="tablist"
         onKeyDown={handleKeyDown}
         className={cn(
-          'flex',
-          'border-b border-[length:var(--sf-border-width)] border-[var(--sf-border)]',
+          "flex gap-0.5",
+          "bg-[var(--sf-bg-app)] p-1",
+          "rounded-[var(--sf-radius-md)]",
+          "border border-[var(--sf-border)]"
         )}
       >
         {tabs.map((tab) => {
@@ -56,13 +56,14 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
               tabIndex={isActive ? 0 : -1}
               onClick={() => onChange(tab.id)}
               className={cn(
-                'px-4 py-2 text-sm font-medium',
-                'border-b-2 -mb-px',
-                'transition-colors duration-[var(--sf-transition)]',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]',
+                "flex-1 px-3 py-1.5 text-sm font-medium",
+                "rounded-[calc(var(--sf-radius-md)_-_2px)]",
+                "transition-all duration-[var(--sf-transition)]",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]",
+                "select-none",
                 isActive
-                  ? 'border-[var(--sf-accent)] text-[var(--sf-accent)]'
-                  : 'border-transparent text-[var(--sf-text-secondary)] hover:text-[var(--sf-text)] hover:border-[var(--sf-border-strong)]',
+                  ? "bg-[var(--sf-bg-elevated)] text-[var(--sf-text)] shadow-[0_1px_3px_rgba(0,0,0,0.3),inset_0_-2px_0_var(--sf-accent),inset_0_1px_0_rgba(255,255,255,0.05)]"
+                  : "text-[var(--sf-text-muted)] hover:text-[var(--sf-text-secondary)] hover:bg-[var(--sf-bg-surface)]"
               )}
             >
               {tab.label}
@@ -70,7 +71,7 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
           );
         })}
       </div>
-      {/* Tab panels */}
+      {/* Tab panels — all stay mounted; hidden attribute controls visibility */}
       {tabs.map((tab) => (
         <div
           key={tab.id}
@@ -80,9 +81,11 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
           hidden={tab.id !== activeTab}
           className="py-4"
         >
-          {tab.id === activeTab && activeTabContent}
+          {tab.content}
         </div>
       ))}
     </div>
   );
 }
+
+Tabs.displayName = "Tabs";

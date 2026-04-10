@@ -30,11 +30,13 @@ describe('Avatar', () => {
     expect(lg?.className).toContain('h-12');
   });
 
-  it('uses --sf-border-strong for border (not --sf-border)', () => {
+  it('uses --sf-border-strong for ring contrast (not --sf-border)', () => {
+    // Avatar uses a ring (not border) for its visual edge — the ring color mixes
+    // accent into --sf-border-strong for WCAG 1.4.11 contrast.
     const { container } = render(<Avatar name="Test" />);
     const el = container.firstChild as HTMLElement;
-    expect(el?.className).toContain('border-[var(--sf-border-strong)]');
-    expect(el?.className).not.toMatch(/border-\[var\(--sf-border\)\]/);
+    expect(el?.className).toContain('--sf-border-strong');
+    expect(el?.className).not.toMatch(/var\(--sf-border\)(?!-)/);
   });
 
   it.each(THEME_NAMES)('renders without error in %s theme', (theme) => {

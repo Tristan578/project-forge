@@ -1,7 +1,8 @@
-import { forwardRef, type TextareaHTMLAttributes } from 'react';
-import { cn } from '../utils/cn';
+import { forwardRef, type TextareaHTMLAttributes } from "react";
+import { cn } from "../utils/cn";
 
-export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+export interface TextareaProps
+  extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   error?: boolean;
 }
 
@@ -10,21 +11,25 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     return (
       <textarea
         ref={ref}
+        aria-invalid={error || undefined}
         className={cn(
-          'flex min-h-[80px] w-full',
-          'rounded-[var(--sf-radius-md)]',
-          'border border-[length:var(--sf-border-width)]',
-          error
-            ? 'border-[var(--sf-destructive)]'
-            : 'border-[var(--sf-border-strong)]',
-          'bg-[var(--sf-bg-surface)] text-[var(--sf-text)]',
-          'px-3 py-2 text-sm',
-          'placeholder:text-[var(--sf-text-muted)]',
-          'resize-y',
-          'transition-colors duration-[var(--sf-transition)]',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]',
-          'disabled:opacity-50 disabled:cursor-not-allowed',
-          className,
+          "flex min-h-[80px] w-full",
+          "rounded-[var(--sf-radius-md)]",
+          "border-[length:var(--sf-border-width)] border-[var(--sf-border-strong)]",
+          "border-b-[color-mix(in_srgb,var(--sf-accent)_25%,var(--sf-border-strong))]",
+          "bg-[var(--sf-bg-app)] text-[var(--sf-text)]",
+          "px-3 py-2 text-sm",
+          "shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)]",
+          "placeholder:text-[var(--sf-text-muted)]",
+          "resize-y",
+          "transition-all duration-[var(--sf-transition)]",
+          !error && "hover:border-[var(--sf-text-muted)]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--sf-bg-app)]",
+          "focus-visible:border-[var(--sf-accent)]",
+          "disabled:opacity-40 disabled:cursor-not-allowed",
+          error &&
+            "border-[var(--sf-destructive)] hover:border-[var(--sf-destructive)] focus-visible:ring-[var(--sf-destructive)]",
+          className
         )}
         {...props}
       />
@@ -32,4 +37,4 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
   }
 );
 
-Textarea.displayName = 'Textarea';
+Textarea.displayName = "Textarea";

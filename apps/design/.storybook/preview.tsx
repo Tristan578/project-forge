@@ -1,8 +1,8 @@
 import type { Preview } from '@storybook/react';
 import { THEME_NAMES, THEME_DEFINITIONS, type ThemeName } from '@spawnforge/ui';
 
-// Import the theme CSS + token utilities (static import — NOT dynamic)
-import '@spawnforge/ui/tokens/theme.css';
+// Import Tailwind CSS (compiles utility classes from @spawnforge/ui sources)
+import '../storybook.css';
 
 function applyTheme(theme: ThemeName) {
   const tokens = THEME_DEFINITIONS[theme];

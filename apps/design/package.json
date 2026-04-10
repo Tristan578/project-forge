@@ -8,8 +8,11 @@
   },
   "dependencies": {
     "@spawnforge/ui": "file:./vendored/spawnforge-ui",
+    "@tailwindcss/postcss": "^4.2.2",
+    "@tailwindcss/vite": "^4.2.2",
     "react": "^19",
-    "react-dom": "^19"
+    "react-dom": "^19",
+    "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
     "@storybook/addon-a11y": "^8.6",

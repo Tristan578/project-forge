@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { Popover } from '../Popover';
 import { THEME_NAMES } from '../../tokens';
@@ -6,68 +6,88 @@ import { THEME_NAMES } from '../../tokens';
 describe('Popover', () => {
   it('renders trigger', () => {
     render(
-      <Popover trigger={<button>Open</button>} content={<div>Popover content</div>} />
+      <Popover trigger={<span>Open</span>} content={<div>Popover content</div>} />
     );
-    expect(screen.getByRole('button')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Open' })).not.toBeNull();
   });
 
   it('content hidden initially', () => {
-    const { container } = render(
-      <Popover trigger={<button>Open</button>} content={<div>Hidden content</div>} />
+    render(
+      <Popover trigger={<span>Open</span>} content={<div>Hidden content</div>} />
     );
-    expect(container.querySelector('[data-popover-content]')).toBeNull();
+    const dialog = screen.getByRole('dialog', { hidden: true });
+    expect(dialog.hidden).toBe(true);
   });
 
   it('shows content when trigger is clicked', () => {
     render(
       <Popover
-        trigger={<button>Open popover</button>}
+        trigger={<span>Open popover</span>}
         content={<div>Visible content</div>}
       />
     );
     fireEvent.click(screen.getByRole('button'));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.hidden).toBe(false);
     expect(screen.getByText('Visible content')).not.toBeNull();
   });
 
   it('closes when clicking outside', () => {
-    const { container } = render(
+    render(
       <Popover
-        trigger={<button>Open</button>}
+        trigger={<span>Open</span>}
         content={<div>Content</div>}
       />
     );
     fireEvent.click(screen.getByRole('button'));
-    expect(container.querySelector('[data-popover-content]')).not.toBeNull();
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.hidden).toBe(false);
     // Click outside
     fireEvent.mouseDown(document.body);
-    expect(container.querySelector('[data-popover-content]')).toBeNull();
+    expect(dialog.hidden).toBe(true);
   });
 
   it('closes when Escape is pressed', () => {
-    const { container } = render(
-      <Popover trigger={<button>Open</button>} content={<div>Popover</div>} />
+    render(
+      <Popover trigger={<span>Open</span>} content={<div>Popover</div>} />
     );
     fireEvent.click(screen.getByRole('button'));
-    expect(container.querySelector('[data-popover-content]')).not.toBeNull();
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.hidden).toBe(false);
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(container.querySelector('[data-popover-content]')).toBeNull();
+    expect(dialog.hidden).toBe(true);
+  });
+
+  it('trigger has aria-expanded and aria-controls', () => {
+    render(
+      <Popover trigger={<span>Open</span>} content={<div>Content</div>} />
+    );
+    const trigger = screen.getByRole('button');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
+    const controlsId = trigger.getAttribute('aria-controls');
+    expect(controlsId).toBeTruthy();
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.id).toBe(controlsId);
   });
 
   it('uses overlay background token', () => {
     render(
-      <Popover trigger={<button>Open</button>} content={<div>Content</div>} />
+      <Popover trigger={<span>Open</span>} content={<div>Content</div>} />
     );
     fireEvent.click(screen.getByRole('button'));
-    const popoverContent = document.querySelector('[data-popover-content]');
-    expect(popoverContent?.className).toContain('var(--sf-bg-overlay)');
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.className).toContain('var(--sf-bg-surface)');
   });
 
   it.each(THEME_NAMES)('renders without error in %s theme', (theme) => {
     document.documentElement.setAttribute('data-sf-theme', theme);
     const { container } = render(
-      <Popover trigger={<button>Open</button>} content={<div>Content</div>} />
+      <Popover trigger={<span>Open</span>} content={<div>Content</div>} />
     );
-    fireEvent.click(container.querySelector('button')!);
+    fireEvent.click(screen.getByRole('button'));
     const allClasses = Array.from(container.querySelectorAll('[class]'))
       .flatMap((el) => el.className.split(' '));
     const leaks = allClasses.filter((c) => /zinc-|stone-|slate-/.test(c));
