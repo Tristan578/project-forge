@@ -20,6 +20,14 @@ vi.mock('lucide-react', () => ({
   Shield: (props: Record<string, unknown>) => <span data-testid="shield-icon" {...props} />,
 }));
 
+const mockConfirm = vi.fn().mockResolvedValue(true);
+vi.mock('@/hooks/useConfirmDialog', () => ({
+  useConfirmDialog: () => ({
+    confirm: mockConfirm,
+    ConfirmDialogPortal: () => null,
+  }),
+}));
+
 const baseTilemapData = {
   tilesetAssetId: '',
   mapSize: [20, 15] as [number, number],
@@ -161,11 +169,13 @@ describe('TilemapInspector', () => {
     expect(screen.getByText('Remove Tilemap')).toBeInTheDocument();
   });
 
-  it('calls removeTilemapData when Remove Tilemap confirmed', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('calls removeTilemapData when Remove Tilemap confirmed', async () => {
+    mockConfirm.mockResolvedValue(true);
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapInspector />);
     fireEvent.click(screen.getByText('Remove Tilemap'));
-    expect(mockRemoveTilemapData).toHaveBeenCalledWith('entity-1');
+    await vi.waitFor(() => {
+      expect(mockRemoveTilemapData).toHaveBeenCalledWith('entity-1');
+    });
   });
 });
