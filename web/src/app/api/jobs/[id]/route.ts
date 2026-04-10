@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { generationJobs } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -6,6 +7,15 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
+
+const patchJobSchema = z.object({
+  status: z.enum(['pending', 'processing', 'downloading', 'completed', 'failed', 'cancelled']).optional(),
+  progress: z.number().finite().min(0).max(100).optional(),
+  errorMessage: z.string().max(2000).nullish(),
+  resultUrl: z.string().max(2000).nullish(),
+  resultMeta: z.record(z.string(), z.unknown()).nullish(),
+  imported: z.boolean().optional(),
+});
 
 // PATCH: Update job status (used by polling to sync provider status to DB)
 export async function PATCH(
@@ -17,11 +27,12 @@ export async function PATCH(
       requireAuth: true,
       rateLimit: true,
       rateLimitConfig: { key: (id) => `user:job-update:${id}`, max: 60, windowSeconds: 60, distributed: false },
+      validate: patchJobSchema,
     });
     if (mid.error) return mid.error;
 
     const { id } = await params;
-    const body = await req.json();
+    const body = mid.body as z.infer<typeof patchJobSchema>;
 
     // Verify ownership
     const [existing] = await queryWithResilience(() =>
@@ -39,23 +50,12 @@ export async function PATCH(
     // Build update object
     const updates: Record<string, unknown> = { updatedAt: new Date() };
 
-    const VALID_STATUSES = ['pending', 'processing', 'downloading', 'completed', 'failed', 'cancelled'] as const;
-    if (body.status) {
-      if (!VALID_STATUSES.includes(body.status)) {
-        return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
-      }
-      updates.status = body.status;
-    }
-    if (typeof body.progress === 'number') {
-      if (!Number.isFinite(body.progress) || body.progress < 0 || body.progress > 100) {
-        return NextResponse.json({ error: 'progress must be a finite number between 0 and 100' }, { status: 400 });
-      }
-      updates.progress = body.progress;
-    }
+    if (body.status !== undefined) updates.status = body.status;
+    if (body.progress !== undefined) updates.progress = body.progress;
     if (body.errorMessage !== undefined) updates.errorMessage = body.errorMessage;
     if (body.resultUrl !== undefined) updates.resultUrl = body.resultUrl;
     if (body.resultMeta !== undefined) updates.resultMeta = body.resultMeta;
-    if (typeof body.imported === 'boolean') updates.imported = body.imported ? 1 : 0;
+    if (body.imported !== undefined) updates.imported = body.imported ? 1 : 0;
     // refunded field intentionally omitted — only server-side refundTokens() may set this
 
     if (body.status === 'completed' || body.status === 'failed') {

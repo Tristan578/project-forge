@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import Stripe from 'stripe';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
@@ -13,7 +14,11 @@ import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { logger } from '@/lib/logging/logger';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { badRequest, validationError, internalError } from '@/lib/api/errors';
+import { internalError } from '@/lib/api/errors';
+
+const checkoutSchema = z.object({
+  tier: z.enum(['hobbyist', 'creator', 'pro']),
+});
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -39,23 +44,14 @@ export async function POST(req: NextRequest) {
     requireAuth: true,
     rateLimit: true,
     rateLimitConfig: { key: (id) => `billing-checkout:${id}`, max: 5, windowSeconds: 60 },
+    validate: checkoutSchema,
   });
   if (mid.error) return mid.error;
 
   const user = mid.authContext!.user;
   const reqLog = logger.child({ endpoint: 'POST /api/billing/checkout', userId: user.id });
 
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return badRequest('Invalid JSON body');
-  }
-  const { tier } = body as { tier?: string };
-
-  if (!tier || !['hobbyist', 'creator', 'pro'].includes(tier)) {
-    return validationError('Invalid tier. Choose: hobbyist, creator, or pro');
-  }
+  const { tier } = mid.body as z.infer<typeof checkoutSchema>;
 
   const priceId = PRICE_IDS[tier];
   if (!priceId) {

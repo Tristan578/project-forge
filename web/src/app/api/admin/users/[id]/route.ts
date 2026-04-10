@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
@@ -7,8 +8,14 @@ import { eq } from 'drizzle-orm';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
-const VALID_TIERS = ['starter', 'hobbyist', 'creator', 'pro'] as const;
-type Tier = (typeof VALID_TIERS)[number];
+const patchUserSchema = z
+  .object({
+    tier: z.enum(['starter', 'hobbyist', 'creator', 'pro']).optional(),
+    banned: z.boolean().optional(),
+  })
+  .refine((v) => v.tier !== undefined || v.banned !== undefined, {
+    message: 'No valid fields to update',
+  });
 
 export async function GET(
   req: NextRequest,
@@ -46,7 +53,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const mid = await withApiMiddleware(req, { requireAuth: true });
+  const mid = await withApiMiddleware(req, { requireAuth: true, validate: patchUserSchema });
   if (mid.error) return mid.error;
   const { clerkId } = mid.authContext!;
 
@@ -57,44 +64,11 @@ export async function PATCH(
   if (limited) return limited;
 
   const { id } = await params;
+  const body = mid.body as z.infer<typeof patchUserSchema>;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-  }
-
-  if (typeof body !== 'object' || body === null) {
-    return NextResponse.json({ error: 'Body must be an object' }, { status: 400 });
-  }
-
-  const updates: Partial<{ tier: Tier; banned: number }> = {};
-
-  const record = body as Record<string, unknown>;
-
-  if ('tier' in record) {
-    const tier = record['tier'];
-    if (typeof tier !== 'string' || !VALID_TIERS.includes(tier as Tier)) {
-      return NextResponse.json(
-        { error: `tier must be one of: ${VALID_TIERS.join(', ')}` },
-        { status: 400 }
-      );
-    }
-    updates.tier = tier as Tier;
-  }
-
-  if ('banned' in record) {
-    const banned = record['banned'];
-    if (typeof banned !== 'boolean') {
-      return NextResponse.json({ error: 'banned must be a boolean' }, { status: 400 });
-    }
-    updates.banned = banned ? 1 : 0;
-  }
-
-  if (Object.keys(updates).length === 0) {
-    return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
-  }
+  const updates: Partial<{ tier: 'starter' | 'hobbyist' | 'creator' | 'pro'; banned: number }> = {};
+  if (body.tier !== undefined) updates.tier = body.tier;
+  if (body.banned !== undefined) updates.banned = body.banned ? 1 : 0;
 
   try {
     const [updated] = await queryWithResilience(() =>

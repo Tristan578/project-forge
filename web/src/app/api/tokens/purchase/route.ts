@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import Stripe from 'stripe';
 import { assertTier } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import type { TokenPackage } from '@/lib/tokens/pricing';
 import { TOKEN_PACKAGES } from '@/lib/tokens/pricing';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { badRequest, validationError, internalError } from '@/lib/api/errors';
+import { internalError } from '@/lib/api/errors';
+
+const purchaseSchema = z.object({
+  package: z.enum(['spark', 'blaze', 'inferno']),
+});
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -24,6 +29,7 @@ export async function POST(req: NextRequest) {
     requireAuth: true,
     rateLimit: true,
     rateLimitConfig: { key: (id) => `tokens-purchase:${id}`, max: 5, windowSeconds: 60 },
+    validate: purchaseSchema,
   });
   if (mid.error) return mid.error;
 
@@ -31,17 +37,7 @@ export async function POST(req: NextRequest) {
   const tierCheck = assertTier(mid.authContext!.user, ['hobbyist', 'creator', 'pro']);
   if (tierCheck) return tierCheck;
 
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return badRequest('Invalid JSON body');
-  }
-  const pkg = body.package as string;
-
-  if (!pkg || !(pkg in TOKEN_PACKAGES)) {
-    return validationError('Invalid package. Choose: spark, blaze, or inferno');
-  }
+  const { package: pkg } = mid.body as z.infer<typeof purchaseSchema>;
 
   const priceId = PACKAGE_PRICE_IDS[pkg];
   if (!priceId) {
