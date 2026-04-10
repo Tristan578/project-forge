@@ -50,9 +50,11 @@ describe('Checkbox', () => {
   });
 
   it('uses --sf-border-strong for default border (not --sf-border)', () => {
+    // Visible checkbox is rendered as a sibling <label> (peer pattern) since the
+    // real <input> is sr-only. Border classes live on that visible label.
     const { container } = render(<Checkbox label="Test" />);
-    const input = container.querySelector('input');
-    expect(input?.className).toContain('border-[var(--sf-border-strong)]');
-    expect(input?.className).not.toMatch(/border-\[var\(--sf-border\)\]/);
+    const visible = container.querySelector('label[aria-hidden="true"]');
+    expect(visible?.className).toContain('border-[var(--sf-border-strong)]');
+    expect(visible?.className).not.toMatch(/border-\[var\(--sf-border\)\]/);
   });
 });
