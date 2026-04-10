@@ -80,11 +80,23 @@ const BOARD = { id: 'board-1', name: 'highscore', sortOrder: 'desc', maxEntries:
 // GET /api/publish/[id]/leaderboards
 // ---------------------------------------------------------------------------
 
+// Default mock: parses request body via req.clone().json() so route handlers
+// receive mid.body matching what the real middleware would supply after Zod validation.
+async function defaultMiddlewareImpl(req: NextRequest) {
+  let body: unknown = undefined;
+  try {
+    body = await req.clone().json();
+  } catch {
+    body = undefined;
+  }
+  return { userId: 'user-1', body, authContext: { clerkId: 'c1', user: { id: 'user-1' } } };
+}
+
 describe('GET /api/publish/[id]/leaderboards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    mockWithApiMiddleware.mockResolvedValue({ userId: 'user-1' });
+    mockWithApiMiddleware.mockImplementation(defaultMiddlewareImpl);
   });
 
   it('returns 404 when game not owned by user', async () => {
@@ -141,7 +153,7 @@ describe('POST /api/publish/[id]/leaderboards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    mockWithApiMiddleware.mockResolvedValue({ userId: 'user-1' });
+    mockWithApiMiddleware.mockImplementation(defaultMiddlewareImpl);
   });
 
   it('returns 404 when game not owned by user', async () => {
@@ -154,32 +166,6 @@ describe('POST /api/publish/[id]/leaderboards', () => {
       makeParams('game-1'),
     );
     expect(res.status).toBe(404);
-  });
-
-  it('returns 400 for missing name', async () => {
-    const gameChain = makeSelectChain([GAME]);
-    mockGetDb.mockReturnValue({ select: vi.fn().mockReturnValue(gameChain) });
-
-    const { POST } = await import('../route');
-    const res = await POST(
-      jsonRequest('http://localhost/api/publish/game-1/leaderboards', 'POST', {}),
-      makeParams('game-1'),
-    );
-    expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.error).toContain('name is required');
-  });
-
-  it('returns 400 for name over 64 characters', async () => {
-    const gameChain = makeSelectChain([GAME]);
-    mockGetDb.mockReturnValue({ select: vi.fn().mockReturnValue(gameChain) });
-
-    const { POST } = await import('../route');
-    const res = await POST(
-      jsonRequest('http://localhost/api/publish/game-1/leaderboards', 'POST', { name: 'a'.repeat(65) }),
-      makeParams('game-1'),
-    );
-    expect(res.status).toBe(400);
   });
 
   it('returns 400 when minScore > maxScore', async () => {
@@ -196,24 +182,6 @@ describe('POST /api/publish/[id]/leaderboards', () => {
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error).toContain('minScore must be <= maxScore');
-  });
-
-  it('returns 400 for invalid JSON body', async () => {
-    const gameChain = makeSelectChain([GAME]);
-    mockGetDb.mockReturnValue({ select: vi.fn().mockReturnValue(gameChain) });
-
-    const { POST } = await import('../route');
-    const res = await POST(
-      new NextRequest('http://localhost/api/publish/game-1/leaderboards', {
-        method: 'POST',
-        body: 'not json',
-        headers: { 'Content-Type': 'application/json' },
-      }),
-      makeParams('game-1'),
-    );
-    expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.error).toBe('Invalid JSON body');
   });
 
   it('creates leaderboard with defaults', async () => {

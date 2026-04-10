@@ -53,7 +53,7 @@ describe('PUT /api/admin/economics/config', () => {
     const { PUT } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/admin/economics/config', {
       method: 'PUT',
-      body: JSON.stringify({ type: 'token_config', id: 'tc1', tokenCost: 10 }),
+      body: JSON.stringify({ type: 'token_config', id: 'tc1', tokenCost: 10, estimatedCostCents: 5 }),
     });
     const res = await PUT(req);
 
@@ -81,47 +81,47 @@ describe('PUT /api/admin/economics/config', () => {
     expect(body.success).toBe(true);
   });
 
-  it('should return 400 for missing id', async () => {
+  it('should return 422 for missing id', async () => {
     const { PUT } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/admin/economics/config', {
       method: 'PUT',
       body: JSON.stringify({ type: 'token_config', tokenCost: 10, estimatedCostCents: 5 }),
     });
     const res = await PUT(req);
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toContain('id');
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe('Validation failed');
   });
 
-  it('should return 400 for negative tokenCost', async () => {
+  it('should return 422 for negative tokenCost', async () => {
     const { PUT } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/admin/economics/config', {
       method: 'PUT',
       body: JSON.stringify({ type: 'token_config', id: 'tc1', tokenCost: -5, estimatedCostCents: 5 }),
     });
     const res = await PUT(req);
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toContain('tokenCost');
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe('Validation failed');
   });
 
-  it('should return 400 for NaN tokenCost', async () => {
+  it('should return 422 for NaN tokenCost', async () => {
     const { PUT } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/admin/economics/config', {
       method: 'PUT',
       body: JSON.stringify({ type: 'token_config', id: 'tc1', tokenCost: 'abc', estimatedCostCents: 5 }),
     });
     const res = await PUT(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
-  it('should return 400 for unknown type', async () => {
+  it('should return 422 for unknown type', async () => {
     const { PUT } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/admin/economics/config', {
       method: 'PUT',
       body: JSON.stringify({ type: 'unknown_config', id: 'x' }),
     });
     const res = await PUT(req);
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe('Invalid type');
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe('Validation failed');
   });
 
   it('should update tier config', async () => {

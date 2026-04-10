@@ -60,7 +60,7 @@ describe('POST /api/community/games/[id]/rate', () => {
     expect(res.status).toBe(429);
   });
 
-  it('should return 400 for invalid rating', async () => {
+  it('should return 422 for invalid rating', async () => {
     const mockDb = { select: vi.fn(), insert: vi.fn(), update: vi.fn() };
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
@@ -72,11 +72,11 @@ describe('POST /api/community/games/[id]/rate', () => {
     const res = await POST(req, { params: Promise.resolve({ id: 'game-1' }) });
     const body = await res.json();
 
-    expect(res.status).toBe(400);
-    expect(body.error).toBe('Rating must be between 1 and 5');
+    expect(res.status).toBe(422);
+    expect(body.error).toBe('Validation failed');
   });
 
-  it('should return 400 for rating above 5', async () => {
+  it('should return 422 for rating above 5', async () => {
     const mockDb = { select: vi.fn(), insert: vi.fn(), update: vi.fn() };
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
@@ -88,8 +88,8 @@ describe('POST /api/community/games/[id]/rate', () => {
     const res = await POST(req, { params: Promise.resolve({ id: 'game-1' }) });
     const body = await res.json();
 
-    expect(res.status).toBe(400);
-    expect(body.error).toBe('Rating must be between 1 and 5');
+    expect(res.status).toBe(422);
+    expect(body.error).toBe('Validation failed');
   });
 
   it('should create a new rating and return stats', async () => {

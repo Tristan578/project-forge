@@ -87,7 +87,7 @@ describe('PATCH /api/jobs/[id]', () => {
     expect(body.updated).toBe(true);
   });
 
-  it('should return 400 for invalid status', async () => {
+  it('should return 422 for invalid status', async () => {
     const mockDb = {
       select: vi.fn().mockReturnThis(), from: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'j1' }]),
@@ -100,11 +100,11 @@ describe('PATCH /api/jobs/[id]', () => {
       body: JSON.stringify({ status: 'hacked' }),
     });
     const res = await PATCH(req, { params: Promise.resolve({ id: 'j1' }) });
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe('Invalid status');
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe('Validation failed');
   });
 
-  it('should return 400 for negative progress', async () => {
+  it('should return 422 for negative progress', async () => {
     const mockDb = {
       select: vi.fn().mockReturnThis(), from: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'j1' }]),
@@ -117,11 +117,11 @@ describe('PATCH /api/jobs/[id]', () => {
       body: JSON.stringify({ progress: -5 }),
     });
     const res = await PATCH(req, { params: Promise.resolve({ id: 'j1' }) });
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toContain('progress');
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe('Validation failed');
   });
 
-  it('should return 400 for progress > 100', async () => {
+  it('should return 422 for progress > 100', async () => {
     const mockDb = {
       select: vi.fn().mockReturnThis(), from: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'j1' }]),
@@ -134,7 +134,7 @@ describe('PATCH /api/jobs/[id]', () => {
       body: JSON.stringify({ progress: 150 }),
     });
     const res = await PATCH(req, { params: Promise.resolve({ id: 'j1' }) });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
   it('should silently ignore refunded field', async () => {

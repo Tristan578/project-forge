@@ -89,7 +89,7 @@ describe('/api/admin/moderation', () => {
       expect(res.status).toBe(403);
     });
 
-    it('returns 400 for invalid action', async () => {
+    it('returns 422 for invalid action', async () => {
       const user = makeUser();
       vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
       vi.mocked(assertAdmin).mockReturnValue(null);
@@ -99,7 +99,8 @@ describe('/api/admin/moderation', () => {
         body: JSON.stringify({ id: 'comment_1', action: 'ignore' }),
       });
       const res = await POST(req);
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
+      expect((await res.json()).error).toBe('Validation failed');
     });
 
     it('approves comment by updating flagged status', async () => {

@@ -31,8 +31,21 @@ export async function POST(request: NextRequest) {
 
   const parsed = vitalsSchema.safeParse(raw);
   if (!parsed.success) {
+    // Distinguish invalid metric name from other shape errors to preserve
+    // the historical error messages the client + tests expect. Only route to
+    // the "invalid metric" message when `name` is present but not in the
+    // allowed enum — a missing name still counts as a shape error.
+    const raw2 = raw as { name?: unknown };
+    const nameBadEnum = typeof raw2?.name === 'string'
+      && parsed.error.issues.some((i) => i.path[0] === 'name');
+    if (nameBadEnum) {
+      return NextResponse.json(
+        { error: 'Invalid metric name. Must be one of: LCP, FCP, CLS, INP, TTFB' },
+        { status: 400 }
+      );
+    }
     return NextResponse.json(
-      { error: 'Invalid vitals payload', details: parsed.error.issues },
+      { error: 'Missing or invalid required fields: name (string), value (finite number), id (string), delta (finite number)' },
       { status: 400 }
     );
   }

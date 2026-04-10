@@ -88,11 +88,23 @@ const BOARD = { id: 'board-1', name: 'highscore', sortOrder: 'desc', maxEntries:
 // PATCH /api/publish/[id]/leaderboards/[name]
 // ---------------------------------------------------------------------------
 
+// Default mock: parses request body via req.clone().json() so route handlers
+// receive mid.body matching what the real middleware would supply after Zod validation.
+async function defaultMiddlewareImpl(req: NextRequest) {
+  let body: unknown = undefined;
+  try {
+    body = await req.clone().json();
+  } catch {
+    body = undefined;
+  }
+  return { userId: 'user-1', body, authContext: { clerkId: 'c1', user: { id: 'user-1' } } };
+}
+
 describe('PATCH /api/publish/[id]/leaderboards/[name]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    mockWithApiMiddleware.mockResolvedValue({ userId: 'user-1' });
+    mockWithApiMiddleware.mockImplementation(defaultMiddlewareImpl);
   });
 
   it('returns 404 when game not owned', async () => {
@@ -124,29 +136,6 @@ describe('PATCH /api/publish/[id]/leaderboards/[name]', () => {
     expect(res.status).toBe(404);
     const data = await res.json();
     expect(data.error).toBe('Leaderboard not found');
-  });
-
-  it('returns 400 for invalid JSON body', async () => {
-    const gameChain = makeSelectChain([GAME]);
-    const boardChain = makeSelectChain([BOARD]);
-    mockGetDb.mockReturnValue({
-      select: vi.fn()
-        .mockReturnValueOnce(gameChain)
-        .mockReturnValueOnce(boardChain),
-    });
-
-    const { PATCH } = await import('../route');
-    const res = await PATCH(
-      new NextRequest('http://localhost', {
-        method: 'PATCH',
-        body: 'not json',
-        headers: { 'Content-Type': 'application/json' },
-      }),
-      makeParams('game-1', 'highscore'),
-    );
-    expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.error).toBe('Invalid JSON body');
   });
 
   it('returns 400 when no valid fields provided', async () => {
@@ -274,7 +263,7 @@ describe('DELETE /api/publish/[id]/leaderboards/[name]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    mockWithApiMiddleware.mockResolvedValue({ userId: 'user-1' });
+    mockWithApiMiddleware.mockImplementation(defaultMiddlewareImpl);
   });
 
   it('returns 404 when game not owned', async () => {

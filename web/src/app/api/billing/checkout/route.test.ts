@@ -52,11 +52,19 @@ function makeReq(body?: unknown) {
 
 function mockMiddlewareSuccess(overrides?: Partial<ReturnType<typeof makeUser>>) {
   const user = makeUser(overrides);
-  vi.mocked(withApiMiddleware).mockResolvedValue({
-    error: undefined,
-    userId: user.id,
-    authContext: { clerkId: 'clerk123', user } as never,
-    body: undefined,
+  vi.mocked(withApiMiddleware).mockImplementation(async (req) => {
+    let body: unknown = undefined;
+    try {
+      body = await req.clone().json();
+    } catch {
+      body = undefined;
+    }
+    return {
+      error: undefined,
+      userId: user.id,
+      authContext: { clerkId: 'clerk123', user } as never,
+      body,
+    };
   });
   return user;
 }
@@ -109,15 +117,24 @@ describe('POST /api/billing/checkout', () => {
     expect(res.status).toBe(429);
   });
 
-  it('returns 422 for invalid tier (regression: was 400, valid JSON with invalid business value)', async () => {
-    mockMiddlewareSuccess();
+  it('returns 422 for invalid tier (schema validation via middleware)', async () => {
+    const validationResponse = new Response(
+      JSON.stringify({ error: 'Validation failed', code: 'VALIDATION_ERROR' }),
+      { status: 422 }
+    );
+    vi.mocked(withApiMiddleware).mockResolvedValue({
+      error: validationResponse as never,
+      userId: null,
+      authContext: null,
+      body: undefined,
+    });
 
     const { POST } = await import('./route');
     const res = await POST(makeReq({ tier: 'invalid_tier' }));
     const data = await res.json();
 
     expect(res.status).toBe(422);
-    expect(data.error).toContain('Invalid tier');
+    expect(data.error).toBe('Validation failed');
   });
 
   it('creates Stripe customer if none exists and starts checkout', async () => {

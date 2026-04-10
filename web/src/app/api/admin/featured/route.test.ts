@@ -98,7 +98,7 @@ describe('POST /api/admin/featured', () => {
     const body = await res.json();
 
     expect(res.status).toBe(400);
-    expect(body.error).toBe('gameId is required');
+    expect(body.error).toBe('Validation failed');
   });
 
   it('should return 404 when game not found', async () => {

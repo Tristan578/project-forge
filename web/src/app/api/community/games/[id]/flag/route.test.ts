@@ -57,7 +57,7 @@ describe('POST /api/community/games/[id]/flag', () => {
     expect(res.status).toBe(429);
   });
 
-  it('should return 400 when commentId is missing', async () => {
+  it('should return 422 when commentId is missing', async () => {
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/community/games/game-1/flag', {
       method: 'POST',
@@ -66,8 +66,8 @@ describe('POST /api/community/games/[id]/flag', () => {
     const res = await POST(req, { params: Promise.resolve({ id: 'game-1' }) });
     const body = await res.json();
 
-    expect(res.status).toBe(400);
-    expect(body.error).toBe('commentId is required');
+    expect(res.status).toBe(422);
+    expect(body.error).toBe('Validation failed');
   });
 
   it('should return 404 when comment not found', async () => {
