@@ -15,7 +15,12 @@
     "done": "Done"
   },
   "localProjectId": "01KMM9ZA6SBZ7RKJZJTZS9VR4R",
-  "allowedTeamName": "Engineering",
+  "legacyProjectIds": [
+    "01KK974VMNC16ZAW7MW1NH3T3M",
+    "01KMM7VST5NY7GN3T3QK9M2B6K",
+    "01KK87WWSZ1HM4MN641VG57V2M"
+  ],
+  "allowedTeamName": "SpawnForge Engineering",
   "allowedProjectName": "Project Forge",
   "allowedProjectPrefix": "PF"
 }

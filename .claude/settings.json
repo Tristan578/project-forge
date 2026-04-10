@@ -153,16 +153,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/post-edit-format.sh\"",
-            "timeout": 5000
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/auto-lockfile-sync.sh\"",
             "timeout": 30000
           }
