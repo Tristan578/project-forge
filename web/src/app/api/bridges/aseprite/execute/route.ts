@@ -10,7 +10,7 @@ import { BRIDGE_CACHE_TTL_MS } from '@/lib/config/timeouts';
 
 const asepriteExecuteSchema = z.object({
   operation: z.string().min(1).max(100),
-  params: z.record(z.string(), z.unknown()).optional(),
+  params: z.record(z.string(), z.unknown()).nullish(),
 });
 
 // Cache discovered tool config to avoid spawning a child process on every request

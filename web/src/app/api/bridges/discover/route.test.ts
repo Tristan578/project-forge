@@ -50,18 +50,20 @@ describe('POST /api/bridges/discover', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns 400 when toolId is missing', async () => {
+  it('returns 422 when toolId is missing', async () => {
     const res = await POST(makeRequest({}));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const data = await res.json();
-    expect(data.error).toBe('toolId is required');
+    expect(data.error).toBe('Validation failed');
+    expect(data.code).toBe('VALIDATION_ERROR');
   });
 
-  it('returns 400 when toolId is not a string', async () => {
+  it('returns 422 when toolId is not a string', async () => {
     const res = await POST(makeRequest({ toolId: 42 }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const data = await res.json();
-    expect(data.error).toBe('toolId is required');
+    expect(data.error).toBe('Validation failed');
+    expect(data.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 400 when toolId is an unknown tool', async () => {

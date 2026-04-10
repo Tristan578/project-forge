@@ -66,7 +66,7 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns 400 when operation is missing', async () => {
+  it('returns 422 when operation is missing', async () => {
     vi.doMock('@/lib/auth/api-auth', () => ({
       authenticateRequest: vi.fn().mockResolvedValue({
         ok: true as const,
@@ -83,12 +83,12 @@ describe('POST /api/bridges/aseprite/execute', () => {
 
     const POST = await importRoute();
     const res = await POST(makeRequest({ params: { width: 32 } }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const data = await res.json();
-    expect(data.error).toBe('operation is required');
+    expect(data.error).toBe('Validation failed');
   });
 
-  it('returns 400 when operation is not a string', async () => {
+  it('returns 422 when operation is not a string', async () => {
     vi.doMock('@/lib/auth/api-auth', () => ({
       authenticateRequest: vi.fn().mockResolvedValue({
         ok: true as const,
@@ -105,9 +105,9 @@ describe('POST /api/bridges/aseprite/execute', () => {
 
     const POST = await importRoute();
     const res = await POST(makeRequest({ operation: 123 }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const data = await res.json();
-    expect(data.error).toBe('operation is required');
+    expect(data.error).toBe('Validation failed');
   });
 
   it('returns 400 when operation is not in allowlist', async () => {
@@ -134,7 +134,7 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(data.error).toContain('createSprite');
   });
 
-  it('returns 400 when params is an array', async () => {
+  it('returns 422 when params is an array', async () => {
     vi.doMock('@/lib/auth/api-auth', () => ({
       authenticateRequest: vi.fn().mockResolvedValue({
         ok: true as const,
@@ -151,12 +151,12 @@ describe('POST /api/bridges/aseprite/execute', () => {
 
     const POST = await importRoute();
     const res = await POST(makeRequest({ operation: 'createSprite', params: [1, 2, 3] }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const data = await res.json();
-    expect(data.error).toBe('params must be a plain object');
+    expect(data.error).toBe('Validation failed');
   });
 
-  it('returns 400 when params is a primitive', async () => {
+  it('returns 422 when params is a primitive', async () => {
     vi.doMock('@/lib/auth/api-auth', () => ({
       authenticateRequest: vi.fn().mockResolvedValue({
         ok: true as const,
@@ -173,9 +173,9 @@ describe('POST /api/bridges/aseprite/execute', () => {
 
     const POST = await importRoute();
     const res = await POST(makeRequest({ operation: 'createSprite', params: 'bad' }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const data = await res.json();
-    expect(data.error).toBe('params must be a plain object');
+    expect(data.error).toBe('Validation failed');
   });
 
   it('returns 503 when aseprite is not connected', async () => {
