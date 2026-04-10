@@ -6,7 +6,7 @@ import { apiError, internalError } from '@/lib/api/errors';
 import { z } from 'zod';
 
 const createProjectSchema = z.object({
-  name: z.string().min(1).max(200),
+  name: z.string().trim().min(1).max(200),
   sceneData: z.record(z.string(), z.unknown()),
 });
 
