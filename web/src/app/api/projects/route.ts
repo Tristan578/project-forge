@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { listProjects, createProject } from '@/lib/projects/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { parseJsonBody, requireString, requireObject } from '@/lib/apiValidation';
 import { apiError, internalError } from '@/lib/api/errors';
+import { z } from 'zod';
+
+const createProjectSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  sceneData: z.record(z.string(), z.unknown()),
+});
 
 /**
  * GET /api/projects
@@ -36,20 +41,14 @@ export async function POST(req: NextRequest) {
     requireAuth: true,
     rateLimit: true,
     rateLimitConfig: { key: (id) => `projects-create:${id}`, max: 10, windowSeconds: 60 },
+    validate: createProjectSchema,
   });
   if (mid.error) return mid.error;
 
-  const parsed = await parseJsonBody(req);
-  if (!parsed.ok) return parsed.response;
-
-  const nameResult = requireString(parsed.body.name, 'Project name', { maxLength: 200 });
-  if (!nameResult.ok) return nameResult.response;
-
-  const sceneResult = requireObject(parsed.body.sceneData, 'Scene data');
-  if (!sceneResult.ok) return sceneResult.response;
+  const { name, sceneData } = mid.body as z.infer<typeof createProjectSchema>;
 
   try {
-    const project = await createProject(mid.userId!, nameResult.value, sceneResult.value);
+    const project = await createProject(mid.userId!, name, sceneData);
     return NextResponse.json({ id: project.id, name: project.name }, { status: 201 });
   } catch (error) {
     const err = error as Error & { limit?: number };

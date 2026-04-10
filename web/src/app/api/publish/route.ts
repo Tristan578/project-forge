@@ -1,13 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, projects, gameTags } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { moderateContent } from '@/lib/moderation/contentFilter';
-import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
 import { logger } from '@/lib/logging/logger';
 import { extractRequestId } from '@/lib/logging/requestContext';
 import { captureException } from '@/lib/monitoring/sentry-server';
+
+const publishSchema = z.object({
+  projectId: z.string().trim().min(1).max(100),
+  title: z.string().trim().min(1).max(200),
+  slug: z.string().trim().min(3).max(50),
+  description: z.string().trim().max(5000).optional(),
+  // thumbnail/tags are intentionally lenient — non-string thumbnails and
+  // non-array tags are silently ignored (not rejected) to match legacy behavior.
+  thumbnail: z.unknown().optional(),
+  tags: z.unknown().optional(),
+});
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,31 +29,20 @@ export async function POST(request: NextRequest) {
     requireAuth: true,
     rateLimit: true,
     rateLimitConfig: { key: (id) => `publish:${id}`, max: 10, windowSeconds: 60 },
+    validate: publishSchema,
   });
   if (mid.error) return mid.error;
   const { user, clerkId } = mid.authContext!;
+  const body = mid.body as z.infer<typeof publishSchema>;
+  const { projectId, title, slug } = body;
+  const description = body.description ?? null;
 
   const reqLogAuth = reqLog.child({ userId: user.id });
-
-  const parsed = await parseJsonBody(request);
-  if (!parsed.ok) return parsed.response;
-
-  const projectIdResult = requireString(parsed.body.projectId, 'Project ID', { maxLength: 100 });
-  if (!projectIdResult.ok) return projectIdResult.response;
-
-  const titleResult = requireString(parsed.body.title, 'Title', { maxLength: 200 });
-  if (!titleResult.ok) return titleResult.response;
-
-  const slugResult = requireString(parsed.body.slug, 'Slug', { minLength: 3, maxLength: 50 });
-  if (!slugResult.ok) return slugResult.response;
-
-  const descResult = optionalString(parsed.body.description, 'Description', { maxLength: 5000 });
-  if (!descResult.ok) return descResult.response;
 
   // Thumbnail is an optional base64 data URL (max 200 KB to prevent abuse).
   // Only safe raster MIME types allowed — SVG excluded to prevent XSS.
   const ALLOWED_THUMBNAIL_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-  const thumbnailRaw = parsed.body.thumbnail;
+  const thumbnailRaw = body.thumbnail;
   let thumbnail: string | null = null;
   if (typeof thumbnailRaw === 'string' && thumbnailRaw.startsWith('data:image/')) {
     const mimeMatch = thumbnailRaw.match(/^data:(image\/[^;,]+)/);
@@ -60,18 +60,18 @@ export async function POST(request: NextRequest) {
   }
 
   // Content moderation check on title and description
-  const titleMod = moderateContent(titleResult.value);
+  const titleMod = moderateContent(title);
   if (titleMod.severity === 'block') {
-    reqLogAuth.warn('Publish blocked: prohibited title content', { slug: slugResult.value });
+    reqLogAuth.warn('Publish blocked: prohibited title content', { slug });
     return NextResponse.json(
       { error: 'Game title contains prohibited content' },
       { status: 422 }
     );
   }
-  if (descResult.value) {
-    const descMod = moderateContent(descResult.value);
+  if (description) {
+    const descMod = moderateContent(description);
     if (descMod.severity === 'block') {
-      reqLogAuth.warn('Publish blocked: prohibited description content', { slug: slugResult.value });
+      reqLogAuth.warn('Publish blocked: prohibited description content', { slug });
       return NextResponse.json(
         { error: 'Game description contains prohibited content' },
         { status: 422 }
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Validate slug format
-  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(slugResult.value)) {
+  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(slug)) {
     return NextResponse.json({ error: 'Invalid slug format' }, { status: 400 });
   }
 
@@ -91,9 +91,9 @@ export async function POST(request: NextRequest) {
     'settings', 'account', 'billing', 'dashboard', 'help', 'support',
     'status', 'health', 'internal', 'system', 'static', 'assets', 'public',
   ];
-  if (RESERVED_SLUGS.includes(slugResult.value)) {
+  if (RESERVED_SLUGS.includes(slug)) {
     return NextResponse.json(
-      { error: `Slug "${slugResult.value}" is reserved and cannot be used` },
+      { error: `Slug "${slug}" is reserved and cannot be used` },
       { status: 400 },
     );
   }
@@ -113,20 +113,21 @@ export async function POST(request: NextRequest) {
   // Check slug availability (for this user)
   const existingSlug = await queryWithResilience(() => getDb().select({ id: publishedGames.id, version: publishedGames.version })
     .from(publishedGames)
-    .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.slug, slugResult.value)))
+    .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.slug, slug)))
     .limit(1));
 
   // Get project data (verify ownership)
   const [project] = await queryWithResilience(() => getDb().select().from(projects)
-    .where(and(eq(projects.id, projectIdResult.value), eq(projects.userId, user.id)))
+    .where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
     .limit(1));
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
 
-  const gameUrl = `/play/${clerkId}/${slugResult.value}`;
+  const gameUrl = `/play/${clerkId}/${slug}`;
 
-  // Validate tags
-  const validTags: string[] = Array.isArray(parsed.body.tags)
-    ? (parsed.body.tags as unknown[]).filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+  // Validate tags — lenient filter: non-array becomes [], non-string entries dropped
+  const validTags: string[] = Array.isArray(body.tags)
+    ? (body.tags as unknown[])
+        .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
         .map((t) => t.trim().toLowerCase().slice(0, 30))
         .slice(0, 5)
     : [];
@@ -137,8 +138,8 @@ export async function POST(request: NextRequest) {
     const newVersion = existingSlug[0].version + 1;
     await queryWithResilience(() => getDb().update(publishedGames)
       .set({
-        title: titleResult.value,
-        description: descResult.value ?? null,
+        title: title,
+        description: description ?? null,
         status: 'published',
         version: newVersion,
         cdnUrl: gameUrl,
@@ -156,8 +157,8 @@ export async function POST(request: NextRequest) {
     }
 
     reqLogAuth.info('Game republished', {
-      projectId: projectIdResult.value,
-      slug: slugResult.value,
+      projectId: projectId,
+      slug: slug,
       version: newVersion,
     });
 
@@ -171,10 +172,10 @@ export async function POST(request: NextRequest) {
   const [publication] = await queryWithResilience(() => getDb().insert(publishedGames)
     .values({
       userId: user.id,
-      projectId: projectIdResult.value,
-      slug: slugResult.value,
-      title: titleResult.value,
-      description: descResult.value ?? null,
+      projectId: projectId,
+      slug: slug,
+      title: title,
+      description: description ?? null,
       status: 'published',
       cdnUrl: gameUrl,
       thumbnail,
@@ -182,9 +183,9 @@ export async function POST(request: NextRequest) {
     .onConflictDoUpdate({
       target: [publishedGames.userId, publishedGames.slug],
       set: {
-        projectId: projectIdResult.value,
-        title: titleResult.value,
-        description: descResult.value ?? null,
+        projectId: projectId,
+        title: title,
+        description: description ?? null,
         status: 'published',
         cdnUrl: gameUrl,
         thumbnail,
@@ -204,8 +205,8 @@ export async function POST(request: NextRequest) {
   }
 
   reqLogAuth.info('Game published', {
-    projectId: projectIdResult.value,
-    slug: slugResult.value,
+    projectId: projectId,
+    slug: slug,
     version: 1,
   });
 

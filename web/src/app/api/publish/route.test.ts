@@ -31,11 +31,11 @@ describe('POST /api/publish', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns 400 for missing fields', async () => {
+  it('returns 422 for missing fields', async () => {
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser() } });
     const req = new NextRequest('http://localhost/api/publish', { method: 'POST', body: JSON.stringify({ title: 'A' }) });
     const res = await POST(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
   it('returns 422 for blocked content in title', async () => {
@@ -50,15 +50,15 @@ describe('POST /api/publish', () => {
     expect(res.status).toBe(422);
   });
 
-  it('returns 400 for invalid slug', async () => {
+  it('returns 422 for invalid slug', async () => {
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser() } });
-    
-    const req = new NextRequest('http://localhost/api/publish', { 
-      method: 'POST', 
+
+    const req = new NextRequest('http://localhost/api/publish', {
+      method: 'POST',
       body: JSON.stringify({ projectId: 'p1', title: 'Good Game', slug: 'a' }) // too short
     });
     const res = await POST(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
   it('returns 403 if tier limit reached', async () => {

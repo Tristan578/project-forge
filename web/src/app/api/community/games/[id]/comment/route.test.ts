@@ -116,7 +116,7 @@ describe('POST /api/community/games/[id]/comment', () => {
     expect(res.status).toBe(429);
   });
 
-  it('should return 400 when content is missing', async () => {
+  it('should return 422 when content is missing', async () => {
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/community/games/game-1/comment', {
       method: 'POST',
@@ -125,8 +125,8 @@ describe('POST /api/community/games/[id]/comment', () => {
     const res = await POST(req, { params: Promise.resolve({ id: 'game-1' }) });
     const body = await res.json();
 
-    expect(res.status).toBe(400);
-    expect(body.error).toContain('Content is required');
+    expect(res.status).toBe(422);
+    expect(body.code).toBe('VALIDATION_ERROR');
   });
 
   it('should return 400 for empty content after sanitization', async () => {

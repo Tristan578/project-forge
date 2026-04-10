@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getProject, updateProject, deleteProject } from '@/lib/projects/service';
-import { parseJsonBody, requireString, requireObject, optionalString } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { validationError, notFound, internalError } from '@/lib/api/errors';
+import { notFound, internalError } from '@/lib/api/errors';
+
+const updateProjectSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  sceneData: z.record(z.string(), z.unknown()).optional(),
+  thumbnail: z.string().max(500_000).nullable().optional(),
+  entityCount: z.number().int().nonnegative().optional(),
+});
 
 /**
  * GET /api/projects/[id]
@@ -43,12 +50,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     requireAuth: true,
     rateLimit: true,
     rateLimitConfig: { key: (id) => `user:project-put:${id}`, max: 10, windowSeconds: 60, distributed: false },
+    validate: updateProjectSchema,
   });
   if (mid.error) return mid.error;
 
   const { id } = await params;
-  const parsed = await parseJsonBody(req);
-  if (!parsed.ok) return parsed.response;
+  const body = mid.body as z.infer<typeof updateProjectSchema>;
 
   const updates: {
     name?: string;
@@ -57,35 +64,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     entityCount?: number;
   } = {};
 
-  if (parsed.body.name !== undefined) {
-    const nameResult = requireString(parsed.body.name, 'name', { minLength: 1, maxLength: 200 });
-    if (!nameResult.ok) return nameResult.response;
-    updates.name = nameResult.value;
-  }
-
-  if (parsed.body.sceneData !== undefined) {
-    const sceneResult = requireObject(parsed.body.sceneData, 'sceneData');
-    if (!sceneResult.ok) return sceneResult.response;
-    updates.sceneData = sceneResult.value;
-  }
-
-  if (parsed.body.thumbnail !== undefined) {
-    if (parsed.body.thumbnail === null) {
-      updates.thumbnail = null;
-    } else {
-      const thumbResult = optionalString(parsed.body.thumbnail, 'thumbnail', { maxLength: 500_000 });
-      if (!thumbResult.ok) return thumbResult.response;
-      updates.thumbnail = thumbResult.value ?? null;
-    }
-  }
-
-  if (parsed.body.entityCount !== undefined) {
-    const count = parsed.body.entityCount;
-    if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
-      return validationError('entityCount must be a non-negative integer');
-    }
-    updates.entityCount = count;
-  }
+  if (body.name !== undefined) updates.name = body.name;
+  if (body.sceneData !== undefined) updates.sceneData = body.sceneData;
+  if (body.thumbnail !== undefined) updates.thumbnail = body.thumbnail;
+  if (body.entityCount !== undefined) updates.entityCount = body.entityCount;
 
   try {
     const project = await updateProject(mid.userId!, id, updates);

@@ -73,15 +73,17 @@ describe('/api/user/profile', () => {
       expect(data.error).toBe('Invalid JSON body');
     });
 
-    it('returns 400 if displayName is missing', async () => {
+    it('returns 422 if displayName is missing', async () => {
       vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser() } });
 
-      const req = new NextRequest('http://localhost/api/user/profile', { 
+      const req = new NextRequest('http://localhost/api/user/profile', {
         method: 'PUT',
         body: JSON.stringify({}),
       });
       const res = await PUT(req);
-      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(res.status).toBe(422);
+      expect(data.code).toBe('VALIDATION_ERROR');
     });
 
     it('updates display name successfully', async () => {
@@ -103,19 +105,32 @@ describe('/api/user/profile', () => {
       expect(updateDisplayName).toHaveBeenCalledWith(user.id, 'Updated Name');
     });
 
-    it('returns 400 if updateDisplayName throws', async () => {
+    it('returns 422 for short displayName', async () => {
       vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser() } });
-      vi.mocked(updateDisplayName).mockRejectedValue(new Error('Validation failed'));
 
       const req = new NextRequest('http://localhost/api/user/profile', {
         method: 'PUT',
-        body: JSON.stringify({ displayName: 'a' }), // too short — now caught by requireString
+        body: JSON.stringify({ displayName: 'a' }), // too short — caught by Zod schema
       });
       const res = await PUT(req);
       const data = await res.json();
 
-      expect(res.status).toBe(400);
-      expect(data.error).toContain('at least 2 character');
+      expect(res.status).toBe(422);
+      expect(data.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('returns 422 for whitespace-only displayName (regression: Sentry #13124255)', async () => {
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser() } });
+
+      const req = new NextRequest('http://localhost/api/user/profile', {
+        method: 'PUT',
+        body: JSON.stringify({ displayName: '    ' }), // trimmed to empty → fails min(2)
+      });
+      const res = await PUT(req);
+      const data = await res.json();
+
+      expect(res.status).toBe(422);
+      expect(data.code).toBe('VALIDATION_ERROR');
     });
   });
 });

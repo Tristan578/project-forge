@@ -3,8 +3,14 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { sellerProfiles } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { z } from 'zod';
+
+const sellerProfileSchema = z.object({
+  displayName: z.string().trim().min(2).max(100),
+  bio: z.string().trim().max(1000).optional(),
+  portfolioUrl: z.string().trim().max(500).optional(),
+});
 
 export async function GET(req: NextRequest) {
   try {
@@ -49,21 +55,11 @@ export async function POST(req: NextRequest) {
       requireAuth: true,
       rateLimit: true,
       rateLimitConfig: { key: (id) => `user:seller-profile-post:${id}`, max: 10, windowSeconds: 60, distributed: false },
+      validate: sellerProfileSchema,
     });
     if (mid.error) return mid.error;
     const { user } = mid.authContext!;
-
-    const parsed = await parseJsonBody(req);
-    if (!parsed.ok) return parsed.response;
-
-    const nameResult = requireString(parsed.body.displayName, 'Display name', { minLength: 2, maxLength: 100 });
-    if (!nameResult.ok) return nameResult.response;
-
-    const bioResult = optionalString(parsed.body.bio, 'Bio', { maxLength: 1000 });
-    if (!bioResult.ok) return bioResult.response;
-
-    const urlResult = optionalString(parsed.body.portfolioUrl, 'Portfolio URL', { maxLength: 500 });
-    if (!urlResult.ok) return urlResult.response;
+    const { displayName, bio, portfolioUrl } = mid.body as z.infer<typeof sellerProfileSchema>;
 
     // Check if profile exists
     const [existing] = await queryWithResilience(() => getDb()
@@ -77,18 +73,18 @@ export async function POST(req: NextRequest) {
       await queryWithResilience(() => getDb()
         .update(sellerProfiles)
         .set({
-          displayName: nameResult.value,
-          bio: bioResult.value ?? null,
-          portfolioUrl: urlResult.value ?? null,
+          displayName,
+          bio: bio ?? null,
+          portfolioUrl: portfolioUrl ?? null,
         })
         .where(eq(sellerProfiles.userId, user.id)));
     } else {
       // Create
       await queryWithResilience(() => getDb().insert(sellerProfiles).values({
         userId: user.id,
-        displayName: nameResult.value,
-        bio: bioResult.value ?? null,
-        portfolioUrl: urlResult.value ?? null,
+        displayName,
+        bio: bio ?? null,
+        portfolioUrl: portfolioUrl ?? null,
       }));
     }
 

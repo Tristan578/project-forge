@@ -15,14 +15,17 @@ vi.mock('@/lib/db/schema', () => ({
   marketplaceAssets: { id: 'id', avgRating: 'avgRating', ratingCount: 'ratingCount' },
 }));
 vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
-vi.mock('@/lib/apiValidation', () => ({
-  parseJsonBody: vi.fn(),
-  requireInteger: vi.fn(),
-  optionalString: vi.fn(),
-}));
 
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { parseJsonBody, requireInteger, optionalString } from '@/lib/apiValidation';
+
+function mockAuth(body: unknown = { rating: 5, content: 'Great asset!' }) {
+  vi.mocked(withApiMiddleware).mockResolvedValue({
+    error: undefined,
+    userId: 'user_1',
+    authContext: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } },
+    body,
+  } as never);
+}
 
 describe('POST /api/marketplace/assets/[id]/review', () => {
   beforeEach(() => {
@@ -34,7 +37,9 @@ describe('POST /api/marketplace/assets/[id]/review', () => {
     const errorResponse = new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
     vi.mocked(withApiMiddleware).mockResolvedValue({
       error: errorResponse as never,
+      userId: null,
       authContext: null,
+      body: undefined,
     } as never);
 
     const { POST } = await import('./route');
@@ -46,31 +51,8 @@ describe('POST /api/marketplace/assets/[id]/review', () => {
     expect(res.status).toBe(401);
   });
 
-  it('should return 400 when body parsing fails', async () => {
-    vi.mocked(withApiMiddleware).mockResolvedValue({
-      error: undefined,
-      authContext: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } },
-    } as never);
-    const badResponse = new Response(JSON.stringify({ error: 'Invalid body' }), { status: 400 });
-    vi.mocked(parseJsonBody).mockResolvedValue({ ok: false, response: badResponse } as never);
-
-    const { POST } = await import('./route');
-    const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/review', {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
-    const res = await POST(req, { params: Promise.resolve({ id: 'a1' }) });
-    expect(res.status).toBe(400);
-  });
-
   it('should return 403 when user has not purchased asset', async () => {
-    vi.mocked(withApiMiddleware).mockResolvedValue({
-      error: undefined,
-      authContext: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } },
-    } as never);
-    vi.mocked(parseJsonBody).mockResolvedValue({ ok: true, body: { rating: 5 } } as never);
-    vi.mocked(requireInteger).mockReturnValue({ ok: true, value: 5 } as never);
-    vi.mocked(optionalString).mockReturnValue({ ok: true, value: null } as never);
+    mockAuth({ rating: 5 });
 
     const mockDb = {
       select: vi.fn().mockReturnValue({
@@ -92,32 +74,8 @@ describe('POST /api/marketplace/assets/[id]/review', () => {
     expect(res.status).toBe(403);
   });
 
-  it('should return 400 when rating is invalid', async () => {
-    vi.mocked(withApiMiddleware).mockResolvedValue({
-      error: undefined,
-      authContext: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } },
-    } as never);
-    vi.mocked(parseJsonBody).mockResolvedValue({ ok: true, body: { rating: 99 } } as never);
-    const badResponse = new Response(JSON.stringify({ error: 'Invalid rating' }), { status: 400 });
-    vi.mocked(requireInteger).mockReturnValue({ ok: false, response: badResponse } as never);
-
-    const { POST } = await import('./route');
-    const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/review', {
-      method: 'POST',
-      body: JSON.stringify({ rating: 99 }),
-    });
-    const res = await POST(req, { params: Promise.resolve({ id: 'a1' }) });
-    expect(res.status).toBe(400);
-  });
-
   it('should create a review and recalculate rating', async () => {
-    vi.mocked(withApiMiddleware).mockResolvedValue({
-      error: undefined,
-      authContext: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } },
-    } as never);
-    vi.mocked(parseJsonBody).mockResolvedValue({ ok: true, body: { rating: 5, content: 'Great asset!' } } as never);
-    vi.mocked(requireInteger).mockReturnValue({ ok: true, value: 5 } as never);
-    vi.mocked(optionalString).mockReturnValue({ ok: true, value: 'Great asset!' } as never);
+    mockAuth({ rating: 5, content: 'Great asset!' });
 
     // The route makes 5 DB calls via queryWithResilience:
     // 1. select purchase (with .limit) → found

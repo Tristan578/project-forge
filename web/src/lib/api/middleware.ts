@@ -121,6 +121,9 @@ export interface MiddlewareSuccess {
   userId: string | null;
   /** Full auth context (user + clerkId). Null when requireAuth = false. */
   authContext: AuthContext | null;
+  /** Validated request body. Present when `validate` option is provided. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  body: any;
 }
 
 /** Failed middleware result — return the error response directly. */
@@ -128,6 +131,7 @@ export interface MiddlewareFailure {
   error: NextResponse;
   userId: null;
   authContext: null;
+  body: undefined;
 }
 
 export type MiddlewareResult = MiddlewareSuccess | MiddlewareFailure;
@@ -197,7 +201,7 @@ async function runMiddlewarePipeline(
     const authResult = await authenticateRequest();
     if (!authResult.ok) {
       if (handler) return authResult.response;
-      return { error: authResult.response, userId: null, authContext: null };
+      return { error: authResult.response, userId: null, authContext: null, body: undefined };
     }
     authContext = authResult.ctx;
     userId = authResult.ctx.user.id;
@@ -234,7 +238,7 @@ async function runMiddlewarePipeline(
       const { rateLimitResponse: rlResponse } = await import('@/lib/rateLimit');
       const errorResponse = rlResponse(remaining, resetAt);
       if (handler) return errorResponse;
-      return { error: errorResponse, userId: null, authContext: null };
+      return { error: errorResponse, userId: null, authContext: null, body: undefined };
     }
   }
 
@@ -252,7 +256,7 @@ async function runMiddlewarePipeline(
       const { apiError } = await import('@/lib/api/errors');
       const errResponse = apiError(400, 'Invalid JSON body', 'BAD_REQUEST');
       if (handler) return errResponse;
-      return { error: errResponse, userId: null, authContext: null };
+      return { error: errResponse, userId: null, authContext: null, body: undefined };
     }
 
     const parsed = options.validate.safeParse(rawBody);
@@ -260,7 +264,7 @@ async function runMiddlewarePipeline(
       const { apiError } = await import('@/lib/api/errors');
       const errResponse = apiError(422, 'Validation failed', 'VALIDATION_ERROR', parsed.error.format());
       if (handler) return errResponse;
-      return { error: errResponse, userId: null, authContext: null };
+      return { error: errResponse, userId: null, authContext: null, body: undefined };
     }
     body = parsed.data;
   }
@@ -272,5 +276,5 @@ async function runMiddlewarePipeline(
     return handler(req, { userId, authContext, body });
   }
 
-  return { error: undefined, userId, authContext };
+  return { error: undefined, userId, authContext, body };
 }

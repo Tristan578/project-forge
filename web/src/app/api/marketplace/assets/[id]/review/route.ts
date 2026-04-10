@@ -3,8 +3,13 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { assetPurchases, assetReviews, marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { parseJsonBody, requireInteger, optionalString } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { z } from 'zod';
+
+const reviewSchema = z.object({
+  rating: z.number().int().min(1).max(5),
+  content: z.string().max(2000).optional(),
+});
 
 export async function POST(
   req: NextRequest,
@@ -17,18 +22,11 @@ export async function POST(
       requireAuth: true,
       rateLimit: true,
       rateLimitConfig: { key: (id) => `review:${id}`, max: 20, windowSeconds: 60, distributed: false },
+      validate: reviewSchema,
     });
     if (mid.error) return mid.error;
     const { user } = mid.authContext!;
-
-    const parsed = await parseJsonBody(req);
-    if (!parsed.ok) return parsed.response;
-
-    const ratingResult = requireInteger(parsed.body.rating, 'Rating', { min: 1, max: 5 });
-    if (!ratingResult.ok) return ratingResult.response;
-
-    const contentResult = optionalString(parsed.body.content, 'Review content', { maxLength: 2000 });
-    if (!contentResult.ok) return contentResult.response;
+    const { rating, content } = mid.body as z.infer<typeof reviewSchema>;
 
     // Check if user purchased the asset
     const [purchase] = await queryWithResilience(() => getDb()
@@ -52,7 +50,7 @@ export async function POST(
       // Update existing review
       await queryWithResilience(() => getDb()
         .update(assetReviews)
-        .set({ rating: ratingResult.value, content: contentResult.value ?? null })
+        .set({ rating: rating, content: content ?? null })
         .where(eq(assetReviews.id, existingReview.id)));
     } else {
       // Insert new review — onConflictDoNothing makes this idempotent under
@@ -61,8 +59,8 @@ export async function POST(
       await queryWithResilience(() => getDb().insert(assetReviews).values({
         assetId,
         userId: user.id,
-        rating: ratingResult.value,
-        content: contentResult.value ?? null,
+        rating: rating,
+        content: content ?? null,
       }).onConflictDoNothing());
     }
 

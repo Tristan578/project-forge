@@ -161,16 +161,14 @@ describe('POST /api/publish — negative cases', () => {
       expect(body.error).toMatch(/Invalid JSON/i);
     });
 
-    it('returns 400 for JSON array body (not object)', async () => {
+    it('returns 422 for JSON array body (not object)', async () => {
       const res = await POST(makeRawRequest('["not", "an", "object"]'));
-      expect(res.status).toBe(400);
-      const body = await res.json();
-      expect(body.error).toMatch(/must be a JSON object/i);
+      expect(res.status).toBe(422);
     });
 
-    it('returns 400 for JSON primitive body', async () => {
+    it('returns 422 for JSON primitive body', async () => {
       const res = await POST(makeRawRequest('"just a string"'));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
   });
 
@@ -178,24 +176,24 @@ describe('POST /api/publish — negative cases', () => {
   // Field type validation
   // -------------------------------------------------------------------------
   describe('field type validation', () => {
-    it('returns 400 when projectId is a number', async () => {
+    it('returns 422 when projectId is a number', async () => {
       const res = await POST(makeRequest(validBody({ projectId: 42 })));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
 
-    it('returns 400 when title is a boolean', async () => {
+    it('returns 422 when title is a boolean', async () => {
       const res = await POST(makeRequest(validBody({ title: true })));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
 
-    it('returns 400 when slug is an object', async () => {
+    it('returns 422 when slug is an object', async () => {
       const res = await POST(makeRequest(validBody({ slug: { value: 'test' } })));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
 
-    it('returns 400 when description is a number', async () => {
+    it('returns 422 when description is a number', async () => {
       const res = await POST(makeRequest(validBody({ description: 12345 })));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
   });
 
@@ -203,14 +201,14 @@ describe('POST /api/publish — negative cases', () => {
   // Slug edge cases
   // -------------------------------------------------------------------------
   describe('slug edge cases', () => {
-    it('returns 400 for single character slug (below minLength 3)', async () => {
+    it('returns 422 for single character slug (below minLength 3)', async () => {
       const res = await POST(makeRequest(validBody({ slug: 'a' })));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
 
-    it('returns 400 for slug that is exactly 51 chars (above maxLength 50)', async () => {
+    it('returns 422 for slug that is exactly 51 chars (above maxLength 50)', async () => {
       const res = await POST(makeRequest(validBody({ slug: 'a'.repeat(51) })));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
 
     it('allows slug with consecutive dashes (regex permits middle dashes)', async () => {

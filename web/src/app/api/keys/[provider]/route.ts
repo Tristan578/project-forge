@@ -3,9 +3,14 @@ import { assertTier } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { storeProviderKey, deleteProviderKey } from '@/lib/keys/resolver';
 import type { Provider } from '@/lib/db/schema';
-import { parseJsonBody, requireString, requireOneOf } from '@/lib/apiValidation';
+import { requireOneOf } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { BYOK_PROVIDERS } from '@/lib/config/providers';
+import { z } from 'zod';
+
+const keySchema = z.object({
+  key: z.string().trim().min(8).max(500),
+});
 
 /** PUT /api/keys/:provider — store/update a BYOK key */
 export async function PUT(
@@ -16,6 +21,7 @@ export async function PUT(
     requireAuth: true,
     rateLimit: true,
     rateLimitConfig: { key: (id) => `keys:${id}`, max: 10, windowSeconds: 60, distributed: false },
+    validate: keySchema,
   });
   if (mid.error) return mid.error;
 
@@ -26,14 +32,10 @@ export async function PUT(
   const providerResult = requireOneOf(provider, 'Provider', BYOK_PROVIDERS);
   if (!providerResult.ok) return providerResult.response;
 
-  const parsed = await parseJsonBody(req);
-  if (!parsed.ok) return parsed.response;
-
-  const keyResult = requireString(parsed.body.key, 'API key', { minLength: 8, maxLength: 500 });
-  if (!keyResult.ok) return keyResult.response;
+  const { key } = mid.body as z.infer<typeof keySchema>;
 
   try {
-    await storeProviderKey(mid.userId!, providerResult.value as Provider, keyResult.value);
+    await storeProviderKey(mid.userId!, providerResult.value as Provider, key);
     return NextResponse.json({ success: true, provider: providerResult.value, configured: true });
   } catch (err) {
     captureException(err, { route: '/api/keys/[provider]', method: 'PUT' });

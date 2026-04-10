@@ -236,34 +236,34 @@ describe('POST /api/publish', () => {
   // Field validation
   // -------------------------------------------------------------------------
   describe('field validation', () => {
-    it('returns 400 when projectId is missing', async () => {
+    it('returns 422 when projectId is missing', async () => {
       const res = await POST(makeRequest({ title: 'My Game', slug: 'my-game' }));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
 
-    it('returns 400 when title is missing', async () => {
+    it('returns 422 when title is missing', async () => {
       const res = await POST(makeRequest({ projectId: 'p1', slug: 'my-game' }));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
 
-    it('returns 400 when slug is missing', async () => {
+    it('returns 422 when slug is missing', async () => {
       const res = await POST(makeRequest({ projectId: 'p1', title: 'My Game' }));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
 
-    it('returns 400 when slug is too short (< 3 chars)', async () => {
+    it('returns 422 when slug is too short (< 3 chars)', async () => {
       const res = await POST(makeRequest(validBody({ slug: 'ab' })));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
 
-    it('returns 400 when title exceeds 200 chars', async () => {
+    it('returns 422 when title exceeds 200 chars', async () => {
       const res = await POST(makeRequest(validBody({ title: 'x'.repeat(201) })));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
 
-    it('returns 400 when description exceeds 5000 chars', async () => {
+    it('returns 422 when description exceeds 5000 chars', async () => {
       const res = await POST(makeRequest(validBody({ description: 'x'.repeat(5001) })));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
 
     it('returns 400 for invalid JSON body', async () => {

@@ -186,6 +186,7 @@ describe('GET /api/tokens/balance — negative cases', () => {
       error: undefined,
       userId: 'user-1',
       authContext: { user: { id: 'user-1' }, clerkId: 'clerk_1' },
+      body: undefined,
     });
     mockGetTokenBalance.mockResolvedValue(fakeBalance);
 
@@ -267,7 +268,7 @@ describe('POST /api/feedback — negative cases', () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns 400 when type field is missing', async () => {
+  it('returns 422 when type field is missing', async () => {
     mockAuthenticateClerkSession.mockResolvedValue({ ok: true, clerkId: 'clerk_1' });
 
     const { getUserByClerkId } = await import('@/lib/auth/user-service');
@@ -278,10 +279,10 @@ describe('POST /api/feedback — negative cases', () => {
     // Missing 'type' field
     const req = makeRequest('http://localhost/api/feedback', { description: 'This description is long enough' });
     const res = await POST(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
-  it('returns 400 when description is too short', async () => {
+  it('returns 422 when description is too short', async () => {
     mockAuthenticateClerkSession.mockResolvedValue({ ok: true, clerkId: 'clerk_1' });
 
     const { getUserByClerkId } = await import('@/lib/auth/user-service');
@@ -292,10 +293,10 @@ describe('POST /api/feedback — negative cases', () => {
     // Description < 10 chars
     const req = makeRequest('http://localhost/api/feedback', { type: 'bug', description: 'Short' });
     const res = await POST(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
-  it('returns 400 when type has invalid value', async () => {
+  it('returns 422 when type has invalid value', async () => {
     mockAuthenticateClerkSession.mockResolvedValue({ ok: true, clerkId: 'clerk_1' });
 
     const { getUserByClerkId } = await import('@/lib/auth/user-service');
@@ -308,7 +309,7 @@ describe('POST /api/feedback — negative cases', () => {
       description: 'This description is long enough to pass the length check',
     });
     const res = await POST(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 });
 
@@ -355,11 +356,10 @@ describe('POST /api/publish — negative cases', () => {
     expect(res.status).toBe(429);
   });
 
-  it('returns 400 when projectId is missing', async () => {
+  it('returns 422 when projectId is missing', async () => {
+    // withApiMiddleware now handles Zod validation; simulate its 422 response
     mockWithApiMiddleware.mockResolvedValue({
-      error: undefined,
-      userId: 'user-1',
-      authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+      error: NextResponse.json({ error: 'Validation failed', code: 'VALIDATION_ERROR' }, { status: 422 }),
     });
 
     const { POST } = await import('@/app/api/publish/route');
@@ -368,14 +368,12 @@ describe('POST /api/publish — negative cases', () => {
       slug: 'my-game',
     });
     const res = await POST(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
-  it('returns 400 when title is missing', async () => {
+  it('returns 422 when title is missing', async () => {
     mockWithApiMiddleware.mockResolvedValue({
-      error: undefined,
-      userId: 'user-1',
-      authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+      error: NextResponse.json({ error: 'Validation failed', code: 'VALIDATION_ERROR' }, { status: 422 }),
     });
 
     const { POST } = await import('@/app/api/publish/route');
@@ -384,14 +382,13 @@ describe('POST /api/publish — negative cases', () => {
       slug: 'my-game',
     });
     const res = await POST(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
   it('returns 400 for invalid JSON body', async () => {
+    // Middleware returns 400 on JSON parse errors (distinct from 422 validation errors)
     mockWithApiMiddleware.mockResolvedValue({
-      error: undefined,
-      userId: 'user-1',
-      authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+      error: NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }),
     });
 
     const { POST } = await import('@/app/api/publish/route');
@@ -400,11 +397,9 @@ describe('POST /api/publish — negative cases', () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns 400 when slug is too short', async () => {
+  it('returns 422 when slug is too short', async () => {
     mockWithApiMiddleware.mockResolvedValue({
-      error: undefined,
-      userId: 'user-1',
-      authContext: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+      error: NextResponse.json({ error: 'Validation failed', code: 'VALIDATION_ERROR' }, { status: 422 }),
     });
 
     const { POST } = await import('@/app/api/publish/route');
@@ -414,7 +409,7 @@ describe('POST /api/publish — negative cases', () => {
       slug: 'ab', // < 3 chars
     });
     const res = await POST(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 });
 

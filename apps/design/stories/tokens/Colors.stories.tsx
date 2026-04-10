@@ -18,15 +18,16 @@ function ColorSwatch({ token, value }: { token: string; value: string }) {
 
 function ThemeColorGrid({ theme }: { theme: ThemeName }) {
   const tokens = THEME_DEFINITIONS[theme];
-  const colorTokens = Object.entries(tokens).filter(([key]) =>
-    key.startsWith('--sf-bg') ||
+  const colorTokens = Object.entries(tokens).filter(([key, value]) =>
+    (key.startsWith('--sf-bg') ||
     key.startsWith('--sf-text') ||
     key.startsWith('--sf-border') ||
     key.startsWith('--sf-accent') ||
     key.startsWith('--sf-on-') ||
     key.startsWith('--sf-destructive') ||
     key.startsWith('--sf-success') ||
-    key.startsWith('--sf-warning')
+    key.startsWith('--sf-warning')) &&
+    value.startsWith('#')
   );
 
   return (

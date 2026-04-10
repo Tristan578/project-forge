@@ -119,8 +119,8 @@ describe('POST /api/marketplace/seller', () => {
     const res = await POST(req);
     const body = await res.json();
 
-    expect(res.status).toBe(400);
-    expect(body.error).toContain('at least 2 character');
+    expect(res.status).toBe(422);
+    expect(body.code).toBe('VALIDATION_ERROR');
   });
 
   it('should create a new seller profile', async () => {
