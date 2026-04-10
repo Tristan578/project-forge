@@ -1,23 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { discoverTool, isAllowedToolId } from '@/lib/bridges/bridgeManager';
 import { captureException } from '@/lib/monitoring/sentry-server';
+
+const discoverSchema = z.object({
+  toolId: z.string().min(1).max(100),
+});
 
 export async function POST(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
     rateLimitConfig: { key: (id) => `user:bridges-discover:${id}`, max: 10, windowSeconds: 60, distributed: false },
+    validate: discoverSchema,
   });
   if (mid.error) return mid.error;
 
   try {
-    const body = await req.json();
-    const toolId = body?.toolId;
-
-    if (!toolId || typeof toolId !== 'string') {
-      return NextResponse.json({ error: 'toolId is required' }, { status: 400 });
-    }
+    const { toolId } = mid.body as z.infer<typeof discoverSchema>;
 
     if (!isAllowedToolId(toolId)) {
       return NextResponse.json(

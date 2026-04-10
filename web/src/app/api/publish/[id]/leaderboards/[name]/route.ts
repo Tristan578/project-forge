@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, leaderboards } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
+
+const patchLeaderboardSchema = z.object({
+  sortOrder: z.enum(['asc', 'desc']).optional(),
+  maxEntries: z.number().finite().optional(),
+  minScore: z.number().finite().nullish(),
+  maxScore: z.number().finite().nullish(),
+});
 
 async function verifyGameOwnership(gameId: string, userId: string) {
   const [game] = await queryWithResilience(() => getDb()
@@ -32,6 +40,7 @@ export async function PATCH(
     requireAuth: true,
     rateLimit: true,
     rateLimitConfig: { key: (userId) => `user:leaderboard-config:${userId}`, max: 20, windowSeconds: 60 },
+    validate: patchLeaderboardSchema,
   });
   if (mid.error) return mid.error;
 
@@ -57,22 +66,17 @@ export async function PATCH(
       return NextResponse.json({ error: 'Leaderboard not found' }, { status: 404 });
     }
 
-    let body: Record<string, unknown>;
-    try {
-      body = await request.json();
-    } catch {
-      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-    }
+    const body = mid.body as z.infer<typeof patchLeaderboardSchema>;
 
     const updates: Record<string, unknown> = {};
-    if (body.sortOrder === 'asc' || body.sortOrder === 'desc') updates.sortOrder = body.sortOrder;
-    if (typeof body.maxEntries === 'number' && Number.isFinite(body.maxEntries)) {
+    if (body.sortOrder !== undefined) updates.sortOrder = body.sortOrder;
+    if (body.maxEntries !== undefined) {
       updates.maxEntries = Math.min(Math.max(Math.round(body.maxEntries), 1), 1000);
     }
     const minScore = body.minScore === null ? null
-      : (typeof body.minScore === 'number' && Number.isFinite(body.minScore)) ? Math.round(body.minScore) : undefined;
+      : body.minScore !== undefined ? Math.round(body.minScore) : undefined;
     const maxScore = body.maxScore === null ? null
-      : (typeof body.maxScore === 'number' && Number.isFinite(body.maxScore)) ? Math.round(body.maxScore) : undefined;
+      : body.maxScore !== undefined ? Math.round(body.maxScore) : undefined;
 
     // Validate the resulting min/max range using existing DB values for fields not in this update.
     // A partial PATCH (e.g. only minScore) must still satisfy minScore <= maxScore after the update.
