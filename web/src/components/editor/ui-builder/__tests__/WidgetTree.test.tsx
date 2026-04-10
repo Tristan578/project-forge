@@ -19,6 +19,14 @@ vi.mock('lucide-react', () => ({
   Copy: (props: Record<string, unknown>) => <span data-testid="copy-icon" {...props} />,
 }));
 
+const mockConfirm = vi.fn().mockResolvedValue(true);
+vi.mock('@/hooks/useConfirmDialog', () => ({
+  useConfirmDialog: () => ({
+    confirm: mockConfirm,
+    ConfirmDialogPortal: () => null,
+  }),
+}));
+
 const makeWidget = (id: string, name: string, type = 'text', children: string[] = []) => ({
   id,
   name,
@@ -120,24 +128,27 @@ describe('WidgetTree', () => {
     expect(mockDuplicateWidget).toHaveBeenCalledWith('screen1', 'w1');
   });
 
-  it('calls removeWidget when delete button is clicked and confirmed', () => {
+  it('calls removeWidget when delete button is clicked and confirmed', async () => {
     setupStore();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    mockConfirm.mockResolvedValue(true);
     render(<WidgetTree />);
     const deleteButtons = screen.getAllByTitle('Delete');
     fireEvent.click(deleteButtons[0]);
-    expect(mockRemoveWidget).toHaveBeenCalledWith('screen1', 'w1');
-    vi.restoreAllMocks();
+    await vi.waitFor(() => {
+      expect(mockRemoveWidget).toHaveBeenCalledWith('screen1', 'w1');
+    });
   });
 
-  it('does not call removeWidget when delete is cancelled', () => {
+  it('does not call removeWidget when delete is cancelled', async () => {
     setupStore();
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    mockConfirm.mockResolvedValue(false);
     render(<WidgetTree />);
     const deleteButtons = screen.getAllByTitle('Delete');
     fireEvent.click(deleteButtons[0]);
+    await vi.waitFor(() => {
+      expect(mockConfirm).toHaveBeenCalled();
+    });
     expect(mockRemoveWidget).not.toHaveBeenCalled();
-    vi.restoreAllMocks();
   });
 
   it('calls reorderWidget with "up" when move-up button is clicked', () => {

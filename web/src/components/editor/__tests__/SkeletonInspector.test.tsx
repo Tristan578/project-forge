@@ -22,6 +22,14 @@ vi.mock('lucide-react', () => ({
   Trash2: (props: Record<string, unknown>) => <span data-testid="trash-icon" {...props} />,
 }));
 
+const mockConfirm = vi.fn().mockResolvedValue(true);
+vi.mock('@/hooks/useConfirmDialog', () => ({
+  useConfirmDialog: () => ({
+    confirm: mockConfirm,
+    ConfirmDialogPortal: () => null,
+  }),
+}));
+
 const baseSkeleton: SkeletonData2d = {
   bones: [
     {
@@ -201,12 +209,15 @@ describe('SkeletonInspector', () => {
     expect(screen.getByText('Remove Skeleton').textContent).toBe('Remove Skeleton');
   });
 
-  it('calls removeSkeleton2d when Remove Skeleton confirmed', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('calls removeSkeleton2d when Remove Skeleton confirmed', async () => {
+    mockConfirm.mockResolvedValue(true);
     setupStore({ skeleton: baseSkeleton });
     render(<SkeletonInspector entityId="entity-1" />);
     fireEvent.click(screen.getByText('Remove Skeleton'));
-    expect(mockRemoveSkeleton2d).toHaveBeenCalledWith('entity-1');
+    // Wait for the async confirm to resolve
+    await vi.waitFor(() => {
+      expect(mockRemoveSkeleton2d).toHaveBeenCalledWith('entity-1');
+    });
   });
 
   it('renders IK constraints when they exist', () => {

@@ -21,6 +21,14 @@ vi.mock('lucide-react', () => ({
   GripVertical: (props: Record<string, unknown>) => <span data-testid="grip-icon" {...props} />,
 }));
 
+const mockConfirm = vi.fn().mockResolvedValue(true);
+vi.mock('@/hooks/useConfirmDialog', () => ({
+  useConfirmDialog: () => ({
+    confirm: mockConfirm,
+    ConfirmDialogPortal: () => null,
+  }),
+}));
+
 const baseTilemapData = {
   tilesetAssetId: '',
   mapSize: [20, 15] as [number, number],
@@ -203,12 +211,14 @@ describe('TilemapLayerPanel', () => {
     expect(screen.getByRole('slider')).toBeInTheDocument();
   });
 
-  it('calls setTilemapData when delete layer confirmed', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('calls setTilemapData when delete layer confirmed', async () => {
+    mockConfirm.mockResolvedValue(true);
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapLayerPanel />);
     const deleteButtons = screen.getAllByTitle('Delete layer');
     fireEvent.click(deleteButtons[0]);
-    expect(mockSetTilemapData).toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(mockSetTilemapData).toHaveBeenCalled();
+    });
   });
 });
