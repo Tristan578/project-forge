@@ -9,7 +9,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 const variantStyles: Record<NonNullable<ButtonProps['variant']>, string> = {
   default: 'bg-[var(--sf-accent)] text-[var(--sf-on-accent)] hover:bg-[var(--sf-accent-hover)]',
   destructive: 'bg-[var(--sf-destructive)] sf-destructive text-[var(--sf-on-accent)] hover:opacity-90',
-  outline: 'bg-transparent sf-border border-[length:var(--sf-border-width)] border-[var(--sf-border)] text-[var(--sf-text)] hover:bg-[var(--sf-bg-elevated)]',
+  outline: 'bg-transparent border-[length:var(--sf-border-width)] border-[var(--sf-border-strong)] text-[var(--sf-text)] hover:bg-[var(--sf-bg-elevated)]',
   ghost: 'bg-transparent text-[var(--sf-text)] hover:bg-[var(--sf-bg-elevated)]',
 };
 

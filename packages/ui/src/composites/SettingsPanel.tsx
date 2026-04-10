@@ -108,7 +108,7 @@ function ThemeCard({
             type="checkbox"
             checked={isProjectTheme}
             onChange={(e) => onProjectToggle(e.target.checked)}
-            className="rounded border-[var(--sf-border)] accent-[var(--sf-accent)]"
+            className="rounded border-[var(--sf-border-strong)] accent-[var(--sf-accent)]"
             aria-label={`Set ${theme} as project theme`}
           />
           Project
