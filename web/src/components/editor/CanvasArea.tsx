@@ -15,6 +15,12 @@ import { UIRuntimeRenderer } from './ui-builder/UIRuntimeRenderer';
 
 const CANVAS_ID = 'game-canvas';
 
+// Keyboard orbit step sizes — kept small enough that held-key repeat feels
+// smooth, large enough that a single tap is perceptible.
+const ORBIT_YAW_STEP = 0.1;    // radians (~5.7°)
+const ORBIT_PITCH_STEP = 0.08; // radians (~4.6°)
+const ZOOM_STEP = 0.5;         // radius units
+
 /** Map keybinding action names to WASM engine commands. */
 const ACTION_COMMANDS: Record<string, (wasm: ReturnType<typeof getWasmModule>) => void> = {
   translate: (w) => w?.handle_command('set_gizmo_mode', { mode: 'translate' }),
@@ -26,6 +32,17 @@ const ACTION_COMMANDS: Record<string, (wasm: ReturnType<typeof getWasmModule>) =
   redo: (w) => w?.handle_command('redo', {}),
   focus: (w) => { const id = useEditorStore.getState().primaryId; if (id) w?.handle_command('focus_camera', { entityId: id }); },
   deselect: (w) => w?.handle_command('clear_selection', {}),
+  'orbit-left': (w) => w?.handle_command('orbit_camera', { deltaYaw: -ORBIT_YAW_STEP }),
+  'orbit-right': (w) => w?.handle_command('orbit_camera', { deltaYaw: ORBIT_YAW_STEP }),
+  // Arrow Up/Down match mouse-drag convention: dragging up (negative screen-Y)
+  // tilts the view upward, which corresponds to a NEGATIVE pitch delta in
+  // bevy_panorbit_camera (positive pitch raises the camera above the target so
+  // the view tilts down to track it). Keeping arrows and mouse drag consistent
+  // avoids the "inverted controls" surprise flagged in #8338 review.
+  'orbit-up': (w) => w?.handle_command('orbit_camera', { deltaPitch: -ORBIT_PITCH_STEP }),
+  'orbit-down': (w) => w?.handle_command('orbit_camera', { deltaPitch: ORBIT_PITCH_STEP }),
+  'zoom-in': (w) => w?.handle_command('orbit_camera', { deltaRadius: -ZOOM_STEP }),
+  'zoom-out': (w) => w?.handle_command('orbit_camera', { deltaRadius: ZOOM_STEP }),
 };
 
 export function CanvasArea() {

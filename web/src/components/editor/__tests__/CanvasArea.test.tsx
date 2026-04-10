@@ -247,6 +247,32 @@ describe('CanvasArea', () => {
     expect(mockHandleCommand).not.toHaveBeenCalledWith('focus_camera', expect.anything());
   });
 
+  // Regression: Sentry #8338 — Arrow Up/Down pitch signs were inverted relative
+  // to mouse-drag convention in bevy_panorbit_camera. Mouse drag up (screen-Y
+  // negative) tilts the view up, corresponding to a NEGATIVE pitch delta.
+  // Arrow Up must match mouse drag up → negative pitch.
+  it('ArrowUp dispatches orbit_camera with NEGATIVE deltaPitch (tilts view up)', () => {
+    mockEditorStore();
+    const { container } = render(<CanvasArea />);
+    const canvas = container.querySelector('canvas')!;
+    fireEvent.keyDown(canvas, { key: 'ArrowUp' });
+    const call = mockHandleCommand.mock.calls.find(([cmd]) => cmd === 'orbit_camera');
+    expect(call).toBeDefined();
+    const payload = call![1] as { deltaPitch: number };
+    expect(payload.deltaPitch).toBeLessThan(0);
+  });
+
+  it('ArrowDown dispatches orbit_camera with POSITIVE deltaPitch (tilts view down)', () => {
+    mockEditorStore();
+    const { container } = render(<CanvasArea />);
+    const canvas = container.querySelector('canvas')!;
+    fireEvent.keyDown(canvas, { key: 'ArrowDown' });
+    const call = mockHandleCommand.mock.calls.find(([cmd]) => cmd === 'orbit_camera');
+    expect(call).toBeDefined();
+    const payload = call![1] as { deltaPitch: number };
+    expect(payload.deltaPitch).toBeGreaterThan(0);
+  });
+
   it('Escape in paused mode dispatches stop', () => {
     mockEditorStore({ engineMode: 'paused' });
     const { container } = render(<CanvasArea />);

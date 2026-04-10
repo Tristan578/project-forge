@@ -8,12 +8,13 @@ use crate::core::{
     input::{ActionDef, ActionType, InputPreset, InputSource},
     pending_commands::{
         queue_transform_update_from_bridge, queue_rename_from_bridge, queue_camera_focus_from_bridge,
+        queue_camera_orbit_from_bridge,
         queue_spawn_from_bridge, queue_delete_from_bridge, queue_duplicate_from_bridge,
         queue_reparent_from_bridge, queue_snap_settings_update_from_bridge, queue_grid_toggle_from_bridge,
         queue_camera_preset_from_bridge, queue_coordinate_mode_update_from_bridge,
         queue_input_binding_update_from_bridge, queue_input_preset_from_bridge,
         queue_input_binding_removal_from_bridge,
-        TransformUpdate, RenameRequest, CameraFocusRequest, SpawnRequest, DeleteRequest, DuplicateRequest,
+        TransformUpdate, RenameRequest, CameraFocusRequest, CameraOrbitRequest, SpawnRequest, DeleteRequest, DuplicateRequest,
         ReparentRequest, SnapSettingsUpdate, CameraPresetRequest, EntityType,
         InputBindingUpdate, InputPresetRequest, InputBindingRemoval,
         QueryRequest, SelectionRequest, SelectionMode, queue_selection_from_bridge,
@@ -46,6 +47,7 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<CommandRes
         "rename_entity" => handle_rename_entity(payload.clone()),
         "reparent_entity" => handle_reparent_entity(payload.clone()),
         "focus_camera" => handle_focus_camera(payload.clone()),
+        "orbit_camera" => handle_orbit_camera(payload.clone()),
         "delete_entities" => handle_delete_entities(payload.clone()),
         "duplicate_entity" => handle_duplicate_entity(payload.clone()),
         "undo" => handle_undo(payload.clone()),
@@ -400,6 +402,52 @@ fn handle_focus_camera(payload: serde_json::Value) -> CommandResult {
 
     if queue_camera_focus_from_bridge(request) {
         tracing::info!("Queued camera focus on entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for orbit_camera command.
+/// All fields optional — apply whichever deltas are present.
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct OrbitCameraPayload {
+    delta_yaw: Option<f32>,
+    delta_pitch: Option<f32>,
+    delta_radius: Option<f32>,
+}
+
+/// Orbit the editor camera by delta yaw/pitch/radius (keyboard-driven).
+/// Payload: { deltaYaw?: number, deltaPitch?: number, deltaRadius?: number }
+fn handle_orbit_camera(payload: serde_json::Value) -> CommandResult {
+    let data: OrbitCameraPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid orbit_camera payload: {}", e))?;
+
+    if data.delta_yaw.is_none() && data.delta_pitch.is_none() && data.delta_radius.is_none() {
+        return Err("orbit_camera requires at least one of deltaYaw, deltaPitch, deltaRadius".to_string());
+    }
+
+    // Reject non-finite values to prevent NaN/Infinity leaking into camera state.
+    for (name, v) in [
+        ("deltaYaw", data.delta_yaw),
+        ("deltaPitch", data.delta_pitch),
+        ("deltaRadius", data.delta_radius),
+    ] {
+        if let Some(n) = v {
+            if !n.is_finite() {
+                return Err(format!("{} must be finite", name));
+            }
+        }
+    }
+
+    let request = CameraOrbitRequest {
+        delta_yaw: data.delta_yaw,
+        delta_pitch: data.delta_pitch,
+        delta_radius: data.delta_radius,
+    };
+
+    if queue_camera_orbit_from_bridge(request) {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
@@ -1014,6 +1062,38 @@ mod tests {
             err
         );
     }
+
+    // === orbit_camera ===
+
+    #[test]
+    fn orbit_camera_accepts_yaw_delta() {
+        let result = run("orbit_camera", json!({"deltaYaw": 0.1}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn orbit_camera_accepts_radius_delta() {
+        let result = run("orbit_camera", json!({"deltaRadius": -1.0}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn orbit_camera_rejects_empty_payload() {
+        let result = run("orbit_camera", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("at least one"),
+            "Expected 'at least one' error, got: {}",
+            err
+        );
+    }
+
+    // Note: JSON can't represent NaN/Infinity, so the is_finite() guard in
+    // handle_orbit_camera protects against construction paths that don't go
+    // through serde_json (currently none, but cheap insurance).
 
     // === undo/redo ===
     // undo/redo use PENDING_HISTORY which is always initialized (thread-local with default value),

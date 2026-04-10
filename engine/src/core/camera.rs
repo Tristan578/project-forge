@@ -20,6 +20,7 @@ impl Plugin for CameraControlPlugin {
             .init_resource::<CameraViewState>()
             .add_systems(Update, (
                 apply_pending_camera_focus,
+                apply_pending_camera_orbit,
                 focus_on_selection_system,
                 camera_presets::camera_preset_keyboard_system,
                 camera_presets::apply_camera_preset_system,
@@ -49,6 +50,43 @@ fn apply_pending_camera_focus(
             if let Ok(mut camera) = camera_query.single_mut() {
                 camera.target_focus = transform.translation;
             }
+        }
+    }
+}
+
+/// System that applies pending camera orbit requests (keyboard-driven deltas).
+///
+/// Adjusts `target_yaw`, `target_pitch`, `target_radius` on the editor camera
+/// so `bevy_panorbit_camera`'s built-in smoothing handles the transition.
+/// Pitch is clamped to avoid flipping past the poles; radius is clamped to
+/// a sensible floor so the camera can't zoom through the focus point.
+fn apply_pending_camera_orbit(
+    mut pending: ResMut<PendingCommands>,
+    mut camera_query: Query<&mut PanOrbitCamera, With<EditorCamera>>,
+) {
+    if pending.camera_orbit_requests.is_empty() {
+        return;
+    }
+
+    let Ok(mut camera) = camera_query.single_mut() else {
+        pending.camera_orbit_requests.clear();
+        return;
+    };
+
+    // Pitch clamp: ~89° each side. Past this, the orbit basis flips.
+    const PITCH_LIMIT: f32 = 1.55; // ~88.8°
+    // Radius floor — must be > 0 to avoid degenerate projection.
+    const MIN_RADIUS: f32 = 0.1;
+
+    for request in pending.camera_orbit_requests.drain(..) {
+        if let Some(dy) = request.delta_yaw {
+            camera.target_yaw += dy;
+        }
+        if let Some(dp) = request.delta_pitch {
+            camera.target_pitch = (camera.target_pitch + dp).clamp(-PITCH_LIMIT, PITCH_LIMIT);
+        }
+        if let Some(dr) = request.delta_radius {
+            camera.target_radius = (camera.target_radius + dr).max(MIN_RADIUS);
         }
     }
 }

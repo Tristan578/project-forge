@@ -43,6 +43,14 @@ export const DEFAULT_BINDINGS: KeyBinding[] = [
   { action: 'delete', label: 'Delete selected', category: 'Scene', defaultKey: 'Delete', customKey: null, context: 'canvas' },
   { action: 'focus', label: 'Focus on selected', category: 'Scene', defaultKey: 'F', customKey: null, context: 'canvas' },
 
+  // Camera orbit (keyboard navigation of 3D viewport)
+  { action: 'orbit-left', label: 'Orbit camera left', category: 'Camera', defaultKey: 'ArrowLeft', customKey: null, context: 'canvas' },
+  { action: 'orbit-right', label: 'Orbit camera right', category: 'Camera', defaultKey: 'ArrowRight', customKey: null, context: 'canvas' },
+  { action: 'orbit-up', label: 'Orbit camera up', category: 'Camera', defaultKey: 'ArrowUp', customKey: null, context: 'canvas' },
+  { action: 'orbit-down', label: 'Orbit camera down', category: 'Camera', defaultKey: 'ArrowDown', customKey: null, context: 'canvas' },
+  { action: 'zoom-in', label: 'Zoom camera in', category: 'Camera', defaultKey: '=', customKey: null, context: 'canvas' },
+  { action: 'zoom-out', label: 'Zoom camera out', category: 'Camera', defaultKey: '-', customKey: null, context: 'canvas' },
+
   // View
   { action: 'view-top', label: 'Top view', category: 'View', defaultKey: '1', customKey: null },
   { action: 'view-front', label: 'Front view', category: 'View', defaultKey: '2', customKey: null },
