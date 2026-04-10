@@ -36,6 +36,7 @@ function mockMiddlewareSuccess(overrides?: Partial<ReturnType<typeof makeUser>>)
     error: undefined,
     userId: user.id,
     authContext: { clerkId: 'clerk123', user } as never,
+    body: undefined,
   });
   return user;
 }
@@ -53,6 +54,7 @@ describe('GET /api/billing/status', () => {
       error: mockResponse as never,
       userId: null,
       authContext: null,
+      body: undefined,
     });
 
     const { GET } = await import('./route');

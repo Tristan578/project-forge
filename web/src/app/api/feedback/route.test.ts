@@ -59,7 +59,7 @@ describe('POST /api/feedback', () => {
     expect(res.status).toBe(429);
   });
 
-  it('should return 400 for invalid type', async () => {
+  it('should return 422 for invalid type', async () => {
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/feedback', {
       method: 'POST',
@@ -68,11 +68,11 @@ describe('POST /api/feedback', () => {
     const res = await POST(req);
     const body = await res.json();
 
-    expect(res.status).toBe(400);
-    expect(body.error).toContain('Type must be one of');
+    expect(res.status).toBe(422);
+    expect(body.code).toBe('VALIDATION_ERROR');
   });
 
-  it('should return 400 for description too short', async () => {
+  it('should return 422 for description too short', async () => {
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/feedback', {
       method: 'POST',
@@ -81,8 +81,8 @@ describe('POST /api/feedback', () => {
     const res = await POST(req);
     const body = await res.json();
 
-    expect(res.status).toBe(400);
-    expect(body.error).toContain('at least 10 character');
+    expect(res.status).toBe(422);
+    expect(body.code).toBe('VALIDATION_ERROR');
   });
 
   it('should submit feedback successfully', async () => {

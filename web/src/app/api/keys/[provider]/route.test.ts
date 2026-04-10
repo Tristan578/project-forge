@@ -71,7 +71,7 @@ describe('PUT /api/keys/[provider]', () => {
     expect(body.error).toContain('must be one of');
   });
 
-  it('should return 400 for short API key', async () => {
+  it('should return 422 for short API key', async () => {
     const { PUT } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/keys/anthropic', {
       method: 'PUT',
@@ -80,8 +80,8 @@ describe('PUT /api/keys/[provider]', () => {
     const res = await PUT(req, { params: Promise.resolve({ provider: 'anthropic' }) });
     const body = await res.json();
 
-    expect(res.status).toBe(400);
-    expect(body.error).toContain('at least 8 character');
+    expect(res.status).toBe(422);
+    expect(body.code).toBe('VALIDATION_ERROR');
   });
 
   it('should store key and return success', async () => {

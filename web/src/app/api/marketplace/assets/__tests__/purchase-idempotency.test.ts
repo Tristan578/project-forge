@@ -32,6 +32,7 @@ vi.mock('@/lib/db/client', () => ({
 vi.mock('@/lib/api/middleware', () => ({
   withApiMiddleware: vi.fn().mockResolvedValue({
     error: undefined,
+    userId: 'buyer-1',
     authContext: {
       user: {
         id: 'buyer-1',
@@ -41,6 +42,7 @@ vi.mock('@/lib/api/middleware', () => ({
         earnedCredits: 500,
       },
     },
+    body: undefined,
   }),
 }));
 

@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { updateDisplayName } from '@/lib/auth/user-service';
-import { parseJsonBody, requireString } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { internalError } from '@/lib/api/errors';
+
+const profileUpdateSchema = z.object({
+  displayName: z.string().min(2).max(100),
+});
 
 /**
  * GET /api/user/profile
@@ -36,17 +40,14 @@ export async function PUT(request: NextRequest) {
     requireAuth: true,
     rateLimit: true,
     rateLimitConfig: { key: (id) => `user:profile-put:${id}`, max: 10, windowSeconds: 60 },
+    validate: profileUpdateSchema,
   });
   if (mid.error) return mid.error;
 
-  const parsed = await parseJsonBody(request);
-  if (!parsed.ok) return parsed.response;
-
-  const nameResult = requireString(parsed.body.displayName, 'displayName', { minLength: 2, maxLength: 100 });
-  if (!nameResult.ok) return nameResult.response;
+  const { displayName } = mid.body as z.infer<typeof profileUpdateSchema>;
 
   try {
-    const user = await updateDisplayName(mid.userId!, nameResult.value);
+    const user = await updateDisplayName(mid.userId!, displayName);
     return NextResponse.json({
       displayName: user.displayName,
       email: user.email,

@@ -1,14 +1,12 @@
-import type { CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { THEME_NAMES, THEME_DEFINITIONS, type ThemeName } from '@spawnforge/ui/tokens';
-import { DEMO_BG } from './vars';
 
 function ColorSwatch({ token, value }: { token: string; value: string }) {
   return (
     <div className="flex items-center gap-3 py-1">
       <div
-        className={`w-10 h-10 rounded-md border border-[var(--sf-border)] shrink-0 bg-[var(${DEMO_BG})]`}
-        style={{ [DEMO_BG]: value } as CSSProperties}
+        className="w-10 h-10 rounded-md border border-zinc-600 shrink-0"
+        style={{ backgroundColor: value }}
       />
       <div>
         <div className="font-mono text-[13px]">{token}</div>
@@ -20,15 +18,16 @@ function ColorSwatch({ token, value }: { token: string; value: string }) {
 
 function ThemeColorGrid({ theme }: { theme: ThemeName }) {
   const tokens = THEME_DEFINITIONS[theme];
-  const colorTokens = Object.entries(tokens).filter(([key]) =>
-    key.startsWith('--sf-bg') ||
+  const colorTokens = Object.entries(tokens).filter(([key, value]) =>
+    (key.startsWith('--sf-bg') ||
     key.startsWith('--sf-text') ||
     key.startsWith('--sf-border') ||
     key.startsWith('--sf-accent') ||
     key.startsWith('--sf-on-') ||
     key.startsWith('--sf-destructive') ||
     key.startsWith('--sf-success') ||
-    key.startsWith('--sf-warning')
+    key.startsWith('--sf-warning')) &&
+    value.startsWith('#')
   );
 
   return (

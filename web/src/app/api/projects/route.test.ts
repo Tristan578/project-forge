@@ -23,11 +23,16 @@ function makeReq(method = 'GET', body?: string) {
   return new NextRequest(url, { method });
 }
 
-function mockMiddlewareSuccess(userId = 'user_1', tier = 'creator' as const) {
+function mockMiddlewareSuccess(
+  userId = 'user_1',
+  tier = 'creator' as const,
+  body: unknown = { name: 'Test', sceneData: {} },
+) {
   vi.mocked(withApiMiddleware).mockResolvedValue({
     error: undefined,
     userId,
     authContext: { clerkId: 'clerk_1', user: { id: userId, tier } as never },
+    body,
   });
 }
 
@@ -43,6 +48,7 @@ describe('GET /api/projects', () => {
       error: mockResponse as never,
       userId: null,
       authContext: null,
+      body: undefined,
     });
 
     const { GET } = await import('./route');
@@ -78,6 +84,7 @@ describe('POST /api/projects', () => {
       error: mockResponse as never,
       userId: null,
       authContext: null,
+      body: undefined,
     });
 
     const { POST } = await import('./route');
@@ -92,6 +99,7 @@ describe('POST /api/projects', () => {
       error: rlResponse as never,
       userId: null,
       authContext: null,
+      body: undefined,
     });
 
     const { POST } = await import('./route');
@@ -100,25 +108,8 @@ describe('POST /api/projects', () => {
     expect(res.status).toBe(429);
   });
 
-  it('should return 400 when name is missing', async () => {
-    const { POST } = await import('./route');
-    const res = await POST(makeReq('POST', JSON.stringify({ sceneData: {} })));
-    const body = await res.json();
-
-    expect(res.status).toBe(400);
-    expect(body.error).toBe('Project name is required and must be a string');
-  });
-
-  it('should return 400 when sceneData is missing', async () => {
-    const { POST } = await import('./route');
-    const res = await POST(makeReq('POST', JSON.stringify({ name: 'Test' })));
-    const body = await res.json();
-
-    expect(res.status).toBe(400);
-    expect(body.error).toBe('Scene data is required and must be an object');
-  });
-
   it('should create project and return 201', async () => {
+    mockMiddlewareSuccess('user_1', 'creator', { name: 'New Project', sceneData: { entities: [] } });
     vi.mocked(createProject).mockResolvedValue({ id: 'p-new', name: 'New Project' } as never);
 
     const { POST } = await import('./route');
@@ -131,6 +122,7 @@ describe('POST /api/projects', () => {
   });
 
   it('should return 403 when project limit exceeded (regression: error field now contains human-readable message, not code)', async () => {
+    mockMiddlewareSuccess('user_1', 'creator', { name: 'New Project', sceneData: {} });
     const error = new Error('Project limit exceeded') as Error & { limit?: number };
     error.limit = 3;
     vi.mocked(createProject).mockRejectedValue(error);

@@ -1,10 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { parseJsonBody, optionalString } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
+
+const patchAssetSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().min(1).max(5000).optional(),
+  priceTokens: z.number().int().nonnegative().optional(),
+  license: z.string().max(50).optional(),
+  tags: z.array(z.string()).max(20).optional(),
+  previewUrl: z.string().max(2000).optional(),
+  assetFileUrl: z.string().max(2000).optional(),
+  assetFileSize: z.number().int().nonnegative().optional(),
+  status: z.enum(['draft', 'pending_review']).optional(),
+});
 
 export async function PATCH(
   req: NextRequest,
@@ -17,9 +29,11 @@ export async function PATCH(
       requireAuth: true,
       rateLimit: true,
       rateLimitConfig: { key: (id) => `user:seller-asset-patch:${id}`, max: 10, windowSeconds: 60, distributed: false },
+      validate: patchAssetSchema,
     });
     if (mid.error) return mid.error;
     const { user } = mid.authContext!;
+    const body = mid.body as z.infer<typeof patchAssetSchema>;
 
     // Check ownership
     const [asset] = await queryWithResilience(() => getDb()
@@ -32,59 +46,17 @@ export async function PATCH(
       return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
     }
 
-    const parsed = await parseJsonBody(req);
-    if (!parsed.ok) return parsed.response;
-
     const updates: Record<string, unknown> = {};
 
-    if (parsed.body.name !== undefined) {
-      const r = optionalString(parsed.body.name, 'Name', { maxLength: 200 });
-      if (!r.ok) return r.response;
-      updates.name = r.value;
-    }
-    if (parsed.body.description !== undefined) {
-      const r = optionalString(parsed.body.description, 'Description', { maxLength: 5000 });
-      if (!r.ok) return r.response;
-      updates.description = r.value;
-    }
-    if (parsed.body.priceTokens !== undefined) {
-      const p = parsed.body.priceTokens;
-      if (typeof p !== 'number' || !Number.isInteger(p) || p < 0) {
-        return NextResponse.json({ error: 'priceTokens must be a non-negative integer' }, { status: 400 });
-      }
-      updates.priceTokens = p;
-    }
-    if (parsed.body.license !== undefined) {
-      const r = optionalString(parsed.body.license, 'License', { maxLength: 50 });
-      if (!r.ok) return r.response;
-      updates.license = r.value;
-    }
-    if (parsed.body.tags !== undefined) {
-      if (!Array.isArray(parsed.body.tags)) {
-        return NextResponse.json({ error: 'Tags must be an array' }, { status: 400 });
-      }
-      updates.tags = (parsed.body.tags as unknown[])
-        .filter((t): t is string => typeof t === 'string')
-        .slice(0, 20);
-    }
-    if (parsed.body.previewUrl !== undefined) {
-      const r = optionalString(parsed.body.previewUrl, 'Preview URL', { maxLength: 2000 });
-      if (!r.ok) return r.response;
-      updates.previewUrl = r.value;
-    }
-    if (parsed.body.assetFileUrl !== undefined) {
-      const r = optionalString(parsed.body.assetFileUrl, 'Asset file URL', { maxLength: 2000 });
-      if (!r.ok) return r.response;
-      updates.assetFileUrl = r.value;
-    }
-    if (parsed.body.assetFileSize !== undefined) {
-      const s = parsed.body.assetFileSize;
-      if (typeof s !== 'number' || !Number.isInteger(s) || s < 0) {
-        return NextResponse.json({ error: 'assetFileSize must be a non-negative integer' }, { status: 400 });
-      }
-      updates.assetFileSize = s;
-    }
-    if (parsed.body.status !== undefined) {
+    if (body.name !== undefined) updates.name = body.name;
+    if (body.description !== undefined) updates.description = body.description;
+    if (body.priceTokens !== undefined) updates.priceTokens = body.priceTokens;
+    if (body.license !== undefined) updates.license = body.license;
+    if (body.tags !== undefined) updates.tags = body.tags;
+    if (body.previewUrl !== undefined) updates.previewUrl = body.previewUrl;
+    if (body.assetFileUrl !== undefined) updates.assetFileUrl = body.assetFileUrl;
+    if (body.assetFileSize !== undefined) updates.assetFileSize = body.assetFileSize;
+    if (body.status !== undefined) {
       // Sellers can only transition draft -> pending_review. Publishing requires admin review.
       const allowedTransitions: Record<string, string[]> = {
         draft: ['pending_review'],
@@ -92,14 +64,13 @@ export async function PATCH(
         rejected: ['pending_review', 'draft'], // Can resubmit
       };
       const allowed = allowedTransitions[asset.status] || [];
-      const newStatus = parsed.body.status;
-      if (typeof newStatus !== 'string' || !allowed.includes(newStatus)) {
+      if (!allowed.includes(body.status)) {
         return NextResponse.json(
-          { error: `Cannot transition from '${asset.status}' to '${newStatus}'` },
+          { error: `Cannot transition from '${asset.status}' to '${body.status}'` },
           { status: 400 }
         );
       }
-      updates.status = newStatus;
+      updates.status = body.status;
     }
 
     await queryWithResilience(() => getDb()

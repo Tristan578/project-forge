@@ -27,9 +27,11 @@ const mockUser = {
 vi.mock('@/lib/api/middleware', () => ({
   withApiMiddleware: vi.fn().mockResolvedValue({
     error: undefined,
+    userId: 'buyer-1',
     authContext: {
       user: { ...mockUser },
     },
+    body: undefined,
   }),
 }));
 
@@ -112,7 +114,9 @@ describe('POST /api/marketplace/assets/[id]/purchase', () => {
     // Reset withApiMiddleware to default (authenticated user)
     vi.mocked(withApiMiddleware).mockResolvedValue({
       error: undefined,
+      userId: 'buyer-1',
       authContext: { user: { ...mockUser } },
+      body: undefined,
     } as never);
   });
 

@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { parseJsonBody, requireString, requireOneOf } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
-const VALID_CATEGORIES = ['model_3d', 'sprite', 'texture', 'audio', 'script', 'prefab', 'template', 'shader', 'animation'] as const;
-const VALID_LICENSES = ['standard', 'extended'] as const;
+const createAssetSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().min(1).max(5000),
+  category: z.enum(['model_3d', 'sprite', 'texture', 'audio', 'script', 'prefab', 'template', 'shader', 'animation']),
+  license: z.enum(['standard', 'extended']).optional().default('standard'),
+  priceTokens: z.number().int().nonnegative().optional().default(0),
+  tags: z.array(z.string()).max(20).optional().default([]),
+});
 
 export async function GET(req: NextRequest) {
   try {
@@ -52,48 +58,21 @@ export async function POST(req: NextRequest) {
       requireAuth: true,
       rateLimit: true,
       rateLimitConfig: { key: (id) => `user:seller-assets-create:${id}`, max: 10, windowSeconds: 60, distributed: false },
+      validate: createAssetSchema,
     });
     if (mid.error) return mid.error;
     const { user } = mid.authContext!;
-
-    const parsed = await parseJsonBody(req);
-    if (!parsed.ok) return parsed.response;
-
-    const nameResult = requireString(parsed.body.name, 'Name', { maxLength: 200 });
-    if (!nameResult.ok) return nameResult.response;
-
-    const descResult = requireString(parsed.body.description, 'Description', { maxLength: 5000 });
-    if (!descResult.ok) return descResult.response;
-
-    const catResult = requireOneOf(parsed.body.category, 'Category', VALID_CATEGORIES);
-    if (!catResult.ok) return catResult.response;
-
-    // Optional fields
-    const licenseResult = parsed.body.license !== undefined
-      ? requireOneOf(parsed.body.license, 'License', VALID_LICENSES)
-      : { ok: true as const, value: 'standard' as const };
-    if (!licenseResult.ok) return licenseResult.response;
-
-    const priceTokens = parsed.body.priceTokens;
-    if (priceTokens !== undefined && priceTokens !== 0) {
-      if (typeof priceTokens !== 'number' || !Number.isInteger(priceTokens) || priceTokens < 0) {
-        return NextResponse.json({ error: 'priceTokens must be a non-negative integer' }, { status: 400 });
-      }
-    }
-
-    const tags: string[] = Array.isArray(parsed.body.tags)
-      ? (parsed.body.tags as unknown[]).filter((t): t is string => typeof t === 'string').slice(0, 20)
-      : [];
+    const { name, description, category, license, priceTokens, tags } = mid.body as z.infer<typeof createAssetSchema>;
 
     const [asset] = await queryWithResilience(() => getDb()
       .insert(marketplaceAssets)
       .values({
         sellerId: user.id,
-        name: nameResult.value,
-        description: descResult.value,
-        category: catResult.value,
-        priceTokens: (priceTokens as number) ?? 0,
-        license: licenseResult.value,
+        name,
+        description,
+        category,
+        priceTokens,
+        license,
         tags,
         status: 'draft' as const,
       })

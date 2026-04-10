@@ -112,24 +112,24 @@ describe('PUT /api/projects/[id]', () => {
     expect(body.error).toBe('Project not found');
   });
 
-  it('should return 400 for null name', async () => {
+  it('should return 422 for null name', async () => {
     const { PUT } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/projects/p1', {
       method: 'PUT',
       body: JSON.stringify({ name: null }),
     });
     const res = await PUT(req, { params: Promise.resolve({ id: 'p1' }) });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
-  it('should return 400 for null sceneData', async () => {
+  it('should return 422 for null sceneData', async () => {
     const { PUT } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/projects/p1', {
       method: 'PUT',
       body: JSON.stringify({ sceneData: null }),
     });
     const res = await PUT(req, { params: Promise.resolve({ id: 'p1' }) });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
   it('should return 422 for non-integer entityCount (regression: was 400, valid JSON with invalid numeric value)', async () => {

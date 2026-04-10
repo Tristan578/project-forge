@@ -97,7 +97,7 @@ describe('POST /api/marketplace/seller/assets', () => {
     expect(res.status).toBe(401);
   });
 
-  it('should return 400 for missing required fields', async () => {
+  it('should return 422 for missing required fields', async () => {
     const mockDb = { insert: vi.fn() };
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
@@ -109,8 +109,8 @@ describe('POST /api/marketplace/seller/assets', () => {
     const res = await POST(req);
     const body = await res.json();
 
-    expect(res.status).toBe(400);
-    expect(body.error).toBeDefined();
+    expect(res.status).toBe(422);
+    expect(body.code).toBe('VALIDATION_ERROR');
   });
 
   it('should create a new asset listing', async () => {

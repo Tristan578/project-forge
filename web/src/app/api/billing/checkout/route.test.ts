@@ -56,6 +56,7 @@ function mockMiddlewareSuccess(overrides?: Partial<ReturnType<typeof makeUser>>)
     error: undefined,
     userId: user.id,
     authContext: { clerkId: 'clerk123', user } as never,
+    body: undefined,
   });
   return user;
 }
@@ -84,6 +85,7 @@ describe('POST /api/billing/checkout', () => {
       error: mockResponse as never,
       userId: null,
       authContext: null,
+      body: undefined,
     });
 
     const { POST } = await import('./route');
@@ -98,6 +100,7 @@ describe('POST /api/billing/checkout', () => {
       error: rlResponse as never,
       userId: null,
       authContext: null,
+      body: undefined,
     });
 
     const { POST } = await import('./route');

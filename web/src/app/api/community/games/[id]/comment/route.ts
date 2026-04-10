@@ -6,8 +6,13 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 import { containsBlockedKeyword } from '@/lib/moderation/keywords';
-import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { z } from 'zod';
+
+const commentSchema = z.object({
+  content: z.string().min(1).max(1000),
+  parentId: z.string().max(100).optional(),
+});
 
 export const dynamic = 'force-dynamic';
 
@@ -71,24 +76,17 @@ export async function POST(
       requireAuth: true,
       rateLimit: true,
       rateLimitConfig: { key: (id) => `comment:${id}`, max: 20, windowSeconds: 60 },
+      validate: commentSchema,
     });
     if (mid.error) return mid.error;
 
     const { id: gameId } = await params;
-
-    const parsed = await parseJsonBody(req);
-    if (!parsed.ok) return parsed.response;
-
-    const contentResult = requireString(parsed.body.content, 'Content', { minLength: 1, maxLength: 1000 });
-    if (!contentResult.ok) return contentResult.response;
-
-    const parentResult = optionalString(parsed.body.parentId, 'Parent ID', { maxLength: 100 });
-    if (!parentResult.ok) return parentResult.response;
+    const { content, parentId } = mid.body as z.infer<typeof commentSchema>;
 
     // Sanitize content: remove ASCII angle brackets and their Unicode lookalikes
     // to prevent tag injection. Unicode alternatives include single/double angle
     // quotation marks, mathematical angle brackets, and CJK angle brackets.
-    const sanitized = contentResult.value
+    const sanitized = content
       .replace(/[<>]/g, '')
       .replace(/[\u2039\u203A\u00AB\u00BB\u2329\u232A\u3008\u3009]/g, '');
 
@@ -119,7 +117,7 @@ export async function POST(
         gameId,
         userId: mid.userId!,
         content: sanitized,
-        parentId: parentResult.value ?? null,
+        parentId: parentId ?? null,
         flagged: shouldFlag ? 1 : 0,
       })
       .returning());
