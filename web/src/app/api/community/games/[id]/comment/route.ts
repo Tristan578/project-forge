@@ -11,7 +11,7 @@ import { z } from 'zod';
 
 const commentSchema = z.object({
   content: z.string().trim().min(1).max(1000),
-  parentId: z.string().max(100).optional(),
+  parentId: z.string().max(100).nullish(),
 });
 
 export const dynamic = 'force-dynamic';
