@@ -126,6 +126,7 @@ pub struct PendingCommands {
     pub transform_updates: Vec<TransformUpdate>,
     pub rename_requests: Vec<RenameRequest>,
     pub camera_focus_requests: Vec<CameraFocusRequest>,
+    pub camera_orbit_requests: Vec<CameraOrbitRequest>,
     pub spawn_requests: Vec<SpawnRequest>,
     pub delete_requests: Vec<DeleteRequest>,
     pub duplicate_requests: Vec<DuplicateRequest>,

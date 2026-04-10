@@ -75,7 +75,7 @@ fn route_domain(command: &str) -> u8 {
         | "update_transform" | "set_camera" | "select_entity" | "select_entities"
         | "clear_selection" | "set_visibility" | "set_gizmo_mode"
         | "set_coordinate_mode" | "rename_entity" | "reparent_entity"
-        | "focus_camera" | "delete_entities" | "duplicate_entity"
+        | "focus_camera" | "orbit_camera" | "delete_entities" | "duplicate_entity"
         | "undo" | "redo" | "set_snap_settings" | "toggle_grid"
         | "set_camera_preset" | "set_input_binding" | "remove_input_binding"
         | "set_input_preset" | "get_input_bindings" | "get_input_state" => 0,
