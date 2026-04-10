@@ -16,6 +16,14 @@ vi.mock('@/stores/uiBuilderStore', () => ({
   useUIBuilderStore: vi.fn(() => ({})),
 }));
 
+const mockConfirm = vi.fn().mockResolvedValue(true);
+vi.mock('@/hooks/useConfirmDialog', () => ({
+  useConfirmDialog: () => ({
+    confirm: mockConfirm,
+    ConfirmDialogPortal: () => null,
+  }),
+}));
+
 const makeScreen = (overrides: Record<string, unknown> = {}) => ({
   id: 'screen1',
   name: 'Main Menu',
@@ -210,22 +218,26 @@ describe('ScreenSettingsPanel', () => {
       expect(screen.getByText('Delete Screen')).toBeDefined();
     });
 
-    it('calls deleteScreen when delete is confirmed', () => {
+    it('calls deleteScreen when delete is confirmed', async () => {
       setupStore();
-      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      mockConfirm.mockResolvedValue(true);
       render(<ScreenSettingsPanel />);
       fireEvent.click(screen.getByText('Delete Screen'));
-      expect(mockDeleteScreen).toHaveBeenCalledWith('screen1');
-      vi.restoreAllMocks();
+      await vi.waitFor(() => {
+        expect(mockDeleteScreen).toHaveBeenCalledWith('screen1');
+      });
     });
 
-    it('does not call deleteScreen when delete is cancelled', () => {
+    it('does not call deleteScreen when delete is cancelled', async () => {
       setupStore();
-      vi.spyOn(window, 'confirm').mockReturnValue(false);
+      mockConfirm.mockResolvedValue(false);
       render(<ScreenSettingsPanel />);
       fireEvent.click(screen.getByText('Delete Screen'));
+      // Give the async confirm time to resolve
+      await vi.waitFor(() => {
+        expect(mockConfirm).toHaveBeenCalled();
+      });
       expect(mockDeleteScreen).not.toHaveBeenCalled();
-      vi.restoreAllMocks();
     });
   });
 });

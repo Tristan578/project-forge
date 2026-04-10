@@ -31,7 +31,7 @@ vi.mock('@/lib/db/client', () => ({
 
 vi.mock('@/lib/api/middleware', () => ({
   withApiMiddleware: vi.fn().mockResolvedValue({
-    error: null,
+    error: undefined,
     authContext: {
       user: {
         id: 'buyer-1',
@@ -201,27 +201,25 @@ describe('POST /api/marketplace/assets/[id]/purchase — downloadCount idempoten
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it('completes charging on orphan purchase row (insert committed but balance never deducted)', async () => {
+  it('returns 409 on orphan purchase row (insert committed but balance never deducted)', async () => {
+    // When the purchase INSERT conflicts but no credit_transaction exists,
+    // the route returns 409 "Purchase in progress, please retry" so the
+    // client retries safely. It does NOT attempt to complete the charge
+    // inline — another request may be in-flight.
     setupDbChain([
       { type: 'select', result: [paidAsset] },       // get asset
       { type: 'select', result: [] },                 // check existing purchase (race: not found yet)
       { type: 'insert', result: [] },                 // purchase INSERT conflicts — orphan row
       { type: 'select', result: [] },                 // credit_transaction NOT found → orphan
-      { type: 'select', result: [seller] },           // get seller
-      { type: 'update', result: [{ id: 'buyer-1' }] }, // buyer balance deduction
-      { type: 'update', result: [{ earnedCredits: 270 }] }, // seller balance credit
-      { type: 'select', result: [{ earnedCredits: 400, addonTokens: 0, monthlyTokens: 1000, monthlyTokensUsed: 100 }] }, // buyer balance read
-      { type: 'update', result: [paidAsset] },        // downloadCount increment
-      { type: 'insert', result: [{ id: 'txn-1' }] }, // buyer transaction
-      { type: 'insert', result: [{ id: 'txn-2' }] }, // seller transaction
     ]);
 
     const { POST } = await import('@/app/api/marketplace/assets/[id]/purchase/route');
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: 'asset-1' }) });
     const body = await res.json();
 
-    expect(body.success).toBe(true);
-    // Balance mutations should have happened (3 updates: buyer, seller, downloadCount)
-    expect(mockUpdate).toHaveBeenCalledTimes(3);
+    expect(res.status).toBe(409);
+    expect(body.error).toBe('Purchase in progress, please retry');
+    // No balance mutations should have happened
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 });

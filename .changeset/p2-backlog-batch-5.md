@@ -1,5 +1,5 @@
 ---
-'@spawnforge/web': patch
+'web': patch
 ---
 
 fix: wire AccessibilityPanel toggles to engine and add tests for 9 untested lib files

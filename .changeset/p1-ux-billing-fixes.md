@@ -1,5 +1,5 @@
 ---
-"spawnforge": patch
+"web": patch
 ---
 
 Fix Stripe refund TOCTOU race condition, add server-side AI tier gate, improve chat/editor UX

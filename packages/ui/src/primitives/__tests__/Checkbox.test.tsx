@@ -48,4 +48,11 @@ describe('Checkbox', () => {
     const leaks = allClasses.filter((c) => /zinc-|stone-|slate-/.test(c));
     expect(leaks, `Hardcoded primitives found: ${leaks.join(', ')}`).toHaveLength(0);
   });
+
+  it('uses --sf-border-strong for default border (not --sf-border)', () => {
+    const { container } = render(<Checkbox label="Test" />);
+    const input = container.querySelector('input');
+    expect(input?.className).toContain('border-[var(--sf-border-strong)]');
+    expect(input?.className).not.toMatch(/border-\[var\(--sf-border\)\]/);
+  });
 });

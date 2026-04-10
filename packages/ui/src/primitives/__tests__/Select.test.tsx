@@ -52,4 +52,13 @@ describe('Select', () => {
     const leaks = allClasses.filter((c) => /zinc-|stone-|slate-/.test(c));
     expect(leaks, `Hardcoded primitives found: ${leaks.join(', ')}`).toHaveLength(0);
   });
+
+  it('uses --sf-border-strong for default border (not --sf-border)', () => {
+    const { container } = render(
+      <Select options={[{ value: 'a', label: 'A' }]} aria-label="Test" />
+    );
+    const select = container.querySelector('select');
+    expect(select?.className).toContain('border-[var(--sf-border-strong)]');
+    expect(select?.className).not.toMatch(/border-\[var\(--sf-border\)\]/);
+  });
 });

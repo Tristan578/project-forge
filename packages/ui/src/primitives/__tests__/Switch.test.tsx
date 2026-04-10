@@ -46,4 +46,11 @@ describe('Switch', () => {
     const leaks = allClasses.filter((c) => /zinc-|stone-|slate-/.test(c));
     expect(leaks, `Hardcoded primitives found: ${leaks.join(', ')}`).toHaveLength(0);
   });
+
+  it('uses --sf-border-strong for OFF-state track border', () => {
+    const { container } = render(<Switch label="Test" />);
+    const track = container.querySelector('label[aria-hidden]');
+    expect(track?.className).toContain('border-[var(--sf-border-strong)]');
+    expect(track?.className).not.toMatch(/border-\[var\(--sf-border\)\]/);
+  });
 });

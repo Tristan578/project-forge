@@ -26,6 +26,14 @@ vi.mock('lucide-react', () => ({
   HelpCircle: (props: Record<string, unknown>) => <span data-testid="help-circle" {...props} />,
 }));
 
+const mockConfirm = vi.fn().mockResolvedValue(true);
+vi.mock('@/hooks/useConfirmDialog', () => ({
+  useConfirmDialog: () => ({
+    confirm: mockConfirm,
+    ConfirmDialogPortal: () => null,
+  }),
+}));
+
 const basePhysics2d: Physics2dData = {
   bodyType: 'dynamic',
   colliderShape: 'auto',
@@ -212,11 +220,14 @@ describe('Physics2dInspector', () => {
     expect(screen.getByText('Remove Physics')).toBeInTheDocument();
   });
 
-  it('calls removePhysics2d when Remove clicked and confirmed', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('calls removePhysics2d when Remove clicked and confirmed', async () => {
+    mockConfirm.mockResolvedValue(true);
     setupStore({ physics2d: basePhysics2d, physics2dEnabled: true });
     render(<Physics2dInspector />);
     fireEvent.click(screen.getByText('Remove Physics'));
-    expect(mockRemovePhysics2d).toHaveBeenCalledWith('entity-1');
+    // Wait for the async confirm to resolve
+    await vi.waitFor(() => {
+      expect(mockRemovePhysics2d).toHaveBeenCalledWith('entity-1');
+    });
   });
 });

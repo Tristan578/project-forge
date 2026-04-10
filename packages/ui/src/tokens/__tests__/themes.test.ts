@@ -92,4 +92,31 @@ describe('Theme Definitions', () => {
       expect(ratio, `${theme}: ${description} — contrast ${ratio.toFixed(2)}:1 (${textHex} on ${bgHex})`).toBeGreaterThanOrEqual(4.5);
     }
   });
+
+  // WCAG 1.4.11 Non-text Contrast — interactive elements need >= 3:1 against their container background.
+  // --sf-bg-surface and --sf-bg-app are the primary containers for interactive elements.
+  // --sf-bg-elevated is for hover states / card interiors, not interactive element containers.
+  const NONTEXT_PAIRS: Array<[keyof ThemeTokens, keyof ThemeTokens, string, number]> = [
+    ['--sf-border-strong', '--sf-bg-surface', 'interactive border on surface', 3.0],
+    ['--sf-border-strong', '--sf-bg-app', 'interactive border on app background', 3.0],
+    ['--sf-accent', '--sf-bg-surface', 'accent on surface', 3.0],
+    ['--sf-accent', '--sf-bg-app', 'accent on app background', 3.0],
+    ['--sf-destructive', '--sf-bg-surface', 'destructive indicator on surface', 3.0],
+    ['--sf-success', '--sf-bg-surface', 'success indicator on surface', 3.0],
+    ['--sf-warning', '--sf-bg-surface', 'warning indicator on surface', 3.0],
+  ];
+
+  it.each(THEMES)('%s theme meets WCAG 1.4.11 non-text contrast for interactive elements', (theme) => {
+    const tokens = THEME_DEFINITIONS[theme];
+    for (const [fgKey, bgKey, description, minRatio] of NONTEXT_PAIRS) {
+      const fgHex = tokens[fgKey] as string;
+      const bgHex = tokens[bgKey] as string;
+      if (!fgHex.startsWith('#') || !bgHex.startsWith('#')) continue;
+      const ratio = contrastRatio(fgHex, bgHex);
+      expect(
+        ratio,
+        `${theme}: ${description} — contrast ${ratio.toFixed(2)}:1 (${fgHex} on ${bgHex}), need >= ${minRatio}:1`
+      ).toBeGreaterThanOrEqual(minRatio);
+    }
+  });
 });

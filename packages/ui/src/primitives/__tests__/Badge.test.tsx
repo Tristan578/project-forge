@@ -32,6 +32,13 @@ describe('Badge', () => {
     expect(badge?.className).toContain('var(--sf-destructive)');
   });
 
+  it('uses --sf-border-strong for border (not --sf-border)', () => {
+    const { container } = render(<Badge>Test</Badge>);
+    const badge = container.querySelector('span');
+    expect(badge?.className).toContain('border-[var(--sf-border-strong)]');
+    expect(badge?.className).not.toMatch(/border-\[var\(--sf-border\)\]/);
+  });
+
   it.each(THEME_NAMES)('renders without error in %s theme', (theme) => {
     document.documentElement.setAttribute('data-sf-theme', theme);
     const { container } = render(<Badge>Test</Badge>);

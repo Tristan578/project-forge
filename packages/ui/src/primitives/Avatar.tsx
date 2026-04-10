@@ -35,7 +35,7 @@ export function Avatar({
     "rounded-full overflow-hidden",
     "bg-[var(--sf-bg-elevated)]",
     "text-[var(--sf-text-secondary)] font-medium",
-    "ring-2 ring-[color-mix(in_srgb,var(--sf-accent)_40%,var(--sf-border))] ring-offset-1 ring-offset-[var(--sf-bg-app)]",
+    "ring-2 ring-[color-mix(in_srgb,var(--sf-accent)_40%,var(--sf-border-strong))] ring-offset-1 ring-offset-[var(--sf-bg-app)]",
     "shadow-[0_1px_4px_rgba(0,0,0,0.3)]",
     sizeStyles[size],
     className

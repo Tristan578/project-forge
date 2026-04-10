@@ -12,12 +12,19 @@ const mockSceneGraph = {
   rootIds: ['e-1', 'e-2'],
 };
 
-vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: Object.assign(vi.fn(() => ({})), {
-    getState: vi.fn(() => ({ sceneGraph: mockSceneGraph })),
-  }),
-  getCommandDispatcher: vi.fn(() => vi.fn()),
-}));
+vi.mock('@/stores/editorStore', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fn = vi.fn((selector: any) => {
+    const state = { sceneGraph: mockSceneGraph };
+    return typeof selector === 'function' ? selector(state) : state;
+  });
+  return {
+    useEditorStore: Object.assign(fn, {
+      getState: vi.fn(() => ({ sceneGraph: mockSceneGraph, primaryId: 'e-1' })),
+    }),
+    getCommandDispatcher: vi.fn(() => vi.fn()),
+  };
+});
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockDiagnoseIssues = vi.fn((..._args: any[]) => []);
@@ -77,8 +84,15 @@ describe('AutoIterationPanel', () => {
 
   it('passes empty entities when scene graph has no nodes', async () => {
     const { useEditorStore } = await import('@/stores/editorStore');
+    const emptyGraph = { nodes: {}, rootIds: [] };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(useEditorStore).mockImplementation((selector: any) => {
+      const state = { sceneGraph: emptyGraph };
+      return typeof selector === 'function' ? selector(state) : state;
+    });
     vi.mocked(useEditorStore.getState).mockReturnValue({
-      sceneGraph: { nodes: {}, rootIds: [] },
+      sceneGraph: emptyGraph,
+      primaryId: 'e-1',
     } as never);
 
     const { default: AutoIterationPanel } = await import('../AutoIterationPanel');

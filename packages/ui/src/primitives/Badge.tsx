@@ -7,7 +7,7 @@ export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
 
 const variantStyles: Record<NonNullable<BadgeProps["variant"]>, string> = {
   default:
-    "bg-[color-mix(in_srgb,var(--sf-accent)_8%,var(--sf-bg-elevated))] text-[var(--sf-text-secondary)] border-[color-mix(in_srgb,var(--sf-accent)_20%,var(--sf-border))]",
+    "bg-[color-mix(in_srgb,var(--sf-accent)_8%,var(--sf-bg-elevated))] text-[var(--sf-text-secondary)] border-[color-mix(in_srgb,var(--sf-accent)_20%,var(--sf-border-strong))]",
   success: [
     "bg-[color-mix(in_srgb,var(--sf-success)_15%,var(--sf-bg-app))] text-[var(--sf-success)]",
     "border-[color-mix(in_srgb,var(--sf-success)_30%,transparent)]",
