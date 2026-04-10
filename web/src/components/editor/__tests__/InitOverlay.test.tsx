@@ -218,9 +218,10 @@ describe('InitOverlay', () => {
       retry: mockRetry,
     });
     render(<InitOverlay />);
-    const retryButton = screen.getByText('Retry');
-    expect(retryButton).toBeInTheDocument();
-    fireEvent.click(retryButton);
+    // Component renders Retry in both the error block and the bottom bar
+    const retryButtons = screen.getAllByText('Retry');
+    expect(retryButtons.length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(retryButtons[0]);
     expect(mockRetry).toHaveBeenCalled();
   });
 

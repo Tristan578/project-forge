@@ -14,6 +14,18 @@ vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
 }));
 
+vi.mock('@/stores/userStore', () => ({
+  useUserStore: vi.fn((selector: (s: { tier: string }) => unknown) =>
+    selector({ tier: 'pro' }),
+  ),
+}));
+
+vi.mock('@/lib/ai/tierAccess', () => ({
+  canAccessPanel: vi.fn(() => true),
+  getRequiredTier: vi.fn(() => null),
+  TIER_LABELS: { free: 'Free', pro: 'Pro', team: 'Team', enterprise: 'Enterprise' },
+}));
+
 vi.mock('../MaterialLibraryPanel', () => ({
   MaterialLibraryPanel: () => <div data-testid="material-library">Material Library</div>,
 }));
