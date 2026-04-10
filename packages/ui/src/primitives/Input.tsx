@@ -21,12 +21,12 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           "shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)]",
           "placeholder:text-[var(--sf-text-muted)]",
           "transition-all duration-[var(--sf-transition)]",
-          "hover:border-[var(--sf-text-muted)]",
+          !error && "hover:border-[var(--sf-text-muted)]",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--sf-bg-app)]",
           "focus-visible:border-[var(--sf-accent)]",
           "disabled:opacity-40 disabled:cursor-not-allowed",
           error &&
-            "border-[var(--sf-destructive)] focus-visible:ring-[var(--sf-destructive)]",
+            "border-[var(--sf-destructive)] hover:border-[var(--sf-destructive)] focus-visible:ring-[var(--sf-destructive)]",
           className
         )}
         {...props}

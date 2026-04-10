@@ -16,6 +16,8 @@ export interface PopoverProps {
   side?: "top" | "bottom" | "left" | "right";
   className?: string;
   "aria-label"?: string;
+  /** When true, the trigger is already an interactive element — skip the wrapper button. */
+  asChild?: boolean;
 }
 
 const sideStyles: Record<NonNullable<PopoverProps["side"]>, string> = {
@@ -47,6 +49,7 @@ export function Popover({
   side = "bottom",
   className,
   "aria-label": ariaLabel,
+  asChild = false,
 }: PopoverProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -69,6 +72,7 @@ export function Popover({
         !containerRef.current.contains(e.target as Node)
       ) {
         setOpen(false);
+        triggerRef.current?.focus();
       }
     }
     function handleKeyDown(e: KeyboardEvent) {
@@ -87,17 +91,38 @@ export function Popover({
 
   return (
     <div ref={containerRef} className="relative inline-flex">
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-expanded={open}
-        aria-controls={popoverId}
-        aria-haspopup="dialog"
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex"
-      >
-        {trigger}
-      </button>
+      {asChild ? (
+        <span
+          ref={triggerRef as React.RefObject<HTMLSpanElement>}
+          role="button"
+          tabIndex={0}
+          aria-expanded={open}
+          aria-controls={popoverId}
+          aria-haspopup="dialog"
+          onClick={() => setOpen((v) => !v)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setOpen((v) => !v);
+            }
+          }}
+          className="inline-flex"
+        >
+          {trigger}
+        </span>
+      ) : (
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-expanded={open}
+          aria-controls={popoverId}
+          aria-haspopup="dialog"
+          onClick={() => setOpen((v) => !v)}
+          className="inline-flex"
+        >
+          {trigger}
+        </button>
+      )}
       <div
         ref={contentRef}
         id={popoverId}
