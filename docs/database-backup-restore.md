@@ -181,9 +181,25 @@ If any check fails, review the detailed output, adjust the PITR timestamp, and r
 
 ---
 
-## 5. Backup Verification Checklist (Monthly)
+## 5. Backup Verification
 
-Run this checklist on the first Monday of each month. Estimated time: 15 minutes.
+### Automated (monthly)
+
+A scheduled GitHub Actions workflow exercises PITR end-to-end on the 1st of each month:
+
+- **Workflow:** `.github/workflows/pitr-verify.yml`
+- **Driver:** `scripts/pitr-verify.mjs`
+- **Script:** `scripts/verify-db-backup.sh` (runs against the recovery branch)
+- **Trigger:** `schedule: '0 8 1 * *'` or `workflow_dispatch` with optional `hours_ago` input
+- **Required secrets:** `NEON_API_KEY`, `NEON_PROJECT_ID` (both configured in repo settings)
+
+The driver creates a read-only Neon branch from `(now - HOURS_AGO)`, waits for the branch operations to finish, runs `verify-db-backup.sh` against the recovery branch's connection URI, and deletes the branch in a `finally` block regardless of outcome. On scheduled failures the workflow opens a P0 issue tagged `priority-p0, area-infra, disaster-recovery`.
+
+Run it manually at any time from the Actions tab → **PITR Verification** → **Run workflow**.
+
+### Manual Checklist (optional backstop)
+
+Run this checklist on the first Monday of each month if the automated workflow has been disabled. Estimated time: 15 minutes.
 
 ```
 [ ] 1. Confirm Neon project exists and main branch is healthy
