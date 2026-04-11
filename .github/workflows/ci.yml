@@ -216,7 +216,13 @@ jobs:
   preview-deploy:
     name: Preview Deployment
     needs: [ci-gate, quality-gates]
+    # Skip for Dependabot PRs — repo secrets (VERCEL_TOKEN, VERCEL_TEAM_ID,
+    # VERCEL_STAGING_PROJECT_ID) are not exposed to Dependabot-triggered runs,
+    # so `vercel pull` fails with "No existing credentials found". Maintainers
+    # who need a preview for a dep bump can rebase the branch onto a
+    # maintainer branch or deploy manually via `vercel deploy`.
     if: |
+      github.actor != 'dependabot[bot]' &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       needs.quality-gates.result == 'success' &&
       (needs.ci-gate.outputs.needs-web == 'true' || needs.ci-gate.outputs.needs-mcp == 'true')

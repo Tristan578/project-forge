@@ -55,7 +55,7 @@
     "jsfxr": "^1.4.0",
     "lucide-react": "^1.0.1",
     "next": "^16.2.3",
-    "next-intl": "^4.8.3",
+    "next-intl": "^4.9.1",
     "posthog-js": "^1.367.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
