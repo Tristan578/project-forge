@@ -2,7 +2,7 @@
 
 import { RouteErrorBoundary } from '@/components/errors/RouteErrorBoundary';
 
-export default function SettingsError({
+export default function AdminError({
   error,
   reset,
 }: {
@@ -13,9 +13,9 @@ export default function SettingsError({
     <RouteErrorBoundary
       error={error}
       reset={reset}
-      route="settings"
-      title="Settings Error"
-      description="Something went wrong loading your settings. Your data has not been changed."
+      route="admin"
+      title="Admin Error"
+      description="Something went wrong loading the admin console."
       primaryLabel="Retry"
       secondaryHref="/dashboard"
       secondaryLabel="Back to Dashboard"

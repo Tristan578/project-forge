@@ -2,7 +2,7 @@
 
 import { RouteErrorBoundary } from '@/components/errors/RouteErrorBoundary';
 
-export default function SettingsError({
+export default function CommunityError({
   error,
   reset,
 }: {
@@ -13,9 +13,9 @@ export default function SettingsError({
     <RouteErrorBoundary
       error={error}
       reset={reset}
-      route="settings"
-      title="Settings Error"
-      description="Something went wrong loading your settings. Your data has not been changed."
+      route="community"
+      title="Community Error"
+      description="Something went wrong loading the community feed."
       primaryLabel="Retry"
       secondaryHref="/dashboard"
       secondaryLabel="Back to Dashboard"

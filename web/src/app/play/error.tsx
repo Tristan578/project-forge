@@ -2,7 +2,7 @@
 
 import { RouteErrorBoundary } from '@/components/errors/RouteErrorBoundary';
 
-export default function SettingsError({
+export default function PlayError({
   error,
   reset,
 }: {
@@ -13,12 +13,12 @@ export default function SettingsError({
     <RouteErrorBoundary
       error={error}
       reset={reset}
-      route="settings"
-      title="Settings Error"
-      description="Something went wrong loading your settings. Your data has not been changed."
+      route="play"
+      title="Play Error"
+      description="Something went wrong loading this game."
       primaryLabel="Retry"
-      secondaryHref="/dashboard"
-      secondaryLabel="Back to Dashboard"
+      secondaryHref="/community"
+      secondaryLabel="Back to Community"
     />
   );
 }
