@@ -48,14 +48,22 @@ export async function PUT(request: NextRequest) {
 
   try {
     if (body.type === 'token_config') {
+      const tokenConfigUpdate: {
+        tokenCost: number;
+        estimatedCostCents: number;
+        updatedAt: Date;
+        active?: number;
+      } = {
+        tokenCost: body.tokenCost,
+        estimatedCostCents: body.estimatedCostCents,
+        updatedAt: new Date(),
+      };
+      if (body.active !== undefined) {
+        tokenConfigUpdate.active = body.active ? 1 : 0;
+      }
       await queryWithResilience(() =>
         getDb().update(tokenConfig)
-          .set({
-            tokenCost: body.tokenCost,
-            estimatedCostCents: body.estimatedCostCents,
-            active: body.active ? 1 : 0,
-            updatedAt: new Date(),
-          })
+          .set(tokenConfigUpdate)
           .where(eq(tokenConfig.id, body.id))
       );
     } else {

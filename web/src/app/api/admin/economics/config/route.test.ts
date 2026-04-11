@@ -81,6 +81,52 @@ describe('PUT /api/admin/economics/config', () => {
     expect(body.success).toBe(true);
   });
 
+  it('omits `active` from UPDATE when the field is not provided', async () => {
+    const setSpy = vi.fn().mockReturnThis();
+    const mockDb = {
+      update: vi.fn().mockReturnValue({
+        set: setSpy,
+        where: vi.fn().mockResolvedValue(undefined),
+      }),
+    };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { PUT } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/admin/economics/config', {
+      method: 'PUT',
+      // `active` intentionally omitted.
+      body: JSON.stringify({ type: 'token_config', id: 'tc1', tokenCost: 15, estimatedCostCents: 5 }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(200);
+    expect(setSpy).toHaveBeenCalledTimes(1);
+    const setArg = setSpy.mock.calls[0][0] as Record<string, unknown>;
+    expect(setArg).not.toHaveProperty('active');
+    expect(setArg.tokenCost).toBe(15);
+    expect(setArg.estimatedCostCents).toBe(5);
+  });
+
+  it('includes `active: 0` when explicitly set to false', async () => {
+    const setSpy = vi.fn().mockReturnThis();
+    const mockDb = {
+      update: vi.fn().mockReturnValue({
+        set: setSpy,
+        where: vi.fn().mockResolvedValue(undefined),
+      }),
+    };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { PUT } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/admin/economics/config', {
+      method: 'PUT',
+      body: JSON.stringify({ type: 'token_config', id: 'tc1', tokenCost: 15, estimatedCostCents: 5, active: false }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(200);
+    const setArg = setSpy.mock.calls[0][0] as Record<string, unknown>;
+    expect(setArg.active).toBe(0);
+  });
+
   it('should return 422 for missing id', async () => {
     const { PUT } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/admin/economics/config', {
