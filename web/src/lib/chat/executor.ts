@@ -39,9 +39,52 @@ import { economyHandlers } from './handlers/economyHandlers';
 import { cutsceneHandlers } from './handlers/cutsceneHandlers';
 
 /**
- * Merged handler registry.
+ * Ordered list of every handler-domain source map spread into the registry.
+ * Tests introspect this to detect drift when a new domain is added without
+ * extending test coverage (see executorIntegrationBroad.test.ts). The order
+ * matches the spread order below — later entries overwrite earlier keys on
+ * collision.
  */
-const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx: ToolCallContext) => Promise<ExecutionResult>> = {
+export const HANDLER_DOMAIN_SOURCES: ReadonlyArray<{
+  name: string;
+  handlers: Record<string, unknown>;
+}> = [
+  { name: 'transformHandlers', handlers: transformHandlers },
+  { name: 'materialHandlers', handlers: materialHandlers },
+  { name: 'queryHandlers', handlers: queryHandlers },
+  { name: 'editModeHandlers', handlers: editModeHandlers },
+  { name: 'audioHandlers', handlers: audioHandlers },
+  { name: 'securityHandlers', handlers: securityHandlers },
+  { name: 'exportHandlers', handlers: exportHandlers },
+  { name: 'shaderHandlers', handlers: shaderHandlers },
+  { name: 'performanceHandlers', handlers: performanceHandlers },
+  { name: 'generationHandlers', handlers: generationHandlers },
+  { name: 'handlers2d', handlers: handlers2d },
+  { name: 'entityHandlers', handlers: entityHandlers },
+  { name: 'sceneManagementHandlers', handlers: sceneManagementHandlers },
+  { name: 'uiBuilderHandlers', handlers: uiBuilderHandlers },
+  { name: 'dialogueHandlers', handlers: dialogueHandlers },
+  { name: 'scriptLibraryHandlers', handlers: scriptLibraryHandlers },
+  { name: 'physicsJointHandlers', handlers: physicsJointHandlers },
+  { name: 'animationParticleHandlers', handlers: animationParticleHandlers },
+  { name: 'gameplayHandlers', handlers: gameplayHandlers },
+  { name: 'assetHandlers', handlers: assetHandlers },
+  { name: 'audioEntityHandlers', handlers: audioEntityHandlers },
+  { name: 'pixelArtHandlers', handlers: pixelArtHandlers },
+  { name: 'compoundHandlers', handlers: compoundHandlers },
+  { name: 'leaderboardHandlers', handlers: leaderboardHandlers },
+  { name: 'ideaHandlers', handlers: ideaHandlers },
+  { name: 'worldHandlers', handlers: worldHandlers },
+  { name: 'localizationHandlers', handlers: localizationHandlers },
+  { name: 'economyHandlers', handlers: economyHandlers },
+  { name: 'cutsceneHandlers', handlers: cutsceneHandlers },
+];
+
+/**
+ * Merged handler registry. Exported for test introspection — production code
+ * should use {@link executeToolCall} rather than reaching into this map.
+ */
+export const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx: ToolCallContext) => Promise<ExecutionResult>> = {
   ...transformHandlers,
   ...materialHandlers,
   ...queryHandlers,
