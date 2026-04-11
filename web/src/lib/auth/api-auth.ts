@@ -51,7 +51,22 @@ export async function authenticateRequest(): Promise<
     return unauthorized('NO_SESSION');
   }
 
-  let user = await getUserByClerkId(clerkId);
+  let user: User | null;
+  try {
+    user = await getUserByClerkId(clerkId);
+  } catch {
+    // DB unavailable (circuit breaker open, Neon outage, etc). Return 503
+    // to match the degraded-mode contract — returning 500 would leak a
+    // generic error to clients and bypass the retry guidance in the 503
+    // payload. Never fall through to a userless AuthContext (credit bypass).
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'SERVICE_DEGRADED', message: 'User sync temporarily unavailable. Please retry.' },
+        { status: 503 },
+      ),
+    };
+  }
   if (!user) {
     // Auto-sync: user is authenticated with Clerk but missing from our DB.
     // Handles webhook failures, new deployments, or DB resets (PF-474).

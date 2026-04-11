@@ -48,14 +48,26 @@ export async function PUT(request: NextRequest) {
 
   try {
     if (body.type === 'token_config') {
+      // `active` is optional in the schema — only include it in the UPDATE
+      // when the caller explicitly sets it. Previously `body.active ? 1 : 0`
+      // silently deactivated the row whenever the field was omitted, which
+      // violates the schema contract (optional = "do not change").
+      const tokenConfigUpdate: {
+        tokenCost: number;
+        estimatedCostCents: number;
+        updatedAt: Date;
+        active?: number;
+      } = {
+        tokenCost: body.tokenCost,
+        estimatedCostCents: body.estimatedCostCents,
+        updatedAt: new Date(),
+      };
+      if (body.active !== undefined) {
+        tokenConfigUpdate.active = body.active ? 1 : 0;
+      }
       await queryWithResilience(() =>
         getDb().update(tokenConfig)
-          .set({
-            tokenCost: body.tokenCost,
-            estimatedCostCents: body.estimatedCostCents,
-            active: body.active ? 1 : 0,
-            updatedAt: new Date(),
-          })
+          .set(tokenConfigUpdate)
           .where(eq(tokenConfig.id, body.id))
       );
     } else {

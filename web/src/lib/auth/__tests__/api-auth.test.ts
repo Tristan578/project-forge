@@ -435,6 +435,24 @@ describe('authenticateRequest — edge cases', () => {
     expect(mockSyncUserFromClerk).toHaveBeenCalledTimes(2);
   });
 
+  it('returns 503 SERVICE_DEGRADED when getUserByClerkId throws (DB outage)', async () => {
+    // Circuit breaker open / Neon unreachable — the DB lookup itself throws.
+    // Must surface as 503, not a 500 propagation, and must NOT reach the
+    // sync path (which would gobble the error and mask a real outage).
+    mockAuth.mockResolvedValue({ userId: 'clerk_abc' });
+    mockGetUserByClerkId.mockRejectedValue(new Error('circuit breaker open'));
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(503);
+      const body = await result.response.json();
+      expect(body.error).toBe('SERVICE_DEGRADED');
+      expect(body.message).toMatch(/retry/i);
+    }
+    expect(mockSyncUserFromClerk).not.toHaveBeenCalled();
+  });
+
   it('returns 401 when auth() returns empty object (no userId key)', async () => {
     mockAuth.mockResolvedValue({});
 
