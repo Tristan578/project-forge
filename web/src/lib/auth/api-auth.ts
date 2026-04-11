@@ -205,9 +205,18 @@ export async function authenticateClerkSession(): Promise<
   // Lightweight banned check: this helper skips the full user sync,
   // but we must still reject banned users. If the user row is missing
   // (not yet synced), fall through in the caller's degraded-mode path.
-  const user = await getUserByClerkId(clerkId);
-  if (user && user.banned > 0) {
-    return bannedResponse();
+  // DB unavailability is tolerated — callers of this function are expected
+  // to degrade gracefully without a DB user record.
+  try {
+    const user = await getUserByClerkId(clerkId);
+    if (user && user.banned > 0) {
+      return bannedResponse();
+    }
+  } catch {
+    // DB unavailable — skip the banned check and let the caller's
+    // degraded-mode path handle the outage. This preserves the function's
+    // contract: routes using authenticateClerkSession can operate without
+    // DB access (e.g. return an empty list instead of crashing with 500).
   }
 
   return { ok: true, clerkId };

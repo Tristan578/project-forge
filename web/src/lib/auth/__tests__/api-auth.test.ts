@@ -611,6 +611,21 @@ describe('authenticateClerkSession — edge cases', () => {
     const result = await authenticateClerkSession();
     expect(result.ok).toBe(true);
   });
+
+  it('degrades gracefully when the DB is unavailable during the banned check', async () => {
+    // queryWithResilience throws when the DB is unreachable. authenticateClerkSession
+    // must catch this and allow the caller's degraded-mode path to handle it —
+    // crashing with a 500 breaks the contract for routes that use this lighter helper.
+    mockAuth.mockResolvedValue({ userId: 'clerk_abc' });
+    mockGetUserByClerkId.mockRejectedValue(new Error('DB connection refused'));
+
+    const result = await authenticateClerkSession();
+    // Should degrade gracefully: ok=true (banned check skipped), no thrown exception.
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.clerkId).toBe('clerk_abc');
+    }
+  });
 });
 
 describe('assertAdmin — edge cases', () => {
