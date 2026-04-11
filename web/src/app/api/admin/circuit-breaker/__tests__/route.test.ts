@@ -160,25 +160,28 @@ describe('POST /api/admin/circuit-breaker', () => {
     mockAuthAdmin();
     const res = await POST(makePostRequest({ action: 'invalid_action' }));
     expect(res.status).toBe(422);
-    const data = await res.json() as { error: string; code?: string };
+    const data = await res.json() as { error: string; code?: string; details?: unknown };
     expect(data.error).toBe('Validation failed');
     expect(data.code).toBe('VALIDATION_ERROR');
+    expect(JSON.stringify(data.details)).toContain('action');
   });
 
   it('returns 422 for reset_provider with missing provider', async () => {
     mockAuthAdmin();
     const res = await POST(makePostRequest({ action: 'reset_provider' }));
     expect(res.status).toBe(422);
-    const data = await res.json() as { error: string };
+    const data = await res.json() as { error: string; details?: unknown };
     expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('provider');
   });
 
   it('returns 422 for reset_provider with unknown provider name', async () => {
     mockAuthAdmin();
     const res = await POST(makePostRequest({ action: 'reset_provider', provider: 'unknown-xyz' }));
     expect(res.status).toBe(422);
-    const data = await res.json() as { error: string };
+    const data = await res.json() as { error: string; details?: unknown };
     expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('provider');
   });
 
   it('returns 400 for invalid JSON body', async () => {

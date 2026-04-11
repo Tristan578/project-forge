@@ -38,8 +38,10 @@ describe('POST /api/admin/moderation/bulk', () => {
       body: JSON.stringify({ action: 'ignore', commentIds: ['c1'] }),
     });
     const res = await POST(req);
+    const data = await res.json();
     expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe('Validation failed');
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('action');
   });
 
   it('returns 422 for empty commentIds', async () => {
@@ -49,8 +51,10 @@ describe('POST /api/admin/moderation/bulk', () => {
       body: JSON.stringify({ action: 'approve', commentIds: [] }),
     });
     const res = await POST(req);
+    const data = await res.json();
     expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe('Validation failed');
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('commentIds');
   });
 
   it('returns actual DB affected count, not ids.length (PF-457)', async () => {

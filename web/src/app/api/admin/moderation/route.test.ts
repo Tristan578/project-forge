@@ -99,8 +99,10 @@ describe('/api/admin/moderation', () => {
         body: JSON.stringify({ id: 'comment_1', action: 'ignore' }),
       });
       const res = await POST(req);
+      const data = await res.json();
       expect(res.status).toBe(422);
-      expect((await res.json()).error).toBe('Validation failed');
+      expect(data.error).toBe('Validation failed');
+      expect(JSON.stringify(data.details)).toContain('action');
     });
 
     it('approves comment by updating flagged status', async () => {

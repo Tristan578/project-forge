@@ -119,7 +119,7 @@ describe('POST /api/billing/checkout', () => {
 
   it('returns 422 for invalid tier (schema validation via middleware)', async () => {
     const validationResponse = new Response(
-      JSON.stringify({ error: 'Validation failed', code: 'VALIDATION_ERROR' }),
+      JSON.stringify({ error: 'Validation failed', code: 'VALIDATION_ERROR', details: { tier: { _errors: ['Invalid enum value'] } } }),
       { status: 422 }
     );
     vi.mocked(withApiMiddleware).mockResolvedValue({
@@ -135,6 +135,7 @@ describe('POST /api/billing/checkout', () => {
 
     expect(res.status).toBe(422);
     expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('tier');
   });
 
   it('creates Stripe customer if none exists and starts checkout', async () => {

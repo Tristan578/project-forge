@@ -100,8 +100,10 @@ describe('PATCH /api/jobs/[id]', () => {
       body: JSON.stringify({ status: 'hacked' }),
     });
     const res = await PATCH(req, { params: Promise.resolve({ id: 'j1' }) });
+    const dataStatus = await res.json();
     expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe('Validation failed');
+    expect(dataStatus.error).toBe('Validation failed');
+    expect(JSON.stringify(dataStatus.details)).toContain('status');
   });
 
   it('should return 422 for negative progress', async () => {
@@ -117,8 +119,10 @@ describe('PATCH /api/jobs/[id]', () => {
       body: JSON.stringify({ progress: -5 }),
     });
     const res = await PATCH(req, { params: Promise.resolve({ id: 'j1' }) });
+    const dataProgress = await res.json();
     expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe('Validation failed');
+    expect(dataProgress.error).toBe('Validation failed');
+    expect(JSON.stringify(dataProgress.details)).toContain('progress');
   });
 
   it('should return 422 for progress > 100', async () => {
@@ -134,7 +138,9 @@ describe('PATCH /api/jobs/[id]', () => {
       body: JSON.stringify({ progress: 150 }),
     });
     const res = await PATCH(req, { params: Promise.resolve({ id: 'j1' }) });
+    const dataProgressHigh = await res.json();
     expect(res.status).toBe(422);
+    expect(JSON.stringify(dataProgressHigh.details)).toContain('progress');
   });
 
   it('should silently ignore refunded field', async () => {

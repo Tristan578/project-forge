@@ -127,6 +127,7 @@ describe('/api/jobs', () => {
 
       expect(response.status).toBe(422);
       expect(body.error).toBe('Validation failed');
+      expect(JSON.stringify(body.details)).toContain('type');
     });
 
     it('creates job and returns 201', async () => {

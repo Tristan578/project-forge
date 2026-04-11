@@ -88,8 +88,10 @@ describe('PUT /api/admin/economics/config', () => {
       body: JSON.stringify({ type: 'token_config', tokenCost: 10, estimatedCostCents: 5 }),
     });
     const res = await PUT(req);
+    const data = await res.json();
     expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe('Validation failed');
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('id');
   });
 
   it('should return 422 for negative tokenCost', async () => {
@@ -99,8 +101,10 @@ describe('PUT /api/admin/economics/config', () => {
       body: JSON.stringify({ type: 'token_config', id: 'tc1', tokenCost: -5, estimatedCostCents: 5 }),
     });
     const res = await PUT(req);
+    const data = await res.json();
     expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe('Validation failed');
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('tokenCost');
   });
 
   it('should return 422 for NaN tokenCost', async () => {
@@ -110,7 +114,10 @@ describe('PUT /api/admin/economics/config', () => {
       body: JSON.stringify({ type: 'token_config', id: 'tc1', tokenCost: 'abc', estimatedCostCents: 5 }),
     });
     const res = await PUT(req);
+    const data = await res.json();
     expect(res.status).toBe(422);
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('tokenCost');
   });
 
   it('should return 422 for unknown type', async () => {
@@ -120,8 +127,10 @@ describe('PUT /api/admin/economics/config', () => {
       body: JSON.stringify({ type: 'unknown_config', id: 'x' }),
     });
     const res = await PUT(req);
+    const data = await res.json();
     expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe('Validation failed');
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('type');
   });
 
   it('should update tier config', async () => {

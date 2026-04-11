@@ -117,6 +117,7 @@ describe('POST /api/tokens/purchase', () => {
 
     expect(res.status).toBe(422);
     expect(body.error).toBe('Validation failed');
+    expect(JSON.stringify(body.details)).toContain('package');
   });
 
   it('returns checkoutUrl on successful Stripe checkout session creation', async () => {

@@ -68,6 +68,7 @@ describe('POST /api/community/games/[id]/flag', () => {
 
     expect(res.status).toBe(422);
     expect(body.error).toBe('Validation failed');
+    expect(JSON.stringify(body.details)).toContain('commentId');
   });
 
   it('should return 404 when comment not found', async () => {

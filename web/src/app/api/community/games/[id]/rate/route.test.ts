@@ -74,6 +74,7 @@ describe('POST /api/community/games/[id]/rate', () => {
 
     expect(res.status).toBe(422);
     expect(body.error).toBe('Validation failed');
+    expect(JSON.stringify(body.details)).toContain('rating');
   });
 
   it('should return 422 for rating above 5', async () => {
@@ -90,6 +91,7 @@ describe('POST /api/community/games/[id]/rate', () => {
 
     expect(res.status).toBe(422);
     expect(body.error).toBe('Validation failed');
+    expect(JSON.stringify(body.details)).toContain('rating');
   });
 
   it('should create a new rating and return stats', async () => {

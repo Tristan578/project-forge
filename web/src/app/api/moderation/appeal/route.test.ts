@@ -40,6 +40,7 @@ describe('/api/moderation/appeal', () => {
     expect(res.status).toBe(422);
     const data = await res.json();
     expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('contentId');
   });
 
   it('returns 422 if contentType is invalid', async () => {
@@ -50,6 +51,7 @@ describe('/api/moderation/appeal', () => {
     expect(res.status).toBe(422);
     const data = await res.json();
     expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('contentType');
   });
 
   it('returns 422 if reason is too short', async () => {
@@ -60,6 +62,7 @@ describe('/api/moderation/appeal', () => {
     expect(res.status).toBe(422);
     const data = await res.json();
     expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('reason');
   });
 
   it('creates appeal and returns 201 on success', async () => {

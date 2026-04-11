@@ -112,8 +112,10 @@ describe('PATCH /api/admin/users/[id]', () => {
     vi.mocked(assertAdmin).mockReturnValue(null);
 
     const res = await PATCH(makeReq('http://localhost/api/admin/users/user-uuid-1', 'PATCH', { tier: 'enterprise' }), PARAMS);
+    const data422a = await res.json();
     expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe('Validation failed');
+    expect(data422a.error).toBe('Validation failed');
+    expect(JSON.stringify(data422a.details)).toContain('tier');
   });
 
   it('returns 422 if no valid fields provided', async () => {
@@ -122,8 +124,10 @@ describe('PATCH /api/admin/users/[id]', () => {
     vi.mocked(assertAdmin).mockReturnValue(null);
 
     const res = await PATCH(makeReq('http://localhost/api/admin/users/user-uuid-1', 'PATCH', { foo: 'bar' }), PARAMS);
+    const data422b = await res.json();
     expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe('Validation failed');
+    expect(data422b.error).toBe('Validation failed');
+    expect(data422b.details).toBeDefined();
   });
 
   it('returns 404 if user not found', async () => {

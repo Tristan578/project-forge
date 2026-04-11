@@ -55,6 +55,7 @@ describe('/api/admin/moderation/appeals/[id]/review POST', () => {
     expect(res.status).toBe(422);
     const data = await res.json();
     expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('decision');
   });
 
   it('returns 404 if appeal not found', async () => {

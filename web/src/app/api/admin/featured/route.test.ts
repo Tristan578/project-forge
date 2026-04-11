@@ -99,6 +99,7 @@ describe('POST /api/admin/featured', () => {
 
     expect(res.status).toBe(400);
     expect(body.error).toBe('Validation failed');
+    expect(JSON.stringify(body.issues)).toContain('gameId');
   });
 
   it('should return 404 when game not found', async () => {
