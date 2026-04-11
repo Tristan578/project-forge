@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { gameComments, publishedGames, users } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
@@ -9,6 +10,11 @@ import { parsePaginationParams } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
+
+const moderationActionSchema = z.object({
+  id: z.string().min(1).max(100),
+  action: z.enum(['approve', 'delete']),
+});
 
 /**
  * GET /api/admin/moderation
@@ -82,7 +88,10 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
-    const mid = await withApiMiddleware(req, { requireAuth: true });
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      validate: moderationActionSchema,
+    });
     if (mid.error) return mid.error;
 
     const adminError = assertAdmin(mid.authContext!.clerkId);
@@ -91,22 +100,7 @@ export async function POST(req: NextRequest) {
     const rateLimitError = await rateLimitAdminRoute(mid.userId!, 'admin-moderation');
     if (rateLimitError) return rateLimitError;
 
-    const body: unknown = await req.json();
-    if (typeof body !== 'object' || body === null) {
-      return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: 400 });
-    }
-    const { id, action } = body as { id?: string; action?: string };
-
-    if (!id || !action) {
-      return NextResponse.json({ error: 'Missing id or action' }, { status: 400 });
-    }
-
-    if (action !== 'approve' && action !== 'delete') {
-      return NextResponse.json(
-        { error: 'Action must be "approve" or "delete"' },
-        { status: 400 }
-      );
-    }
+    const { id, action } = mid.body as z.infer<typeof moderationActionSchema>;
 
     if (action === 'approve') {
       // Unflag the comment (set flagged=0)

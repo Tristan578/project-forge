@@ -110,7 +110,7 @@ describe('POST /api/generate/voice/batch', () => {
     const res = await POST(req);
     const data = await res.json();
     expect(res.status).toBe(400);
-    expect(data.error).toBe('Invalid JSON');
+    expect(data.error).toBe('Invalid JSON body');
   });
 
   it('returns 422 if items is not an array', async () => {
@@ -120,7 +120,9 @@ describe('POST /api/generate/voice/batch', () => {
     const res = await POST(makeRequest({ items: 'not-array', voiceSettings: defaultVoiceSettings }));
     const data = await res.json();
     expect(res.status).toBe(422);
-    expect(data.error).toContain('items');
+    expect(data.error).toBe('Validation failed');
+    // Zod error details include the offending field
+    expect(JSON.stringify(data.details)).toContain('items');
   });
 
   it('returns 422 if items is empty', async () => {
@@ -144,7 +146,9 @@ describe('POST /api/generate/voice/batch', () => {
     const res = await POST(makeRequest({ items, voiceSettings: defaultVoiceSettings }));
     const data = await res.json();
     expect(res.status).toBe(422);
-    expect(data.error).toContain('20');
+    expect(data.error).toBe('Validation failed');
+    // The max-length constraint is surfaced in the Zod error details
+    expect(JSON.stringify(data.details)).toContain('items');
   });
 
   it('returns 422 if an item text is empty', async () => {
@@ -155,7 +159,8 @@ describe('POST /api/generate/voice/batch', () => {
     const res = await POST(makeRequest({ items, voiceSettings: defaultVoiceSettings }));
     const data = await res.json();
     expect(res.status).toBe(422);
-    expect(data.error).toContain('node_1');
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('text');
   });
 
   it('returns 422 if voiceSettings.voiceId is missing', async () => {
@@ -165,7 +170,8 @@ describe('POST /api/generate/voice/batch', () => {
     const res = await POST(makeRequest({ items: defaultItems, voiceSettings: { stability: 0.5 } }));
     const data = await res.json();
     expect(res.status).toBe(422);
-    expect(data.error).toContain('voiceId');
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('voiceId');
   });
 
   it('returns 402 if API key cannot be resolved', async () => {

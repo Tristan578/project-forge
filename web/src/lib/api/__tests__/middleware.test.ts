@@ -349,6 +349,76 @@ describe('withApiMiddleware', () => {
       expect(res.status).toBe(422);
     });
 
+    it('does not leak the full Zod format tree in production environment', async () => {
+      // Regression test for security audit finding: Zod's `.format()` output
+      // recursively discloses every schema field (including unrelated ones)
+      // via its nested `_errors` tree. Production responses must NOT carry
+      // that tree. A flat `details.message` containing the single failing
+      // field is acceptable — it only reveals what the caller already
+      // submitted, equivalent to the pre-Zod manual validation messages.
+      const originalEnv = process.env.NODE_ENV;
+      try {
+        // @ts-expect-error — test override of readonly NODE_ENV
+        process.env.NODE_ENV = 'production';
+        const handler = withApiMiddleware(
+          async () => NextResponse.json({ ok: true }),
+          {
+            requireAuth: false,
+            validate: z.object({
+              failingField: z.string(),
+              unrelatedSiblingField: z.string().optional(),
+            }),
+          },
+        );
+        const req = new NextRequest('http://localhost/api/test', {
+          method: 'POST',
+          body: JSON.stringify({ wrongField: 'x' }),
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const res = await handler(req);
+        expect(res.status).toBe(422);
+        const body = await res.json();
+        expect(body.error).toBe('Validation failed');
+        expect(body.code).toBe('VALIDATION_ERROR');
+        // Flat message is present and mentions the failing field
+        expect(body.details).toEqual({ message: expect.stringContaining('failingField') });
+        // The `.format()` tree's signature `_errors` key MUST NOT appear
+        expect(JSON.stringify(body)).not.toContain('_errors');
+        // Unrelated schema fields that were NOT part of the request must not leak
+        expect(JSON.stringify(body)).not.toContain('unrelatedSiblingField');
+      } finally {
+        // @ts-expect-error — restore readonly NODE_ENV
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    it('includes Zod details in development environment', async () => {
+      const originalEnv = process.env.NODE_ENV;
+      try {
+        // @ts-expect-error — test override of readonly NODE_ENV
+        process.env.NODE_ENV = 'development';
+        const handler = withApiMiddleware(
+          async () => NextResponse.json({ ok: true }),
+          {
+            requireAuth: false,
+            validate: z.object({ name: z.string() }),
+          },
+        );
+        const req = new NextRequest('http://localhost/api/test', {
+          method: 'POST',
+          body: JSON.stringify({ name: 123 }),
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const res = await handler(req);
+        const body = await res.json();
+        expect(res.status).toBe(422);
+        expect(body.details).toBeDefined();
+      } finally {
+        // @ts-expect-error — restore readonly NODE_ENV
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
     it('does not run validation when validate option is not provided', async () => {
       const handlerFn = vi.fn(async () => NextResponse.json({ ok: true }));
       const handler = withApiMiddleware(handlerFn, { requireAuth: false });

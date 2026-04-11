@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
@@ -7,8 +8,33 @@ import { eq } from 'drizzle-orm';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
+const tokenConfigSchema = z.object({
+  type: z.literal('token_config'),
+  id: z.string().min(1).max(100),
+  tokenCost: z.number().finite().min(0),
+  estimatedCostCents: z.number().finite().min(0),
+  active: z.boolean().optional(),
+});
+
+const tierConfigSchema = z.object({
+  type: z.literal('tier_config'),
+  id: z.string().min(1).max(100),
+  monthlyTokens: z.number().finite().min(0),
+  maxProjects: z.number().finite().min(0),
+  maxPublished: z.number().finite().min(0),
+  priceCentsMonthly: z.number().finite().min(0),
+});
+
+const economicsConfigSchema = z.discriminatedUnion('type', [
+  tokenConfigSchema,
+  tierConfigSchema,
+]);
+
 export async function PUT(request: NextRequest) {
-  const mid = await withApiMiddleware(request, { requireAuth: true });
+  const mid = await withApiMiddleware(request, {
+    requireAuth: true,
+    validate: economicsConfigSchema,
+  });
   if (mid.error) return mid.error;
   const { clerkId } = mid.authContext!;
 
@@ -18,25 +44,10 @@ export async function PUT(request: NextRequest) {
   const limited = await rateLimitAdminRoute(mid.userId!, 'admin-economics-config');
   if (limited) return limited;
 
-  let body;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-  }
+  const body = mid.body as z.infer<typeof economicsConfigSchema>;
 
   try {
-    if (typeof body.id !== 'string' || !body.id) {
-      return NextResponse.json({ error: 'id is required' }, { status: 400 });
-    }
-
     if (body.type === 'token_config') {
-      if (typeof body.tokenCost !== 'number' || !Number.isFinite(body.tokenCost) || body.tokenCost < 0) {
-        return NextResponse.json({ error: 'tokenCost must be a non-negative finite number' }, { status: 400 });
-      }
-      if (typeof body.estimatedCostCents !== 'number' || !Number.isFinite(body.estimatedCostCents) || body.estimatedCostCents < 0) {
-        return NextResponse.json({ error: 'estimatedCostCents must be a non-negative finite number' }, { status: 400 });
-      }
       await queryWithResilience(() =>
         getDb().update(tokenConfig)
           .set({
@@ -47,13 +58,7 @@ export async function PUT(request: NextRequest) {
           })
           .where(eq(tokenConfig.id, body.id))
       );
-    } else if (body.type === 'tier_config') {
-      const numFields = ['monthlyTokens', 'maxProjects', 'maxPublished', 'priceCentsMonthly'] as const;
-      for (const field of numFields) {
-        if (typeof body[field] !== 'number' || !Number.isFinite(body[field]) || body[field] < 0) {
-          return NextResponse.json({ error: `${field} must be a non-negative finite number` }, { status: 400 });
-        }
-      }
+    } else {
       await queryWithResilience(() =>
         getDb().update(tierConfig)
           .set({
@@ -65,8 +70,6 @@ export async function PUT(request: NextRequest) {
           })
           .where(eq(tierConfig.id, body.id))
       );
-    } else {
-      return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
     }
 
     return NextResponse.json({ success: true });

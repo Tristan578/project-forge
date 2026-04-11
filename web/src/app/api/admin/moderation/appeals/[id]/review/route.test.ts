@@ -46,15 +46,16 @@ describe('/api/admin/moderation/appeals/[id]/review POST', () => {
     expect(res.status).toBe(403);
   });
 
-  it('returns 400 for invalid decision', async () => {
+  it('returns 422 for invalid decision', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_1', user } });
     vi.mocked(assertAdmin).mockReturnValue(null);
 
     const res = await POST(makeReviewRequest({ decision: 'maybe' }), { params: makeParams() });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const data = await res.json();
-    expect(data.error).toContain('decision');
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('decision');
   });
 
   it('returns 404 if appeal not found', async () => {

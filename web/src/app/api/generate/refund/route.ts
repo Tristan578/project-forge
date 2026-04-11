@@ -9,34 +9,25 @@
 export const maxDuration = 10; // API_MAX_DURATION_SIMPLE_S
 
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
+
+const refundSchema = z.object({
+  usageId: z.string().min(1).max(100),
+});
 
 export async function POST(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
     requireAuth: true,
     rateLimit: true,
     rateLimitConfig: { key: (id) => `refund:${id}`, max: 3, windowSeconds: 60 },
+    validate: refundSchema,
   });
   if (mid.error) return mid.error;
 
-  // 2. Parse request
-  let body: {
-    usageId: string;
-  };
-
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
-
-  const { usageId } = body;
-
-  if (!usageId) {
-    return NextResponse.json({ error: 'usageId required' }, { status: 400 });
-  }
+  const { usageId } = mid.body as z.infer<typeof refundSchema>;
 
   // 3. Refund tokens
   try {

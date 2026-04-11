@@ -32,34 +32,37 @@ describe('/api/moderation/appeal', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns 400 if contentId is missing', async () => {
+  it('returns 422 if contentId is missing', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'c1', user } });
 
     const res = await POST(makeRequest({ contentType: 'comment', reason: 'Not offensive content' }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const data = await res.json();
-    expect(data.error).toContain('contentId');
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('contentId');
   });
 
-  it('returns 400 if contentType is invalid', async () => {
+  it('returns 422 if contentType is invalid', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'c1', user } });
 
     const res = await POST(makeRequest({ contentId: '1', contentType: 'invalid', reason: 'Not offensive content' }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const data = await res.json();
-    expect(data.error).toContain('contentType');
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('contentType');
   });
 
-  it('returns 400 if reason is too short', async () => {
+  it('returns 422 if reason is too short', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'c1', user } });
 
     const res = await POST(makeRequest({ contentId: '1', contentType: 'comment', reason: 'short' }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const data = await res.json();
-    expect(data.error).toContain('10 characters');
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('reason');
   });
 
   it('creates appeal and returns 201 on success', async () => {

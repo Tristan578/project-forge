@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { gameRatings } from '@/lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
@@ -6,6 +7,10 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
+
+const rateSchema = z.object({
+  rating: z.number().finite().min(1).max(5),
+});
 
 export async function POST(
   req: NextRequest,
@@ -16,25 +21,12 @@ export async function POST(
       requireAuth: true,
       rateLimit: true,
       rateLimitConfig: { key: (id) => `rate:${id}`, max: 30, windowSeconds: 60 },
+      validate: rateSchema,
     });
     if (mid.error) return mid.error;
 
     const { id: gameId } = await params;
-    let body;
-    try {
-      body = await req.json();
-    } catch {
-      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-    }
-    const { rating } = body;
-
-    // Validate rating
-    if (typeof rating !== 'number' || !Number.isFinite(rating) || rating < 1 || rating > 5) {
-      return NextResponse.json(
-        { error: 'Rating must be between 1 and 5' },
-        { status: 400 }
-      );
-    }
+    const { rating } = mid.body as z.infer<typeof rateSchema>;
 
     // Atomic upsert — eliminates TOCTOU race where concurrent requests
     // both pass the "already rated?" check and both INSERT duplicates.

@@ -31,22 +31,30 @@ describe('POST /api/admin/moderation/bulk', () => {
     expect((await POST(req)).status).toBe(401);
   });
 
-  it('returns 400 for invalid action', async () => {
+  it('returns 422 for invalid action', async () => {
     makeAdminAuth();
     const req = new NextRequest('http://localhost/api/admin/moderation/bulk', {
       method: 'POST',
       body: JSON.stringify({ action: 'ignore', commentIds: ['c1'] }),
     });
-    expect((await POST(req)).status).toBe(400);
+    const res = await POST(req);
+    const data = await res.json();
+    expect(res.status).toBe(422);
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('action');
   });
 
-  it('returns 400 for empty commentIds', async () => {
+  it('returns 422 for empty commentIds', async () => {
     makeAdminAuth();
     const req = new NextRequest('http://localhost/api/admin/moderation/bulk', {
       method: 'POST',
       body: JSON.stringify({ action: 'approve', commentIds: [] }),
     });
-    expect((await POST(req)).status).toBe(400);
+    const res = await POST(req);
+    const data = await res.json();
+    expect(res.status).toBe(422);
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('commentIds');
   });
 
   it('returns actual DB affected count, not ids.length (PF-457)', async () => {

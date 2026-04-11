@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { gameComments } from '@/lib/db/schema';
 import { inArray } from 'drizzle-orm';
@@ -8,6 +9,11 @@ import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
+
+const bulkModerationSchema = z.object({
+  action: z.enum(['approve', 'delete']),
+  commentIds: z.array(z.string().min(1).max(100)).min(1).max(100),
+});
 
 /**
  * POST /api/admin/moderation/bulk
@@ -19,7 +25,10 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: NextRequest) {
   try {
-    const mid = await withApiMiddleware(req, { requireAuth: true });
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      validate: bulkModerationSchema,
+    });
     if (mid.error) return mid.error;
 
     const adminError = assertAdmin(mid.authContext!.clerkId);
@@ -28,37 +37,7 @@ export async function POST(req: NextRequest) {
     const limited = await rateLimitAdminRoute(mid.userId!, 'admin-moderation-bulk');
     if (limited) return limited;
 
-    const body = await req.json() as unknown;
-
-    if (typeof body !== 'object' || body === null) {
-      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
-    }
-
-    const { action, commentIds } = body as Record<string, unknown>;
-
-    if (action !== 'approve' && action !== 'delete') {
-      return NextResponse.json(
-        { error: 'Action must be "approve" or "delete"' },
-        { status: 400 }
-      );
-    }
-
-    if (!Array.isArray(commentIds) || commentIds.length === 0) {
-      return NextResponse.json(
-        { error: 'commentIds must be a non-empty array' },
-        { status: 400 }
-      );
-    }
-
-    const invalidIds = (commentIds as unknown[]).filter((id) => typeof id !== 'string');
-    if (invalidIds.length > 0) {
-      return NextResponse.json(
-        { error: 'All commentIds must be strings' },
-        { status: 400 }
-      );
-    }
-
-    const ids = commentIds as string[];
+    const { action, commentIds: ids } = mid.body as z.infer<typeof bulkModerationSchema>;
     const errors: string[] = [];
     let processed = 0;
 

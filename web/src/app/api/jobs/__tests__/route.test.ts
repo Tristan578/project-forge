@@ -113,7 +113,7 @@ describe('/api/jobs', () => {
       expect(response.status).toBe(429);
     });
 
-    it('returns 400 when required fields missing', async () => {
+    it('returns 422 when required fields missing', async () => {
       mockAuth(true);
       setupDb();
 
@@ -125,8 +125,9 @@ describe('/api/jobs', () => {
       const response = await POST(req);
       const body = await response.json();
 
-      expect(response.status).toBe(400);
-      expect(body.error).toBe('Missing required fields');
+      expect(response.status).toBe(422);
+      expect(body.error).toBe('Validation failed');
+      expect(JSON.stringify(body.details)).toContain('type');
     });
 
     it('creates job and returns 201', async () => {

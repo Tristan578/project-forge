@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { executeOperation } from '@/lib/bridges/asepriteBridge';
 import { discoverTool } from '@/lib/bridges/bridgeManager';
@@ -6,6 +7,11 @@ import type { BridgeToolConfig } from '@/lib/bridges/types';
 import { ALLOWED_TEMPLATES } from '@/lib/bridges/luaTemplates';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { BRIDGE_CACHE_TTL_MS } from '@/lib/config/timeouts';
+
+const asepriteExecuteSchema = z.object({
+  operation: z.string().min(1).max(100),
+  params: z.record(z.string(), z.unknown()).nullish(),
+});
 
 // Cache discovered tool config to avoid spawning a child process on every request
 let cachedTool: { config: BridgeToolConfig; expiresAt: number } | null = null;
@@ -25,27 +31,19 @@ export async function POST(req: NextRequest) {
     requireAuth: true,
     rateLimit: true,
     rateLimitConfig: { key: (id) => `user:bridges-aseprite-execute:${id}`, max: 10, windowSeconds: 60, distributed: false },
+    validate: asepriteExecuteSchema,
   });
   if (mid.error) return mid.error;
 
   try {
-    const body = await req.json();
-    const { operation, params } = body ?? {};
+    const { operation, params } = mid.body as z.infer<typeof asepriteExecuteSchema>;
 
-    if (!operation || typeof operation !== 'string') {
-      return NextResponse.json({ error: 'operation is required' }, { status: 400 });
-    }
-
+    // Runtime allowlist check — ALLOWED_TEMPLATES is a Set, not expressible as a static Zod enum
     if (!ALLOWED_TEMPLATES.has(operation)) {
       return NextResponse.json(
         { error: `Unknown operation: "${operation}". Allowed: ${[...ALLOWED_TEMPLATES].join(', ')}` },
         { status: 400 }
       );
-    }
-
-    // Validate params is a plain object (not array); prototype pollution guarded by coerceParams
-    if (params != null && (typeof params !== 'object' || Array.isArray(params))) {
-      return NextResponse.json({ error: 'params must be a plain object' }, { status: 400 });
     }
 
     const tool = await getCachedTool();

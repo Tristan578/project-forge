@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { moderationAppeals, gameComments } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -8,6 +9,11 @@ import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
+
+const reviewAppealSchema = z.object({
+  decision: z.enum(['approve', 'reject']),
+  note: z.string().trim().max(2000).optional(),
+});
 
 /**
  * POST /api/admin/moderation/appeals/[id]/review
@@ -22,7 +28,10 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const mid = await withApiMiddleware(req, { requireAuth: true });
+    const mid = await withApiMiddleware(req, {
+      requireAuth: true,
+      validate: reviewAppealSchema,
+    });
     if (mid.error) return mid.error;
 
     const adminError = assertAdmin(mid.authContext!.clerkId);
@@ -32,15 +41,7 @@ export async function POST(
     if (rateLimitError) return rateLimitError;
 
     const { id } = await params;
-    const body = await req.json();
-    const { decision, note } = body;
-
-    if (!decision || (decision !== 'approve' && decision !== 'reject')) {
-      return NextResponse.json(
-        { error: 'decision must be "approve" or "reject"' },
-        { status: 400 }
-      );
-    }
+    const { decision, note } = mid.body as z.infer<typeof reviewAppealSchema>;
 
     // Fetch the appeal
     const [appeal] = await queryWithResilience(() =>
@@ -71,7 +72,7 @@ export async function POST(
         .set({
           status: newStatus,
           reviewedBy: mid.authContext!.clerkId,
-          reviewNote: typeof note === 'string' ? note.trim() : null,
+          reviewNote: note ?? null,
           reviewedAt: new Date(),
         })
         .where(eq(moderationAppeals.id, id))

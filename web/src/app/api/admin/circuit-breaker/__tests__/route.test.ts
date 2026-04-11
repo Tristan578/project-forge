@@ -156,28 +156,32 @@ describe('POST /api/admin/circuit-breaker', () => {
     expect(getProviderBreaker('meshy').getState()).toBe('OPEN');
   });
 
-  it('returns 400 for unknown action', async () => {
+  it('returns 422 for unknown action', async () => {
     mockAuthAdmin();
     const res = await POST(makePostRequest({ action: 'invalid_action' }));
-    expect(res.status).toBe(400);
-    const data = await res.json() as { error: string };
-    expect(data.error).toContain('Unknown action');
+    expect(res.status).toBe(422);
+    const data = await res.json() as { error: string; code?: string; details?: unknown };
+    expect(data.error).toBe('Validation failed');
+    expect(data.code).toBe('VALIDATION_ERROR');
+    expect(JSON.stringify(data.details)).toContain('action');
   });
 
-  it('returns 400 for reset_provider with missing provider', async () => {
+  it('returns 422 for reset_provider with missing provider', async () => {
     mockAuthAdmin();
     const res = await POST(makePostRequest({ action: 'reset_provider' }));
-    expect(res.status).toBe(400);
-    const data = await res.json() as { error: string };
-    expect(data.error).toContain('Missing provider');
+    expect(res.status).toBe(422);
+    const data = await res.json() as { error: string; details?: unknown };
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('provider');
   });
 
-  it('returns 400 for reset_provider with unknown provider name', async () => {
+  it('returns 422 for reset_provider with unknown provider name', async () => {
     mockAuthAdmin();
     const res = await POST(makePostRequest({ action: 'reset_provider', provider: 'unknown-xyz' }));
-    expect(res.status).toBe(400);
-    const data = await res.json() as { error: string };
-    expect(data.error).toContain('Unknown provider');
+    expect(res.status).toBe(422);
+    const data = await res.json() as { error: string; details?: unknown };
+    expect(data.error).toBe('Validation failed');
+    expect(JSON.stringify(data.details)).toContain('provider');
   });
 
   it('returns 400 for invalid JSON body', async () => {
@@ -191,7 +195,7 @@ describe('POST /api/admin/circuit-breaker', () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns 400 for non-object body', async () => {
+  it('returns 422 for non-object body', async () => {
     mockAuthAdmin();
     const req = new NextRequest('http://localhost/api/admin/circuit-breaker', {
       method: 'POST',
@@ -199,6 +203,6 @@ describe('POST /api/admin/circuit-breaker', () => {
       headers: { 'Content-Type': 'application/json' },
     });
     const res = await POST(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 });

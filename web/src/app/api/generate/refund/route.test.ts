@@ -62,14 +62,15 @@ describe('POST /api/generate/refund', () => {
     const res = await POST(req);
     expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.error).toBe('Invalid JSON');
+    expect(data.error).toBe('Invalid JSON body');
   });
 
-  it('returns 400 when usageId is missing', async () => {
+  it('returns 422 when usageId is missing', async () => {
     const res = await POST(makeRequest({}));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const data = await res.json();
-    expect(data.error).toBe('usageId required');
+    expect(data.error).toBe('Validation failed');
+    expect(data.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 500 when refund fails', async () => {

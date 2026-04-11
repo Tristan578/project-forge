@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { gameComments } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -6,6 +7,10 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
+
+const flagSchema = z.object({
+  commentId: z.string().min(1).max(100),
+});
 
 // Flag a comment for moderation
 export async function POST(
@@ -17,16 +22,12 @@ export async function POST(
       requireAuth: true,
       rateLimit: true,
       rateLimitConfig: { key: (id) => `flag:${id}`, max: 10, windowSeconds: 60 },
+      validate: flagSchema,
     });
     if (mid.error) return mid.error;
 
     const { id: gameId } = await params;
-    const body = await req.json();
-    const { commentId } = body;
-
-    if (!commentId || typeof commentId !== 'string') {
-      return NextResponse.json({ error: 'commentId is required' }, { status: 400 });
-    }
+    const { commentId } = mid.body as z.infer<typeof flagSchema>;
 
     // Verify comment belongs to this game and is not already flagged
     const [comment] = await queryWithResilience(() => getDb()

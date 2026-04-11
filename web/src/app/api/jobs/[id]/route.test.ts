@@ -87,7 +87,7 @@ describe('PATCH /api/jobs/[id]', () => {
     expect(body.updated).toBe(true);
   });
 
-  it('should return 400 for invalid status', async () => {
+  it('should return 422 for invalid status', async () => {
     const mockDb = {
       select: vi.fn().mockReturnThis(), from: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'j1' }]),
@@ -100,11 +100,13 @@ describe('PATCH /api/jobs/[id]', () => {
       body: JSON.stringify({ status: 'hacked' }),
     });
     const res = await PATCH(req, { params: Promise.resolve({ id: 'j1' }) });
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe('Invalid status');
+    const dataStatus = await res.json();
+    expect(res.status).toBe(422);
+    expect(dataStatus.error).toBe('Validation failed');
+    expect(JSON.stringify(dataStatus.details)).toContain('status');
   });
 
-  it('should return 400 for negative progress', async () => {
+  it('should return 422 for negative progress', async () => {
     const mockDb = {
       select: vi.fn().mockReturnThis(), from: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'j1' }]),
@@ -117,11 +119,13 @@ describe('PATCH /api/jobs/[id]', () => {
       body: JSON.stringify({ progress: -5 }),
     });
     const res = await PATCH(req, { params: Promise.resolve({ id: 'j1' }) });
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toContain('progress');
+    const dataProgress = await res.json();
+    expect(res.status).toBe(422);
+    expect(dataProgress.error).toBe('Validation failed');
+    expect(JSON.stringify(dataProgress.details)).toContain('progress');
   });
 
-  it('should return 400 for progress > 100', async () => {
+  it('should return 422 for progress > 100', async () => {
     const mockDb = {
       select: vi.fn().mockReturnThis(), from: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'j1' }]),
@@ -134,7 +138,9 @@ describe('PATCH /api/jobs/[id]', () => {
       body: JSON.stringify({ progress: 150 }),
     });
     const res = await PATCH(req, { params: Promise.resolve({ id: 'j1' }) });
-    expect(res.status).toBe(400);
+    const dataProgressHigh = await res.json();
+    expect(res.status).toBe(422);
+    expect(JSON.stringify(dataProgressHigh.details)).toContain('progress');
   });
 
   it('should silently ignore refunded field', async () => {

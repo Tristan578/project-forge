@@ -1,6 +1,7 @@
 export const maxDuration = 120; // API_MAX_DURATION_BATCH_S
 
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
@@ -11,21 +12,30 @@ import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 
-interface BatchItem {
-  nodeId: string;
-  text: string;
-  speaker: string;
-}
-
-interface VoiceSettings {
-  voiceId: string;
-  stability: number;
-  similarityBoost: number;
-  style: number;
-}
+const voiceBatchSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        nodeId: z.string().min(1).max(200),
+        text: z.string().min(1).max(1000),
+        speaker: z.string().max(200),
+      }),
+    )
+    .min(1)
+    .max(20),
+  voiceSettings: z.object({
+    voiceId: z.string().min(1).max(200),
+    stability: z.number().finite().min(0).max(1),
+    similarityBoost: z.number().finite().min(0).max(1),
+    style: z.number().finite().min(0).max(1),
+  }),
+});
 
 export async function POST(request: NextRequest) {
-  const mid = await withApiMiddleware(request, { requireAuth: true });
+  const mid = await withApiMiddleware(request, {
+    requireAuth: true,
+    validate: voiceBatchSchema,
+  });
   if (mid.error) return mid.error;
 
   // Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
@@ -36,40 +46,7 @@ export async function POST(request: NextRequest) {
   const rl = await distributedRateLimit(`gen-voice-batch:${mid.userId!}`, 5, 300);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
-  let body: {
-    items: BatchItem[];
-    voiceSettings: VoiceSettings;
-  };
-
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
-
-  const { items, voiceSettings } = body;
-
-  // Validate
-  if (!Array.isArray(items) || items.length === 0) {
-    return NextResponse.json({ error: 'items array is required' }, { status: 422 });
-  }
-
-  if (items.length > 20) {
-    return NextResponse.json({ error: 'Maximum 20 items per batch' }, { status: 422 });
-  }
-
-  for (const item of items) {
-    if (!item.text || item.text.length < 1 || item.text.length > 1000) {
-      return NextResponse.json(
-        { error: `Item "${item.nodeId}": text must be 1-1000 characters` },
-        { status: 422 }
-      );
-    }
-  }
-
-  if (!voiceSettings?.voiceId) {
-    return NextResponse.json({ error: 'voiceSettings.voiceId is required' }, { status: 422 });
-  }
+  const { items, voiceSettings } = mid.body as z.infer<typeof voiceBatchSchema>;
 
   // Content safety — batch text gets sent to TTS service
   const batchText = items.map(i => i.text).join(' ');

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { generationJobs } from '@/lib/db/schema';
 import { eq, and, inArray, desc } from 'drizzle-orm';
@@ -7,6 +8,17 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
+const createJobSchema = z.object({
+  providerJobId: z.string().min(1).max(200),
+  provider: z.string().min(1).max(100),
+  type: z.enum(['sprite', 'texture', 'model', 'sfx', 'voice', 'skybox', 'music', 'sprite_sheet', 'tileset']),
+  prompt: z.string().min(1).max(2000),
+  parameters: z.record(z.string(), z.unknown()).optional(),
+  tokenCost: z.number().int().min(0).optional(),
+  tokenUsageId: z.string().max(100).nullish(),
+  entityId: z.string().max(100).nullish(),
+});
+
 // POST: Create a job record (called by client after generation API returns)
 export async function POST(req: NextRequest) {
   try {
@@ -14,15 +26,12 @@ export async function POST(req: NextRequest) {
       requireAuth: true,
       rateLimit: true,
       rateLimitConfig: { key: (id) => `jobs:${id}`, max: 30, windowSeconds: 60, distributed: false },
+      validate: createJobSchema,
     });
     if (mid.error) return mid.error;
 
-    const body = await req.json();
-    const { providerJobId, provider, type, prompt, parameters, tokenCost, tokenUsageId, entityId } = body;
-
-    if (!providerJobId || !provider || !type || !prompt) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
-    }
+    const { providerJobId, provider, type, prompt, parameters, tokenCost, tokenUsageId, entityId } =
+      mid.body as z.infer<typeof createJobSchema>;
 
     const [job] = await queryWithResilience(() =>
       getDb()
@@ -32,9 +41,9 @@ export async function POST(req: NextRequest) {
           providerJobId,
           provider,
           type,
-          prompt: String(prompt).slice(0, 500),
+          prompt: prompt.slice(0, 500),
           parameters: parameters ?? {},
-          tokenCost: typeof tokenCost === 'number' ? tokenCost : 0,
+          tokenCost: tokenCost ?? 0,
           tokenUsageId: tokenUsageId ?? null,
           entityId: entityId ?? null,
         })

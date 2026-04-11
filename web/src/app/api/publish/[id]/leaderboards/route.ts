@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, leaderboards } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
+
+const createLeaderboardSchema = z.object({
+  name: z.string().trim().min(1).max(64),
+  sortOrder: z.enum(['asc', 'desc']).optional(),
+  maxEntries: z.number().finite().optional(),
+  minScore: z.number().finite().nullish(),
+  maxScore: z.number().finite().nullish(),
+});
 
 /**
  * Verify the authenticated user owns the published game.
@@ -66,6 +75,7 @@ export async function POST(
     requireAuth: true,
     rateLimit: true,
     rateLimitConfig: { key: (userId) => `user:leaderboard-create:${userId}`, max: 10, windowSeconds: 60 },
+    validate: createLeaderboardSchema,
   });
   if (mid.error) return mid.error;
 
@@ -77,17 +87,8 @@ export async function POST(
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
     }
 
-    let body: Record<string, unknown>;
-    try {
-      body = await request.json();
-    } catch {
-      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-    }
-
-    const name = typeof body.name === 'string' ? body.name.trim() : '';
-    if (!name || name.length > 64) {
-      return NextResponse.json({ error: 'name is required and must be 64 characters or fewer' }, { status: 400 });
-    }
+    const parsed = mid.body as z.infer<typeof createLeaderboardSchema>;
+    const name = parsed.name;
     // Reject characters that would make the name unaddressable as a URL segment.
     // Next.js already decodes route params, so a name containing '/' or '%' would
     // create leaderboards that cannot be retrieved or deleted via /[name] routes.
@@ -98,12 +99,12 @@ export async function POST(
       );
     }
 
-    const sortOrder = body.sortOrder === 'asc' ? 'asc' as const : 'desc' as const;
-    const maxEntries = typeof body.maxEntries === 'number' && Number.isFinite(body.maxEntries)
-      ? Math.min(Math.max(Math.round(body.maxEntries), 1), 1000)
+    const sortOrder = parsed.sortOrder ?? 'desc';
+    const maxEntries = parsed.maxEntries !== undefined
+      ? Math.min(Math.max(Math.round(parsed.maxEntries), 1), 1000)
       : 100;
-    const minScore = typeof body.minScore === 'number' && Number.isFinite(body.minScore) ? Math.round(body.minScore) : null;
-    const maxScore = typeof body.maxScore === 'number' && Number.isFinite(body.maxScore) ? Math.round(body.maxScore) : null;
+    const minScore = parsed.minScore != null ? Math.round(parsed.minScore) : null;
+    const maxScore = parsed.maxScore != null ? Math.round(parsed.maxScore) : null;
     if (minScore !== null && maxScore !== null && minScore > maxScore) {
       return NextResponse.json({ error: 'minScore must be <= maxScore' }, { status: 400 });
     }
