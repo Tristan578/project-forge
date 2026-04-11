@@ -297,7 +297,7 @@ const MUTATING_REPRESENTATIVES: ReadonlyArray<{
   { domain: 'queryHandlers',             tool: 'query_play_state',        args: {} },
   { domain: 'worldHandlers',             tool: 'get_current_world',       args: {} },
   { domain: 'transformHandlers',         tool: 'spawn_entity',            args: { entityType: 'cube' } },
-  { domain: 'materialHandlers',          tool: 'apply_material_preset',   args: { entityId: 'entity-1', preset: 'gold' } },
+  { domain: 'materialHandlers',          tool: 'apply_material_preset',   args: { entityId: 'entity-1', presetId: 'matte_white' } },
   { domain: 'editModeHandlers',          tool: 'enter_edit_mode',         args: { entityId: 'entity-1' } },
   { domain: 'audioHandlers',             tool: 'set_music_intensity',     args: { intensity: 0.5 } },
   { domain: 'exportHandlers',            tool: 'set_loading_screen',      args: { title: 'Loading', subtitle: '...' } },
@@ -309,7 +309,7 @@ const MUTATING_REPRESENTATIVES: ReadonlyArray<{
   { domain: 'dialogueHandlers',          tool: 'create_dialogue_tree',    args: { id: 'tree-1', title: 'Intro' } },
   { domain: 'scriptLibraryHandlers',     tool: 'create_script',           args: { name: 'Test', entityId: 'entity-1' } },
   { domain: 'physicsJointHandlers',      tool: 'toggle_physics',          args: { entityId: 'entity-1', enabled: true } },
-  { domain: 'animationParticleHandlers', tool: 'play_animation',          args: { entityId: 'entity-1', clip: 'idle' } },
+  { domain: 'animationParticleHandlers', tool: 'play_animation',          args: { entityId: 'entity-1', clipName: 'idle' } },
   { domain: 'gameplayHandlers',          tool: 'add_game_component',      args: { entityId: 'entity-1', component: 'health' } },
   { domain: 'pixelArtHandlers',          tool: 'set_pixel_art_palette',   args: { entityId: 'entity-1', palette: 'nes' } },
   { domain: 'leaderboardHandlers',       tool: 'list_leaderboards',       args: { gameId: 'game-1' } },
@@ -372,6 +372,43 @@ describe('executor: representative-tool coverage covers all 29 domains (PF-8341)
     },
   );
 
+  /**
+   * Shape-only assertions can silently pass for a handler that early-exits
+   * with a validation error before ever touching the dispatcher. For the
+   * subset of representatives whose contract is "dispatch a WASM command
+   * to the engine," prove the dispatcher was actually invoked at least
+   * once after a successful call. A handler that regressed into a no-op
+   * would fail here even though its ExecutionResult shape is still valid.
+   */
+  const DISPATCHER_BACKED: ReadonlyArray<{
+    tool: string;
+    args: Record<string, unknown>;
+    commandPattern: RegExp;
+  }> = [
+    { tool: 'spawn_entity',           args: { entityType: 'cube' },                                      commandPattern: /spawn/i },
+    { tool: 'apply_material_preset',  args: { entityId: 'entity-1', presetId: 'matte_white' },            commandPattern: /material/i },
+    { tool: 'toggle_physics',         args: { entityId: 'entity-1', enabled: true },                     commandPattern: /physics/i },
+    { tool: 'play_animation',         args: { entityId: 'entity-1', clipName: 'idle' },                  commandPattern: /animation/i },
+    { tool: 'update_transform',       args: { entityId: 'entity-1', position: { x: 1, y: 2, z: 3 } },    commandPattern: /transform/i },
+  ];
+
+  it.each(DISPATCHER_BACKED)(
+    '$tool actually invokes dispatchCommand (not a silent no-op)',
+    async ({ tool, args, commandPattern }) => {
+      dispatchSpy.mockClear();
+      const store = useEditorStore.getState();
+      const result = await executeToolCall(tool, args, store);
+      expect(result.success).toBe(true);
+      // Some handlers dispatch multiple related commands; at least one
+      // must match the domain pattern. A full no-op returns success:true
+      // without touching the dispatcher and fails here.
+      const matching = dispatchSpy.mock.calls.filter(([cmd]) =>
+        commandPattern.test(String(cmd)),
+      );
+      expect(matching.length).toBeGreaterThan(0);
+    },
+  );
+
   it('unknown tool names never crash and return a helpful error', async () => {
     const store = useEditorStore.getState();
     const result = await executeToolCall('tool_that_does_not_exist', {}, store);
@@ -430,7 +467,9 @@ describe('executor: real Zustand store end-to-end (PF-8341)', () => {
     const store = useEditorStore.getState();
     const result = await executeToolCall('get_scene_name', {}, store);
     expect(result.success).toBe(true);
-    expect(JSON.stringify(result.result)).toContain('Test Scene');
+    // Structural match, not a JSON.stringify().toContain() — avoids the
+    // "passes because 'Test Scene' appears in some error field" trap.
+    expect(result.result).toMatchObject({ sceneName: 'Test Scene' });
   });
 
   it('get_entity_details returns structured data for the seeded entity', async () => {
@@ -450,6 +489,16 @@ describe('executor: real Zustand store end-to-end (PF-8341)', () => {
 // ────────────────────────────────────────────────────────────────────────
 
 describe('executor: error-propagation contract (PF-8341)', () => {
+  // Snapshot the real spawnEntity so we can restore it — beforeEach seeds
+  // via merge and wouldn't overwrite the throwing stub on its own.
+  const realSpawnEntity = useEditorStore.getState().spawnEntity;
+  afterEach(() => {
+    useEditorStore.setState(
+      { spawnEntity: realSpawnEntity } as Partial<EditorState>,
+      false,
+    );
+  });
+
   it('handler throws surface as success: false, never as a rejected promise', async () => {
     // Spy on a slice action the transform handler depends on, forcing it
     // to throw. If the executor's top-level catch is intact, the rejected
@@ -458,7 +507,7 @@ describe('executor: error-propagation contract (PF-8341)', () => {
       throw new Error('Simulated handler failure');
     });
     useEditorStore.setState(
-      { spawnEntity: throwing } as unknown as Partial<EditorState>,
+      { spawnEntity: throwing } as Partial<EditorState>,
       false,
     );
 
@@ -471,6 +520,10 @@ describe('executor: error-propagation contract (PF-8341)', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('Simulated handler failure');
+    // Prove the injected stub was actually invoked — guards against the
+    // test passing because some *other* validation failure inside the
+    // handler also happens to return success:false with a similar message.
+    expect(throwing).toHaveBeenCalledTimes(1);
   });
 });
 
