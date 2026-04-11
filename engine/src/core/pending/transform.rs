@@ -27,6 +27,13 @@ pub struct CameraFocusRequest {
     pub entity_id: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct CameraOrbitRequest {
+    pub delta_yaw: Option<f32>,
+    pub delta_pitch: Option<f32>,
+    pub delta_radius: Option<f32>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SpawnRequest {
     pub entity_type: super::EntityType,
@@ -105,6 +112,10 @@ impl PendingCommands {
         self.camera_focus_requests.push(request);
     }
 
+    pub fn queue_camera_orbit(&mut self, request: CameraOrbitRequest) {
+        self.camera_orbit_requests.push(request);
+    }
+
     pub fn queue_spawn(&mut self, request: SpawnRequest) {
         self.spawn_requests.push(request);
     }
@@ -170,6 +181,10 @@ pub fn queue_rename_from_bridge(request: RenameRequest) -> bool {
 
 pub fn queue_camera_focus_from_bridge(request: CameraFocusRequest) -> bool {
     super::with_pending(|pc| pc.queue_camera_focus(request)).is_some()
+}
+
+pub fn queue_camera_orbit_from_bridge(request: CameraOrbitRequest) -> bool {
+    super::with_pending(|pc| pc.queue_camera_orbit(request)).is_some()
 }
 
 pub fn queue_spawn_from_bridge(request: SpawnRequest) -> bool {

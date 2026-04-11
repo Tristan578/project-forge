@@ -48,10 +48,6 @@ export async function PUT(request: NextRequest) {
 
   try {
     if (body.type === 'token_config') {
-      // `active` is optional in the schema — only include it in the UPDATE
-      // when the caller explicitly sets it. Previously `body.active ? 1 : 0`
-      // silently deactivated the row whenever the field was omitted, which
-      // violates the schema contract (optional = "do not change").
       const tokenConfigUpdate: {
         tokenCost: number;
         estimatedCostCents: number;

@@ -82,9 +82,6 @@ describe('PUT /api/admin/economics/config', () => {
   });
 
   it('omits `active` from UPDATE when the field is not provided', async () => {
-    // Regression for sentry[bot] comment on PR #8342: `body.active ? 1 : 0`
-    // unconditionally coerced undefined to 0, silently deactivating rows.
-    // The schema marks `active` optional, so omitting it must be a no-op.
     const setSpy = vi.fn().mockReturnThis();
     const mockDb = {
       update: vi.fn().mockReturnValue({

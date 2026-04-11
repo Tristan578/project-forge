@@ -70,4 +70,22 @@ cp pkg-webgpu/*          "$WEB_PUBLIC/engine-pkg-webgpu/"
 cp pkg-webgl2-runtime/*  "$WEB_PUBLIC/engine-pkg-webgl2-runtime/"
 cp pkg-webgpu-runtime/*  "$WEB_PUBLIC/engine-pkg-webgpu-runtime/"
 
+# --- Generate content-hash manifests for cache-busting ---
+# useEngine.ts reads wasm-manifest.json to append ?v=<hash> to WASM URLs,
+# preventing browsers from serving stale binaries after a deployment.
+echo "=== Generating WASM content-hash manifests ==="
+for variant in engine-pkg-webgl2 engine-pkg-webgpu engine-pkg-webgl2-runtime engine-pkg-webgpu-runtime; do
+    dest_dir="$WEB_PUBLIC/$variant"
+    wasm_path="$dest_dir/forge_engine_bg.wasm"
+    if [ -f "$wasm_path" ]; then
+        # First 16 hex chars of SHA-256 (64 bits — sufficient for cache-busting)
+        short_hash=$(shasum -a 256 "$wasm_path" | awk '{print substr($1, 1, 16)}')
+        printf '{"wasmFile":"forge_engine_bg.wasm","jsFile":"forge_engine.js","hash":"%s"}' "$short_hash" \
+            > "$dest_dir/wasm-manifest.json"
+        echo "  $variant hash: $short_hash"
+    else
+        echo "  WARNING: $wasm_path not found, skipping manifest"
+    fi
+done
+
 echo "=== All WASM variants built successfully (editor + runtime) ==="
