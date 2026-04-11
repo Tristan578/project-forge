@@ -64,7 +64,14 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(data.error || `HTTP ${res.status}`);
+        // 422 validation responses carry a user-friendly summary in
+        // `details.message` (e.g. "type: Required"). Prefer it over the
+        // generic top-level `error` string so users see which field failed.
+        const detailMessage =
+          typeof data?.details === 'object' && data.details !== null && typeof (data.details as { message?: unknown }).message === 'string'
+            ? (data.details as { message: string }).message
+            : null;
+        throw new Error(detailMessage || data.error || `HTTP ${res.status}`);
       }
 
       setSubmitted(true);

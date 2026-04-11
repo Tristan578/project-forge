@@ -55,7 +55,14 @@ export function AssetUploadDialog({ onClose, onSuccess }: AssetUploadDialogProps
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Failed to create listing' }));
-        throw new Error(err.error);
+        // 422 validation responses carry a user-friendly summary in
+        // `details.message` (e.g. "name: Required"). Prefer it over the
+        // generic top-level `error` string.
+        const detailMessage =
+          typeof err?.details === 'object' && err.details !== null && typeof (err.details as { message?: unknown }).message === 'string'
+            ? (err.details as { message: string }).message
+            : null;
+        throw new Error(detailMessage || err.error || 'Failed to create listing');
       }
 
       onSuccess();
