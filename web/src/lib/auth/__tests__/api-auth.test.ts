@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { NextResponse } from 'next/server';
 
 // ---------------------------------------------------------------------------
@@ -44,6 +46,7 @@ function makeUser(overrides: Partial<User> = {}): User {
     stripeCustomerId: null,
     stripeSubscriptionId: null,
     billingCycleStart: null,
+    banned: 0,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -268,7 +271,108 @@ describe('authenticateRequest — edge cases', () => {
   it('returns 401 when auth() throws (expired/invalid token)', async () => {
     mockAuth.mockRejectedValue(new Error('Token expired'));
 
-    await expect(authenticateRequest()).rejects.toThrow('Token expired');
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+    }
+    // Ensure the throw did NOT propagate — it must be caught and converted to 401.
+    expect(mockGetUserByClerkId).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 when auth() throws a malformed-JWT error', async () => {
+    mockAuth.mockRejectedValue(new Error('Invalid JWT format'));
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+    }
+  });
+
+  it('returns 403 ACCOUNT_BANNED for a banned user loaded from DB', async () => {
+    const bannedUser = makeUser({ banned: 1 });
+    mockAuth.mockResolvedValue({ userId: 'clerk_abc' });
+    mockGetUserByClerkId.mockResolvedValue(bannedUser);
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(403);
+      const body = await result.response.json();
+      expect(body.error).toBe('ACCOUNT_BANNED');
+      expect(body.message).toContain('suspended');
+    }
+  });
+
+  it('returns 403 ACCOUNT_BANNED when sync returns a banned user', async () => {
+    // DB is empty, sync completes successfully, but the freshly synced
+    // record is already flagged banned — must still reject.
+    const bannedSynced = makeUser({ banned: 1 });
+    mockAuth.mockResolvedValue({ userId: 'clerk_abc' });
+    mockGetUserByClerkId.mockResolvedValue(null);
+    mockClerkClient.mockResolvedValue({
+      users: {
+        getUser: vi.fn().mockResolvedValue({
+          emailAddresses: [{ emailAddress: 'test@example.com' }],
+          firstName: 'Test',
+          lastName: 'User',
+        }),
+      },
+    });
+    mockSyncUserFromClerk.mockResolvedValue(bannedSynced);
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(403);
+      const body = await result.response.json();
+      expect(body.error).toBe('ACCOUNT_BANNED');
+    }
+  });
+
+  it('allows access when banned=0 (unbanned user)', async () => {
+    const normalUser = makeUser({ banned: 0 });
+    mockAuth.mockResolvedValue({ userId: 'clerk_abc' });
+    mockGetUserByClerkId.mockResolvedValue(normalUser);
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(true);
+  });
+
+  it('does NOT retry on Clerk 404 — early 503 instead of waiting 500ms', async () => {
+    // When Clerk returns 404 (user deleted), retry is pointless and leaks
+    // timing information that distinguishes deleted-user from DB-flake.
+    mockAuth.mockResolvedValue({ userId: 'clerk_deleted' });
+    mockGetUserByClerkId.mockResolvedValue(null);
+    const mockGetUser = vi.fn().mockRejectedValue(
+      Object.assign(new Error('User not found'), { status: 404 }),
+    );
+    mockClerkClient.mockResolvedValue({ users: { getUser: mockGetUser } });
+
+    const start = Date.now();
+    const result = await authenticateRequest();
+    const elapsed = Date.now() - start;
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(503);
+    }
+    // Retry adds a 500ms delay — a 404-aware early return should not wait.
+    expect(elapsed).toBeLessThan(400);
+    // getUser was called exactly once (no retry).
+    expect(mockGetUser).toHaveBeenCalledTimes(1);
+  });
+
+  it('detects Clerk 404 by message substring when status field is absent', async () => {
+    mockAuth.mockResolvedValue({ userId: 'clerk_deleted' });
+    mockGetUserByClerkId.mockResolvedValue(null);
+    const mockGetUser = vi.fn().mockRejectedValue(new Error('user not found (404)'));
+    mockClerkClient.mockResolvedValue({ users: { getUser: mockGetUser } });
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    expect(mockGetUser).toHaveBeenCalledTimes(1);
   });
 
   it('returns 401 when auth() returns empty object (no userId key)', async () => {
@@ -368,7 +472,23 @@ describe('authenticateClerkSession — edge cases', () => {
   it('returns 401 when auth() throws (expired token)', async () => {
     mockAuth.mockRejectedValue(new Error('Session expired'));
 
-    await expect(authenticateClerkSession()).rejects.toThrow('Session expired');
+    const result = await authenticateClerkSession();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+    }
+    // Throw must be caught, not propagated.
+    expect(mockGetUserByClerkId).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 when auth() throws a malformed-JWT error', async () => {
+    mockAuth.mockRejectedValue(new Error('Invalid JWT format'));
+
+    const result = await authenticateClerkSession();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+    }
   });
 
   it('returns 401 when auth() returns empty object', async () => {
@@ -391,6 +511,45 @@ describe('authenticateClerkSession — edge cases', () => {
       expect(result.response.status).toBe(401);
     }
   });
+
+  it('returns 403 ACCOUNT_BANNED for a banned user', async () => {
+    // authenticateClerkSession skips the full sync path, but it MUST still
+    // reject banned users when the DB row exists — otherwise a banned user
+    // can access any route that uses this lighter helper.
+    const bannedUser = makeUser({ banned: 1 });
+    mockAuth.mockResolvedValue({ userId: 'clerk_abc' });
+    mockGetUserByClerkId.mockResolvedValue(bannedUser);
+
+    const result = await authenticateClerkSession();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(403);
+      const body = await result.response.json();
+      expect(body.error).toBe('ACCOUNT_BANNED');
+    }
+  });
+
+  it('allows access when the DB row is missing (unsynced degraded path)', async () => {
+    // Caller-side degraded mode: if the user row does not exist yet, this
+    // helper returns ok so the caller can decide how to handle it.
+    mockAuth.mockResolvedValue({ userId: 'clerk_new' });
+    mockGetUserByClerkId.mockResolvedValue(null);
+
+    const result = await authenticateClerkSession();
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.clerkId).toBe('clerk_new');
+    }
+  });
+
+  it('allows access for unbanned user (banned=0)', async () => {
+    const normalUser = makeUser({ banned: 0 });
+    mockAuth.mockResolvedValue({ userId: 'clerk_abc' });
+    mockGetUserByClerkId.mockResolvedValue(normalUser);
+
+    const result = await authenticateClerkSession();
+    expect(result.ok).toBe(true);
+  });
 });
 
 describe('assertAdmin — edge cases', () => {
@@ -410,6 +569,29 @@ describe('assertAdmin — edge cases', () => {
     process.env.ADMIN_USER_IDS = 'clerk_abc';
     const response = assertAdmin('clerk_ab');
     expect(response?.status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Schema-locking test: guarantees a future refactor of syncUserFromClerk
+// cannot silently unban users by adding `banned` to the onConflictDoUpdate
+// .set() block. A partial set on ON CONFLICT DO UPDATE preserves unset
+// columns, so omitting `banned` is load-bearing security behavior.
+// ---------------------------------------------------------------------------
+
+describe('syncUserFromClerk — schema lock', () => {
+  it('does NOT include `banned` in the onConflictDoUpdate set block', () => {
+    const source = readFileSync(
+      join(process.cwd(), 'src/lib/auth/user-service.ts'),
+      'utf8',
+    );
+    const conflictBlockMatch = source.match(/\.onConflictDoUpdate\(\s*\{[\s\S]*?set:\s*\{([\s\S]*?)\}/);
+    expect(conflictBlockMatch, 'onConflictDoUpdate.set block should exist').not.toBeNull();
+    const setBlock = conflictBlockMatch![1];
+    expect(
+      /\bbanned\b/.test(setBlock),
+      'banned must NOT appear in onConflictDoUpdate.set — it would silently unban users on re-sync',
+    ).toBe(false);
   });
 });
 

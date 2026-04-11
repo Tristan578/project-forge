@@ -38,7 +38,17 @@ export async function authenticateRequest(): Promise<
     };
   }
 
-  const { userId: clerkId } = await auth();
+  let clerkId: string | null | undefined;
+  try {
+    ({ userId: clerkId } = await auth());
+  } catch {
+    // Expired token, malformed JWT, or Clerk transient error.
+    // Fail closed with 401 instead of propagating a 500.
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+    };
+  }
 
   if (!clerkId) {
     return {
@@ -47,22 +57,35 @@ export async function authenticateRequest(): Promise<
     };
   }
 
-  const user = await getUserByClerkId(clerkId);
+  let user = await getUserByClerkId(clerkId);
   if (!user) {
     // Auto-sync: user is authenticated with Clerk but missing from our DB.
     // This handles webhook failures, new deployments, or DB resets.
     // Retry once after 500ms on transient failures (PF-474).
     const syncedUser = await attemptSyncWithRetry(clerkId);
-    if (syncedUser) {
-      return { ok: true, ctx: { user: syncedUser, clerkId } };
+    if (!syncedUser) {
+      // Degraded mode: deny access with 503 instead of returning a user
+      // without DB state (tier, credits). This prevents credit bypass (PF-474).
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: 'SERVICE_DEGRADED', message: 'User sync temporarily unavailable. Please retry.' },
+          { status: 503 },
+        ),
+      };
     }
-    // Degraded mode: deny access with 503 instead of returning a user
-    // without DB state (tier, credits). This prevents credit bypass (PF-474).
+    user = syncedUser;
+  }
+
+  // Banned check applies to BOTH the freshly-loaded and freshly-synced
+  // code paths — a banned DB row must never be returned as an auth context,
+  // regardless of whether we loaded or inserted it on this request.
+  if (user.banned > 0) {
     return {
       ok: false,
       response: NextResponse.json(
-        { error: 'SERVICE_DEGRADED', message: 'User sync temporarily unavailable. Please retry.' },
-        { status: 503 },
+        { error: 'ACCOUNT_BANNED', message: 'This account has been suspended.' },
+        { status: 403 },
       ),
     };
   }
@@ -86,13 +109,33 @@ async function attemptSyncWithRetry(clerkId: string, _attempt = 0): Promise<User
       first_name: clerkUser.firstName,
       last_name: clerkUser.lastName,
     });
-  } catch {
+  } catch (err) {
+    // Clerk 404 = user was deleted from Clerk. Don't retry — the session
+    // token is stale. Returning null here lets the caller surface a 401
+    // (via the authenticateRequest "user sync failed" branch), closing a
+    // timing side-channel where a deleted user is distinguishable from
+    // a transient DB failure.
+    if (isClerk404(err)) {
+      return null;
+    }
     if (_attempt < 1) {
       await delay(500);
       return attemptSyncWithRetry(clerkId, _attempt + 1);
     }
     return null;
   }
+}
+
+/** Detect Clerk "user not found" errors without depending on Clerk's private error types. */
+function isClerk404(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const maybeStatus = (err as { status?: unknown }).status;
+  if (maybeStatus === 404) return true;
+  const maybeMessage = (err as { message?: unknown }).message;
+  if (typeof maybeMessage === 'string' && /\b404\b|not[_ ]?found/i.test(maybeMessage)) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -110,12 +153,34 @@ export async function authenticateClerkSession(): Promise<
     };
   }
 
-  const { userId: clerkId } = await auth();
+  let clerkId: string | null | undefined;
+  try {
+    ({ userId: clerkId } = await auth());
+  } catch {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+    };
+  }
 
   if (!clerkId) {
     return {
       ok: false,
       response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+    };
+  }
+
+  // Lightweight banned check: this helper skips the full user sync,
+  // but we must still reject banned users. If the user row is missing
+  // (not yet synced), fall through in the caller's degraded-mode path.
+  const user = await getUserByClerkId(clerkId);
+  if (user && user.banned > 0) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'ACCOUNT_BANNED', message: 'This account has been suspended.' },
+        { status: 403 },
+      ),
     };
   }
 
