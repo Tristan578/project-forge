@@ -275,9 +275,25 @@ describe('authenticateRequest — edge cases', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.response.status).toBe(401);
+      const body = await result.response.json();
+      // The `reason` sub-code distinguishes a provider outage from a
+      // routine missing-session 401 for on-call observability.
+      expect(body.reason).toBe('AUTH_PROVIDER_ERROR');
     }
     // Ensure the throw did NOT propagate — it must be caught and converted to 401.
     expect(mockGetUserByClerkId).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 NO_SESSION reason when userId is missing (distinguishable from provider error)', async () => {
+    mockAuth.mockResolvedValue({ userId: null });
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+      const body = await result.response.json();
+      expect(body.reason).toBe('NO_SESSION');
+    }
   });
 
   it('returns 401 when auth() throws a malformed-JWT error', async () => {
@@ -302,6 +318,9 @@ describe('authenticateRequest — edge cases', () => {
       const body = await result.response.json();
       expect(body.error).toBe('ACCOUNT_BANNED');
       expect(body.message).toContain('suspended');
+      // Must give users a next step for appeals — silent bans create
+      // support ticket sprawl and silent churn.
+      expect(body.message).toMatch(/support@spawnforge\.ai/);
     }
   });
 
@@ -340,9 +359,10 @@ describe('authenticateRequest — edge cases', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('does NOT retry on Clerk 404 — early 503 instead of waiting 500ms', async () => {
-    // When Clerk returns 404 (user deleted), retry is pointless and leaks
-    // timing information that distinguishes deleted-user from DB-flake.
+  it('returns 401 STALE_SESSION on Clerk 404 (no retry, no 500ms wait)', async () => {
+    // When Clerk returns 404, the session token is stale. Return 401
+    // (not 503) so client SDKs refresh the token, and skip the 500ms
+    // retry so timing can't distinguish a deleted user from a DB flake.
     mockAuth.mockResolvedValue({ userId: 'clerk_deleted' });
     mockGetUserByClerkId.mockResolvedValue(null);
     const mockGetUser = vi.fn().mockRejectedValue(
@@ -356,12 +376,17 @@ describe('authenticateRequest — edge cases', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.response.status).toBe(503);
+      expect(result.response.status).toBe(401);
+      const body = await result.response.json();
+      expect(body.reason).toBe('STALE_SESSION');
     }
-    // Retry adds a 500ms delay — a 404-aware early return should not wait.
+    // Retry adds a 500ms delay — a 404-aware early return must not wait.
     expect(elapsed).toBeLessThan(400);
     // getUser was called exactly once (no retry).
     expect(mockGetUser).toHaveBeenCalledTimes(1);
+    // syncUserFromClerk was never called — we short-circuited on the
+    // Clerk fetch, so the DB write path didn't execute.
+    expect(mockSyncUserFromClerk).not.toHaveBeenCalled();
   });
 
   it('detects Clerk 404 by message substring when status field is absent', async () => {
@@ -372,7 +397,42 @@ describe('authenticateRequest — edge cases', () => {
 
     const result = await authenticateRequest();
     expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+    }
     expect(mockGetUser).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT fast-exit when syncUserFromClerk throws a generic "record not found" DB error', async () => {
+    // Regression guard: the old broad `/not[_ ]?found/i` regex would
+    // have misclassified a DB error like "record not found" as a Clerk
+    // 404 and fast-exited. After narrowing the regex AND restricting
+    // isClerk404 to only the Clerk fetch path, a DB-side "not found"
+    // must go through the normal retry + degraded flow.
+    mockAuth.mockResolvedValue({ userId: 'clerk_abc' });
+    mockGetUserByClerkId.mockResolvedValue(null);
+    mockClerkClient.mockResolvedValue({
+      users: {
+        getUser: vi.fn().mockResolvedValue({
+          emailAddresses: [{ emailAddress: 'test@example.com' }],
+          firstName: 'Test',
+          lastName: 'User',
+        }),
+      },
+    });
+    mockSyncUserFromClerk.mockRejectedValue(new Error('record not found in table users'));
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // Degraded (503), NOT STALE_SESSION — the user exists in Clerk,
+      // the DB write just failed twice.
+      expect(result.response.status).toBe(503);
+      const body = await result.response.json();
+      expect(body.error).toBe('SERVICE_DEGRADED');
+    }
+    // syncUserFromClerk must have been retried: initial + 1 retry = 2.
+    expect(mockSyncUserFromClerk).toHaveBeenCalledTimes(2);
   });
 
   it('returns 401 when auth() returns empty object (no userId key)', async () => {
@@ -427,10 +487,9 @@ describe('authenticateRequest — edge cases', () => {
     }
   });
 
-  it('handles deleted user (exists in Clerk but DB lookup returns null, sync also returns null)', async () => {
+  it('handles deleted Clerk user as 401 STALE_SESSION (not 503)', async () => {
     mockAuth.mockResolvedValue({ userId: 'clerk_deleted_user' });
     mockGetUserByClerkId.mockResolvedValue(null);
-    // Clerk user was deleted — getUser throws 404
     mockClerkClient.mockResolvedValue({
       users: {
         getUser: vi.fn().mockRejectedValue(new Error('User not found (404)')),
@@ -440,9 +499,9 @@ describe('authenticateRequest — edge cases', () => {
     const result = await authenticateRequest();
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.response.status).toBe(503);
+      expect(result.response.status).toBe(401);
       const body = await result.response.json();
-      expect(body.error).toBe('SERVICE_DEGRADED');
+      expect(body.reason).toBe('STALE_SESSION');
     }
   });
 
@@ -469,13 +528,15 @@ describe('authenticateRequest — edge cases', () => {
 });
 
 describe('authenticateClerkSession — edge cases', () => {
-  it('returns 401 when auth() throws (expired token)', async () => {
+  it('returns 401 AUTH_PROVIDER_ERROR when auth() throws (expired token)', async () => {
     mockAuth.mockRejectedValue(new Error('Session expired'));
 
     const result = await authenticateClerkSession();
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.response.status).toBe(401);
+      const body = await result.response.json();
+      expect(body.reason).toBe('AUTH_PROVIDER_ERROR');
     }
     // Throw must be caught, not propagated.
     expect(mockGetUserByClerkId).not.toHaveBeenCalled();
@@ -586,11 +647,19 @@ describe('syncUserFromClerk — schema lock', () => {
       'utf8',
     );
     const conflictBlockMatch = source.match(/\.onConflictDoUpdate\(\s*\{[\s\S]*?set:\s*\{([\s\S]*?)\}/);
-    expect(conflictBlockMatch, 'onConflictDoUpdate.set block should exist').not.toBeNull();
+    expect(
+      conflictBlockMatch,
+      'onConflictDoUpdate.set block not found in user-service.ts — schema-lock guard is broken. ' +
+        'Verify syncUserFromClerk still uses onConflictDoUpdate AND that `banned` is still excluded ' +
+        'from its set block (omitting banned is load-bearing security: partial set on ON CONFLICT ' +
+        'DO UPDATE preserves unset columns, so listing banned would silently unban users on re-sync).',
+    ).not.toBeNull();
     const setBlock = conflictBlockMatch![1];
     expect(
       /\bbanned\b/.test(setBlock),
-      'banned must NOT appear in onConflictDoUpdate.set — it would silently unban users on re-sync',
+      'banned must NOT appear in syncUserFromClerk.onConflictDoUpdate.set — a partial set clause ' +
+        'preserves unset columns, so adding `banned` here would reset it to the default (0) on every ' +
+        're-sync, silently unbanning previously-suspended users. Keep it out of the set block.',
     ).toBe(false);
   });
 });
