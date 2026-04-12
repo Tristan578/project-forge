@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect } from 'react';
-import { captureException } from '@/lib/monitoring/sentry-client';
+import { captureException, setTag } from '@/lib/monitoring/sentry-client';
 
 export interface RouteErrorBoundaryProps {
   error: Error & { digest?: string };
@@ -26,7 +26,8 @@ export function RouteErrorBoundary({
   secondaryLabel,
 }: RouteErrorBoundaryProps) {
   useEffect(() => {
-    captureException(error, { route, digest: error.digest });
+    setTag('route', route);
+    captureException(error, { digest: error.digest });
   }, [error, route]);
 
   const displayMessage =

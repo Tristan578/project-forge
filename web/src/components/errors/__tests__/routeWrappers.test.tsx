@@ -5,9 +5,11 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
 
 const captureExceptionMock = vi.fn();
+const setTagMock = vi.fn();
 vi.mock('@/lib/monitoring/sentry-client', () => ({
   captureException: (err: unknown, ctx?: Record<string, unknown>) =>
     captureExceptionMock(err, ctx),
+  setTag: (key: string, value: string) => setTagMock(key, value),
 }));
 
 vi.mock('next/link', () => ({
@@ -45,8 +47,8 @@ describe('route error.tsx wrappers', () => {
     render(<EditorError error={error} reset={reset} />);
     expect(screen.getByText('Editor Error')).toBeInTheDocument();
     expect(screen.getByText(/auto-saved/)).toBeInTheDocument();
+    expect(setTagMock).toHaveBeenCalledWith('route', 'editor');
     expect(captureExceptionMock).toHaveBeenCalledWith(error, {
-      route: 'editor',
       digest: undefined,
     });
   });
@@ -58,8 +60,8 @@ describe('route error.tsx wrappers', () => {
     const error = makeError('dashboard crash');
     render(<DashboardError error={error} reset={reset} />);
     expect(screen.getByText('Dashboard Error')).toBeInTheDocument();
+    expect(setTagMock).toHaveBeenCalledWith('route', 'dashboard');
     expect(captureExceptionMock).toHaveBeenCalledWith(error, {
-      route: 'dashboard',
       digest: undefined,
     });
   });
@@ -75,8 +77,8 @@ describe('route error.tsx wrappers', () => {
       'href',
       '/dashboard',
     );
+    expect(setTagMock).toHaveBeenCalledWith('route', 'settings');
     expect(captureExceptionMock).toHaveBeenCalledWith(error, {
-      route: 'settings',
       digest: undefined,
     });
   });
@@ -86,8 +88,8 @@ describe('route error.tsx wrappers', () => {
     const error = makeError('admin crash');
     render(<AdminError error={error} reset={reset} />);
     expect(screen.getByText('Admin Error')).toBeInTheDocument();
+    expect(setTagMock).toHaveBeenCalledWith('route', 'admin');
     expect(captureExceptionMock).toHaveBeenCalledWith(error, {
-      route: 'admin',
       digest: undefined,
     });
   });
@@ -99,8 +101,8 @@ describe('route error.tsx wrappers', () => {
     const error = makeError('community crash');
     render(<CommunityError error={error} reset={reset} />);
     expect(screen.getByText('Community Error')).toBeInTheDocument();
+    expect(setTagMock).toHaveBeenCalledWith('route', 'community');
     expect(captureExceptionMock).toHaveBeenCalledWith(error, {
-      route: 'community',
       digest: undefined,
     });
   });
@@ -114,8 +116,8 @@ describe('route error.tsx wrappers', () => {
       'href',
       '/community',
     );
+    expect(setTagMock).toHaveBeenCalledWith('route', 'play');
     expect(captureExceptionMock).toHaveBeenCalledWith(error, {
-      route: 'play',
       digest: undefined,
     });
   });

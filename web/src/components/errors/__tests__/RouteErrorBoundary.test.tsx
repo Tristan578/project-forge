@@ -6,9 +6,11 @@ import { render, screen, cleanup, fireEvent } from '@/test/utils/componentTestUt
 import { RouteErrorBoundary } from '../RouteErrorBoundary';
 
 const captureExceptionMock = vi.fn();
+const setTagMock = vi.fn();
 vi.mock('@/lib/monitoring/sentry-client', () => ({
   captureException: (err: unknown, ctx?: Record<string, unknown>) =>
     captureExceptionMock(err, ctx),
+  setTag: (key: string, value: string) => setTagMock(key, value),
 }));
 
 vi.mock('next/link', () => ({
@@ -145,7 +147,7 @@ describe('RouteErrorBoundary', () => {
     expect(reset).toHaveBeenCalledTimes(1);
   });
 
-  it('reports the error to Sentry with route context', () => {
+  it('reports the error to Sentry with route tag and digest extra', () => {
     const error = makeError('editor crashed');
     render(
       <RouteErrorBoundary
@@ -156,14 +158,14 @@ describe('RouteErrorBoundary', () => {
         description="Auto-saved."
       />,
     );
+    expect(setTagMock).toHaveBeenCalledWith('route', 'editor');
     expect(captureExceptionMock).toHaveBeenCalledTimes(1);
     expect(captureExceptionMock).toHaveBeenCalledWith(error, {
-      route: 'editor',
       digest: undefined,
     });
   });
 
-  it('forwards error.digest to Sentry context', () => {
+  it('forwards error.digest to Sentry extra', () => {
     const error = makeError('dashboard boom', 'abc123');
     render(
       <RouteErrorBoundary
@@ -174,8 +176,8 @@ describe('RouteErrorBoundary', () => {
         description="Retry?"
       />,
     );
+    expect(setTagMock).toHaveBeenCalledWith('route', 'dashboard');
     expect(captureExceptionMock).toHaveBeenCalledWith(error, {
-      route: 'dashboard',
       digest: 'abc123',
     });
   });
