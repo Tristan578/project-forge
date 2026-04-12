@@ -72,6 +72,17 @@ describe('useEngine', () => {
     consoleSpy.mockRestore();
   });
 
+  it('sendCommandBatch returns failure result when engine not initialized', () => {
+    const { result } = renderHook(() => useEngine('forge-canvas'));
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const batchResult = result.current.sendCommandBatch([{ command: 'test', payload: {} }]);
+    expect(batchResult).toEqual({ success: false, results: [] });
+    expect(consoleSpy).toHaveBeenCalledWith('Engine not initialized');
+
+    consoleSpy.mockRestore();
+  });
+
   it('getWasmModule returns null when not initialized', async () => {
     const { getWasmModule } = await import('../useEngine');
     expect(getWasmModule()).toBeNull();

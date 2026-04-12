@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useEngineEvents } from '../useEngineEvents';
-import { useEditorStore, setCommandDispatcher } from '@/stores/editorStore';
+import { useEditorStore, setCommandDispatcher, setCommandBatchDispatcher } from '@/stores/editorStore';
 import * as events from '../events';
 
 vi.mock('@/stores/editorStore', () => ({
@@ -10,6 +10,7 @@ vi.mock('@/stores/editorStore', () => ({
     getState: vi.fn(),
   },
   setCommandDispatcher: vi.fn(),
+  setCommandBatchDispatcher: vi.fn(),
 }));
 
 vi.mock('../events', () => ({
@@ -34,6 +35,7 @@ describe('useEngineEvents', () => {
     wasmModule = {
       set_event_callback: vi.fn(),
       handle_command: vi.fn(),
+      handle_command_batch: vi.fn(),
     };
     
     // Silence console.warn for unknown events
@@ -98,6 +100,54 @@ describe('useEngineEvents', () => {
     expect(events.handleTransformEvent).toHaveBeenCalled();
     expect(events.handleEditModeEvent).toHaveBeenCalled();
     expect(console.warn).toHaveBeenCalledWith('Unknown engine event:', 'unknown_event');
+  });
+
+  it('registers batch command dispatcher on mount', () => {
+    renderHook(() => useEngineEvents({ wasmModule }));
+    expect(setCommandBatchDispatcher).toHaveBeenCalled();
+
+    const batchDispatcher = vi.mocked(setCommandBatchDispatcher).mock.calls[0][0]!;
+    wasmModule.handle_command_batch.mockReturnValue([
+      { success: true },
+      { success: true },
+    ]);
+    const result = batchDispatcher([
+      { command: 'spawn_entity', payload: { entityType: 'cube' } },
+      { command: 'update_transform', payload: { position: [0, 1, 0] } },
+    ]);
+    expect(wasmModule.handle_command_batch).toHaveBeenCalledWith([
+      { command: 'spawn_entity', payload: { entityType: 'cube' } },
+      { command: 'update_transform', payload: { position: [0, 1, 0] } },
+    ]);
+    expect(result).toEqual({ success: true, results: [{ success: true }, { success: true }] });
+  });
+
+  it('registers undefined batch dispatcher when handle_command_batch is absent', () => {
+    delete wasmModule.handle_command_batch;
+    renderHook(() => useEngineEvents({ wasmModule }));
+
+    const batchDispatcher = vi.mocked(setCommandBatchDispatcher).mock.calls[0][0];
+    expect(batchDispatcher).toBeUndefined();
+  });
+
+  it('batch dispatcher rejects oversized batches (>256)', () => {
+    renderHook(() => useEngineEvents({ wasmModule }));
+
+    const batchDispatcher = vi.mocked(setCommandBatchDispatcher).mock.calls[0][0]!;
+    const oversized = Array.from({ length: 257 }, (_, i) => ({ command: `cmd_${i}` }));
+    const result = batchDispatcher(oversized);
+    expect(result).toEqual({ success: false, results: [] });
+    expect(wasmModule.handle_command_batch).not.toHaveBeenCalled();
+  });
+
+  it('batch dispatcher catches errors and returns failure', () => {
+    wasmModule.handle_command_batch.mockImplementation(() => { throw new Error('WASM batch crash'); });
+    renderHook(() => useEngineEvents({ wasmModule }));
+
+    const batchDispatcher = vi.mocked(setCommandBatchDispatcher).mock.calls[0][0]!;
+    const result = batchDispatcher([{ command: 'crash' }]);
+    expect(result).toEqual({ success: false, results: [] });
+    expect(console.error).toHaveBeenCalledWith('Error dispatching command batch:', expect.any(Error));
   });
 
   it('does nothing if wasmModule is null', () => {

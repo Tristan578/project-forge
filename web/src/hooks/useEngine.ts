@@ -39,9 +39,20 @@ export function useLoadingState(): LoadingState {
   );
 }
 
+export interface CommandResponse {
+  success: boolean;
+  error?: string;
+}
+
+export interface BatchResult {
+  success: boolean;
+  results: CommandResponse[];
+}
+
 export type WasmModule = {
   init_engine: (canvasId: string) => void;
   handle_command: (command: string, payload: unknown) => unknown;
+  handle_command_batch: (batch: unknown) => unknown;
   set_init_callback: (callback: (phase: string, message?: string, error?: string) => void) => void;
   set_event_callback: (callback: (event: unknown) => void) => void;
 };
@@ -706,7 +717,31 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
     []
   );
 
-  return { isReady, error, sendCommand, wasmModule };
+  const sendCommandBatch = useCallback(
+    (commands: Array<{ command: string; payload?: unknown }>): BatchResult => {
+      if (!wasmModule) {
+        console.warn('Engine not initialized');
+        return { success: false, results: [] };
+      }
+      try {
+        const results = wasmModule.handle_command_batch(commands) as CommandResponse[];
+        return {
+          success: results.every((r) => r.success),
+          results,
+        };
+      } catch (err) {
+        const batchError = err instanceof Error ? err : new Error(String(err));
+        captureException(batchError, {
+          phase: 'handle_command_batch',
+          batchSize: commands.length,
+        });
+        return { success: false, results: [] };
+      }
+    },
+    [],
+  );
+
+  return { isReady, error, sendCommand, sendCommandBatch, wasmModule };
 }
 
 // Export for use by other hooks

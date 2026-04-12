@@ -43,21 +43,17 @@ export const autoPolishExecutor: ExecutorDefinition = {
     const issues = (verifyOutput?.['issues'] as string[]) ?? [];
 
     const fixes: string[] = [];
+    const commands: Array<{ command: string; payload?: unknown }> = [];
 
     // [B4] Structural heuristics only -- no telemetry data required
 
     // [FIX: NB4] update_ambient_light — manifest: { color: [r,g,b] (0-1), brightness: number }
     if (issues.includes('no_ambient_light')) {
-      ctx.dispatchCommand('update_ambient_light', {
-        color: [1, 1, 1],
-        brightness: 0.3,
-      });
+      commands.push({ command: 'update_ambient_light', payload: { color: [1, 1, 1], brightness: 0.3 } });
       fixes.push('Added ambient lighting');
     }
 
     // set_game_camera — manifest requires { entityId, mode }
-    // Every scene has a default Camera entity (Undeletable). Find it from the store
-    // and configure it as a player-following camera.
     if (issues.includes('no_camera_on_player')) {
       const nodes = Object.values(ctx.store.sceneGraph.nodes);
       const cameraNode = nodes.find(n => {
@@ -67,11 +63,7 @@ export const autoPolishExecutor: ExecutorDefinition = {
 
       if (cameraNode) {
         const mode = parsed.data.projectType === '2d' ? 'sideScroller' : 'thirdPersonFollow';
-        ctx.dispatchCommand('set_game_camera', {
-          entityId: cameraNode.entityId,
-          mode,
-          followSmoothing: 0.8,
-        });
+        commands.push({ command: 'set_game_camera', payload: { entityId: cameraNode.entityId, mode, followSmoothing: 0.8 } });
         fixes.push(`Configured camera as ${mode}`);
       } else {
         fixes.push('Warning: no camera entity found to configure');
@@ -79,22 +71,27 @@ export const autoPolishExecutor: ExecutorDefinition = {
     }
 
     // spawn_entity — manifest: { entityType, name?, position?: [x,y,z] }
-    // No 'scale' param — use update_transform after spawn for scaling
     if (issues.includes('no_ground_plane')) {
-      ctx.dispatchCommand('spawn_entity', {
-        entityType: 'plane',
-        name: 'Ground',
-        position: [0, 0, 0],
-      });
+      commands.push({ command: 'spawn_entity', payload: { entityType: 'plane', name: 'Ground', position: [0, 0, 0] } });
       fixes.push('Added ground plane');
     }
 
     // update_physics — manifest requires { entityId }
-    // verify_all_scenes emits 'physics_without_collider' (not 'player_no_physics')
     if (issues.includes('physics_without_collider')) {
-      // Cannot fix without knowing the specific entityId that has the issue.
-      // Log it as a warning for the user to address manually.
       fixes.push('Warning: entity has physics without collider — manual fix needed');
+    }
+
+    if (commands.length > 0) {
+      if (ctx.dispatchCommandBatch) {
+        const result = ctx.dispatchCommandBatch(commands);
+        if (!result.success) {
+          return failResult(
+            makeStepError('COMMAND_FAILED', 'Engine command rejected', this.userFacingErrorMessage),
+          );
+        }
+      } else {
+        for (const cmd of commands) ctx.dispatchCommand(cmd.command, cmd.payload);
+      }
     }
 
     return successResult({

@@ -4,7 +4,7 @@
  */
 
 import type { EditorState } from '@/stores/editorStore';
-import { getCommandDispatcher } from '@/stores/editorStore';
+import { getCommandDispatcher, getCommandBatchDispatcher } from '@/stores/editorStore';
 import type { ToolCallContext, ExecutionResult } from './handlers/types';
 
 // Import all handler registries
@@ -127,11 +127,13 @@ export async function executeToolCall(
 ): Promise<ExecutionResult> {
   try {
     const dispatch = getCommandDispatcher();
+    const batchDispatch = getCommandBatchDispatcher();
     const ctx: ToolCallContext = {
       store,
       dispatchCommand: dispatch ?? ((_cmd: string, _payload: unknown) => {
         console.warn('Command dispatcher not initialized');
       }),
+      dispatchCommandBatch: batchDispatch ?? undefined,
     };
     const handler = handlerRegistry[toolName];
 

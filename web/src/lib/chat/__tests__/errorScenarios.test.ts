@@ -43,6 +43,7 @@ vi.mock('../handlers/compoundHandlers', () => ({ compoundHandlers: {} }));
 // ── Mock editorStore ──────────────────────────────────────────────────────────
 vi.mock('@/stores/editorStore', () => ({
   getCommandDispatcher: mocks.getCommandDispatcher,
+  getCommandBatchDispatcher: vi.fn().mockReturnValue(null),
 }));
 
 import { executeToolCall } from '../executor';
