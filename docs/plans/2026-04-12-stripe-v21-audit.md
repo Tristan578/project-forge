@@ -8,7 +8,7 @@
 
 **Risk level: LOW.** The codebase has zero `decimal_string` field usage — all monetary
 amounts are integer cents. The upgrade requires only an `apiVersion` string update
-across 4 files and a package version bump.
+across 5 files and a package version bump.
 
 ## Breaking Changes in Stripe v21
 
@@ -18,7 +18,7 @@ across 4 files and a package version bump.
 | New OAuth error classes | **None.** No OAuth integration. |
 | Dropped Node 16 support | **None.** We run Node 22+. |
 | `constructEvent` stricter method validation | **None.** We pass `req.text()` (raw string). |
-| `LatestApiVersion` type changes | **4 files** need `apiVersion` string updated. |
+| `LatestApiVersion` type changes | **5 files** need `apiVersion` string updated. |
 
 ## Files Using Stripe (5 routes + 2 libraries)
 
@@ -55,7 +55,7 @@ When ready to upgrade (currently pinned at `^20.4.1` per CLAUDE.md gotcha):
 cd web && npm install stripe@21
 ```
 
-### Step 2: Update apiVersion in 4 files
+### Step 2: Update apiVersion in 5 files
 The `apiVersion` string and `LatestApiVersion` type will change in v21.
 Remove the `as Stripe.LatestApiVersion` cast and use the new default:
 
