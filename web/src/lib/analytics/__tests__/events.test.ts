@@ -58,8 +58,8 @@ describe('Vercel analytics event wrappers', () => {
 
   it('trackAIChatMessageSent calls track with model', async () => {
     const { trackAIChatMessageSent } = await import('@/lib/analytics/events');
-    trackAIChatMessageSent('claude-3-5-sonnet');
-    expect(mockTrack).toHaveBeenCalledWith('ai_chat_message_sent', expect.objectContaining({ model: 'claude-3-5-sonnet' }));
+    trackAIChatMessageSent('claude-sonnet-4-6');
+    expect(mockTrack).toHaveBeenCalledWith('ai_chat_message_sent', expect.objectContaining({ model: 'claude-sonnet-4-6' }));
   });
 
   it('trackAIAssetGenerated calls track with type and provider', async () => {
@@ -161,7 +161,7 @@ describe('Vercel analytics event wrappers', () => {
     const mod = await import('@/lib/analytics/events');
     mod.trackSignupComplete('starter');
     mod.trackFirstSceneCreated();
-    mod.trackAIChatMessageSent('claude-3-opus');
+    mod.trackAIChatMessageSent('claude-sonnet-4-6');
     mod.trackCommandDispatched('delete_entity');
     mod.trackAIAssetGenerated('texture', 'meshy');
     mod.trackEditorPanelOpened('inspector');

@@ -336,7 +336,7 @@ describe('POST /api/chat — invalid body contract', () => {
 
   it('returns { error } object with 4xx for missing messages field', async () => {
     const { POST } = await import('@/app/api/chat/route');
-    const req = makePostRequest('http://localhost/api/chat', { model: 'claude-3-5-sonnet-20241022' });
+    const req = makePostRequest('http://localhost/api/chat', { model: 'claude-sonnet-4-6' });
     const res = await POST(req);
 
     // Auth or validation should reject — either way, shape must be { error }
