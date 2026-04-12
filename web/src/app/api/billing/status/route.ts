@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
     let subscriptionStatus: string | null = null;
     if (stripeSecret && user.stripeSubscriptionId) {
       try {
-        const stripe = new Stripe(stripeSecret, { apiVersion: '2025-01-27.acacia' as Stripe.LatestApiVersion });
+        const stripe = new Stripe(stripeSecret, { apiVersion: '2026-03-25.dahlia' });
         const subscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
         subscriptionStatus = subscription.status;
       } catch (err) {

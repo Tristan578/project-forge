@@ -34,7 +34,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error('STRIPE_SECRET_KEY environment variable is not set');
-  return new Stripe(key, { apiVersion: '2025-01-27.acacia' as Stripe.LatestApiVersion });
+  return new Stripe(key, { apiVersion: '2026-03-25.dahlia' });
 }
 
 // Map Stripe price IDs to tiers
