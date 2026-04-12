@@ -65,3 +65,14 @@ export function setTag(key: string, value: string): void {
   if (!DSN) return;
   Sentry.setTag(key, value);
 }
+
+/**
+ * Run a callback in an isolated Sentry scope.
+ * Tags or context set on the scope via scope.setTag() are scoped only to
+ * events captured inside the callback and do not leak to the global scope.
+ * No-ops (callback not called) when NEXT_PUBLIC_SENTRY_DSN is not configured.
+ */
+export function withScope(callback: (scope: Sentry.Scope) => void): void {
+  if (!DSN) return;
+  Sentry.withScope(callback);
+}
