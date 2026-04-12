@@ -65,7 +65,7 @@ These are lower-frequency gotchas moved from CLAUDE.md. The most common ones rem
 - **Schema changes need migrations** — `db:push` works in dev but production needs `ALTER TABLE`.
 - **IV/crypto changes need migration path** — Changing parameters breaks existing stored data.
 - **`experimental.sri` is incompatible with Vercel CDN** — Do NOT re-enable.
-- **Stripe v21 hold-back** — Pinned at `^20.4.1`. Breaking changes to `decimal_string` fields.
+- **Stripe v22 API version** — Upgraded to `22.0.1`, API version `2026-03-25.dahlia`. No `decimal_string` fields used — all amounts are integer cents.
 - **Max 5-7 fixes per builder dispatch** — Agents rushing through 25+ lists introduce anti-patterns.
 - **GraphQL rate limit exhaustion** — Use `gh issue list` (REST) for sync, not `gh project item-list` (GraphQL).
 - **Taskboard `localProjectId` drifts** — Verify sync config against `curl http://localhost:3010/api/projects`.

@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Stripe from 'stripe';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { logger } from '@/lib/logging/logger';
 import { captureException } from '@/lib/monitoring/sentry-server';
-
-const stripeSecret = process.env.STRIPE_SECRET_KEY;
+import { getStripe } from '@/lib/billing/stripe-client';
 
 /**
  * GET /api/billing/status
@@ -33,10 +31,9 @@ export async function GET(req: NextRequest) {
 
     // Fetch subscription status from Stripe if available
     let subscriptionStatus: string | null = null;
-    if (stripeSecret && user.stripeSubscriptionId) {
+    if (process.env.STRIPE_SECRET_KEY && user.stripeSubscriptionId) {
       try {
-        const stripe = new Stripe(stripeSecret, { apiVersion: '2025-01-27.acacia' as Stripe.LatestApiVersion });
-        const subscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+        const subscription = await getStripe().subscriptions.retrieve(user.stripeSubscriptionId);
         subscriptionStatus = subscription.status;
       } catch (err) {
         // Stripe unavailable or subscription not found — gracefully degrade

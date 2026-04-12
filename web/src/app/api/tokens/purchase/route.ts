@@ -1,22 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import Stripe from 'stripe';
 import { assertTier } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import type { TokenPackage } from '@/lib/tokens/pricing';
 import { TOKEN_PACKAGES } from '@/lib/tokens/pricing';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { internalError } from '@/lib/api/errors';
+import { getStripe } from '@/lib/billing/stripe-client';
 
 const purchaseSchema = z.object({
   package: z.enum(['spark', 'blaze', 'inferno']),
 });
-
-function getStripe() {
-  const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) throw new Error('STRIPE_SECRET_KEY environment variable is not set');
-  return new Stripe(key, { apiVersion: '2025-01-27.acacia' as Stripe.LatestApiVersion });
-}
 
 const PACKAGE_PRICE_IDS: Record<string, string | undefined> = {
   spark: process.env.STRIPE_PRICE_TOKEN_SPARK,

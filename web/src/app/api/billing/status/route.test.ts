@@ -13,15 +13,19 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
 
-// Mock Stripe
-const { mockSubscriptionRetrieve } = vi.hoisted(() => ({
+// Mock Stripe — capture constructor args to verify apiVersion
+const { mockSubscriptionRetrieve, capturedStripeOpts } = vi.hoisted(() => ({
   mockSubscriptionRetrieve: vi.fn(),
+  capturedStripeOpts: { value: null as { apiVersion: string } | null },
 }));
 
 vi.mock('stripe', () => {
   return {
     default: class MockStripe {
       subscriptions = { retrieve: mockSubscriptionRetrieve };
+      constructor(_key: string, opts: { apiVersion: string }) {
+        capturedStripeOpts.value = opts;
+      }
     },
   };
 });
@@ -108,5 +112,47 @@ describe('GET /api/billing/status', () => {
     expect(data.stripeSubscriptionId).toBeNull();
     expect(data.billingCycleStart).toBeNull();
     expect(data.nextRefillDate).toBeNull();
+  });
+
+  it('initialises Stripe with the v22 API version', async () => {
+    mockMiddlewareSuccess({
+      stripeCustomerId: 'cus_123',
+      stripeSubscriptionId: 'sub_123',
+    });
+    mockSubscriptionRetrieve.mockResolvedValue({ status: 'active' });
+
+    const { GET } = await import('./route');
+    await GET(makeReq());
+
+    expect(capturedStripeOpts.value?.apiVersion).toBe('2026-03-25.dahlia');
+  });
+
+  it('returns subscriptionStatus from Stripe', async () => {
+    mockMiddlewareSuccess({
+      stripeCustomerId: 'cus_123',
+      stripeSubscriptionId: 'sub_123',
+    });
+    mockSubscriptionRetrieve.mockResolvedValue({ status: 'active' });
+
+    const { GET } = await import('./route');
+    const res = await GET(makeReq());
+    const data = await res.json();
+
+    expect(data.subscriptionStatus).toBe('active');
+  });
+
+  it('gracefully degrades when Stripe subscription lookup fails', async () => {
+    mockMiddlewareSuccess({
+      stripeCustomerId: 'cus_123',
+      stripeSubscriptionId: 'sub_123',
+    });
+    mockSubscriptionRetrieve.mockRejectedValue(new Error('Stripe unavailable'));
+
+    const { GET } = await import('./route');
+    const res = await GET(makeReq());
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.subscriptionStatus).toBeNull();
   });
 });
