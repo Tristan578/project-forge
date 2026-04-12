@@ -294,7 +294,7 @@ jobs:
 
       - name: Try downloading WASM from CI (same SHA)
         id: ci-wasm
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: wasm-binaries
           path: engine/
@@ -392,7 +392,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Download WASM artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: wasm-binaries
           path: engine/
@@ -488,7 +488,7 @@ jobs:
           sudo ./aws/install --update
 
       - name: Download WASM artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: wasm-binaries
           path: engine/
@@ -503,6 +503,9 @@ jobs:
           cp engine/pkg-webgpu/* wasm-upload/engine-pkg-webgpu/
           cp engine/pkg-webgl2-runtime/* wasm-upload/engine-pkg-webgl2-runtime/ 2>/dev/null || true
           cp engine/pkg-webgpu-runtime/* wasm-upload/engine-pkg-webgpu-runtime/ 2>/dev/null || true
+
+      - name: Generate WASM manifests for CDN
+        run: bash scripts/generate-wasm-manifests.sh wasm-upload
 
       - name: Upload to R2
         run: bash scripts/upload-wasm-to-r2.sh
@@ -564,13 +567,15 @@ jobs:
         run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
 
       - name: Download WASM artifacts for same-origin fallback
-        uses: actions/download-artifact@v8
+        id: download-wasm-staging
+        uses: actions/download-artifact@v4
         with:
           name: wasm-binaries
           path: engine/
         continue-on-error: true
 
       - name: Populate same-origin WASM fallback
+        if: steps.download-wasm-staging.outcome == 'success'
         run: |
           for variant in webgl2 webgpu webgl2-runtime webgpu-runtime; do
             src="engine/pkg-${variant}"
@@ -580,12 +585,7 @@ jobs:
               cp "$src"/* "$dest"/
             fi
           done
-          if ls web/public/engine-pkg-*/forge_engine_bg.wasm 1>/dev/null 2>&1; then
-            bash scripts/generate-wasm-manifests.sh web/public
-          else
-            echo "No WASM files found — same-origin fallback will be empty"
-          fi
-        continue-on-error: true
+          bash scripts/generate-wasm-manifests.sh web/public
 
       - name: Deploy to staging (remote build)
         id: deploy
@@ -733,13 +733,15 @@ jobs:
           "
 
       - name: Download WASM artifacts for same-origin fallback
-        uses: actions/download-artifact@v8
+        id: download-wasm-production
+        uses: actions/download-artifact@v4
         with:
           name: wasm-binaries
           path: engine/
         continue-on-error: true
 
       - name: Populate same-origin WASM fallback
+        if: steps.download-wasm-production.outcome == 'success'
         run: |
           for variant in webgl2 webgpu webgl2-runtime webgpu-runtime; do
             src="engine/pkg-${variant}"
@@ -749,12 +751,7 @@ jobs:
               cp "$src"/* "$dest"/
             fi
           done
-          if ls web/public/engine-pkg-*/forge_engine_bg.wasm 1>/dev/null 2>&1; then
-            bash scripts/generate-wasm-manifests.sh web/public
-          else
-            echo "No WASM files found — same-origin fallback will be empty"
-          fi
-        continue-on-error: true
+          bash scripts/generate-wasm-manifests.sh web/public
 
       - name: Deploy to production (remote build)
         id: deploy

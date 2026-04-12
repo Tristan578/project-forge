@@ -32,8 +32,7 @@ hash16() {
 }
 
 xor_hex() {
-  local a="$1" b="$2"
-  printf '%016x' "$(( 16#$a ^ 16#$b ))"
+  python3 -c "print(format(int('$1',16) ^ int('$2',16), '016x'))"
 }
 
 generated=0

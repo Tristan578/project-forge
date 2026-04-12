@@ -304,4 +304,36 @@ describe('fetchWasmManifest', () => {
 
     vi.unstubAllGlobals();
   });
+
+  it('forwards AbortSignal to fetch', async () => {
+    const controller = new AbortController();
+    const mockFetch = vi.fn().mockRejectedValue(new DOMException('Aborted', 'AbortError'));
+    vi.stubGlobal('fetch', mockFetch);
+
+    controller.abort();
+    const manifest = await fetchWasmManifest('/engine-pkg-webgl2/', controller.signal);
+    expect(manifest).toBeNull();
+    expect(mockFetch).toHaveBeenCalledWith(
+      '/engine-pkg-webgl2/wasm-manifest.json',
+      expect.objectContaining({ signal: controller.signal }),
+    );
+
+    vi.unstubAllGlobals();
+  });
+
+  it('uses wasmHash as buildId when buildId is empty string', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ wasmHash: 'a1b2c3d4e5f67890', jsHash: 'f0e1d2c3b4a59876', buildId: '' }),
+    }));
+
+    const manifest = await fetchWasmManifest('/engine-pkg-webgl2/');
+    expect(manifest).toEqual({
+      wasmHash: 'a1b2c3d4e5f67890',
+      jsHash: 'f0e1d2c3b4a59876',
+      buildId: 'a1b2c3d4e5f67890',
+    });
+
+    vi.unstubAllGlobals();
+  });
 });
