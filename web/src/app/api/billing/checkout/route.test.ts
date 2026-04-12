@@ -23,10 +23,11 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
 
-// Mock Stripe
-const { mockCustomerCreate, mockCheckoutCreate } = vi.hoisted(() => ({
+// Mock Stripe — capture constructor args to verify apiVersion
+const { mockCustomerCreate, mockCheckoutCreate, capturedStripeOpts } = vi.hoisted(() => ({
   mockCustomerCreate: vi.fn(),
   mockCheckoutCreate: vi.fn(),
+  capturedStripeOpts: { value: null as { apiVersion: string } | null },
 }));
 
 vi.mock('stripe', () => {
@@ -34,6 +35,9 @@ vi.mock('stripe', () => {
     default: class MockStripe {
       customers = { create: mockCustomerCreate };
       checkout = { sessions: { create: mockCheckoutCreate } };
+      constructor(_key: string, opts: { apiVersion: string }) {
+        capturedStripeOpts.value = opts;
+      }
     },
   };
 });
@@ -180,5 +184,29 @@ describe('POST /api/billing/checkout', () => {
       customer: 'cus_existing',
       line_items: [{ price: 'price_studio_mock', quantity: 1 }],
     }));
+  });
+
+  it('initialises Stripe with the v22 API version', async () => {
+    mockMiddlewareSuccess({ stripeCustomerId: 'cus_existing' });
+    mockCheckoutCreate.mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/mock' });
+
+    const { POST } = await import('./route');
+    await POST(makeReq({ tier: 'hobbyist' }));
+
+    expect(capturedStripeOpts.value?.apiVersion).toBe('2026-03-25.dahlia');
+  });
+
+  it('returns 500 when Stripe checkout creation fails', async () => {
+    mockMiddlewareSuccess({ stripeCustomerId: 'cus_existing' });
+    mockCheckoutCreate.mockRejectedValue(new Error('Stripe unavailable'));
+
+    const { captureException } = await import('@/lib/monitoring/sentry-server');
+    const { POST } = await import('./route');
+    const res = await POST(makeReq({ tier: 'creator' }));
+    const data = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(data.error).toContain('Failed to create checkout session');
+    expect(captureException).toHaveBeenCalled();
   });
 });

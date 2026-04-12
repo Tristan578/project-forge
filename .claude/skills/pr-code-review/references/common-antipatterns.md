@@ -175,11 +175,11 @@ if (rows.length === 0) { /* nothing inserted */ }
 
 ---
 
-## 13. Stripe v21 Hold-Back
+## 13. Stripe Client Centralization
 
-**The bug:** `stripe` is pinned at `^20.4.1`. Do not upgrade to v21 — breaking changes in decimal string fields.
+**The bug:** `getStripe()` was duplicated in 4 route files. Version string drifts silently.
 
-**Fix:** Any PR bumping `stripe` past `20.x` is a FAIL.
+**Fix:** All Stripe usage must import from `@/lib/billing/stripe-client`. Any PR adding a local `new Stripe()` or `getStripe()` is a FAIL.
 
 ---
 

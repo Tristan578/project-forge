@@ -10,9 +10,10 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
 
-// Mock Stripe
-const { mockPortalCreate } = vi.hoisted(() => ({
+// Mock Stripe — capture constructor args to verify apiVersion
+const { mockPortalCreate, capturedStripeOpts } = vi.hoisted(() => ({
   mockPortalCreate: vi.fn(),
+  capturedStripeOpts: { value: null as { apiVersion: string } | null },
 }));
 
 vi.mock('stripe', () => {
@@ -23,6 +24,9 @@ vi.mock('stripe', () => {
           create: mockPortalCreate,
         },
       };
+      constructor(_key: string, opts: { apiVersion: string }) {
+        capturedStripeOpts.value = opts;
+      }
     },
   };
 });
@@ -105,5 +109,29 @@ describe('POST /api/billing/portal', () => {
       customer: 'cus_123',
       return_url: 'http://localhost:3000/dashboard',
     });
+  });
+
+  it('initialises Stripe with the v22 API version', async () => {
+    mockMiddlewareSuccess({ stripeCustomerId: 'cus_123' });
+    mockPortalCreate.mockResolvedValue({ url: 'https://billing.stripe.com/p/session/mock' });
+
+    const { POST } = await import('./route');
+    await POST(makeReq());
+
+    expect(capturedStripeOpts.value?.apiVersion).toBe('2026-03-25.dahlia');
+  });
+
+  it('returns 500 when Stripe portal creation fails', async () => {
+    mockMiddlewareSuccess({ stripeCustomerId: 'cus_123' });
+    mockPortalCreate.mockRejectedValue(new Error('Stripe unavailable'));
+
+    const { captureException } = await import('@/lib/monitoring/sentry-server');
+    const { POST } = await import('./route');
+    const res = await POST(makeReq());
+    const data = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(data.error).toContain('Failed to create billing portal session');
+    expect(captureException).toHaveBeenCalled();
   });
 });

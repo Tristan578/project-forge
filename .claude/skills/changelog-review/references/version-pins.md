@@ -6,18 +6,15 @@ Documenting why specific dependencies are pinned and what must be audited before
 
 ## JavaScript / Node
 
-### stripe — Pinned at `^20.4.1`
+### stripe — `22.0.1`, API version `2026-03-25.dahlia`
 
-**Why pinned:** Stripe v21.0.0 has breaking changes:
-- All `decimal_string` fields changed from `string` to `Stripe.Decimal` — affects checkout, invoicing, and pricing APIs
-- Dropped support for Node 16
-- Stricter webhook parsing
+**Upgraded from** `^20.4.1` in PR #8136. v21 `decimal_string` changes and v22 callback/ES6 class changes were non-issues — all amounts use integer cents, no callbacks, ESM imports.
 
-**Before upgrading:**
-1. Audit all `charge.amount_*`, `payment_intent.amount`, and `price.unit_amount` usages — check for type assumptions
-2. Review `web/src/app/api/webhooks/stripe/route.ts` — webhook handler uses `charge.amount_refunded` (integer, likely unaffected)
-3. Test the full payment flow (checkout → subscription → invoice → refund) in staging
-4. Check `stripe events list` for any format changes in webhook payloads
+**Before future upgrades:**
+1. Check for new `apiVersion` string — update `web/src/lib/billing/stripe-client.ts` (single source)
+2. Test the full payment flow (checkout → subscription → invoice → refund) in staging
+3. Verify webhook Dashboard endpoint API version matches the SDK version
+4. Remove `invoice.subscription` backward-compat fallback in webhook route once Dashboard is on dahlia
 
 ---
 
@@ -85,7 +82,7 @@ Documenting why specific dependencies are pinned and what must be audited before
 
 | Dependency | Current | Upgrade Risk | Recommended Action |
 |-----------|---------|-------------|-------------------|
-| `stripe` | ^20.4.1 | HIGH (v21 breaking) | Hold until we audit all Stripe type usage |
+| `stripe` | 22.0.1 | LOW | Centralized in `stripe-client.ts`, check apiVersion string |
 | `wasm-bindgen` | =0.2.108 | HIGH (CLI must match) | Only upgrade as a coordinated Rust+CLI change |
 | `next` | 16.x | MEDIUM | Check migration guide, test E2E |
 | `bevy` | 0.18 | HIGH (API churn) | Only on planned engine upgrade sprint |

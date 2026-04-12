@@ -30,12 +30,7 @@ import {
   handleChargeRefunded,
 } from '@/lib/billing/subscription-lifecycle';
 import { captureException } from '@/lib/monitoring/sentry-server';
-
-function getStripe() {
-  const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) throw new Error('STRIPE_SECRET_KEY environment variable is not set');
-  return new Stripe(key, { apiVersion: '2026-03-25.dahlia' });
-}
+import { getStripe } from '@/lib/billing/stripe-client';
 
 // Map Stripe price IDs to tiers
 function tierFromPriceId(priceId: string): Tier | null {
@@ -172,11 +167,15 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       const customerId = resolveCustomerId(invoice.customer);
       if (!customerId) break;
 
-      const subField = invoice.parent?.subscription_details?.subscription ?? null;
+      // v22 (dahlia) nests subscription under invoice.parent; pre-dahlia uses top-level invoice.subscription.
+      // Keep both reads until Dashboard webhook endpoint is confirmed on 2026-03-25.dahlia.
+      const subField = invoice.parent?.subscription_details?.subscription
+        ?? (invoice as unknown as { subscription?: string | { id: string } | null }).subscription
+        ?? null;
       const subscriptionId =
         typeof subField === 'string'
           ? subField
-          : subField?.id ?? null;
+          : (subField && typeof subField === 'object' && 'id' in subField) ? subField.id : null;
 
       await handleInvoicePaid(customerId, invoice.id, subscriptionId);
       break;

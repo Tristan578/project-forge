@@ -7,7 +7,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import Stripe from 'stripe';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
@@ -15,16 +14,11 @@ import { eq } from 'drizzle-orm';
 import { logger } from '@/lib/logging/logger';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { internalError } from '@/lib/api/errors';
+import { getStripe } from '@/lib/billing/stripe-client';
 
 const checkoutSchema = z.object({
   tier: z.enum(['hobbyist', 'creator', 'pro']),
 });
-
-function getStripe() {
-  const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) throw new Error('STRIPE_SECRET_KEY environment variable is not set');
-  return new Stripe(key, { apiVersion: '2026-03-25.dahlia' });
-}
 
 const PRICE_IDS: Record<string, string | undefined> = {
   hobbyist: process.env.STRIPE_PRICE_STARTER,
