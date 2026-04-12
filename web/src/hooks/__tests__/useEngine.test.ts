@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { useEngine, resetEngine, recoverEngine, fetchWasmHash, onEngineRecovered } from '../useEngine';
+import { useEngine, resetEngine, recoverEngine, fetchWasmManifest, onEngineRecovered } from '../useEngine';
 import * as initLog from '@/lib/initLog';
 
 vi.mock('@/lib/initLog', () => ({
@@ -204,19 +204,45 @@ describe('onEngineRecovered', () => {
   });
 });
 
-describe('fetchWasmHash', () => {
+describe('fetchWasmManifest', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('returns the hash from a valid manifest', async () => {
+  it('returns full manifest from extended format', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        wasmFile: 'forge_engine_bg.wasm',
+        jsFile: 'forge_engine.js',
+        wasmHash: 'a1b2c3d4e5f67890',
+        jsHash: 'f0e1d2c3b4a59876',
+        buildId: '5153119d51531906',
+      }),
+    }));
+
+    const manifest = await fetchWasmManifest('/engine-pkg-webgl2/');
+    expect(manifest).toEqual({
+      wasmHash: 'a1b2c3d4e5f67890',
+      jsHash: 'f0e1d2c3b4a59876',
+      buildId: '5153119d51531906',
+    });
+
+    vi.unstubAllGlobals();
+  });
+
+  it('falls back to legacy hash field when wasmHash is absent', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ wasmFile: 'forge_engine_bg.wasm', jsFile: 'forge_engine.js', hash: 'abc123def456' }),
     }));
 
-    const hash = await fetchWasmHash('/engine-pkg-webgl2/');
-    expect(hash).toBe('abc123def456');
+    const manifest = await fetchWasmManifest('/engine-pkg-webgl2/');
+    expect(manifest).toEqual({
+      wasmHash: 'abc123def456',
+      jsHash: '',
+      buildId: 'abc123def456',
+    });
 
     vi.unstubAllGlobals();
   });
@@ -224,32 +250,32 @@ describe('fetchWasmHash', () => {
   it('returns null when the manifest fetch returns a non-ok status', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404 }));
 
-    const hash = await fetchWasmHash('/engine-pkg-webgl2/');
-    expect(hash).toBeNull();
+    const manifest = await fetchWasmManifest('/engine-pkg-webgl2/');
+    expect(manifest).toBeNull();
 
     vi.unstubAllGlobals();
   });
 
-  it('returns null when the manifest has no hash field', async () => {
+  it('returns null when the manifest has no hash fields', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ wasmFile: 'forge_engine_bg.wasm' }),
     }));
 
-    const hash = await fetchWasmHash('/engine-pkg-webgl2/');
-    expect(hash).toBeNull();
+    const manifest = await fetchWasmManifest('/engine-pkg-webgl2/');
+    expect(manifest).toBeNull();
 
     vi.unstubAllGlobals();
   });
 
-  it('returns null when the manifest hash is an empty string', async () => {
+  it('returns null when all hash fields are empty strings', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ hash: '' }),
+      json: async () => ({ hash: '', wasmHash: '' }),
     }));
 
-    const hash = await fetchWasmHash('/engine-pkg-webgl2/');
-    expect(hash).toBeNull();
+    const manifest = await fetchWasmManifest('/engine-pkg-webgl2/');
+    expect(manifest).toBeNull();
 
     vi.unstubAllGlobals();
   });
@@ -257,24 +283,56 @@ describe('fetchWasmHash', () => {
   it('returns null when fetch throws (network error)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')));
 
-    const hash = await fetchWasmHash('/engine-pkg-webgl2/');
-    expect(hash).toBeNull();
+    const manifest = await fetchWasmManifest('/engine-pkg-webgl2/');
+    expect(manifest).toBeNull();
 
     vi.unstubAllGlobals();
   });
 
-  it('fetches the manifest from the correct URL', async () => {
+  it('fetches the manifest from the correct URL with no-store cache', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ hash: 'deadbeef12345678' }),
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    await fetchWasmHash('https://engine.spawnforge.ai/engine-pkg-webgpu/');
+    await fetchWasmManifest('https://engine.spawnforge.ai/engine-pkg-webgpu/');
     expect(mockFetch).toHaveBeenCalledWith(
       'https://engine.spawnforge.ai/engine-pkg-webgpu/wasm-manifest.json',
       expect.objectContaining({ cache: 'no-store' }),
     );
+
+    vi.unstubAllGlobals();
+  });
+
+  it('forwards AbortSignal to fetch', async () => {
+    const controller = new AbortController();
+    const mockFetch = vi.fn().mockRejectedValue(new DOMException('Aborted', 'AbortError'));
+    vi.stubGlobal('fetch', mockFetch);
+
+    controller.abort();
+    const manifest = await fetchWasmManifest('/engine-pkg-webgl2/', controller.signal);
+    expect(manifest).toBeNull();
+    expect(mockFetch).toHaveBeenCalledWith(
+      '/engine-pkg-webgl2/wasm-manifest.json',
+      expect.objectContaining({ signal: controller.signal }),
+    );
+
+    vi.unstubAllGlobals();
+  });
+
+  it('uses wasmHash as buildId when buildId is empty string', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ wasmHash: 'a1b2c3d4e5f67890', jsHash: 'f0e1d2c3b4a59876', buildId: '' }),
+    }));
+
+    const manifest = await fetchWasmManifest('/engine-pkg-webgl2/');
+    expect(manifest).toEqual({
+      wasmHash: 'a1b2c3d4e5f67890',
+      jsHash: 'f0e1d2c3b4a59876',
+      buildId: 'a1b2c3d4e5f67890',
+    });
 
     vi.unstubAllGlobals();
   });

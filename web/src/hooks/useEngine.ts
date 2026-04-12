@@ -238,20 +238,32 @@ export function getWasmBasePaths(backend: 'webgpu' | 'webgl2'): string[] {
   return paths;
 }
 
+export interface WasmManifest {
+  wasmHash: string;
+  jsHash: string;
+  buildId: string;
+}
+
 /**
- * Fetch the wasm-manifest.json from the given base path and return the
- * content hash. Returns null when the manifest is absent (e.g. local dev
- * without a WASM build, or legacy deployments). Never throws.
- *
- * Exported for unit testing only.
+ * Fetch wasm-manifest.json from the given base path.
+ * Returns null when absent (local dev, legacy deployments). Never throws.
+ * Backward-compatible: reads legacy `hash` field when `wasmHash` is absent.
  */
-export async function fetchWasmHash(basePath: string, signal?: AbortSignal): Promise<string | null> {
+export async function fetchWasmManifest(basePath: string, signal?: AbortSignal): Promise<WasmManifest | null> {
   try {
-    const manifestUrl = `${basePath}wasm-manifest.json`;
-    const res = await fetch(manifestUrl, { signal, cache: 'no-store' });
+    const res = await fetch(`${basePath}wasm-manifest.json`, { signal, cache: 'no-store' });
     if (!res.ok) return null;
-    const data = (await res.json()) as { hash?: string };
-    return typeof data.hash === 'string' && data.hash.length > 0 ? data.hash : null;
+    const data = (await res.json()) as {
+      wasmHash?: string;
+      jsHash?: string;
+      buildId?: string;
+      hash?: string;
+    };
+    const wasmHash = data.wasmHash || data.hash || '';
+    if (!wasmHash) return null;
+    const jsHash = data.jsHash || '';
+    const buildId = data.buildId || wasmHash;
+    return { wasmHash, jsHash, buildId };
   } catch {
     return null;
   }
@@ -304,14 +316,15 @@ async function loadWasmFromPath(
   signal?: AbortSignal,
   onProgress?: (pct: number) => void,
 ): Promise<WasmModule> {
-  const wasm = await import(/* webpackIgnore: true */ `${basePath}${jsFile}`);
+  const manifest = await fetchWasmManifest(basePath, signal);
+  const buildId = manifest?.buildId;
+  if (buildId) setTag('wasm.buildId', buildId);
 
-  // Append content hash as a query param so browsers re-fetch after deployments.
-  // Falls back to the plain filename when no manifest exists.
-  const hash = await fetchWasmHash(basePath, signal);
-  const wasmUrl = hash ? `${basePath}${wasmFile}?v=${hash}` : `${basePath}${wasmFile}`;
+  const jsUrl = buildId ? `${basePath}${jsFile}?v=${buildId}` : `${basePath}${jsFile}`;
+  const wasm = await import(/* webpackIgnore: true */ jsUrl);
 
-  // Determine backend from the base path for CDN metrics
+  const wasmUrl = buildId ? `${basePath}${wasmFile}?v=${buildId}` : `${basePath}${wasmFile}`;
+
   const backend: 'webgpu' | 'webgl2' = basePath.includes('webgpu') ? 'webgpu' : 'webgl2';
 
   // Pre-fetch the .wasm binary with the abort signal so callers can cancel,
@@ -404,11 +417,14 @@ async function loadWasm(): Promise<WasmModule> {
       let lastErr: Error | null = null;
       for (let i = 0; i < paths.length; i++) {
         const basePath = paths[i];
+        const isCdn = basePath.startsWith('http');
         try {
           setLoadingState({ phase: 'downloading', progress: 0 });
           const mod = await loadWasmFromPath(basePath, jsFile, wasmFile, signal, (pct) => {
             setLoadingState({ phase: 'downloading', progress: pct });
           });
+          setTag('wasm.source', isCdn ? 'cdn' : 'same-origin');
+          setTag('wasm.backend', targetBackend);
           return mod;
         } catch (err) {
           lastErr = err instanceof Error ? err : new Error(String(err));
