@@ -1,0 +1,85 @@
+name: PITR Verification
+
+on:
+  schedule:
+    # 08:00 UTC on the 1st of each month
+    - cron: '0 8 1 * *'
+  workflow_dispatch:
+    inputs:
+      hours_ago:
+        description: 'How far back to recover from (hours)'
+        required: false
+        default: '24'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  verify:
+    name: Verify Neon PITR
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+      HOURS_AGO: ${{ github.event.inputs.hours_ago || '24' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install psql
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Run unit tests for driver
+        run: node --test scripts/pitr-verify.test.mjs
+
+      - name: Run PITR verification
+        id: verify
+        run: node scripts/pitr-verify.mjs
+
+      - name: Summary
+        if: always()
+        env:
+          OUTCOME: ${{ steps.verify.outcome }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          {
+            echo "# PITR Verification"
+            echo ""
+            echo "- Result: **${OUTCOME}**"
+            echo "- Recovered from: ${HOURS_AGO}h ago"
+            echo "- Run: ${RUN_ID}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open issue on failure
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        env:
+          HOURS_AGO: ${{ env.HOURS_AGO }}
+        with:
+          script: |
+            const title = `PITR verification failed (${new Date().toISOString().slice(0, 10)})`;
+            const body = [
+              `Scheduled PITR verification failed.`,
+              ``,
+              `**Run:** https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              `**Hours ago:** ${process.env.HOURS_AGO}`,
+              ``,
+              `See \`docs/database-backup-restore.md\` for the manual recovery procedure.`,
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['priority-p0', 'area-infra', 'disaster-recovery'],
+            });
