@@ -563,12 +563,30 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
 
-      # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
-      # Adding working-directory:web here causes web/web path doubling on remote builds.
-      # Remote build avoids `spawn npm ENOENT` bug with `vercel build` on GHA runners.
-      # WASM files are served from R2 CDN (engine.spawnforge.ai), not bundled in the deploy.
-      # NEXT_PUBLIC_ENGINE_VERSION pins the CDN path to the immutable versioned upload so
-      # browsers receive Cache-Control: max-age=31536000, immutable for WASM assets.
+      - name: Download WASM artifacts for same-origin fallback
+        uses: actions/download-artifact@v8
+        with:
+          name: wasm-binaries
+          path: engine/
+        continue-on-error: true
+
+      - name: Populate same-origin WASM fallback
+        run: |
+          for variant in webgl2 webgpu webgl2-runtime webgpu-runtime; do
+            src="engine/pkg-${variant}"
+            dest="web/public/engine-pkg-${variant}"
+            if [ -d "$src" ]; then
+              mkdir -p "$dest"
+              cp "$src"/* "$dest"/
+            fi
+          done
+          if ls web/public/engine-pkg-*/forge_engine_bg.wasm 1>/dev/null 2>&1; then
+            bash scripts/generate-wasm-manifests.sh web/public
+          else
+            echo "No WASM files found — same-origin fallback will be empty"
+          fi
+        continue-on-error: true
+
       - name: Deploy to staging (remote build)
         id: deploy
         env:
@@ -714,12 +732,30 @@ jobs:
             }
           "
 
-      # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
-      # Adding working-directory:web here causes web/web path doubling on remote builds.
-      # Remote build avoids `spawn npm ENOENT` bug with `vercel build` on GHA runners.
-      # WASM files are served from R2 CDN (engine.spawnforge.ai), not bundled in the deploy.
-      # NEXT_PUBLIC_ENGINE_VERSION pins the CDN path to the immutable versioned upload so
-      # browsers receive Cache-Control: max-age=31536000, immutable for WASM assets.
+      - name: Download WASM artifacts for same-origin fallback
+        uses: actions/download-artifact@v8
+        with:
+          name: wasm-binaries
+          path: engine/
+        continue-on-error: true
+
+      - name: Populate same-origin WASM fallback
+        run: |
+          for variant in webgl2 webgpu webgl2-runtime webgpu-runtime; do
+            src="engine/pkg-${variant}"
+            dest="web/public/engine-pkg-${variant}"
+            if [ -d "$src" ]; then
+              mkdir -p "$dest"
+              cp "$src"/* "$dest"/
+            fi
+          done
+          if ls web/public/engine-pkg-*/forge_engine_bg.wasm 1>/dev/null 2>&1; then
+            bash scripts/generate-wasm-manifests.sh web/public
+          else
+            echo "No WASM files found — same-origin fallback will be empty"
+          fi
+        continue-on-error: true
+
       - name: Deploy to production (remote build)
         id: deploy
         env:
