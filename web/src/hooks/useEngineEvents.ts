@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useCallback } from 'react';
-import { useEditorStore, setCommandDispatcher } from '@/stores/editorStore';
+import { useEditorStore, setCommandDispatcher, setCommandBatchDispatcher } from '@/stores/editorStore';
 import {
   handleTransformEvent,
   handleMaterialEvent,
@@ -42,6 +42,7 @@ interface UseEngineEventsOptions {
   wasmModule: {
     set_event_callback?: (callback: (event: unknown) => void) => void;
     handle_command?: (command: string, payload: unknown) => unknown;
+    handle_command_batch?: (batch: unknown) => unknown;
   } | null;
 }
 
@@ -64,12 +65,32 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
     [wasmModule]
   );
 
-  // Register command dispatcher with the store
+  const dispatchCommandBatch = useCallback(
+    (commands: Array<{ command: string; payload?: unknown }>) => {
+      if (wasmModule?.handle_command_batch) {
+        try {
+          const results = wasmModule.handle_command_batch(commands) as Array<{ success: boolean; error?: string }>;
+          return {
+            success: results.every((r) => r.success),
+            results,
+          };
+        } catch (error) {
+          console.error('Error dispatching command batch:', error);
+          return { success: false, results: [] };
+        }
+      }
+      return { success: false, results: [] };
+    },
+    [wasmModule],
+  );
+
+  // Register command dispatchers with the store
   useEffect(() => {
     if (wasmModule) {
       setCommandDispatcher(dispatchCommand);
+      setCommandBatchDispatcher(dispatchCommandBatch);
     }
-  }, [wasmModule, dispatchCommand]);
+  }, [wasmModule, dispatchCommand, dispatchCommandBatch]);
 
   // Register event callback with WASM
   useEffect(() => {

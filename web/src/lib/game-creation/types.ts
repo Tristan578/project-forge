@@ -222,6 +222,7 @@ export type UserTier = 'starter' | 'hobbyist' | 'creator' | 'pro';
 
 export interface ExecutorContext {
   dispatchCommand: (command: string, payload: unknown) => void;
+  dispatchCommandBatch?: (commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult;
   store: EditorState;
   projectType: '2d' | '3d';
   userTier: UserTier;

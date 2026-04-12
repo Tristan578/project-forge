@@ -158,6 +158,18 @@ export function getCommandDispatcher(): ((command: string, payload: unknown) => 
   return _dispatchCommand;
 }
 
+// Batch command dispatcher - set by useEngine hook
+type BatchCommandDispatcher = (commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult;
+let _dispatchCommandBatch: BatchCommandDispatcher | null = null;
+
+export function setCommandBatchDispatcher(dispatcher: BatchCommandDispatcher): void {
+  _dispatchCommandBatch = dispatcher;
+}
+
+export function getCommandBatchDispatcher(): BatchCommandDispatcher | null {
+  return _dispatchCommandBatch;
+}
+
 // Play tick callback for script runner
 type PlayTickCallback = (data: unknown) => void;
 let _playTickCallback: PlayTickCallback | null = null;

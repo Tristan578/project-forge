@@ -8,6 +8,7 @@ import type { EditorState } from '@/stores/editorStore';
 export interface ToolCallContext {
   store: EditorState;
   dispatchCommand: (command: string, payload: unknown) => void;
+  dispatchCommandBatch?: (commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult;
 }
 
 export type ToolHandler = (

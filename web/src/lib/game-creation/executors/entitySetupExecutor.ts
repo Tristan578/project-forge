@@ -54,16 +54,22 @@ export const entitySetupExecutor: ExecutorDefinition = {
     // Manifest: spawn_entity entityType is lowercase enum
     const entityType = projectType === '2d' ? 'plane' : (ROLE_TO_ENTITY_TYPE[entity.role] ?? 'cube');
 
-    // Switch to the target scene before spawning
-    // Manifest: switch_scene requires { sceneId: string }
-    ctx.dispatchCommand('switch_scene', { sceneId: scene });
+    const commands = [
+      { command: 'switch_scene', payload: { sceneId: scene } },
+      { command: 'spawn_entity', payload: { entityType, name: entity.name } },
+    ];
 
-    // Manifest: spawn_entity requires { entityType }, optional { name, position }
-    // Note: 'scene' is NOT a valid parameter — we switch_scene first
-    ctx.dispatchCommand('spawn_entity', {
-      entityType,
-      name: entity.name,
-    });
+    if (ctx.dispatchCommandBatch) {
+      const result = ctx.dispatchCommandBatch(commands);
+      if (!result.success) {
+        const failed = result.results.find((r) => !r.success);
+        return failResult(
+          makeStepError('COMMAND_FAILED', failed?.error ?? 'Batch command failed', this.userFacingErrorMessage),
+        );
+      }
+    } else {
+      for (const cmd of commands) ctx.dispatchCommand(cmd.command, cmd.payload);
+    }
 
     return successResult({
       entityName: entity.name,
