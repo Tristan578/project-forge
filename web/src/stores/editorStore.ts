@@ -162,7 +162,11 @@ export function getCommandDispatcher(): ((command: string, payload: unknown) => 
 type BatchCommandDispatcher = (commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult;
 let _dispatchCommandBatch: BatchCommandDispatcher | null = null;
 
-export function setCommandBatchDispatcher(dispatcher: BatchCommandDispatcher): void {
+export function setCommandBatchDispatcher(dispatcher: BatchCommandDispatcher | undefined): void {
+  if (!dispatcher) {
+    _dispatchCommandBatch = null;
+    return;
+  }
   _dispatchCommandBatch = (commands) => {
     for (const { command } of commands) trackCommandDispatched(command);
     return dispatcher(commands);

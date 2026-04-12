@@ -106,7 +106,7 @@ describe('useEngineEvents', () => {
     renderHook(() => useEngineEvents({ wasmModule }));
     expect(setCommandBatchDispatcher).toHaveBeenCalled();
 
-    const batchDispatcher = vi.mocked(setCommandBatchDispatcher).mock.calls[0][0];
+    const batchDispatcher = vi.mocked(setCommandBatchDispatcher).mock.calls[0][0]!;
     wasmModule.handle_command_batch.mockReturnValue([
       { success: true },
       { success: true },
@@ -122,19 +122,18 @@ describe('useEngineEvents', () => {
     expect(result).toEqual({ success: true, results: [{ success: true }, { success: true }] });
   });
 
-  it('batch dispatcher returns failure when handle_command_batch is absent', () => {
+  it('registers undefined batch dispatcher when handle_command_batch is absent', () => {
     delete wasmModule.handle_command_batch;
     renderHook(() => useEngineEvents({ wasmModule }));
 
     const batchDispatcher = vi.mocked(setCommandBatchDispatcher).mock.calls[0][0];
-    const result = batchDispatcher([{ command: 'spawn_entity' }]);
-    expect(result).toEqual({ success: false, results: [] });
+    expect(batchDispatcher).toBeUndefined();
   });
 
   it('batch dispatcher rejects oversized batches (>256)', () => {
     renderHook(() => useEngineEvents({ wasmModule }));
 
-    const batchDispatcher = vi.mocked(setCommandBatchDispatcher).mock.calls[0][0];
+    const batchDispatcher = vi.mocked(setCommandBatchDispatcher).mock.calls[0][0]!;
     const oversized = Array.from({ length: 257 }, (_, i) => ({ command: `cmd_${i}` }));
     const result = batchDispatcher(oversized);
     expect(result).toEqual({ success: false, results: [] });
@@ -145,7 +144,7 @@ describe('useEngineEvents', () => {
     wasmModule.handle_command_batch.mockImplementation(() => { throw new Error('WASM batch crash'); });
     renderHook(() => useEngineEvents({ wasmModule }));
 
-    const batchDispatcher = vi.mocked(setCommandBatchDispatcher).mock.calls[0][0];
+    const batchDispatcher = vi.mocked(setCommandBatchDispatcher).mock.calls[0][0]!;
     const result = batchDispatcher([{ command: 'crash' }]);
     expect(result).toEqual({ success: false, results: [] });
     expect(console.error).toHaveBeenCalledWith('Error dispatching command batch:', expect.any(Error));

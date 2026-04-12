@@ -92,7 +92,7 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
   useEffect(() => {
     if (wasmModule) {
       setCommandDispatcher(dispatchCommand);
-      setCommandBatchDispatcher(dispatchCommandBatch);
+      setCommandBatchDispatcher(wasmModule.handle_command_batch ? dispatchCommandBatch : undefined);
     }
   }, [wasmModule, dispatchCommand, dispatchCommandBatch]);
 
