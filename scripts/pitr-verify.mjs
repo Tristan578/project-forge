@@ -163,11 +163,11 @@ export async function main({ env, fetchFn, spawnFn, sleepFn, now, log, scriptPat
     body: buildBranchPayload({ parentTimestamp, branchName }),
   });
 
-  const { branchId, connectionUri, operationIds } = parseCreateResponse(createJson);
-  log(`Branch created: ${branchId} (${operationIds.length} operations pending)`);
-
+  const branchId = createJson?.branch?.id;
   let verifyExitCode = 1;
   try {
+    const { connectionUri, operationIds } = parseCreateResponse(createJson);
+    log(`Branch created: ${branchId} (${operationIds.length} operations pending)`);
     for (const opId of operationIds) {
       log(`Waiting for operation ${opId}...`);
       await waitForOperation({ fetchFn, projectId, apiKey, operationId: opId, sleepFn, now });
@@ -176,16 +176,18 @@ export async function main({ env, fetchFn, spawnFn, sleepFn, now, log, scriptPat
     verifyExitCode = await runVerifyScript({ connectionUri, scriptPath, spawnFn });
     log(`Verification script exited with code ${verifyExitCode}`);
   } finally {
-    log(`Deleting branch ${branchId}...`);
-    try {
-      await neonFetch(fetchFn, {
-        method: 'DELETE',
-        path: `/projects/${projectId}/branches/${branchId}`,
-        apiKey,
-      });
-      log('Branch deleted.');
-    } catch (err) {
-      log(`WARN: failed to delete branch ${branchId}: ${err instanceof Error ? err.message : err}`);
+    if (branchId) {
+      log(`Deleting branch ${branchId}...`);
+      try {
+        await neonFetch(fetchFn, {
+          method: 'DELETE',
+          path: `/projects/${projectId}/branches/${branchId}`,
+          apiKey,
+        });
+        log('Branch deleted.');
+      } catch (err) {
+        log(`WARN: failed to delete branch ${branchId}: ${err instanceof Error ? err.message : err}`);
+      }
     }
   }
 

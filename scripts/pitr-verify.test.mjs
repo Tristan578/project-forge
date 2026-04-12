@@ -448,6 +448,34 @@ describe('main', () => {
     assert.equal(calls[2].init.method, 'DELETE');
   });
 
+  test('deletes branch when parseCreateResponse throws (missing connection_uris)', async () => {
+    const createBody = JSON.stringify({
+      branch: { id: 'br_leak' },
+      operations: [{ id: 'op_1' }],
+    });
+    const { fetchFn, calls } = makeFetch([
+      { ok: true, body: createBody },
+      { ok: true, body: '{}' },
+    ]);
+    await assert.rejects(
+      main({
+        env: makeEnv(),
+        fetchFn,
+        spawnFn: () => {
+          throw new Error('should not spawn');
+        },
+        sleepFn: async () => {},
+        now: () => Date.parse('2026-04-11T12:00:00Z'),
+        log: () => {},
+        scriptPath: '/tmp/verify.sh',
+      }),
+      (err) => err instanceof PitrError && err.message.includes('connection_uri'),
+    );
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].init.method, 'DELETE');
+    assert.match(calls[1].url, /\/branches\/br_leak$/);
+  });
+
   test('swallows delete failure with warning', async () => {
     const createBody = JSON.stringify({
       branch: { id: 'br_new' },
