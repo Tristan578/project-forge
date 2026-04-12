@@ -10,6 +10,7 @@ vi.mock('@/stores/editorStore', () => ({
     getState: vi.fn(),
   },
   setCommandDispatcher: vi.fn(),
+  setCommandBatchDispatcher: vi.fn(),
 }));
 
 vi.mock('../events', () => ({

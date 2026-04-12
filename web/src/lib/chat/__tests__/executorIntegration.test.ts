@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@/stores/editorStore', () => ({
   getCommandDispatcher: () => mocks.dispatchCommand,
+  getCommandBatchDispatcher: () => null,
   // Provide the EditorState type stub so handler imports don't crash
   useEditorStore: { getState: () => ({}) },
 }));

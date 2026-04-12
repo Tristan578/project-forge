@@ -17,6 +17,7 @@ import type { EditorState, SceneNode } from '@/stores/editorStore';
 // ── Mock getCommandDispatcher (required by executor.ts wrapper) ───────────────
 vi.mock('@/stores/editorStore', () => ({
   getCommandDispatcher: vi.fn(() => vi.fn()),
+  getCommandBatchDispatcher: vi.fn(() => null),
 }));
 
 import { executeToolCall } from '../executor';
