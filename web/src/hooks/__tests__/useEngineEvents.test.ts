@@ -131,6 +131,16 @@ describe('useEngineEvents', () => {
     expect(result).toEqual({ success: false, results: [] });
   });
 
+  it('batch dispatcher rejects oversized batches (>256)', () => {
+    renderHook(() => useEngineEvents({ wasmModule }));
+
+    const batchDispatcher = vi.mocked(setCommandBatchDispatcher).mock.calls[0][0];
+    const oversized = Array.from({ length: 257 }, (_, i) => ({ command: `cmd_${i}` }));
+    const result = batchDispatcher(oversized);
+    expect(result).toEqual({ success: false, results: [] });
+    expect(wasmModule.handle_command_batch).not.toHaveBeenCalled();
+  });
+
   it('batch dispatcher catches errors and returns failure', () => {
     wasmModule.handle_command_batch.mockImplementation(() => { throw new Error('WASM batch crash'); });
     renderHook(() => useEngineEvents({ wasmModule }));

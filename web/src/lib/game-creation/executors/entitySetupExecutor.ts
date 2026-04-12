@@ -62,9 +62,8 @@ export const entitySetupExecutor: ExecutorDefinition = {
     if (ctx.dispatchCommandBatch) {
       const result = ctx.dispatchCommandBatch(commands);
       if (!result.success) {
-        const failed = result.results.find((r) => !r.success);
         return failResult(
-          makeStepError('COMMAND_FAILED', failed?.error ?? 'Batch command failed', this.userFacingErrorMessage),
+          makeStepError('COMMAND_FAILED', 'Engine command rejected', this.userFacingErrorMessage),
         );
       }
     } else {

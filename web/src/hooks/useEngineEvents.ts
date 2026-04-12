@@ -67,6 +67,10 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
 
   const dispatchCommandBatch = useCallback(
     (commands: Array<{ command: string; payload?: unknown }>) => {
+      if (commands.length > 256) {
+        console.error(`Batch size ${commands.length} exceeds limit of 256`);
+        return { success: false, results: [] };
+      }
       if (wasmModule?.handle_command_batch) {
         try {
           const results = wasmModule.handle_command_batch(commands) as Array<{ success: boolean; error?: string }>;
