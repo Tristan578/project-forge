@@ -37,8 +37,8 @@ function mockMiddlewareError(status: number, error: string) {
   const { NextResponse } = require('next/server');
   vi.mocked(withApiMiddleware).mockResolvedValue({
     error: NextResponse.json({ error }, { status }),
-    userId: undefined,
-    authContext: undefined,
+    userId: null,
+    authContext: null,
     body: undefined,
   });
 }

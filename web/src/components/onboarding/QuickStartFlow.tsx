@@ -78,7 +78,7 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const loadTemplate = useEditorStore((s) => s.loadTemplate);
+  const startDecomposition = useEditorStore((s) => s.startDecomposition);
   const setEngineMode = useEditorStore((s) => s.setEngineMode);
 
   const selectedCard = GAME_TYPE_CARDS.find((c) => c.id === selectedType) ?? null;
@@ -99,16 +99,22 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
     setIsGenerating(true);
     setGenerateError(null);
     try {
-      await loadTemplate(card.templateId);
+      // Build full prompt: "{card label}: {user prompt}"
+      const fullPrompt = prompt.trim() || card.placeholder;
+      const gamePrompt = `${card.label}: ${fullPrompt}`;
+
+      // Start the game creation pipeline (decompose -> plan -> approve -> execute)
+      await startDecomposition(gamePrompt, '3d');
+
       setIsReady(true);
       setStep(3);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load template. Please try again.';
+      const message = err instanceof Error ? err.message : 'Failed to create game. Please try again.';
       setGenerateError(message);
     } finally {
       setIsGenerating(false);
     }
-  }, [selectedType, isGenerating, loadTemplate]);
+  }, [selectedType, isGenerating, prompt, startDecomposition]);
 
   const handlePlay = useCallback(() => {
     setEngineMode('play');
@@ -241,7 +247,7 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
                   placeholder={selectedCard.placeholder}
                 />
                 <p className="text-xs text-zinc-400">
-                  AI will use a pre-built template to build your game — you can customize everything afterwards.
+                  AI will analyze your description and build a custom game — you can customize everything afterwards.
                 </p>
               </div>
 
@@ -285,27 +291,27 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
                     {selectedCard?.label ?? 'Game'} is ready!
                   </h3>
                   <p className="mt-1 text-sm text-zinc-400">
-                    Your scene is loaded. Hit Play to try it out.
+                    Your game plan is ready. Review it in the Game Creator panel, then hit Play.
                   </p>
                 </div>
               </div>
 
               <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 p-4 text-left">
                 <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                  What was loaded
+                  What happens next
                 </h4>
                 <ul className="space-y-1 text-sm text-zinc-300">
                   <li className="flex items-center gap-2">
                     <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                    Pre-built {selectedCard?.label ?? 'game'} scene with entities and physics
+                    AI analyzed your description and created a game plan
                   </li>
                   <li className="flex items-center gap-2">
                     <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                    Player controls and game mechanics scripted
+                    Review and approve the plan in the Game Creator panel
                   </li>
                   <li className="flex items-center gap-2">
                     <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                    Ready to play — customize everything in the editor
+                    AI builds your game step by step — customize everything afterwards
                   </li>
                 </ul>
               </div>

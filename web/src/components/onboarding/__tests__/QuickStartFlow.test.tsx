@@ -6,13 +6,13 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import { QuickStartFlow, shouldShowQuickStart } from '../QuickStartFlow';
 
 // Mock editorStore
-const mockLoadTemplate = vi.fn().mockResolvedValue(undefined);
+const mockStartDecomposition = vi.fn().mockResolvedValue(undefined);
 const mockSetEngineMode = vi.fn();
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: (selector: (s: Record<string, unknown>) => unknown) =>
     selector({
-      loadTemplate: mockLoadTemplate,
+      startDecomposition: mockStartDecomposition,
       setEngineMode: mockSetEngineMode,
     }),
 }));
@@ -73,8 +73,8 @@ describe('QuickStartFlow', () => {
     expect(textarea.value.length).toBeGreaterThan(0);
   });
 
-  it('shows error message and stays on step 2 when loadTemplate fails (regression for #7126)', async () => {
-    mockLoadTemplate.mockRejectedValueOnce(new Error('Template not found'));
+  it('shows error message and stays on step 2 when decomposition fails', async () => {
+    mockStartDecomposition.mockRejectedValueOnce(new Error('Decomposition failed'));
     render(<QuickStartFlow onComplete={onComplete} onSkip={onSkip} />);
 
     const shooterBtn = screen.getAllByRole('button').find(
@@ -89,10 +89,10 @@ describe('QuickStartFlow', () => {
       expect(screen.getByRole('alert')).toBeDefined();
     });
 
-    expect(screen.getByRole('alert').textContent).toContain('Template not found');
+    expect(screen.getByRole('alert').textContent).toContain('Decomposition failed');
     // Must remain on step 2 — not advance to step 3
     expect(screen.getByText('Describe your game')).toBeDefined();
-    expect(screen.queryByText('Your game is ready!')).toBeNull();
+    expect(screen.queryByText(/is ready!/)).toBeNull();
     // onComplete must NOT have been called
     expect(onComplete).not.toHaveBeenCalled();
   });
@@ -109,7 +109,10 @@ describe('QuickStartFlow', () => {
     fireEvent.click(generateBtn);
 
     await waitFor(() => {
-      expect(mockLoadTemplate).toHaveBeenCalledWith('shooter');
+      expect(mockStartDecomposition).toHaveBeenCalledWith(
+        expect.stringContaining('Shooter:'),
+        '3d',
+      );
     });
 
     await waitFor(() => {
