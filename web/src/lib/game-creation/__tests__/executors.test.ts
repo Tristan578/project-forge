@@ -119,7 +119,7 @@ vi.mock('@/lib/ai/contentSafety', () => ({
 }));
 
 vi.mock('@/lib/ai/models', () => ({
-  AI_MODEL_PRIMARY: 'claude-3-5-sonnet-20241022',
+  AI_MODEL_PRIMARY: 'claude-sonnet-4-6',
 }));
 
 // ---------------------------------------------------------------------------
