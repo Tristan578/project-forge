@@ -64,6 +64,8 @@ import {
   createSceneLightSlice,
   LocalizationSlice,
   createLocalizationSlice,
+  OrchestratorSlice,
+  createOrchestratorSlice,
 } from './slices';
 
 // Re-export all types for backward compatibility
@@ -89,7 +91,8 @@ export type EditorState =
   & EditModeSlice
   & BridgeSlice
   & SceneLightSlice
-  & LocalizationSlice;
+  & LocalizationSlice
+  & OrchestratorSlice;
 
 // Create the store by composing all slices
 export const useEditorStore = create<EditorState>()((...args) => ({
@@ -112,6 +115,7 @@ export const useEditorStore = create<EditorState>()((...args) => ({
   ...createBridgeSlice(...args),
   ...createSceneLightSlice(...args),
   ...createLocalizationSlice(...args),
+  ...createOrchestratorSlice(...args),
 }));
 
 // Best-effort store exposure for E2E tests (dev/test only).

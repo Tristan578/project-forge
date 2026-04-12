@@ -23,3 +23,4 @@ export * from './bridgeSlice';
 
 export * from './sceneLightSlice';
 export * from './localizationSlice';
+export * from './orchestratorSlice';
