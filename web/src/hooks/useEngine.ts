@@ -735,7 +735,7 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
           phase: 'handle_command_batch',
           batchSize: commands.length,
         });
-        throw err;
+        return { success: false, results: [] };
       }
     },
     [],
