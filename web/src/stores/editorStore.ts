@@ -163,7 +163,10 @@ type BatchCommandDispatcher = (commands: Array<{ command: string; payload?: unkn
 let _dispatchCommandBatch: BatchCommandDispatcher | null = null;
 
 export function setCommandBatchDispatcher(dispatcher: BatchCommandDispatcher): void {
-  _dispatchCommandBatch = dispatcher;
+  _dispatchCommandBatch = (commands) => {
+    for (const { command } of commands) trackCommandDispatched(command);
+    return dispatcher(commands);
+  };
 }
 
 export function getCommandBatchDispatcher(): BatchCommandDispatcher | null {

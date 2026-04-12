@@ -83,7 +83,13 @@ export const autoPolishExecutor: ExecutorDefinition = {
 
     if (commands.length > 0) {
       if (ctx.dispatchCommandBatch) {
-        ctx.dispatchCommandBatch(commands);
+        const result = ctx.dispatchCommandBatch(commands);
+        if (!result.success) {
+          const failed = result.results.find((r) => !r.success);
+          return failResult(
+            makeStepError('COMMAND_FAILED', failed?.error ?? 'Batch command failed', this.userFacingErrorMessage),
+          );
+        }
       } else {
         for (const cmd of commands) ctx.dispatchCommand(cmd.command, cmd.payload);
       }

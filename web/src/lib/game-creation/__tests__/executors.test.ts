@@ -437,6 +437,51 @@ describe('entity_setup executor', () => {
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('INVALID_INPUT');
   });
+
+  it('uses dispatchCommandBatch when available', async () => {
+    const batchFn = vi.fn().mockReturnValue({
+      success: true,
+      results: [{ success: true }, { success: true }],
+    });
+    const ctx = makeMockCtx({ dispatchCommandBatch: batchFn });
+    const result = await executor.execute(
+      { entity: baseEntity, scene: 'Level 1', projectType: '3d' },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(batchFn).toHaveBeenCalledWith([
+      { command: 'switch_scene', payload: { sceneId: 'Level 1' } },
+      { command: 'spawn_entity', payload: { entityType: 'cube', name: 'Enemy' } },
+    ]);
+    expect(ctx.dispatchCommand).not.toHaveBeenCalled();
+  });
+
+  it('falls back to sequential dispatch when batch unavailable', async () => {
+    const ctx = makeMockCtx();
+    const result = await executor.execute(
+      { entity: baseEntity, scene: 'Level 1', projectType: '3d' },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(ctx.dispatchCommand).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns failure when batch reports a command error', async () => {
+    const batchFn = vi.fn().mockReturnValue({
+      success: false,
+      results: [{ success: true }, { success: false, error: 'Entity limit reached' }],
+    });
+    const ctx = makeMockCtx({ dispatchCommandBatch: batchFn });
+    const result = await executor.execute(
+      { entity: baseEntity, scene: 'Level 1', projectType: '3d' },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('COMMAND_FAILED');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -820,5 +865,50 @@ describe('auto_polish executor', () => {
 
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('INVALID_INPUT');
+  });
+
+  it('uses dispatchCommandBatch when available', async () => {
+    const batchFn = vi.fn().mockReturnValue({
+      success: true,
+      results: [{ success: true }, { success: true }],
+    });
+    const ctx = makeMockCtx({ dispatchCommandBatch: batchFn });
+    vi.mocked(ctx.resolveStepOutput).mockReturnValue({
+      issues: ['no_ambient_light', 'no_ground_plane'],
+    });
+    const result = await executor.execute(baseInput, ctx);
+
+    expect(result.success).toBe(true);
+    expect(batchFn).toHaveBeenCalledWith([
+      { command: 'update_ambient_light', payload: { color: [1, 1, 1], brightness: 0.3 } },
+      { command: 'spawn_entity', payload: { entityType: 'plane', name: 'Ground', position: [0, 0, 0] } },
+    ]);
+    expect(ctx.dispatchCommand).not.toHaveBeenCalled();
+  });
+
+  it('returns failure when batch reports a command error', async () => {
+    const batchFn = vi.fn().mockReturnValue({
+      success: false,
+      results: [{ success: false, error: 'Ambient light failed' }],
+    });
+    const ctx = makeMockCtx({ dispatchCommandBatch: batchFn });
+    vi.mocked(ctx.resolveStepOutput).mockReturnValue({
+      issues: ['no_ambient_light'],
+    });
+    const result = await executor.execute(baseInput, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('COMMAND_FAILED');
+  });
+
+  it('falls back to sequential dispatch when batch unavailable', async () => {
+    const ctx = makeMockCtx();
+    vi.mocked(ctx.resolveStepOutput).mockReturnValue({
+      issues: ['no_ambient_light', 'no_ground_plane'],
+    });
+    const result = await executor.execute(baseInput, ctx);
+
+    expect(result.success).toBe(true);
+    expect(ctx.dispatchCommand).toHaveBeenCalledTimes(2);
   });
 });
