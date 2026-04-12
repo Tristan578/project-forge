@@ -9,7 +9,8 @@ const setTagMock = vi.fn();
 vi.mock('@/lib/monitoring/sentry-client', () => ({
   captureException: (err: unknown, ctx?: Record<string, unknown>) =>
     captureExceptionMock(err, ctx),
-  setTag: (key: string, value: string) => setTagMock(key, value),
+  withScope: (callback: (scope: { setTag: typeof setTagMock }) => void) =>
+    callback({ setTag: setTagMock }),
 }));
 
 vi.mock('next/link', () => ({
