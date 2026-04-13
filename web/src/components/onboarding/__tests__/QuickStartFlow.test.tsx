@@ -9,13 +9,20 @@ import { QuickStartFlow, shouldShowQuickStart } from '../QuickStartFlow';
 const mockStartDecomposition = vi.fn().mockResolvedValue(undefined);
 const mockSetEngineMode = vi.fn();
 
-vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector({
-      startDecomposition: mockStartDecomposition,
-      setEngineMode: mockSetEngineMode,
-    }),
-}));
+// Mutable store state — tests can mutate this to simulate failures
+const mockStoreState: Record<string, unknown> = {
+  startDecomposition: mockStartDecomposition,
+  setEngineMode: mockSetEngineMode,
+  orchestratorStatus: 'idle',
+  orchestratorError: null,
+};
+
+vi.mock('@/stores/editorStore', () => {
+  const hook = (selector: (s: Record<string, unknown>) => unknown) =>
+    selector(mockStoreState);
+  hook.getState = () => mockStoreState;
+  return { useEditorStore: hook };
+});
 
 const STORAGE_KEY = 'forge-quickstart-completed';
 
@@ -26,6 +33,9 @@ describe('QuickStartFlow', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
+    // Reset mock store state
+    mockStoreState.orchestratorStatus = 'idle';
+    mockStoreState.orchestratorError = null;
   });
 
   afterEach(() => {
@@ -74,7 +84,12 @@ describe('QuickStartFlow', () => {
   });
 
   it('shows error message and stays on step 2 when decomposition fails', async () => {
-    mockStartDecomposition.mockRejectedValueOnce(new Error('Decomposition failed'));
+    // Simulate the real behavior: startDecomposition resolves (never rejects)
+    // but sets orchestratorStatus to 'failed' in the store
+    mockStartDecomposition.mockImplementationOnce(async () => {
+      mockStoreState.orchestratorStatus = 'failed';
+      mockStoreState.orchestratorError = 'Decomposition failed';
+    });
     render(<QuickStartFlow onComplete={onComplete} onSkip={onSkip} />);
 
     const shooterBtn = screen.getAllByRole('button').find(

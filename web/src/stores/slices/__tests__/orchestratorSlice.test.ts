@@ -135,15 +135,22 @@ describe('orchestratorSlice', () => {
       expect(state.stepStatuses).toEqual({});
       expect(state.pendingGate).toBeNull();
       expect(state.tokenEstimate).toBeNull();
+      expect(state.reservationId).toBeNull();
       expect(state.orchestratorError).toBeNull();
     });
   });
 
   describe('startDecomposition', () => {
     it('sets status to decomposing and calls decompose endpoint', async () => {
+      // First call: decompose endpoint
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ gdd: makeMockGdd() }),
+      });
+      // Second call: token reservation
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ reservationId: 'res-123', remaining: { total: 9300 } }),
       });
 
       const promise = store.getState().startDecomposition('make a platformer', '3d');
@@ -157,6 +164,23 @@ describe('orchestratorSlice', () => {
       expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
       expect(store.getState().currentPlan).not.toBeNull();
       expect(store.getState().tokenEstimate).not.toBeNull();
+      expect(store.getState().reservationId).toBe('res-123');
+    });
+
+    it('fails when token reservation returns insufficient', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ gdd: makeMockGdd() }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: 'insufficient_tokens' }),
+      });
+
+      await store.getState().startDecomposition('make a game', '3d');
+
+      expect(store.getState().orchestratorStatus).toBe('failed');
+      expect(store.getState().orchestratorError).toContain('Insufficient tokens');
     });
 
     it('sets status to failed on fetch error', async () => {
@@ -184,16 +208,21 @@ describe('orchestratorSlice', () => {
     it('clears previous state before starting', async () => {
       // Set up some previous state
       store.getState().setPlan(makeMockPlan());
-      store.setState({ orchestratorError: 'old error' });
+      store.setState({ orchestratorError: 'old error', reservationId: 'old-res' });
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ gdd: makeMockGdd() }),
       });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ reservationId: 'new-res', remaining: { total: 9000 } }),
+      });
 
       await store.getState().startDecomposition('new game', '2d');
 
       expect(store.getState().orchestratorError).toBeNull();
+      expect(store.getState().reservationId).toBe('new-res');
     });
   });
 
@@ -328,6 +357,7 @@ describe('orchestratorSlice', () => {
         orchestratorStatus: 'completed',
         orchestratorError: 'some error',
         currentStepIndex: 5,
+        reservationId: 'res-123',
       });
 
       store.getState().resetOrchestrator();
@@ -339,6 +369,7 @@ describe('orchestratorSlice', () => {
       expect(state.stepStatuses).toEqual({});
       expect(state.pendingGate).toBeNull();
       expect(state.tokenEstimate).toBeNull();
+      expect(state.reservationId).toBeNull();
       expect(state.orchestratorError).toBeNull();
     });
   });

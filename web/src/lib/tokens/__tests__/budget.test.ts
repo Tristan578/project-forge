@@ -188,7 +188,7 @@ describe('recordStepUsage', () => {
     // Second query: insert audit row (returns nothing)
     mockNeonSqlResults.push([]);
 
-    await recordStepUsage('res-123', 'step-1', 25);
+    await recordStepUsage('user-1', 'res-123', 'step-1', 25);
 
     // Two queries: lookup + insert
     expect(mockNeonSql).toHaveBeenCalledTimes(2);
@@ -199,7 +199,7 @@ describe('recordStepUsage', () => {
     mockNeonSqlResults.push([{ user_id: 'user-1', source: 'addon' }]);
     mockNeonSqlResults.push([]);
 
-    await recordStepUsage('res-addon', 'step-2', 50);
+    await recordStepUsage('user-1', 'res-addon', 'step-2', 50);
 
     // The second call is the INSERT — verify the source parameter
     const insertCall = mockNeonSql.mock.calls[1];
@@ -214,7 +214,7 @@ describe('recordStepUsage', () => {
     mockNeonSqlResults.push([{ user_id: 'user-1', source: 'mixed' }]);
     mockNeonSqlResults.push([]);
 
-    await recordStepUsage('res-mixed', 'step-3', 30);
+    await recordStepUsage('user-1', 'res-mixed', 'step-3', 30);
 
     const insertCall = mockNeonSql.mock.calls[1];
     const interpolatedValues = insertCall.slice(1);
@@ -222,19 +222,19 @@ describe('recordStepUsage', () => {
   });
 
   it('skips insert for zero tokens', async () => {
-    await recordStepUsage('res-123', 'step-1', 0);
+    await recordStepUsage('user-1', 'res-123', 'step-1', 0);
 
     expect(mockNeonSql).not.toHaveBeenCalled();
   });
 
   it('skips insert for negative tokens', async () => {
-    await recordStepUsage('res-123', 'step-1', -5);
+    await recordStepUsage('user-1', 'res-123', 'step-1', -5);
 
     expect(mockNeonSql).not.toHaveBeenCalled();
   });
 
   it('skips insert for free reservations', async () => {
-    await recordStepUsage('free', 'step-1', 25);
+    await recordStepUsage('user-1', 'free', 'step-1', 25);
 
     expect(mockNeonSql).not.toHaveBeenCalled();
   });
@@ -242,9 +242,19 @@ describe('recordStepUsage', () => {
   it('handles missing reservation gracefully', async () => {
     mockNeonSqlResults.push([]);
 
-    await recordStepUsage('nonexistent', 'step-1', 25);
+    await recordStepUsage('user-1', 'nonexistent', 'step-1', 25);
 
     // Only lookup query, no insert
+    expect(mockNeonSql).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects reservation owned by different user', async () => {
+    // Reservation belongs to user-1 but caller claims user-2
+    mockNeonSqlResults.push([]); // WHERE clause excludes mismatched userId
+
+    await recordStepUsage('user-2', 'res-123', 'step-1', 25);
+
+    // Only lookup query (returns 0 rows), no insert
     expect(mockNeonSql).toHaveBeenCalledTimes(1);
   });
 });

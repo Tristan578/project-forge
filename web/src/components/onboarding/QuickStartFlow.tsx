@@ -104,7 +104,15 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
       const gamePrompt = `${card.label}: ${fullPrompt}`;
 
       // Start the game creation pipeline (decompose -> plan -> approve -> execute)
+      // startDecomposition handles errors internally (sets orchestratorStatus to 'failed')
+      // so we must check store state after the await to detect failures.
       await startDecomposition(gamePrompt, '3d');
+
+      // Read fresh state imperatively — React hook values are stale inside callbacks
+      const { orchestratorStatus: status, orchestratorError: error } = useEditorStore.getState();
+      if (status === 'failed') {
+        throw new Error(error ?? 'Failed to create game. Please try again.');
+      }
 
       setIsReady(true);
       setStep(3);

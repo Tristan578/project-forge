@@ -158,6 +158,7 @@ export async function releaseUnusedBudget(
  * already reserved upfront.
  */
 export async function recordStepUsage(
+  userId: string,
   reservationId: string,
   stepId: string,
   tokensUsed: number,
@@ -173,11 +174,11 @@ export async function recordStepUsage(
     type: 'pipeline_step_audit',
   });
 
-  // Look up the userId from the reservation record
+  // Verify the reservation belongs to this user and get source
   const rows = await queryWithResilience(() =>
     neonSql`
       SELECT user_id, source FROM token_usage
-      WHERE id = ${reservationId}::uuid
+      WHERE id = ${reservationId}::uuid AND user_id = ${userId}
       LIMIT 1
     `
   );
@@ -185,7 +186,6 @@ export async function recordStepUsage(
   if (rows.length === 0) return;
 
   const row = rows[0] as { user_id: string; source: string };
-  const userId = row.user_id;
   const source = row.source;
 
   await queryWithResilience(() =>

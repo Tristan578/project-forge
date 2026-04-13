@@ -23,6 +23,7 @@ import { runPipeline } from '@/lib/game-creation/pipelineRunner';
 import type { PipelineCallbacks } from '@/lib/game-creation/pipelineRunner';
 import { EXECUTOR_REGISTRY } from '@/lib/game-creation/executors';
 import { getCommandDispatcher, getCommandBatchDispatcher } from '@/stores/editorStore';
+import { captureException } from '@/lib/monitoring/sentry-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,8 +49,9 @@ export interface OrchestratorSlice {
   // Gate resolution
   pendingGate: ApprovalGate | null;
 
-  // Token estimate
+  // Token estimate & budget
   tokenEstimate: TokenEstimate | null;
+  reservationId: string | null;
 
   // Error state
   orchestratorError: string | null;
@@ -102,6 +104,7 @@ export const createOrchestratorSlice: StateCreator<
   stepStatuses: {},
   pendingGate: null,
   tokenEstimate: null,
+  reservationId: null,
   orchestratorError: null,
 
   // ---------------------------------------------------------------------------
@@ -116,6 +119,7 @@ export const createOrchestratorSlice: StateCreator<
       stepStatuses: {},
       pendingGate: null,
       tokenEstimate: null,
+      reservationId: null,
     });
 
     try {
@@ -154,9 +158,36 @@ export const createOrchestratorSlice: StateCreator<
         stepStatuses[step.id] = step.status;
       }
 
+      // Reserve tokens for the pipeline (server-side via API)
+      let reservationId: string | null = null;
+      if (plan.tokenEstimate.totalVarianceHigh > 0) {
+        const reserveRes = await fetch('/api/game/pipeline', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'reserve',
+            estimatedTotal: plan.tokenEstimate.totalVarianceHigh,
+          }),
+        });
+
+        if (!reserveRes.ok) {
+          const reserveBody = await reserveRes.json().catch(() => ({ error: 'Token reservation failed' }));
+          throw new Error(reserveBody.error === 'insufficient_tokens'
+            ? 'Insufficient tokens — add tokens or upgrade your plan'
+            : reserveBody.error ?? 'Token reservation failed');
+        }
+
+        const reserveData = await reserveRes.json();
+        if (typeof reserveData.reservationId !== 'string' || reserveData.reservationId.length === 0) {
+          throw new Error('Token reservation returned invalid ID');
+        }
+        reservationId = reserveData.reservationId;
+      }
+
       set({
         currentPlan: plan,
         tokenEstimate: plan.tokenEstimate,
+        reservationId,
         stepStatuses,
         orchestratorStatus: 'awaiting_approval',
         currentStepIndex: 0,
@@ -229,6 +260,7 @@ export const createOrchestratorSlice: StateCreator<
       stepStatuses: {},
       pendingGate: null,
       tokenEstimate: null,
+      reservationId: null,
       orchestratorError: null,
     });
   },
@@ -267,6 +299,10 @@ export const createOrchestratorSlice: StateCreator<
       resolveStepOutput: () => undefined, // overridden by runPipeline
     };
 
+    const { reservationId } = get();
+    let completedSteps = 0;
+    const totalSteps = currentPlan.steps.length;
+
     const callbacks: PipelineCallbacks = {
       onStepComplete: (stepId, result) => {
         const status = result.success ? 'completed' : 'failed';
@@ -279,6 +315,10 @@ export const createOrchestratorSlice: StateCreator<
           if (idx >= 0) {
             set({ currentStepIndex: idx });
           }
+        }
+
+        if (result.success) {
+          completedSteps += 1;
         }
       },
 
@@ -318,6 +358,23 @@ export const createOrchestratorSlice: StateCreator<
       });
     } finally {
       _abortController = null;
+
+      // Release unused tokens — prorate by completed steps (fire-and-forget)
+      if (reservationId) {
+        const estimated = currentPlan.tokenEstimate.totalEstimated;
+        const actualUsed = totalSteps > 0
+          ? Math.round(estimated * (completedSteps / totalSteps))
+          : 0;
+        fetch('/api/game/pipeline', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'release', reservationId, actualUsed }),
+        }).catch((releaseErr) => {
+          captureException(releaseErr instanceof Error ? releaseErr : new Error(String(releaseErr)), {
+            extra: { context: 'orchestrator.releaseTokens', reservationId, actualUsed },
+          });
+        });
+      }
     }
   },
 });
