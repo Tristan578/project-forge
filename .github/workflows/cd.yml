@@ -294,7 +294,7 @@ jobs:
 
       - name: Try downloading WASM from CI (same SHA)
         id: ci-wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: wasm-binaries
           path: engine/
@@ -392,7 +392,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Download WASM artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: wasm-binaries
           path: engine/
@@ -488,7 +488,7 @@ jobs:
           sudo ./aws/install --update
 
       - name: Download WASM artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: wasm-binaries
           path: engine/
@@ -568,7 +568,7 @@ jobs:
 
       - name: Download WASM artifacts for same-origin fallback
         id: download-wasm-staging
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: wasm-binaries
           path: engine/
@@ -734,7 +734,7 @@ jobs:
 
       - name: Download WASM artifacts for same-origin fallback
         id: download-wasm-production
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: wasm-binaries
           path: engine/
