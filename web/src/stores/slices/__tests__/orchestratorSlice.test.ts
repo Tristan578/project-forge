@@ -300,7 +300,6 @@ describe('orchestratorSlice', () => {
     });
 
     it('resolves pending gate as rejected', () => {
-      let resolved = false;
       // Simulate a pending gate resolver
       const gate: ApprovalGate = {
         id: 'gate_plan',

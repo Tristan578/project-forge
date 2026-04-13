@@ -1,7 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 import { injectStore, readStore, isStrictMode } from '../helpers/store-injection';
 import {
-  E2E_TIMEOUT_SHORT_MS,
   E2E_TIMEOUT_ELEMENT_MS,
   E2E_TIMEOUT_LOAD_MS,
 } from '../constants';

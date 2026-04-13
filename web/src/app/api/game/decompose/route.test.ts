@@ -1,7 +1,7 @@
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { decomposeIntoSystems } from '@/lib/game-creation';
 import { makeUser } from '@/test/utils/apiTestUtils';
@@ -34,7 +34,6 @@ function mockMiddlewareSuccess(overrides?: Partial<ReturnType<typeof makeUser>>)
 }
 
 function mockMiddlewareError(status: number, error: string) {
-  const { NextResponse } = require('next/server');
   vi.mocked(withApiMiddleware).mockResolvedValue({
     error: NextResponse.json({ error }, { status }),
     userId: null,
