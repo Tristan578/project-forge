@@ -80,6 +80,7 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
 
   const startDecomposition = useEditorStore((s) => s.startDecomposition);
   const setEngineMode = useEditorStore((s) => s.setEngineMode);
+  const orchestratorStatus = useEditorStore((s) => s.orchestratorStatus);
 
   const selectedCard = GAME_TYPE_CARDS.find((c) => c.id === selectedType) ?? null;
 
@@ -306,7 +307,7 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
 
               <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 p-4 text-left">
                 <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                  What happens next
+                  {orchestratorStatus === 'completed' ? 'Ready to play' : 'What happens next'}
                 </h4>
                 <ul className="space-y-1 text-sm text-zinc-300">
                   <li className="flex items-center gap-2">
@@ -314,22 +315,38 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
                     AI analyzed your description and created a game plan
                   </li>
                   <li className="flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                    Review and approve the plan in the Game Creator panel
+                    <span className={`h-1.5 w-1.5 rounded-full ${orchestratorStatus === 'awaiting_approval' ? 'bg-yellow-500' : 'bg-green-500'}`} />
+                    {orchestratorStatus === 'awaiting_approval'
+                      ? 'Review and approve the plan in the Game Creator panel'
+                      : 'Plan approved'}
                   </li>
                   <li className="flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                    AI builds your game step by step — customize everything afterwards
+                    <span className={`h-1.5 w-1.5 rounded-full ${orchestratorStatus === 'completed' ? 'bg-green-500' : 'bg-zinc-600'}`} />
+                    {orchestratorStatus === 'executing'
+                      ? 'AI is building your game...'
+                      : orchestratorStatus === 'completed'
+                        ? 'Game built — customize everything afterwards'
+                        : 'AI builds your game step by step'}
                   </li>
                 </ul>
               </div>
 
               <button
                 onClick={handlePlay}
-                className="flex w-full items-center justify-center gap-2 rounded-md bg-green-600 px-4 py-4 text-base font-bold text-white shadow-lg transition-all hover:bg-green-500 hover:shadow-green-900/50 focus:outline-none focus:ring-2 focus:ring-green-500"
+                disabled={orchestratorStatus !== 'completed'}
+                className="flex w-full items-center justify-center gap-2 rounded-md bg-green-600 px-4 py-4 text-base font-bold text-white shadow-lg transition-all hover:bg-green-500 hover:shadow-green-900/50 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <Play className="h-5 w-5 fill-white" />
-                Play Now
+                {orchestratorStatus === 'completed' ? (
+                  <>
+                    <Play className="h-5 w-5 fill-white" />
+                    Play Now
+                  </>
+                ) : (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    Building your game...
+                  </>
+                )}
               </button>
 
               <button

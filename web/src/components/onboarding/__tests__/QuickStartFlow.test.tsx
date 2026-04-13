@@ -152,7 +152,31 @@ describe('QuickStartFlow', () => {
     expect(generateBtn.disabled).toBe(true);
   });
 
+  it('disables Play Now button until orchestrator status is completed', async () => {
+    mockStartDecomposition.mockImplementationOnce(async () => {
+      mockStoreState.orchestratorStatus = 'awaiting_approval';
+    });
+    render(<QuickStartFlow onComplete={onComplete} onSkip={onSkip} />);
+
+    const explorerBtn = screen.getAllByRole('button').find(
+      (b) => b.textContent?.includes('Explorer') && b.textContent?.includes('Wander, discover'),
+    )!;
+    fireEvent.click(explorerBtn);
+    fireEvent.click(screen.getByRole('button', { name: /generate game/i }));
+
+    await waitFor(() => screen.getByText('Your game is ready!'));
+
+    // Play Now button should be disabled (showing "Building your game...")
+    const playBtn = screen.getByText(/building your game/i).closest('button')!;
+    expect(playBtn.disabled).toBe(true);
+    expect(mockSetEngineMode).not.toHaveBeenCalled();
+  });
+
   it('calls setEngineMode(play) and onComplete when Play Now is clicked', async () => {
+    // Simulate full pipeline completion
+    mockStartDecomposition.mockImplementationOnce(async () => {
+      mockStoreState.orchestratorStatus = 'completed';
+    });
     render(<QuickStartFlow onComplete={onComplete} onSkip={onSkip} />);
 
     const explorerBtn = screen.getAllByRole('button').find(
@@ -170,6 +194,9 @@ describe('QuickStartFlow', () => {
   });
 
   it('saves completed flag to localStorage after Play Now', async () => {
+    mockStartDecomposition.mockImplementationOnce(async () => {
+      mockStoreState.orchestratorStatus = 'completed';
+    });
     render(<QuickStartFlow onComplete={onComplete} onSkip={onSkip} />);
 
     const explorerBtn = screen.getAllByRole('button').find(
