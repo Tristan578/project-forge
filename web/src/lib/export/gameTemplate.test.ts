@@ -190,5 +190,66 @@ describe('gameTemplate', () => {
       expect(html).toContain("console.error('[Forge] Failed to initialize:', err)");
       expect(html).toContain("document.querySelector('#loading p').textContent = 'Failed to load game. ' + err.message");
     });
+
+    describe('branding', () => {
+      it('includes "Made with SpawnForge" badge by default (no tier)', () => {
+        const html = generateGameHTML(baseOptions);
+        expect(html).toContain('Made with');
+        expect(html).toContain('SpawnForge');
+        expect(html).toContain('spawnforge.ai');
+      });
+
+      it('includes branding on free tier (starter)', () => {
+        const html = generateGameHTML({ ...baseOptions, creatorTier: 'starter' });
+        expect(html).toContain('Made with');
+        expect(html).toContain('SpawnForge');
+      });
+
+      it('includes branding on hobbyist tier', () => {
+        const html = generateGameHTML({ ...baseOptions, creatorTier: 'hobbyist' });
+        expect(html).toContain('Made with');
+        expect(html).toContain('SpawnForge');
+      });
+
+      it('omits branding when hideBranding is true on paid tier', () => {
+        const html = generateGameHTML({
+          ...baseOptions,
+          creatorTier: 'creator',
+          hideBranding: true,
+        });
+        expect(html).not.toContain('Made with');
+        expect(html).not.toContain('forge-branding');
+      });
+
+      it('includes branding even on paid tier when hideBranding is false', () => {
+        const html = generateGameHTML({
+          ...baseOptions,
+          creatorTier: 'creator',
+          hideBranding: false,
+        });
+        expect(html).toContain('Made with');
+        expect(html).toContain('SpawnForge');
+      });
+
+      it('ignores hideBranding on free tier (non-removable)', () => {
+        const html = generateGameHTML({
+          ...baseOptions,
+          creatorTier: 'starter',
+          hideBranding: true,
+        });
+        expect(html).toContain('Made with');
+        expect(html).toContain('SpawnForge');
+      });
+
+      it('ignores hideBranding on hobbyist tier (non-removable)', () => {
+        const html = generateGameHTML({
+          ...baseOptions,
+          creatorTier: 'hobbyist',
+          hideBranding: true,
+        });
+        expect(html).toContain('Made with');
+        expect(html).toContain('SpawnForge');
+      });
+    });
   });
 });

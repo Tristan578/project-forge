@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { safeAuth } from '@/lib/auth/safe-auth';
 import { GamePlayer } from '@/components/play/GamePlayer';
 
 interface PlayPageProps {
@@ -59,6 +60,13 @@ export async function generateMetadata({
  */
 export default async function PlayPage({ params }: PlayPageProps) {
   const { userId, slug } = await params;
+  const { userId: viewerClerkId } = await safeAuth();
 
-  return <GamePlayer userId={userId} slug={slug} />;
+  return (
+    <GamePlayer
+      userId={userId}
+      slug={slug}
+      isAuthenticated={!!viewerClerkId}
+    />
+  );
 }

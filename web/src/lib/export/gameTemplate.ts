@@ -19,10 +19,34 @@ export interface GameTemplateOptions {
   mobileTouchConfig?: string;  // JSON-encoded MobileTouchConfig
   embeddedWasm?: Record<string, EmbeddedWasmData>;  // Inlined WASM for single-HTML portability
   orientationLock?: 'landscape' | 'portrait' | 'none';  // Screen orientation lock for mobile
+  creatorTier?: string;    // User subscription tier — branding non-removable on starter/hobbyist
+  hideBranding?: boolean;  // Only honored on creator/pro tiers
+}
+
+/** Tiers where "Made with SpawnForge" branding cannot be removed. */
+const BRANDING_REQUIRED_TIERS = new Set(['starter', 'hobbyist']);
+
+function shouldShowBranding(tier?: string, hide?: boolean): boolean {
+  // Default (no tier specified) = show branding
+  if (!tier) return true;
+  // Free/hobbyist tiers: branding is non-removable
+  if (BRANDING_REQUIRED_TIERS.has(tier)) return true;
+  // Paid tiers: respect hideBranding flag
+  return !hide;
+}
+
+function generateBrandingHTML(): string {
+  return `
+  <div id="forge-branding" style="position:fixed;bottom:12px;right:12px;z-index:9999;pointer-events:auto;">
+    <a href="https://spawnforge.ai?utm_source=game_export&utm_medium=badge&utm_campaign=made_with" target="_blank" rel="noopener noreferrer" style="display:flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(0,0,0,0.7);border-radius:8px;text-decoration:none;font-family:system-ui,sans-serif;font-size:12px;color:rgba(255,255,255,0.7);backdrop-filter:blur(4px);transition:opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">
+      <span style="font-size:14px;">⚒</span>
+      <span>Made with <strong style="color:#f97316;">SpawnForge</strong></span>
+    </a>
+  </div>`;
 }
 
 export function generateGameHTML(options: GameTemplateOptions): string {
-  const { title, bgColor, resolution, sceneData, scriptBundle, includeDebug, uiData, mobileTouchConfig, embeddedWasm, orientationLock } = options;
+  const { title, bgColor, resolution, sceneData, scriptBundle, includeDebug, uiData, mobileTouchConfig, embeddedWasm, orientationLock, creatorTier, hideBranding } = options;
 
   const canvasStyle = resolution === 'responsive'
     ? 'width: 100vw; height: 100vh;'
@@ -185,6 +209,8 @@ export function generateGameHTML(options: GameTemplateOptions): string {
   </script>
 
   ${uiData ? generateUIRuntimeScript(uiData) : ''}
+
+  ${shouldShowBranding(creatorTier, hideBranding) ? generateBrandingHTML() : ''}
 </body>
 </html>`;
 }
