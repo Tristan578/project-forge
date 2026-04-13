@@ -8,6 +8,7 @@
  * and do NOT require the WASM engine to be initialized.
  */
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_SHORT_MS, E2E_TIMEOUT_ELEMENT_MS } from '../constants';
 
 const LIGHT_THEMES = ['ember', 'ice', 'leaf', 'rust', 'mech', 'light'] as const;
 
@@ -38,7 +39,7 @@ test.describe('Theme Effects @ui @dev', () => {
       }, theme);
 
       const effect = page.locator(`[data-sf-effect="${theme}"]`);
-      await expect(effect).toBeVisible({ timeout: 5000 });
+      await expect(effect).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
       // Verify pointer-events: none (so effect doesn't block interactions)
       const pe = await effect.evaluate((el) => getComputedStyle(el).pointerEvents);
@@ -88,6 +89,6 @@ test.describe('Theme Effects @ui @dev', () => {
     });
 
     // Effect should appear
-    await expect(page.locator('[data-sf-effect="ember"]')).toBeVisible({ timeout: 3000 });
+    await expect(page.locator('[data-sf-effect="ember"]')).toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
   });
 });

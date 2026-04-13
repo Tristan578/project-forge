@@ -16,6 +16,11 @@
 
 import type { Page } from '@playwright/test';
 import { test, expect, EditorPage } from '../fixtures/editor.fixture';
+import {
+  E2E_TIMEOUT_ELEMENT_MS,
+  E2E_TIMEOUT_INTERACTION_MS,
+  E2E_TIMEOUT_LOAD_MS,
+} from '../constants';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -39,7 +44,7 @@ async function spawnCubeAndSelect(page: Page, editor: EditorPage) {
       const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { selectedIds: Set<string> } } }).__EDITOR_STORE;
       return store && store.getState().selectedIds.size > 0;
     },
-    { timeout: 10_000 },
+    { timeout: E2E_TIMEOUT_LOAD_MS },
   );
 }
 
@@ -69,7 +74,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
     await spawnCubeAndSelect(page, editor);
 
     const transformHeading = page.getByText('Transform', { exact: false });
-    await expect(transformHeading.first()).toBeVisible({ timeout: 8_000 });
+    await expect(transformHeading.first()).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
 
     // X, Y, Z labels must be present — proves the inspector rendered position fields
     await expect(page.getByText('X', { exact: true }).first()).toBeVisible();
@@ -92,7 +97,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
     // on nth-child ordering which can change if the inspector layout changes.
     const transformSection = page.getByText('Transform', { exact: false }).first().locator('..');
     const xInput = transformSection.locator('input').first();
-    await expect(xInput).toBeVisible({ timeout: 5_000 });
+    await expect(xInput).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Fill in a distinctive value that is unlikely to be the default
     await xInput.click({ clickCount: 3 });
@@ -110,7 +115,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
         // primaryTransform.position[0] should be approximately 7.5
         return t && typeof t.position?.[0] === 'number' && Math.abs(t.position[0] - 7.5) < 0.1;
       },
-      { timeout: 5_000 },
+      { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
     const state = await getStoreState(page) as { primaryTransform?: { position?: number[] } } | undefined;
@@ -171,7 +176,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
         const zOk = typeof t.position?.[2] === 'number' && Math.abs(t.position[2] - (-2.5)) < 0.1;
         return yOk && zOk;
       },
-      { timeout: 5_000 },
+      { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
     const state = await getStoreState(page) as { primaryTransform?: { position?: number[] } } | undefined;
@@ -190,7 +195,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
 
     // Use the data-testid added to the Rotation Vec3Input for reliable targeting
     const rotationRow = page.locator('[data-testid="vec3-rotation"]');
-    await expect(rotationRow).toBeVisible({ timeout: 8_000 });
+    await expect(rotationRow).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
     const rotXInput = rotationRow.locator('input').first();
 
     // Capture the rotation value BEFORE editing so we can detect a real change.
@@ -216,7 +221,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
         return Math.abs(val - 45) < 1.0 || Math.abs(val - 0.785398) < 0.1;
       },
       [beforeRot] as [number | null],
-      { timeout: 10_000 },
+      { timeout: E2E_TIMEOUT_LOAD_MS },
     );
 
     const state = await getStoreState(page) as { primaryTransform?: { rotation?: number[] } } | undefined;
@@ -242,7 +247,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
 
     // Use the data-testid added to the Scale Vec3Input for reliable targeting
     const scaleRow = page.locator('[data-testid="vec3-scale"]');
-    await expect(scaleRow).toBeVisible({ timeout: 8_000 });
+    await expect(scaleRow).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
     const scaleXInput = scaleRow.locator('input').first();
 
     await scaleXInput.click({ clickCount: 3 });
@@ -256,7 +261,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
         const t = store.getState().primaryTransform;
         return t && Array.isArray(t.scale) && Math.abs(t.scale[0] - 2.0) < 0.1;
       },
-      { timeout: 5_000 },
+      { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
     const state = await getStoreState(page) as { primaryTransform?: { scale?: number[] } } | undefined;
@@ -283,7 +288,7 @@ test.describe('Group 2: Material Editing @engine', () => {
     await spawnCubeAndSelect(page, editor);
 
     const materialHeading = page.getByText(/material/i, { exact: false }).first();
-    await expect(materialHeading).toBeVisible({ timeout: 8_000 });
+    await expect(materialHeading).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
   });
 
   test('changing metallic input dispatches update_material and updates the store', async ({
@@ -301,10 +306,10 @@ test.describe('Group 2: Material Editing @engine', () => {
 
     // Find the metallic label and its sibling input
     const metallicLabel = page.locator('text=/metallic/i').first();
-    await expect(metallicLabel).toBeVisible({ timeout: 8_000 });
+    await expect(metallicLabel).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
 
     const metallicInput = metallicLabel.locator('..').locator('input').first();
-    await expect(metallicInput).toBeVisible({ timeout: 5_000 });
+    await expect(metallicInput).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await metallicInput.click({ clickCount: 3 });
     await metallicInput.fill('0.85');
@@ -324,7 +329,7 @@ test.describe('Group 2: Material Editing @engine', () => {
         return changed && correct;
       },
       beforeMetallic,
-      { timeout: 5_000 },
+      { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
     const afterState = await getStoreState(page) as { primaryMaterial?: { metallic?: number } } | undefined;
@@ -345,14 +350,14 @@ test.describe('Group 2: Material Editing @engine', () => {
         const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { selectedIds: Set<string> } } }).__EDITOR_STORE;
         return store && store.getState().selectedIds.size > 0;
       },
-      { timeout: 10_000 },
+      { timeout: E2E_TIMEOUT_LOAD_MS },
     );
 
     const roughnessLabel = page.locator('text=/roughness/i').first();
-    await expect(roughnessLabel).toBeVisible({ timeout: 8_000 });
+    await expect(roughnessLabel).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
 
     const roughnessInput = roughnessLabel.locator('..').locator('input').first();
-    await expect(roughnessInput).toBeVisible({ timeout: 5_000 });
+    await expect(roughnessInput).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await roughnessInput.click({ clickCount: 3 });
     await roughnessInput.fill('0.25');
@@ -365,7 +370,7 @@ test.describe('Group 2: Material Editing @engine', () => {
         const mat = store.getState().primaryMaterial;
         return mat && Math.abs((mat.perceptualRoughness ?? 0) - 0.25) < 0.05;
       },
-      { timeout: 5_000 },
+      { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
     const state = await getStoreState(page) as { primaryMaterial?: { perceptualRoughness?: number } } | undefined;
@@ -390,7 +395,7 @@ test.describe('Group 2: Material Editing @engine', () => {
 
     // Look for a material preset button — the material library uses named presets
     const presetBtn = page.locator('button').filter({ hasText: /metal|plastic|wood|glass|stone/i }).first();
-    await expect(presetBtn).toBeVisible({ timeout: 8_000 });
+    await expect(presetBtn).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
 
     await presetBtn.click();
 
@@ -411,7 +416,7 @@ test.describe('Group 2: Material Editing @engine', () => {
         );
       },
       before ? JSON.stringify(before) : null,
-      { timeout: 5_000 },
+      { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
     const afterState = await getStoreState(page) as { primaryMaterial?: unknown } | undefined;
@@ -435,7 +440,7 @@ test.describe('Group 3: Physics Toggle @engine', () => {
     await spawnCubeAndSelect(page, editor);
 
     const physicsSection = page.getByText(/physics/i, { exact: false }).first();
-    await expect(physicsSection).toBeVisible({ timeout: 8_000 });
+    await expect(physicsSection).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
   });
 
   test('toggling physics enabled checkbox changes physicsEnabled in the store', async ({
@@ -445,7 +450,7 @@ test.describe('Group 3: Physics Toggle @engine', () => {
     await spawnCubeAndSelect(page, editor);
 
     // Wait for physics section to render
-    await expect(page.getByText(/physics/i).first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText(/physics/i).first()).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
 
     // Capture initial state — physicsEnabled starts false for newly spawned entities
     const initialState = await getStoreState(page) as { physicsEnabled?: boolean } | undefined;
@@ -459,7 +464,7 @@ test.describe('Group 3: Physics Toggle @engine', () => {
     const physicsToggle = physicsSectionContainer
       .locator('[role="checkbox"], input[type="checkbox"]')
       .first();
-    await expect(physicsToggle).toBeVisible({ timeout: 8_000 });
+    await expect(physicsToggle).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
 
     const wasChecked = await physicsToggle.isChecked();
     await physicsToggle.click();
@@ -472,7 +477,7 @@ test.describe('Group 3: Physics Toggle @engine', () => {
         return store.getState().physicsEnabled !== was;
       },
       wasChecked,
-      { timeout: 5_000 },
+      { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
     const nowState = await getStoreState(page) as { physicsEnabled?: boolean } | undefined;
@@ -504,7 +509,7 @@ test.describe('Group 4: Store Round-Trip Verification @engine', () => {
     // Edit position X via the inspector input
     const transformSection = page.getByText('Transform', { exact: false }).first().locator('..');
     const xInput = transformSection.locator('input').first();
-    await expect(xInput).toBeVisible({ timeout: 5_000 });
+    await expect(xInput).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const targetValue = 4.5;
     await xInput.click({ clickCount: 3 });
@@ -520,7 +525,7 @@ test.describe('Group 4: Store Round-Trip Verification @engine', () => {
         return t && typeof t.position?.[0] === 'number' && Math.abs(t.position[0] - expected) < 0.1;
       },
       targetValue,
-      { timeout: 5_000 },
+      { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
     const state = await getStoreState(page) as { primaryTransform?: { position?: number[] } } | undefined;
@@ -576,7 +581,7 @@ test.describe('Group 4: Store Round-Trip Verification @engine', () => {
           Math.abs(t.position[2] - 3.0) < 0.1
         );
       },
-      { timeout: 5_000 },
+      { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
     const state = await getStoreState(page) as { primaryTransform?: { position?: number[] }; selectedIds?: Set<string> } | undefined;

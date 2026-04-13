@@ -15,7 +15,7 @@
  */
 
 import { test, expect } from '../fixtures/editor.fixture';
-import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
+import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_INTERACTION_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
 
 test.describe('update_material dispatch @engine', () => {
   test.beforeEach(async ({ editor }) => {
@@ -143,7 +143,7 @@ test.describe('update_material dispatch @engine', () => {
 
     // Material section must be visible
     const materialSection = page.getByText(/material/i, { exact: false }).first();
-    await expect(materialSection).toBeVisible({ timeout: 8_000 });
+    await expect(materialSection).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
 
     // Get entity id before interaction
     await page.waitForFunction(

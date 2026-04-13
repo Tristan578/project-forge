@@ -11,6 +11,7 @@
  */
 import { test, expect } from '../fixtures/editor.fixture';
 import {
+  E2E_TIMEOUT_QUICK_MS,
   E2E_TIMEOUT_SHORT_MS,
   E2E_TIMEOUT_ELEMENT_MS,
   E2E_TIMEOUT_LOAD_MS,
@@ -189,13 +190,13 @@ test.describe('Demo Regression Walkthrough @ui @dev', () => {
   test('keyboard shortcuts work in editor', async ({ page }) => {
     // Undo button should be visible
     const undoBtn = page.locator('button[title*="Undo"]').first();
-    if (await undoBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    if (await undoBtn.isVisible({ timeout: E2E_TIMEOUT_QUICK_MS }).catch(() => false)) {
       await expect(undoBtn).toBeVisible();
     }
 
     // Export button should be accessible
     const exportBtn = page.locator('button[title*="Export"], button[title*="export"]').first();
-    if (await exportBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    if (await exportBtn.isVisible({ timeout: E2E_TIMEOUT_QUICK_MS }).catch(() => false)) {
       await expect(exportBtn).toBeVisible();
     }
   });
