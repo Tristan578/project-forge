@@ -130,6 +130,7 @@ function setupStore() {
 
 describe('WorkspaceProvider', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     capturedOnReady = null;
     setupStore();

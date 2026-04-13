@@ -55,6 +55,7 @@ function setupStore(overrides: { primaryId?: string | null } = {}) {
 
 describe('SpriteSheetImportDialog', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

@@ -142,6 +142,7 @@ function makeStripeEvent(type: string, dataObject: unknown, id = 'evt_001') {
 
 describe('POST /api/stripe/webhook', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     mockClaimEvent.mockResolvedValue(true);
     mockHandleSubscriptionCreated.mockResolvedValue(undefined);

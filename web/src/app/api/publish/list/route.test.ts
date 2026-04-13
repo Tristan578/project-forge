@@ -14,6 +14,7 @@ vi.mock('@/lib/db/schema', () => ({
 
 describe('GET /api/publish/list', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateClerkSession).mockResolvedValue({
       ok: true as const,

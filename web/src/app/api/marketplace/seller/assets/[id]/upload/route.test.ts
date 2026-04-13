@@ -27,6 +27,7 @@ vi.mock('@/lib/storage/r2', () => ({
 
 describe('POST /api/marketplace/seller/assets/[id]/upload', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,

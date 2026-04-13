@@ -45,6 +45,7 @@ function makeErrorResponse(status: number, error: string): Response {
 let mockFetch: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  vi.resetModules();
   mockFetch = vi.fn();
   vi.stubGlobal('fetch', mockFetch);
 });

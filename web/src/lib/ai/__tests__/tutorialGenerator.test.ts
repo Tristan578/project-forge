@@ -423,6 +423,7 @@ describe('generateTutorialPlan', () => {
   let fetchAIMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
+    vi.resetModules();
     vi.resetAllMocks();
     const client = await import('@/lib/ai/client');
     fetchAIMock = vi.mocked(client.fetchAI);

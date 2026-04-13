@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
 
 const captureExceptionMock = vi.fn();
@@ -33,6 +33,10 @@ function makeError(message = 'boom') {
 }
 
 const reset = vi.fn();
+
+beforeEach(() => {
+  vi.resetModules();
+});
 
 afterEach(() => {
   cleanup();

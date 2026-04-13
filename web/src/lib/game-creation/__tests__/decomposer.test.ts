@@ -94,6 +94,7 @@ let fetchAI: ReturnType<typeof vi.fn>;
 let sanitizePrompt: ReturnType<typeof vi.fn>;
 
 beforeEach(async () => {
+  vi.resetModules();
   vi.clearAllMocks();
 
   // Default: fetchAI returns valid JSON

@@ -50,6 +50,7 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
 
 describe('POST /api/play/[userId]/[slug]/remix', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

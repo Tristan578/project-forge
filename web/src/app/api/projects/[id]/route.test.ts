@@ -10,6 +10,7 @@ vi.mock('@/lib/projects/service');
 
 describe('GET /api/projects/[id]', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
@@ -58,6 +59,7 @@ describe('GET /api/projects/[id]', () => {
 
 describe('PUT /api/projects/[id]', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
@@ -168,6 +170,7 @@ describe('PUT /api/projects/[id]', () => {
 
 describe('DELETE /api/projects/[id]', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,

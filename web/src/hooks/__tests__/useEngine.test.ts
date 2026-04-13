@@ -21,6 +21,7 @@ vi.mock('@/lib/monitoring/sentry-client', () => ({
 // Instead we'll test the hook behavior by creating a mock canvas and controlling SSR state.
 describe('useEngine', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     resetEngine();
 
@@ -143,6 +144,7 @@ describe('useEngine', () => {
 
 describe('recoverEngine', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     resetEngine();
 

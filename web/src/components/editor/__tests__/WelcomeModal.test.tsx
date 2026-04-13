@@ -42,6 +42,7 @@ vi.mock('@/data/tutorials', () => mockTutorials);
 
 describe('WelcomeModal', () => {
   beforeEach(() => {
+    vi.resetModules();
     localStorage.clear();
     vi.clearAllMocks();
     const workspaceState = { navigateDocs: vi.fn() } as unknown as WorkspaceState;

@@ -87,6 +87,7 @@ function scheduleSceneExportedEvent(detail: unknown, delayMs = 50) {
 
 describe('exportGame: missing scene data', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     // Mock fetch to return minimal WASM data so single-HTML export succeeds.
     // These tests focus on scene data fallback, not WASM inlining.
@@ -188,6 +189,7 @@ describe('exportGame: missing scene data', () => {
 
 describe('exportGame: empty entity list', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     // Mock fetch to return minimal WASM data so single-HTML export succeeds.
     mockFetchWithWasm();
@@ -284,6 +286,7 @@ describe('exportGame: empty entity list', () => {
 
 describe('exportGame: WASM fetch failure (#8186)', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     // All WASM fetches fail — simulates CDN down or engine not built
     global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 503 });
@@ -322,6 +325,7 @@ describe('exportGame: WASM fetch failure (#8186)', () => {
 
 describe('exportGame: AbortSignal cancellation (#8266)', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     mockFetchWithWasm();
   });
@@ -426,6 +430,7 @@ describe('downloadBlob: zero-byte blob', () => {
   let clickSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    vi.resetModules();
     createObjectURLSpy = vi.fn(() => 'blob:zero-url');
     revokeObjectURLSpy = vi.fn();
     global.URL.createObjectURL = createObjectURLSpy as unknown as (obj: Blob | MediaSource) => string;

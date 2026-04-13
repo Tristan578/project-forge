@@ -41,6 +41,7 @@ function makeCutscene(id = 'cs1'): Cutscene {
 }
 
 beforeEach(() => {
+  vi.resetModules();
   vi.clearAllMocks();
   useCutsceneStore.setState({
     cutscenes: {},

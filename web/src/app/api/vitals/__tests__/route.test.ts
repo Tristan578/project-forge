@@ -41,6 +41,7 @@ function makeRawRequest(body: string): NextRequest {
 
 describe('POST /api/vitals', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

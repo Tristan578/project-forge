@@ -15,6 +15,7 @@ vi.mock('@vercel/analytics', () => ({
 
 describe('Vercel analytics event wrappers', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

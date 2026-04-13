@@ -54,6 +54,7 @@ function mockUpdateChain() {
 
 describe('GET /api/play/[userId]/[slug]', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

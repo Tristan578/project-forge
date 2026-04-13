@@ -23,6 +23,7 @@ vi.mock('@/lib/db/schema', () => ({
 
 describe('Per-Game OG Image', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

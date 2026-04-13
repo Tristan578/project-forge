@@ -59,6 +59,7 @@ function setupStore(overrides: {
 
 describe('ExportDialog', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 
