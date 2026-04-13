@@ -19,6 +19,9 @@ vi.mock('lucide-react', () => ({
   Maximize: (props: Record<string, unknown>) => <span data-testid="maximize-icon" {...props} />,
   Minimize: (props: Record<string, unknown>) => <span data-testid="minimize-icon" {...props} />,
   Loader2: (props: Record<string, unknown>) => <span data-testid="loader-icon" {...props} />,
+  Share2: (props: Record<string, unknown>) => <span data-testid="share-icon" {...props} />,
+  Twitter: (props: Record<string, unknown>) => <span data-testid="twitter-icon" {...props} />,
+  MessageCircle: (props: Record<string, unknown>) => <span data-testid="discord-icon" {...props} />,
 }));
 
 const mockGame = {

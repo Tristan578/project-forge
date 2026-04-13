@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Maximize, Minimize, Loader2 } from 'lucide-react';
+import { ShareButtons } from './ShareButtons';
 
 const CANVAS_ID = 'play-canvas';
 
@@ -216,13 +217,21 @@ export function GamePlayer({ userId, slug }: GamePlayerProps) {
             </p>
           </div>
         </div>
-        <button
-          onClick={toggleFullscreen}
-          className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
-          title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-        >
-          {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
-        </button>
+        <div className="flex items-center gap-1">
+          {gameData && (
+            <ShareButtons
+              gameTitle={gameData.title}
+              gameUrl={typeof window !== 'undefined' ? window.location.href : ''}
+            />
+          )}
+          <button
+            onClick={toggleFullscreen}
+            className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
+          </button>
+        </div>
       </div>
 
       {/* Canvas area */}
