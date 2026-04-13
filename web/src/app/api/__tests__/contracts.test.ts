@@ -465,14 +465,29 @@ describe('OpenAPI schema validation — public routes', () => {
     expect(balanceValidator).toBeDefined();
 
     const validBalance = {
+      monthlyRemaining: 9500,
+      monthlyTotal: 10000,
+      addon: 0,
+      total: 9500,
+      nextRefillDate: '2026-05-01T00:00:00.000Z',
+    };
+    expect(balanceValidator(validBalance)).toBe(true);
+  });
+
+  it('TokenBalance schema rejects objects with wrong field names', () => {
+    const balanceValidator = validators['TokenBalance'];
+    const wrongFields = {
       monthlyTokens: 10000,
       monthlyTokensUsed: 500,
       monthlyTokensRemaining: 9500,
       addonTokens: 0,
-      earnedCredits: 0,
-      totalAvailable: 9500,
     };
-    expect(balanceValidator(validBalance)).toBe(true);
+    expect(balanceValidator(wrongFields)).toBe(false);
+  });
+
+  it('TokenBalance schema rejects empty objects', () => {
+    const balanceValidator = validators['TokenBalance'];
+    expect(balanceValidator({})).toBe(false);
   });
 
   it('GenerationStatus schema validates correct shape', () => {

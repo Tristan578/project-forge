@@ -141,12 +141,14 @@
       },
       "TokenBalance": {
         "type": "object",
+        "required": ["monthlyRemaining", "monthlyTotal", "addon", "total"],
+        "additionalProperties": false,
         "properties": {
-          "monthlyTokens": { "type": "integer" },
-          "monthlyTokensUsed": { "type": "integer" },
-          "monthlyTokensRemaining": { "type": "integer" },
-          "addonTokens": { "type": "integer" },
-          "earnedCredits": { "type": "integer" }
+          "monthlyRemaining": { "type": "integer" },
+          "monthlyTotal": { "type": "integer" },
+          "addon": { "type": "integer" },
+          "total": { "type": "integer" },
+          "nextRefillDate": { "type": "string", "format": "date-time", "nullable": true }
         }
       },
       "ApiKeyRecord": {
