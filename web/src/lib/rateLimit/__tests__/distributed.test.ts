@@ -11,18 +11,14 @@ globalThis.fetch = mockFetch;
 // Dynamic import so env vars and mocks are applied per test
 let distributedRateLimit: typeof import('../distributed').distributedRateLimit;
 
-// Helper to build a successful Upstash pipeline response with a given ZCARD result
-function makePipelineResponse(zcard: number) {
+// Helper to build a successful Upstash EVAL response.
+// The Lua script returns [allowed (0|1), count].
+function makeEvalResponse(allowed: boolean, count: number) {
   return {
     ok: true,
     status: 200,
     statusText: 'OK',
-    json: async () => [
-      { result: 3 },         // ZREMRANGEBYSCORE
-      { result: 1 },         // ZADD
-      { result: zcard },     // ZCARD
-      { result: 1 },         // EXPIRE
-    ],
+    json: async () => ({ result: [allowed ? 1 : 0, count] }),
   };
 }
 
@@ -88,8 +84,8 @@ describe('distributedRateLimit — Upstash path', () => {
     process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
   });
 
-  it('returns allowed=true when ZCARD is below limit', async () => {
-    mockFetch.mockResolvedValue(makePipelineResponse(3)); // 3 out of 10
+  it('returns allowed=true when count is below limit', async () => {
+    mockFetch.mockResolvedValue(makeEvalResponse(true, 3)); // 3 out of 10
 
     const result = await distributedRateLimit('key-1', 10, 60);
 
@@ -97,8 +93,8 @@ describe('distributedRateLimit — Upstash path', () => {
     expect(result.remaining).toBe(7); // 10 - 3
   });
 
-  it('returns allowed=true when ZCARD equals limit exactly', async () => {
-    mockFetch.mockResolvedValue(makePipelineResponse(5)); // exactly at limit
+  it('returns allowed=true when count equals limit exactly', async () => {
+    mockFetch.mockResolvedValue(makeEvalResponse(true, 5)); // exactly at limit
 
     const result = await distributedRateLimit('key-2', 5, 60);
 
@@ -106,10 +102,9 @@ describe('distributedRateLimit — Upstash path', () => {
     expect(result.remaining).toBe(0);
   });
 
-  it('returns allowed=false when ZCARD exceeds limit', async () => {
-    // First call: pipeline response showing over limit
-    mockFetch.mockResolvedValueOnce(makePipelineResponse(6)) // ZCARD = 6, limit = 5
-      .mockResolvedValueOnce({ ok: true, json: async () => [{ result: 1 }] }); // ZREM cleanup
+  it('returns allowed=false when count exceeds limit', async () => {
+    // Single EVAL call — no separate ZREM needed (PF-744)
+    mockFetch.mockResolvedValue(makeEvalResponse(false, 5)); // at limit, denied
 
     const result = await distributedRateLimit('key-3', 5, 60);
 
@@ -117,13 +112,13 @@ describe('distributedRateLimit — Upstash path', () => {
     expect(result.remaining).toBe(0);
   });
 
-  it('calls the Upstash pipeline endpoint with correct headers', async () => {
-    mockFetch.mockResolvedValue(makePipelineResponse(1));
+  it('calls the Upstash EVAL endpoint with correct headers', async () => {
+    mockFetch.mockResolvedValue(makeEvalResponse(true, 1));
 
     await distributedRateLimit('test-key', 10, 30);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      'https://redis.upstash.io/pipeline',
+      'https://redis.upstash.io/eval',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
@@ -134,28 +129,30 @@ describe('distributedRateLimit — Upstash path', () => {
     );
   });
 
-  it('sends ZREMRANGEBYSCORE, ZADD, ZCARD, EXPIRE pipeline commands', async () => {
-    mockFetch.mockResolvedValue(makePipelineResponse(1));
+  it('sends Lua script with correct arguments to EVAL', async () => {
+    mockFetch.mockResolvedValue(makeEvalResponse(true, 1));
 
-    await distributedRateLimit('pipeline-key', 5, 30);
+    await distributedRateLimit('lua-key', 5, 30);
 
-    const callBody = JSON.parse(mockFetch.mock.calls[0][1].body as string) as string[][];
-    // Keys are prefixed with @spawnforge/ratelimit: to match the @upstash/ratelimit prefix
-    const prefixed = '@spawnforge/ratelimit:pipeline-key';
-    expect(callBody[0][0]).toBe('ZREMRANGEBYSCORE');
-    expect(callBody[0][1]).toBe(prefixed);
-    expect(callBody[1][0]).toBe('ZADD');
-    expect(callBody[1][1]).toBe(prefixed);
-    expect(callBody[2][0]).toBe('ZCARD');
-    expect(callBody[2][1]).toBe(prefixed);
-    expect(callBody[3][0]).toBe('EXPIRE');
-    expect(callBody[3][1]).toBe(prefixed);
-    // windowSeconds must be a number (not a string) — Redis sorted-set scores require numeric values
-    expect(callBody[3][2]).toBe(30); // windowSeconds as number
+    const callBody = JSON.parse(mockFetch.mock.calls[0][1].body as string) as unknown[];
+    const prefixed = '@spawnforge/ratelimit:lua-key';
+    // [luaScript, numkeys, key, windowStart, limit, now, member, windowSeconds]
+    expect(typeof callBody[0]).toBe('string'); // Lua script
+    expect((callBody[0] as string)).toContain('ZREMRANGEBYSCORE');
+    expect((callBody[0] as string)).toContain('ZADD');
+    expect((callBody[0] as string)).toContain('ZCARD');
+    expect(callBody[1]).toBe(1);              // numkeys
+    expect(callBody[2]).toBe(prefixed);       // KEYS[1]
+    // ARGV: windowStart, limit, now, member, windowSeconds
+    expect(typeof callBody[3]).toBe('number'); // windowStart
+    expect(callBody[4]).toBe(5);              // limit
+    expect(typeof callBody[5]).toBe('number'); // now
+    expect(typeof callBody[6]).toBe('string'); // member
+    expect(callBody[7]).toBe(30);             // windowSeconds
   });
 
   it('provides a resetAt timestamp in the future', async () => {
-    mockFetch.mockResolvedValue(makePipelineResponse(2));
+    mockFetch.mockResolvedValue(makeEvalResponse(true, 2));
 
     const before = Date.now();
     const result = await distributedRateLimit('reset-key', 10, 60);
@@ -192,34 +189,26 @@ describe('distributedRateLimit — Upstash path', () => {
     expect(result.allowed).toBe(false);
   });
 
-  it('attempts cleanup via Lua EVAL when over limit', async () => {
-    // Over-limit: ZCARD = 6 for limit = 5
-    mockFetch
-      .mockResolvedValueOnce(makePipelineResponse(6))
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ result: 1 }) });
+  it('makes exactly one fetch call (atomic EVAL) regardless of allow/deny', async () => {
+    // Denied request: single EVAL, no second ZREM call needed (PF-744)
+    mockFetch.mockResolvedValue(makeEvalResponse(false, 5));
 
-    await distributedRateLimit('cleanup-key', 5, 60);
+    await distributedRateLimit('atomic-key', 5, 60);
 
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-    // Second call must go to the /eval endpoint (Lua EVAL for atomic remove-if-over-limit)
-    const [evalUrl, evalInit] = mockFetch.mock.calls[1] as [string, RequestInit];
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [evalUrl] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(evalUrl).toBe('https://redis.upstash.io/eval');
-    expect(evalInit.method).toBe('POST');
-    // Body is [luaScript, numkeys, key, member]
-    const evalBody = JSON.parse(evalInit.body as string) as [string, number, string, string];
-    expect(typeof evalBody[0]).toBe('string'); // Lua script
-    expect(evalBody[0]).toContain('ZREM');     // script performs ZREM
-    expect(evalBody[1]).toBe(1);               // numkeys = 1
-    expect(evalBody[2]).toBe('@spawnforge/ratelimit:cleanup-key');   // KEYS[1]
   });
 
-  it('does not throw if Lua EVAL cleanup fails', async () => {
-    mockFetch
-      .mockResolvedValueOnce(makePipelineResponse(6))
-      .mockRejectedValueOnce(new Error('cleanup failed'));
+  it('never adds a phantom entry on deny (no ZADD in deny path)', async () => {
+    // The Lua script only calls ZADD when count < limit.
+    // On deny, the entry is never written — nothing to clean up.
+    mockFetch.mockResolvedValue(makeEvalResponse(false, 10));
 
-    // Should not throw despite cleanup failure
-    await expect(distributedRateLimit('no-throw-key', 5, 60)).resolves.toBeDefined();
+    const result = await distributedRateLimit('no-phantom-key', 10, 60);
+
+    expect(result.allowed).toBe(false);
+    expect(mockFetch).toHaveBeenCalledTimes(1); // No second cleanup call
   });
 });
 
@@ -274,17 +263,7 @@ describe('PF-738: distributedRateLimit result shape matches in-memory RateLimitR
     process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
     process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      json: async () => [
-        { result: 3 },  // ZREMRANGEBYSCORE
-        { result: 1 },  // ZADD
-        { result: 4 },  // ZCARD (4 out of 10)
-        { result: 1 },  // EXPIRE
-      ],
-    });
+    mockFetch.mockResolvedValue(makeEvalResponse(true, 4)); // 4 out of 10
 
     const result = await distributedRateLimit('upstash-shape-key', 10, 60);
 
