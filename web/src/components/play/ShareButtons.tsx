@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { Share2, Twitter, MessageCircle } from 'lucide-react';
+import { Share2, X as XIcon } from 'lucide-react';
 
 interface ShareButtonsProps {
   gameTitle: string;
@@ -73,7 +73,7 @@ export function ShareButtons({ gameTitle, gameUrl }: ShareButtonsProps) {
         className={btnClass}
         title="Share on X"
       >
-        <Twitter size={16} />
+        <XIcon size={16} />
       </a>
 
       <a

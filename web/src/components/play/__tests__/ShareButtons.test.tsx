@@ -9,8 +9,7 @@ import { ShareButtons } from '../ShareButtons';
 
 vi.mock('lucide-react', () => ({
   Share2: (props: Record<string, unknown>) => <span data-testid="share-icon" {...props} />,
-  Twitter: (props: Record<string, unknown>) => <span data-testid="twitter-icon" {...props} />,
-  MessageCircle: (props: Record<string, unknown>) => <span data-testid="discord-icon" {...props} />,
+  X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
 }));
 
 const defaultProps = {
