@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Maximize, Minimize, Loader2 } from 'lucide-react';
 import { ShareButtons } from './ShareButtons';
+import { RemixButton } from './RemixButton';
 
 const CANVAS_ID = 'play-canvas';
 
@@ -20,6 +21,7 @@ interface GameData {
 interface GamePlayerProps {
   userId: string;
   slug: string;
+  isAuthenticated?: boolean;
 }
 
 type WasmRuntime = {
@@ -28,7 +30,7 @@ type WasmRuntime = {
   set_event_callback: (callback: (event: unknown) => void) => void;
 };
 
-export function GamePlayer({ userId, slug }: GamePlayerProps) {
+export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayerProps) {
   const [gameData, setGameData] = useState<GameData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -217,7 +219,12 @@ export function GamePlayer({ userId, slug }: GamePlayerProps) {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
+          <RemixButton
+            userId={userId}
+            slug={slug}
+            isAuthenticated={isAuthenticated}
+          />
           {gameData && (
             <ShareButtons
               gameTitle={gameData.title}

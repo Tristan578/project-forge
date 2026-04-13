@@ -22,6 +22,11 @@ vi.mock('lucide-react', () => ({
   Share2: (props: Record<string, unknown>) => <span data-testid="share-icon" {...props} />,
   Twitter: (props: Record<string, unknown>) => <span data-testid="twitter-icon" {...props} />,
   MessageCircle: (props: Record<string, unknown>) => <span data-testid="discord-icon" {...props} />,
+  GitFork: (props: Record<string, unknown>) => <span data-testid="fork-icon" {...props} />,
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
 }));
 
 const mockGame = {
