@@ -15,8 +15,11 @@ import type { Page } from '@playwright/test';
 import {
   E2E_TIMEOUT_SHORT_MS,
   E2E_TIMEOUT_ELEMENT_MS,
-  E2E_TIMEOUT_NAV_MS,
   E2E_TIMEOUT_LOAD_MS,
+  E2E_TIMEOUT_NAV_MS,
+  E2E_TIMEOUT_TEST_MS,
+  E2E_TIMEOUT_ENGINE_INIT_MS,
+  E2E_TIMEOUT_ENGINE_FULL_MS,
 } from '../constants';
 import { waitForHydration } from '../helpers/wait-helpers';
 
@@ -208,14 +211,14 @@ test.describe('Accessibility Audit — WelcomeModal @ui @dev', () => {
       );
     });
 
-    await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
+    await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
     try {
-      await waitForHydration(page, 90_000);
+      await waitForHydration(page, E2E_TIMEOUT_ENGINE_FULL_MS);
     } catch {
       await page.reload({ waitUntil: 'domcontentloaded' });
-      await waitForHydration(page, 40_000);
+      await waitForHydration(page, E2E_TIMEOUT_ENGINE_INIT_MS);
     }
 
     const welcomeModal = page.locator(

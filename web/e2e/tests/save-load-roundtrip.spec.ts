@@ -23,6 +23,11 @@
  */
 
 import { test, expect } from '../fixtures/editor.fixture';
+import {
+  E2E_TIMEOUT_SHORT_MS,
+  E2E_TIMEOUT_ELEMENT_MS,
+  E2E_TIMEOUT_NAV_MS,
+} from '../constants';
 
 // ---------------------------------------------------------------------------
 // Fixtures — minimal .forge scene payloads used across multiple tests
@@ -168,7 +173,7 @@ test.describe('Save/Load round-trip — store level @ui @dev', () => {
     await expect.poll(
       () => editor.getStoreState<Record<string, unknown>>('sceneGraph.nodes')
         .then((nodes) => Object.keys(nodes)),
-      { timeout: 5_000 }
+      { timeout: E2E_TIMEOUT_ELEMENT_MS }
     ).toEqual(expect.arrayContaining(['rt-entity-1', 'rt-entity-2', 'rt-entity-3']));
 
     // Entity names survive round-trip
@@ -201,7 +206,7 @@ test.describe('Save/Load round-trip — store level @ui @dev', () => {
     // Verify it was set
     await expect.poll(
       () => editor.getStoreState<string>('sceneName'),
-      { timeout: 3_000 }
+      { timeout: E2E_TIMEOUT_SHORT_MS }
     ).toBe('MySavedScene');
 
     // Serialize scene state (name + graph) to simulate a file export
@@ -231,7 +236,7 @@ test.describe('Save/Load round-trip — store level @ui @dev', () => {
 
     await expect.poll(
       () => editor.getStoreState<string>('sceneName'),
-      { timeout: 3_000 }
+      { timeout: E2E_TIMEOUT_SHORT_MS }
     ).toBe('Untitled');
 
     // Restore from serialized — simulates what a load handler does after
@@ -255,7 +260,7 @@ test.describe('Save/Load round-trip — store level @ui @dev', () => {
     // Scene name must match original after round-trip
     await expect.poll(
       () => editor.getStoreState<string>('sceneName'),
-      { timeout: 3_000 }
+      { timeout: E2E_TIMEOUT_SHORT_MS }
     ).toBe('MySavedScene');
   });
 
@@ -327,7 +332,7 @@ test.describe('Save/Load round-trip — store level @ui @dev', () => {
         const t = await editor.getStoreState<{ entityId: string; position: [number, number, number] } | null>('primaryTransform');
         return t?.entityId === entity.entityId ? t.position : null;
       },
-      { timeout: 3_000 }
+      { timeout: E2E_TIMEOUT_SHORT_MS }
     ).toEqual([5, 10, 15]);
 
     // Serialize current state
@@ -390,7 +395,7 @@ test.describe('Save/Load round-trip — store level @ui @dev', () => {
     await expect.poll(
       () => editor.getStoreState<Record<string, unknown>>('sceneGraph.nodes')
         .then((nodes) => nodes[entity.entityId] ?? null),
-      { timeout: 3_000 }
+      { timeout: E2E_TIMEOUT_SHORT_MS }
     ).not.toBeNull();
 
     // Verify transform survived
@@ -399,7 +404,7 @@ test.describe('Save/Load round-trip — store level @ui @dev', () => {
         const t = await editor.getStoreState<{ entityId: string; position: [number, number, number] } | null>('primaryTransform');
         return t?.entityId === entity.entityId ? t.position : null;
       },
-      { timeout: 3_000 }
+      { timeout: E2E_TIMEOUT_SHORT_MS }
     ).toEqual([5, 10, 15]);
   });
 
@@ -429,7 +434,7 @@ test.describe('Save/Load round-trip — store level @ui @dev', () => {
     // Confirm loadScene accepted the call by verifying the store is still operational
     await expect.poll(
       () => editor.getStoreState<boolean | null>('sceneModified').then(() => true),
-      { timeout: 3_000 }
+      { timeout: E2E_TIMEOUT_SHORT_MS }
     ).toBe(true);
   });
 
@@ -445,7 +450,7 @@ test.describe('Save/Load round-trip — store level @ui @dev', () => {
 
     await expect.poll(
       () => editor.getStoreState<string>('sceneName'),
-      { timeout: 3_000 }
+      { timeout: E2E_TIMEOUT_SHORT_MS }
     ).toBe('OldName');
 
     // Call loadScene with a JSON payload that includes the new name.
@@ -471,7 +476,7 @@ test.describe('Save/Load round-trip — store level @ui @dev', () => {
 
     await expect.poll(
       () => editor.getStoreState<string>('sceneName'),
-      { timeout: 3_000 }
+      { timeout: E2E_TIMEOUT_SHORT_MS }
     ).toBe('MySavedScene');
   });
 
@@ -490,7 +495,7 @@ test.describe('Save/Load round-trip — store level @ui @dev', () => {
 
     await expect.poll(
       () => editor.getStoreState<string>('cloudSaveStatus'),
-      { timeout: 3_000 }
+      { timeout: E2E_TIMEOUT_SHORT_MS }
     ).toBe('saving');
 
     // Transition to saved
@@ -504,7 +509,7 @@ test.describe('Save/Load round-trip — store level @ui @dev', () => {
 
     await expect.poll(
       () => editor.getStoreState<string>('cloudSaveStatus'),
-      { timeout: 3_000 }
+      { timeout: E2E_TIMEOUT_SHORT_MS }
     ).toBe('saved');
   });
 });
@@ -525,7 +530,7 @@ test.describe('Save/Load round-trip — UI level @engine', () => {
     await editor.waitForEntityCount(2); // Camera + Cube
 
     // Start listening for download before triggering it
-    const downloadPromise = page.waitForEvent('download', { timeout: 15_000 }).catch(() => null);
+    const downloadPromise = page.waitForEvent('download', { timeout: E2E_TIMEOUT_NAV_MS }).catch(() => null);
 
     // Trigger save — Ctrl+S with no projectId dispatches export_scene + download
     await page.keyboard.press('Control+s');
@@ -580,7 +585,7 @@ test.describe('Save/Load round-trip — UI level @engine', () => {
 
     await expect.poll(
       () => dispatchedCommands.includes('export_scene'),
-      { timeout: 5_000 }
+      { timeout: E2E_TIMEOUT_ELEMENT_MS }
     ).toBe(true);
   });
 
@@ -607,7 +612,7 @@ test.describe('Save/Load round-trip — UI level @engine', () => {
         const headingVisible = await headingText.isVisible().catch(() => false);
         return panelVisible || headingVisible;
       },
-      { timeout: 5_000 }
+      { timeout: E2E_TIMEOUT_ELEMENT_MS }
     ).toBe(true);
   });
 
@@ -641,7 +646,7 @@ test.describe('Save/Load round-trip — UI level @engine', () => {
         const status = store?.getState().cloudSaveStatus ?? null;
         return status !== null && ['idle', 'saving', 'error'].includes(status);
       }),
-      { timeout: 3_000 }
+      { timeout: E2E_TIMEOUT_SHORT_MS }
     ).toBeTruthy();
   });
 });

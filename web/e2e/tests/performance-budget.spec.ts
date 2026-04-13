@@ -11,7 +11,7 @@
  */
 
 import { test, expect } from '../fixtures/editor.fixture';
-import { E2E_TIMEOUT_TEST_MS } from '../constants';
+import { E2E_TIMEOUT_SHORT_MS, E2E_TIMEOUT_TEST_MS } from '../constants';
 
 test.describe('Performance Budget @ui @dev', () => {
   test('LCP is under 2500ms on editor page', async ({ page, editor }) => {
@@ -42,7 +42,7 @@ test.describe('Performance Budget @ui @dev', () => {
         const vals = (window as unknown as Record<string, unknown>).__LCP_VALUES;
         return Array.isArray(vals) && vals.length > 0;
       },
-      { timeout: 3000 },
+      { timeout: E2E_TIMEOUT_SHORT_MS },
     ).catch(async () => {
       // LCP may not fire on some CI configs — fall back to networkidle
       await page.waitForLoadState('networkidle').catch(() => undefined);

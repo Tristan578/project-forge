@@ -1,5 +1,13 @@
 import { test, expect } from '../fixtures/editor.fixture';
 import type { Page } from '@playwright/test';
+import {
+  E2E_TIMEOUT_SHORT_MS,
+  E2E_TIMEOUT_ELEMENT_MS,
+  E2E_TIMEOUT_INTERACTION_MS,
+  E2E_TIMEOUT_TEST_MS,
+  E2E_TIMEOUT_ENGINE_INIT_MS,
+  E2E_TIMEOUT_ENGINE_FULL_MS,
+} from '../constants';
 
 /**
  * Template gallery and starter bundle onboarding flow tests.
@@ -25,36 +33,36 @@ test.describe('Template Gallery @ui @dev', () => {
       localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
-    await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
+    await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
     try {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 90_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 40_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
 
     // WelcomeModal should appear — it shows when forge-welcomed is absent
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
-    await expect(welcomeModal).toBeVisible({ timeout: 8_000 });
+    await expect(welcomeModal).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
 
     // Click "Browse Templates" to open the TemplateGallery
     const browseBtn = page.getByRole('button', { name: /browse templates/i });
-    await expect(browseBtn).toBeVisible({ timeout: 5_000 });
+    await expect(browseBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     await browseBtn.click();
 
     // TemplateGallery dialog should appear
     const galleryDialog = page.locator('[role="dialog"][aria-labelledby="template-gallery-title"]');
-    await expect(galleryDialog).toBeVisible({ timeout: 5_000 });
+    await expect(galleryDialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Heading text
     const heading = page.locator('#template-gallery-title');
@@ -76,30 +84,30 @@ test.describe('Template Gallery @ui @dev', () => {
       localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
-    await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
+    await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
     try {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 90_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 40_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
 
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
-    await expect(welcomeModal).toBeVisible({ timeout: 8_000 });
+    await expect(welcomeModal).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
     await page.getByRole('button', { name: /browse templates/i }).click();
 
     const galleryDialog = page.locator('[role="dialog"][aria-labelledby="template-gallery-title"]');
-    await expect(galleryDialog).toBeVisible({ timeout: 5_000 });
+    await expect(galleryDialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Every card must have a non-empty <h3> (name) and a <p> (description)
     const cards = galleryDialog.locator('button').filter({ has: page.locator('h3') });
@@ -125,29 +133,29 @@ test.describe('Template Gallery @ui @dev', () => {
       localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
-    await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
+    await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
     try {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 90_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 40_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
 
-    await page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]').waitFor({ state: 'visible', timeout: 8_000 });
+    await page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]').waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
     await page.getByRole('button', { name: /browse templates/i }).click();
 
     const galleryDialog = page.locator('[role="dialog"][aria-labelledby="template-gallery-title"]');
-    await expect(galleryDialog).toBeVisible({ timeout: 5_000 });
+    await expect(galleryDialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Difficulty badges are rendered as spans with 'capitalize' class
     const difficultyBadges = galleryDialog.locator('span.capitalize');
@@ -173,36 +181,36 @@ test.describe('Template Gallery @ui @dev', () => {
       localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
-    await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
+    await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
     try {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 90_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 40_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
 
-    await page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]').waitFor({ state: 'visible', timeout: 8_000 });
+    await page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]').waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
     await page.getByRole('button', { name: /browse templates/i }).click();
 
     const galleryDialog = page.locator('[role="dialog"][aria-labelledby="template-gallery-title"]');
-    await expect(galleryDialog).toBeVisible({ timeout: 5_000 });
+    await expect(galleryDialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Close via the X button
     const closeBtn = page.getByRole('button', { name: /close template gallery/i });
     await expect(closeBtn).toBeVisible();
     await closeBtn.click();
 
-    await expect(galleryDialog).not.toBeVisible({ timeout: 3_000 });
+    await expect(galleryDialog).not.toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
   });
 
   test('template gallery can be closed by pressing Escape', async ({ page }) => {
@@ -214,32 +222,32 @@ test.describe('Template Gallery @ui @dev', () => {
       localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
-    await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
+    await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
     try {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 90_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 40_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
 
-    await page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]').waitFor({ state: 'visible', timeout: 8_000 });
+    await page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]').waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
     await page.getByRole('button', { name: /browse templates/i }).click();
 
     const galleryDialog = page.locator('[role="dialog"][aria-labelledby="template-gallery-title"]');
-    await expect(galleryDialog).toBeVisible({ timeout: 5_000 });
+    await expect(galleryDialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await page.keyboard.press('Escape');
-    await expect(galleryDialog).not.toBeVisible({ timeout: 3_000 });
+    await expect(galleryDialog).not.toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
   });
 });
 
@@ -258,30 +266,30 @@ test.describe('Template selection flow @ui @dev', () => {
       localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
-    await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
+    await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
     try {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 90_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 40_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
 
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
-    await welcomeModal.waitFor({ state: 'visible', timeout: 8_000 });
+    await welcomeModal.waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
     await page.getByRole('button', { name: /browse templates/i }).click();
 
     const galleryDialog = page.locator('[role="dialog"][aria-labelledby="template-gallery-title"]');
-    await galleryDialog.waitFor({ state: 'visible', timeout: 5_000 });
+    await galleryDialog.waitFor({ state: 'visible', timeout: E2E_TIMEOUT_ELEMENT_MS });
   }
 
   test('selecting Blank Project closes the gallery', async ({ page }) => {
@@ -290,13 +298,13 @@ test.describe('Template selection flow @ui @dev', () => {
     const galleryDialog = page.locator('[role="dialog"][aria-labelledby="template-gallery-title"]');
 
     const blankCard = galleryDialog.locator('button').filter({ hasText: /blank project/i });
-    await expect(blankCard).toBeVisible({ timeout: 3_000 });
+    await expect(blankCard).toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
     await blankCard.click();
 
     // Both the gallery and the WelcomeModal should close after selecting blank
-    await expect(galleryDialog).not.toBeVisible({ timeout: 5_000 });
+    await expect(galleryDialog).not.toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
-    await expect(welcomeModal).not.toBeVisible({ timeout: 5_000 });
+    await expect(welcomeModal).not.toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('selecting a named template closes the gallery', async ({ page }) => {
@@ -320,9 +328,9 @@ test.describe('Template selection flow @ui @dev', () => {
     await firstTemplate.click();
 
     // Both modals should close after selection
-    await expect(galleryDialog).not.toBeVisible({ timeout: 5_000 });
+    await expect(galleryDialog).not.toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
-    await expect(welcomeModal).not.toBeVisible({ timeout: 5_000 });
+    await expect(welcomeModal).not.toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // The selected template name should be non-empty (guards against empty card bug)
     expect(templateName?.trim().length).toBeGreaterThan(0);
@@ -347,13 +355,13 @@ test.describe('Template selection flow @ui @dev', () => {
     await firstTemplate.click();
 
     // Wait for gallery to close
-    await expect(galleryDialog).not.toBeVisible({ timeout: 5_000 });
+    await expect(galleryDialog).not.toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Wait for store then read sceneGraph node count
     await page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => !!(window as any).__EDITOR_STORE,
-      { timeout: 5_000 },
+      { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
     const nodeCount = await page.evaluate(() => {
@@ -388,27 +396,27 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
       localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
-    await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
+    await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
     try {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 90_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 40_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
 
     // WelcomeModal should be visible
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
-    await expect(welcomeModal).toBeVisible({ timeout: 8_000 });
+    await expect(welcomeModal).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
 
     // Heading
     await expect(welcomeModal.locator('#welcome-modal-title')).toHaveText(/welcome to spawnforge/i);
@@ -440,26 +448,26 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
       localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
-    await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
+    await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
     try {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 90_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 40_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
 
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
-    await welcomeModal.waitFor({ state: 'visible', timeout: 8_000 });
+    await welcomeModal.waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
 
     // Check "Don't show again" via JS click — CI viewport clips the dialog bottom
     // and Playwright refuses to interact even with force:true (viewport constraint)
@@ -478,7 +486,7 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
       const skip = Array.from(btns ?? []).find(b => /^skip$/i.test(b.textContent?.trim() ?? ''));
       if (skip) { skip.click(); }
     });
-    await expect(welcomeModal).not.toBeVisible({ timeout: 5_000 });
+    await expect(welcomeModal).not.toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // forge-welcomed should now be set in localStorage
     const forgeWelcomed = await page.evaluate(() => localStorage.getItem('forge-welcomed'));
@@ -495,26 +503,26 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
       localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
-    await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
+    await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
     try {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 90_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 40_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
 
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
-    await welcomeModal.waitFor({ state: 'visible', timeout: 8_000 });
+    await welcomeModal.waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
 
     // Do NOT check "Don't show again" — just click Skip via JS
     // CI viewport clips dialog bottom; Playwright refuses interaction even with force:true
@@ -524,7 +532,7 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
       const skip = Array.from(btns ?? []).find(b => /^skip$/i.test(b.textContent?.trim() ?? ''));
       if (skip) { skip.click(); }
     });
-    await expect(welcomeModal).not.toBeVisible({ timeout: 5_000 });
+    await expect(welcomeModal).not.toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // forge-welcomed must NOT be set
     const forgeWelcomed = await page.evaluate(() => localStorage.getItem('forge-welcomed'));
@@ -541,26 +549,26 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
       localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
-    await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
+    await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
     try {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 90_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 40_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
 
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
-    await welcomeModal.waitFor({ state: 'visible', timeout: 8_000 });
+    await welcomeModal.waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
 
     // Must have role="dialog"
     await expect(welcomeModal).toHaveAttribute('role', 'dialog');
@@ -585,29 +593,29 @@ test.describe('Template gallery ARIA structure @ui @dev', () => {
       localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
-    await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
+    await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
     try {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 90_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 40_000 },
+        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
 
-    await page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]').waitFor({ state: 'visible', timeout: 8_000 });
+    await page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]').waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
     await page.getByRole('button', { name: /browse templates/i }).click();
 
     const galleryDialog = page.locator('[role="dialog"][aria-labelledby="template-gallery-title"]');
-    await galleryDialog.waitFor({ state: 'visible', timeout: 5_000 });
+    await galleryDialog.waitFor({ state: 'visible', timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await expect(galleryDialog).toHaveAttribute('role', 'dialog');
     await expect(galleryDialog).toHaveAttribute('aria-modal', 'true');

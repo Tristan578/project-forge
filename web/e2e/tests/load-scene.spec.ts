@@ -14,7 +14,7 @@
  */
 
 import { test, expect } from '../fixtures/editor.fixture';
-import { E2E_TIMEOUT_LOAD_MS, E2E_TIMEOUT_NAV_MS } from '../constants';
+import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS, E2E_TIMEOUT_NAV_MS } from '../constants';
 
 /** Minimal valid .forge scene JSON with one Cube entity */
 const MINIMAL_SCENE_JSON = JSON.stringify({
@@ -224,7 +224,7 @@ test.describe('load_scene engine round-trip @engine', () => {
         }
         return false;
       },
-      { timeout: 5_000 },
+      { timeout: E2E_TIMEOUT_ELEMENT_MS },
     ).catch(() => undefined); // panel visibility is checked below
 
     const panelVisible = await hierarchyPanel.isVisible().catch(() => false);

@@ -1,4 +1,9 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import {
+  E2E_TIMEOUT_ELEMENT_MS,
+  E2E_TIMEOUT_INTERACTION_MS,
+  E2E_TIMEOUT_LOAD_MS,
+} from '../constants';
 import { injectStore, readStore } from '../helpers/store-injection';
 
 /**
@@ -74,7 +79,7 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui @dev', () => {
     // The hierarchy panel is React-rendered from store state — it renders
     // immediately after store injection without requiring WASM.
     const hierarchyNode = page.getByText(entityName, { exact: false });
-    await expect(hierarchyNode.first()).toBeVisible({ timeout: 5000 });
+    await expect(hierarchyNode.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   // -------------------------------------------------------------------------
@@ -177,7 +182,7 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui @dev', () => {
     // must appear in the DOM after its store injection.
     for (const entity of entities) {
       const domNode = page.getByText(entity.name, { exact: false });
-      await expect(domNode.first()).toBeVisible({ timeout: 5000 });
+      await expect(domNode.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     }
   });
 
@@ -221,7 +226,7 @@ test.describe('AI → Entity Round-trip: Engine Pipeline @engine', () => {
 
     // Entity name must appear in the DOM hierarchy
     const cubeInHierarchy = page.getByText('AICube', { exact: false });
-    await expect(cubeInHierarchy.first()).toBeVisible({ timeout: 8000 });
+    await expect(cubeInHierarchy.first()).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
 
     // Select the entity and verify the inspector renders the Transform section
     await cubeInHierarchy.first().click();
@@ -232,11 +237,11 @@ test.describe('AI → Entity Round-trip: Engine Pipeline @engine', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && store.getState().selectedIds.size > 0;
       },
-      { timeout: 8000 },
+      { timeout: E2E_TIMEOUT_INTERACTION_MS },
     );
 
     const transformSection = page.getByText('Transform', { exact: false });
-    await expect(transformSection.first()).toBeVisible({ timeout: 5000 });
+    await expect(transformSection.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   // -------------------------------------------------------------------------
@@ -257,7 +262,7 @@ test.describe('AI → Entity Round-trip: Engine Pipeline @engine', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && store.getState().selectedIds.size > 0;
       },
-      { timeout: 10000 },
+      { timeout: E2E_TIMEOUT_LOAD_MS },
     );
 
     // Retrieve the selected entity id

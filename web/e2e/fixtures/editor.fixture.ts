@@ -1,5 +1,12 @@
 import { test as base, expect, type Page } from '@playwright/test';
 import { E2E_HYDRATION_TIMEOUT_MS } from '../../src/lib/config/timeouts';
+import {
+  E2E_TIMEOUT_ELEMENT_MS,
+  E2E_TIMEOUT_LOAD_MS,
+  E2E_TIMEOUT_TEST_MS,
+  E2E_TIMEOUT_ENGINE_INIT_MS,
+  E2E_TIMEOUT_ENGINE_FULL_MS,
+} from '../constants';
 
 /**
  * Page Object Model for the Project Forge editor.
@@ -43,7 +50,7 @@ export class EditorPage {
       { timeout: E2E_HYDRATION_TIMEOUT_MS }
     );
     // Wait for the editor layout container to be visible (canonical way to know hydration + layout is stable)
-    await this.page.locator('.dv-dockview').first().waitFor({ state: 'visible', timeout: 5000 });
+    await this.page.locator('.dv-dockview').first().waitFor({ state: 'visible', timeout: E2E_TIMEOUT_ELEMENT_MS });
   }
 
   /** Navigate to /dev without waiting for WASM (for @ui tests in CI) */
@@ -82,7 +89,7 @@ export class EditorPage {
 
     // Use 'commit' to avoid navigation timeout under parallel test load.
     // The actual readiness gate is __REACT_HYDRATED below.
-    await this.page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
+    await this.page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await this.page.waitForLoadState('domcontentloaded');
     // Wait for React hydration — ensures all event handlers (keyboard shortcuts,
     // button clicks) are attached. This fires after EditorLayout mounts.
@@ -95,7 +102,7 @@ export class EditorPage {
       await this.page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 90_000 }
+        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS }
       );
     } catch {
       // Reload — chunks should be compiled by now
@@ -103,7 +110,7 @@ export class EditorPage {
       await this.page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 40_000 }
+        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS }
       );
     }
   }
@@ -117,7 +124,7 @@ export class EditorPage {
         return store && Object.keys(store.getState().sceneGraph.nodes).length >= expected;
       },
       count,
-      { timeout: 10_000 }
+      { timeout: E2E_TIMEOUT_LOAD_MS }
     );
   }
 
@@ -143,7 +150,7 @@ export class EditorPage {
   async expectPanelVisible(panelTitle: string) {
     await expect(
       this.page.locator(`.dv-tab, [data-testid="panel-${panelTitle}"]`).filter({ hasText: new RegExp(panelTitle, 'i') }).first()
-    ).toBeVisible({ timeout: 5000 });
+    ).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   }
 
   /** Check that no visible text elements are invisible (zero opacity or transparent color) */
@@ -172,7 +179,7 @@ export class EditorPage {
   /** Open settings modal */
   async openSettings() {
     await this.page.getByRole('button', { name: /settings/i }).click();
-    await expect(this.page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 5000 });
+    await expect(this.page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   }
 
   /** Press keyboard shortcut */
@@ -181,7 +188,7 @@ export class EditorPage {
   }
 
   /** Wait until __EDITOR_STORE is available (guards against hydration race). */
-  async waitForEditorStore(timeout = 10_000) {
+  async waitForEditorStore(timeout = E2E_TIMEOUT_LOAD_MS) {
     await this.page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => !!(window as any).__EDITOR_STORE,
