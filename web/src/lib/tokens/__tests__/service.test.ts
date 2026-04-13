@@ -450,20 +450,47 @@ describe('refundTokens', () => {
     expect(mockNeonSql).toHaveBeenCalledTimes(2);
   });
 
-  it('refunds mixed source to addon via CTE statement', async () => {
+  it('refunds mixed source proportionally to both pools via CTE', async () => {
     const { refundTokens } = await import('../service');
 
     mockWhere.mockReturnValueOnce(chainableWhere());
     mockLimit.mockResolvedValueOnce([{
       id: 'usage-3', userId: 'user-1', tokens: 40, source: 'mixed', provider: 'meshy',
+      metadata: { _split: { monthly: 15, addon: 25 } },
     }]);
-    mockNeonSqlResults.push([]); // setClause fragment
+    mockNeonSqlResults.push([]); // setClause fragment (monthly_tokens_used + addon_tokens)
     mockNeonSqlResults.push([{ id: 'user-1' }]); // CTE RETURNING
 
     const result = await refundTokens('user-1', 'usage-3');
 
     expect(result.refunded).toBe(true);
     expect(mockNeonSql).toHaveBeenCalledTimes(2);
+    // Verify setClause fragment received both proportional amounts
+    const setClauseCall = mockNeonSql.mock.calls[0];
+    const setClauseValues = setClauseCall.slice(1);
+    expect(setClauseValues).toContain(15); // monthlyPortion
+    expect(setClauseValues).toContain(25); // addonPortion
+  });
+
+  it('falls back to addon for mixed source without _split metadata', async () => {
+    const { refundTokens } = await import('../service');
+
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{
+      id: 'usage-4', userId: 'user-1', tokens: 40, source: 'mixed', provider: 'meshy',
+      metadata: {}, // no _split
+    }]);
+    mockNeonSqlResults.push([]); // setClause fragment (addon_tokens only)
+    mockNeonSqlResults.push([{ id: 'user-1' }]); // CTE RETURNING
+
+    const result = await refundTokens('user-1', 'usage-4');
+
+    expect(result.refunded).toBe(true);
+    // Verify setClause uses addon path (monthlyPortion=0, addonPortion=tokens)
+    const setClauseCall = mockNeonSql.mock.calls[0];
+    const setClauseValues = setClauseCall.slice(1);
+    expect(setClauseValues).toContain(0);  // monthlyPortion
+    expect(setClauseValues).toContain(40); // addonPortion = full amount
   });
 
   it('returns refunded:false for free usageId', async () => {
@@ -515,9 +542,9 @@ describe('refundTokenAmount', () => {
   it('uses CTE for idempotent refund when usageId is provided', async () => {
     const { refundTokenAmount } = await import('../service');
 
-    // Mock the source lookup
+    // Mock the source lookup (now returns source + tokens + metadata)
     mockWhere.mockReturnValueOnce(chainableWhere());
-    mockLimit.mockResolvedValueOnce([{ source: 'addon' }]);
+    mockLimit.mockResolvedValueOnce([{ source: 'addon', tokens: 50, metadata: null }]);
 
     await refundTokenAmount('user-1', 50, 'partial failure', 'usage-123');
 
@@ -543,7 +570,7 @@ describe('refundTokenAmount', () => {
 
     // Mock: usage record has monthly source
     mockWhere.mockReturnValueOnce(chainableWhere());
-    mockLimit.mockResolvedValueOnce([{ source: 'monthly' }]);
+    mockLimit.mockResolvedValueOnce([{ source: 'monthly', tokens: 30, metadata: null }]);
 
     await refundTokenAmount('user-1', 30, 'batch fail', 'usage-monthly');
 
@@ -563,6 +590,48 @@ describe('refundTokenAmount', () => {
 
     // 2 neonSql calls: setClause fragment + CTE query (defaults to addon pool)
     expect(mockNeonSql).toHaveBeenCalledTimes(2);
+  });
+
+  it('proportionally refunds both pools for mixed source with _split', async () => {
+    const { refundTokenAmount } = await import('../service');
+
+    // Original deduction: 100 tokens total, 60 monthly + 40 addon
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{
+      source: 'mixed',
+      tokens: 100,
+      metadata: { _split: { monthly: 60, addon: 40 } },
+    }]);
+
+    // Refund 50 tokens → monthly: round(60*50/100) = 30, addon: 50-30 = 20
+    await refundTokenAmount('user-1', 50, 'pipeline_unused_budget', 'usage-mixed');
+
+    expect(mockNeonSql).toHaveBeenCalledTimes(2);
+    // Verify setClause fragment contains proportional amounts
+    const setClauseCall = mockNeonSql.mock.calls[0];
+    const setClauseValues = setClauseCall.slice(1);
+    expect(setClauseValues).toContain(30); // monthlyRefund
+    expect(setClauseValues).toContain(20); // addonRefund
+  });
+
+  it('falls back to addon for mixed source without _split metadata', async () => {
+    const { refundTokenAmount } = await import('../service');
+
+    // Old record without _split metadata
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{
+      source: 'mixed',
+      tokens: 80,
+      metadata: { type: 'pipeline_reservation' },
+    }]);
+
+    await refundTokenAmount('user-1', 40, 'pipeline_unused_budget', 'usage-old');
+
+    // Falls through to addon path (backward compat)
+    expect(mockNeonSql).toHaveBeenCalledTimes(2);
+    const setClauseCall = mockNeonSql.mock.calls[0];
+    const setClauseValues = setClauseCall.slice(1);
+    expect(setClauseValues).toContain(40); // full amount to addon
   });
 });
 

@@ -352,6 +352,14 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minHeight: 300,
     renderer: 'always',
   },
+  orchestrator: {
+    id: 'orchestrator',
+    title: 'Game Creator',
+    component: 'orchestrator',
+    minWidth: 260,
+    minHeight: 200,
+    category: 'creation',
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */

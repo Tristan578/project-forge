@@ -6,16 +6,23 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import { QuickStartFlow, shouldShowQuickStart } from '../QuickStartFlow';
 
 // Mock editorStore
-const mockLoadTemplate = vi.fn().mockResolvedValue(undefined);
+const mockStartDecomposition = vi.fn().mockResolvedValue(undefined);
 const mockSetEngineMode = vi.fn();
 
-vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector({
-      loadTemplate: mockLoadTemplate,
-      setEngineMode: mockSetEngineMode,
-    }),
-}));
+// Mutable store state — tests can mutate this to simulate failures
+const mockStoreState: Record<string, unknown> = {
+  startDecomposition: mockStartDecomposition,
+  setEngineMode: mockSetEngineMode,
+  orchestratorStatus: 'idle',
+  orchestratorError: null,
+};
+
+vi.mock('@/stores/editorStore', () => {
+  const hook = (selector: (s: Record<string, unknown>) => unknown) =>
+    selector(mockStoreState);
+  hook.getState = () => mockStoreState;
+  return { useEditorStore: hook };
+});
 
 const STORAGE_KEY = 'forge-quickstart-completed';
 
@@ -26,6 +33,9 @@ describe('QuickStartFlow', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
+    // Reset mock store state
+    mockStoreState.orchestratorStatus = 'idle';
+    mockStoreState.orchestratorError = null;
   });
 
   afterEach(() => {
@@ -73,8 +83,13 @@ describe('QuickStartFlow', () => {
     expect(textarea.value.length).toBeGreaterThan(0);
   });
 
-  it('shows error message and stays on step 2 when loadTemplate fails (regression for #7126)', async () => {
-    mockLoadTemplate.mockRejectedValueOnce(new Error('Template not found'));
+  it('shows error message and stays on step 2 when decomposition fails', async () => {
+    // Simulate the real behavior: startDecomposition resolves (never rejects)
+    // but sets orchestratorStatus to 'failed' in the store
+    mockStartDecomposition.mockImplementationOnce(async () => {
+      mockStoreState.orchestratorStatus = 'failed';
+      mockStoreState.orchestratorError = 'Decomposition failed';
+    });
     render(<QuickStartFlow onComplete={onComplete} onSkip={onSkip} />);
 
     const shooterBtn = screen.getAllByRole('button').find(
@@ -89,10 +104,10 @@ describe('QuickStartFlow', () => {
       expect(screen.getByRole('alert')).toBeDefined();
     });
 
-    expect(screen.getByRole('alert').textContent).toContain('Template not found');
+    expect(screen.getByRole('alert').textContent).toContain('Decomposition failed');
     // Must remain on step 2 — not advance to step 3
     expect(screen.getByText('Describe your game')).toBeDefined();
-    expect(screen.queryByText('Your game is ready!')).toBeNull();
+    expect(screen.queryByText(/is ready!/)).toBeNull();
     // onComplete must NOT have been called
     expect(onComplete).not.toHaveBeenCalled();
   });
@@ -109,7 +124,10 @@ describe('QuickStartFlow', () => {
     fireEvent.click(generateBtn);
 
     await waitFor(() => {
-      expect(mockLoadTemplate).toHaveBeenCalledWith('shooter');
+      expect(mockStartDecomposition).toHaveBeenCalledWith(
+        expect.stringContaining('Shooter:'),
+        '3d',
+      );
     });
 
     await waitFor(() => {
@@ -134,7 +152,31 @@ describe('QuickStartFlow', () => {
     expect(generateBtn.disabled).toBe(true);
   });
 
+  it('disables Play Now button until orchestrator status is completed', async () => {
+    mockStartDecomposition.mockImplementationOnce(async () => {
+      mockStoreState.orchestratorStatus = 'awaiting_approval';
+    });
+    render(<QuickStartFlow onComplete={onComplete} onSkip={onSkip} />);
+
+    const explorerBtn = screen.getAllByRole('button').find(
+      (b) => b.textContent?.includes('Explorer') && b.textContent?.includes('Wander, discover'),
+    )!;
+    fireEvent.click(explorerBtn);
+    fireEvent.click(screen.getByRole('button', { name: /generate game/i }));
+
+    await waitFor(() => screen.getByText('Your game is ready!'));
+
+    // Play Now button should be disabled (showing "Building your game...")
+    const playBtn = screen.getByText(/building your game/i).closest('button')!;
+    expect(playBtn.disabled).toBe(true);
+    expect(mockSetEngineMode).not.toHaveBeenCalled();
+  });
+
   it('calls setEngineMode(play) and onComplete when Play Now is clicked', async () => {
+    // Simulate full pipeline completion
+    mockStartDecomposition.mockImplementationOnce(async () => {
+      mockStoreState.orchestratorStatus = 'completed';
+    });
     render(<QuickStartFlow onComplete={onComplete} onSkip={onSkip} />);
 
     const explorerBtn = screen.getAllByRole('button').find(
@@ -152,6 +194,9 @@ describe('QuickStartFlow', () => {
   });
 
   it('saves completed flag to localStorage after Play Now', async () => {
+    mockStartDecomposition.mockImplementationOnce(async () => {
+      mockStoreState.orchestratorStatus = 'completed';
+    });
     render(<QuickStartFlow onComplete={onComplete} onSkip={onSkip} />);
 
     const explorerBtn = screen.getAllByRole('button').find(

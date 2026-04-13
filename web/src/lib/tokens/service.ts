@@ -124,7 +124,13 @@ export async function deductTokens(
   // critical atomicity point for financial correctness.
   const neonSql = getNeonSql();
   const now = new Date().toISOString();
-  const metadataJson = metadata ? JSON.stringify(metadata) : null;
+  // Always store the pool split so refundTokens/refundTokenAmount can
+  // proportionally credit back both pools for mixed-source deductions.
+  const enrichedMetadata = {
+    ...(metadata ?? {}),
+    _split: { monthly: monthlyDeduct, addon: addonDeduct },
+  };
+  const metadataJson = JSON.stringify(enrichedMetadata);
   const updateRows = await queryWithResilience(() =>
     neonSql`
       UPDATE users
@@ -201,10 +207,21 @@ export async function refundTokens(userId: string, usageId: string): Promise<Ref
   const neonSql = getNeonSql();
   const refundMetadata = JSON.stringify({ refundedUsageId: usageId });
 
-  // Build the CTE-based single statement based on source type
-  const setClause = record.source === 'monthly'
-    ? neonSql`monthly_tokens_used = GREATEST(0, monthly_tokens_used - ${record.tokens})`
-    : neonSql`addon_tokens = addon_tokens + ${record.tokens}`;
+  // Build the CTE-based single statement based on source type.
+  // For 'mixed' source, proportionally credit both pools using the stored split.
+  let setClause;
+  if (record.source === 'monthly') {
+    setClause = neonSql`monthly_tokens_used = GREATEST(0, monthly_tokens_used - ${record.tokens})`;
+  } else if (record.source === 'mixed') {
+    const split = (record.metadata as Record<string, unknown>)?._split as
+      | { monthly: number; addon: number }
+      | undefined;
+    const monthlyPortion = split?.monthly ?? 0;
+    const addonPortion = split?.addon ?? record.tokens;
+    setClause = neonSql`monthly_tokens_used = GREATEST(0, monthly_tokens_used - ${monthlyPortion}), addon_tokens = addon_tokens + ${addonPortion}`;
+  } else {
+    setClause = neonSql`addon_tokens = addon_tokens + ${record.tokens}`;
+  }
 
   const result = await queryWithResilience(() =>
     neonSql`
@@ -255,15 +272,28 @@ export async function refundTokenAmount(
 
   // Determine the original source so we credit the right pool.
   let source: 'monthly' | 'addon' | 'mixed' = 'addon';
+  let originalTokens = 0;
+  let splitData: { monthly: number; addon: number } | undefined;
+
   if (usageId) {
     const [record] = await queryWithResilience(() =>
       getDb()
-        .select({ source: tokenUsage.source })
+        .select({
+          source: tokenUsage.source,
+          tokens: tokenUsage.tokens,
+          metadata: tokenUsage.metadata,
+        })
         .from(tokenUsage)
         .where(and(eq(tokenUsage.id, usageId), eq(tokenUsage.userId, userId)))
         .limit(1)
     );
-    if (record) source = record.source as 'monthly' | 'addon' | 'mixed';
+    if (record) {
+      source = record.source as 'monthly' | 'addon' | 'mixed';
+      originalTokens = record.tokens;
+      splitData = (record.metadata as Record<string, unknown>)?._split as
+        | { monthly: number; addon: number }
+        | undefined;
+    }
   }
 
   // Atomic idempotent refund using a CTE.
@@ -277,9 +307,18 @@ export async function refundTokenAmount(
     ...(usageId ? { refundedUsageId: usageId } : {}),
   });
 
-  const setClause = source === 'monthly'
-    ? neonSql`monthly_tokens_used = GREATEST(0, monthly_tokens_used - ${tokens})`
-    : neonSql`addon_tokens = addon_tokens + ${tokens}`;
+  // For 'mixed' source, proportionally refund both pools using the stored split.
+  let setClause;
+  if (source === 'monthly') {
+    setClause = neonSql`monthly_tokens_used = GREATEST(0, monthly_tokens_used - ${tokens})`;
+  } else if (source === 'mixed' && splitData && originalTokens > 0) {
+    const ratio = tokens / originalTokens;
+    const monthlyRefund = Math.round(splitData.monthly * ratio);
+    const addonRefund = tokens - monthlyRefund;
+    setClause = neonSql`monthly_tokens_used = GREATEST(0, monthly_tokens_used - ${monthlyRefund}), addon_tokens = addon_tokens + ${addonRefund}`;
+  } else {
+    setClause = neonSql`addon_tokens = addon_tokens + ${tokens}`;
+  }
 
   if (usageId) {
     // Idempotent path: CTE INSERT + UPDATE in a single statement
