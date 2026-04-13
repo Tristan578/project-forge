@@ -128,6 +128,7 @@ function makeSubscription(overrides: Record<string, unknown> = {}) {
 
 describe('POST /api/stripe/webhook — negative cases', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     mockClaimEvent.mockResolvedValue(true);
     mockHandleSubscriptionCreated.mockResolvedValue(undefined);

@@ -84,6 +84,7 @@ const aiSuggestions = [
 
 describe('POST /api/generate/pacing', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
 
     vi.mocked(authenticateRequest).mockResolvedValue({

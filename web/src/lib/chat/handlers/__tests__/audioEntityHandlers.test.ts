@@ -3,7 +3,11 @@
  * Tests for audioEntityHandlers — core entity audio, bus management,
  * layering, transitions, reverb zones, and ducking rules.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+beforeEach(() => {
+  vi.resetModules();
+});
 import { createMockStore } from './handlerTestUtils';
 import { audioEntityHandlers } from '../audioEntityHandlers';
 

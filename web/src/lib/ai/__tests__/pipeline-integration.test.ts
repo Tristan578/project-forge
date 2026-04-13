@@ -54,6 +54,7 @@ function makeStreamingResponse(text: string): Response {
 
 describe('gddGenerator — generateGDD contract', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 
@@ -143,6 +144,7 @@ describe('gddGenerator — generateGDD contract', () => {
 
 describe('levelGenerator — generateLevel contract', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 
@@ -204,6 +206,7 @@ describe('levelGenerator — generateLevel contract', () => {
 
 describe('effectSystem — generateEffectBindings contract', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 
@@ -286,6 +289,7 @@ describe('effectSystem — generateEffectBindings contract', () => {
 
 describe('gameReviewer — generateReview contract', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

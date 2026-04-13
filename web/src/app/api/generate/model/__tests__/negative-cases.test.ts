@@ -107,6 +107,7 @@ describe('POST /api/generate/model — negative cases', () => {
   let POST: (request: NextRequest) => Promise<Response>;
 
   beforeEach(async () => {
+    vi.resetModules();
     vi.clearAllMocks();
 
     vi.mocked(authenticateRequest).mockResolvedValue({

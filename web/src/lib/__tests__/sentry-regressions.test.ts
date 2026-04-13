@@ -11,7 +11,11 @@
  * - #17: Array spread on large arrays (lesson #17)
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+beforeEach(() => {
+  vi.resetModules();
+});
 
 // ---------------------------------------------------------------------------
 // Bug #3: Number(undefined) ?? 60 → NaN regression

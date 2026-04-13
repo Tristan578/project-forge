@@ -74,6 +74,7 @@ const defaultVoiceSettings: VoiceSettings = {
 
 describe('POST /api/generate/voice/batch', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 4, resetAt: Date.now() + 60000 });
   });

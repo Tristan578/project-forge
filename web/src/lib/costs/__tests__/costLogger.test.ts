@@ -36,6 +36,7 @@ vi.mock('@/lib/db/schema', () => ({
 
 describe('logCost', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     resetChain();
   });

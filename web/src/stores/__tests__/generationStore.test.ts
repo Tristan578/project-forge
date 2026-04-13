@@ -40,6 +40,7 @@ describe('generationStore', () => {
   };
 
   beforeEach(() => {
+    vi.resetModules();
     // Mock fetch for addJob persistence (fire-and-forget)
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,

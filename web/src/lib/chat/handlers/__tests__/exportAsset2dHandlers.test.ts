@@ -42,6 +42,7 @@ vi.mock('@/stores/editorStore', () => ({
 
 describe('exportHandlers', () => {
   beforeEach(async () => {
+    vi.resetModules();
     // Reset mutable state and clear call history
     mockEditorState.sceneName = 'TestScene';
     mockEditorState.loadingScreenConfig = null;

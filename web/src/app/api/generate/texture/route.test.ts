@@ -48,6 +48,7 @@ const makeRequest = (body: Record<string, unknown>) =>
 
 describe('POST /api/generate/texture', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
   });

@@ -45,6 +45,7 @@ function makeRequest(body: unknown): NextRequest {
 
 describe('POST /api/generate/sprite', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,

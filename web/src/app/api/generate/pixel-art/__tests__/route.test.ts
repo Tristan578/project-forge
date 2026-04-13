@@ -80,6 +80,7 @@ const validBody = {
 
 describe('POST /api/generate/pixel-art', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({
       ok: true,

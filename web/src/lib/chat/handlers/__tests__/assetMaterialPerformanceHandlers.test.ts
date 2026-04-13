@@ -8,7 +8,11 @@
  * - Return value shape
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+beforeEach(() => {
+  vi.resetModules();
+});
 import { invokeHandler, createMockStore } from './handlerTestUtils';
 import { assetHandlers } from '../assetHandlers';
 import { materialHandlers } from '../materialHandlers';

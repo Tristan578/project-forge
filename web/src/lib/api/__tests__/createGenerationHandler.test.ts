@@ -89,6 +89,7 @@ const testHandler = createGenerationHandler({
 
 describe('createGenerationHandler', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({
       ok: true,

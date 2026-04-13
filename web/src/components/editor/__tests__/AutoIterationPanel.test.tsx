@@ -50,6 +50,7 @@ vi.mock('@/lib/ai/autoIteration', () => ({
 
 describe('AutoIterationPanel', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

@@ -148,6 +148,10 @@ function makeMockCtx(overrides: Partial<ExecutorContext> = {}): ExecutorContext 
   };
 }
 
+beforeEach(() => {
+  vi.resetModules();
+});
+
 // ---------------------------------------------------------------------------
 // scene_create executor
 // ---------------------------------------------------------------------------

@@ -3,9 +3,13 @@
  *
  * @vitest-environment node
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 describe('Root OG Image', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
   it('exports correct size (1200x630)', async () => {
     const mod = await import('../opengraph-image');
     expect(mod.size).toEqual({ width: 1200, height: 630 });

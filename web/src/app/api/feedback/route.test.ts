@@ -20,6 +20,7 @@ vi.mock('@/lib/db/schema', () => ({
 
 describe('POST /api/feedback', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateClerkSession).mockResolvedValue({
       ok: true as const,

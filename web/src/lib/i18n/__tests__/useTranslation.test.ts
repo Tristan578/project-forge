@@ -17,6 +17,7 @@ vi.mock('next-intl', () => ({
 
 describe('useT', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

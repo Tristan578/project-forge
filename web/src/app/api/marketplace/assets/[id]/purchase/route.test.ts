@@ -109,6 +109,7 @@ const { withApiMiddleware } = await import('@/lib/api/middleware');
 
 describe('POST /api/marketplace/assets/[id]/purchase', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
 
     // Reset withApiMiddleware to default (authenticated user)

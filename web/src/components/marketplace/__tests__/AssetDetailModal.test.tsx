@@ -54,6 +54,7 @@ describe('AssetDetailModal', () => {
   const mockOnClose = vi.fn();
 
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,

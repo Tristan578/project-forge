@@ -90,6 +90,7 @@ vi.mock('@/lib/export/exportEngine', () => ({
 let audioHandlers: Record<string, (args: Record<string, unknown>, ctx: ToolCallContext) => Promise<ExecutionResult>>;
 
 beforeEach(async () => {
+  vi.resetModules();
   const mod = await import('../audioHandlers');
   audioHandlers = mod.audioHandlers;
   // Reset mock snapshot storage

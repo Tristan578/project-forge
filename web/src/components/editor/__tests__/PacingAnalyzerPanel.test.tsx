@@ -11,6 +11,7 @@ vi.mock('@/stores/editorStore', () => ({
 
 describe('PacingAnalyzerPanel', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(useEditorStore).mockImplementation((selector: any) =>

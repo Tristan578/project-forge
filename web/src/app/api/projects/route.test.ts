@@ -38,6 +38,7 @@ function mockMiddlewareSuccess(
 
 describe('GET /api/projects', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     mockMiddlewareSuccess();
   });
@@ -74,6 +75,7 @@ describe('GET /api/projects', () => {
 
 describe('POST /api/projects', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     mockMiddlewareSuccess();
   });

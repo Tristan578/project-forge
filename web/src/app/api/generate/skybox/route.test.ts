@@ -47,6 +47,7 @@ function makeRequest(body: unknown): NextRequest {
 
 describe('POST /api/generate/skybox', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,

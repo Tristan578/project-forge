@@ -20,6 +20,7 @@ function ThrowingChild({ shouldThrow }: { shouldThrow: boolean }) {
 describe('EditorErrorBoundary', () => {
   const origErr = console.error;
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     console.error = vi.fn();
     Object.defineProperty(window, 'location', { value: { ...window.location, reload: vi.fn(), href: '' }, writable: true, configurable: true });

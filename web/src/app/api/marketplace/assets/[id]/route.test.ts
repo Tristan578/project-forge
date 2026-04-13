@@ -20,6 +20,7 @@ vi.mock('@/lib/db/schema', () => ({
 
 describe('GET /api/marketplace/assets/[id]', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

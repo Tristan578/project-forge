@@ -125,6 +125,7 @@ describe('getAutoSave and clearAutoSave', () => {
   let mockStore: Record<string, string>;
 
   beforeEach(() => {
+    vi.resetModules();
     mockStore = {};
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => mockStore[key] ?? null,
@@ -194,6 +195,7 @@ describe('saveAutoSave', () => {
   }
 
   beforeEach(() => {
+    vi.resetModules();
     mockStore = {};
     vi.stubGlobal('localStorage', makeLocalStorageMock());
   });

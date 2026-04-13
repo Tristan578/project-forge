@@ -69,6 +69,7 @@ async function invoke(
 }
 
 beforeEach(async () => {
+  vi.resetModules();
   vi.clearAllMocks();
   mockGraphState = makeDefaultGraphState();
   const mod = await import('../shaderHandlers');

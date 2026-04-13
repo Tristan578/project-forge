@@ -11,6 +11,7 @@ vi.mock('@vercel/analytics', () => ({
 
 describe('panelTracking', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

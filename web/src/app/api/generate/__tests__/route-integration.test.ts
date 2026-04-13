@@ -169,6 +169,7 @@ function makeRequest(url: string, body: unknown): NextRequest {
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
+  vi.resetModules();
   vi.clearAllMocks();
   mockAuth.mockResolvedValue({
     ok: true,

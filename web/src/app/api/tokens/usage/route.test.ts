@@ -18,6 +18,7 @@ vi.mock('@/lib/rateLimit/distributed', () => ({
 
 describe('GET /api/tokens/usage', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,

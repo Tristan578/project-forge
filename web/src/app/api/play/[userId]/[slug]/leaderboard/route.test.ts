@@ -84,6 +84,7 @@ const BOARD_DESC: {
 
 describe('GET /api/play/[userId]/[slug]/leaderboard', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 
@@ -222,6 +223,7 @@ function makeNeonSqlFn(result: unknown[] = DEFAULT_NEON_INSERT_RESULT) {
 
 describe('POST /api/play/[userId]/[slug]/leaderboard', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

@@ -11,7 +11,7 @@
  *  - Edge inputs: empty string, very long string, binary-safe unicode, newlines
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { randomBytes } from 'crypto';
 
 // ----- helpers -----
@@ -36,6 +36,7 @@ describe('encryption module', () => {
   let savedEnv: string | undefined;
 
   beforeEach(() => {
+    vi.resetModules();
     savedEnv = process.env.ENCRYPTION_MASTER_KEY;
     process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
   });

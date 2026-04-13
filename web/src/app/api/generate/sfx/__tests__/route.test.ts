@@ -66,6 +66,7 @@ function makeRequest(body: unknown): NextRequest {
 
 describe('POST /api/generate/sfx', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
