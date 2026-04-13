@@ -72,6 +72,7 @@ const validBody = {
 
 describe('POST /api/generate/localize', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
 
     vi.mocked(authenticateRequest).mockResolvedValue({

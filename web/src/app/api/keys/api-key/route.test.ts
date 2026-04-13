@@ -21,6 +21,7 @@ vi.mock('bcryptjs', () => ({
 
 describe('POST /api/keys/api-key', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,

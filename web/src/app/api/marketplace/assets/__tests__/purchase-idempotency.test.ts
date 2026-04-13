@@ -129,6 +129,7 @@ function setupDbChain(calls: Array<{ type: 'select' | 'insert' | 'update'; resul
 
 describe('POST /api/marketplace/assets/[id]/purchase — downloadCount idempotency', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

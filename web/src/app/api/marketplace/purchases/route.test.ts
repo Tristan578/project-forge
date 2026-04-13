@@ -13,6 +13,7 @@ vi.mock('@/lib/db/schema', () => ({
 
 describe('GET /api/marketplace/purchases', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,

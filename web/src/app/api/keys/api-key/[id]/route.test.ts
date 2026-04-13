@@ -14,6 +14,7 @@ vi.mock('@/lib/db/schema', () => ({
 
 describe('DELETE /api/keys/api-key/[id]', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
