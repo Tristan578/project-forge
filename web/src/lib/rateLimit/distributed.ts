@@ -25,19 +25,45 @@ function isUpstashConfigured(): boolean {
 }
 
 /**
- * Execute a Redis pipeline via the Upstash REST API.
- * Uses MULTI/EXEC-style pipeline to atomically ZADD + ZREMRANGEBYSCORE + ZCARD.
+ * Atomic sliding window rate limiter via a single Lua EVAL script (PF-744).
  *
- * Sliding window algorithm:
+ * Sliding window algorithm — all steps run atomically in Redis:
  * 1. Remove all timestamps older than `now - windowMs`
  * 2. Count remaining timestamps in the window
- * 3. If count < limit, add current timestamp and allow
- * 4. Set TTL on the key to clean up after the window expires
+ * 3. If count < limit, add current timestamp and set TTL → allow
+ * 4. If count >= limit, set TTL only (never add the entry) → deny
  *
- * All steps run in a single pipelined request for atomicity.
+ * This eliminates phantom entries: the entry is never written when over limit,
+ * so there's nothing to clean up and no window for ZREM failures to leave
+ * stale data behind.
  */
 /** Prefix must match the @upstash/ratelimit prefix used by rateLimit.ts */
 const REDIS_KEY_PREFIX = '@spawnforge/ratelimit';
+
+/**
+ * Lua script for atomic sliding window rate limiting.
+ *
+ * KEYS[1] = rate limit key
+ * ARGV[1] = windowStart (oldest allowed timestamp)
+ * ARGV[2] = limit (max entries per window)
+ * ARGV[3] = now (score for ZADD)
+ * ARGV[4] = member (unique value for ZADD)
+ * ARGV[5] = windowSeconds (TTL for EXPIRE)
+ *
+ * Returns {allowed (0|1), count} as a two-element array.
+ */
+const SLIDING_WINDOW_SCRIPT = `
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
+local count = redis.call('ZCARD', KEYS[1])
+if count < tonumber(ARGV[2]) then
+  redis.call('ZADD', KEYS[1], tonumber(ARGV[3]), ARGV[4])
+  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[5]))
+  return {1, count + 1}
+else
+  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[5]))
+  return {0, count}
+end
+`;
 
 async function upstashSlidingWindow(
   key: string,
@@ -55,58 +81,25 @@ async function upstashSlidingWindow(
   // requests arrive in the same millisecond (each member must be unique).
   const member = `${now}:${Math.random().toString(36).slice(2, 8)}`;
 
-  // Pipeline: ZREMRANGEBYSCORE, ZADD, ZCARD, EXPIRE
-  // We issue these as a pipeline (array of commands) for a single round-trip.
-  // ZADD score must be a number (not a string) for the Redis sorted set to order correctly.
-  const pipeline = [
-    ['ZREMRANGEBYSCORE', prefixedKey, '-inf', windowStart],
-    ['ZADD', prefixedKey, now, member],
-    ['ZCARD', prefixedKey],
-    ['EXPIRE', prefixedKey, windowSeconds],
-  ];
-
-  const response = await fetch(`${url}/pipeline`, {
+  const response = await fetch(`${url}/eval`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(pipeline),
+    body: JSON.stringify([SLIDING_WINDOW_SCRIPT, 1, prefixedKey, windowStart, limit, now, member, windowSeconds]),
   });
 
   if (!response.ok) {
-    throw new Error(`Upstash pipeline failed: ${response.status} ${response.statusText}`);
+    throw new Error(`Upstash EVAL failed: ${response.status} ${response.statusText}`);
   }
 
-  const results = await response.json() as Array<{ result: number | string | null }>;
+  const result = await response.json() as { result: [number, number] };
+  const [allowed, count] = result.result;
 
-  // Index 2 is ZCARD — count of entries currently in window (including the one we just added)
-  const countAfterAdd = typeof results[2]?.result === 'number' ? results[2].result : 1;
+  const remaining = Math.max(0, limit - count);
 
-  const allowed = countAfterAdd <= limit;
-
-  if (!allowed) {
-    // Atomically remove the member we just added using a Lua script.
-    // A plain ZREM in a separate request is non-atomic — the Lua EVAL guarantees
-    // the remove-if-over-limit check is atomic on the Redis side.
-    const luaScript = "if redis.call('ZSCORE', KEYS[1], ARGV[1]) then return redis.call('ZREM', KEYS[1], ARGV[1]) else return 0 end";
-    await fetch(`${url}/eval`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify([luaScript, 1, prefixedKey, member]),
-    }).catch(() => {
-      // Best-effort cleanup; don't throw on failure
-    });
-  }
-
-  const remaining = Math.max(0, limit - countAfterAdd);
-
-  // resetAt: oldest entry in window + windowMs (when the window will open up a slot)
-  // For simplicity, use now + windowMs as the conservative upper bound
-  return { allowed, remaining, resetAt };
+  return { allowed: allowed === 1, remaining, resetAt };
 }
 
 /**
