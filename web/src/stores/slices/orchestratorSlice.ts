@@ -186,6 +186,9 @@ export const createOrchestratorSlice: StateCreator<
           throw new Error('Token reservation returned invalid ID');
         }
         reservationId = reserveData.reservationId;
+        // Persist reservationId immediately so cancelPipeline can release
+        // tokens even if the user cancels before the full set() below.
+        set({ reservationId });
       }
 
       // If cancelled during decomposition, don't override status
@@ -258,6 +261,19 @@ export const createOrchestratorSlice: StateCreator<
     if (_gateResolver) {
       _gateResolver('rejected');
       _gateResolver = null;
+    }
+    // Release reserved tokens so they aren't leaked on cancel
+    const { reservationId } = get();
+    if (reservationId) {
+      fetch('/api/game/pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'release', reservationId, actualUsed: 0 }),
+      }).catch((err) => {
+        captureException(err instanceof Error ? err : new Error(String(err)), {
+          extra: { context: 'orchestrator.cancelPipeline.releaseTokens', reservationId },
+        });
+      });
     }
     set({
       orchestratorStatus: 'cancelled',
