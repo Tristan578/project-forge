@@ -176,7 +176,7 @@ export async function recordStepUsage(
   // Look up the userId from the reservation record
   const rows = await queryWithResilience(() =>
     neonSql`
-      SELECT user_id FROM token_usage
+      SELECT user_id, source FROM token_usage
       WHERE id = ${reservationId}::uuid
       LIMIT 1
     `
@@ -184,12 +184,14 @@ export async function recordStepUsage(
 
   if (rows.length === 0) return;
 
-  const userId = (rows[0] as { user_id: string }).user_id;
+  const row = rows[0] as { user_id: string; source: string };
+  const userId = row.user_id;
+  const source = row.source;
 
   await queryWithResilience(() =>
     neonSql`
       INSERT INTO token_usage (user_id, operation, tokens, source, metadata)
-      VALUES (${userId}, 'pipeline_step', ${tokensUsed}, 'monthly', ${metadata}::jsonb)
+      VALUES (${userId}, 'pipeline_step', ${tokensUsed}, ${source}, ${metadata}::jsonb)
     `
   );
 }

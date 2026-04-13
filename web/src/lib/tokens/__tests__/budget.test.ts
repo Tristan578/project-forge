@@ -183,8 +183,8 @@ describe('recordStepUsage', () => {
   beforeEach(resetMocks);
 
   it('inserts an audit row with step metadata', async () => {
-    // First query: lookup userId from reservation
-    mockNeonSqlResults.push([{ user_id: 'user-1' }]);
+    // First query: lookup userId + source from reservation
+    mockNeonSqlResults.push([{ user_id: 'user-1', source: 'monthly' }]);
     // Second query: insert audit row (returns nothing)
     mockNeonSqlResults.push([]);
 
@@ -192,6 +192,33 @@ describe('recordStepUsage', () => {
 
     // Two queries: lookup + insert
     expect(mockNeonSql).toHaveBeenCalledTimes(2);
+  });
+
+  it('propagates source from reservation to audit row', async () => {
+    // Reservation was drawn from addon tokens
+    mockNeonSqlResults.push([{ user_id: 'user-1', source: 'addon' }]);
+    mockNeonSqlResults.push([]);
+
+    await recordStepUsage('res-addon', 'step-2', 50);
+
+    // The second call is the INSERT — verify the source parameter
+    const insertCall = mockNeonSql.mock.calls[1];
+    // Tagged template: insertCall[0] is TemplateStringsArray, rest are interpolated values
+    // Interpolated values: userId, tokensUsed, source, metadata
+    // ('pipeline_step' is a SQL literal, not interpolated)
+    const interpolatedValues = insertCall.slice(1);
+    expect(interpolatedValues[2]).toBe('addon');
+  });
+
+  it('propagates mixed source from reservation to audit row', async () => {
+    mockNeonSqlResults.push([{ user_id: 'user-1', source: 'mixed' }]);
+    mockNeonSqlResults.push([]);
+
+    await recordStepUsage('res-mixed', 'step-3', 30);
+
+    const insertCall = mockNeonSql.mock.calls[1];
+    const interpolatedValues = insertCall.slice(1);
+    expect(interpolatedValues[2]).toBe('mixed');
   });
 
   it('skips insert for zero tokens', async () => {
