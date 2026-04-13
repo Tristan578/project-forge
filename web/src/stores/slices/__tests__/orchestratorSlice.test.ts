@@ -24,6 +24,10 @@ vi.mock('@/lib/game-creation/executors', () => ({
   EXECUTOR_REGISTRY: new Map(),
 }));
 
+vi.mock('@/lib/monitoring/sentry-client', () => ({
+  captureException: vi.fn(),
+}));
+
 vi.mock('@/stores/editorStore', () => ({
   getCommandDispatcher: vi.fn().mockReturnValue(vi.fn()),
   getCommandBatchDispatcher: vi.fn().mockReturnValue(null),
@@ -223,6 +227,33 @@ describe('orchestratorSlice', () => {
 
       expect(store.getState().orchestratorError).toBeNull();
       expect(store.getState().reservationId).toBe('new-res');
+    });
+
+    it('respects cancellation during decomposing phase', async () => {
+      // Simulate fetch that rejects with AbortError when signal fires
+      mockFetch.mockImplementationOnce((_url: string, opts?: { signal?: AbortSignal }) => {
+        return new Promise((_resolve, reject) => {
+          if (opts?.signal) {
+            opts.signal.addEventListener('abort', () => {
+              reject(new DOMException('The operation was aborted.', 'AbortError'));
+            });
+          }
+        });
+      });
+
+      const promise = store.getState().startDecomposition('make a game', '3d');
+
+      expect(store.getState().orchestratorStatus).toBe('decomposing');
+
+      // Cancel while decomposing — aborts the fetch
+      store.getState().cancelPipeline();
+      expect(store.getState().orchestratorStatus).toBe('cancelled');
+
+      await promise;
+
+      // Status must remain cancelled, not overwritten to awaiting_approval or failed
+      expect(store.getState().orchestratorStatus).toBe('cancelled');
+      expect(store.getState().orchestratorError).toBeNull();
     });
   });
 

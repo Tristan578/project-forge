@@ -22,7 +22,6 @@ import { buildPlan } from '@/lib/game-creation/planBuilder';
 import { runPipeline } from '@/lib/game-creation/pipelineRunner';
 import type { PipelineCallbacks } from '@/lib/game-creation/pipelineRunner';
 import { EXECUTOR_REGISTRY } from '@/lib/game-creation/executors';
-import { getCommandDispatcher, getCommandBatchDispatcher } from '@/stores/editorStore';
 import { captureException } from '@/lib/monitoring/sentry-client';
 
 // ---------------------------------------------------------------------------
@@ -112,6 +111,9 @@ export const createOrchestratorSlice: StateCreator<
   // ---------------------------------------------------------------------------
 
   startDecomposition: async (prompt, projectType) => {
+    // Create abort controller so cancelPipeline can stop in-flight fetches
+    _abortController = new AbortController();
+
     set({
       orchestratorStatus: 'decomposing',
       orchestratorError: null,
@@ -127,6 +129,7 @@ export const createOrchestratorSlice: StateCreator<
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt, projectType }),
+        signal: _abortController.signal,
       });
 
       if (!res.ok) {
@@ -168,6 +171,7 @@ export const createOrchestratorSlice: StateCreator<
             action: 'reserve',
             estimatedTotal: plan.tokenEstimate.totalVarianceHigh,
           }),
+          signal: _abortController?.signal,
         });
 
         if (!reserveRes.ok) {
@@ -184,6 +188,9 @@ export const createOrchestratorSlice: StateCreator<
         reservationId = reserveData.reservationId;
       }
 
+      // If cancelled during decomposition, don't override status
+      if (get().orchestratorStatus === 'cancelled') return;
+
       set({
         currentPlan: plan,
         tokenEstimate: plan.tokenEstimate,
@@ -193,10 +200,18 @@ export const createOrchestratorSlice: StateCreator<
         currentStepIndex: 0,
       });
     } catch (err) {
+      // AbortError from cancellation — don't override 'cancelled' status
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+
       set({
         orchestratorStatus: 'failed',
         orchestratorError: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      // Clear abort controller after decomposition completes (runPipelineFromPlan creates its own)
+      if (get().orchestratorStatus !== 'executing') {
+        _abortController = null;
+      }
     }
   },
 
@@ -272,6 +287,9 @@ export const createOrchestratorSlice: StateCreator<
       return;
     }
 
+    // Dynamic imports break circular dependency (editorStore imports this slice)
+    const { getCommandDispatcher, getCommandBatchDispatcher } = await import('@/stores/editorStore');
+
     const dispatcher = getCommandDispatcher();
     if (!dispatcher) {
       set({ orchestratorStatus: 'failed', orchestratorError: 'Engine not loaded' });
@@ -285,8 +303,7 @@ export const createOrchestratorSlice: StateCreator<
     const { useUserStore } = await import('@/stores/userStore');
     const { tier } = useUserStore.getState();
 
-    // Build executor context
-    // Dynamic import of editorStore to get fresh state — avoids stale closure
+    // Get fresh editorStore state
     const { useEditorStore } = await import('@/stores/editorStore');
 
     const ctx: ExecutorContext = {
