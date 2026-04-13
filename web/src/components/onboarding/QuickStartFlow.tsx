@@ -111,8 +111,8 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
 
       // Read fresh state imperatively — React hook values are stale inside callbacks
       const { orchestratorStatus: status, orchestratorError: error } = useEditorStore.getState();
-      if (status === 'failed') {
-        throw new Error(error ?? 'Failed to create game. Please try again.');
+      if (status === 'failed' || status === 'cancelled') {
+        throw new Error(error ?? (status === 'cancelled' ? 'Game creation was cancelled.' : 'Failed to create game. Please try again.'));
       }
 
       setIsReady(true);
