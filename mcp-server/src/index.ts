@@ -17,8 +17,8 @@ async function main() {
   const editorUrl = process.env.FORGE_EDITOR_WS_URL ?? 'ws://localhost:3001/api/mcp/ws';
   const bridge = new EditorBridge(editorUrl);
 
-  // Register all tools from the command manifest
-  registerTools(server, bridge);
+  // Register all tools from the command manifest (batched for large manifests)
+  await registerTools(server, bridge);
 
   // Register MCP resources (scene graph, selection, etc.)
   registerResources(server, bridge);

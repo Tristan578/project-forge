@@ -12,11 +12,10 @@ function jsonSchemaToZod(prop: Record<string, unknown>): z.ZodTypeAny {
 
   switch (type) {
     case 'string': {
-      let schema = z.string();
       if (prop.enum) {
         return z.enum(prop.enum as [string, ...string[]]);
       }
-      return schema;
+      return z.string();
     }
     case 'number':
       return z.number();
@@ -53,7 +52,6 @@ function buildZodSchema(
     if (!required.has(key)) {
       fieldSchema = fieldSchema.optional();
     }
-    // Add description if available
     if (prop.description) {
       fieldSchema = fieldSchema.describe(prop.description as string);
     }
@@ -63,39 +61,80 @@ function buildZodSchema(
   return shape;
 }
 
+// Size of each registration batch. Yields the event loop between batches
+// so that startup doesn't block for the full manifest.
+const BATCH_SIZE = 50;
+
+/**
+ * Register a single command as an MCP tool.
+ */
+function registerCommand(
+  server: McpServer,
+  bridge: EditorBridge,
+  cmd: (typeof manifest.commands)[number],
+): void {
+  const zodShape = buildZodSchema(cmd.parameters as unknown as {
+    properties?: Record<string, Record<string, unknown>>;
+    required?: string[];
+  });
+
+  server.registerTool(
+    cmd.name,
+    {
+      description: cmd.description,
+      inputSchema: zodShape,
+    },
+    async (args) => {
+      try {
+        const result = await bridge.executeCommand(cmd.name, args as Record<string, unknown>);
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${message}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+}
+
 /**
  * Register all commands from the manifest as MCP tools.
+ *
+ * Registers in batches of {@link BATCH_SIZE}, yielding the event loop between
+ * batches so that large manifests (350+ commands) don't block startup.
+ *
+ * Returns a Promise that resolves when all tools are registered.
  */
-export function registerTools(server: McpServer, bridge: EditorBridge): void {
-  for (const cmd of manifest.commands) {
-    const zodShape = buildZodSchema(cmd.parameters as unknown as {
-      properties?: Record<string, Record<string, unknown>>;
-      required?: string[];
-    });
+export async function registerTools(server: McpServer, bridge: EditorBridge): Promise<void> {
+  const commands = manifest.commands;
 
-    server.tool(
-      cmd.name,
-      cmd.description,
-      zodShape,
-      async (args) => {
-        try {
-          const result = await bridge.executeCommand(cmd.name, args as Record<string, unknown>);
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
-              },
-            ],
-          };
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          return {
-            content: [{ type: 'text' as const, text: `Error: ${message}` }],
-            isError: true,
-          };
-        }
-      }
-    );
+  // Small manifests: register synchronously (no overhead)
+  if (commands.length <= BATCH_SIZE) {
+    for (const cmd of commands) {
+      registerCommand(server, bridge, cmd);
+    }
+    return;
+  }
+
+  // Large manifests: register in batches, yielding between each
+  for (let i = 0; i < commands.length; i += BATCH_SIZE) {
+    const batch = commands.slice(i, i + BATCH_SIZE);
+    for (const cmd of batch) {
+      registerCommand(server, bridge, cmd);
+    }
+
+    // Yield to the event loop between batches
+    if (i + BATCH_SIZE < commands.length) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
   }
 }
