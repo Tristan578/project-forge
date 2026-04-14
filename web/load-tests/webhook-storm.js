@@ -17,7 +17,7 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Rate } from 'k6/metrics';
-import { crypto } from 'k6/experimental/webcrypto';
+import crypto from 'k6/crypto';
 import exec from 'k6/execution';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
@@ -72,11 +72,16 @@ function makeWebhookPayload(eventType, index) {
   };
 }
 
-function signPayload(payload, _secret) {
-  // k6 does not have Node.js crypto — return a placeholder signature.
-  // For real testing, use `stripe listen --forward-to` which signs properly.
+function signPayload(payload, secret) {
   const timestamp = Math.floor(Date.now() / 1000);
-  return `t=${timestamp},v1=placeholder_signature_for_load_test`;
+  if (!secret) {
+    // Without a secret, return a placeholder that will fail server-side
+    // verification with a 400. For real testing, pass STRIPE_WEBHOOK_SECRET.
+    return `t=${timestamp},v1=placeholder_signature_for_load_test`;
+  }
+  const signedPayload = `${timestamp}.${payload}`;
+  const mac = crypto.hmac('sha256', secret, signedPayload, 'hex');
+  return `t=${timestamp},v1=${mac}`;
 }
 
 export default function () {
