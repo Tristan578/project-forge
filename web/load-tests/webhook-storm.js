@@ -85,12 +85,13 @@ function signPayload(payload, secret) {
 }
 
 export default function () {
-  const eventType = EVENT_TYPES[Math.floor(Math.random() * EVENT_TYPES.length)];
-  // Use a 50-slot repeating pool so half the requests reuse event IDs,
-  // exercising the server-side idempotency guard. The pool is keyed by event
-  // type so different event types don't collide with each other.
+  // Use a 50-slot repeating pool so half the requests (iterations 50-99)
+  // reuse event IDs from iterations 0-49, exercising the idempotency guard.
   const pool = 50;
   const index = exec.scenario.iterationInTest % pool;
+  // Derive eventType from index (not random) so repeated indices produce
+  // identical event IDs — random selection would reduce duplicate rate to ~10%.
+  const eventType = EVENT_TYPES[index % EVENT_TYPES.length];
   const payload = makeWebhookPayload(eventType, index);
   const body = JSON.stringify(payload);
 
