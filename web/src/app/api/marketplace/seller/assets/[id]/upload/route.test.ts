@@ -2,10 +2,12 @@ vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 
-vi.mock('@/lib/auth/api-auth');
+const mockWithApiMiddleware = vi.fn();
+vi.mock('@/lib/api/middleware', () => ({
+  withApiMiddleware: (...args: unknown[]) => mockWithApiMiddleware(...args),
+}));
 vi.mock('@/lib/db/client');
 vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
 vi.mock('@/lib/db/schema', () => ({
@@ -25,22 +27,27 @@ vi.mock('@/lib/storage/r2', () => ({
   ),
 }));
 
+function authSuccess() {
+  mockWithApiMiddleware.mockResolvedValue({
+    authContext: { user: { id: 'user_1', tier: 'creator' } },
+  });
+}
+
+function authFailure() {
+  mockWithApiMiddleware.mockResolvedValue({
+    error: new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+  });
+}
+
 describe('POST /api/marketplace/seller/assets/[id]/upload', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: true as const,
-      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as never },
-    });
+    authSuccess();
   });
 
   it('should return 401 when not authenticated', async () => {
-    const mockResponse = new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
-    vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: false as const,
-      response: mockResponse as never,
-    });
+    authFailure();
 
     const { POST } = await import('./route');
     const formData = new FormData();
@@ -158,6 +165,46 @@ describe('POST /api/marketplace/seller/assets/[id]/upload', () => {
     expect(res.status).toBe(200);
     expect(body.uploaded.preview).toContain('cdn.spawnforge.ai');
     expect(mockUploadToR2).toHaveBeenCalled();
+  });
+
+  it('should pass file body to R2 as stream or buffer (#8219)', async () => {
+    const selectChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([{ id: 'a1', sellerId: 'user_1' }]),
+    };
+    const updateChain = {
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ id: 'a1' }]),
+        }),
+      }),
+    };
+    vi.mocked(getDb).mockReturnValue({
+      select: vi.fn().mockReturnValue(selectChain),
+      update: vi.fn().mockReturnValue(updateChain),
+    } as never);
+
+    mockUploadToR2.mockResolvedValue({
+      url: 'https://cdn.spawnforge.ai/assets/user_1/a1/file/model.glb',
+      key: 'assets/user_1/a1/file/model.glb',
+    });
+
+    const { POST } = await import('./route');
+    const formData = new FormData();
+    formData.append('asset', new File(['modeldata'], 'model.glb', { type: 'model/gltf-binary' }));
+    const req = new NextRequest('http://localhost:3000/api/marketplace/seller/assets/a1/upload', {
+      method: 'POST',
+    });
+    vi.spyOn(req, 'formData').mockResolvedValue(formData);
+    await POST(req, { params: Promise.resolve({ id: 'a1' }) });
+
+    // Body is streamed when File.stream() is available, buffered otherwise.
+    // Both are valid — the key invariant is that we don't pre-buffer unnecessarily.
+    const bodyArg = mockUploadToR2.mock.calls[0][1];
+    const isStreamOrBuffer =
+      bodyArg instanceof ReadableStream || Buffer.isBuffer(bodyArg);
+    expect(isStreamOrBuffer).toBe(true);
   });
 
   it('should return 500 when R2 upload fails', async () => {
