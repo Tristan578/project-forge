@@ -853,19 +853,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   saveConversation: (projectId: string) => {
     const { messages } = get();
     const toStore = messages.slice(-MAX_STORED_MESSAGES);
-    const key = PERSISTENCE_KEY + projectId;
-    const doSave = () => {
-      try {
-        localStorage.setItem(key, JSON.stringify(toStore));
-      } catch {
-        // localStorage full or unavailable
-      }
-    };
-    if (typeof requestIdleCallback !== 'undefined') {
-      requestIdleCallback(doSave, { timeout: 2000 });
-    } else {
-      setTimeout(doSave, 0);
-    }
+    debouncedSaveProjectConversation(projectId, toStore);
   },
 
   loadConversation: (projectId: string) => {
@@ -1168,9 +1156,42 @@ useChatStore.subscribe((state, prevState) => {
 let _pendingSaveArgs: { conversations: Conversation[]; activeId?: string | null } | null = null;
 let _saveScheduled = false;
 
+// Per-project save debouncing — coalesces rapid saveConversation() calls so
+// only the latest messages are written, using the same requestIdleCallback
+// pattern as saveConversationsToStorage. Uses a Map so concurrent saves for
+// different projects don't overwrite each other.
+const _pendingProjectSaves = new Map<string, ChatMessage[]>();
+let _projectSaveScheduled = false;
+
+function flushProjectSave() {
+  _projectSaveScheduled = false;
+  if (_pendingProjectSaves.size === 0) return;
+  for (const [projectId, messages] of _pendingProjectSaves) {
+    try {
+      localStorage.setItem(PERSISTENCE_KEY + projectId, JSON.stringify(messages));
+    } catch {
+      // localStorage full or unavailable
+    }
+  }
+  _pendingProjectSaves.clear();
+}
+
+function debouncedSaveProjectConversation(projectId: string, messages: ChatMessage[]) {
+  _pendingProjectSaves.set(projectId, messages);
+  if (!_projectSaveScheduled) {
+    _projectSaveScheduled = true;
+    if (typeof requestIdleCallback !== 'undefined') {
+      requestIdleCallback(flushProjectSave, { timeout: 2000 });
+    } else {
+      setTimeout(flushProjectSave, 0);
+    }
+  }
+}
+
 /** @internal Exposed for tests to flush the pending save synchronously. */
 export function flushConversationSaveForTesting() {
   flushConversationSave();
+  flushProjectSave();
 }
 
 function flushConversationSave() {
@@ -1212,7 +1233,10 @@ function saveConversationsToStorage(conversations: Conversation[], activeId?: st
 // Flush pending saves on page unload to prevent data loss.
 // Uses 'pagehide' (fires reliably on mobile + desktop) over 'beforeunload'.
 if (typeof window !== 'undefined') {
-  window.addEventListener('pagehide', flushConversationSave);
+  window.addEventListener('pagehide', () => {
+    flushConversationSave();
+    flushProjectSave();
+  });
 }
 
 /** Convert ChatMessages to Anthropic API format */

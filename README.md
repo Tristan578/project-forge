@@ -138,6 +138,20 @@ cd project-forge
 # and copies them to web/public/
 ```
 
+<details>
+<summary>WASM build troubleshooting</summary>
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `wasm-bindgen` version mismatch | CLI version differs from the `wasm-bindgen` crate in `Cargo.lock` (pinned to 0.2.108) | `cargo install wasm-bindgen-cli --version 0.2.108` |
+| `error[E0433]: could not find crate` | Missing the WASM compile target | `rustup target add wasm32-unknown-unknown` |
+| `doc-image-embed` link errors (Windows) | Native proc-macro needs Windows SDK LIB paths | The build script auto-detects; ensure Visual Studio Build Tools are installed |
+| Pink/magenta materials in browser | Missing `tonemapping_luts` Bevy feature | Verify `Cargo.toml` includes `"tonemapping_luts"` in default features |
+| `wasm-opt` not found warning | Optional optimization step | `cargo install wasm-opt` (non-fatal — build still succeeds) |
+| Engine loads but renders nothing | WebGPU not supported; fallback not triggered | Check browser console for WebGPU detection; try Chrome/Edge with `chrome://flags/#enable-webgpu` |
+
+</details>
+
 ### 3. Install web dependencies
 
 ```bash

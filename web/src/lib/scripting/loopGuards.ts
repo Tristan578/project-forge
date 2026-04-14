@@ -11,7 +11,14 @@
  * script entry-point call (onStart/onUpdate/onDestroy). This prevents legitimate
  * loops with moderate iteration counts from accumulating across frames and
  * falsely triggering the guard after extended play time.
+ *
+ * PF-8289: Uses acorn's tokenizer for keyword detection instead of regex. This
+ * correctly handles template literals with ${...} expressions, nested backticks,
+ * strings, and comments — eliminating both false positives (keywords in strings)
+ * and false negatives (loops inside template expressions).
  */
+
+import { tokenizer } from 'acorn';
 
 export interface LoopGuardResult {
   source: string;
@@ -19,6 +26,32 @@ export interface LoopGuardResult {
 }
 
 export function injectLoopGuards(source: string): LoopGuardResult {
+  // PF-8289: Use acorn's tokenizer to find positions of real loop keywords.
+  // This properly handles template literals with ${...} expressions, nested
+  // backticks, strings, and comments — replacing the previous regex approach.
+  const loopKeywords = new Map<number, string>();
+  const braceTokenPositions = new Map<number, '{' | '}'>();
+  try {
+    for (const token of tokenizer(source, {
+      ecmaVersion: 2025,
+      allowReturnOutsideFunction: true,
+    })) {
+      const kw = (token.type as { keyword?: string }).keyword;
+      if (kw === 'for' || kw === 'while' || kw === 'do') {
+        loopKeywords.set(token.start, kw);
+      }
+      if (token.type.label === '{') braceTokenPositions.set(token.start, '{');
+      if (token.type.label === '}') braceTokenPositions.set(token.start, '}');
+    }
+  } catch {
+    // Syntax error — return unchanged; the sandbox will catch it at runtime
+    return { source, guardVarNames: [] };
+  }
+
+  if (loopKeywords.size === 0) {
+    return { source, guardVarNames: [] };
+  }
+
   // PF-524: Each loop gets its own counter variable (__lg0, __lg1, ...)
   // declared immediately before the loop statement so the counter resets
   // each time control reaches the loop. The guard check increments the
@@ -44,9 +77,10 @@ export function injectLoopGuards(source: string): LoopGuardResult {
   const doBodyStartDepths: number[] = [];
   let skipNextWhile = false;
   while (i < len) {
-    // Track brace depth for do-while detection
-    if (src[i] === '{') braceDepth++;
-    if (src[i] === '}') {
+    // Track brace depth using acorn-validated positions (not affected by
+    // braces inside strings, comments, or template expressions)
+    if (braceTokenPositions.get(i) === '{') braceDepth++;
+    if (braceTokenPositions.get(i) === '}') {
       braceDepth--;
       // If we just closed a do-while body, flag to skip the next `while`
       if (doBodyStartDepths.length > 0 && braceDepth === doBodyStartDepths[doBodyStartDepths.length - 1]) {
@@ -54,38 +88,10 @@ export function injectLoopGuards(source: string): LoopGuardResult {
         skipNextWhile = true;
       }
     }
-    if (src[i] === '"' || src[i] === "'" || src[i] === '`') {
-      // KNOWN LIMITATION: Template literals with ${...} expressions are scanned
-      // with a simple quote-matching loop that does NOT track expression depth.
-      // A template literal containing a nested loop — e.g. `${[1,2].forEach(i=>{for(;;){}})}` —
-      // will have the loop scanner skip the inner loop body because it's inside the
-      // string range delimited by the backtick pair. This means loop guards are NOT
-      // injected into loops inside template literal expressions.
-      // Mitigation: the worker runs with a per-frame iteration budget (onUpdate timeout)
-      // so such loops will eventually be killed by the frame watchdog even without guards.
-      // TODO(PF): Implement a proper JS tokenizer (or use acorn) to correctly handle
-      // nested expressions in template literals.
-      const quote = src[i];
-      result += src[i++];
-      while (i < len && src[i] !== quote) {
-        if (src[i] === '\\') { result += src[i++]; }
-        if (i < len) { result += src[i++]; }
-      }
-      if (i < len) result += src[i++];
-      continue;
-    }
-    if (src[i] === '/' && i + 1 < len && src[i + 1] === '/') {
-      while (i < len && src[i] !== '\n') result += src[i++];
-      continue;
-    }
-    if (src[i] === '/' && i + 1 < len && src[i + 1] === '*') {
-      result += src[i++]; result += src[i++];
-      while (i < len && !(src[i] === '*' && i + 1 < len && src[i + 1] === '/')) result += src[i++];
-      if (i < len) { result += src[i++]; result += src[i++]; }
-      continue;
-    }
-    const remaining = src.slice(i);
-    if (/^while\b/.test(remaining) && (i === 0 || !/\w/.test(src[i - 1]))) {
+
+    const kw = loopKeywords.get(i);
+
+    if (kw === 'while') {
       if (skipNextWhile) {
         // This is the condition part of a do-while — emit verbatim
         skipNextWhile = false;
@@ -108,7 +114,7 @@ export function injectLoopGuards(source: string): LoopGuardResult {
       }
       continue;
     }
-    if (/^for\b/.test(remaining) && (i === 0 || !/\w/.test(src[i - 1]))) {
+    if (kw === 'for') {
       const gv = '__lg' + loopIndex++;
       guardVarNames.push(gv);
       const gd = 'let ' + gv + '=0;';
@@ -125,7 +131,7 @@ export function injectLoopGuards(source: string): LoopGuardResult {
       }
       continue;
     }
-    if (/^do\b/.test(remaining) && (i === 0 || !/\w/.test(src[i - 1]))) {
+    if (kw === 'do') {
       const gv = '__lg' + loopIndex++;
       guardVarNames.push(gv);
       const gd = 'let ' + gv + '=0;';

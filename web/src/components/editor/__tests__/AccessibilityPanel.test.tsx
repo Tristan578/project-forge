@@ -29,6 +29,17 @@ vi.mock('@/stores/editorStore', () => {
   };
 });
 
+function mockProfile(overrides: Record<string, unknown> = {}) {
+  return {
+    colorblindMode: { enabled: false, mode: 'protanopia' as const, filterStrength: 1.0 },
+    screenReader: { enabled: false, entityDescriptions: new Map(), navigationAnnouncements: true },
+    inputRemapping: { enabled: false, remappings: [], onScreenControls: false },
+    subtitles: { enabled: false, fontSize: 'medium' as const, backgroundColor: '#000', textColor: '#fff', opacity: 1.0 },
+    fontSize: { enabled: false, scale: 1.0, minSize: 12 },
+    ...overrides,
+  };
+}
+
 vi.mock('@/lib/ai/accessibilityGenerator', () => ({
   analyzeAccessibility: vi.fn(() => ({
     score: 72,
@@ -46,27 +57,10 @@ vi.mock('@/lib/ai/accessibilityGenerator', () => ({
     totalChecks: 8,
     recommendations: [],
   })),
-  generateAccessibilityProfile: vi.fn((ctx) => ({
-    colorblindMode: { enabled: false, mode: 'protanopia', filterStrength: 1.0 },
-    screenReader: { enabled: false, entityDescriptions: new Map(), announcements: [] },
-    inputRemapping: { enabled: false, remappings: [] },
-    subtitles: { enabled: false, fontSize: 'medium', position: 'bottom', backgroundColor: '#000', textColor: '#fff' },
-    fontSize: { enabled: false, scale: 1.0 },
-    reducedMotion: false,
-    highContrast: false,
-    ctx,
-  })),
+  generateAccessibilityProfile: vi.fn((_ctx) => mockProfile()),
   generateEntityDescriptions: vi.fn(() => new Map([['ent-1', 'A player entity']])),
   buildEntitySummaries: vi.fn(() => []),
-  createDefaultProfile: vi.fn(() => ({
-    colorblindMode: { enabled: false, mode: 'protanopia', filterStrength: 1.0 },
-    screenReader: { enabled: false, entityDescriptions: new Map(), announcements: [] },
-    inputRemapping: { enabled: false, remappings: [] },
-    subtitles: { enabled: false, fontSize: 'medium', position: 'bottom', backgroundColor: '#000', textColor: '#fff' },
-    fontSize: { enabled: false, scale: 1.0 },
-    reducedMotion: false,
-    highContrast: false,
-  })),
+  createDefaultProfile: vi.fn(() => mockProfile()),
 }));
 
 vi.mock('lucide-react', async () => {
@@ -265,5 +259,109 @@ describe('AccessibilityPanel', () => {
     expect(mockSetAccessibilityProfile).toHaveBeenCalled();
     const latestCall = mockSetAccessibilityProfile.mock.calls[mockSetAccessibilityProfile.mock.calls.length - 1][0];
     expect(latestCall.screenReader.enabled).toBe(true);
+  });
+
+  it('cleans up previously-applied keybindings when profile is regenerated (#8307)', async () => {
+    // Set up mock to return profile A with remappings, then profile B with different remappings
+    const { generateAccessibilityProfile } = await import('@/lib/ai/accessibilityGenerator');
+    const mockGenerate = vi.mocked(generateAccessibilityProfile);
+
+    // Profile A: Jump→Space input remapping
+    mockGenerate.mockReturnValueOnce(mockProfile({
+      inputRemapping: {
+        enabled: true,
+        remappings: [{ action: 'Jump', primaryKey: 'Space', alternativeKeys: [], gamepadButton: undefined }],
+        onScreenControls: false,
+      },
+    }));
+
+    // Profile B: Dash→Shift input remapping (Jump no longer present)
+    mockGenerate.mockReturnValueOnce(mockProfile({
+      inputRemapping: {
+        enabled: true,
+        remappings: [{ action: 'Dash', primaryKey: 'Shift', alternativeKeys: [], gamepadButton: undefined }],
+        onScreenControls: false,
+      },
+    }));
+
+    render(<AccessibilityPanel />);
+    mockDispatcher.mockClear();
+
+    // Generate profile A
+    fireEvent.click(screen.getByLabelText('Auto-generate accessibility profile'));
+    // Allow setTimeout(fn, 0) to fire
+    await vi.waitFor(() => {
+      expect(mockGenerate).toHaveBeenCalledTimes(1);
+    });
+
+    // Profile A should have dispatched set_input_binding for Jump
+    const setJumpCalls = mockDispatcher.mock.calls.filter(
+      ([cmd]) => cmd === 'set_input_binding',
+    );
+    expect(setJumpCalls.length).toBeGreaterThanOrEqual(1);
+    expect(setJumpCalls.some(([_cmd, args]) => args.actionName === 'Jump')).toBe(true);
+
+    mockDispatcher.mockClear();
+
+    // Generate profile B (different remappings)
+    fireEvent.click(screen.getByLabelText('Auto-generate accessibility profile'));
+    await vi.waitFor(() => {
+      expect(mockGenerate).toHaveBeenCalledTimes(2);
+    });
+
+    // The old Jump binding should have been removed
+    const removeJumpCalls = mockDispatcher.mock.calls.filter(
+      ([cmd, args]) => cmd === 'remove_input_binding' && args.actionName === 'Jump',
+    );
+    expect(removeJumpCalls.length).toBeGreaterThanOrEqual(1);
+
+    // And the new Dash binding should have been applied
+    const setDashCalls = mockDispatcher.mock.calls.filter(
+      ([cmd, args]) => cmd === 'set_input_binding' && args.actionName === 'Dash',
+    );
+    expect(setDashCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('cleans up all applied keybindings on unmount (#8307)', async () => {
+    const { generateAccessibilityProfile } = await import('@/lib/ai/accessibilityGenerator');
+    const mockGenerate = vi.mocked(generateAccessibilityProfile);
+
+    // Return a profile with enabled remappings when auto-generate is clicked
+    mockGenerate.mockReturnValueOnce(mockProfile({
+      inputRemapping: {
+        enabled: true,
+        remappings: [
+          { action: 'Jump', primaryKey: 'Space', alternativeKeys: [], gamepadButton: undefined },
+          { action: 'Fire', primaryKey: 'Enter', alternativeKeys: [], gamepadButton: undefined },
+        ],
+        onScreenControls: false,
+      },
+    }));
+
+    const { unmount } = render(<AccessibilityPanel />);
+
+    // Auto-generate to apply remappings
+    fireEvent.click(screen.getByLabelText('Auto-generate accessibility profile'));
+    await vi.waitFor(() => {
+      expect(mockGenerate).toHaveBeenCalledTimes(1);
+    });
+
+    // Verify bindings were applied
+    const applyCalls = mockDispatcher.mock.calls.filter(
+      ([cmd]) => cmd === 'set_input_binding',
+    );
+    expect(applyCalls.length).toBeGreaterThanOrEqual(2);
+
+    mockDispatcher.mockClear();
+
+    unmount();
+
+    // On unmount, all previously-applied bindings should be removed
+    const removeCalls = mockDispatcher.mock.calls.filter(
+      ([cmd]) => cmd === 'remove_input_binding',
+    );
+    const removedActions = removeCalls.map(([_cmd, args]) => args.actionName);
+    expect(removedActions).toContain('Jump');
+    expect(removedActions).toContain('Fire');
   });
 });

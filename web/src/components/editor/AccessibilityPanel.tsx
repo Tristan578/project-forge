@@ -467,24 +467,20 @@ export function AccessibilityPanel() {
   const irRemappings = profile.inputRemapping.remappings;
   const prevAppliedActionsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const dispatch = getCommandDispatcher();
-    const currentActions = new Set(irRemappings.map((r) => r.action));
-
-    if (dispatch) {
-      // Remove any previously-applied actions that are no longer in the list
-      for (const action of prevAppliedActionsRef.current) {
-        if (!currentActions.has(action)) {
-          dispatch('remove_input_binding', { actionName: action });
-        }
-      }
-    }
-
     dispatchInputRemappings(irRemappings, irEnabled);
+    const currentActions = new Set(irRemappings.map((r) => r.action));
     prevAppliedActionsRef.current = irEnabled ? currentActions : new Set();
 
     return () => {
-      // Remove all custom bindings on unmount so engine reverts to defaults
-      dispatchInputRemappings(irRemappings, false);
+      // Remove all previously-applied bindings so engine reverts to defaults.
+      // Uses the ref (not the closure) to ensure stale bindings from prior
+      // profile regenerations are always cleaned up (#8307).
+      const d = getCommandDispatcher();
+      if (d) {
+        for (const action of prevAppliedActionsRef.current) {
+          d('remove_input_binding', { actionName: action });
+        }
+      }
       prevAppliedActionsRef.current = new Set();
     };
   }, [irEnabled, irRemappings]);

@@ -165,6 +165,8 @@ const eslintConfig = defineConfig([
     "public/engine-pkg-webgpu-runtime/**",
     // Test coverage output
     "coverage/**",
+    // k6 load test scripts (k6 runtime, not Node.js)
+    "load-tests/**",
   ]),
 ]);
 

@@ -318,4 +318,17 @@ describe('InspectorPanel', () => {
     fireEvent.click(screen.getByText('Edit Script'));
     expect(mockSetRightPanelTab).toHaveBeenCalledWith('script');
   });
+
+  // ── Touch target compliance (#8229) ───────────────────────────────────
+
+  it('transform action buttons meet 44px minimum touch target (#8229)', () => {
+    setupStore();
+    render(<InspectorPanel />);
+    const copyBtn = screen.getByTitle('Copy transform');
+    const pasteBtn = screen.getByTitle('Paste transform');
+    for (const btn of [copyBtn, pasteBtn]) {
+      expect(btn.className).toContain('min-h-11');
+      expect(btn.className).toContain('min-w-11');
+    }
+  });
 });

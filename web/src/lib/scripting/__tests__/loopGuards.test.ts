@@ -327,5 +327,32 @@ describe('injectLoopGuards (production implementation)', () => {
       const { guardVarNames } = injectLoopGuards(source);
       expect(guardVarNames).toHaveLength(0);
     });
+
+    it('does not inject into loop keywords inside template literals (#8289)', () => {
+      const source = 'const s = `for each item do while processing`; const x = 1;';
+      const { source: output, guardVarNames } = injectLoopGuards(source);
+      expect(output).toBe(source);
+      expect(guardVarNames).toHaveLength(0);
+    });
+
+    it('guards loops inside template literal expressions (#8289)', () => {
+      const source = 'const s = `result: ${(() => { let n = 0; for (let i = 0; i < 3; i++) { n += i; } return n; })()}`;';
+      const { guardVarNames } = injectLoopGuards(source);
+      expect(guardVarNames).toHaveLength(1);
+    });
+
+    it('handles nested template literals correctly (#8289)', () => {
+      const source = 'const s = `outer ${`inner ${x}`} rest`;';
+      const { source: output, guardVarNames } = injectLoopGuards(source);
+      expect(output).toBe(source);
+      expect(guardVarNames).toHaveLength(0);
+    });
+
+    it('returns source unchanged for syntax errors (#8289)', () => {
+      const source = 'const x = {{{;';
+      const { source: output, guardVarNames } = injectLoopGuards(source);
+      expect(output).toBe(source);
+      expect(guardVarNames).toHaveLength(0);
+    });
   });
 });
