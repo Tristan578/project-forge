@@ -125,6 +125,8 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
     '/api/docs(.*)',
     '/api-docs(.*)',
     '/api/openapi(.*)',
+    '/api/health(.*)',
+    '/api/status(.*)',
     '/api/sentry(.*)',
     '/monitoring(.*)',
   ];
