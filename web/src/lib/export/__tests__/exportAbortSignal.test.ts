@@ -93,7 +93,10 @@ describe('exportGame AbortSignal', () => {
 
       // Attach rejection handler BEFORE advancing timers to prevent
       // unhandled rejection when the abort fires during advanceTimersByTimeAsync.
-      const rejection = result.catch((err: Error) => err);
+      const rejection = result.then(
+        () => { throw new Error('Should have rejected'); },
+        (err: unknown) => err as DOMException,
+      );
 
       // Abort after 100ms — well before the 5s timeout
       await vi.advanceTimersByTimeAsync(100);
