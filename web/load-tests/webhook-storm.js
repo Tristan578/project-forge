@@ -44,7 +44,7 @@ const EVENT_TYPES = [
   'checkout.session.completed',
   'customer.subscription.updated',
   'customer.subscription.deleted',
-  'invoice.payment_succeeded',
+  'invoice.paid',
   'invoice.payment_failed',
 ];
 
@@ -86,9 +86,11 @@ function signPayload(payload, secret) {
 
 export default function () {
   const eventType = EVENT_TYPES[Math.floor(Math.random() * EVENT_TYPES.length)];
-  // Use globally unique iteration counter (not per-VU __ITER which collides
-  // across virtual users in shared-iterations mode).
-  const index = exec.scenario.iterationInTest;
+  // Use a 50-slot repeating pool so half the requests reuse event IDs,
+  // exercising the server-side idempotency guard. The pool is keyed by event
+  // type so different event types don't collide with each other.
+  const pool = 50;
+  const index = exec.scenario.iterationInTest % pool;
   const payload = makeWebhookPayload(eventType, index);
   const body = JSON.stringify(payload);
 
@@ -102,10 +104,17 @@ export default function () {
   const isError = res.status >= 500;
   errorRate.add(isError);
 
-  // Track duplicate detection: a 200 on a previously-sent event ID means the
-  // handler processed it; a 409 or identical 200 with "already processed" in
-  // the body indicates the idempotency guard fired correctly.
-  const isDuplicate = res.status === 200 && res.body && res.body.includes('already_processed');
+  // Track duplicate detection: server returns {"received":true,"duplicate":true}
+  // when the idempotency guard fires for a previously-processed event ID.
+  let isDuplicate = false;
+  if (res.status === 200 && res.body) {
+    try {
+      const json = res.json();
+      isDuplicate = json.duplicate === true;
+    } catch (_) {
+      // non-JSON body (e.g. 400 from failed sig verification) — not a duplicate
+    }
+  }
   duplicateRate.add(isDuplicate ? 1 : 0);
 
   // 400 is expected when signature verification fails (no real secret)
