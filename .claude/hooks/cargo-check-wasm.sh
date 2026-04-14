@@ -28,8 +28,8 @@ fi
 
 echo "[cargo-check-wasm] Running cargo check --target wasm32-unknown-unknown on $FILE_PATH..." >&2
 
-OUTPUT=$(cd "$ENGINE_DIR" && cargo check --target wasm32-unknown-unknown --message-format=short 2>&1 || true)
-EXIT_CODE=$?
+EXIT_CODE=0
+OUTPUT=$(cd "$ENGINE_DIR" && cargo check --target wasm32-unknown-unknown --message-format=short 2>&1) || EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ] || echo "$OUTPUT" | grep -qE '^error'; then
   echo "CARGO CHECK FAILED for $FILE_PATH:"
