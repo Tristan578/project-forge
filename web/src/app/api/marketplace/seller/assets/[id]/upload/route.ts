@@ -87,13 +87,19 @@ export async function POST(
 
     if (previewFile) {
       const key = buildAssetKey(user.id, assetId, previewFile.name, 'preview');
-      const { url } = await uploadToR2(key, previewFile.stream(), previewFile.type);
+      const body = typeof previewFile.stream === 'function'
+        ? previewFile.stream()
+        : Buffer.from(await previewFile.arrayBuffer());
+      const { url } = await uploadToR2(key, body, previewFile.type);
       updates.previewUrl = url;
     }
 
     if (assetFile) {
       const key = buildAssetKey(user.id, assetId, assetFile.name, 'file');
-      const { url } = await uploadToR2(key, assetFile.stream(), assetFile.type);
+      const body = typeof assetFile.stream === 'function'
+        ? assetFile.stream()
+        : Buffer.from(await assetFile.arrayBuffer());
+      const { url } = await uploadToR2(key, body, assetFile.type);
       updates.assetFileUrl = url;
       updates.assetFileSize = assetFile.size;
     }
