@@ -3,7 +3,7 @@ vi.mock('server-only', () => ({}));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { reserveTokenBudget, releaseUnusedBudget, recordStepUsage } from '@/lib/tokens/budget';
+import { reserveTokenBudget } from '@/lib/tokens/budget';
 
 vi.mock('@/lib/api/middleware');
 vi.mock('@/lib/tokens/budget');

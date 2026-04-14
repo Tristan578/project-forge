@@ -14,12 +14,14 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
 const BASE_URL = 'http://localhost:3000/api/user/profile';
 
 function makeReq(method: string, body?: string) {
-  const opts: RequestInit = { method };
   if (body) {
-    opts.body = body;
-    opts.headers = { 'Content-Type': 'application/json' };
+    return new NextRequest(BASE_URL, {
+      method,
+      body,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
-  return new NextRequest(BASE_URL, opts);
+  return new NextRequest(BASE_URL, { method });
 }
 
 function mockMiddlewareSuccess(
