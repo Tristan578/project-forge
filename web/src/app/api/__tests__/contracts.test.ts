@@ -474,6 +474,18 @@ describe('OpenAPI schema validation — public routes', () => {
     expect(balanceValidator(validBalance)).toBe(true);
   });
 
+  it('TokenBalance schema validates nextRefillDate as null', () => {
+    const balanceValidator = validators['TokenBalance'];
+    const balanceWithNullRefill = {
+      monthlyRemaining: 9500,
+      monthlyTotal: 10000,
+      addon: 0,
+      total: 9500,
+      nextRefillDate: null,
+    };
+    expect(balanceValidator(balanceWithNullRefill)).toBe(true);
+  });
+
   it('TokenBalance schema rejects objects with wrong field names', () => {
     const balanceValidator = validators['TokenBalance'];
     const wrongFields = {
