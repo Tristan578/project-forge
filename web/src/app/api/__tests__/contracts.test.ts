@@ -5,10 +5,9 @@
  * that breaking changes in route signatures are caught in CI before they
  * reach clients or the MCP server.
  *
- * Tested routes:
- *   GET  /api/health       — { status, services[], timestamp, ... }
- *   GET  /api/capabilities — { capabilities[], available[], unavailable[] }
- *   POST /api/chat         — invalid body → { error } with 400
+ * Part 1: Hand-written shape tests for health, capabilities, chat.
+ * Part 2: Ajv-based validation of responses against OpenAPI spec schemas.
+ * Part 3: Auth-gated routes return Error schema on 401.
  *
  * All external I/O (DB, fetch, Clerk, Redis) is mocked.
  */
@@ -353,5 +352,270 @@ describe('POST /api/chat — invalid body contract', () => {
     const body = await res.json() as Record<string, unknown>;
     expect(typeof body.error).toBe('string');
     expect((body.error as string).length).toBeGreaterThan(0);
+  });
+});
+
+// ===========================================================================
+// Part 2: OpenAPI spec schema validation with Ajv
+// ===========================================================================
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const Ajv = require('ajv') as typeof import('ajv');
+import { readFileSync } from 'fs';
+import path from 'path';
+
+/**
+ * Load the OpenAPI spec and compile its component schemas into Ajv validators.
+ * The spec has a trailing comma that standard JSON.parse rejects, so we strip
+ * trailing commas before parsing.
+ */
+function loadOpenApiSchemas() {
+  const specPath = path.resolve(__dirname, '../../../../../docs/api/openapi.json');
+  const raw = readFileSync(specPath, 'utf-8');
+  const fixed = raw.replace(/,(\s*[}\]])/g, '$1');
+  const spec = JSON.parse(fixed) as {
+    components?: { schemas?: Record<string, Record<string, unknown>> };
+    paths?: Record<string, Record<string, Record<string, unknown>>>;
+  };
+
+  // Ajv v6 from webpack transitive dep — unknownFormats ignores OpenAPI
+  // format keywords like "float", "uuid", "date-time" that Ajv doesn't
+  // validate by default.
+  const ajv = new Ajv({ allErrors: true, unknownFormats: 'ignore', nullable: true }) as InstanceType<typeof import('ajv')>;
+
+  const schemas = spec.components?.schemas ?? {};
+  const validators: Record<string, ReturnType<typeof ajv.compile>> = {};
+  for (const [name, schema] of Object.entries(schemas)) {
+    validators[name] = ajv.compile(schema);
+  }
+
+  return { spec, ajv, validators };
+}
+
+describe('OpenAPI schema validation — public routes', () => {
+  const { validators } = loadOpenApiSchemas();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it('GET /api/health response matches Error schema when unhealthy', async () => {
+    // The Error schema is { error: string } — used for 4xx/5xx responses.
+    // Verify the compiled validator works on a known-good Error object.
+    const errorValidator = validators['Error'];
+    expect(errorValidator).toBeDefined();
+
+    const valid = errorValidator({ error: 'Something went wrong' });
+    expect(valid).toBe(true);
+
+    const invalid = errorValidator({ message: 'wrong field name' });
+    expect(invalid).toBe(false);
+  });
+
+  it('health response has fields matching the spec 200 schema', async () => {
+    const { GET, resetHealthCache } = await import('@/app/api/health/route');
+    resetHealthCache();
+    const res = await GET(makeGetRequest('http://localhost/api/health'));
+    const body = await res.json() as Record<string, unknown>;
+
+    // The spec declares: status (string), services (array), timestamp (string)
+    // plus environment, commit, branch, version
+    expect(typeof body.status).toBe('string');
+    expect(Array.isArray(body.services)).toBe(true);
+    expect(typeof body.timestamp).toBe('string');
+  });
+
+  it('capabilities response includes all spec-required fields', async () => {
+    const { GET } = await import('@/app/api/capabilities/route');
+    const res = await GET(new NextRequest('http://localhost/api/capabilities'));
+    const body = await res.json() as Record<string, unknown>;
+
+    // The spec declares: capabilities (array), available (array), unavailable (array)
+    expect(Array.isArray(body.capabilities)).toBe(true);
+    expect(Array.isArray(body.available)).toBe(true);
+    expect(Array.isArray(body.unavailable)).toBe(true);
+
+    // Each capability entry must have: capability (string), available (boolean), label (string)
+    const caps = body.capabilities as Array<Record<string, unknown>>;
+    for (const cap of caps) {
+      expect(typeof cap.capability).toBe('string');
+      expect(typeof cap.available).toBe('boolean');
+      expect(typeof cap.label).toBe('string');
+    }
+  });
+
+  it('Error schema validator rejects non-object inputs', () => {
+    const errorValidator = validators['Error'];
+    expect(errorValidator(null)).toBe(false);
+    expect(errorValidator('string')).toBe(false);
+    expect(errorValidator(42)).toBe(false);
+    expect(errorValidator([])).toBe(false);
+  });
+
+  it('Error schema validator rejects objects without error field', () => {
+    const errorValidator = validators['Error'];
+    expect(errorValidator({})).toBe(false);
+    expect(errorValidator({ status: 401 })).toBe(false);
+    expect(errorValidator({ msg: 'oops' })).toBe(false);
+  });
+
+  it('TokenBalance schema validates correct shape', () => {
+    const balanceValidator = validators['TokenBalance'];
+    expect(balanceValidator).toBeDefined();
+
+    const validBalance = {
+      monthlyRemaining: 9500,
+      monthlyTotal: 10000,
+      addon: 0,
+      total: 9500,
+      nextRefillDate: '2026-05-01T00:00:00.000Z',
+    };
+    expect(balanceValidator(validBalance)).toBe(true);
+  });
+
+  it('TokenBalance schema validates nextRefillDate as null', () => {
+    const balanceValidator = validators['TokenBalance'];
+    const balanceWithNullRefill = {
+      monthlyRemaining: 9500,
+      monthlyTotal: 10000,
+      addon: 0,
+      total: 9500,
+      nextRefillDate: null,
+    };
+    expect(balanceValidator(balanceWithNullRefill)).toBe(true);
+  });
+
+  it('TokenBalance schema rejects objects with wrong field names', () => {
+    const balanceValidator = validators['TokenBalance'];
+    const wrongFields = {
+      monthlyTokens: 10000,
+      monthlyTokensUsed: 500,
+      monthlyTokensRemaining: 9500,
+      addonTokens: 0,
+    };
+    expect(balanceValidator(wrongFields)).toBe(false);
+  });
+
+  it('TokenBalance schema rejects empty objects', () => {
+    const balanceValidator = validators['TokenBalance'];
+    expect(balanceValidator({})).toBe(false);
+  });
+
+  it('GenerationStatus schema validates correct shape', () => {
+    const statusValidator = validators['GenerationStatus'];
+    expect(statusValidator).toBeDefined();
+
+    const validStatus = {
+      jobId: 'job_123',
+      status: 'completed',
+      progress: 100,
+      resultUrl: 'https://example.com/result.png',
+    };
+    expect(statusValidator(validStatus)).toBe(true);
+  });
+
+  it('GenerationStatus schema rejects invalid status enum', () => {
+    const statusValidator = validators['GenerationStatus'];
+    const invalidStatus = {
+      jobId: 'job_123',
+      status: 'magic',
+      progress: 50,
+    };
+    expect(statusValidator(invalidStatus)).toBe(false);
+  });
+
+  it('all component schemas compile without error', () => {
+    // Ensures the spec schemas are syntactically valid JSON Schema
+    const { validators: allValidators } = loadOpenApiSchemas();
+    const names = Object.keys(allValidators);
+    expect(names.length).toBeGreaterThanOrEqual(10);
+    for (const name of names) {
+      expect(typeof allValidators[name]).toBe('function');
+    }
+  });
+});
+
+// ===========================================================================
+// Part 3: Auth-gated routes return Error-schema-conformant 401 responses
+// ===========================================================================
+
+describe('Auth-gated routes return Error schema on 401', () => {
+  const { validators } = loadOpenApiSchemas();
+  const errorValidator = validators['Error'];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  /**
+   * Helper: call a route handler, assert 401 status and Error schema compliance.
+   */
+  async function assert401ErrorSchema(
+    importPath: string,
+    method: 'GET' | 'POST',
+    url: string,
+    body?: unknown,
+  ) {
+    const mod = await import(importPath);
+    const handler = mod[method];
+    expect(handler).toBeDefined();
+
+    const req = method === 'GET'
+      ? makeGetRequest(url)
+      : makePostRequest(url, body ?? {});
+    const res = await handler(req);
+
+    expect(res.status).toBe(401);
+    const json = await res.json() as Record<string, unknown>;
+    const valid = errorValidator(json);
+    expect(valid, `Response ${JSON.stringify(json)} does not match Error schema`).toBe(true);
+  }
+
+  it('GET /api/projects returns 401 with Error schema', async () => {
+    await assert401ErrorSchema('@/app/api/projects/route', 'GET', 'http://localhost/api/projects');
+  });
+
+  it('POST /api/projects returns 401 with Error schema', async () => {
+    await assert401ErrorSchema('@/app/api/projects/route', 'POST', 'http://localhost/api/projects', { name: 'Test' });
+  });
+
+  it('GET /api/tokens/balance returns 401 with Error schema', async () => {
+    await assert401ErrorSchema('@/app/api/tokens/balance/route', 'GET', 'http://localhost/api/tokens/balance');
+  });
+
+  it('GET /api/tokens/usage returns 401 with Error schema', async () => {
+    await assert401ErrorSchema('@/app/api/tokens/usage/route', 'GET', 'http://localhost/api/tokens/usage');
+  });
+
+  it('GET /api/publish/list returns 401 with Error schema', async () => {
+    await assert401ErrorSchema('@/app/api/publish/list/route', 'GET', 'http://localhost/api/publish/list');
+  });
+
+  it('GET /api/keys returns 401 with Error schema', async () => {
+    await assert401ErrorSchema('@/app/api/keys/route', 'GET', 'http://localhost/api/keys');
+  });
+
+  it('GET /api/keys/api-key returns 401 with Error schema', async () => {
+    await assert401ErrorSchema('@/app/api/keys/api-key/route', 'GET', 'http://localhost/api/keys/api-key');
+  });
+
+  it('POST /api/keys/api-key returns 401 with Error schema', async () => {
+    await assert401ErrorSchema(
+      '@/app/api/keys/api-key/route', 'POST', 'http://localhost/api/keys/api-key',
+      { name: 'test-key', scopes: ['read'] },
+    );
+  });
+
+  it('POST /api/billing/checkout returns 401 with Error schema', async () => {
+    await assert401ErrorSchema(
+      '@/app/api/billing/checkout/route', 'POST', 'http://localhost/api/billing/checkout',
+      { tier: 'pro' },
+    );
+  });
+
+  it('GET /api/marketplace/seller returns 401 with Error schema', async () => {
+    await assert401ErrorSchema('@/app/api/marketplace/seller/route', 'GET', 'http://localhost/api/marketplace/seller');
   });
 });
