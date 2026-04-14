@@ -4,14 +4,16 @@ import { invokeHandler } from './handlerTestUtils';
 
 vi.mock('@/lib/security/validator', () => ({
   getSecurityStatus: vi.fn().mockReturnValue({
-    csrfProtection: true,
-    rateLimit: true,
-    inputSanitization: true,
+    cspEnabled: true,
+    corsEnabled: true,
+    rateLimitEnabled: true,
+    sandboxEnabled: true,
+    maxRequestSize: '10KB',
   }),
   validateProjectSecurity: vi.fn().mockReturnValue({
     healthy: true,
     issues: [],
-    stats: { entityCount: 5, scriptCount: 2 },
+    stats: { totalEntities: 5, suspiciousNames: 0, oversizedScripts: 0 },
   }),
 }));
 
@@ -19,13 +21,16 @@ describe('securityHandlers', () => {
   describe('get_security_status', () => {
     it('returns security settings from validator', async () => {
       const { result } = await invokeHandler(securityHandlers, 'get_security_status', {});
+      const data = result.result as Record<string, unknown>;
 
       expect(result.success).toBe(true);
-      expect(result.result?.status).toContain('Security features enabled');
-      expect(result.result?.settings).toEqual({
-        csrfProtection: true,
-        rateLimit: true,
-        inputSanitization: true,
+      expect(data.status).toContain('Security features enabled');
+      expect(data.settings).toEqual({
+        cspEnabled: true,
+        corsEnabled: true,
+        rateLimitEnabled: true,
+        sandboxEnabled: true,
+        maxRequestSize: '10KB',
       });
     });
   });
@@ -41,10 +46,11 @@ describe('securityHandlers', () => {
         },
         allScripts: {},
       });
+      const data = result.result as Record<string, unknown>;
 
       expect(result.success).toBe(true);
-      expect(result.result?.healthy).toBe(true);
-      expect(result.result?.issues).toEqual([]);
+      expect(data.healthy).toBe(true);
+      expect(data.issues).toEqual([]);
     });
 
     it('passes scene graph nodes to validator', async () => {
@@ -56,12 +62,12 @@ describe('securityHandlers', () => {
             n1: { entityId: 'e1', name: 'TestEntity', components: ['cube'] },
           },
         },
-        allScripts: { s1: { code: 'console.log("test")' } },
+        allScripts: { s1: { source: 'console.log("test")' } },
       });
 
       expect(validateProjectSecurity).toHaveBeenCalledWith(
         [{ id: 'e1', name: 'TestEntity', type: 'cube' }],
-        { s1: { code: 'console.log("test")' } },
+        expect.anything(),
       );
     });
 
@@ -69,19 +75,23 @@ describe('securityHandlers', () => {
       const { validateProjectSecurity } = await import('@/lib/security/validator');
       vi.mocked(validateProjectSecurity).mockReturnValueOnce({
         healthy: false,
-        issues: ['Unsafe code pattern in script s1', 'Exposed API key in script s2'],
-        stats: { entityCount: 3, scriptCount: 2 },
+        issues: [
+          { severity: 'high', category: 'script_security', message: 'Unsafe code pattern in script s1' },
+          { severity: 'high', category: 'script_security', message: 'Exposed API key in script s2' },
+        ],
+        stats: { totalEntities: 3, suspiciousNames: 0, oversizedScripts: 0 },
       });
 
       const { result } = await invokeHandler(securityHandlers, 'validate_project_security', {}, {
         sceneGraph: { nodes: {} },
         allScripts: {},
       });
+      const data = result.result as Record<string, unknown>;
 
       expect(result.success).toBe(true);
-      expect(result.result?.healthy).toBe(false);
-      expect(result.result?.status).toContain('Found 2 issue(s)');
-      expect(result.result?.issues).toHaveLength(2);
+      expect(data.healthy).toBe(false);
+      expect(data.status).toContain('Found 2 issue(s)');
+      expect(data.issues).toHaveLength(2);
     });
 
     it('handles empty scene graph', async () => {

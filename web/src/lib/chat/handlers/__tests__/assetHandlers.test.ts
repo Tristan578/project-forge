@@ -126,10 +126,11 @@ describe('assetHandlers', () => {
   describe('list_assets', () => {
     it('returns empty list when no assets', async () => {
       const { result } = await invokeHandler(assetHandlers, 'list_assets', {});
+      const data = result.result as Record<string, unknown>;
 
       expect(result.success).toBe(true);
-      expect(result.result?.assets).toEqual([]);
-      expect(result.result?.count).toBe(0);
+      expect(data.assets).toEqual([]);
+      expect(data.count).toBe(0);
     });
 
     it('returns asset summaries from store', async () => {
@@ -139,10 +140,11 @@ describe('assetHandlers', () => {
           a2: { id: 'a2', name: 'Shield', kind: 'model', fileSize: 2048 },
         },
       });
+      const data = result.result as Record<string, unknown>;
 
       expect(result.success).toBe(true);
-      expect(result.result?.count).toBe(2);
-      const assets = result.result?.assets as Array<{ id: string; name: string }>;
+      expect(data.count).toBe(2);
+      const assets = data.assets as Array<{ id: string; name: string }>;
       expect(assets.map(a => a.name).sort()).toEqual(['Shield', 'Sword']);
     });
   });
