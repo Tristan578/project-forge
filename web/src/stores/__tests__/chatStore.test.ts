@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { useChatStore, type ChatMessage, type ToolCallStatus } from '../chatStore';
+import { useChatStore, flushConversationSaveForTesting, type ChatMessage, type ToolCallStatus } from '../chatStore';
 import { mockSSEResponse, makeChatSSEEvents } from '@/test/utils/streamingTestUtils';
 
 describe('chatStore', () => {
@@ -489,6 +489,28 @@ describe('chatStore', () => {
       const parsed = JSON.parse(stored!);
       expect(parsed).toHaveLength(50);
       expect(parsed[0].content).toBe('Message 10'); // First 10 trimmed
+    });
+
+    it('should coalesce rapid saveConversation calls (#7418)', () => {
+      // Rapid saves — only the last one should persist
+      useChatStore.setState({ messages: [{ id: 'm1', role: 'user', content: 'first', timestamp: 1 }] });
+      useChatStore.getState().saveConversation('coalesce-test');
+
+      useChatStore.setState({ messages: [{ id: 'm2', role: 'user', content: 'second', timestamp: 2 }] });
+      useChatStore.getState().saveConversation('coalesce-test');
+
+      useChatStore.setState({ messages: [{ id: 'm3', role: 'user', content: 'third', timestamp: 3 }] });
+      useChatStore.getState().saveConversation('coalesce-test');
+
+      // Flush synchronously via test helper
+      flushConversationSaveForTesting();
+
+      // Verify the stored data is from the LAST call
+      const stored = localStorage.getItem('forge-chat-coalesce-test');
+      expect(stored).not.toBeNull();
+      const parsed = JSON.parse(stored!);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].content).toBe('third');
     });
 
     it('should round-trip save and load', async () => {
