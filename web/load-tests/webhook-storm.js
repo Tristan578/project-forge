@@ -18,6 +18,7 @@ import http from 'k6/http';
 import { check } from 'k6';
 import { Rate } from 'k6/metrics';
 import { crypto } from 'k6/experimental/webcrypto';
+import exec from 'k6/execution';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
 const WEBHOOK_SECRET = __ENV.STRIPE_WEBHOOK_SECRET || '';
@@ -80,7 +81,9 @@ function signPayload(payload, _secret) {
 
 export default function () {
   const eventType = EVENT_TYPES[Math.floor(Math.random() * EVENT_TYPES.length)];
-  const index = __ITER;
+  // Use globally unique iteration counter (not per-VU __ITER which collides
+  // across virtual users in shared-iterations mode).
+  const index = exec.scenario.iterationInTest;
   const payload = makeWebhookPayload(eventType, index);
   const body = JSON.stringify(payload);
 
@@ -89,27 +92,35 @@ export default function () {
     'Stripe-Signature': signPayload(body, WEBHOOK_SECRET),
   };
 
-  const res = http.post(`${BASE_URL}/api/webhooks/stripe`, body, { headers });
+  const res = http.post(`${BASE_URL}/api/stripe/webhook`, body, { headers });
 
   const isError = res.status >= 500;
   errorRate.add(isError);
 
+  // Track duplicate detection: a 200 on a previously-sent event ID means the
+  // handler processed it; a 409 or identical 200 with "already processed" in
+  // the body indicates the idempotency guard fired correctly.
+  const isDuplicate = res.status === 200 && res.body && res.body.includes('already_processed');
+  duplicateRate.add(isDuplicate ? 1 : 0);
+
   // 400 is expected when signature verification fails (no real secret)
   check(res, {
     'no 500 errors': (r) => r.status < 500,
-    'valid response': (r) => [200, 400].includes(r.status),
+    'valid response': (r) => [200, 400, 409].includes(r.status),
   });
 }
 
 export function handleSummary(data) {
   const total = data.metrics.http_reqs?.values?.count ?? 0;
   const errRate = data.metrics.errors?.values?.rate ?? 0;
+  const dupRate = data.metrics.duplicates?.values?.rate ?? 0;
   const p95 = data.metrics.http_req_duration?.values?.['p(95)'] ?? 0;
 
   console.log('\n======== WEBHOOK STORM TEST SUMMARY ========');
   console.log(`Total webhooks:  ${total}`);
   console.log(`p95 latency:     ${p95.toFixed(0)}ms`);
   console.log(`Error rate:      ${(errRate * 100).toFixed(2)}% (target: <1%)`);
+  console.log(`Duplicate rate:  ${(dupRate * 100).toFixed(2)}%`);
   console.log('=============================================\n');
 
   return {};
