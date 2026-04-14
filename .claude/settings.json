@@ -34,6 +34,21 @@
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/lessons-learned-reminder.sh\"",
             "timeout": 3000
+          },
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/builder-quality-gate.sh\"",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/review-quality-gate.sh\"",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/worktree-safety-commit.sh\"",
+            "timeout": 10000
           }
         ]
       }
@@ -186,6 +201,11 @@
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/check-route-has-test.sh\"",
             "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/cargo-check-wasm.sh\"",
+            "timeout": 30000
           }
         ]
       },
@@ -235,6 +255,11 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/validate-agent-output.sh\"",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/reject-incomplete-review.sh\"",
             "timeout": 5000
           }
         ]
