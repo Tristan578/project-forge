@@ -91,12 +91,19 @@ describe('exportGame AbortSignal', () => {
         signal: controller.signal,
       });
 
+      // Attach rejection handler BEFORE advancing timers to prevent
+      // unhandled rejection when the abort fires during advanceTimersByTimeAsync.
+      const rejection = result.catch((err: Error) => err);
+
       // Abort after 100ms — well before the 5s timeout
       await vi.advanceTimersByTimeAsync(100);
       controller.abort();
 
-      // Should reject with AbortError, not wait for the 5s timeout
-      await expect(result).rejects.toThrow('Export cancelled');
+      const err = await rejection;
+      expect(err).toBeInstanceOf(DOMException);
+      expect(err.message).toBe('Export cancelled');
+
+      vi.clearAllTimers();
     } finally {
       vi.useRealTimers();
     }
@@ -116,12 +123,18 @@ describe('exportGame AbortSignal', () => {
         includeDebug: false,
       });
 
-      // Advance past the 5s scene data timeout
+      // Attach rejection handler BEFORE advancing timers to prevent
+      // unhandled rejection when the 5s engine timeout fires.
+      const settledPromise = result.then(() => 'resolved').catch(() => 'rejected');
+
+      // Advance past the 5s scene data timeout so getSceneData rejects
       await vi.advanceTimersByTimeAsync(6000);
 
-      // Export will reject (empty WASM) or resolve — either way, no TypeError from missing signal
-      const settled = await result.then(() => 'resolved').catch(() => 'rejected');
+      // Export will reject (engine timeout, no WASM) — either way, no TypeError from missing signal
+      const settled = await settledPromise;
       expect(['resolved', 'rejected']).toContain(settled);
+
+      vi.clearAllTimers();
     } finally {
       vi.useRealTimers();
     }
