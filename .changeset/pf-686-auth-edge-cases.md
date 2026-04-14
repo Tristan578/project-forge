@@ -1,5 +1,5 @@
 ---
-'@spawnforge/web': patch
+'web': patch
 ---
 
 fix(auth): catch Clerk token throws and enforce banned flag

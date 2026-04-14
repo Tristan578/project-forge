@@ -1,5 +1,5 @@
 ---
-'@spawnforge/web': patch
+'web': patch
 ---
 
 test(chat): broaden chat executor integration coverage to all 29 handler domains
