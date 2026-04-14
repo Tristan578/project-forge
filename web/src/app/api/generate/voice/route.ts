@@ -87,6 +87,13 @@ export const POST = createGenerationHandler<
       },
     };
   },
+  cacheKeyParams: (params) => ({
+    text: params.text,
+    voiceId: params.voiceId,
+    stability: params.stability,
+    similarityBoost: params.similarityBoost,
+    style: params.style,
+  }),
   execute: async (params, apiKey) => {
     const client = new ElevenLabsClient({ apiKey });
     const result = await client.generateVoice({

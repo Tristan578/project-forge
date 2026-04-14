@@ -110,6 +110,11 @@ export const POST = createGenerationHandler<
       },
     };
   },
+  cacheKeyParams: (params) => ({
+    strings: params.strings,
+    sourceLocale: params.sourceLocale,
+    targetLocales: params.targetLocales,
+  }),
   execute: async (params, apiKey) => {
     const anthropicProvider = createAnthropic({ apiKey });
     const result: Record<string, LocaleBundle> = {};

@@ -28,6 +28,10 @@ export const POST = createGenerationHandler<
 
     return { ok: true, params: { prompt: prompt as string, durationSeconds: durationSeconds as number } };
   },
+  cacheKeyParams: (params) => ({
+    prompt: params.prompt,
+    durationSeconds: params.durationSeconds,
+  }),
   execute: async (params, apiKey) => {
     const client = new ElevenLabsClient({ apiKey });
     const result = await client.generateSfx({
