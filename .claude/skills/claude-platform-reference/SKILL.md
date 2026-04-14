@@ -5,32 +5,34 @@ description: "Use when you need details about SpawnForge's Claude Code platform 
 
 # Claude Code Platform Reference
 
-## Skills (~28 custom + 19 marketplace)
+## Skills (53 total)
 
 **Orchestration:** `/planner`, `/builder`, `/cycle`
 **Engine:** `/rust-engine`, `/build`, `/arch-validator`, `/rust-best-practices`
 **Web:** `/frontend`, `/mcp-commands`, `/web-accessibility`, `/shadcn`, `/vercel-react-best-practices`, `/vercel-composition-patterns`, `/vercel-react-view-transitions`
 **Next.js:** `/next-best-practices`, `/next-cache-components`, `/next-upgrade`
 **Testing:** `/testing`, `/playwright-best-practices`, `/tdd`
-**Infrastructure:** `/infra-services`, `/troubleshoot`, `/kanban`, `/babysit-prs`, `/pr-code-review`, `/pr-green-machine`, `/env-health-check`, `/changelog-review`, `/deploy-to-vercel`, `/resolve-pr-comments`, `/api-middleware-migrate`
-**Database:** `/db-migrate`, `/neon-postgres`, `/claimable-postgres`
+**Infrastructure:** `/infra-services`, `/troubleshoot`, `/kanban`, `/babysit-prs`, `/pr-code-review`, `/pr-green-machine`, `/env-health-check`, `/changelog-review`, `/deploy-to-vercel`, `/resolve-pr-comments`, `/resolve-all-pr-comments`, `/api-middleware-migrate`, `/autonomous-sprint`
+**Database:** `/db-migrate`, `/neon-postgres`, `/claimable-postgres`, `/neon-postgres-egress-optimizer`
 **Deployment:** `/deploy-engine` (user-only)
-**Billing:** `stripe-webhooks` (background, auto-loads on billing edits)
-**Features:** `/game-engine`, `/multiplayer-readiness`, `/viewport`
+**Billing:** `/stripe-webhooks` (background, auto-loads on billing edits)
+**Features:** `/game-engine`, `/game-ui-design`, `/multiplayer-readiness`, `/viewport`
 **Workflow:** `/design`, `/architect-flow`, `/docs`, `/developer-experience`
 **Review:** `/review-protocol`, `/component-checklist`
+**Vercel:** `/vercel-cli-with-tokens`, `/vercel-react-native-skills`
 
-Marketplace skills live in `.agents/skills/` with symlinks in `.claude/skills/`. Managed via `npx skills add/ls/update`.
-
-## MCP Servers (`.mcp.json` — 4 servers)
+## MCP Servers (`.mcp.json` — 7 servers)
 - `context7` — live library documentation for all 30+ dependencies
 - `neon` — direct Neon Postgres queries (needs `NEON_API_KEY`)
 - `playwright` — browser automation for E2E verification
 - `github` — GitHub API access for PR/issue/Actions operations
+- `sentry` — error tracking, issue search, event analysis
+- `stripe` — payment processing, webhook debugging, test cards
+- `upstash` — Redis cache operations and rate limiting
 
-## Hooks (`.claude/hooks/` — 40+ scripts, 18 event types)
+## Hooks (`.claude/hooks/` — 52 scripts, 20 event types)
 
-**Event types:** PreToolUse, PostToolUse, SessionStart, SessionEnd, UserPromptSubmit, Stop, SubagentStart, SubagentStop, TaskCreated, TaskCompleted, TeammateIdle, PreCompact, PostCompact, StopFailure, ConfigChange, InstructionsLoaded, WorktreeCreate, CwdChanged, PostToolUseFailure
+**Event types:** PreToolUse, PostToolUse, SessionStart, SessionEnd, UserPromptSubmit, Stop, SubagentStart, SubagentStop, TaskCreated, TaskCompleted, TeammateIdle, PreCompact, PostCompact, StopFailure, ConfigChange, InstructionsLoaded, WorktreeCreate, CwdChanged, PostToolUseFailure, FileChanged
 
 | Hook | Event | Purpose |
 |------|-------|---------|

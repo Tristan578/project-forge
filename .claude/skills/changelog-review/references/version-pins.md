@@ -86,9 +86,9 @@ Documenting why specific dependencies are pinned and what must be audited before
 | `wasm-bindgen` | =0.2.108 | HIGH (CLI must match) | Only upgrade as a coordinated Rust+CLI change |
 | `next` | 16.x | MEDIUM | Check migration guide, test E2E |
 | `bevy` | 0.18 | HIGH (API churn) | Only on planned engine upgrade sprint |
-| `@clerk/nextjs` | ^7.0.7 | LOW-MEDIUM | Check for auth() API changes |
-| `drizzle-orm` | ^0.45.1 | LOW | Check migration query syntax |
-| `vitest` | 4.1.1 | LOW | Check for workspace config changes |
+| `@clerk/nextjs` | ^7.0.12 | LOW-MEDIUM | Check for auth() API changes |
+| `drizzle-orm` | 0.45.2 | LOW | Check migration query syntax |
+| `vitest` | ^4.1.4 | LOW | Check for workspace config changes |
 | `zod` | ^4.3.6 | LOW | Already on v4 |
 
 ---
