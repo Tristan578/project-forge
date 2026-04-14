@@ -10,7 +10,13 @@
 set -euo pipefail
 
 INPUT=$(cat)
+AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // "unknown"' 2>/dev/null)
 OUTPUT=$(echo "$INPUT" | jq -r '.output // ""' 2>/dev/null)
+
+# Only enforce on reviewer/guardian agents — non-reviewers don't produce verdicts
+if ! echo "$AGENT_TYPE" | grep -qiE "reviewer|guardian"; then
+  exit 0
+fi
 
 # --- 1. Verdict check ---
 if ! echo "$OUTPUT" | grep -qiE '\bPASS\b|\bFAIL\b'; then
