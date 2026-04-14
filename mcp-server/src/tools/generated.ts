@@ -1,4 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import manifest from '../../manifest/commands.json' with { type: 'json' };
 import type { EditorBridge } from '../transport/websocket.js';
@@ -7,16 +8,15 @@ import type { EditorBridge } from '../transport/websocket.js';
  * Convert JSON Schema property to a Zod schema.
  * Handles the subset of JSON Schema used in our manifest.
  */
-function jsonSchemaToZod(prop: Record<string, unknown>): z.ZodTypeAny {
+export function jsonSchemaToZod(prop: Record<string, unknown>): z.ZodTypeAny {
   const type = prop.type as string;
 
   switch (type) {
     case 'string': {
-      let schema = z.string();
       if (prop.enum) {
         return z.enum(prop.enum as [string, ...string[]]);
       }
-      return schema;
+      return z.string();
     }
     case 'number':
       return z.number();
@@ -41,7 +41,7 @@ function jsonSchemaToZod(prop: Record<string, unknown>): z.ZodTypeAny {
 /**
  * Build a Zod object schema from JSON Schema properties definition.
  */
-function buildZodSchema(
+export function buildZodSchema(
   parameters: { properties?: Record<string, Record<string, unknown>>; required?: string[] }
 ): Record<string, z.ZodTypeAny> {
   const shape: Record<string, z.ZodTypeAny> = {};
@@ -53,7 +53,6 @@ function buildZodSchema(
     if (!required.has(key)) {
       fieldSchema = fieldSchema.optional();
     }
-    // Add description if available
     if (prop.description) {
       fieldSchema = fieldSchema.describe(prop.description as string);
     }
@@ -64,19 +63,54 @@ function buildZodSchema(
 }
 
 /**
+ * Derive MCP tool annotations from the command's requiredScope.
+ * Read-only scopes get readOnlyHint; write/manage scopes get destructiveHint
+ * for operations that modify or delete scene state.
+ */
+export function deriveAnnotations(
+  scope: string,
+  name: string,
+): ToolAnnotations {
+  const isRead = scope.endsWith(':read');
+  const isDestructive = name.startsWith('despawn_') ||
+    name.startsWith('delete_') ||
+    name.startsWith('remove_') ||
+    name === 'clear_scene' ||
+    name === 'undo' ||
+    name === 'redo';
+
+  return {
+    readOnlyHint: isRead,
+    destructiveHint: isDestructive,
+    openWorldHint: false,
+  };
+}
+
+/**
  * Register all commands from the manifest as MCP tools.
+ *
+ * Uses the registerTool API (non-deprecated) with annotations derived
+ * from each command's requiredScope for better tool discovery by LLM clients.
  */
 export function registerTools(server: McpServer, bridge: EditorBridge): void {
   for (const cmd of manifest.commands) {
-    const zodShape = buildZodSchema(cmd.parameters as unknown as {
+    const inputSchema = buildZodSchema(cmd.parameters as unknown as {
       properties?: Record<string, Record<string, unknown>>;
       required?: string[];
     });
 
-    server.tool(
+    const annotations = deriveAnnotations(
+      cmd.requiredScope,
       cmd.name,
-      cmd.description,
-      zodShape,
+    );
+
+    server.registerTool(
+      cmd.name,
+      {
+        description: cmd.description,
+        inputSchema,
+        annotations,
+      },
       async (args) => {
         try {
           const result = await bridge.executeCommand(cmd.name, args as Record<string, unknown>);
@@ -95,7 +129,7 @@ export function registerTools(server: McpServer, bridge: EditorBridge): void {
             isError: true,
           };
         }
-      }
+      },
     );
   }
 }
