@@ -47,6 +47,7 @@
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "@xyflow/react": "^12.10.1",
+    "acorn": "^8.16.0",
     "ai": "^6.0.158",
     "bcryptjs": "^3.0.3",
     "dockview-react": "^5.1.0",
