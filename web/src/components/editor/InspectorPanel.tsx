@@ -222,7 +222,8 @@ export const InspectorPanel = memo(function InspectorPanel() {
     : [0, 0, 0];
 
   const buttonClass = `
-    p-1 rounded transition-opacity duration-150
+    min-h-11 min-w-11 inline-flex items-center justify-center
+    rounded transition-opacity duration-150
     text-zinc-400 hover:text-zinc-200 hover:bg-[var(--sf-bg-elevated)]
     opacity-60 hover:opacity-100
     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:opacity-100
