@@ -48,7 +48,7 @@ function getCdnUrl(): string {
  */
 export async function uploadToR2(
   key: string,
-  body: Buffer | Uint8Array,
+  body: Buffer | Uint8Array | ReadableStream<Uint8Array>,
   contentType: string
 ): Promise<{ url: string; key: string }> {
   const r2 = getR2Client();

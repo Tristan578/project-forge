@@ -85,22 +85,15 @@ export async function POST(
       updatedAt?: Date;
     } = { updatedAt: new Date() };
 
-    // NOTE: Files are buffered entirely in memory before upload. For large assets (up to 100 MB),
-    // this may cause memory pressure. Streaming uploads would be preferable but require S3's
-    // multipart upload API or a presigned-URL flow, which adds significant complexity.
-    // Acceptable for MVP; revisit if memory issues arise in production.
-
     if (previewFile) {
-      const buffer = Buffer.from(await previewFile.arrayBuffer());
       const key = buildAssetKey(user.id, assetId, previewFile.name, 'preview');
-      const { url } = await uploadToR2(key, buffer, previewFile.type);
+      const { url } = await uploadToR2(key, previewFile.stream(), previewFile.type);
       updates.previewUrl = url;
     }
 
     if (assetFile) {
-      const buffer = Buffer.from(await assetFile.arrayBuffer());
       const key = buildAssetKey(user.id, assetId, assetFile.name, 'file');
-      const { url } = await uploadToR2(key, buffer, assetFile.type);
+      const { url } = await uploadToR2(key, assetFile.stream(), assetFile.type);
       updates.assetFileUrl = url;
       updates.assetFileSize = assetFile.size;
     }
