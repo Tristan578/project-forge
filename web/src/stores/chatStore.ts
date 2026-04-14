@@ -1158,24 +1158,26 @@ let _saveScheduled = false;
 
 // Per-project save debouncing — coalesces rapid saveConversation() calls so
 // only the latest messages are written, using the same requestIdleCallback
-// pattern as saveConversationsToStorage.
-let _pendingProjectSave: { projectId: string; messages: ChatMessage[] } | null = null;
+// pattern as saveConversationsToStorage. Uses a Map so concurrent saves for
+// different projects don't overwrite each other.
+const _pendingProjectSaves = new Map<string, ChatMessage[]>();
 let _projectSaveScheduled = false;
 
 function flushProjectSave() {
   _projectSaveScheduled = false;
-  if (!_pendingProjectSave) return;
-  const { projectId, messages } = _pendingProjectSave;
-  _pendingProjectSave = null;
-  try {
-    localStorage.setItem(PERSISTENCE_KEY + projectId, JSON.stringify(messages));
-  } catch {
-    // localStorage full or unavailable
+  if (_pendingProjectSaves.size === 0) return;
+  for (const [projectId, messages] of _pendingProjectSaves) {
+    try {
+      localStorage.setItem(PERSISTENCE_KEY + projectId, JSON.stringify(messages));
+    } catch {
+      // localStorage full or unavailable
+    }
   }
+  _pendingProjectSaves.clear();
 }
 
 function debouncedSaveProjectConversation(projectId: string, messages: ChatMessage[]) {
-  _pendingProjectSave = { projectId, messages };
+  _pendingProjectSaves.set(projectId, messages);
   if (!_projectSaveScheduled) {
     _projectSaveScheduled = true;
     if (typeof requestIdleCallback !== 'undefined') {
