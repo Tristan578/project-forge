@@ -6,6 +6,13 @@
  * AudioData component.
  */
 
+import type { EffectInstance, AudioSnapshot, LoopPoint } from './audioTypes';
+import { createEffectInstance as createEffect, generateIRBuffer } from './audioEffects';
+import { detectLoopPoints as detectLoops } from './loopDetection';
+
+// Re-export public types for backward compatibility
+export type { AudioSnapshot, LoopPoint } from './audioTypes';
+
 interface AudioInstance {
   entityId: string;
   assetId: string;
@@ -31,14 +38,6 @@ interface BusState {
   duckGainNode: GainNode;
 }
 
-interface EffectInstance {
-  type: string;
-  inputNode: AudioNode;
-  outputNode: AudioNode;
-  params: Record<string, number>;
-  enabled: boolean;
-}
-
 interface DuckingRule {
   triggerBus: string;
   targetBus: string;
@@ -59,20 +58,6 @@ interface AdaptiveMusicTrack {
   stems: Map<string, StemConfig>;
   intensity: number;
   bus: string;
-}
-
-export interface AudioSnapshot {
-  name: string;
-  busStates: Record<string, { volume: number; muted: boolean }>;
-  crossfadeDurationMs: number;
-}
-
-export interface LoopPoint {
-  startSample: number;
-  endSample: number;
-  startTime: number;
-  endTime: number;
-  score: number;
 }
 
 class AudioManager {
@@ -1010,175 +995,12 @@ class AudioManager {
    */
   private createEffectInstance(def: { effectType: string; params: Record<string, number>; enabled: boolean }): EffectInstance {
     if (!this.ctx) throw new Error('AudioContext not initialized');
-
-    switch (def.effectType) {
-      case 'reverb':
-        return this.createReverbEffect(this.ctx, def.params);
-      case 'lowpass':
-        return this.createFilterEffect(this.ctx, 'lowpass', def.params);
-      case 'highpass':
-        return this.createFilterEffect(this.ctx, 'highpass', def.params);
-      case 'compressor':
-        return this.createCompressorEffect(this.ctx, def.params);
-      case 'delay':
-        return this.createDelayEffect(this.ctx, def.params);
-      default:
-        // Passthrough: gain node with gain 1
-        const passthrough = this.ctx.createGain();
-        return {
-          type: def.effectType,
-          inputNode: passthrough,
-          outputNode: passthrough,
-          params: def.params,
-          enabled: true,
-        };
-    }
+    return createEffect(this.ctx, def, (presetIndex) => this.getIRBuffer(presetIndex));
   }
 
-  /**
-   * Create a reverb effect with procedural impulse response.
-   */
-  private createReverbEffect(ctx: AudioContext, params: Record<string, number>): EffectInstance {
-    const preset = params.preset ?? 0;
-    const wet = params.wet ?? 0.5;
-
-    const convolver = ctx.createConvolver();
-    convolver.buffer = this.getIRBuffer(preset);
-
-    const dryGain = ctx.createGain();
-    const wetGain = ctx.createGain();
-    const output = ctx.createGain();
-
-    dryGain.gain.value = 1 - wet;
-    wetGain.gain.value = wet;
-
-    // Split input into dry and wet paths
-    const input = ctx.createGain();
-    input.connect(dryGain).connect(output);
-    input.connect(convolver).connect(wetGain).connect(output);
-
-    return {
-      type: 'reverb',
-      inputNode: input,
-      outputNode: output,
-      params: { preset, wet },
-      enabled: true,
-    };
-  }
-
-  /**
-   * Create a filter effect (lowpass or highpass).
-   */
-  private createFilterEffect(ctx: AudioContext, type: 'lowpass' | 'highpass', params: Record<string, number>): EffectInstance {
-    const filter = ctx.createBiquadFilter();
-    filter.type = type;
-    filter.frequency.value = params.frequency ?? (type === 'lowpass' ? 1000 : 500);
-    filter.Q.value = params.q ?? 1.0;
-
-    return {
-      type,
-      inputNode: filter,
-      outputNode: filter,
-      params: { frequency: filter.frequency.value, q: filter.Q.value },
-      enabled: true,
-    };
-  }
-
-  /**
-   * Create a compressor effect.
-   */
-  private createCompressorEffect(ctx: AudioContext, params: Record<string, number>): EffectInstance {
-    const compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.value = params.threshold ?? -24;
-    compressor.knee.value = params.knee ?? 30;
-    compressor.ratio.value = params.ratio ?? 12;
-    compressor.attack.value = params.attack ?? 0.003;
-    compressor.release.value = params.release ?? 0.25;
-
-    return {
-      type: 'compressor',
-      inputNode: compressor,
-      outputNode: compressor,
-      params: {
-        threshold: compressor.threshold.value,
-        knee: compressor.knee.value,
-        ratio: compressor.ratio.value,
-        attack: compressor.attack.value,
-        release: compressor.release.value,
-      },
-      enabled: true,
-    };
-  }
-
-  /**
-   * Create a delay effect with feedback.
-   */
-  private createDelayEffect(ctx: AudioContext, params: Record<string, number>): EffectInstance {
-    const time = params.time ?? 0.5;
-    const feedback = Math.min(params.feedback ?? 0.3, 0.95);
-    const wet = params.wet ?? 0.5;
-
-    const delay = ctx.createDelay(2.0);
-    delay.delayTime.value = time;
-
-    const feedbackGain = ctx.createGain();
-    feedbackGain.gain.value = feedback;
-
-    const dryGain = ctx.createGain();
-    const wetGain = ctx.createGain();
-    const input = ctx.createGain();
-    const output = ctx.createGain();
-
-    dryGain.gain.value = 1 - wet;
-    wetGain.gain.value = wet;
-
-    // Routing: input -> dryGain -> output
-    //          input -> delay -> feedbackGain -> delay (loop)
-    //                         -> wetGain -> output
-    input.connect(dryGain).connect(output);
-    input.connect(delay);
-    delay.connect(feedbackGain);
-    feedbackGain.connect(delay);
-    delay.connect(wetGain).connect(output);
-
-    return {
-      type: 'delay',
-      inputNode: input,
-      outputNode: output,
-      params: { time, feedback, wet },
-      enabled: true,
-    };
-  }
-
-  /**
-   * Generate a synthetic impulse response buffer.
-   */
   private getIRBuffer(presetIndex: number): AudioBuffer {
     if (this.irBuffers.has(presetIndex)) return this.irBuffers.get(presetIndex)!;
-
-    const ctx = this.ctx!;
-    const presets = [
-      { duration: 3.0, density: 0.8, name: 'Hall' },
-      { duration: 1.0, density: 0.5, name: 'Room' },
-      { duration: 2.0, density: 0.9, name: 'Plate' },
-      { duration: 5.0, density: 0.95, name: 'Cathedral' },
-    ];
-
-    const preset = presets[presetIndex] ?? presets[0];
-    const sampleRate = ctx.sampleRate;
-    const length = Math.floor(preset.duration * sampleRate);
-    const buffer = ctx.createBuffer(2, length, sampleRate);
-
-    for (let ch = 0; ch < 2; ch++) {
-      const data = buffer.getChannelData(ch);
-      for (let i = 0; i < length; i++) {
-        const t = i / sampleRate;
-        const decay = Math.exp(-t / (preset.duration * 0.3));
-        const noise = (Math.random() * 2 - 1) * preset.density;
-        data[i] = noise * decay;
-      }
-    }
-
+    const buffer = generateIRBuffer(this.ctx!, presetIndex);
     this.irBuffers.set(presetIndex, buffer);
     return buffer;
   }
@@ -1558,113 +1380,7 @@ class AudioManager {
   }): LoopPoint[] {
     const buffer = this.buffers.get(assetId);
     if (!buffer) return [];
-
-    const maxResults = options?.maxResults ?? 5;
-    const minLoopDurationSec = options?.minLoopDuration ?? 0.5;
-    const sampleRate = buffer.sampleRate;
-    const minLoopSamples = Math.floor(minLoopDurationSec * sampleRate);
-    const data = buffer.getChannelData(0); // Analyze first channel
-    const totalSamples = data.length;
-
-    if (totalSamples < minLoopSamples) {
-      // Buffer too short; return full-length loop
-      return [{
-        startSample: 0,
-        endSample: totalSamples - 1,
-        startTime: 0,
-        endTime: (totalSamples - 1) / sampleRate,
-        score: 0.5,
-      }];
-    }
-
-    // Find zero crossings (where sign changes)
-    const zeroCrossings: number[] = [];
-    for (let i = 1; i < totalSamples; i++) {
-      if ((data[i - 1] >= 0 && data[i] < 0) || (data[i - 1] < 0 && data[i] >= 0)) {
-        zeroCrossings.push(i);
-      }
-    }
-
-    // If no zero crossings found (e.g., silent buffer), return full loop
-    if (zeroCrossings.length < 2) {
-      return [{
-        startSample: 0,
-        endSample: totalSamples - 1,
-        startTime: 0,
-        endTime: (totalSamples - 1) / sampleRate,
-        score: 0.5,
-      }];
-    }
-
-    // Score candidate loop points: compare waveform at start and end regions
-    const candidates: LoopPoint[] = [];
-    const windowSize = Math.min(256, Math.floor(totalSamples / 10));
-
-    // Take early zero crossings as potential start points
-    const startCandidates = zeroCrossings.filter(z => z < totalSamples / 3).slice(0, 10);
-    // Take late zero crossings as potential end points
-    const endCandidates = zeroCrossings.filter(z => z > totalSamples * 2 / 3).slice(-10);
-
-    for (const startSample of startCandidates) {
-      for (const endSample of endCandidates) {
-        if (endSample - startSample < minLoopSamples) continue;
-
-        // Score by waveform similarity at boundaries
-        const score = this.scoreLoopPoint(data, startSample, endSample, windowSize);
-        candidates.push({
-          startSample,
-          endSample,
-          startTime: startSample / sampleRate,
-          endTime: endSample / sampleRate,
-          score,
-        });
-      }
-    }
-
-    // Fallback: if no valid candidates found (short buffers where all pairs < minLoopSamples),
-    // return a full-length loop rather than an empty array
-    if (candidates.length === 0) {
-      return [{
-        startSample: 0,
-        endSample: totalSamples - 1,
-        startTime: 0,
-        endTime: (totalSamples - 1) / sampleRate,
-        score: 0.3,
-      }];
-    }
-
-    // Sort by score (highest first) and return top N
-    candidates.sort((a, b) => b.score - a.score);
-    return candidates.slice(0, maxResults);
-  }
-
-  /**
-   * Score a loop point by comparing waveform similarity at the boundary.
-   * Returns 0-1 where 1 = perfect match.
-   */
-  private scoreLoopPoint(
-    data: Float32Array,
-    startSample: number,
-    endSample: number,
-    windowSize: number
-  ): number {
-    let sumDiff = 0;
-    let sumEnergy = 0;
-    const safeWindow = Math.min(windowSize, endSample - startSample);
-
-    for (let i = 0; i < safeWindow; i++) {
-      const startIdx = startSample + i;
-      const endIdx = endSample - safeWindow + i;
-      if (startIdx >= data.length || endIdx >= data.length) break;
-
-      const diff = data[startIdx] - data[endIdx];
-      sumDiff += diff * diff;
-      sumEnergy += data[startIdx] * data[startIdx] + data[endIdx] * data[endIdx];
-    }
-
-    if (sumEnergy < 1e-10) return 1.0; // Silent — perfect match
-    // Normalized cross-correlation-like score
-    return Math.max(0, 1.0 - (sumDiff / (sumEnergy + 1e-10)));
+    return detectLoops(buffer, options);
   }
 }
 
