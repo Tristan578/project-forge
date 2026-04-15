@@ -104,6 +104,8 @@ const competitors: Record<string, CompetitorData> = {
 
 const validSlugs = Object.keys(competitors);
 
+export const dynamicParams = false;
+
 export function generateStaticParams() {
   return validSlugs.map((slug) => ({ competitor: slug }));
 }
