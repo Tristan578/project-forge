@@ -78,7 +78,9 @@ export default async function ChangelogPage() {
   try {
     const changelogPath = join(process.cwd(), '..', 'CHANGELOG.md');
     const raw = readFileSync(changelogPath, 'utf-8');
-    sections = parseChangelog(raw);
+    sections = parseChangelog(raw).filter(
+      (s) => s.content.some((line) => line.trim() !== '')
+    );
   } catch {
     // Fallback: file not found in CI/build
   }
