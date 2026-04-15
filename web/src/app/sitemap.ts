@@ -92,6 +92,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "monthly" as const,
       priority: 0.6,
     })),
+    {
+      url: `${SITE_URL}/changelog`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.5,
+    },
   ];
 
   // Query published games for dynamic sitemap entries

@@ -135,6 +135,7 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
     '/about(.*)',
     '/compare(.*)',
     '/use-cases(.*)',
+    '/changelog(.*)',
   ];
   if (process.env.NODE_ENV !== 'production') {
     publicRoutes.push('/dev(.*)');
