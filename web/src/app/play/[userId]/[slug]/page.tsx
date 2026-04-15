@@ -109,8 +109,9 @@ export default async function PlayPage({ params }: PlayPageProps) {
 
   const gameData = await getGameData(userId, slug);
 
-  // VideoGame JSON-LD — values from our own DB, serialized via JSON.stringify
-  // which escapes special characters. Safe for script[type=application/ld+json].
+  // VideoGame JSON-LD — user-controlled values from DB (title, description).
+  // JSON.stringify does NOT escape '<', so we replace it with \u003c to
+  // prevent script tag breakout (XSS via </script> in user content).
   const videoGameJsonLd = gameData
     ? JSON.stringify({
         '@context': 'https://schema.org',
@@ -130,13 +131,12 @@ export default async function PlayPage({ params }: PlayPageProps) {
           url: SITE_URL,
         },
         datePublished: gameData.createdAt?.toISOString(),
-      })
+      }).replace(/</g, '\\u003c')
     : null;
 
   return (
     <>
       {videoGameJsonLd && (
-        // JSON-LD structured data for search engines — DB values sanitized by JSON.stringify
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: videoGameJsonLd }}
