@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { cacheLife, cacheTag } from 'next/cache';
 import { PricingPage } from '@/components/pricing/PricingPage';
+import { Breadcrumbs } from '@/components/marketing/Breadcrumbs';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
 
@@ -76,7 +77,10 @@ export default async function Pricing() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: pricingJsonLd }}
       />
-      <PricingPage />
+      <div className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 lg:px-8">
+        <Breadcrumbs items={[{ label: 'Pricing', href: '/pricing' }]} />
+        <PricingPage />
+      </div>
     </>
   );
 }

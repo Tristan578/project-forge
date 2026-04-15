@@ -4,11 +4,37 @@ import { publishedGames, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { safeAuth } from '@/lib/auth/safe-auth';
 import { GamePlayer } from '@/components/play/GamePlayer';
+import { Breadcrumbs } from '@/components/marketing/Breadcrumbs';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
 
 interface PlayPageProps {
   params: Promise<{ userId: string; slug: string }>;
+}
+
+async function getGameTitle(clerkId: string, slug: string): Promise<string | null> {
+  try {
+    const [user] = await queryWithResilience(() => getDb()
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.clerkId, clerkId))
+      .limit(1));
+    if (!user) return null;
+
+    const [game] = await queryWithResilience(() => getDb()
+      .select({ title: publishedGames.title })
+      .from(publishedGames)
+      .where(
+        and(
+          eq(publishedGames.userId, user.id),
+          eq(publishedGames.slug, slug)
+        )
+      )
+      .limit(1));
+    return game?.title ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -107,6 +133,7 @@ async function getGameData(clerkId: string, slug: string) {
 export default async function PlayPage({ params }: PlayPageProps) {
   const { userId, slug } = await params;
   const { userId: viewerClerkId } = await safeAuth();
+  const gameTitle = await getGameTitle(userId, slug);
 
   const gameData = await getGameData(userId, slug);
 
@@ -143,6 +170,16 @@ export default async function PlayPage({ params }: PlayPageProps) {
           dangerouslySetInnerHTML={{ __html: videoGameJsonLd }}
         />
       )}
+      <div className="mx-auto max-w-7xl px-4 pt-4 sm:px-6 lg:px-8">
+        <Breadcrumbs
+          items={[
+            { label: 'Play', href: '/community' },
+            ...(gameTitle
+              ? [{ label: gameTitle, href: `/play/${userId}/${slug}` }]
+              : []),
+          ]}
+        />
+      </div>
       <GamePlayer
         userId={userId}
         slug={slug}
