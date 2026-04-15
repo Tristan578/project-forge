@@ -140,6 +140,15 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
     const corsResponse = handleCors(req);
     if (corsResponse) return corsResponse;
 
+    // Redirect authenticated users from landing page to dashboard.
+    // This runs in the proxy so the landing page itself can be statically cached.
+    if (req.nextUrl.pathname === '/') {
+      const { userId } = await auth();
+      if (userId) {
+        return NextResponse.redirect(new URL('/dashboard', req.url));
+      }
+    }
+
     if (!isPublicRoute(req)) {
       await auth.protect();
     }
