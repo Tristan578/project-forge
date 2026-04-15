@@ -37,9 +37,18 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
   const [engineState, setEngineState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [clickToStart, setClickToStart] = useState(false);
+  // shareUrl must be captured after mount — window.location.href is undefined
+  // during SSR, so reading it at render time causes a hydration mismatch
+  // (server: '', client: actual URL). An empty string also throws in addUtm's
+  // new URL() call, so ShareButtons is only rendered once the URL is known.
+  const [shareUrl, setShareUrl] = useState('');
 
   const containerRef = useRef<HTMLDivElement>(null);
   const initStartedRef = useRef(false);
+
+  useEffect(() => {
+    setShareUrl(window.location.href);
+  }, []);
 
   // Fetch game data from the API
   useEffect(() => {
@@ -225,10 +234,10 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
             slug={slug}
             isAuthenticated={isAuthenticated}
           />
-          {gameData && (
+          {gameData && shareUrl && (
             <ShareButtons
               gameTitle={gameData.title}
-              gameUrl={typeof window !== 'undefined' ? window.location.href : ''}
+              gameUrl={shareUrl}
             />
           )}
           <button
