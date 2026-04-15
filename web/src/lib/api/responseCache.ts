@@ -176,9 +176,13 @@ async function redisSet<T>(key: string, value: T, ttlSeconds: number): Promise<v
     // Enforce max entry size (10 MB)
     if (serialized.length > 10 * 1024 * 1024) return;
 
-    await fetch(`${url}/set/${encodeURIComponent(key)}/${encodeURIComponent(serialized)}/ex/${ttlSeconds}`, {
+    await fetch(url, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(['SET', key, serialized, 'EX', ttlSeconds]),
     });
   } catch (err) {
     captureException(err, { action: 'responseCache.redisSet', key });
