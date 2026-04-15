@@ -129,6 +129,8 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
     '/api/status(.*)',
     '/api/sentry(.*)',
     '/monitoring(.*)',
+    '/llms.txt',
+    '/llms-full.txt',
   ];
   if (process.env.NODE_ENV !== 'production') {
     publicRoutes.push('/dev(.*)');
