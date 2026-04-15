@@ -1,6 +1,25 @@
 {
   "name": "spawnforge",
   "private": true,
+  "description": "AI-native 2D/3D game engine for the browser — Bevy/WASM engine, 350 MCP commands, visual scripting, WebGPU rendering",
+  "keywords": [
+    "game engine",
+    "browser game",
+    "AI game creation",
+    "WebGPU",
+    "WebAssembly",
+    "WASM",
+    "game maker",
+    "visual scripting",
+    "MCP",
+    "model context protocol",
+    "2D game engine",
+    "3D game engine",
+    "no-code game",
+    "game development platform",
+    "Bevy",
+    "Rust game engine"
+  ],
   "workspaces": [
     "packages/*",
     "apps/*",
