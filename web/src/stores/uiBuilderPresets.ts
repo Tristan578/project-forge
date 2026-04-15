@@ -166,7 +166,7 @@ export function createPresetWidgets(preset: ScreenPreset): UIWidget[] {
           label: 'Quit',
           hoverStyle: { opacity: 0.8 },
           activeStyle: { opacity: 0.6 },
-          action: { type: 'none' },
+          action: { type: 'scene_reset' },
         },
       }));
       break;
