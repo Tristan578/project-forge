@@ -1,10 +1,13 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/constants";
+import { getDb, queryWithResilience } from "@/lib/db/client";
+import { publishedGames, users } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
 
-  return [
+  const staticPages: MetadataRoute.Sitemap = [
     {
       url: SITE_URL,
       lastModified: now,
@@ -54,4 +57,31 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.2,
     },
   ];
+
+  // Query published games for dynamic sitemap entries
+  let gamePages: MetadataRoute.Sitemap = [];
+  try {
+    const games = await queryWithResilience(() =>
+      getDb()
+        .select({
+          slug: publishedGames.slug,
+          clerkId: users.clerkId,
+          updatedAt: publishedGames.updatedAt,
+        })
+        .from(publishedGames)
+        .innerJoin(users, eq(publishedGames.userId, users.id))
+        .where(eq(publishedGames.status, "published"))
+    );
+
+    gamePages = games.map((game) => ({
+      url: `${SITE_URL}/play/${game.clerkId}/${game.slug}`,
+      lastModified: game.updatedAt,
+      changeFrequency: "weekly" as const,
+      priority: 0.6,
+    }));
+  } catch {
+    // If DB is unavailable (CI, build), return static pages only
+  }
+
+  return [...staticPages, ...gamePages];
 }
