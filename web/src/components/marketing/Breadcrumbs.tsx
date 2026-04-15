@@ -14,6 +14,8 @@ interface BreadcrumbsProps {
 export function Breadcrumbs({ items }: BreadcrumbsProps) {
   const allItems: BreadcrumbItem[] = [{ label: 'Home', href: '/' }, ...items];
 
+  // Escape '<' as '\u003c' to prevent script tag breakout XSS when
+  // breadcrumb labels contain user-controlled data (e.g. game titles).
   const jsonLd = JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
@@ -23,7 +25,7 @@ export function Breadcrumbs({ items }: BreadcrumbsProps) {
       name: item.label,
       item: `${SITE_URL}${item.href}`,
     })),
-  });
+  }).replace(/</g, '\\u003c');
 
   return (
     <>
