@@ -8,9 +8,6 @@ const isPublicRoute = createRouteMatcher([
   '/sign-up(.*)',
   '/api/webhooks(.*)',
   '/mcp(.*)',
-  '/api-reference(.*)',
-  '/getting-started(.*)',
-  '/guides(.*)',
 ]);
 
 function passThrough() {
