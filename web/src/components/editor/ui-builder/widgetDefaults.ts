@@ -4,7 +4,7 @@
  * Default configurations and styles for each widget type.
  */
 
-import type { WidgetType, WidgetStyle } from '@/stores/uiBuilderStore';
+import type { WidgetType, WidgetStyle } from '@/stores/uiBuilderTypes';
 
 export const DEFAULT_WIDGET_STYLE: WidgetStyle = {
   backgroundColor: null,
