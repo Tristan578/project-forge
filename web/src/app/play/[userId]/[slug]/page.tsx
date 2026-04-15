@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { cache } from 'react';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -12,17 +13,22 @@ interface PlayPageProps {
   params: Promise<{ userId: string; slug: string }>;
 }
 
-async function getGameTitle(clerkId: string, slug: string): Promise<string | null> {
+const getGameData = cache(async (clerkId: string, slug: string) => {
   try {
     const [user] = await queryWithResilience(() => getDb()
-      .select({ id: users.id })
+      .select({ id: users.id, displayName: users.displayName })
       .from(users)
       .where(eq(users.clerkId, clerkId))
       .limit(1));
     if (!user) return null;
 
     const [game] = await queryWithResilience(() => getDb()
-      .select({ title: publishedGames.title })
+      .select({
+        title: publishedGames.title,
+        description: publishedGames.description,
+        createdAt: publishedGames.createdAt,
+        status: publishedGames.status,
+      })
       .from(publishedGames)
       .where(
         and(
@@ -31,11 +37,19 @@ async function getGameTitle(clerkId: string, slug: string): Promise<string | nul
         )
       )
       .limit(1));
-    return game?.title ?? null;
+    if (!game) return null;
+
+    return {
+      title: game.title,
+      description: game.description,
+      createdAt: game.createdAt,
+      status: game.status,
+      authorName: user.displayName,
+    };
   } catch {
     return null;
   }
-}
+});
 
 /**
  * Generate dynamic metadata for the published game page.
@@ -45,84 +59,17 @@ export async function generateMetadata({
   params,
 }: PlayPageProps): Promise<Metadata> {
   const { userId: clerkId, slug } = await params;
+  const game = await getGameData(clerkId, slug);
 
-  try {
-    const [user] = await queryWithResilience(() => getDb()
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.clerkId, clerkId))
-      .limit(1));
-
-    if (!user) {
-      return { title: 'Game Not Found - SpawnForge' };
-    }
-
-    const [game] = await queryWithResilience(() => getDb()
-      .select({ title: publishedGames.title, description: publishedGames.description })
-      .from(publishedGames)
-      .where(
-        and(
-          eq(publishedGames.userId, user.id),
-          eq(publishedGames.slug, slug)
-        )
-      )
-      .limit(1));
-
-    if (!game) {
-      return { title: 'Game Not Found - SpawnForge' };
-    }
-
-    return {
-      title: `${game.title} - SpawnForge`,
-      description: game.description || `Play ${game.title} on SpawnForge`,
-      alternates: { canonical: `/play/${clerkId}/${slug}` },
-    };
-  } catch {
-    return { title: 'SpawnForge' };
+  if (!game) {
+    return { title: 'Game Not Found - SpawnForge' };
   }
-}
 
-/**
- * Fetch game data for VideoGame JSON-LD.
- * Returns null if game not found or DB unavailable.
- */
-async function getGameData(clerkId: string, slug: string) {
-  try {
-    const [user] = await queryWithResilience(() => getDb()
-      .select({ id: users.id, displayName: users.displayName })
-      .from(users)
-      .where(eq(users.clerkId, clerkId))
-      .limit(1));
-
-    if (!user) return null;
-
-    const [game] = await queryWithResilience(() => getDb()
-      .select({
-        title: publishedGames.title,
-        description: publishedGames.description,
-        createdAt: publishedGames.createdAt,
-      })
-      .from(publishedGames)
-      .where(
-        and(
-          eq(publishedGames.userId, user.id),
-          eq(publishedGames.slug, slug),
-          eq(publishedGames.status, 'published')
-        )
-      )
-      .limit(1));
-
-    if (!game) return null;
-
-    return {
-      title: game.title,
-      description: game.description,
-      authorName: user.displayName,
-      createdAt: game.createdAt,
-    };
-  } catch {
-    return null;
-  }
+  return {
+    title: `${game.title} - SpawnForge`,
+    description: game.description || `Play ${game.title} on SpawnForge`,
+    alternates: { canonical: `/play/${clerkId}/${slug}` },
+  };
 }
 
 /**
@@ -133,32 +80,31 @@ async function getGameData(clerkId: string, slug: string) {
 export default async function PlayPage({ params }: PlayPageProps) {
   const { userId, slug } = await params;
   const { userId: viewerClerkId } = await safeAuth();
-  const gameTitle = await getGameTitle(userId, slug);
-
-  const gameData = await getGameData(userId, slug);
+  const game = await getGameData(userId, slug);
 
   // VideoGame JSON-LD — user-controlled values from DB (title, description).
   // JSON.stringify does NOT escape '<', so we replace it with < to
   // prevent script tag breakout (XSS via </script> in user content).
-  const videoGameJsonLd = gameData
+  // Only emitted for published games; drafts have no public schema.
+  const videoGameJsonLd = game && game.status === 'published'
     ? JSON.stringify({
         '@context': 'https://schema.org',
         '@type': 'VideoGame',
-        name: gameData.title,
-        description: gameData.description || `Play ${gameData.title} on SpawnForge`,
+        name: game.title,
+        description: game.description || `Play ${game.title} on SpawnForge`,
         url: `${SITE_URL}/play/${userId}/${slug}`,
         gamePlatform: 'Web Browser',
         playMode: 'SinglePlayer',
         applicationCategory: 'Game',
-        author: gameData.authorName
-          ? { '@type': 'Person', name: gameData.authorName }
+        author: game.authorName
+          ? { '@type': 'Person', name: game.authorName }
           : undefined,
         publisher: {
           '@type': 'Organization',
           name: 'SpawnForge',
           url: SITE_URL,
         },
-        datePublished: gameData.createdAt?.toISOString(),
+        datePublished: game.createdAt?.toISOString(),
       }).replace(/</g, '\\u003c')
     : null;
 
@@ -173,9 +119,9 @@ export default async function PlayPage({ params }: PlayPageProps) {
       <div className="mx-auto max-w-7xl px-4 pt-4 sm:px-6 lg:px-8">
         <Breadcrumbs
           items={[
-            { label: 'Play', href: '/community' },
-            ...(gameTitle
-              ? [{ label: gameTitle, href: `/play/${userId}/${slug}` }]
+            { label: 'Community', href: '/community' },
+            ...(game?.title
+              ? [{ label: game.title, href: `/play/${userId}/${slug}` }]
               : []),
           ]}
         />
