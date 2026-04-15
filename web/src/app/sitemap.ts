@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/constants";
 import { getDb, queryWithResilience } from "@/lib/db/client";
 import { publishedGames, users } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
@@ -70,7 +70,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         })
         .from(publishedGames)
         .innerJoin(users, eq(publishedGames.userId, users.id))
-        .where(eq(publishedGames.status, "published"))
+        .where(and(eq(publishedGames.status, "published"), eq(users.banned, 0)))
     );
 
     gamePages = games.map((game) => ({
