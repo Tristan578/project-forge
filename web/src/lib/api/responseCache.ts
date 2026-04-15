@@ -55,7 +55,7 @@ const DEFAULT_TTL: Record<string, number> = {
   pixel_art_openai: 86400,
   skybox_generation: 604800,       // 7 days
   tileset_generation: 604800,      // 7 days
-  localize_cost_per_chunk: 86400,  // 24 hours
+  localize_scene: 86400,           // 24 hours
 };
 
 // Chat is never cached
