@@ -13,10 +13,12 @@ export const metadata: Metadata = {
     default: 'SpawnForge Documentation',
     template: '%s | SpawnForge Docs',
   },
-  description: 'API reference, MCP command documentation, and getting started guides for SpawnForge — the AI-powered game creation platform.',
+  description:
+    'API reference, MCP command documentation, and getting started guides for SpawnForge — the AI-powered game creation platform. 350 commands across 41 categories.',
   openGraph: {
     title: 'SpawnForge Documentation',
-    description: 'API reference, MCP command documentation, and guides for SpawnForge.',
+    description:
+      'MCP command reference and API docs for SpawnForge — the AI-native browser game engine.',
     siteName: 'SpawnForge Docs',
     type: 'website',
   },
