@@ -6,6 +6,7 @@ import { LegalLayout } from '@/components/legal/LegalLayout';
 export const metadata: Metadata = {
   title: 'Privacy Policy - SpawnForge',
   description: 'SpawnForge Privacy Policy - AI-Powered Game Creation Platform',
+  alternates: { canonical: '/privacy' },
 };
 
 const tableOfContents = [
