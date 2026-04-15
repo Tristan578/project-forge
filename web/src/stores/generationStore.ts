@@ -229,7 +229,12 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         hydrated: true,
       }));
     } catch (err) {
-      captureException(err, { context: 'generationStore.hydrateFromServer' });
+      // Don't report transient network errors — these fire when the server is
+      // temporarily unreachable (e.g. dev server not ready) and create noise.
+      const isNetworkError = err instanceof TypeError && err.message === 'Failed to fetch';
+      if (!isNetworkError) {
+        captureException(err, { context: 'generationStore.hydrateFromServer' });
+      }
       set({ hydrated: true });
     }
   },
