@@ -98,6 +98,21 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "weekly",
       priority: 0.5,
     },
+    {
+      url: `${SITE_URL}/blog`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.8,
+    },
+    ...[
+      "spawnforge-browser-ai-game-engine",
+      "spawnforge-vs-unity-vs-godot",
+    ].map((slug) => ({
+      url: `${SITE_URL}/blog/${slug}`,
+      lastModified: now,
+      changeFrequency: "monthly" as const,
+      priority: 0.7,
+    })),
   ];
 
   // Query published games for dynamic sitemap entries
