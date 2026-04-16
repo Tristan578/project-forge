@@ -159,12 +159,16 @@ describe('POST /api/generate/voice', () => {
     expect(captureException).toHaveBeenCalled();
   });
 
-  it('rethrows non-ApiKeyError during key resolution', async () => {
+  it('returns 500 for non-ApiKeyError during key resolution', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
     vi.mocked(resolveApiKey).mockRejectedValue(new Error('DB connection failed'));
 
-    await expect(POST(makeRequest({ text: 'Hello world' }))).rejects.toThrow('DB connection failed');
+    const res = await POST(makeRequest({ text: 'Hello world' }));
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.error).toBe('DB connection failed');
   });
 
   it('returns 422 when sanitizePrompt returns safe:false', async () => {

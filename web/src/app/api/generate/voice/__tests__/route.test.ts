@@ -302,11 +302,15 @@ describe('POST /api/generate/voice', () => {
       expect(body.code).toBe('TIER_NOT_ALLOWED');
     });
 
-    it('rethrows non-ApiKeyError exceptions', async () => {
+    it('returns 500 for non-ApiKeyError exceptions', async () => {
       vi.mocked(resolveApiKey).mockRejectedValue(new Error('Network failure'));
 
       const { POST } = await import('../route');
-      await expect(POST(makeRequest({ text: 'Hi' }))).rejects.toThrow('Network failure');
+      const res = await POST(makeRequest({ text: 'Hi' }));
+      const body = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(body.error).toBe('Network failure');
     });
   });
 
