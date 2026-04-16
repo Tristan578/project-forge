@@ -9,7 +9,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@clerk/nextjs": "^7.0.7",
+    "@clerk/nextjs": "^7.2.1",
     "@tailwindcss/postcss": "^4",
     "fumadocs-core": "^16",
     "fumadocs-ui": "^16",
