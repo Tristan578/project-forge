@@ -9,6 +9,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit } from '@/lib/rateLimit';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import { refundTokens } from '@/lib/tokens/service';
+import { _memoryCache, _inFlight } from '@/lib/api/responseCache';
 
 const mockGenerateVoice = vi.hoisted(() => vi.fn());
 
@@ -50,6 +51,8 @@ describe('POST /api/generate/voice', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    _memoryCache.clear();
+    _inFlight.clear();
     vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
   });
 
