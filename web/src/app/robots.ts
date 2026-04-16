@@ -1,6 +1,5 @@
 import type { MetadataRoute } from "next";
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://spawnforge.ai";
+import { SITE_URL } from "@/lib/constants";
 
 const DISALLOW_PRIVATE = ["/api/", "/admin/", "/dev/", "/settings/", "/health/", "/api-docs/"];
 

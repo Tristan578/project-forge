@@ -40,4 +40,43 @@ describe('robots', () => {
     const result = robots();
     expect(result.sitemap).toContain('/sitemap.xml');
   });
+
+  describe('AI crawler rules', () => {
+    const AI_BOTS = ['GPTBot', 'ChatGPT-User', 'Google-Extended', 'ClaudeBot', 'CCBot', 'PerplexityBot', 'Anthropic'];
+
+    it('includes a rule for every expected AI crawler', () => {
+      const result = robots();
+      const rules = Array.isArray(result.rules) ? result.rules : [result.rules];
+      const userAgents = rules.map((r) => r.userAgent);
+
+      for (const bot of AI_BOTS) {
+        expect(userAgents).toContain(bot);
+      }
+    });
+
+    it('allows public content paths for AI crawlers', () => {
+      const result = robots();
+      const rules = Array.isArray(result.rules) ? result.rules : [result.rules];
+      const gptRule = rules.find((r) => r.userAgent === 'GPTBot');
+
+      expect(gptRule).toBeDefined();
+      const allowed = gptRule!.allow as string[];
+      expect(allowed).toContain('/');
+      expect(allowed).toContain('/pricing');
+      expect(allowed).toContain('/llms.txt');
+      expect(allowed).toContain('/llms-full.txt');
+    });
+
+    it('disallows private paths for AI crawlers', () => {
+      const result = robots();
+      const rules = Array.isArray(result.rules) ? result.rules : [result.rules];
+      const gptRule = rules.find((r) => r.userAgent === 'GPTBot');
+
+      expect(gptRule).toBeDefined();
+      const disallow = gptRule!.disallow as string[];
+      expect(disallow).toContain('/api/');
+      expect(disallow).toContain('/admin/');
+      expect(disallow).toContain('/dev/');
+    });
+  });
 });

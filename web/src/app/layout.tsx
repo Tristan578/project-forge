@@ -9,6 +9,7 @@ import { defaultLocale } from "@/i18n/config";
 import messages from "@/i18n/messages/en.json";
 import { Toaster } from "sonner";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
+import { SITE_URL } from "@/lib/constants";
 import "./globals.css";
 
 // Lazy-load analytics and consent providers — they rely on browser APIs
@@ -35,8 +36,6 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://spawnforge.ai";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
