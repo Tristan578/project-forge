@@ -13,6 +13,8 @@ const contentComponents: Record<string, React.ComponentType> = {
   'spawnforge-vs-unity-vs-godot': SpawnForgeVsUnityVsGodot,
 };
 
+export const dynamicParams = false;
+
 export function generateStaticParams() {
   return getAllBlogSlugs().map((slug) => ({ slug }));
 }

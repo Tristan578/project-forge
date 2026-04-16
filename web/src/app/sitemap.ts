@@ -3,6 +3,7 @@ import { SITE_URL } from "@/lib/constants";
 import { getDb, queryWithResilience } from "@/lib/db/client";
 import { publishedGames, users } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
+import { getAllBlogSlugs } from "@/lib/blog";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
@@ -104,10 +105,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "weekly",
       priority: 0.8,
     },
-    ...[
-      "spawnforge-browser-ai-game-engine",
-      "spawnforge-vs-unity-vs-godot",
-    ].map((slug) => ({
+    ...getAllBlogSlugs().map((slug) => ({
       url: `${SITE_URL}/blog/${slug}`,
       lastModified: now,
       changeFrequency: "monthly" as const,
