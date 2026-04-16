@@ -16,13 +16,17 @@ function addUtm(url: string, source: string): string {
   return u.toString();
 }
 
+// Stable subscribe reference — useSyncExternalStore requires a stable function
+// identity to avoid unsubscribing/resubscribing on every render.
+const noopSubscribe = () => () => {};
+
 export function ShareButtons({ gameTitle, gameUrl }: ShareButtonsProps) {
   const [copied, setCopied] = useState(false);
   // navigator.share is undefined during SSR. useSyncExternalStore provides
   // the server snapshot (false) and the client snapshot (actual capability)
   // without triggering the set-state-in-effect lint rule.
   const hasNativeShare = useSyncExternalStore(
-    () => () => {},
+    noopSubscribe,
     () => !!navigator.share,
     () => false,
   );
