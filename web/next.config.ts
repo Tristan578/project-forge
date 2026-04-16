@@ -71,6 +71,11 @@ const nextConfig: NextConfig = {
     // cache-eligible components to declare cacheTag() and cacheLife() hints
     // so Next.js can skip re-rendering on subsequent requests.
     useCache: true,
+    // Include CHANGELOG.md in the serverless function bundle so the
+    // changelog page can read it at runtime (cache revalidation).
+    outputFileTracingIncludes: {
+      '/changelog': ['../CHANGELOG.md'],
+    },
   },
   images: {
     remotePatterns: [

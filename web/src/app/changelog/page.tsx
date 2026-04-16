@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { cacheLife, cacheTag } from 'next/cache';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readChangelog } from '@/lib/changelog';
 
 export const metadata: Metadata = {
   title: 'Changelog — SpawnForge',
@@ -13,23 +12,6 @@ export const metadata: Metadata = {
     description: 'Track every SpawnForge release — features, fixes, and improvements.',
   },
 };
-
-function parseChangelog(markdown: string) {
-  const lines = markdown.split('\n');
-  const sections: { heading: string; content: string[] }[] = [];
-  let current: { heading: string; content: string[] } | null = null;
-
-  for (const line of lines) {
-    if (line.startsWith('## ')) {
-      if (current) sections.push(current);
-      current = { heading: line.replace('## ', ''), content: [] };
-    } else if (current) {
-      current.content.push(line);
-    }
-  }
-  if (current) sections.push(current);
-  return sections;
-}
 
 function renderContent(lines: string[]) {
   const elements: React.ReactNode[] = [];
@@ -74,16 +56,7 @@ export default async function ChangelogPage() {
   cacheLife('days');
   cacheTag('changelog');
 
-  let sections: { heading: string; content: string[] }[] = [];
-  try {
-    const changelogPath = join(process.cwd(), '..', 'CHANGELOG.md');
-    const raw = readFileSync(changelogPath, 'utf-8');
-    sections = parseChangelog(raw).filter(
-      (s) => s.content.some((line) => line.trim() !== '')
-    );
-  } catch {
-    // Fallback: file not found in CI/build
-  }
+  const sections = readChangelog();
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8">
