@@ -174,6 +174,8 @@ const useCases: Record<string, UseCaseData> = {
 
 const validSlugs = Object.keys(useCases);
 
+export const dynamicParams = false;
+
 export function generateStaticParams() {
   return validSlugs.map((slug) => ({ slug }));
 }
