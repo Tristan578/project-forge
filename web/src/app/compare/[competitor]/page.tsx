@@ -158,7 +158,7 @@ export default async function CompetitorComparePage({ params }: ComparePageProps
         applicationCategory: 'GameApplication',
       },
     ],
-  });
+  }).replace(/</g, '\\u003c');
 
   return (
     <>
