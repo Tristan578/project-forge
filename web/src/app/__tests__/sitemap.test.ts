@@ -4,15 +4,16 @@
  * @vitest-environment node
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock DB to avoid real database calls in tests
+const mockWhere = vi.fn(() => Promise.resolve([]));
+
 vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn(() => ({
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         innerJoin: vi.fn(() => ({
-          where: vi.fn(() => Promise.resolve([])),
+          where: mockWhere,
         })),
       })),
     })),
@@ -62,5 +63,60 @@ describe('sitemap', () => {
     expect(urls.some((u: string) => u.includes('/dev'))).toBe(false);
     expect(urls.some((u: string) => u.includes('/editor'))).toBe(false);
     expect(urls.some((u: string) => u.includes('/settings'))).toBe(false);
+  });
+
+  describe('dynamic game entries', () => {
+    beforeEach(() => {
+      mockWhere.mockReset();
+    });
+
+    it('includes published games from the database', async () => {
+      const updatedAt = new Date('2026-04-01');
+      mockWhere.mockResolvedValueOnce([
+        { slug: 'cool-game', clerkId: 'user_abc', updatedAt },
+        { slug: 'another-game', clerkId: 'user_xyz', updatedAt },
+      ]);
+
+      const result = await sitemap();
+      const urls = result.map((e) => e.url);
+
+      expect(urls).toContain('https://spawnforge.ai/play/user_abc/cool-game');
+      expect(urls).toContain('https://spawnforge.ai/play/user_xyz/another-game');
+    });
+
+    it('sets weekly changeFrequency and 0.6 priority for game entries', async () => {
+      mockWhere.mockResolvedValueOnce([
+        { slug: 'my-game', clerkId: 'user_1', updatedAt: new Date() },
+      ]);
+
+      const result = await sitemap();
+      const gameEntry = result.find((e) => e.url.includes('/play/'));
+
+      expect(gameEntry).toBeDefined();
+      expect(gameEntry!.changeFrequency).toBe('weekly');
+      expect(gameEntry!.priority).toBe(0.6);
+    });
+
+    it('uses game updatedAt as lastModified', async () => {
+      const updatedAt = new Date('2026-03-15T10:00:00Z');
+      mockWhere.mockResolvedValueOnce([
+        { slug: 'dated-game', clerkId: 'user_2', updatedAt },
+      ]);
+
+      const result = await sitemap();
+      const gameEntry = result.find((e) => e.url.includes('/play/'));
+
+      expect(gameEntry!.lastModified).toBe(updatedAt);
+    });
+
+    it('returns only static pages when DB query fails', async () => {
+      mockWhere.mockRejectedValueOnce(new Error('DB unavailable'));
+
+      const result = await sitemap();
+      const gameEntries = result.filter((e) => e.url.includes('/play/'));
+
+      expect(gameEntries).toHaveLength(0);
+      expect(result.length).toBeGreaterThan(0);
+    });
   });
 });
