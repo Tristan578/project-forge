@@ -224,6 +224,7 @@ export function createGenerationHandler<TParams, TResult>(
           resolvedOperation,
           cacheParams,
           async () => {
+            // Cache miss — deduct tokens and execute provider call
             // This runs only on cache miss — deduct tokens and execute
             const metadata = billingMetadataFn ? billingMetadataFn(params) : (params as Record<string, unknown>);
             const resolved = await resolveApiKey(userId, resolvedProvider, tokenCost, resolvedOperation, metadata);
@@ -244,7 +245,7 @@ export function createGenerationHandler<TParams, TResult>(
               throw err;
             }
           },
-          { ttlSeconds: cacheTtlSeconds }
+          { ttlSeconds: cacheTtlSeconds, userId }
         );
 
         const headers: Record<string, string> = {

@@ -39,6 +39,24 @@ describe('responseCache', () => {
       const key = await _generateCacheKey('sfx_generation', { prompt: 'test' });
       expect(key).toMatch(/^gen-cache:sfx_generation:/);
     });
+
+    it('produces different keys for different userIds', async () => {
+      const key1 = await _generateCacheKey('sfx', { prompt: 'boom' }, 'user_A');
+      const key2 = await _generateCacheKey('sfx', { prompt: 'boom' }, 'user_B');
+      expect(key1).not.toBe(key2);
+    });
+
+    it('treats undefined userId same as no userId', async () => {
+      const key1 = await _generateCacheKey('sfx', { prompt: 'boom' });
+      const key2 = await _generateCacheKey('sfx', { prompt: 'boom' }, undefined);
+      expect(key1).toBe(key2);
+    });
+
+    it('handles params with undefined values consistently', async () => {
+      const key1 = await _generateCacheKey('sfx', { prompt: 'boom', extra: undefined });
+      const key2 = await _generateCacheKey('sfx', { prompt: 'boom', extra: undefined });
+      expect(key1).toBe(key2);
+    });
   });
 
   describe('cachedGenerate', () => {
@@ -113,6 +131,19 @@ describe('responseCache', () => {
       expect(result2.cached).toBe(true);
     });
 
+    it('isolates cache entries per userId', async () => {
+      const executeFn = vi.fn()
+        .mockResolvedValueOnce({ audio: 'user_a_result' })
+        .mockResolvedValueOnce({ audio: 'user_b_result' });
+
+      const resultA = await cachedGenerate('sfx_generation', { prompt: 'boom' }, executeFn, { userId: 'user_A' });
+      const resultB = await cachedGenerate('sfx_generation', { prompt: 'boom' }, executeFn, { userId: 'user_B' });
+
+      expect(executeFn).toHaveBeenCalledTimes(2);
+      expect(resultA.result).toEqual({ audio: 'user_a_result' });
+      expect(resultB.result).toEqual({ audio: 'user_b_result' });
+    });
+
     it('does not cache on execution failure', async () => {
       const executeFn = vi.fn()
         .mockRejectedValueOnce(new Error('provider down'))
@@ -177,6 +208,29 @@ describe('responseCache', () => {
       expect(stats.memoryEntries).toBe(1);
       expect(stats.memoryMaxEntries).toBe(30);
       expect(stats.inFlightRequests).toBe(0);
+    });
+  });
+
+  describe('TTL expiry', () => {
+    it('expires cached entries after TTL', async () => {
+      vi.useFakeTimers();
+
+      await cachedGenerate('sfx_generation', { prompt: 'boom' }, async () => ({ audio: 'data' }), {
+        ttlSeconds: 60,
+      });
+
+      // Should be cached
+      const result1 = await getCachedResult('sfx_generation', { prompt: 'boom' });
+      expect(result1.hit).toBe(true);
+
+      // Advance past TTL
+      vi.advanceTimersByTime(61_000);
+
+      // Should be expired
+      const result2 = await getCachedResult('sfx_generation', { prompt: 'boom' });
+      expect(result2.hit).toBe(false);
+
+      vi.useRealTimers();
     });
   });
 

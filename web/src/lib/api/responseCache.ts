@@ -71,6 +71,7 @@ function getTtlSeconds(operation: string, override?: number): number {
 // ---------------------------------------------------------------------------
 
 function sortedStringify(obj: unknown): string {
+  if (obj === undefined) return 'null';
   if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
   if (Array.isArray(obj)) return `[${obj.map(sortedStringify).join(',')}]`;
   const sorted = Object.keys(obj as Record<string, unknown>).sort();
@@ -79,9 +80,10 @@ function sortedStringify(obj: unknown): string {
 
 async function generateCacheKey(
   operation: string,
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
+  userId?: string
 ): Promise<string> {
-  const payload = sortedStringify({ operation, params });
+  const payload = sortedStringify({ operation, params, userId: userId ?? null });
   const encoder = new TextEncoder();
   const data = encoder.encode(payload);
 
@@ -173,8 +175,8 @@ async function redisSet<T>(key: string, value: T, ttlSeconds: number): Promise<v
   try {
     const serialized = JSON.stringify(value);
 
-    // Enforce max entry size (10 MB)
-    if (serialized.length > 10 * 1024 * 1024) return;
+    // Enforce max entry size (10 MB, measured in bytes not code units)
+    if (Buffer.byteLength(serialized, 'utf-8') > 10 * 1024 * 1024) return;
 
     await fetch(url, {
       method: 'POST',
@@ -205,11 +207,12 @@ const inFlight = new Map<string, InFlightEntry<unknown>>();
  */
 export async function getCachedResult<T>(
   operation: string,
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
+  userId?: string
 ): Promise<{ hit: true; result: T } | { hit: false }> {
   if (NEVER_CACHE_OPS.has(operation)) return { hit: false };
 
-  const key = await generateCacheKey(operation, params);
+  const key = await generateCacheKey(operation, params, userId);
 
   // Check Redis first, fall back to memory
   if (isUpstashConfigured()) {
@@ -236,14 +239,14 @@ export async function cachedGenerate<T>(
   operation: string,
   params: Record<string, unknown>,
   executeFn: () => Promise<T>,
-  config?: { ttlSeconds?: number; skipCache?: boolean }
+  config?: { ttlSeconds?: number; skipCache?: boolean; userId?: string }
 ): Promise<{ result: T; cached: boolean }> {
   if (config?.skipCache || NEVER_CACHE_OPS.has(operation)) {
     const result = await executeFn();
     return { result, cached: false };
   }
 
-  const key = await generateCacheKey(operation, params);
+  const key = await generateCacheKey(operation, params, config?.userId);
 
   // 1. Check cache
   if (isUpstashConfigured()) {
