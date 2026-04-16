@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useSyncExternalStore } from 'react';
 import { Share2, X as XIcon } from 'lucide-react';
 
 interface ShareButtonsProps {
@@ -18,13 +18,14 @@ function addUtm(url: string, source: string): string {
 
 export function ShareButtons({ gameTitle, gameUrl }: ShareButtonsProps) {
   const [copied, setCopied] = useState(false);
-  // hasNativeShare must be determined after mount — navigator.share is
-  // undefined during SSR, so computing it at render time causes a hydration
-  // mismatch (server: false, client: potentially true).
-  const [hasNativeShare, setHasNativeShare] = useState(false);
-  useEffect(() => {
-    setHasNativeShare(!!navigator.share);
-  }, []);
+  // navigator.share is undefined during SSR. useSyncExternalStore provides
+  // the server snapshot (false) and the client snapshot (actual capability)
+  // without triggering the set-state-in-effect lint rule.
+  const hasNativeShare = useSyncExternalStore(
+    () => () => {},
+    () => !!navigator.share,
+    () => false,
+  );
 
   const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
     `Check out "${gameTitle}" on SpawnForge!`
