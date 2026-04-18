@@ -13,7 +13,8 @@
   "overrides": {
     "dompurify": ">=3.3.2",
     "esbuild": ">=0.25.0",
-    "lodash": ">=4.18.1"
+    "lodash": ">=4.18.1",
+    "protobufjs": ">=7.5.5"
   },
   "scripts": {
     "changeset": "changeset",
