@@ -83,7 +83,7 @@
     "@types/react-dom": "^19",
     "@vitest/coverage-v8": "^4.1.4",
     "drizzle-kit": "^0.31.10",
-    "eslint": "^9",
+    "eslint": "^10",
     "eslint-config-next": "^16.2.3",
     "jsdom": "^29.0.1",
     "portless": "^0.10.1",
