@@ -35,5 +35,10 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+    // Use development condition so @spawnforge/ui resolves to TS source,
+    // allowing tests to run without a dist build. Only 'development' is
+    // prepended — remaining conditions left to Vite defaults to avoid
+    // breaking other packages (e.g. @sentry/nextjs ESM/CJS selection).
+    conditions: ['development'],
   },
 });
