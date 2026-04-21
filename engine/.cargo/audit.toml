@@ -1,0 +1,7 @@
+[advisories]
+# RUSTSEC-2026-0097: rand unsound with custom logger using rand::rng()
+# rand 0.9.3+ is already updated above. rand 0.8.5 is a transitive dep of
+# noise 0.9 which requires ^0.8 and has no 0.8.x patch. The unsoundness
+# triggers only when a custom global logger calls rand::rng() during
+# reseeding — not possible in a WASM/Bevy context with no global logger.
+ignore = ["RUSTSEC-2026-0097"]
