@@ -36,9 +36,9 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
     // Use development condition so @spawnforge/ui resolves to TS source,
-    // allowing tests to run without a dist build. Only 'development' is
-    // prepended — remaining conditions left to Vite defaults to avoid
-    // breaking other packages (e.g. @sentry/nextjs ESM/CJS selection).
-    conditions: ['development'],
+    // allowing tests to run without a dist build. In Vite 6+, resolve.conditions
+    // replaces (not extends) the defaults, so explicitly include module + browser
+    // to preserve @sentry/nextjs ESM/CJS selection and other module-sensitive deps.
+    conditions: ['development', 'module', 'browser'],
   },
 });
