@@ -67,7 +67,7 @@ fi
 
 # ── HEALTH CHECK: Verify board has data (lesson #56) ────────────────────
 # An empty board means wrong DB path. This catches it immediately.
-HEALTH_COUNT=$(curl -s --connect-timeout 2 "$TB_API/board" 2>/dev/null | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('tickets',[])))" 2>/dev/null || echo "0")
+HEALTH_COUNT=$(curl -sL --connect-timeout 2 "$TB_API/board" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(len(c.get('tickets',[])) for c in d.get('columns',[])))" 2>/dev/null || echo "0")
 if [ "$HEALTH_COUNT" = "0" ]; then
     echo ""
     echo "╔══════════════════════════════════════════════════════════════╗"

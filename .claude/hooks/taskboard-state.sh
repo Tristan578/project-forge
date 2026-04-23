@@ -13,13 +13,13 @@ _TB_PROJECT_ROOT="$(cd "$_TB_HOOKS_DIR/../.." && pwd)"
 # Use the OS default database path — NOT .claude/taskboard.db (which creates an empty local copy)
 TB_DB="$HOME/Library/Application Support/taskboard/taskboard.db"
 # Try Portless URL first, fall back to direct port
-if curl -s --connect-timeout 1 "http://taskboard.localhost:1355/api/board" > /dev/null 2>&1; then
+if curl -sL --connect-timeout 1 "http://taskboard.localhost:1355/api/board" > /dev/null 2>&1; then
     TB_API="http://taskboard.localhost:1355/api"
 else
     TB_API="http://localhost:3010/api"
 fi
 TB_STATE_FILE="$_TB_HOOKS_DIR/.taskboard-active-ticket"
-export PROJECT_ID="01KK974VMNC16ZAW7MW1NH3T3M"
+export PROJECT_ID="01KMM9ZA6SBZ7RKJZJTZS9VR4R"
 export TEAM_ENGINEERING_ID="01KK9751NZ4HM7VQM0AQ5WGME3"
 
 # Known locations for the taskboard binary
@@ -50,7 +50,7 @@ tb_check_installed() {
 
 # Check if taskboard API is reachable
 tb_api_available() {
-    curl -s --connect-timeout 2 "$TB_API/board" > /dev/null 2>&1
+    curl -sL --connect-timeout 2 "$TB_API/board" > /dev/null 2>&1
 }
 
 # Auto-start taskboard if binary exists but server is not running
@@ -75,7 +75,7 @@ tb_auto_start() {
         if tb_api_available; then
             # HEALTH CHECK: verify the board actually has data.
             # If ticket count is 0, the DB path is wrong (lesson #56).
-            TICKET_COUNT=$(curl -s --connect-timeout 2 "$TB_API/board" 2>/dev/null | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('tickets',[])))" 2>/dev/null || echo "0")
+            TICKET_COUNT=$(curl -sL --connect-timeout 2 "$TB_API/board" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(len(c.get('tickets',[])) for c in d.get('columns',[])))" 2>/dev/null || echo "0")
             if [ "$TICKET_COUNT" = "0" ]; then
                 echo "[TASKBOARD WARNING] Board has 0 tickets — possible wrong DB path or sync needed." >&2
                 echo "[TASKBOARD WARNING] Try: python3 .claude/hooks/github_project_sync.py pull" >&2
@@ -92,7 +92,7 @@ tb_auto_start() {
 
 # Get the full board as JSON
 tb_get_board() {
-    curl -s --connect-timeout 3 "$TB_API/board" 2>/dev/null
+    curl -sL --connect-timeout 3 "$TB_API/board" 2>/dev/null
 }
 
 # Get tickets by status
@@ -102,20 +102,20 @@ tb_get_tickets() {
     if [ -n "$status" ]; then
         url="$url&status=$status"
     fi
-    curl -s --connect-timeout 3 "$url" 2>/dev/null
+    curl -sL --connect-timeout 3 "$url" 2>/dev/null
 }
 
 # Get a single ticket
 tb_get_ticket() {
     local ticket_id="$1"
-    curl -s --connect-timeout 3 "$TB_API/tickets/$ticket_id" 2>/dev/null
+    curl -sL --connect-timeout 3 "$TB_API/tickets/$ticket_id" 2>/dev/null
 }
 
 # Move a ticket to a new status
 tb_move_ticket() {
     local ticket_id="$1"
     local status="$2"
-    curl -s -X POST "$TB_API/tickets/$ticket_id/move" \
+    curl -sL --post301 --post302 --post303 -X POST "$TB_API/tickets/$ticket_id/move" \
         -H "Content-Type: application/json" \
         -d "{\"status\": \"$status\"}" 2>/dev/null
 }
