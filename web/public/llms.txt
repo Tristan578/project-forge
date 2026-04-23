@@ -1,0 +1,32 @@
+# SpawnForge
+
+> AI-Powered Game Creation Platform
+
+SpawnForge is a browser-based 2D and 3D game engine that lets anyone create, edit, and publish games using natural language and a visual editor. No downloads, no installs — describe your game and watch it come to life. Built on a production-grade Rust/WASM engine with WebGPU rendering and WebGL2 fallback.
+
+## Key Capabilities
+
+- AI-first game creation from natural language prompts
+- 2D and 3D game engine (Rust compiled to WASM)
+- WebGPU primary rendering with WebGL2 fallback
+- Visual scripting (73 node types) and TypeScript scripting
+- 350 MCP commands for AI-assisted editing across 41 categories
+- Real-time physics simulation (Rapier 3D and 2D)
+- AI asset generation: 3D models, textures, audio, music, voice
+- One-click browser game publishing
+- PBR materials (56 presets), skeletal animation, GPU particles
+- Tilemap editor, dialogue system, economy designer, leaderboards
+
+## Pricing
+
+- Free: $0/month — AI chat (limited), 1 published game
+- Hobbyist: $9/month — unlimited AI, 5 published games, asset generation
+- Creator: $29/month — unlimited publishing, custom domain, advanced AI
+- Pro: $99/month — team collaboration, API access, dedicated support
+
+## Links
+
+- Website: https://spawnforge.ai
+- Pricing: https://spawnforge.ai/pricing
+- Community: https://spawnforge.ai/community
+- Documentation: https://docs.spawnforge.ai

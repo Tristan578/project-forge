@@ -1,0 +1,132 @@
+# SpawnForge — Comprehensive Product Reference
+
+> AI-Powered Game Creation Platform for the Browser
+
+## What is SpawnForge?
+
+SpawnForge is a web-based, AI-native 2D and 3D game engine. Users create games by describing what they want in natural language or by using a visual editor. The platform handles everything from scene composition and physics to scripting, asset generation, and one-click publishing — all in the browser with no downloads or installs required.
+
+The engine is built in Rust, compiled to WebAssembly, and renders via WebGPU (with WebGL2 fallback). AI features are powered by multi-agent orchestration with 350 MCP (Model Context Protocol) commands spanning 41 categories.
+
+## Architecture
+
+- **Frontend**: React (Next.js 16), Zustand state management, Tailwind CSS
+- **Engine**: Bevy 0.18 ECS (Rust) compiled to WASM via wasm-bindgen
+- **Rendering**: WebGPU primary (wgpu 27), WebGL2 fallback — 4 binaries (2 editor + 2 runtime)
+- **Physics**: Rapier 3D and 2D simulation
+- **Communication**: JSON commands through `handle_command()` bridge, event callbacks from engine to UI
+- **Infrastructure**: Vercel (hosting), Neon (Postgres), Upstash (Redis), Clerk (auth), Stripe (payments), Cloudflare R2 (CDN)
+
+## Features
+
+### Engine & Rendering
+- WebGPU and WebGL2 rendering with automatic detection
+- PBR materials with 56 presets (metallic, roughness, normal, emissive, occlusion mapping)
+- Skeletal animation (3D GLTF and 2D bone-based)
+- GPU particle system (bevy_hanabi on WebGPU)
+- Post-processing: bloom, chromatic aberration, color grading, sharpening
+- CSG boolean operations (union, difference, intersection)
+- Procedural terrain with noise-based heightmaps and vertex coloring
+- Extrude and lathe shape operations
+- Distance fog and ambient lighting
+
+### 2D Engine
+- Sprite rendering with atlas support
+- Tilemap editor
+- 2D physics (Rapier 2D)
+- 2D skeletal animation with bone rigging, IK, and auto-weight
+- Sprite animation
+
+### Game Systems
+- Visual scripting with 73 node types
+- TypeScript scripting with `forge.*` API
+- Dialogue system
+- Economy designer
+- Leaderboards
+- Localization support
+- Game components (health, inventory, custom data)
+- Input binding system with presets
+- Game camera system with camera shake
+
+### AI Capabilities
+- Natural language game creation and editing
+- Multi-agent AI orchestration
+- AI asset generation:
+  - 3D model generation
+  - Texture generation
+  - Sound effect generation
+  - Music generation
+  - Voice line generation
+- 25+ specialized AI modules
+- BYOK (Bring Your Own Keys) support for AI providers
+
+### Editor
+- Dockview-based workspace with customizable panels
+- Scene hierarchy with drag-and-drop reparenting
+- Inspector panels for materials, lights, physics, audio, animation, particles, terrain
+- Audio mixer with bus system and reverb zones
+- Asset panel with texture/model management
+- Undo/redo history (29 action types)
+- Keyboard shortcuts and context menus
+- Mobile-responsive layout
+
+### Publishing & Community
+- One-click browser game publishing to shareable URLs
+- Community gallery for discovering and playing games
+- Cloud project storage
+
+## MCP Commands (350 commands, 41 categories)
+
+Categories: animation, asset, audio, camera, compound, cutscene, dialogue, docs, economy, editor, environment, export, game_cameras, game_components, generation, history, lighting, localization, materials, mesh, modeling, particles, performance, physics2d, prefab, publishing, query, rendering, runtime, scene, scripting, security, shaders, skeleton2d, sprite, sprite_animation, templates, terrain, tilemap, ui, world_building.
+
+## Pricing
+
+| Plan | Price | Key Features |
+|------|-------|-------------|
+| Free (Starter) | $0/month | AI chat (limited), 1 published game, community templates, basic export |
+| Hobbyist | $9/month | Unlimited AI chat, 5 published games, asset generation, priority support |
+| Creator | $29/month | Unlimited publishing, custom domain, advanced AI tools, remove branding |
+| Pro | $99/month | Team collaboration, API access, dedicated support, custom integrations |
+
+## Comparison with Other Game Engines
+
+| Feature | SpawnForge | Unity | Godot | GameMaker |
+|---------|-----------|-------|-------|-----------|
+| Browser-native (no install) | Yes | No | No | No |
+| AI-first game creation | Yes | No | No | No |
+| Free tier | Yes | Yes | Yes (open source) | No |
+| Visual scripting | Yes (73 nodes) | Yes | Yes | Yes |
+| WebGPU rendering | Yes | No | Partial | No |
+| 2D + 3D support | Yes | Yes | Yes | 2D only |
+| One-click web publish | Yes | No | No | No |
+| TypeScript scripting | Yes | No (C#) | No (GDScript) | No (GML) |
+| Natural language editing | Yes | No | No | No |
+| No build tools required | Yes | No | No | No |
+
+## Technology Stack
+
+- Rust, Bevy 0.18, wasm-bindgen 0.2.108
+- React, Next.js 16, TypeScript, Zustand, Tailwind CSS
+- Rapier 3D/2D physics
+- WebGPU (wgpu 27) / WebGL2
+- Drizzle ORM, Neon Postgres
+- Clerk authentication, Stripe payments
+- Sentry error tracking, PostHog analytics
+
+## Use Cases
+
+- **Solo indie developers**: Build and publish browser games without learning complex tools
+- **Game jams**: Rapid prototyping with AI assistance — go from idea to playable in hours
+- **Educators**: Teach game development concepts with an accessible, browser-based tool
+- **Hobbyists**: Create games as a creative outlet without programming experience
+- **Studios**: Prototype game ideas quickly before committing to full production
+- **Content creators**: Build interactive experiences to share with audiences
+
+## Links
+
+- Website: https://spawnforge.ai
+- Pricing: https://spawnforge.ai/pricing
+- Community Gallery: https://spawnforge.ai/community
+- Documentation: https://docs.spawnforge.ai
+- Terms of Service: https://spawnforge.ai/terms
+- Privacy Policy: https://spawnforge.ai/privacy
