@@ -109,20 +109,17 @@ describe('WelcomeModal', () => {
     // Spy restored by afterEach via vi.restoreAllMocks()
   });
 
-  it('does not throw when dismissing with "Don\'t show again" and setItem throws', async () => {
-    const { userEvent } = await import('@testing-library/user-event');
-    const user = userEvent.setup();
-
+  it('does not throw when dismissing with "Don\'t show again" and setItem throws', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('Quota exceeded', 'QuotaExceededError');
     });
 
     render(<WelcomeModal />);
     const checkbox = screen.getByRole('checkbox', { name: /Don't show again/i });
-    await user.click(checkbox);
+    fireEvent.click(checkbox);
     const skipBtn = screen.getByRole('button', { name: /Skip/i });
     // Should not throw — dismissal succeeds even if write fails
-    await user.click(skipBtn);
+    fireEvent.click(skipBtn);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
