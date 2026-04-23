@@ -26,6 +26,7 @@ import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
+import { cachedGenerate } from './responseCache';
 
 /** Validation result: either the parsed params or an error response. */
 type ValidateResult<T> =
@@ -91,6 +92,18 @@ export interface GenerationHandlerConfig<TParams, TResult> {
     usageId: string | undefined;
     tokenCost: number;
   }) => Promise<TResult>;
+
+  /**
+   * Extract cache-relevant params from validated params. Only these fields
+   * contribute to the cache key. Omit large binary fields (imageBase64, etc.)
+   * and volatile fields (timestamps, request IDs).
+   *
+   * When omitted, caching is disabled for this route.
+   */
+  cacheKeyParams?: (params: TParams) => Record<string, unknown>;
+
+  /** Override TTL for cached results (in seconds). Uses operation-based defaults if omitted. */
+  cacheTtlSeconds?: number;
 }
 
 /**
@@ -123,6 +136,8 @@ export function createGenerationHandler<TParams, TResult>(
     billingMetadata: billingMetadataFn,
     validate,
     execute,
+    cacheKeyParams,
+    cacheTtlSeconds,
   } = config;
 
   return async (request: NextRequest): Promise<NextResponse> => {
@@ -200,6 +215,54 @@ export function createGenerationHandler<TParams, TResult>(
       captureException(err, { route, action: 'resolve_billing_params' });
       return NextResponse.json({ error: 'Internal pricing error' }, { status: 500 });
     }
+
+    // 6b. Check response cache (before token deduction — cache hits are free)
+    if (cacheKeyParams) {
+      const cacheParams = cacheKeyParams(params);
+      try {
+        const cacheResult = await cachedGenerate<TResult>(
+          resolvedOperation,
+          cacheParams,
+          async () => {
+            // Cache miss — deduct tokens and execute provider call
+            // This runs only on cache miss — deduct tokens and execute
+            const metadata = billingMetadataFn ? billingMetadataFn(params) : (params as Record<string, unknown>);
+            const resolved = await resolveApiKey(userId, resolvedProvider, tokenCost, resolvedOperation, metadata);
+            const apiKey = resolved.key;
+            const usageId = resolved.usageId;
+
+            try {
+              return await execute(params, apiKey, { userId, tier, usageId, tokenCost });
+            } catch (err) {
+              // Refund tokens on provider failure
+              if (usageId) {
+                try {
+                  await refundTokens(userId, usageId);
+                } catch (refundErr) {
+                  captureException(refundErr, { route, action: 'refund', usageId });
+                }
+              }
+              throw err;
+            }
+          },
+          { ttlSeconds: cacheTtlSeconds, userId }
+        );
+
+        const headers: Record<string, string> = {
+          'X-Cache': cacheResult.cached ? 'HIT' : 'MISS',
+        };
+        return NextResponse.json(cacheResult.result, { status: successStatus, headers });
+      } catch (err) {
+        if (err instanceof ApiKeyError) {
+          return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+        }
+        captureException(err, { route });
+        const message = err instanceof Error ? err.message : 'Provider error';
+        return NextResponse.json({ error: message }, { status: 500 });
+      }
+    }
+
+    // 7. No caching — original path: resolve key, deduct, execute
     let apiKey: string;
     let usageId: string | undefined;
 
@@ -215,12 +278,11 @@ export function createGenerationHandler<TParams, TResult>(
       throw err;
     }
 
-    // 7. Execute provider call
     try {
       const result = await execute(params, apiKey, { userId, tier, usageId, tokenCost });
       return NextResponse.json(result, { status: successStatus });
     } catch (err) {
-      // 8. Refund tokens on provider failure
+      // Refund tokens on provider failure
       if (usageId) {
         try {
           await refundTokens(userId, usageId);

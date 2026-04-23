@@ -223,13 +223,15 @@ describe('POST /api/generate/sfx', () => {
       expect(body.code).toBe('INSUFFICIENT_TOKENS');
     });
 
-    it('rethrows non-ApiKeyError exceptions', async () => {
+    it('returns 500 for non-ApiKeyError exceptions', async () => {
       vi.mocked(resolveApiKey).mockRejectedValue(new Error('DB error'));
 
       const { POST } = await import('../route');
-      await expect(
-        POST(makeRequest({ prompt: 'thunder', durationSeconds: 5 }))
-      ).rejects.toThrow('DB error');
+      const res = await POST(makeRequest({ prompt: 'thunder', durationSeconds: 5 }));
+      const body = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(body.error).toBe('DB error');
     });
   });
 

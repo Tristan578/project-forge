@@ -9,6 +9,7 @@ import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLi
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { refundTokens } from '@/lib/tokens/service';
+import { _memoryCache, _inFlight } from '@/lib/api/responseCache';
 
 const mockGenerateText = vi.hoisted(() => vi.fn());
 const mockAnthropicModel = vi.hoisted(() => vi.fn(() => 'model-stub'));
@@ -74,6 +75,8 @@ describe('POST /api/generate/localize', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    _memoryCache.clear();
+    _inFlight.clear();
 
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true,
@@ -285,9 +288,13 @@ describe('POST /api/generate/localize', () => {
     expect(refundTokens).not.toHaveBeenCalled();
   });
 
-  it('rethrows non-ApiKeyError during key resolution', async () => {
+  it('returns 500 for non-ApiKeyError during key resolution', async () => {
     vi.mocked(resolveApiKey).mockRejectedValue(new Error('DB connection failed'));
 
-    await expect(POST(makeRequest(validBody))).rejects.toThrow('DB connection failed');
+    const res = await POST(makeRequest(validBody));
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.error).toBe('DB connection failed');
   });
 });
