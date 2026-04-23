@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useSyncExternalStore } from 'react';
 import { Share2, X as XIcon } from 'lucide-react';
 
 interface ShareButtonsProps {
@@ -16,8 +16,20 @@ function addUtm(url: string, source: string): string {
   return u.toString();
 }
 
+// Stable subscribe reference — useSyncExternalStore requires a stable function
+// identity to avoid unsubscribing/resubscribing on every render.
+const noopSubscribe = () => () => {};
+
 export function ShareButtons({ gameTitle, gameUrl }: ShareButtonsProps) {
   const [copied, setCopied] = useState(false);
+  // navigator.share is undefined during SSR. useSyncExternalStore provides
+  // the server snapshot (false) and the client snapshot (actual capability)
+  // without triggering the set-state-in-effect lint rule.
+  const hasNativeShare = useSyncExternalStore(
+    noopSubscribe,
+    () => !!navigator.share,
+    () => false,
+  );
 
   const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
     `Check out "${gameTitle}" on SpawnForge!`
@@ -48,8 +60,6 @@ export function ShareButtons({ gameTitle, gameUrl }: ShareButtonsProps) {
       // User cancelled or API not available
     }
   }, [gameTitle, gameUrl]);
-
-  const hasNativeShare = typeof navigator !== 'undefined' && !!navigator.share;
 
   const btnClass =
     'rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300';
