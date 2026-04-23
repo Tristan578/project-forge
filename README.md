@@ -1,11 +1,34 @@
 # SpawnForge
 
+**SpawnForge is an open-source, AI-native 2D/3D game engine that runs entirely in the browser.** It combines a Bevy-based Rust/WebAssembly rendering engine with a React visual editor and 350 MCP commands, enabling game creation through natural language, visual scripting, or manual editing. Games are built, tested, and published without leaving the browser — no install, no compile step, no deployment pipeline.
+
 [![CI](https://github.com/Tristan578/project-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/Tristan578/project-forge/actions/workflows/ci.yml)
 [![CD](https://github.com/Tristan578/project-forge/actions/workflows/cd.yml/badge.svg)](https://github.com/Tristan578/project-forge/actions/workflows/cd.yml)
 
 ## Status
 
 ![CI](https://github.com/Tristan578/project-forge/actions/workflows/ci.yml/badge.svg) ![Vercel](https://img.shields.io/badge/Vercel-deployed-brightgreen?logo=vercel) ![Cloudflare](https://img.shields.io/badge/CDN-Cloudflare_R2-orange?logo=cloudflare) ![Anthropic](https://img.shields.io/badge/AI-Claude_API-blueviolet?logo=anthropic) ![Google AI](https://img.shields.io/badge/Embeddings-Gemini-blue?logo=google) ![Sentry](https://img.shields.io/badge/Monitoring-Sentry-purple?logo=sentry)
+
+## Why SpawnForge
+
+- **Browser-native** — No download, no IDE setup. Open a URL and start building 2D or 3D games.
+- **AI-first** — 25+ AI modules and 350 MCP commands let LLMs and agents drive the full editor. Describe a scene in plain text and watch it materialize.
+- **Real engine** — Bevy ECS compiled to WebAssembly, WebGPU rendering (WebGL2 fallback), Rapier physics, spatial audio, GPU particles, skeletal animation. Not a toy.
+- **One command interface** — The visual editor, AI chat, and external MCP agents all call the same `handle_command()` JSON API. There is no separate "AI mode."
+- **Publish instantly** — One-click publish to a shareable URL. Export as a standalone ZIP with PWA support.
+
+## Key Statistics
+
+| Metric | Value |
+|--------|-------|
+| MCP commands | 350 across 41 categories |
+| Visual scripting nodes | 73 across 10 categories |
+| Material presets | 56 across 9 categories |
+| AI modules | 25+ (chat, generation, asset creation) |
+| Game components | 12 drag-and-drop behaviors |
+| Test suite | 14,200+ tests |
+| Rendering | WebGPU primary, WebGL2 fallback |
+| Engine | Bevy 0.18, Rust/WASM |
 
 An open-source, AI-native 2D/3D game engine for the browser. Every capability — scene creation, materials, physics, scripting, audio, particles, tilemaps, animation, export — is exposed as a JSON command, making the entire editor fully controllable by LLMs and autonomous agents via the [Model Context Protocol](https://modelcontextprotocol.io/). Build games by conversation, by code, or by hand.
 

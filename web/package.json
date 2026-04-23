@@ -2,6 +2,21 @@
   "name": "web",
   "version": "0.1.0",
   "private": true,
+  "description": "SpawnForge web frontend — Next.js editor, AI chat, game publishing, and MCP command interface",
+  "keywords": [
+    "game engine",
+    "browser game",
+    "AI game creation",
+    "WebGPU",
+    "WASM",
+    "game maker",
+    "visual scripting",
+    "MCP",
+    "2D game engine",
+    "3D game engine",
+    "no-code game",
+    "game development platform"
+  ],
   "engines": {
     "node": ">=20 <25"
   },
