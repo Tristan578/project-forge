@@ -107,3 +107,10 @@ export const AI_QUEUE_DEFAULT_MAX_DEPTH = 20;
 
 /** Maximum number of retries for the WASM engine initialisation sequence. */
 export const ENGINE_INIT_MAX_RETRIES = 3;
+
+// ---------------------------------------------------------------------------
+// Site URL
+// ---------------------------------------------------------------------------
+
+/** Canonical site URL, driven by NEXT_PUBLIC_SITE_URL env var (build-time). */
+export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://spawnforge.ai";

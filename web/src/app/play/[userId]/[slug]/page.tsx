@@ -47,6 +47,7 @@ export async function generateMetadata({
     return {
       title: `${game.title} - SpawnForge`,
       description: game.description || `Play ${game.title} on SpawnForge`,
+      alternates: { canonical: `/play/${clerkId}/${slug}` },
     };
   } catch {
     return { title: 'SpawnForge' };

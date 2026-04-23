@@ -9,6 +9,7 @@ export const metadata: Metadata = {
   title: 'SpawnForge - AI-Powered Game Creation Platform',
   description:
     'Create 2D and 3D games in your browser with AI. No downloads, no installs. Describe your game and watch it come to life.',
+  alternates: { canonical: '/' },
   openGraph: {
     title: 'SpawnForge - Create Games with AI',
     description:

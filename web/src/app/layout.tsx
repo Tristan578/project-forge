@@ -9,6 +9,7 @@ import { defaultLocale } from "@/i18n/config";
 import messages from "@/i18n/messages/en.json";
 import { Toaster } from "sonner";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
+import { SITE_URL } from "@/lib/constants";
 import "./globals.css";
 
 // Lazy-load analytics and consent providers — they rely on browser APIs
@@ -36,9 +37,8 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://spawnforge.ai";
-
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "SpawnForge",
   description: "AI-Powered Game Creation Platform — build 2D and 3D games in your browser with natural language and a visual editor.",
   manifest: "/manifest.json",
@@ -58,16 +58,49 @@ export const metadata: Metadata = {
   },
 };
 
-// Static JSON-LD Organization schema (safe constant — no user input)
-const jsonLdString = JSON.stringify({
-  "@context": "https://schema.org",
-  "@type": "Organization",
-  name: "SpawnForge",
-  url: SITE_URL,
-  logo: `${SITE_URL}/favicon.ico`,
-  description: "AI-Powered Game Creation Platform — build 2D and 3D games in your browser with natural language and a visual editor.",
-  sameAs: [],
-});
+// Static JSON-LD: combined SoftwareApplication + Organization schema (safe constant — no user input)
+const jsonLdString = JSON.stringify([
+  {
+    "@context": "https://schema.org",
+    "@type": ["WebApplication", "SoftwareApplication"],
+    name: "SpawnForge",
+    url: SITE_URL,
+    description: "AI-Powered Game Creation Platform — build 2D and 3D games in your browser with natural language and a visual editor.",
+    applicationCategory: ["GameApplication", "DeveloperApplication"],
+    operatingSystem: "Web Browser",
+    browserRequirements: "WebGPU or WebGL2 capable browser",
+    offers: {
+      "@type": "AggregateOffer",
+      lowPrice: "0",
+      highPrice: "99",
+      priceCurrency: "USD",
+      offerCount: 4,
+      offers: [
+        { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD" },
+        { "@type": "Offer", name: "Starter", price: "9", priceCurrency: "USD" },
+        { "@type": "Offer", name: "Pro", price: "29", priceCurrency: "USD" },
+        { "@type": "Offer", name: "Studio", price: "99", priceCurrency: "USD" },
+      ],
+    },
+    featureList: [
+      "AI-powered game creation from natural language prompts",
+      "2D and 3D game engine (Rust/WASM, WebGPU + WebGL2)",
+      "Visual scripting with 73 node types",
+      "350 MCP commands for AI-assisted editing",
+      "One-click browser game publishing",
+      "Real-time physics simulation (Rapier)",
+      "AI asset generation (3D models, textures, audio, music)",
+    ],
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: "SpawnForge",
+    url: SITE_URL,
+    logo: `${SITE_URL}/favicon.ico`,
+    description: "AI-Powered Game Creation Platform — build 2D and 3D games in your browser with natural language and a visual editor.",
+  },
+]);
 
 export default function RootLayout({
   children,

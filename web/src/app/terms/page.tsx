@@ -6,6 +6,7 @@ import { LegalLayout } from '@/components/legal/LegalLayout';
 export const metadata: Metadata = {
   title: 'Terms of Service - SpawnForge',
   description: 'SpawnForge Terms of Service - AI-Powered Game Creation Platform',
+  alternates: { canonical: '/terms' },
 };
 
 const tableOfContents = [
