@@ -37,7 +37,8 @@
     "esbuild": ">=0.25.0",
     "hono": "^4.12.14",
     "lodash": ">=4.18.1",
-    "protobufjs": ">=7.5.5"
+    "protobufjs": ">=7.5.5",
+    "eslint-plugin-react-hooks": "7.0.1"
   },
   "scripts": {
     "changeset": "changeset",
