@@ -1,8 +1,4 @@
-import { redirect } from 'next/navigation';
-import { safeAuth } from '@/lib/auth/safe-auth';
 import type { Metadata } from 'next';
-
-export const dynamic = 'force-dynamic';
 import LandingPage from './(marketing)/page';
 
 export const metadata: Metadata = {
@@ -18,10 +14,7 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function Home() {
-  const { userId } = await safeAuth();
-  if (userId) {
-    redirect('/dashboard');
-  }
+// Auth redirect moved to proxy.ts — landing page can be statically cached.
+export default function Home() {
   return <LandingPage />;
 }
