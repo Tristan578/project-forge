@@ -1,12 +1,25 @@
 import './globals.css';
 import type { ReactNode } from 'react';
+import type { Metadata } from 'next';
 import { ClerkProvider } from '@clerk/nextjs';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata = {
-  title: 'SpawnForge Documentation',
-  description: 'API reference and MCP command documentation for SpawnForge',
+const DOCS_URL = process.env.NEXT_PUBLIC_DOCS_URL ?? 'https://docs.spawnforge.ai';
+
+export const metadata: Metadata = {
+  metadataBase: new URL(DOCS_URL),
+  title: {
+    default: 'SpawnForge Documentation',
+    template: '%s | SpawnForge Docs',
+  },
+  description: 'API reference, MCP command documentation, and getting started guides for SpawnForge — the AI-powered game creation platform.',
+  openGraph: {
+    title: 'SpawnForge Documentation',
+    description: 'API reference, MCP command documentation, and guides for SpawnForge.',
+    siteName: 'SpawnForge Docs',
+    type: 'website',
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
