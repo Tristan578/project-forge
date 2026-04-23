@@ -6,7 +6,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockWhere = vi.fn(() => Promise.resolve([]));
+type GameRow = { slug: string; clerkId: string; updatedAt: Date };
+const mockWhere = vi.fn<() => Promise<GameRow[]>>(() => Promise.resolve([]));
 
 vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn(() => ({
