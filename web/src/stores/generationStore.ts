@@ -229,7 +229,14 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         hydrated: true,
       }));
     } catch (err) {
-      captureException(err, { context: 'generationStore.hydrateFromServer' });
+      // Network-level TypeError ("Failed to fetch") is expected in dev when
+      // the API isn't reachable (missing DATABASE_URL, no Clerk keys, etc.).
+      // Only report genuine server-side errors to Sentry.
+      const isNetworkError =
+        err instanceof TypeError && /failed to fetch/i.test(err.message);
+      if (!isNetworkError) {
+        captureException(err, { context: 'generationStore.hydrateFromServer' });
+      }
       set({ hydrated: true });
     }
   },
