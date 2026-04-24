@@ -30,7 +30,13 @@ vi.mock('@/lib/ai/toolAdapter', () => ({
 
 vi.mock('@/lib/ai/models', () => ({
   AI_MODEL_PRIMARY: 'claude-sonnet-4.5',
-  AI_MODELS: { gatewayChat: 'anthropic/claude-sonnet-4.6' },
+  AI_MODELS: {
+    chat: 'claude-sonnet-4.5',
+    fast: 'claude-haiku-4-5',
+    deep: 'claude-opus-4-7',
+    gatewayChat: 'anthropic/claude-sonnet-4.6',
+    gatewayDeep: 'anthropic/claude-opus-4-7',
+  },
 }));
 
 import { streamText } from 'ai';
@@ -445,6 +451,15 @@ describe('streamViaSdk — provider selection', () => {
     );
 
     expect(gateway).toHaveBeenCalledWith('anthropic/claude-sonnet-4.6');
+    expect(anthropic).not.toHaveBeenCalled();
+  });
+
+  it('routes Opus deep-tier model through gateway as anthropic/claude-opus-4-7', async () => {
+    await collectEvents(
+      streamViaSdk(gatewayRoute, simpleMessages, { model: 'claude-opus-4-7' }),
+    );
+
+    expect(gateway).toHaveBeenCalledWith('anthropic/claude-opus-4-7');
     expect(anthropic).not.toHaveBeenCalled();
   });
 

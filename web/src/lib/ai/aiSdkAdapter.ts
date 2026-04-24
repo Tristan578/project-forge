@@ -46,6 +46,9 @@ function toGatewayModelId(canonicalModel: string): string {
   if (canonicalModel === AI_MODELS.fast || canonicalModel.includes('haiku')) {
     return AI_MODELS.gatewayChat; // haiku routes to chat gateway by default
   }
+  if (canonicalModel === AI_MODELS.deep || canonicalModel.includes('opus')) {
+    return AI_MODELS.gatewayDeep;
+  }
   // Fallback: construct gateway ID from canonical name
   return `anthropic/${canonicalModel}`;
 }
