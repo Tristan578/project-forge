@@ -30,10 +30,15 @@
     "node": ">=20 <25"
   },
   "overrides": {
-    "dompurify": ">=3.3.2",
+    "@clerk/nextjs": "^7.2.1",
+    "@clerk/shared": "^4.8.1",
+    "@hono/node-server": "^1.19.13",
+    "dompurify": "^3.4.0",
     "esbuild": ">=0.25.0",
+    "hono": "^4.12.14",
     "lodash": ">=4.18.1",
-    "protobufjs": ">=7.5.5"
+    "protobufjs": ">=7.5.5",
+    "eslint-plugin-react-hooks": "7.0.1"
   },
   "scripts": {
     "changeset": "changeset",
