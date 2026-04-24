@@ -27,7 +27,8 @@ beforeEach(async () => {
   vi.resetAllMocks();
   mockFetch.mockReset();
   // Re-import after reset so the module gets a fresh state
-  vi.mock('@/lib/rateLimit', () => ({
+  // vi.doMock is not hoisted, so it runs after vi.resetModules() as intended
+  vi.doMock('@/lib/rateLimit', () => ({
     rateLimit: vi.fn(),
   }));
   globalThis.fetch = mockFetch;

@@ -27,19 +27,20 @@ import * as childProcess from 'child_process';
 async function importBridgeManager() {
   vi.resetModules();
   // Re-apply mocks after module reset
-  vi.mock('server-only', () => ({}));
-  vi.mock('child_process', () => ({
+  // vi.doMock is not hoisted, so it runs after vi.resetModules() as intended
+  vi.doMock('server-only', () => ({}));
+  vi.doMock('child_process', () => ({
     execFile: vi.fn(),
     default: { execFile: vi.fn() },
   }));
-  vi.mock('fs', () => ({
+  vi.doMock('fs', () => ({
     existsSync: vi.fn(),
     readFileSync: vi.fn(),
     writeFileSync: vi.fn(),
     mkdirSync: vi.fn(),
     default: { existsSync: vi.fn(), readFileSync: vi.fn(), writeFileSync: vi.fn(), mkdirSync: vi.fn() },
   }));
-  vi.mock('os', () => ({
+  vi.doMock('os', () => ({
     homedir: vi.fn(() => '/mock-home'),
     platform: vi.fn(() => 'darwin'),
     default: { homedir: vi.fn(() => '/mock-home'), platform: vi.fn(() => 'darwin') },
