@@ -3,7 +3,7 @@
  * Pure data module: types, presets, generation prompt builder, and parsers.
  */
 
-import { AI_MODEL_PRIMARY } from './models';
+import { getDeepGenerationModel } from './deepTier';
 import { fetchAI } from './client';
 
 // ---- Core Types ----
@@ -588,7 +588,7 @@ export async function generateWorld(description: string, preset?: string): Promi
   // Attempt AI generation — let HTTP/auth errors surface to the caller,
   // but fall back to the preset on network failures or parse errors.
   const content = await fetchAI(prompt, {
-    model: AI_MODEL_PRIMARY,
+    model: getDeepGenerationModel('world_builder'),
     priority: 2,
   });
 

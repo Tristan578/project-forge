@@ -32,6 +32,15 @@ export const AI_MODEL_FAST = 'claude-haiku-4-5-20251001';
  */
 export const AI_MODEL_PREMIUM = 'claude-opus-4-7';
 
+/**
+ * Deep model for highest-quality single-shot generations where latency
+ * is secondary to output fidelity (GDD authoring, world building, cutscenes).
+ * Routed via the feature flag helper in `deepTier.ts`. Falls back to
+ * AI_MODEL_PRIMARY when the flag is off. Aliases AI_MODEL_PREMIUM — same
+ * Opus 4.7 model, separate semantic role (deep generators vs. user request).
+ */
+export const AI_MODEL_DEEP = AI_MODEL_PREMIUM;
+
 // ---------------------------------------------------------------------------
 // Gateway-format model strings (for use with AI SDK gateway() provider)
 // ---------------------------------------------------------------------------
@@ -44,6 +53,9 @@ export const GATEWAY_MODEL_FAST = 'anthropic/claude-haiku-4-5' as const;
 
 /** Premium chat model via Vercel AI Gateway (Pro tier only) */
 export const GATEWAY_MODEL_PREMIUM = 'anthropic/claude-opus-4-7' as const;
+
+/** Deep chat model via Vercel AI Gateway — alias of GATEWAY_MODEL_PREMIUM */
+export const GATEWAY_MODEL_DEEP = GATEWAY_MODEL_PREMIUM;
 
 /** Embedding model via Vercel AI Gateway */
 export const GATEWAY_MODEL_EMBEDDING = 'google/gemini-embedding-2-preview' as const;
@@ -62,6 +74,10 @@ export const AI_MODELS = {
   fast: AI_MODEL_FAST,
   /** Premium model — Pro tier only, highest quality (Opus 4.7) */
   premium: AI_MODEL_PREMIUM,
+  /** Deep model — highest-quality generation for GDD, world building, cutscenes */
+  deep: AI_MODEL_DEEP,
+  /** Gateway-format deep model string */
+  gatewayDeep: GATEWAY_MODEL_DEEP,
   /** Embedding model used by semantic search (docs, assets) */
   embedding: 'gemini-embedding-2-preview',
   /** Default gateway chat model (routed through Vercel AI Gateway) */

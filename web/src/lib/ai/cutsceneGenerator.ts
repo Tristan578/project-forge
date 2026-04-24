@@ -7,6 +7,7 @@
  */
 
 import { fetchAI } from './client';
+import { getDeepGenerationModel } from './deepTier';
 import type { Cutscene, CutsceneTrack, CutsceneKeyframe, CutsceneTrackType, EasingMode } from '@/stores/cutsceneStore';
 
 // ============================================================================
@@ -207,6 +208,7 @@ export async function generateCutscene(
 ): Promise<Cutscene> {
   const prompt = buildCutscenePrompt(options);
   const raw = await fetchAI(prompt, {
+    model: getDeepGenerationModel('cutscene'),
     systemOverride: 'You are a cinematic director AI for a game engine. Always return valid JSON.',
     priority: 1,
   });

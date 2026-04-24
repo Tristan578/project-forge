@@ -6,7 +6,7 @@
  * a typed GameDesignDocument structure.
  */
 
-import { AI_MODEL_PRIMARY } from './models';
+import { getDeepGenerationModel } from './deepTier';
 import { fetchAI } from './client';
 import { GDD_SCOPE_SET } from '@/lib/config/enums';
 
@@ -348,7 +348,7 @@ export async function generateGDD(
   const userMessage = buildUserPrompt(prompt, options);
 
   const content = await fetchAI(userMessage, {
-    model: AI_MODEL_PRIMARY,
+    model: getDeepGenerationModel('gdd'),
     sceneContext: '',
     thinking: false,
     systemOverride: GDD_SYSTEM_PROMPT,
