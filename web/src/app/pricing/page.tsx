@@ -29,20 +29,20 @@ const pricingJsonLd = JSON.stringify({
     offers: {
       '@type': 'AggregateOffer',
       lowPrice: '0',
-      highPrice: '99',
+      highPrice: '79',
       priceCurrency: 'USD',
       offerCount: 4,
       offers: [
         {
           '@type': 'Offer',
-          name: 'Starter (Free)',
+          name: 'Free',
           price: '0',
           priceCurrency: 'USD',
           description: 'AI chat (limited), 1 published game, community templates, basic export',
         },
         {
           '@type': 'Offer',
-          name: 'Hobbyist',
+          name: 'Starter',
           price: '9',
           priceCurrency: 'USD',
           description: 'Unlimited AI chat, 5 published games, asset generation, priority support',
@@ -56,8 +56,8 @@ const pricingJsonLd = JSON.stringify({
         },
         {
           '@type': 'Offer',
-          name: 'Pro',
-          price: '99',
+          name: 'Studio',
+          price: '79',
           priceCurrency: 'USD',
           description: 'Team collaboration, API access, dedicated support, custom integrations',
         },
