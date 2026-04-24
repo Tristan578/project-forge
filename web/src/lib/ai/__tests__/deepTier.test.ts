@@ -31,13 +31,21 @@ describe('deepTier', () => {
       expect(isDeepTierEnabled()).toBe(true);
     });
 
-    it('returns false for other truthy-looking strings', async () => {
-      for (const value of ['1', 'yes', 'TRUE', 'on']) {
-        process.env.NEXT_PUBLIC_USE_DEEP_GENERATION = value;
-        vi.resetModules();
-        const { isDeepTierEnabled } = await import('../deepTier');
-        expect(isDeepTierEnabled()).toBe(false);
-      }
+    it.each([
+      ['1'],
+      ['yes'],
+      ['TRUE'],
+      ['on'],
+      [''],
+      [' true '],
+      ['false'],
+    ])('returns false for non-exact-"true" value: %j', async (value) => {
+      // Set env BEFORE resetModules so the fresh import reads the intended value.
+      // Order matters: vi.resetModules() clears the cache, the next import re-reads process.env.
+      process.env.NEXT_PUBLIC_USE_DEEP_GENERATION = value;
+      vi.resetModules();
+      const { isDeepTierEnabled } = await import('../deepTier');
+      expect(isDeepTierEnabled()).toBe(false);
     });
   });
 
