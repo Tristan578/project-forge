@@ -69,6 +69,31 @@ any block carries `ttl: '1h'` — no manual header wiring needed.
 
 > Update this section once we have 7 days of `ai_cache_hit_rate` data.
 
+### How to collect the metrics
+
+1. **Pre-rollout baseline.** Before merging, capture the last 7 days of
+   `ai_cache_hit_rate` events filtered to `tier == 'short'` (the prior code
+   path emitted only the default 5m tier). Use:
+
+   ```sql
+   -- PostHog HogQL
+   SELECT
+     avg(properties.cacheReadTokens) AS avg_read,
+     avg(properties.cacheWriteTokens) AS avg_write,
+     avg(properties.cacheReadTokens / nullif(properties.cacheReadTokens + properties.inputTokens, 0)) AS hit_rate
+   FROM events
+   WHERE event = 'ai_cache_hit_rate'
+     AND properties.tier = 'short'
+     AND timestamp > now() - INTERVAL 7 DAY
+   ```
+
+2. **Post-rollout sample.** Re-run the same query 7 days after merge with
+   `tier == 'long'`.
+3. **Per-session $.** Multiply `avg_read × 0.1× + avg_write × 2.0×` by the
+   chat-session step count (from `usageId` rows in `tokenLedger`).
+4. Drop the numbers into the table below and link the PostHog/Neon query
+   used so future readers can reproduce.
+
 | Metric | Pre-rollout (5m TTL) | Post-rollout (1h TTL) | Δ |
 |---|---|---|---|
 | Avg cache read tokens / step | _TBD_ | _TBD_ | _TBD_ |
@@ -93,6 +118,4 @@ its 5-minute window. Once the typical session re-uses the prefix more than
 
 - Anthropic prompt caching docs: <https://docs.claude.com/en/docs/build-with-claude/prompt-caching>
 - AI SDK Anthropic provider options: `node_modules/@ai-sdk/anthropic/dist/index.d.ts:148`
-- Sibling decisions:
-  - `2026-04-12-stripe-v21-audit.md`
-  - prior session ADR: `2026-05-01-opus-deep-tier.md` (referenced in `CLAUDE.md`)
+- Sibling decision: `2026-04-12-stripe-v21-audit.md`

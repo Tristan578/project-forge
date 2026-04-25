@@ -21,15 +21,24 @@ import { promptCache } from './promptCache';
 // ---------------------------------------------------------------------------
 
 /**
- * Cache tier hint for an instruction block.
+ * Ephemeral cache TTL tier for an Anthropic prompt-cache block.
  *
- * - `short` — default 5-minute ephemeral cache. Use for per-turn content
- *   (doc snippets, ad-hoc instructions) that changes between requests.
- * - `long`  — 1-hour ephemeral cache via the `extended-cache-ttl-2025-04-11`
- *   beta. Use for content reused across many turns within a session
- *   (base system prompt, scene context, tool manifest).
+ * Anthropic prompt caching charges per cache write (1.25× input price for 5m,
+ * 2.0× input price for 1h) and per cache read (0.1× input price). The right
+ * tier depends on how often the block is reused within a session:
+ *
+ * - `short` (5m) — default ephemeral cache. Use for per-turn content (doc
+ *   snippets, ad-hoc instructions) that changes between requests. Break-even
+ *   versus no caching at ~3 reads inside the 5-minute window.
+ *
+ * - `long` (1h) — extended ephemeral cache via the `extended-cache-ttl-2025-04-11`
+ *   beta. Use for stable content reused many times within a session (base
+ *   system prompt, scene context, tool manifest). Costs ~0.75× more to write
+ *   than the 5m tier; break-even versus the 5m tier at ~9 reads per write.
+ *
+ * See `docs/plans/2026-04-24-extended-cache-ttl.md` for the cost model.
  */
-export type CacheTier = 'short' | 'long';
+export type CacheTtlTier = 'short' | 'long';
 
 /**
  * Build the Anthropic providerOptions object for a cache tier. Returns an
@@ -39,7 +48,7 @@ export type CacheTier = 'short' | 'long';
  * The 1h TTL requires the beta header `extended-cache-ttl-2025-04-11`.
  * `@ai-sdk/anthropic` auto-attaches it when any block carries `ttl: '1h'`.
  */
-export function buildAnthropicCacheControl(tier: CacheTier): {
+export function buildAnthropicCacheControl(tier: CacheTtlTier): {
   anthropic: { cacheControl: { type: 'ephemeral'; ttl?: '1h' } };
 } {
   return {

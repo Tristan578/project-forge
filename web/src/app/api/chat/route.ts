@@ -381,13 +381,16 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 5b. Server-side token budget validation.
-  // 2M chars ~= 500k tokens at 4 chars/token, leaving ~500k of Sonnet's 1M
-  // window for output and tool round-trips. Larger limits would push close to
-  // the model cap with no headroom; smaller limits unnecessarily 413 long
-  // game-design conversations (#8484).
+  // 5b. Server-side token budget validation. Counts every char that will be
+  // billed by Anthropic — messages, tool results, attachments, AND the
+  // client-supplied sceneContext that is added to the system prefix below.
+  // sceneContext is tagged for the 1h ephemeral cache (2× input write
+  // multiplier), so leaving it outside this guard would let a client double
+  // their effective bill for free. 2M chars ~= 500k tokens at 4 chars/token,
+  // leaving ~500k of Sonnet's 1M window for output and tool round-trips
+  // (#8484).
   const MAX_INPUT_CHARS = 2_000_000;
-  let totalChars = 0;
+  let totalChars = typeof sceneContext === 'string' ? sceneContext.length : 0;
   for (const msg of messages) {
     if (typeof msg.content === 'string') {
       totalChars += msg.content.length;
@@ -464,7 +467,13 @@ export async function POST(request: NextRequest) {
     // be 50k+ chars. The total input budget (MAX_INPUT_CHARS = 2M) at
     // step 5b is the real size guard for the entire conversation.
     const sanitizedContext = sceneContext.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-    instructionBlocks.push({ text: sanitizedContext, tier: 'long' });
+    // Prepend a per-user nonce so the cached prefix is unique per user even
+    // under the shared platform Anthropic API key. Anthropic's prompt cache
+    // is scoped to API key / org granularity, so without this two users with
+    // byte-identical sceneContext would share a cache entry. The nonce is
+    // an HTML comment — inert to the LLM but disambiguates the prefix bytes.
+    const userScopedContext = `<!-- session:${auth.ctx.user.id} -->\n${sanitizedContext}`;
+    instructionBlocks.push({ text: userScopedContext, tier: 'long' });
   }
 
   // Inject relevant documentation when the user appears to be asking a how-to question
@@ -497,6 +506,10 @@ export async function POST(request: NextRequest) {
   // Sonnet inside createSpawnforgeAgent — but billing already deducted at the
   // higher tier. Direct backends pass-through the canonical name unchanged.
   const resolvedModelId = chatRoute?.modelId ?? model ?? '';
+  // Capture the dominant cache tier for analytics. Computed once per request:
+  // instructionBlocks does not mutate after this point, so we don't need to
+  // recompute inside onStepFinish (which fires once per tool-loop step).
+  const hasLongTier = instructionBlocks.some((b) => b.tier === 'long');
   const agent = createSpawnforgeAgent({
     isDirectBackend: usingDirect,
     model: resolvedModelId,
@@ -517,15 +530,11 @@ export async function POST(request: NextRequest) {
         // the model (not the estimated cost charged upfront via resolveApiKey).
         if (auth.ctx.user.id && usageId && usage) {
           const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-          // AI SDK v6 nests cache token counts under inputTokenDetails. The
-          // unknown cast guards against older SDK shapes if the dep ever
-          // downgrades.
-          const inputDetails =
-            (usage as unknown as {
-              inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number };
-            }).inputTokenDetails ?? {};
-          const cacheReadTokens = inputDetails.cacheReadTokens;
-          const cacheWriteTokens = inputDetails.cacheWriteTokens;
+          // AI SDK v6 nests cache token counts under usage.inputTokenDetails.
+          // The fields are typed `number | undefined` and propagate as-is to
+          // logCost (JSONB metadata) and trackAiCacheHitRate (coerces to 0).
+          const cacheReadTokens = usage.inputTokenDetails?.cacheReadTokens;
+          const cacheWriteTokens = usage.inputTokenDetails?.cacheWriteTokens;
 
           logCost(
             auth.ctx.user.id,
@@ -545,11 +554,11 @@ export async function POST(request: NextRequest) {
             captureException(err, { route: '/api/chat', phase: 'log_token_usage' });
           });
 
-          // Best-effort PostHog/Vercel analytics for cache hit dashboards.
-          // Only meaningful on the direct backend (Anthropic exposes cache
-          // counts); the gateway path returns zeros and is still recorded so
-          // we can compare backends.
-          const hasLongTier = instructionBlocks.some((b) => b.tier === 'long');
+          // PostHog/Vercel analytics for cache-hit dashboards. Only fires on
+          // the direct backend because the surrounding `usageId` guard is
+          // only set when usingDirectBackend is true (gateway users don't
+          // hit our billing path). Gateway cache effectiveness is therefore
+          // not tracked here — Vercel AI Gateway exposes its own metrics.
           trackAiCacheHitRate(hasLongTier ? 'long' : 'short', {
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,

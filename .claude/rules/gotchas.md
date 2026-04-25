@@ -41,6 +41,7 @@ These are lower-frequency gotchas moved from CLAUDE.md. The most common ones rem
 - **`sanitizeSystemPrompt` truncates at 10k chars** — Use inline regex for scene context (can be 50k+).
 - **`ToolLoopAgent.stream()` has no `onError`** — Use `result.toUIMessageStreamResponse({ onFinish })`.
 - **Dynamic route `[name]` params need validation** — If POST validates name characters, PATCH/DELETE on `[name]` must validate too. Malformed percent-encoding (`%E0%A4%A`) passes Next.js decoding but should return 400 before DB queries.
+- **`InstructionBlock[]` cache controls only fire on direct backend** — `createSpawnforgeAgent({ instructions: InstructionBlock[] })` joins blocks into a flat string when `isDirectBackend` is false. Adding `tier: 'long'` does nothing on the gateway/OpenRouter path. Per-user content (e.g. scene context) must include a per-user nonce inside the block text — Anthropic's prompt cache is keyed at the org level, so two users on the same Anthropic key share a cache namespace.
 
 ## WASM / CDN
 - **WASM CDN same-origin fallback** — JS glue (`forge_engine.js`) and WASM binary (`forge_engine_bg.wasm`) are a coupled pair. Both MUST load from the same origin. Cannot load JS from CDN and WASM from same-origin. `getWasmBasePaths()` handles this.

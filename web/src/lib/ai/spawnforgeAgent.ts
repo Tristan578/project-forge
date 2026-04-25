@@ -19,7 +19,7 @@ import { gateway } from '@ai-sdk/gateway';
 import { anthropic } from '@ai-sdk/anthropic';
 import { convertManifestToolsToSdkTools, type ManifestTool } from '@/lib/ai/toolAdapter';
 import { AI_MODEL_PRIMARY, AI_MODELS } from '@/lib/ai/models';
-import { buildAnthropicCacheControl, type CacheTier } from '@/lib/ai/cachedContext';
+import { buildAnthropicCacheControl, type CacheTtlTier } from '@/lib/ai/cachedContext';
 import manifestJson from '@/data/commands.json';
 
 // ---------------------------------------------------------------------------
@@ -84,7 +84,7 @@ const AGENT_TOOLS = getAgentTools();
  */
 export interface InstructionBlock {
   text: string;
-  tier?: CacheTier;
+  tier?: CacheTtlTier;
 }
 
 export interface SpawnforgeAgentOptions {

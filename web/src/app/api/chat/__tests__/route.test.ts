@@ -88,6 +88,10 @@ vi.mock('@/lib/costs/costLogger', () => ({
   logCost: vi.fn().mockResolvedValue('log-id-1'),
 }));
 
+vi.mock('@/lib/analytics/events.server', () => ({
+  trackAiCacheHitRate: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Mock resolveChatRoute so tests don't depend on any backend being configured
 vi.mock('@/lib/providers/resolveChat', () => ({
   // resolveChat is no longer used by route.ts (migrated to AI SDK streamText)
@@ -138,6 +142,7 @@ import { refundTokens } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { logCost } from '@/lib/costs/costLogger';
 import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
+import { trackAiCacheHitRate } from '@/lib/analytics/events.server';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -439,7 +444,14 @@ describe('POST /api/chat', () => {
     it('calls onStepFinish with usage to log actual token counts (PF-890)', async () => {
       // Capture the onStepFinish callback passed to agent.stream() and invoke it
       // with simulated usage data — this logs real token counts to the cost ledger.
-      let capturedOnStepFinish: ((event: { usage: { inputTokens: number; outputTokens: number } }) => Promise<void>) | undefined;
+      type StepEvent = {
+        usage: {
+          inputTokens?: number;
+          outputTokens?: number;
+          inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number };
+        };
+      };
+      let capturedOnStepFinish: ((event: StepEvent) => Promise<void>) | undefined;
       mockStream.mockImplementation(async (opts: Record<string, unknown>) => {
         capturedOnStepFinish = opts.onStepFinish as typeof capturedOnStepFinish;
         return mockStreamResult;
@@ -461,8 +473,109 @@ describe('POST /api/chat', () => {
         expect.objectContaining({
           promptTokens: 1200,
           completionTokens: 300,
+          // The cache token fields are present in metadata even when the SDK
+          // returned no inputTokenDetails — guards against silent drop.
+          cacheReadTokens: undefined,
+          cacheWriteTokens: undefined,
           usageId: 'usage-1',
         }),
+      );
+    });
+
+    it('forwards cacheReadTokens and cacheWriteTokens from inputTokenDetails to logCost', async () => {
+      type StepEvent = {
+        usage: {
+          inputTokens?: number;
+          outputTokens?: number;
+          inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number };
+        };
+      };
+      let capturedOnStepFinish: ((event: StepEvent) => Promise<void>) | undefined;
+      mockStream.mockImplementation(async (opts: Record<string, unknown>) => {
+        capturedOnStepFinish = opts.onStepFinish as typeof capturedOnStepFinish;
+        return mockStreamResult;
+      });
+
+      const res = await POST(makeRequest(validBody()));
+      await res.text();
+
+      await capturedOnStepFinish!({
+        usage: {
+          inputTokens: 1200,
+          outputTokens: 300,
+          inputTokenDetails: { cacheReadTokens: 800, cacheWriteTokens: 100 },
+        },
+      });
+
+      expect(logCost).toHaveBeenCalledWith(
+        'user-1',
+        'chat_message',
+        'anthropic',
+        null,
+        1500,
+        expect.objectContaining({ cacheReadTokens: 800, cacheWriteTokens: 100 }),
+      );
+    });
+
+    it('emits ai_cache_hit_rate analytics with long tier when scene context is present', async () => {
+      type StepEvent = {
+        usage: {
+          inputTokens?: number;
+          outputTokens?: number;
+          inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number };
+        };
+      };
+      let capturedOnStepFinish: ((event: StepEvent) => Promise<void>) | undefined;
+      mockStream.mockImplementation(async (opts: Record<string, unknown>) => {
+        capturedOnStepFinish = opts.onStepFinish as typeof capturedOnStepFinish;
+        return mockStreamResult;
+      });
+
+      const res = await POST(makeRequest(validBody()));
+      await res.text();
+
+      await capturedOnStepFinish!({
+        usage: {
+          inputTokens: 1200,
+          outputTokens: 300,
+          inputTokenDetails: { cacheReadTokens: 800, cacheWriteTokens: 100 },
+        },
+      });
+
+      expect(trackAiCacheHitRate).toHaveBeenCalledWith(
+        'long',
+        expect.objectContaining({
+          inputTokens: 1200,
+          outputTokens: 300,
+          cacheReadTokens: 800,
+          cacheWriteTokens: 100,
+        }),
+      );
+    });
+
+    it('emits ai_cache_hit_rate even when usage.inputTokenDetails is absent (older SDK shape)', async () => {
+      // Regression guard: a future SDK change that drops inputTokenDetails
+      // must not crash onStepFinish or skip analytics. The handler should
+      // pass through undefined cache token counts.
+      type StepEvent = {
+        usage: { inputTokens?: number; outputTokens?: number };
+      };
+      let capturedOnStepFinish: ((event: StepEvent) => Promise<void>) | undefined;
+      mockStream.mockImplementation(async (opts: Record<string, unknown>) => {
+        capturedOnStepFinish = opts.onStepFinish as typeof capturedOnStepFinish;
+        return mockStreamResult;
+      });
+
+      const res = await POST(makeRequest(validBody()));
+      await res.text();
+
+      await expect(
+        capturedOnStepFinish!({ usage: { inputTokens: 500, outputTokens: 50 } }),
+      ).resolves.not.toThrow();
+
+      expect(trackAiCacheHitRate).toHaveBeenCalledWith(
+        'long',
+        expect.objectContaining({ cacheReadTokens: undefined, cacheWriteTokens: undefined }),
       );
     });
 
@@ -486,6 +599,85 @@ describe('POST /api/chat', () => {
           }),
         ]),
       );
+    });
+
+    it('omits the scene-context block when sceneContext is empty', async () => {
+      const res = await POST(makeRequest({ ...validBody(), sceneContext: '' }));
+      await res.text(); // drain stream
+      const call = vi.mocked(createSpawnforgeAgent).mock.calls.at(-1)?.[0];
+      const blocks = (call?.instructions ?? []) as Array<{ text: string; tier?: string }>;
+      // The scene-context block carries the per-user `<!-- session:... -->`
+      // marker which only the scene block uses. Its absence proves the
+      // block was dropped.
+      expect(blocks.some((b) => b.text.includes('<!-- session:'))).toBe(false);
+      expect(blocks[0]?.tier).toBe('long');
+    });
+
+    it('prepends a per-user nonce to scene context so two users do not share a cached prefix', async () => {
+      // First request as user-1 (default mock).
+      await (await POST(makeRequest(validBody()))).text();
+      const userOneCall = vi.mocked(createSpawnforgeAgent).mock.calls.at(-1)?.[0];
+      const userOneBlocks = (userOneCall?.instructions ?? []) as Array<{ text: string; tier?: string }>;
+      // Scene block is uniquely identified by the `<!-- session:... -->` marker.
+      const userOneScene = userOneBlocks.find((b) => b.text.includes('<!-- session:'));
+      expect(userOneScene?.text).toContain('<!-- session:user-1 -->');
+
+      // Switch to a second user with byte-identical scene context.
+      vi.mocked(authenticateRequest).mockResolvedValue({
+        ok: true,
+        ctx: { clerkId: 'clerk-2', user: { id: 'user-2', tier: 'pro' } as never },
+      });
+      await (await POST(makeRequest(validBody()))).text();
+      const userTwoCall = vi.mocked(createSpawnforgeAgent).mock.calls.at(-1)?.[0];
+      const userTwoBlocks = (userTwoCall?.instructions ?? []) as Array<{ text: string; tier?: string }>;
+      const userTwoScene = userTwoBlocks.find((b) => b.text.includes('<!-- session:'));
+      expect(userTwoScene?.text).toContain('<!-- session:user-2 -->');
+      // The two users' cached prefixes must differ byte-for-byte.
+      expect(userTwoScene?.text).not.toBe(userOneScene?.text);
+    });
+
+    it('orders instruction blocks as [base prompt, scene context]', async () => {
+      // Anthropic caches up to the LAST cache_control marker, so the order
+      // of long-tier blocks matters: stable base prompt first, then scene
+      // context (which changes when entities are added/removed). Doc
+      // context is short-tier and added last when the user asks a how-to
+      // question — not exercised here because we have no real docs index.
+      const res = await POST(makeRequest(validBody()));
+      await res.text(); // drain stream
+      const call = vi.mocked(createSpawnforgeAgent).mock.calls.at(-1)?.[0];
+      const blocks = (call?.instructions ?? []) as Array<{ text: string; tier?: string }>;
+      // Base system prompt always at index 0 with long tier; the scene-block
+      // marker appears only on the per-user scene context.
+      expect(blocks[0]?.tier).toBe('long');
+      expect(blocks[0]?.text).not.toContain('<!-- session:');
+      // Scene context immediately follows.
+      expect(blocks[1]?.tier).toBe('long');
+      expect(blocks[1]?.text).toContain('<!-- session:user-1 -->');
+      expect(blocks[1]?.text).toContain('## Scene\nEmpty');
+    });
+
+    it('counts sceneContext.length toward the MAX_INPUT_CHARS budget', async () => {
+      // sceneContext alone is well under 600k, but combined with messages
+      // the total exceeds the 600k MAX_INPUT_CHARS guard. Without summing
+      // sceneContext.length into totalChars (the bug fixed in this change),
+      // the request would slip past the size check.
+      const longScene = 'x'.repeat(500_000);
+      const longContent = 'y'.repeat(3999);
+      const messages = Array.from({ length: 30 }, (_, i) => ({
+        role: i % 2 === 0 ? 'user' : 'assistant',
+        content: longContent,
+      }));
+      // 30 * 3999 = 119_970; combined with 500_000 sceneContext → 619_970 > 600_000.
+
+      const res = await POST(makeRequest({
+        messages,
+        model: 'claude-sonnet-4.6',
+        sceneContext: longScene,
+      }));
+
+      expect(res.status).toBe(413);
+      const body = await res.json();
+      expect(body.error).toContain('Conversation too long');
     });
 
     it('ignores systemOverride for non-creator/pro tiers', async () => {
