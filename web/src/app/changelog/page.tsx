@@ -16,7 +16,6 @@ export const metadata: Metadata = {
 function renderContent(lines: string[]) {
   const elements: React.ReactNode[] = [];
   let listItems: string[] = [];
-  let subheading: string | null = null;
 
   const flushList = () => {
     if (listItems.length > 0) {
@@ -34,10 +33,10 @@ function renderContent(lines: string[]) {
   for (const line of lines) {
     if (line.startsWith('### ')) {
       flushList();
-      subheading = line.replace('### ', '');
+      const heading = line.replace('### ', '');
       elements.push(
         <h3 key={`h3-${elements.length}`} className="mb-2 mt-4 text-sm font-semibold uppercase tracking-wider text-orange-400">
-          {subheading}
+          {heading}
         </h3>
       );
     } else if (line.startsWith('- ')) {
@@ -45,6 +44,13 @@ function renderContent(lines: string[]) {
       listItems.push(text);
     } else if (line.trim() === '') {
       flushList();
+    } else {
+      flushList();
+      elements.push(
+        <p key={`p-${elements.length}`} className="mb-3 text-zinc-300">
+          {line}
+        </p>
+      );
     }
   }
   flushList();
