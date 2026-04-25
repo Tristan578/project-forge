@@ -14,11 +14,12 @@
  * - Handling billing, auth, and rate limiting
  */
 
-import { ToolLoopAgent, stepCountIs } from 'ai';
+import { ToolLoopAgent, stepCountIs, type SystemModelMessage } from 'ai';
 import { gateway } from '@ai-sdk/gateway';
 import { anthropic } from '@ai-sdk/anthropic';
 import { convertManifestToolsToSdkTools, type ManifestTool } from '@/lib/ai/toolAdapter';
 import { AI_MODEL_PRIMARY, AI_MODELS } from '@/lib/ai/models';
+import { buildAnthropicCacheControl, type CacheTier } from '@/lib/ai/cachedContext';
 import manifestJson from '@/data/commands.json';
 
 // ---------------------------------------------------------------------------
@@ -73,17 +74,59 @@ const AGENT_TOOLS = getAgentTools();
 // Agent factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Structured instruction block. When `tier` is set on the direct Anthropic
+ * backend, the block is sent as a separate SystemModelMessage with a
+ * provider-specific `cacheControl` marker so Anthropic caches the prefix.
+ *
+ * The gateway path joins blocks back into a plain string — provider-side
+ * caching there is best-effort and not exposed by the AI Gateway today.
+ */
+export interface InstructionBlock {
+  text: string;
+  tier?: CacheTier;
+}
+
 export interface SpawnforgeAgentOptions {
   /** Whether the model backend is direct Anthropic (true) or gateway (false). */
   isDirectBackend: boolean;
   /** Model ID — bare name for direct, provider/model for gateway. */
   model: string;
-  /** System instructions. Caller must sanitize before passing. */
-  instructions: string;
+  /**
+   * System instructions. Pass a string for the simple case, or an
+   * `InstructionBlock[]` to mark prefixes for Anthropic prompt caching.
+   * Caller must sanitize text before passing.
+   */
+  instructions: string | InstructionBlock[];
   /** Enable Claude thinking mode (direct backend only). */
   thinking?: boolean;
   /** Maximum tool-calling steps before stopping. Default: 10. */
   maxSteps?: number;
+}
+
+/**
+ * Convert structured instruction blocks to the AI SDK's `instructions`
+ * argument. On the direct Anthropic backend each tier-tagged block becomes a
+ * separate `SystemModelMessage` carrying `providerOptions.anthropic.cacheControl`,
+ * so Anthropic can cache the prefix. On non-direct backends we collapse blocks
+ * back into one string — the AI Gateway does not currently surface tier-aware
+ * cache controls.
+ */
+export function buildAgentInstructions(
+  instructions: string | InstructionBlock[],
+  isDirectBackend: boolean,
+): string | SystemModelMessage[] {
+  if (typeof instructions === 'string') return instructions;
+
+  const blocks = instructions.filter((b) => b.text.length > 0);
+  if (blocks.length === 0) return '';
+  if (!isDirectBackend) return blocks.map((b) => b.text).join('\n\n');
+
+  return blocks.map((b) => ({
+    role: 'system' as const,
+    content: b.text,
+    ...(b.tier ? { providerOptions: buildAnthropicCacheControl(b.tier) } : {}),
+  }));
 }
 
 /**
@@ -112,7 +155,7 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
   return new ToolLoopAgent({
     id: 'spawnforge',
     model: modelInstance,
-    instructions,
+    instructions: buildAgentInstructions(instructions, isDirectBackend),
     tools: AGENT_TOOLS,
     stopWhen: stepCountIs(maxSteps),
     ...(providerOptions ? { providerOptions } : {}),

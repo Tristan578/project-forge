@@ -56,4 +56,40 @@ describe('Server analytics event wrappers', () => {
     await trackSubscriptionStarted('pro');
     expect(mockTrack).toHaveBeenCalledWith('subscription_started', expect.objectContaining({ env: expect.any(String) }));
   });
+
+  it('trackAiCacheHitRate sends tier and cache token counts', async () => {
+    const { trackAiCacheHitRate } = await import('@/lib/analytics/events.server');
+    await trackAiCacheHitRate('long', {
+      inputTokens: 12345,
+      cacheReadTokens: 9000,
+      cacheWriteTokens: 1500,
+      outputTokens: 200,
+    });
+    expect(mockTrack).toHaveBeenCalledWith(
+      'ai_cache_hit_rate',
+      expect.objectContaining({
+        tier: 'long',
+        input_tokens: 12345,
+        cache_read_tokens: 9000,
+        cache_write_tokens: 1500,
+        output_tokens: 200,
+        env: expect.any(String) as unknown,
+      }),
+    );
+  });
+
+  it('trackAiCacheHitRate defaults missing token counts to zero', async () => {
+    const { trackAiCacheHitRate } = await import('@/lib/analytics/events.server');
+    await trackAiCacheHitRate('short', {});
+    expect(mockTrack).toHaveBeenCalledWith(
+      'ai_cache_hit_rate',
+      expect.objectContaining({
+        tier: 'short',
+        input_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        output_tokens: 0,
+      }),
+    );
+  });
 });

@@ -4,7 +4,9 @@
  * Two levels of caching:
  *   1. Application-level: avoids re-building expensive strings (promptCache)
  *   2. Claude API: cache_control: { type: 'ephemeral' } marks blocks for
- *      server-side caching (reduces token costs by ~30%).
+ *      server-side caching. Long-lived content (scene context, base prompt,
+ *      tool manifest) uses the 1h TTL via the extended-cache-ttl-2025-04-11
+ *      beta. The AI SDK auto-attaches the beta header when ttl: '1h' is set.
  *
  * Usage:
  *   const ctx = getCachedSceneContext();    // read from cache or rebuild
@@ -13,6 +15,42 @@
  */
 
 import { promptCache } from './promptCache';
+
+// ---------------------------------------------------------------------------
+// Cache tiers (Anthropic prompt caching)
+// ---------------------------------------------------------------------------
+
+/**
+ * Cache tier hint for an instruction block.
+ *
+ * - `short` — default 5-minute ephemeral cache. Use for per-turn content
+ *   (doc snippets, ad-hoc instructions) that changes between requests.
+ * - `long`  — 1-hour ephemeral cache via the `extended-cache-ttl-2025-04-11`
+ *   beta. Use for content reused across many turns within a session
+ *   (base system prompt, scene context, tool manifest).
+ */
+export type CacheTier = 'short' | 'long';
+
+/**
+ * Build the Anthropic providerOptions object for a cache tier. Returns an
+ * `{ anthropic: { cacheControl: ... } }` object suitable for spreading into
+ * a SystemModelMessage / TextPart `providerOptions` field.
+ *
+ * The 1h TTL requires the beta header `extended-cache-ttl-2025-04-11`.
+ * `@ai-sdk/anthropic` auto-attaches it when any block carries `ttl: '1h'`.
+ */
+export function buildAnthropicCacheControl(tier: CacheTier): {
+  anthropic: { cacheControl: { type: 'ephemeral'; ttl?: '1h' } };
+} {
+  return {
+    anthropic: {
+      cacheControl:
+        tier === 'long'
+          ? { type: 'ephemeral', ttl: '1h' }
+          : { type: 'ephemeral' },
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Cache keys
