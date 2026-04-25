@@ -80,7 +80,8 @@ async function getGameData(clerkId: string, slug: string) {
       .where(
         and(
           eq(publishedGames.userId, user.id),
-          eq(publishedGames.slug, slug)
+          eq(publishedGames.slug, slug),
+          eq(publishedGames.status, 'published')
         )
       )
       .limit(1));
@@ -110,7 +111,7 @@ export default async function PlayPage({ params }: PlayPageProps) {
   const gameData = await getGameData(userId, slug);
 
   // VideoGame JSON-LD — user-controlled values from DB (title, description).
-  // JSON.stringify does NOT escape '<', so we replace it with \u003c to
+  // JSON.stringify does NOT escape '<', so we replace it with < to
   // prevent script tag breakout (XSS via </script> in user content).
   const videoGameJsonLd = gameData
     ? JSON.stringify({
