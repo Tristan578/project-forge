@@ -56,7 +56,7 @@ vi.mock('@/lib/chat/tools', () => ({
 }));
 
 vi.mock('@/lib/chat/docContext', () => ({
-  buildDocContext: vi.fn(() => ({ docs: [], recentDocs: [] } as any)),
+  buildDocContext: vi.fn(() => ''),
 }));
 
 vi.mock('@/lib/ai/models', () => ({
@@ -131,7 +131,7 @@ vi.mock('@anthropic-ai/sdk', () => {
 // ---------------------------------------------------------------------------
 import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { rateLimit } from '@/lib/rateLimit';
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { validateBodySize, detectPromptInjection } from '@/lib/chat/sanitizer';
 import { refundTokens } from '@/lib/tokens/service';
