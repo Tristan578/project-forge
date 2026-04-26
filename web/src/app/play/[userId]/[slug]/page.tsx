@@ -27,13 +27,13 @@ const getGameData = cache(async (clerkId: string, slug: string) => {
         title: publishedGames.title,
         description: publishedGames.description,
         createdAt: publishedGames.createdAt,
-        status: publishedGames.status,
       })
       .from(publishedGames)
       .where(
         and(
           eq(publishedGames.userId, user.id),
-          eq(publishedGames.slug, slug)
+          eq(publishedGames.slug, slug),
+          eq(publishedGames.status, 'published')
         )
       )
       .limit(1));
@@ -43,7 +43,6 @@ const getGameData = cache(async (clerkId: string, slug: string) => {
       title: game.title,
       description: game.description,
       createdAt: game.createdAt,
-      status: game.status,
       authorName: user.displayName,
     };
   } catch {
@@ -85,8 +84,8 @@ export default async function PlayPage({ params }: PlayPageProps) {
   // VideoGame JSON-LD — user-controlled values from DB (title, description).
   // JSON.stringify does NOT escape '<', so we replace it with < to
   // prevent script tag breakout (XSS via </script> in user content).
-  // Only emitted for published games; drafts have no public schema.
-  const videoGameJsonLd = game && game.status === 'published'
+  // getGameData filters for status='published', so drafts return null.
+  const videoGameJsonLd = game
     ? JSON.stringify({
         '@context': 'https://schema.org',
         '@type': 'VideoGame',
