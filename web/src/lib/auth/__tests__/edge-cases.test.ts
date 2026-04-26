@@ -292,11 +292,12 @@ describe('Clerk keys — missing key graceful degradation', () => {
 
     // Re-import authenticateRequest to pick up env change
     vi.resetModules();
-    vi.mock('@clerk/nextjs/server', () => ({
+    // vi.doMock is not hoisted, so it runs after vi.resetModules() as intended
+    vi.doMock('@clerk/nextjs/server', () => ({
       auth: vi.fn(),
       clerkClient: vi.fn(),
     }));
-    vi.mock('@/lib/auth/user-service', () => ({
+    vi.doMock('@/lib/auth/user-service', () => ({
       getUserByClerkId: vi.fn(),
       syncUserFromClerk: vi.fn(),
     }));
@@ -323,11 +324,12 @@ describe('Clerk keys — missing key graceful degradation', () => {
     delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
     vi.resetModules();
-    vi.mock('@clerk/nextjs/server', () => ({
+    // vi.doMock is not hoisted, so it runs after vi.resetModules() as intended
+    vi.doMock('@clerk/nextjs/server', () => ({
       auth: vi.fn(),
       clerkClient: vi.fn(),
     }));
-    vi.mock('@/lib/auth/user-service', () => ({
+    vi.doMock('@/lib/auth/user-service', () => ({
       getUserByClerkId: vi.fn(),
       syncUserFromClerk: vi.fn(),
     }));

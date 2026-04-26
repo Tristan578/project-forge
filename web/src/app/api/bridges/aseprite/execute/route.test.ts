@@ -11,9 +11,9 @@ vi.mock('@/lib/bridges/luaTemplates', () => ({
 // Each test gets a fresh route module to avoid the module-level cache
 async function importRoute() {
   vi.resetModules();
-  // Re-apply mocks after reset
-  vi.mock('server-only', () => ({}));
-  vi.mock('@/lib/bridges/luaTemplates', () => ({
+  // Re-apply mocks after reset (vi.doMock is not hoisted, unlike vi.mock)
+  vi.doMock('server-only', () => ({}));
+  vi.doMock('@/lib/bridges/luaTemplates', () => ({
     ALLOWED_TEMPLATES: new Set(['createSprite', 'createAnimation', 'editSprite', 'applyPalette', 'exportSheet']),
   }));
   const { POST } = await import('./route');
