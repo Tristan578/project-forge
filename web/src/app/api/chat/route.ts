@@ -506,10 +506,6 @@ export async function POST(request: NextRequest) {
   // Sonnet inside createSpawnforgeAgent — but billing already deducted at the
   // higher tier. Direct backends pass-through the canonical name unchanged.
   const resolvedModelId = chatRoute?.modelId ?? model ?? '';
-  // Capture the dominant cache tier for analytics. Computed once per request:
-  // instructionBlocks does not mutate after this point, so we don't need to
-  // recompute inside onStepFinish (which fires once per tool-loop step).
-  const hasLongTier = instructionBlocks.some((b) => b.tier === 'long');
   const agent = createSpawnforgeAgent({
     isDirectBackend: usingDirect,
     model: resolvedModelId,
@@ -559,7 +555,9 @@ export async function POST(request: NextRequest) {
           // only set when usingDirectBackend is true (gateway users don't
           // hit our billing path). Gateway cache effectiveness is therefore
           // not tracked here — Vercel AI Gateway exposes its own metrics.
-          trackAiCacheHitRate(hasLongTier ? 'long' : 'short', {
+          // System prompt is always seeded with tier: 'long' above, so every
+          // chat request uses the 1h ephemeral cache for the cacheable prefix.
+          trackAiCacheHitRate('long', {
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
             cacheReadTokens,
