@@ -252,3 +252,16 @@ cd web && npm run db:studio      # Visual DB browser
 cd web && npm run analyze            # Opens bundle visualization
 cd web && npm run check:bundle-size  # Automated size enforcement
 ```
+
+## 11. Long-Session Rule Persistence (PostCompact hook)
+
+Claude Code only loads `CLAUDE.md` and `.claude/CLAUDE.md` on `SessionStart`. After auto-compaction (long sessions, typically >4hr on the main agent), those rules are dropped. The `.claude/hooks/inject-post-compact.sh` hook fires on `PostCompact` and re-injects a digest of `.claude/rules/` so the agent does not drift into deprecated patterns mid-session.
+
+- Triggered by: `PostCompact` event in `.claude/settings.json` (timeout 5s, runs ~30ms in practice)
+- Output: a fixed digest of the highest-frequency anti-patterns + a pointer table listing every file under `.claude/rules/` with a one-line summary. The agent is told to `Read` the specific rule file when its topic is in play. The full file contents are NOT emitted.
+- Why a digest, not a dump: hook stdout is capped at 10,000 chars by Claude Code (truncated silently). The full rule set is ~47KB, so a raw `cat` blew the budget and the tail (often the most critical gotchas) was dropped. The digest stays ~3.5KB; combined with `restore-context-hints.sh`, total well under 5KB.
+- Runs alongside `restore-context-hints.sh`, which restores per-session working state from the `PreCompact` snapshot at `/tmp/spawnforge-context-snapshot.txt`
+
+To test the hook manually: `bash .claude/hooks/inject-post-compact.sh`. To see the wall-clock cost: `time bash .claude/hooks/inject-post-compact.sh > /dev/null`. To verify the size budget: `bash .claude/hooks/inject-post-compact.sh | wc -c` (should be well under 10000).
+
+When you add a new file under `.claude/rules/`, the glob picks it up automatically — but the pointer-table summary in the hook is a hardcoded `case` block. Add a one-line summary for the new file there so the agent knows what topic the file covers.
