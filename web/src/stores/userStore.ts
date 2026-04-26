@@ -15,6 +15,10 @@ export interface TokenBalance {
 interface UserState {
   // User data (populated after auth)
   tier: Tier;
+  /** True once /api/user/profile has resolved. Until then, `tier` is the
+   * default 'starter' placeholder and gating UI on it produces false negatives
+   * for Pro users on first paint. */
+  profileLoaded: boolean;
   displayName: string | null;
   email: string | null;
   createdAt: string | null;
@@ -44,6 +48,7 @@ interface UserState {
 
 export const useUserStore = create<UserState>((set, get) => ({
   tier: 'starter',
+  profileLoaded: false,
   displayName: null,
   email: null,
   createdAt: null,
@@ -95,13 +100,19 @@ export const useUserStore = create<UserState>((set, get) => ({
   fetchProfile: async () => {
     try {
       const res = await fetch('/api/user/profile');
-      if (!res.ok) return;
+      if (!res.ok) {
+        // Anonymous user is a valid terminal state — mark loaded so the UI
+        // stops treating tier as "still resolving".
+        if (res.status === 401) set({ profileLoaded: true });
+        return;
+      }
       const data = await res.json();
       set({
         displayName: data.displayName,
         email: data.email,
         tier: data.tier,
         createdAt: data.createdAt,
+        profileLoaded: true,
       });
     } catch {
       // Silently fail — user may not be logged in
@@ -134,7 +145,7 @@ export const useUserStore = create<UserState>((set, get) => ({
       const res = await fetch('/api/billing/status');
       if (res.ok) {
         const data = await res.json();
-        set({ billingStatus: data, tier: data.tier });
+        set({ billingStatus: data, tier: data.tier, profileLoaded: true });
       }
     } catch {
       // Silently fail

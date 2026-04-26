@@ -31,6 +31,7 @@ export function ChatInput() {
   const recognitionRef = useRef<any>(null);
 
   const userTier = useUserStore((s) => s.tier);
+  const profileLoaded = useUserStore((s) => s.profileLoaded);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const stopStreaming = useChatStore((s) => s.stopStreaming);
   const isStreaming = useChatStore((s) => s.isStreaming);
@@ -285,7 +286,7 @@ export function ChatInput() {
             <option
               key={opt.value}
               value={opt.value}
-              disabled={opt.requiresPro && userTier !== 'pro'}
+              disabled={opt.requiresPro && profileLoaded && userTier !== 'pro'}
             >
               {opt.label}
             </option>
