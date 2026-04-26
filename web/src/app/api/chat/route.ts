@@ -28,6 +28,7 @@ import { logCost } from '@/lib/costs/costLogger';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
 import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
+import { isPremiumModel } from '@/lib/ai/models';
 import { resolveChatRoute } from '@/lib/providers/resolveChat';
 import type { UserModelMessage, AssistantModelMessage } from '@ai-sdk/provider-utils';
 
@@ -309,6 +310,17 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'messages array required' }, { status: 400 });
   }
 
+  // Premium model gate: claude-opus-4-7 is restricted to Pro tier. Reject
+  // before billing so non-Pro users requesting premium are not charged the
+  // estimated cost. The gate only blocks the model — it does not silently
+  // downgrade, so the client gets an explicit signal to update its UI.
+  if (isPremiumModel(model) && auth.ctx.user.tier !== 'pro') {
+    return Response.json(
+      { error: 'The premium model (Opus 4.7) requires a Pro subscription.' },
+      { status: 403 },
+    );
+  }
+
   // 4. Validate message length and content
   for (const msg of messages) {
     if (typeof msg.content !== 'string') {
@@ -459,9 +471,15 @@ export async function POST(request: NextRequest) {
   // Tier gate: thinking mode (10k extra tokens per step) restricted to creator/pro,
   // consistent with the systemOverride gate. Prevents amplified token burn on free tiers.
   const canUseThinking = auth.ctx.user.tier === 'creator' || auth.ctx.user.tier === 'pro';
+  // Use the route's translated modelId (e.g. 'anthropic/claude-opus-4-7' for
+  // the gateway) when available, falling back to the bare canonical model.
+  // Without this, the gateway path silently downgrades unmapped premium IDs to
+  // Sonnet inside createSpawnforgeAgent — but billing already deducted at the
+  // higher tier. Direct backends pass-through the canonical name unchanged.
+  const resolvedModelId = chatRoute?.modelId ?? model ?? '';
   const agent = createSpawnforgeAgent({
     isDirectBackend: usingDirect,
-    model: model || '',
+    model: resolvedModelId,
     instructions: systemText,
     thinking: canUseThinking && thinking === true,
   });

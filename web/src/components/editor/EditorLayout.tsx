@@ -53,6 +53,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useOnboardingStore } from '@/stores/onboardingStore';
+import { useUserStore } from '@/stores/userStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { useGenerationPolling } from '@/hooks/useGenerationPolling';
 import { startAutoSave } from '@/lib/storage/autoSave';
@@ -416,6 +417,13 @@ export function EditorLayout() {
   useEffect(() => {
     hydrateFromServer();
   }, [hydrateFromServer]);
+
+  // Resolve the user's tier on mount so tier-gated UI (e.g. premium model
+  // dropdown in ChatInput) doesn't render the 'starter' default for Pro users.
+  const fetchProfile = useUserStore((s) => s.fetchProfile);
+  useEffect(() => {
+    fetchProfile();
+  }, [fetchProfile]);
 
   // Drawer state for compact mode
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);

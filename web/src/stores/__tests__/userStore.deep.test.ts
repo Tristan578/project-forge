@@ -208,7 +208,7 @@ describe('userStore deep tests', () => {
       expect(state.createdAt).toBe('2026-01-15');
     });
 
-    it('silently fails on non-ok response', async () => {
+    it('marks profileLoaded on 401 (anonymous user) without changing other state', async () => {
       vi.mocked(fetch).mockResolvedValue({
         ok: false,
         status: 401,
@@ -216,17 +216,37 @@ describe('userStore deep tests', () => {
 
       await useUserStore.getState().fetchProfile();
 
-      // State unchanged
-      expect(useUserStore.getState().displayName).toBeNull();
+      const state = useUserStore.getState();
+      expect(state.displayName).toBeNull();
+      expect(state.profileLoaded).toBe(true);
     });
 
-    it('silently fails on network error', async () => {
-      vi.mocked(fetch).mockRejectedValue(new Error('Network error'));
+    it('marks profileLoaded on non-401 server error (5xx)', async () => {
+      // Without this, the UI sits in an indeterminate state and shows
+      // premium options as available because the gate fail-opens until
+      // profileLoaded flips true.
+      vi.mocked(fetch).mockResolvedValue({
+        ok: false,
+        status: 500,
+      } as Response);
 
-      // Should not throw
       await useUserStore.getState().fetchProfile();
 
-      expect(useUserStore.getState().displayName).toBeNull();
+      const state = useUserStore.getState();
+      expect(state.displayName).toBeNull();
+      expect(state.profileLoaded).toBe(true);
+    });
+
+    it('marks profileLoaded on network error', async () => {
+      vi.mocked(fetch).mockRejectedValue(new Error('Network error'));
+
+      // Should not throw and should mark loaded so the UI doesn't hang
+      // in "tier still resolving" forever.
+      await useUserStore.getState().fetchProfile();
+
+      const state = useUserStore.getState();
+      expect(state.displayName).toBeNull();
+      expect(state.profileLoaded).toBe(true);
     });
 
     it('updates tier from profile response', async () => {

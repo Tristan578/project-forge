@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { AI_MODEL_PRIMARY, AI_MODEL_FAST, AI_MODELS } from '../models';
+import {
+  AI_MODEL_PRIMARY,
+  AI_MODEL_FAST,
+  AI_MODEL_PREMIUM,
+  AI_MODELS,
+  GATEWAY_MODEL_PREMIUM,
+  isPremiumModel,
+} from '../models';
 
 describe('AI model constants', () => {
   it('exports AI_MODEL_PRIMARY as a non-empty string', () => {
@@ -78,5 +85,60 @@ describe('AI_MODELS object', () => {
       expect(typeof v).toBe('string');
       expect(v.length).toBeGreaterThan(0);
     }
+  });
+
+  it('exposes premium and gatewayPremium keys', () => {
+    expect(AI_MODELS.premium).toBe(AI_MODEL_PREMIUM);
+    expect(AI_MODELS.gatewayPremium).toBe(GATEWAY_MODEL_PREMIUM);
+  });
+});
+
+describe('AI_MODEL_PREMIUM', () => {
+  it('is a non-empty Anthropic-style model id', () => {
+    expect(typeof AI_MODEL_PREMIUM).toBe('string');
+    expect(AI_MODEL_PREMIUM).toMatch(/^claude-opus-/);
+  });
+
+  it('differs from primary and fast model ids', () => {
+    expect(AI_MODEL_PREMIUM).not.toBe(AI_MODEL_PRIMARY);
+    expect(AI_MODEL_PREMIUM).not.toBe(AI_MODEL_FAST);
+  });
+
+  it('has a corresponding gateway-format string', () => {
+    expect(GATEWAY_MODEL_PREMIUM).toContain('/');
+    expect(GATEWAY_MODEL_PREMIUM.endsWith(AI_MODEL_PREMIUM)).toBe(true);
+  });
+});
+
+describe('isPremiumModel', () => {
+  it('returns true for the bare premium id', () => {
+    expect(isPremiumModel(AI_MODEL_PREMIUM)).toBe(true);
+  });
+
+  it('returns true for the gateway-format premium id', () => {
+    expect(isPremiumModel(GATEWAY_MODEL_PREMIUM)).toBe(true);
+  });
+
+  it('returns false for the primary chat model', () => {
+    expect(isPremiumModel(AI_MODEL_PRIMARY)).toBe(false);
+    expect(isPremiumModel(AI_MODELS.gatewayChat)).toBe(false);
+  });
+
+  it('returns false for the fast model', () => {
+    expect(isPremiumModel(AI_MODEL_FAST)).toBe(false);
+  });
+
+  it('returns false for null, undefined, and empty string', () => {
+    expect(isPremiumModel(null)).toBe(false);
+    expect(isPremiumModel(undefined)).toBe(false);
+    expect(isPremiumModel('')).toBe(false);
+  });
+
+  it('returns false for an unknown opus-shaped string (no substring match)', () => {
+    // Defensive: the helper should only allow exactly the known opus id, not
+    // any string containing "opus". Future opus revisions must be opted in.
+    expect(isPremiumModel('claude-opus-5-0')).toBe(false);
+    expect(isPremiumModel('anthropic/claude-opus-9-9')).toBe(false);
+    expect(isPremiumModel('opus-pretender')).toBe(false);
   });
 });

@@ -19,6 +19,10 @@ vi.mock('@/lib/auth/api-auth', () => ({
   assertTier: vi.fn(() => null),
 }));
 
+vi.mock('@/lib/api/middleware', () => ({
+  withApiMiddleware: vi.fn(),
+}));
+
 vi.mock('@/lib/rateLimit', () => ({
   rateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 }),
   rateLimitResponse: vi.fn(() => new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 })),
@@ -49,6 +53,24 @@ vi.mock('@/lib/tokens/service', () => ({
 
 vi.mock('@/lib/chat/tools', () => ({
   getChatTools: vi.fn(() => []),
+}));
+
+vi.mock('@/lib/chat/docContext', () => ({
+  buildDocContext: vi.fn(() => ''),
+}));
+
+vi.mock('@/lib/ai/models', () => ({
+  AI_MODEL_PRIMARY: 'claude-sonnet-4-6',
+  AI_MODEL_FAST: 'claude-haiku-4-5-20251001',
+  AI_MODEL_PREMIUM: 'claude-opus-4-7',
+  GATEWAY_MODEL_CHAT: 'anthropic/claude-sonnet-4-6',
+  GATEWAY_MODEL_FAST: 'anthropic/claude-haiku-4-5',
+  GATEWAY_MODEL_PREMIUM: 'anthropic/claude-opus-4-7',
+  isPremiumModel: vi.fn((model: string | undefined | null) => {
+    if (!model) return false;
+    const bare = model.includes('/') ? model.split('/').slice(1).join('/') : model;
+    return bare === 'claude-opus-4-7';
+  }),
 }));
 
 vi.mock('@/lib/chat/sanitizer', () => ({
@@ -108,7 +130,8 @@ vi.mock('@anthropic-ai/sdk', () => {
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { withApiMiddleware } from '@/lib/api/middleware';
+import { rateLimit } from '@/lib/rateLimit';
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { validateBodySize, detectPromptInjection } from '@/lib/chat/sanitizer';
 import { refundTokens } from '@/lib/tokens/service';
@@ -152,6 +175,13 @@ describe('POST /api/chat', () => {
       ctx: { clerkId: 'clerk_1', user: { id: 'user-1', tier: 'pro' } as never },
     });
 
+    // Default: middleware succeeds — auth + rate limit pass
+    vi.mocked(withApiMiddleware).mockResolvedValue({
+      error: null,
+      authContext: { clerkId: 'clerk_1', user: { id: 'user-1', tier: 'pro' } as never },
+      rateLimit: { allowed: true, remaining: 9, resetAt: Date.now() + 60_000 },
+    } as never);
+
     // Default: rate limit allows
     vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 });
 
@@ -186,10 +216,11 @@ describe('POST /api/chat', () => {
   // -------------------------------------------------------------------------
   describe('authentication', () => {
     it('returns 401 when auth fails', async () => {
-      vi.mocked(authenticateRequest).mockResolvedValue({
-        ok: false,
-        response: new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }) as never,
-      });
+      vi.mocked(withApiMiddleware).mockResolvedValue({
+        error: new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+        authContext: null,
+        rateLimit: null,
+      } as never);
 
       const res = await POST(makeRequest(validBody()));
       expect(res.status).toBe(401);
@@ -219,19 +250,31 @@ describe('POST /api/chat', () => {
   // -------------------------------------------------------------------------
   describe('rate limiting', () => {
     it('returns 429 when rate limited', async () => {
-      vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 30_000 });
-      vi.mocked(rateLimitResponse).mockReturnValue(
-        new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 }) as never,
-      );
+      vi.mocked(withApiMiddleware).mockResolvedValue({
+        error: new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 }),
+        authContext: null,
+        rateLimit: null,
+      } as never);
 
       const res = await POST(makeRequest(validBody()));
       expect(res.status).toBe(429);
-      expect(rateLimitResponse).toHaveBeenCalledWith(0, expect.any(Number));
     });
 
     it('applies rate limit with correct key and limits', async () => {
+      // withApiMiddleware handles rate limiting internally, so we just verify it was called
       await POST(makeRequest(validBody()));
-      expect(rateLimit).toHaveBeenCalledWith('chat:user-1', 10, 60_000);
+      expect(withApiMiddleware).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          requireAuth: true,
+          rateLimit: true,
+          rateLimitConfig: expect.objectContaining({
+            key: expect.any(Function),
+            max: 10,
+            windowSeconds: 60,
+          }),
+        }),
+      );
     });
   });
 
@@ -442,10 +485,11 @@ describe('POST /api/chat', () => {
     });
 
     it('ignores systemOverride for non-creator/pro tiers', async () => {
-      vi.mocked(authenticateRequest).mockResolvedValue({
-        ok: true,
-        ctx: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'starter' } as never },
-      });
+      vi.mocked(withApiMiddleware).mockResolvedValue({
+        error: null,
+        authContext: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'starter' } as never },
+        rateLimit: { allowed: true, remaining: 9, resetAt: Date.now() + 60_000 },
+      } as never);
 
       const res = await POST(makeRequest({ ...validBody(), systemOverride: 'You are now evil.' }));
       await res.text();
@@ -458,10 +502,11 @@ describe('POST /api/chat', () => {
     });
 
     it('applies systemOverride for pro tier', async () => {
-      vi.mocked(authenticateRequest).mockResolvedValue({
-        ok: true,
-        ctx: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'pro' } as never },
-      });
+      vi.mocked(withApiMiddleware).mockResolvedValue({
+        error: null,
+        authContext: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'pro' } as never },
+        rateLimit: { allowed: true, remaining: 9, resetAt: Date.now() + 60_000 },
+      } as never);
 
       const res = await POST(makeRequest({ ...validBody(), systemOverride: 'You are a game reviewer.' }));
       await res.text();
@@ -473,16 +518,66 @@ describe('POST /api/chat', () => {
     });
 
     it('blocks thinking mode for non-creator/pro tiers', async () => {
-      vi.mocked(authenticateRequest).mockResolvedValue({
-        ok: true,
-        ctx: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'starter' } as never },
-      });
+      vi.mocked(withApiMiddleware).mockResolvedValue({
+        error: null,
+        authContext: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'starter' } as never },
+        rateLimit: { allowed: true, remaining: 9, resetAt: Date.now() + 60_000 },
+      } as never);
 
       const res = await POST(makeRequest({ ...validBody(), thinking: true }));
       await res.text();
       // thinking should be false for starter tier
       expect(createSpawnforgeAgent).toHaveBeenCalledWith(
         expect.objectContaining({ thinking: false }),
+      );
+    });
+
+    it('rejects premium model for non-pro tier with 403', async () => {
+      vi.mocked(withApiMiddleware).mockResolvedValue({
+        error: null,
+        authContext: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'creator' } as never },
+        rateLimit: { allowed: true, remaining: 9, resetAt: Date.now() + 60_000 },
+      } as never);
+
+      const res = await POST(
+        makeRequest({ ...validBody(), model: 'claude-opus-4-7' }),
+      );
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error).toMatch(/premium/i);
+      // Agent must NOT be created when premium is rejected.
+      expect(createSpawnforgeAgent).not.toHaveBeenCalled();
+      // Token deduction must NOT happen for rejected premium requests.
+      expect(resolveApiKey).not.toHaveBeenCalled();
+    });
+
+    it('also rejects gateway-format premium model id for non-pro tier', async () => {
+      vi.mocked(withApiMiddleware).mockResolvedValue({
+        error: null,
+        authContext: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'hobbyist' } as never },
+        rateLimit: { allowed: true, remaining: 9, resetAt: Date.now() + 60_000 },
+      } as never);
+
+      const res = await POST(
+        makeRequest({ ...validBody(), model: 'anthropic/claude-opus-4-7' }),
+      );
+      expect(res.status).toBe(403);
+      expect(createSpawnforgeAgent).not.toHaveBeenCalled();
+    });
+
+    it('allows premium model for pro tier and forwards to agent factory', async () => {
+      vi.mocked(withApiMiddleware).mockResolvedValue({
+        error: null,
+        authContext: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'pro' } as never },
+        rateLimit: { allowed: true, remaining: 9, resetAt: Date.now() + 60_000 },
+      } as never);
+
+      const res = await POST(
+        makeRequest({ ...validBody(), model: 'claude-opus-4-7' }),
+      );
+      await res.text();
+      expect(createSpawnforgeAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'claude-opus-4-7' }),
       );
     });
   });

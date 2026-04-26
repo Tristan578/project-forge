@@ -15,6 +15,10 @@ export interface TokenBalance {
 interface UserState {
   // User data (populated after auth)
   tier: Tier;
+  /** True once /api/user/profile has resolved. Until then, `tier` is the
+   * default 'starter' placeholder and gating UI on it produces false negatives
+   * for Pro users on first paint. */
+  profileLoaded: boolean;
   displayName: string | null;
   email: string | null;
   createdAt: string | null;
@@ -44,6 +48,7 @@ interface UserState {
 
 export const useUserStore = create<UserState>((set, get) => ({
   tier: 'starter',
+  profileLoaded: false,
   displayName: null,
   email: null,
   createdAt: null,
@@ -95,16 +100,27 @@ export const useUserStore = create<UserState>((set, get) => ({
   fetchProfile: async () => {
     try {
       const res = await fetch('/api/user/profile');
-      if (!res.ok) return;
+      if (!res.ok) {
+        // Mark loaded for every terminal failure (401 anonymous, 5xx, 403,
+        // etc.) so the UI stops treating tier as "still resolving" and
+        // consistently shows the starter/anonymous state. Without this,
+        // transient errors leave premium options clickable in the UI even
+        // though the server will reject.
+        set({ profileLoaded: true });
+        return;
+      }
       const data = await res.json();
       set({
         displayName: data.displayName,
         email: data.email,
         tier: data.tier,
         createdAt: data.createdAt,
+        profileLoaded: true,
       });
     } catch {
-      // Silently fail — user may not be logged in
+      // Network failure or fetch abort — same reasoning as the !res.ok
+      // branch: mark loaded so the UI doesn't sit in an indeterminate state.
+      set({ profileLoaded: true });
     }
   },
 
@@ -134,7 +150,7 @@ export const useUserStore = create<UserState>((set, get) => ({
       const res = await fetch('/api/billing/status');
       if (res.ok) {
         const data = await res.json();
-        set({ billingStatus: data, tier: data.tier });
+        set({ billingStatus: data, tier: data.tier, profileLoaded: true });
       }
     } catch {
       // Silently fail
