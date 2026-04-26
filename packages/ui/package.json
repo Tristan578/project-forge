@@ -7,14 +7,17 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
       "default": "./dist/index.js"
     },
     "./internal": {
       "types": "./dist/internal.d.ts",
+      "development": "./src/internal.ts",
       "default": "./dist/internal.js"
     },
     "./tokens": {
       "types": "./dist/tokens/index.d.ts",
+      "development": "./src/tokens/index.ts",
       "default": "./dist/tokens/index.js"
     },
     "./tokens/theme.css": "./src/tokens/theme.css"
