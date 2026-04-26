@@ -323,7 +323,7 @@ export async function generateReview(context: ReviewContext): Promise<GameReview
     {
       model: AI_MODEL_FAST,
       sceneContext: '',
-      thinking: false,
+      effort: 'medium',
       systemOverride: REVIEWER_SYSTEM_PROMPT,
       priority: 3,
     },

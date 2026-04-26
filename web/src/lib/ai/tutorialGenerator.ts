@@ -403,7 +403,7 @@ export async function generateTutorialPlan(
   const content = await fetchAI(userMessage, {
     model: AI_MODEL_PRIMARY,
     sceneContext: '',
-    thinking: false,
+    effort: 'medium',
     systemOverride: TUTORIAL_SYSTEM_PROMPT,
     priority: 2,
   });

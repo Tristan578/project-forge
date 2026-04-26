@@ -350,7 +350,7 @@ export async function generateGDD(
   const content = await fetchAI(userMessage, {
     model: AI_MODEL_PRIMARY,
     sceneContext: '',
-    thinking: false,
+    effort: 'medium',
     systemOverride: GDD_SYSTEM_PROMPT,
     priority: 2,
   });
