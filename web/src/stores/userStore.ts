@@ -101,9 +101,12 @@ export const useUserStore = create<UserState>((set, get) => ({
     try {
       const res = await fetch('/api/user/profile');
       if (!res.ok) {
-        // Anonymous user is a valid terminal state — mark loaded so the UI
-        // stops treating tier as "still resolving".
-        if (res.status === 401) set({ profileLoaded: true });
+        // Mark loaded for every terminal failure (401 anonymous, 5xx, 403,
+        // etc.) so the UI stops treating tier as "still resolving" and
+        // consistently shows the starter/anonymous state. Without this,
+        // transient errors leave premium options clickable in the UI even
+        // though the server will reject.
+        set({ profileLoaded: true });
         return;
       }
       const data = await res.json();
@@ -115,7 +118,9 @@ export const useUserStore = create<UserState>((set, get) => ({
         profileLoaded: true,
       });
     } catch {
-      // Silently fail — user may not be logged in
+      // Network failure or fetch abort — same reasoning as the !res.ok
+      // branch: mark loaded so the UI doesn't sit in an indeterminate state.
+      set({ profileLoaded: true });
     }
   },
 
