@@ -58,7 +58,10 @@ export const metadata: Metadata = {
   },
 };
 
-// Static JSON-LD: combined SoftwareApplication + Organization schema (safe constant — no user input)
+// Static JSON-LD: combined SoftwareApplication + Organization schema (safe constant — no user input).
+// Pricing/Offer markup intentionally lives in `/pricing` only — emitting offers here too would
+// give crawlers two AggregateOffer blocks for the same product and they'd disagree the moment a
+// tier was renamed or repriced. Site-wide layout owns brand metadata; pricing page owns pricing.
 const jsonLdString = JSON.stringify([
   {
     "@context": "https://schema.org",
@@ -69,19 +72,6 @@ const jsonLdString = JSON.stringify([
     applicationCategory: ["GameApplication", "DeveloperApplication"],
     operatingSystem: "Web Browser",
     browserRequirements: "WebGPU or WebGL2 capable browser",
-    offers: {
-      "@type": "AggregateOffer",
-      lowPrice: "0",
-      highPrice: "99",
-      priceCurrency: "USD",
-      offerCount: 4,
-      offers: [
-        { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD" },
-        { "@type": "Offer", name: "Starter", price: "9", priceCurrency: "USD" },
-        { "@type": "Offer", name: "Pro", price: "29", priceCurrency: "USD" },
-        { "@type": "Offer", name: "Studio", price: "99", priceCurrency: "USD" },
-      ],
-    },
     featureList: [
       "AI-powered game creation from natural language prompts",
       "2D and 3D game engine (Rust/WASM, WebGPU + WebGL2)",
