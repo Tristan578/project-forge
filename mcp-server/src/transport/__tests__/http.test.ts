@@ -6,7 +6,7 @@ import type {
   JsonSchemaValidator,
 } from '@modelcontextprotocol/sdk/validation/types.js';
 import { z } from 'zod';
-import { startHttpTransport, MissingTokenError, type RunningHttpServer } from '../http.js';
+import { startHttpTransport, MissingTokenError, InMemoryRateLimiter, type RunningHttpServer } from '../http.js';
 
 const TEST_TOKEN = 'test-token-deadbeef';
 
@@ -424,5 +424,38 @@ describe('startHttpTransport', () => {
       expect([first.status, second.status]).not.toContain(429);
       expect(third.status).toBe(429);
     });
+  });
+});
+
+describe('InMemoryRateLimiter', () => {
+  it('drops keys whose timestamps have all aged out on sweep', async () => {
+    const windowMs = 1_000;
+    const limiter = new InMemoryRateLimiter(windowMs, 10, false);
+
+    // Seed entries for several distinct IPs with timestamps in the past.
+    await limiter.check('1.1.1.1');
+    await limiter.check('2.2.2.2');
+    await limiter.check('3.3.3.3');
+    expect(limiter.size()).toBe(3);
+
+    // Sweep with `now` advanced past the window — every entry's newest
+    // timestamp falls outside the window, so all keys should be evicted.
+    limiter.sweep(Date.now() + windowMs * 2);
+    expect(limiter.size()).toBe(0);
+  });
+
+  it('keeps active keys during sweep', async () => {
+    const limiter = new InMemoryRateLimiter(60_000, 10, false);
+
+    await limiter.check('active');
+    expect(limiter.size()).toBe(1);
+
+    limiter.sweep();
+    expect(limiter.size()).toBe(1);
+  });
+
+  it('stop() is idempotent and safe to call when no timer was scheduled', () => {
+    const limiter = new InMemoryRateLimiter(60_000, 10, false);
+    expect(() => limiter.stop()).not.toThrow();
   });
 });

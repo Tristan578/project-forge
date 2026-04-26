@@ -75,14 +75,29 @@ interface RateLimiter {
 /**
  * In-memory sliding window — single-process only. Intended for local dev or
  * single-instance deployments. For multi-instance, set the Upstash env vars.
+ *
+ * Memory: every key stays in the map until either (a) the next call for that
+ * key prunes it after sweeping all its timestamps, or (b) the periodic sweep
+ * runs. Without the sweep, keys for one-shot crawlers and probes accumulate
+ * forever in long-running processes.
  */
-class InMemoryRateLimiter implements RateLimiter {
+export class InMemoryRateLimiter implements RateLimiter {
   private hits = new Map<string, number[]>();
+  private readonly sweepTimer: ReturnType<typeof setInterval> | null;
 
   constructor(
     private readonly windowMs: number,
     private readonly max: number,
-  ) {}
+    sweepEnabled = true,
+  ) {
+    if (sweepEnabled) {
+      this.sweepTimer = setInterval(() => this.sweep(), windowMs);
+      // unref so the timer doesn't keep Node alive past server.close().
+      this.sweepTimer.unref?.();
+    } else {
+      this.sweepTimer = null;
+    }
+  }
 
   async check(key: string): Promise<boolean> {
     const now = Date.now();
@@ -95,6 +110,26 @@ class InMemoryRateLimiter implements RateLimiter {
     recent.push(now);
     this.hits.set(key, recent);
     return true;
+  }
+
+  /** Drop entries whose every timestamp has aged out of the window. */
+  sweep(now: number = Date.now()): void {
+    const cutoff = now - this.windowMs;
+    for (const [key, timestamps] of this.hits) {
+      const newest = timestamps.length > 0 ? timestamps[timestamps.length - 1]! : 0;
+      if (newest <= cutoff) {
+        this.hits.delete(key);
+      }
+    }
+  }
+
+  stop(): void {
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+  }
+
+  /** Test hook. */
+  size(): number {
+    return this.hits.size;
   }
 }
 
@@ -338,6 +373,7 @@ export async function startHttpTransport(
       });
       if (sharedTransport) await sharedTransport.close();
       if (sharedServer) await sharedServer.close();
+      if (limiter instanceof InMemoryRateLimiter) limiter.stop();
     },
   };
 }
