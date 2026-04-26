@@ -187,6 +187,43 @@ describe('startHttpTransport', () => {
       expect(status).toBe(401);
     });
 
+    it('rejects Authorization header with empty token after the scheme', async () => {
+      const { status } = await jsonRpc(
+        `http://127.0.0.1:${running!.port}/mcp`,
+        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+        { Authorization: 'Bearer    ' },
+      );
+      expect(status).toBe(401);
+    });
+
+    it('accepts the lowercase "bearer" scheme (case-insensitive)', async () => {
+      const { status } = await jsonRpc(
+        `http://127.0.0.1:${running!.port}/mcp`,
+        { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', clientInfo: { name: 'test', version: '0.0.0' }, capabilities: {} } },
+        { Authorization: `bearer ${TEST_TOKEN}` },
+      );
+      expect(status).toBe(200);
+    });
+
+    it('handles pathological whitespace in the Authorization header without backtracking', async () => {
+      // Regression for CodeQL js/polynomial-redos #59 — the prior regex
+      // /^Bearer\s+(.+)$/i could backtrack on long whitespace runs.
+      // The replacement uses slice/trim and runs in linear time.
+      // Node's HTTP parser caps header size (~16KB) so this stays under the
+      // limit while still being long enough that polynomial regex backtracking
+      // would be observable.
+      const evil = 'Bearer ' + ' '.repeat(8_000) + 'x';
+      const start = Date.now();
+      const { status } = await jsonRpc(
+        `http://127.0.0.1:${running!.port}/mcp`,
+        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+        { Authorization: evil },
+      );
+      const elapsed = Date.now() - start;
+      expect(status).toBe(401);
+      expect(elapsed).toBeLessThan(1500);
+    });
+
     it('returns 404 on unknown paths', async () => {
       const res = await fetch(`http://127.0.0.1:${running!.port}/unknown`);
       expect(res.status).toBe(404);

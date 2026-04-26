@@ -176,9 +176,13 @@ function getClientIp(req: IncomingMessage): string {
 
 function bearerOk(headerValue: string | undefined, expected: string): boolean {
   if (!headerValue) return false;
-  const match = headerValue.match(/^Bearer\s+(.+)$/i);
-  if (!match) return false;
-  const provided = Buffer.from(match[1]!.trim(), 'utf8');
+  // Avoid regex-based parsing — `/^Bearer\s+(.+)$/i` is polynomial in `\s+`
+  // against attacker-controlled headers (CodeQL js/polynomial-redos #59).
+  if (headerValue.length < 7) return false;
+  if (headerValue.slice(0, 7).toLowerCase() !== 'bearer ') return false;
+  const token = headerValue.slice(7).trim();
+  if (token.length === 0) return false;
+  const provided = Buffer.from(token, 'utf8');
   const want = Buffer.from(expected, 'utf8');
   if (provided.length !== want.length) return false;
   return timingSafeEqual(provided, want);
