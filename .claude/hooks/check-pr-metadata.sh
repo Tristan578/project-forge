@@ -41,11 +41,20 @@ if [[ ${#ERRORS[@]} -gt 0 ]]; then
     echo "  - $err"
   done
   echo ""
-  echo "  Available milestones:"
+  echo "  Available milestones (run: gh api repos/Tristan578/project-forge/milestones --jq '.[].title'):"
   echo "    P0: Production Blockers"
   echo "    P1: User Workflow Blockers"
-  echo "    P2: Degraded Experience"
-  echo "    P3: Tech Debt"
+  echo "    E1: Game Creation E2E"
+  echo "    E2: Community & Viral Growth"
+  echo "    E3: Instrumentation & Growth Metrics"
+  echo "    E4: Onboarding & Activation"
+  echo "    E5: AI Generation Quality"
+  echo "    E6: Content Safety & Trust"
+  echo "    S1: Quality & Reliability"
+  echo "    S2: Accessibility & Compliance"
+  echo "    S3: Performance & Scale"
+  echo "    S4: SEO & GEO Foundation"
+  echo "    Post-Launch Vision"
   echo "================================================================"
   exit 2
 fi
