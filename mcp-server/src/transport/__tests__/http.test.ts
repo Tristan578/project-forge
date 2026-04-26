@@ -250,6 +250,75 @@ describe('startHttpTransport', () => {
       expect(second.status).toBe(500);
       expect(calls).toBe(2);
     });
+
+    it('runs cleanup when mcpServer.connect rejects (no resource leak)', async () => {
+      // Regression for PR #8512 Sentry MEDIUM: cleanup was registered AFTER
+      // connect(), so a connect failure leaked the constructed server +
+      // transport (each holds open streams). Repeated failures could exhaust
+      // the process. After the fix, res.on('close', cleanup) is wired BEFORE
+      // connect() so the listener still fires when the response closes on
+      // the 500 we write below.
+      let closeCalls = 0;
+      let closeResolver!: () => void;
+      const closeOnce = new Promise<void>((resolve) => {
+        closeResolver = resolve;
+      });
+
+      const failingConnectBuilder = (): McpServer => {
+        const server = buildTestServer();
+        // Shadow connect to fail synchronously after the transport is built.
+        // Object property assignment on a class instance is fine — JS resolves
+        // method dispatch via the instance first, prototype second.
+        Object.defineProperty(server, 'connect', {
+          value: async () => {
+            throw new Error('synthetic connect failure');
+          },
+          writable: true,
+          configurable: true,
+        });
+        // Track close so we can prove cleanup fired.
+        const originalClose = server.close.bind(server);
+        Object.defineProperty(server, 'close', {
+          value: async () => {
+            closeCalls++;
+            closeResolver();
+            return originalClose();
+          },
+          writable: true,
+          configurable: true,
+        });
+        return server;
+      };
+
+      running = await startHttpTransport(failingConnectBuilder, {
+        port: 0,
+        host: '127.0.0.1',
+        token: TEST_TOKEN,
+        stateless: true,
+        rateLimit: { windowMs: 60_000, max: 100 },
+        meta: { name: 'test-server', version: '0.0.0', commandCount: 1 },
+      });
+
+      const { status, json } = await jsonRpc(
+        `http://127.0.0.1:${running.port}/mcp`,
+        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+        { Authorization: `Bearer ${TEST_TOKEN}` },
+      );
+
+      expect(status).toBe(500);
+      expect((json as { error: string }).error).toContain('synthetic connect failure');
+
+      // Wait (with a real timeout, not a sleep) for the close listener to fire.
+      // If the cleanup were registered after connect — as it was before the fix —
+      // this promise would never resolve and the timeout would fail the test.
+      await Promise.race([
+        closeOnce,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('cleanup did not run within 500ms — leak regressed')), 500),
+        ),
+      ]);
+      expect(closeCalls).toBeGreaterThan(0);
+    });
   });
 
   describe('rate limiting', () => {

@@ -283,12 +283,17 @@ export async function startHttpTransport(
             sessionIdGenerator: undefined,
             enableJsonResponse: true,
           });
-          await mcpServer.connect(transport);
+          // Register cleanup BEFORE connect(). If connect() throws, the
+          // catch below writes a 500 and the response closes immediately,
+          // which fires this listener — without it, both transport and
+          // server objects (each holding open streams) would leak per
+          // failed request and exhaust the process under load.
           const cleanup = () => {
             transport.close().catch(() => {});
             mcpServer?.close().catch(() => {});
           };
           res.on('close', cleanup);
+          await mcpServer.connect(transport);
         } else {
           transport = sharedTransport!;
         }
