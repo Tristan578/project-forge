@@ -25,6 +25,7 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { assertTier } from '@/lib/auth/api-auth';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { logCost } from '@/lib/costs/costLogger';
+import { trackAiCacheHitRate } from '@/lib/analytics/events.server';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
 import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
@@ -380,13 +381,16 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 5b. Server-side token budget validation.
-  // 2M chars ~= 500k tokens at 4 chars/token, leaving ~500k of Sonnet's 1M
-  // window for output and tool round-trips. Larger limits would push close to
-  // the model cap with no headroom; smaller limits unnecessarily 413 long
-  // game-design conversations (#8484).
+  // 5b. Server-side token budget validation. Counts every char that will be
+  // billed by Anthropic — messages, tool results, attachments, AND the
+  // client-supplied sceneContext that is added to the system prefix below.
+  // sceneContext is tagged for the 1h ephemeral cache (2× input write
+  // multiplier), so leaving it outside this guard would let a client double
+  // their effective bill for free. 2M chars ~= 500k tokens at 4 chars/token,
+  // leaving ~500k of Sonnet's 1M window for output and tool round-trips
+  // (#8484).
   const MAX_INPUT_CHARS = 2_000_000;
-  let totalChars = 0;
+  let totalChars = typeof sceneContext === 'string' ? sceneContext.length : 0;
   for (const msg of messages) {
     if (typeof msg.content === 'string') {
       totalChars += msg.content.length;
@@ -447,7 +451,15 @@ export async function POST(request: NextRequest) {
     effectiveSystemPrompt = sanitizeSystemPrompt(systemOverride);
   }
 
-  let systemText = effectiveSystemPrompt;
+  // Build instruction blocks with cache tier hints. The base prompt and the
+  // engine scene context are stable across many turns within a session, so
+  // tag them `long` (1h ephemeral cache) — this saves token cost across
+  // the typical 5–60 minute editing session. Doc context is per-turn (varies
+  // with the latest user message) so it stays in the default short tier.
+  const instructionBlocks: Array<{ text: string; tier?: 'short' | 'long' }> = [
+    { text: effectiveSystemPrompt, tier: 'long' },
+  ];
+
   if (sceneContext && typeof sceneContext === 'string') {
     // sceneContext is client-supplied structured data (engine scene state).
     // Strip control characters (security) but do NOT apply the 10k system
@@ -455,7 +467,13 @@ export async function POST(request: NextRequest) {
     // be 50k+ chars. The total input budget (MAX_INPUT_CHARS = 2M) at
     // step 5b is the real size guard for the entire conversation.
     const sanitizedContext = sceneContext.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-    systemText += '\n\n' + sanitizedContext;
+    // Prepend a per-user nonce so the cached prefix is unique per user even
+    // under the shared platform Anthropic API key. Anthropic's prompt cache
+    // is scoped to API key / org granularity, so without this two users with
+    // byte-identical sceneContext would share a cache entry. The nonce is
+    // an HTML comment — inert to the LLM but disambiguates the prefix bytes.
+    const userScopedContext = `<!-- session:${auth.ctx.user.id} -->\n${sanitizedContext}`;
+    instructionBlocks.push({ text: userScopedContext, tier: 'long' });
   }
 
   // Inject relevant documentation when the user appears to be asking a how-to question
@@ -467,7 +485,8 @@ export async function POST(request: NextRequest) {
       const docsEntries = await getDocsEntries();
       const docCtx = buildDocContext(lastUserMessage.content, docsEntries);
       if (docCtx) {
-        systemText += '\n\n' + docCtx;
+        // Doc context varies with each turn — keep on the default 5m TTL.
+        instructionBlocks.push({ text: docCtx });
       }
     } catch {
       // Doc context is best-effort — never block the chat request
@@ -490,7 +509,7 @@ export async function POST(request: NextRequest) {
   const agent = createSpawnforgeAgent({
     isDirectBackend: usingDirect,
     model: resolvedModelId,
-    instructions: systemText,
+    instructions: instructionBlocks,
     thinking: canUseThinking && thinking === true,
   });
 
@@ -507,6 +526,12 @@ export async function POST(request: NextRequest) {
         // the model (not the estimated cost charged upfront via resolveApiKey).
         if (auth.ctx.user.id && usageId && usage) {
           const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+          // AI SDK v6 nests cache token counts under usage.inputTokenDetails.
+          // The fields are typed `number | undefined` and propagate as-is to
+          // logCost (JSONB metadata) and trackAiCacheHitRate (coerces to 0).
+          const cacheReadTokens = usage.inputTokenDetails?.cacheReadTokens;
+          const cacheWriteTokens = usage.inputTokenDetails?.cacheWriteTokens;
+
           logCost(
             auth.ctx.user.id,
             'chat_message',
@@ -517,10 +542,32 @@ export async function POST(request: NextRequest) {
               model,
               promptTokens: usage.inputTokens,
               completionTokens: usage.outputTokens,
+              cacheReadTokens,
+              cacheWriteTokens,
               usageId,
             },
           ).catch((err: unknown) => {
             captureException(err, { route: '/api/chat', phase: 'log_token_usage' });
+          });
+
+          // PostHog/Vercel analytics for cache-hit dashboards. The surrounding
+          // `usageId` guard means this only fires for platform-key requests on
+          // the direct backend — i.e. paid users without a BYOK key. Excluded:
+          //   • Gateway routes (resolveChatRoute → non-direct backendId), which
+          //     bypass our billing path entirely and rely on Vercel AI Gateway
+          //     metrics instead.
+          //   • BYOK users on the direct backend (resolveApiKey returns the
+          //     'byok' type without a usageId — no tokens deducted, nothing to
+          //     refund). Their cache effectiveness is invisible to us by design.
+          // System prompt is always seeded with tier: 'long' above, so every
+          // chat request uses the 1h ephemeral cache for the cacheable prefix.
+          trackAiCacheHitRate('long', {
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            cacheReadTokens,
+            cacheWriteTokens,
+          }).catch((err: unknown) => {
+            captureException(err, { route: '/api/chat', phase: 'track_cache_hit_rate' });
           });
         }
       },
