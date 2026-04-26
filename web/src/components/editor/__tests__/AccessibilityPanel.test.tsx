@@ -346,11 +346,16 @@ describe('AccessibilityPanel', () => {
       expect(mockGenerate).toHaveBeenCalledTimes(1);
     });
 
-    // Verify bindings were applied
-    const applyCalls = mockDispatcher.mock.calls.filter(
-      ([cmd]) => cmd === 'set_input_binding',
-    );
-    expect(applyCalls.length).toBeGreaterThanOrEqual(2);
+    // Wait for React to process the state update and the useEffect to dispatch
+    // set_input_binding. The flow is: click → setTimeout(0) → setProfile →
+    // re-render → useEffect fires → dispatch. Without a second waitFor the
+    // assertion races the effect and fails under full-suite load.
+    await vi.waitFor(() => {
+      const applyCalls = mockDispatcher.mock.calls.filter(
+        ([cmd]) => cmd === 'set_input_binding',
+      );
+      expect(applyCalls.length).toBeGreaterThanOrEqual(2);
+    });
 
     mockDispatcher.mockClear();
 
