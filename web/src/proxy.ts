@@ -133,6 +133,7 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
     '/llms-full.txt',
     '/faq(.*)',
     '/about(.*)',
+    '/compare(.*)',
   ];
   if (process.env.NODE_ENV !== 'production') {
     publicRoutes.push('/dev(.*)');
