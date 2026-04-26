@@ -77,7 +77,8 @@ export default async function Image({ params }: Props) {
         .where(
           and(
             eq(publishedGames.userId, user.id),
-            eq(publishedGames.slug, slug)
+            eq(publishedGames.slug, slug),
+            eq(publishedGames.status, 'published')
           )
         )
         .limit(1)
