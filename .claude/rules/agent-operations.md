@@ -154,8 +154,14 @@ Closes #NNNN (PF-XXX)
 - [ ] test steps
 EOF
 )"
-# Valid milestones: "P0: Production Blockers", "P1: User Workflow Blockers",
-#                   "P2: Degraded Experience", "P3: Tech Debt"
+# Valid milestones (verify with: gh api repos/Tristan578/project-forge/milestones --jq '.[].title'):
+#   "P0: Production Blockers", "P1: User Workflow Blockers"
+#   "E1: Game Creation E2E", "E2: Community & Viral Growth", "E3: Instrumentation & Growth Metrics",
+#   "E4: Onboarding & Activation", "E5: AI Generation Quality", "E6: Content Safety & Trust"
+#   "S1: Quality & Reliability", "S2: Accessibility & Compliance",
+#   "S3: Performance & Scale", "S4: SEO & GEO Foundation"
+#   "Post-Launch Vision"
+# Pick by content: P0/P1 for blockers, E* for epics, S* for sustaining categories.
 ```
 
 ### After PR Creation
