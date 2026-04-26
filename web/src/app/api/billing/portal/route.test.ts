@@ -118,7 +118,7 @@ describe('POST /api/billing/portal', () => {
     const { POST } = await import('./route');
     await POST(makeReq());
 
-    expect(capturedStripeOpts.value?.apiVersion).toBe('2026-03-25.dahlia');
+    expect(capturedStripeOpts.value?.apiVersion).toBe('2026-04-22.dahlia');
   });
 
   it('returns 500 when Stripe portal creation fails', async () => {

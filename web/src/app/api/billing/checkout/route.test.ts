@@ -193,7 +193,7 @@ describe('POST /api/billing/checkout', () => {
     const { POST } = await import('./route');
     await POST(makeReq({ tier: 'hobbyist' }));
 
-    expect(capturedStripeOpts.value?.apiVersion).toBe('2026-03-25.dahlia');
+    expect(capturedStripeOpts.value?.apiVersion).toBe('2026-04-22.dahlia');
   });
 
   it('returns 500 when Stripe checkout creation fails', async () => {
