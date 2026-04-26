@@ -72,12 +72,15 @@ test.describe('Production Smoke Tests @smoke @production', () => {
     expect(res.status()).toBe(200);
   });
 
-  test('/dev route does not return 404 or 500 in production', async ({ request }) => {
+  test('/dev redirects unauthenticated users to sign-in (not 404)', async ({ request }) => {
     const res = await request.get(`${PROD_URL}/dev`, { maxRedirects: 0 });
-    // /dev is auth-protected in production. Clerk v7 returns 200 with a page
-    // shell and handles the redirect client-side. Both 200 (client redirect)
-    // and 307 (server redirect) are valid. 404 or 500 means the build is broken.
-    expect([200, 307, 302]).toContain(res.status());
+    // proxy.ts uses redirectToSignIn() for protected routes (#8529).
+    // 307 with a Location pointing at the sign-in page is the only correct
+    // response for a signed-out browser visit. 404 = Clerk's protect-rewrite
+    // default has regressed (poor UX, no recovery path). 500 = SSR crash.
+    expect([307, 302]).toContain(res.status());
+    const location = res.headers()['location'] || '';
+    expect(location).toMatch(/sign-in/);
   });
 
   test('no Clerk test keys in production HTML', async ({ request }) => {
@@ -114,24 +117,20 @@ test.describe('Production Smoke Tests @smoke @production', () => {
 });
 
 test.describe('Production Auth Flow @smoke @production', () => {
-  test('unauthenticated /dashboard does not 404 or 500', async ({ request }) => {
-    const res = await request.get(`${PROD_URL}/dashboard`, { maxRedirects: 0 });
-    // Clerk v7 + Next.js 16: protected routes may return 200 (client-side
-    // redirect) or 307 (server-side redirect). Both are valid.
-    // 404 = route missing from build. 500 = SSR crash. Either is a deploy bug.
-    const status = res.status();
-    expect(
-      status === 200 || status === 307 || status === 302,
-      `Expected 200/307/302 but got ${status}. 404 = broken build, 500 = SSR crash.`
-    ).toBe(true);
-  });
-
-  test('unauthenticated /settings does not 404 or 500', async ({ request }) => {
-    const res = await request.get(`${PROD_URL}/settings`, { maxRedirects: 0 });
-    const status = res.status();
-    expect(
-      status === 200 || status === 307 || status === 302,
-      `Expected 200/307/302 but got ${status}. 404 = broken build, 500 = SSR crash.`
-    ).toBe(true);
-  });
+  // Protected routes must redirect unauthenticated browser visitors to /sign-in,
+  // not rewrite to /404. Clerk's `auth.protect()` default is protect-rewrite-to-404
+  // (route enumeration mitigation), which gives users no recovery path. proxy.ts
+  // calls `redirectToSignIn()` instead — see #8529.
+  for (const path of ['/dashboard', '/settings']) {
+    test(`unauthenticated ${path} redirects to sign-in`, async ({ request }) => {
+      const res = await request.get(`${PROD_URL}${path}`, { maxRedirects: 0 });
+      const status = res.status();
+      expect(
+        status === 307 || status === 302,
+        `Expected 307/302 redirect but got ${status}. 404 = Clerk protect-rewrite regression. 500 = SSR crash.`,
+      ).toBe(true);
+      const location = res.headers()['location'] || '';
+      expect(location, `Location header should point at sign-in: ${location}`).toMatch(/sign-in/);
+    });
+  }
 });

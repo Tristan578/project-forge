@@ -156,7 +156,19 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
     }
 
     if (!isPublicRoute(req)) {
-      await auth.protect();
+      const { userId, redirectToSignIn } = await auth();
+      if (!userId) {
+        // Browser navigations: redirect to sign-in (preserves the original URL
+        // as `redirect_url` so users land back where they started after auth).
+        // API requests: return 401 so client code can distinguish unauthenticated
+        // from "not found". Clerk's default `auth.protect()` would rewrite browser
+        // requests to /404 — bad UX (no recovery path) and breaks the prod smoke
+        // test. See #8529.
+        if (req.nextUrl.pathname.startsWith('/api/')) {
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+        return redirectToSignIn({ returnBackUrl: req.url });
+      }
     }
 
     return addSecurityHeaders(NextResponse.next(), req);
