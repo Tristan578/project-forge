@@ -772,6 +772,42 @@ describe('POST /api/chat', () => {
         expect.objectContaining({ model: 'claude-opus-4-7' }),
       );
     });
+
+    it('passes effort flag to agent factory for creator tier', async () => {
+      vi.mocked(withApiMiddleware).mockResolvedValue({
+        error: null,
+        authContext: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'creator' } as never },
+        rateLimit: { allowed: true, remaining: 9, resetAt: Date.now() + 60_000 },
+      } as never);
+
+      const res = await POST(makeRequest({ ...validBody(), effort: 'medium' }));
+      await res.text();
+      expect(createSpawnforgeAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ effort: 'medium' }),
+      );
+    });
+
+    it('blocks effort for non-creator/pro tiers', async () => {
+      vi.mocked(withApiMiddleware).mockResolvedValue({
+        error: null,
+        authContext: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'starter' } as never },
+        rateLimit: { allowed: true, remaining: 9, resetAt: Date.now() + 60_000 },
+      } as never);
+
+      const res = await POST(makeRequest({ ...validBody(), effort: 'medium' }));
+      await res.text();
+      const lastCallArgs = vi.mocked(createSpawnforgeAgent).mock.calls.at(-1)?.[0];
+      expect(lastCallArgs).not.toHaveProperty('effort');
+    });
+
+    it('rejects requests with invalid effort value', async () => {
+      const res = await POST(
+        makeRequest({ ...validBody(), effort: 'extreme' as unknown as 'low' }),
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toMatch(/effort/);
+    });
   });
 
   // -------------------------------------------------------------------------

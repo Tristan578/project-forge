@@ -299,6 +299,7 @@ export async function POST(request: NextRequest) {
     model: string;
     sceneContext: string;
     thinking?: boolean;
+    effort?: 'low' | 'medium' | 'high';
     systemOverride?: string;
   };
 
@@ -308,7 +309,15 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { messages, model, sceneContext, thinking, systemOverride } = body;
+  const { messages, model, sceneContext, thinking, effort, systemOverride } = body;
+  // Validate effort enum — reject unknown values rather than passing them through
+  // to the SDK (which would surface as a less helpful runtime error).
+  if (effort !== undefined && effort !== 'low' && effort !== 'medium' && effort !== 'high') {
+    return Response.json(
+      { error: "effort must be one of: 'low', 'medium', 'high'" },
+      { status: 400 },
+    );
+  }
   if (!messages || !Array.isArray(messages)) {
     return Response.json({ error: 'messages array required' }, { status: 400 });
   }
@@ -506,11 +515,15 @@ export async function POST(request: NextRequest) {
   // Sonnet inside createSpawnforgeAgent — but billing already deducted at the
   // higher tier. Direct backends pass-through the canonical name unchanged.
   const resolvedModelId = chatRoute?.modelId ?? model ?? '';
+  // Effort piggybacks the same tier gate as thinking — both consume extra reasoning
+  // tokens and must be off by default for free/starter tiers.
+  const resolvedEffort = canUseThinking && effort ? effort : undefined;
   const agent = createSpawnforgeAgent({
     isDirectBackend: usingDirect,
     model: resolvedModelId,
     instructions: instructionBlocks,
     thinking: canUseThinking && thinking === true,
+    ...(resolvedEffort ? { effort: resolvedEffort } : {}),
   });
 
   // 8. Convert messages
