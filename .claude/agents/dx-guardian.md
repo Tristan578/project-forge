@@ -1,7 +1,7 @@
 ---
 name: dx-guardian
 description: Developer experience guardian. Audits documentation freshness, cross-IDE consistency, and quality standards.
-model: claude-haiku-4-5
+model: claude-haiku-4-5-20251001
 effort: medium
 memory: project
 background: true
