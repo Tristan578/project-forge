@@ -18,10 +18,17 @@ const DEFAULT_MODELS: Record<string, string> = {
 };
 
 const MODEL_MAP: Record<string, string> = {
-  // Anthropic models
+  // Anthropic models — keep in sync with AI_MODELS in @/lib/ai/models. Every
+  // canonical chat ID exposed to clients MUST appear here, otherwise the
+  // gateway path falls back to DEFAULT_MODELS.chat (Sonnet) and silently
+  // downgrades the request — billing has already deducted at the requested
+  // tier by the time we reach the agent factory.
   'claude-sonnet-4-6': 'anthropic/claude-sonnet-4-6',
   'claude-opus-4': 'anthropic/claude-opus-4',
+  'claude-opus-4-7': 'anthropic/claude-opus-4-7',
   'claude-haiku-3-5': 'anthropic/claude-haiku-3-5',
+  'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',
+  'claude-haiku-4-5-20251001': 'anthropic/claude-haiku-4-5',
   // OpenAI models
   'gpt-4o': 'openai/gpt-4o',
   'gpt-4o-mini': 'openai/gpt-4o-mini',

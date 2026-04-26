@@ -471,9 +471,15 @@ export async function POST(request: NextRequest) {
   // Tier gate: thinking mode (10k extra tokens per step) restricted to creator/pro,
   // consistent with the systemOverride gate. Prevents amplified token burn on free tiers.
   const canUseThinking = auth.ctx.user.tier === 'creator' || auth.ctx.user.tier === 'pro';
+  // Use the route's translated modelId (e.g. 'anthropic/claude-opus-4-7' for
+  // the gateway) when available, falling back to the bare canonical model.
+  // Without this, the gateway path silently downgrades unmapped premium IDs to
+  // Sonnet inside createSpawnforgeAgent — but billing already deducted at the
+  // higher tier. Direct backends pass-through the canonical name unchanged.
+  const resolvedModelId = chatRoute?.modelId ?? model ?? '';
   const agent = createSpawnforgeAgent({
     isDirectBackend: usingDirect,
-    model: model || '',
+    model: resolvedModelId,
     instructions: systemText,
     thinking: canUseThinking && thinking === true,
   });
