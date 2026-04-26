@@ -73,6 +73,44 @@ async function jsonRpc(
   return { status: res.status, json };
 }
 
+// Stateful mode returns SSE (event-stream) by default. This helper parses the
+// `data:` payload of the first event so callers can assert on the JSON-RPC
+// envelope regardless of which transport mode the server picked.
+async function jsonRpcSse(
+  url: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<{ status: number; sessionId: string | null; json: unknown }> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  // Header name is case-insensitive in fetch; `Headers.get` already normalizes.
+  const sessionId = res.headers.get('Mcp-Session-Id') ?? res.headers.get('mcp-session-id');
+  // Try JSON first (server may have switched to enableJsonResponse), then SSE.
+  try {
+    return { status: res.status, sessionId, json: text.length > 0 ? JSON.parse(text) : null };
+  } catch {
+    // SSE format: lines like `event: message\ndata: {...}\n\n`. Grab the first
+    // data: payload — for the round-trip test there's exactly one.
+    const dataLine = text.split('\n').find((line) => line.startsWith('data:'));
+    if (!dataLine) {
+      return { status: res.status, sessionId, json: { raw: text } };
+    }
+    try {
+      return { status: res.status, sessionId, json: JSON.parse(dataLine.slice(5).trim()) };
+    } catch {
+      return { status: res.status, sessionId, json: { raw: text } };
+    }
+  }
+}
+
 describe('startHttpTransport', () => {
   let running: RunningHttpServer | null = null;
 
@@ -206,6 +244,51 @@ describe('startHttpTransport', () => {
       expect(listRes.status).toBe(200);
       const result = (listRes.json as { result: { tools: Array<{ name: string }> } }).result;
       expect(result.tools).toBeDefined();
+      expect(result.tools.some((t) => t.name === 'echo')).toBe(true);
+    });
+  });
+
+  describe('JSON-RPC round-trip — stateful mode', () => {
+    // Stateful is the default in production. The route pre-reads the request
+    // body before passing it to `transport.handleRequest(req, res, body)` so it
+    // can enforce a size cap before the SDK consumes the stream. This test
+    // proves the SDK's stateful StreamableHTTPServerTransport accepts the
+    // pre-parsed body — without this coverage, a SDK upgrade that started
+    // re-reading the stream would fail every default-config POST in production.
+    beforeEach(async () => {
+      running = await bootHttp({ stateless: false });
+    });
+
+    it('serves initialize then tools/list and tracks the session', async () => {
+      const initRes = await jsonRpcSse(
+        `http://127.0.0.1:${running!.port}/mcp`,
+        {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2025-06-18',
+            capabilities: {},
+            clientInfo: { name: 'test-client', version: '0.0.0' },
+          },
+        },
+        { Authorization: `Bearer ${TEST_TOKEN}` },
+      );
+      expect(initRes.status).toBe(200);
+      // Stateful mode mints a session ID on initialize and echoes it back via
+      // the response header. A non-null value here proves the SDK consumed the
+      // pre-parsed body and ran the initialize handshake to completion.
+      expect(initRes.sessionId).toBeTruthy();
+      expect((initRes.json as { result: unknown }).result).toBeDefined();
+
+      const sessionId = initRes.sessionId!;
+      const listRes = await jsonRpcSse(
+        `http://127.0.0.1:${running!.port}/mcp`,
+        { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+        { Authorization: `Bearer ${TEST_TOKEN}`, 'Mcp-Session-Id': sessionId },
+      );
+      expect(listRes.status).toBe(200);
+      const result = (listRes.json as { result: { tools: Array<{ name: string }> } }).result;
       expect(result.tools.some((t) => t.name === 'echo')).toBe(true);
     });
   });
