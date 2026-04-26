@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { estimateMessageTokens } from '../lib/chat/tokenCounter';
 import { showError } from '@/lib/toast';
-import { AI_MODEL_PRIMARY, AI_MODEL_FAST } from '@/lib/ai/models';
+import { AI_MODEL_PRIMARY, AI_MODEL_FAST, AI_MODEL_PREMIUM } from '@/lib/ai/models';
 import { readUIMessageStream, isToolUIPart, uiMessageChunkSchema } from 'ai';
 import { parseJsonEventStream } from '@ai-sdk/provider-utils';
 import type { UIMessage, UIMessageChunk } from 'ai';
@@ -29,7 +29,7 @@ export interface ChatMessage {
   entityRefs?: Record<string, string>; // @DisplayName → entity ID
 }
 
-export type ChatModel = typeof AI_MODEL_PRIMARY | typeof AI_MODEL_FAST;
+export type ChatModel = typeof AI_MODEL_PRIMARY | typeof AI_MODEL_FAST | typeof AI_MODEL_PREMIUM;
 
 export type RightPanelTab = 'inspector' | 'chat' | 'script' | 'ui' | 'modify' | 'gdd' | 'review' | 'behavior';
 

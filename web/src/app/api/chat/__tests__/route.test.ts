@@ -485,6 +485,52 @@ describe('POST /api/chat', () => {
         expect.objectContaining({ thinking: false }),
       );
     });
+
+    it('rejects premium model for non-pro tier with 403', async () => {
+      vi.mocked(authenticateRequest).mockResolvedValue({
+        ok: true,
+        ctx: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'creator' } as never },
+      });
+
+      const res = await POST(
+        makeRequest({ ...validBody(), model: 'claude-opus-4-7' }),
+      );
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error).toMatch(/premium/i);
+      // Agent must NOT be created when premium is rejected.
+      expect(createSpawnforgeAgent).not.toHaveBeenCalled();
+      // Token deduction must NOT happen for rejected premium requests.
+      expect(resolveApiKey).not.toHaveBeenCalled();
+    });
+
+    it('also rejects gateway-format premium model id for non-pro tier', async () => {
+      vi.mocked(authenticateRequest).mockResolvedValue({
+        ok: true,
+        ctx: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'hobbyist' } as never },
+      });
+
+      const res = await POST(
+        makeRequest({ ...validBody(), model: 'anthropic/claude-opus-4-7' }),
+      );
+      expect(res.status).toBe(403);
+      expect(createSpawnforgeAgent).not.toHaveBeenCalled();
+    });
+
+    it('allows premium model for pro tier and forwards to agent factory', async () => {
+      vi.mocked(authenticateRequest).mockResolvedValue({
+        ok: true,
+        ctx: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'pro' } as never },
+      });
+
+      const res = await POST(
+        makeRequest({ ...validBody(), model: 'claude-opus-4-7' }),
+      );
+      await res.text();
+      expect(createSpawnforgeAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'claude-opus-4-7' }),
+      );
+    });
   });
 
   // -------------------------------------------------------------------------

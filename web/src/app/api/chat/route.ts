@@ -28,6 +28,7 @@ import { logCost } from '@/lib/costs/costLogger';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
 import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
+import { isPremiumModel } from '@/lib/ai/models';
 import { resolveChatRoute } from '@/lib/providers/resolveChat';
 import type { UserModelMessage, AssistantModelMessage } from '@ai-sdk/provider-utils';
 
@@ -307,6 +308,17 @@ export async function POST(request: NextRequest) {
   const { messages, model, sceneContext, thinking, systemOverride } = body;
   if (!messages || !Array.isArray(messages)) {
     return Response.json({ error: 'messages array required' }, { status: 400 });
+  }
+
+  // Premium model gate: claude-opus-4-7 is restricted to Pro tier. Reject
+  // before billing so non-Pro users requesting premium are not charged the
+  // estimated cost. The gate only blocks the model — it does not silently
+  // downgrade, so the client gets an explicit signal to update its UI.
+  if (isPremiumModel(model) && auth.ctx.user.tier !== 'pro') {
+    return Response.json(
+      { error: 'The premium model (Opus 4.7) requires a Pro subscription.' },
+      { status: 403 },
+    );
   }
 
   // 4. Validate message length and content

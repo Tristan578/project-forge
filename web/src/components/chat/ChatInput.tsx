@@ -3,13 +3,22 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
 import { Send, Square, Paperclip, Mic, MicOff, Brain, Shield } from 'lucide-react';
 import { useChatStore, type ChatModel } from '@/stores/chatStore';
-import { AI_MODEL_PRIMARY, AI_MODEL_FAST } from '@/lib/ai/models';
+import { AI_MODEL_PRIMARY, AI_MODEL_FAST, AI_MODEL_PREMIUM } from '@/lib/ai/models';
+import { useUserStore } from '@/stores/userStore';
 import { EntityPicker } from './EntityPicker';
 import { estimateTokenCount, formatTokenEstimate } from '@/lib/chat/tokenCounter';
 
-const MODEL_OPTIONS: { value: ChatModel; label: string }[] = [
+interface ModelOption {
+  value: ChatModel;
+  label: string;
+  /** When set, only users on this tier (or higher) can pick this model. */
+  requiresPro?: boolean;
+}
+
+const MODEL_OPTIONS: ModelOption[] = [
   { value: AI_MODEL_PRIMARY, label: 'Sonnet 4.5' },
   { value: AI_MODEL_FAST, label: 'Haiku 4.5' },
+  { value: AI_MODEL_PREMIUM, label: 'Opus 4.7 (Pro)', requiresPro: true },
 ];
 
 export function ChatInput() {
@@ -21,6 +30,7 @@ export function ChatInput() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
 
+  const userTier = useUserStore((s) => s.tier);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const stopStreaming = useChatStore((s) => s.stopStreaming);
   const isStreaming = useChatStore((s) => s.isStreaming);
@@ -272,7 +282,13 @@ export function ChatInput() {
           className="rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400 outline-none"
         >
           {MODEL_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
+            <option
+              key={opt.value}
+              value={opt.value}
+              disabled={opt.requiresPro && userTier !== 'pro'}
+            >
+              {opt.label}
+            </option>
           ))}
         </select>
 
