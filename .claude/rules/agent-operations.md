@@ -252,3 +252,15 @@ cd web && npm run db:studio      # Visual DB browser
 cd web && npm run analyze            # Opens bundle visualization
 cd web && npm run check:bundle-size  # Automated size enforcement
 ```
+
+## 11. Long-Session Rule Persistence (PostCompact hook)
+
+Claude Code only loads `CLAUDE.md` and `.claude/CLAUDE.md` on `SessionStart`. After auto-compaction (long sessions, typically >4hr on the main agent), those rules are dropped. The `.claude/hooks/inject-post-compact.sh` hook fires on `PostCompact` and re-emits every file under `.claude/rules/` so the agent does not drift into deprecated patterns mid-session.
+
+- Triggered by: `PostCompact` event in `.claude/settings.json` (timeout 5s, runs ~30ms in practice)
+- Output: each rules file wrapped in `--- BEGIN <path> ---` / `--- END <path> ---` delimiters
+- Runs alongside `restore-context-hints.sh`, which restores per-session working state from the `PreCompact` snapshot at `/tmp/spawnforge-context-snapshot.txt`
+
+To test the hook manually: `bash .claude/hooks/inject-post-compact.sh | head -20`. To see the wall-clock cost: `time bash .claude/hooks/inject-post-compact.sh > /dev/null`.
+
+When you add a new file under `.claude/rules/`, no hook change is needed — the glob picks it up automatically.
