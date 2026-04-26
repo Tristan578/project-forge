@@ -599,13 +599,16 @@ describe('POST /api/chat', () => {
     });
 
     it('refunds tokens when conversation exceeds token budget (413)', async () => {
-      // Build a body where totalChars > 600_000 (MAX_INPUT_CHARS)
-      const longContent = 'x'.repeat(3999); // under per-message limit
-      const messages = Array.from({ length: 200 }, (_, i) => ({
+      // Build a body where totalChars > 2_000_000 (MAX_INPUT_CHARS).
+      // sanitizeUserMessage caps each user message at ~4k chars, so this test
+      // mocks it through to keep the per-message content intact and lets the
+      // body-size + budget check fire naturally.
+      const longContent = 'x'.repeat(3999); // under per-message sanitize cap
+      const messages = Array.from({ length: 600 }, (_, i) => ({
         role: i % 2 === 0 ? 'user' : 'assistant',
         content: longContent,
       }));
-      // 200 * 3999 = 799_800 > 600_000
+      // 600 * 3999 = 2_399_400 > 2_000_000
 
       const res = await POST(makeRequest({
         messages,

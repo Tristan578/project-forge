@@ -280,12 +280,14 @@ export async function POST(request: NextRequest) {
   const tierError = assertTier(auth.ctx.user, ['hobbyist', 'creator', 'pro']);
   if (tierError) return tierError;
 
-  // 2. Validate request size (max 1MB — generous limit for conversation history + scene context;
-  //    the more precise MAX_INPUT_CHARS check below enforces the actual token budget)
+  // 2. Validate request size (max 4MB — sized to fit MAX_INPUT_CHARS=2M plus
+  //    JSON overhead, base64 image data, and tool results. Sits well under
+  //    Vercel's 4.5MB serverless body limit. The MAX_INPUT_CHARS check below
+  //    enforces the actual text-content token budget.)
   const bodyText = await request.text();
-  if (!validateBodySize(bodyText, 1024 * 1024)) {
+  if (!validateBodySize(bodyText, 4 * 1024 * 1024)) {
     return Response.json(
-      { error: 'Request too large. Maximum 1MB allowed.' },
+      { error: 'Request too large. Maximum 4MB allowed.' },
       { status: 413 }
     );
   }
@@ -378,8 +380,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 5b. Server-side token budget validation
-  const MAX_INPUT_CHARS = 600000; // ~150k tokens (well within Claude's window)
+  // 5b. Server-side token budget validation.
+  // 2M chars ~= 500k tokens at 4 chars/token, leaving ~500k of Sonnet's 1M
+  // window for output and tool round-trips. Larger limits would push close to
+  // the model cap with no headroom; smaller limits unnecessarily 413 long
+  // game-design conversations (#8484).
+  const MAX_INPUT_CHARS = 2_000_000;
   let totalChars = 0;
   for (const msg of messages) {
     if (typeof msg.content === 'string') {
@@ -409,7 +415,11 @@ export async function POST(request: NextRequest) {
       });
     }
     return Response.json(
-      { error: 'Conversation too long. Please start a new conversation or clear older messages.' },
+      {
+        error:
+          'Conversation too long for the model context window. Start a new chat, ' +
+          'or clear older messages to free up space.',
+      },
       { status: 413 }
     );
   }
@@ -442,7 +452,7 @@ export async function POST(request: NextRequest) {
     // sceneContext is client-supplied structured data (engine scene state).
     // Strip control characters (security) but do NOT apply the 10k system
     // prompt length cap — scene context for complex scenes can legitimately
-    // be 50k+ chars. The total input budget (MAX_INPUT_CHARS = 600k) at
+    // be 50k+ chars. The total input budget (MAX_INPUT_CHARS = 2M) at
     // step 5b is the real size guard for the entire conversation.
     const sanitizedContext = sceneContext.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
     systemText += '\n\n' + sanitizedContext;
