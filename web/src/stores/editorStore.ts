@@ -7,6 +7,11 @@
 
 import { create } from 'zustand';
 import { trackCommandDispatched } from '@/lib/analytics/events';
+import { addBreadcrumb } from '@/lib/monitoring/sentry-client';
+// Namespace import so partial test mocks of `@/hooks/useEngine` (which omit
+// the snapshot setter) don't throw at module load. We feature-detect the
+// export at runtime instead of relying on the named binding being present.
+import * as engineModule from '@/hooks/useEngine';
 
 // Import all slices
 import {
@@ -125,15 +130,69 @@ if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
   (window as unknown as Record<string, unknown>).__EDITOR_STORE = useEditorStore;
 }
 
+// Register a synchronous snapshot of editor state with the WASM panic
+// interceptor. The interceptor runs on the panicking caller's stack frame
+// (inside `console.error`), so the provider must be sync — async lookups
+// would race the crash. The provider is best-effort: if any field is missing
+// or throws, the interceptor falls back to an empty snapshot.
+//
+// Wrapped in try/catch so partial test mocks of `@/hooks/useEngine` that omit
+// the setter (vitest 4 raises on missing-export access via a Proxy) don't
+// crash module evaluation. In production all exports are present.
+try {
+  const setter = engineModule.setEngineSnapshotProvider;
+  if (typeof setter === 'function') {
+    setter(() => {
+      const state = useEditorStore.getState();
+      const sceneNodes = state.sceneGraph?.nodes;
+      return {
+        entityCount: sceneNodes ? Object.keys(sceneNodes).length : 0,
+        selectionSize: state.selectedIds?.size ?? 0,
+        primarySelection: state.primaryId ?? null,
+        canUndo: state.canUndo,
+        canRedo: state.canRedo,
+        undoDescription: state.undoDescription,
+        engineMode: state.engineMode,
+        recentCommands: _recentCommands.slice(),
+      };
+    });
+  }
+} catch {
+  /* useEngine mocked without snapshot setter — diagnostics off in this test only */
+}
+
+// Ring buffer of the most recent engine commands. Surfaced in WASM panic
+// reports so a crash includes the trail of commands that led to it.
+const COMMAND_RING_SIZE = 20;
+const _recentCommands: string[] = [];
+
+function recordCommand(command: string): void {
+  _recentCommands.push(command);
+  if (_recentCommands.length > COMMAND_RING_SIZE) {
+    _recentCommands.shift();
+  }
+  addBreadcrumb({
+    category: 'engine.command',
+    message: command,
+    level: 'info',
+  });
+}
+
+/** Last N engine commands dispatched (oldest first). For crash diagnostics. */
+export function getRecentCommands(): readonly string[] {
+  return _recentCommands;
+}
+
 // Command dispatcher type - will be set by useEngine hook
 type CommandDispatcher = (command: string, payload: unknown) => void;
 let _dispatchCommand: CommandDispatcher | null = null;
 
 export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
-  // Wrap dispatcher to emit Vercel analytics for every engine command.
-  // Tracking is fire-and-forget and never blocks the dispatch path.
+  // Wrap dispatcher to emit Vercel analytics + Sentry breadcrumb for every
+  // engine command. Tracking is fire-and-forget and never blocks dispatch.
   const tracked: CommandDispatcher = (command, payload) => {
     trackCommandDispatched(command);
+    recordCommand(command);
     dispatcher(command, payload);
   };
   _dispatchCommand = tracked;
@@ -172,7 +231,10 @@ export function setCommandBatchDispatcher(dispatcher: BatchCommandDispatcher | u
     return;
   }
   _dispatchCommandBatch = (commands) => {
-    for (const { command } of commands) trackCommandDispatched(command);
+    for (const { command } of commands) {
+      trackCommandDispatched(command);
+      recordCommand(command);
+    }
     return dispatcher(commands);
   };
 }

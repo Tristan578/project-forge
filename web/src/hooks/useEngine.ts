@@ -61,6 +61,30 @@ let wasmModule: WasmModule | null = null;
 let initPromise: Promise<WasmModule> | null = null;
 let panicInterceptorInstalled = false;
 
+// --- Engine snapshot provider (registered by editorStore for crash diagnostics) ---
+type EngineSnapshotProvider = () => Record<string, unknown>;
+let _engineSnapshotProvider: EngineSnapshotProvider | null = null;
+
+/**
+ * Register a synchronous provider that returns a snapshot of editor state.
+ * Called by `installPanicInterceptor` to enrich WASM crash reports with scene
+ * context (entity count, selection, undo state, recent commands). Must be
+ * sync — the panic path runs inside `console.error`, which is invoked on the
+ * stack frame of the panicking caller. Async lookups would race the crash.
+ */
+export function setEngineSnapshotProvider(provider: EngineSnapshotProvider | null): void {
+  _engineSnapshotProvider = provider;
+}
+
+function snapshotEngineState(): Record<string, unknown> {
+  if (!_engineSnapshotProvider) return {};
+  try {
+    return _engineSnapshotProvider();
+  } catch {
+    return { snapshotError: 'provider threw' };
+  }
+}
+
 // --- Engine crash state (module-level for cross-component access) ---
 let _engineCrashed = false;
 let _engineCrashMessage: string | null = null;
@@ -140,6 +164,7 @@ function installPanicInterceptor(): void {
         source: 'console_error_panic_hook',
         fullMessage: msg.slice(0, 2000),
         engineBackend: resolvedBackend,
+        engineState: snapshotEngineState(),
       });
       setEngineCrashed(msg.slice(0, 500));
     }
@@ -154,6 +179,7 @@ function installPanicInterceptor(): void {
         source: 'unhandled_wasm_runtime_error',
         fullMessage: msg.slice(0, 2000),
         engineBackend: resolvedBackend,
+        engineState: snapshotEngineState(),
       });
       if (!_engineCrashed) {
         setEngineCrashed(`WASM RuntimeError: ${msg.slice(0, 500)}`);
