@@ -550,11 +550,15 @@ export async function POST(request: NextRequest) {
             captureException(err, { route: '/api/chat', phase: 'log_token_usage' });
           });
 
-          // PostHog/Vercel analytics for cache-hit dashboards. Only fires on
-          // the direct backend because the surrounding `usageId` guard is
-          // only set when usingDirectBackend is true (gateway users don't
-          // hit our billing path). Gateway cache effectiveness is therefore
-          // not tracked here — Vercel AI Gateway exposes its own metrics.
+          // PostHog/Vercel analytics for cache-hit dashboards. The surrounding
+          // `usageId` guard means this only fires for platform-key requests on
+          // the direct backend — i.e. paid users without a BYOK key. Excluded:
+          //   • Gateway routes (resolveChatRoute → non-direct backendId), which
+          //     bypass our billing path entirely and rely on Vercel AI Gateway
+          //     metrics instead.
+          //   • BYOK users on the direct backend (resolveApiKey returns the
+          //     'byok' type without a usageId — no tokens deducted, nothing to
+          //     refund). Their cache effectiveness is invisible to us by design.
           // System prompt is always seeded with tier: 'long' above, so every
           // chat request uses the 1h ephemeral cache for the cacheable prefix.
           trackAiCacheHitRate('long', {
