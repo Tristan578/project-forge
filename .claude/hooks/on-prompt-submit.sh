@@ -20,7 +20,7 @@ if ! tb_api_available; then
 fi
 
 # Health check: verify board has data (lesson #56)
-BOARD_COUNT=$(curl -s --connect-timeout 2 "$TB_API/board" 2>/dev/null | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('tickets',[])))" 2>/dev/null || echo "0")
+BOARD_COUNT=$(curl -s --connect-timeout 2 "$TB_API/board" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(len(c.get('tickets',[])) for c in d.get('columns',[])) or len(d.get('tickets',[])))" 2>/dev/null || echo "0")
 if [ "$BOARD_COUNT" = "0" ]; then
     echo "[TASKBOARD WARNING] Board has 0 tickets — wrong DB path or sync needed."
     echo "  Kill and restart: pkill taskboard && taskboard start --port 3010"

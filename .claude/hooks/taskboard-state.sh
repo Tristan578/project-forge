@@ -75,7 +75,7 @@ tb_auto_start() {
         if tb_api_available; then
             # HEALTH CHECK: verify the board actually has data.
             # If ticket count is 0, the DB path is wrong (lesson #56).
-            TICKET_COUNT=$(curl -s --connect-timeout 2 "$TB_API/board" 2>/dev/null | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('tickets',[])))" 2>/dev/null || echo "0")
+            TICKET_COUNT=$(curl -s --connect-timeout 2 "$TB_API/board" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(len(c.get('tickets',[])) for c in d.get('columns',[])) or len(d.get('tickets',[])))" 2>/dev/null || echo "0")
             if [ "$TICKET_COUNT" = "0" ]; then
                 echo "[TASKBOARD WARNING] Board has 0 tickets — possible wrong DB path or sync needed." >&2
                 echo "[TASKBOARD WARNING] Try: python3 .claude/hooks/github_project_sync.py pull" >&2
