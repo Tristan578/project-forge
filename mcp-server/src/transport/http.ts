@@ -223,83 +223,94 @@ export async function startHttpTransport(
     await sharedServer.connect(sharedTransport);
   }
 
-  const server = createServer(async (req, res) => {
-    const url = req.url ?? '/';
-    const method = req.method ?? 'GET';
+  const server = createServer((req, res) => {
+    // Wrap the entire async body in a single try/catch and run it via a
+    // synchronous IIFE so that any rejection — including the SDK's
+    // `connect(transport)` call in stateless mode — is caught here instead of
+    // bubbling up as an unhandled promise rejection that would crash the
+    // process. Without this, a single failed connect would tear down the whole
+    // server.
+    void (async () => {
+      try {
+        // Strip query string from the path: load balancers commonly append
+        // cache-busting params like `?ts=...` to health probes, and an exact
+        // string match on `req.url` would 404 them.
+        const path = new URL(req.url ?? '/', 'http://_').pathname;
+        const method = req.method ?? 'GET';
 
-    // /health is intentionally unauthenticated — load balancers and uptime
-    // probes need to reach it without provisioning a token.
-    if (method === 'GET' && url === '/health') {
-      writeJson(res, 200, {
-        status: 'ok',
-        name: options.meta.name,
-        version: options.meta.version,
-        commandCount: options.meta.commandCount,
-        transport: 'http',
-        sessionMode: options.stateless ? 'stateless' : 'stateful',
-        uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
-      });
-      return;
-    }
+        // /health is intentionally unauthenticated — load balancers and uptime
+        // probes need to reach it without provisioning a token.
+        if (method === 'GET' && path === '/health') {
+          writeJson(res, 200, {
+            status: 'ok',
+            name: options.meta.name,
+            version: options.meta.version,
+            commandCount: options.meta.commandCount,
+            transport: 'http',
+            sessionMode: options.stateless ? 'stateless' : 'stateful',
+            uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
+          });
+          return;
+        }
 
-    if (url !== '/mcp') {
-      writeJson(res, 404, { error: 'Not Found' });
-      return;
-    }
+        if (path !== '/mcp') {
+          writeJson(res, 404, { error: 'Not Found' });
+          return;
+        }
 
-    if (!bearerOk(req.headers.authorization, options.token)) {
-      res.setHeader('WWW-Authenticate', 'Bearer realm="mcp"');
-      writeJson(res, 401, { error: 'Unauthorized' });
-      return;
-    }
+        if (!bearerOk(req.headers.authorization, options.token)) {
+          res.setHeader('WWW-Authenticate', 'Bearer realm="mcp"');
+          writeJson(res, 401, { error: 'Unauthorized' });
+          return;
+        }
 
-    const ip = getClientIp(req);
-    const allowed = await limiter.check(ip);
-    if (!allowed) {
-      res.setHeader('Retry-After', Math.ceil(options.rateLimit.windowMs / 1000).toString());
-      writeJson(res, 429, { error: 'Too Many Requests' });
-      return;
-    }
+        const ip = getClientIp(req);
+        const allowed = await limiter.check(ip);
+        if (!allowed) {
+          res.setHeader('Retry-After', Math.ceil(options.rateLimit.windowMs / 1000).toString());
+          writeJson(res, 429, { error: 'Too Many Requests' });
+          return;
+        }
 
-    // In stateless mode, build a fresh transport+server per request and tear
-    // them down on response close. This matches the SDK's reference example
-    // and avoids cross-request leakage.
-    let transport: StreamableHTTPServerTransport;
-    let mcpServer: McpServer | null = null;
-    if (options.stateless) {
-      mcpServer = buildServer();
-      transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-        enableJsonResponse: true,
-      });
-      await mcpServer.connect(transport);
-      const cleanup = () => {
-        transport.close().catch(() => {});
-        mcpServer?.close().catch(() => {});
-      };
-      res.on('close', cleanup);
-    } else {
-      transport = sharedTransport!;
-    }
+        // In stateless mode, build a fresh transport+server per request and tear
+        // them down on response close. This matches the SDK's reference example
+        // and avoids cross-request leakage.
+        let transport: StreamableHTTPServerTransport;
+        let mcpServer: McpServer | null = null;
+        if (options.stateless) {
+          mcpServer = buildServer();
+          transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: undefined,
+            enableJsonResponse: true,
+          });
+          await mcpServer.connect(transport);
+          const cleanup = () => {
+            transport.close().catch(() => {});
+            mcpServer?.close().catch(() => {});
+          };
+          res.on('close', cleanup);
+        } else {
+          transport = sharedTransport!;
+        }
 
-    try {
-      // Pre-read the body for POST so we can enforce a size limit before the
-      // SDK's web-standard layer consumes it. The SDK skips its own JSON parse
-      // when `parsedBody` is provided.
-      let body: unknown;
-      if (method === 'POST') {
-        body = await readBody(req);
+        // Pre-read the body for POST so we can enforce a size limit before the
+        // SDK's web-standard layer consumes it. The SDK skips its own JSON parse
+        // when `parsedBody` is provided.
+        let body: unknown;
+        if (method === 'POST') {
+          body = await readBody(req);
+        }
+        await transport.handleRequest(req, res, body);
+      } catch (err) {
+        // The SDK writes its own response on JSON-RPC errors; only handle the
+        // pre-handler cases (body too large, malformed JSON, connect failure)
+        // where headers are still uncommitted.
+        if (!res.headersSent) {
+          const message = err instanceof Error ? err.message : 'Internal error';
+          writeJson(res, 500, { error: message });
+        }
       }
-      await transport.handleRequest(req, res, body);
-    } catch (err) {
-      // The SDK writes its own response on JSON-RPC errors; only handle the
-      // pre-handler cases (body too large, malformed JSON) where headers are
-      // still uncommitted.
-      if (!res.headersSent) {
-        const message = err instanceof Error ? err.message : 'Internal error';
-        writeJson(res, 400, { error: message });
-      }
-    }
+    })();
   });
 
   await new Promise<void>((resolve, reject) => {

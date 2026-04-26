@@ -153,6 +153,26 @@ describe('startHttpTransport', () => {
       const res = await fetch(`http://127.0.0.1:${running!.port}/unknown`);
       expect(res.status).toBe(404);
     });
+
+    it('routes /health correctly when a query string is appended', async () => {
+      // Load balancers commonly append cache-busting params to health probes.
+      // The handler must strip the query string before routing.
+      const res = await fetch(`http://127.0.0.1:${running!.port}/health?ts=12345`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.status).toBe('ok');
+    });
+
+    it('routes /mcp correctly when a query string is appended', async () => {
+      // Some MCP clients append a session/tracing query string. Should still
+      // hit the /mcp path-matcher and proceed past auth (here it 401s with no
+      // bearer, proving the route was matched, not 404).
+      const { status } = await jsonRpc(
+        `http://127.0.0.1:${running!.port}/mcp?session=abc`,
+        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+      );
+      expect(status).toBe(401);
+    });
   });
 
   describe('JSON-RPC round-trip', () => {
@@ -187,6 +207,48 @@ describe('startHttpTransport', () => {
       const result = (listRes.json as { result: { tools: Array<{ name: string }> } }).result;
       expect(result.tools).toBeDefined();
       expect(result.tools.some((t) => t.name === 'echo')).toBe(true);
+    });
+  });
+
+  describe('error handling', () => {
+    it('returns 500 (does not crash) when stateless buildServer throws', async () => {
+      // The CRITICAL bug fixed alongside this test: in stateless mode,
+      // `await mcpServer.connect(transport)` lived outside any try/catch,
+      // so a build/connect failure would surface as an unhandled promise
+      // rejection and tear the server process down. We now catch and respond.
+      let calls = 0;
+      const failingBuilder = (): McpServer => {
+        calls++;
+        throw new Error('synthetic build failure');
+      };
+
+      running = await startHttpTransport(failingBuilder, {
+        port: 0,
+        host: '127.0.0.1',
+        token: TEST_TOKEN,
+        stateless: true,
+        rateLimit: { windowMs: 60_000, max: 100 },
+        meta: { name: 'test-server', version: '0.0.0', commandCount: 1 },
+      });
+
+      const { status, json } = await jsonRpc(
+        `http://127.0.0.1:${running.port}/mcp`,
+        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+        { Authorization: `Bearer ${TEST_TOKEN}` },
+      );
+
+      expect(status).toBe(500);
+      expect((json as { error: string }).error).toContain('synthetic build failure');
+      expect(calls).toBe(1);
+
+      // Server still alive — second request also gets a clean 500.
+      const second = await jsonRpc(
+        `http://127.0.0.1:${running.port}/mcp`,
+        { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+        { Authorization: `Bearer ${TEST_TOKEN}` },
+      );
+      expect(second.status).toBe(500);
+      expect(calls).toBe(2);
     });
   });
 
