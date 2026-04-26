@@ -12,6 +12,14 @@ export default defineConfig({
     teardownTimeout: 5000,
     isolate: true,
     retry: process.env.CI ? 1 : 0,
+    // Force Vite to bundle @sentry/nextjs so its bare-specifier imports
+    // (e.g. `import "next/router"` without extension) go through Vite's
+    // resolver instead of Node's strict ESM loader.
+    server: {
+      deps: {
+        inline: [/@sentry\/nextjs/],
+      },
+    },
     include: [
       'src/components/**/*.test.ts',
       'src/components/**/*.test.tsx',
@@ -34,6 +42,13 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // @sentry/nextjs >= 10.50 imports `next/router` (legacy pages router) as a
+      // bare specifier without extension, which vitest's strict ESM resolver
+      // rejects. Next 16 has no `exports` field, so we point at the file directly.
+      'next/router': path.resolve(__dirname, '../node_modules/next/router.js'),
     },
+    // Resolve @spawnforge/ui from TS source instead of dist/, so vitest works
+    // in clean checkouts where packages/ui hasn't been built yet.
+    conditions: ['development', 'import', 'module', 'browser', 'default'],
   },
 });
