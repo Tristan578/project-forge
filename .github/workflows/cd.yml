@@ -679,6 +679,47 @@ jobs:
           echo "prev_url=${prev_url}" >> "$GITHUB_OUTPUT"
           echo "Last-known-good production URL: ${prev_url:-unknown}"
 
+      # Pre-flight: assert the production domain is attached to THIS project in
+      # THIS scope. Catches the failure mode in #8518 where the apex+www were
+      # registered under a different team scope (orphan hobby account), so
+      # `vercel deploy --prod` succeeded but the alias-on-deploy was a no-op
+      # and the user-facing domain stayed pinned to a stale build for days.
+      # We fail loud here instead of letting smoke tests catch it post-deploy.
+      # Inputs are repo secrets and literal strings only — no user-controlled data.
+      - name: Verify production domain attachment
+        env:
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          EXPECTED_DOMAINS: 'spawnforge.ai www.spawnforge.ai'
+        run: |
+          response=$(curl -sS -w '\n%{http_code}' \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v9/projects/${VERCEL_PROJECT_ID}/domains?teamId=${VERCEL_TEAM_ID}&limit=100")
+          http_status=$(printf '%s\n' "$response" | tail -1)
+          body=$(printf '%s\n' "$response" | sed '$d')
+          if [ "$http_status" != "200" ]; then
+            echo "::error::Vercel API returned $http_status for project domains lookup"
+            echo "$body" | head -20
+            exit 1
+          fi
+          attached=$(printf '%s' "$body" | jq -r '.domains[].name' | sort -u)
+          echo "Domains attached to project ${VERCEL_PROJECT_ID}:"
+          printf '%s\n' "$attached" | sed 's/^/  /'
+          missing=()
+          for d in $EXPECTED_DOMAINS; do
+            if ! printf '%s\n' "$attached" | grep -qx "$d"; then
+              missing+=("$d")
+            fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Production domain(s) not attached to project: ${missing[*]}"
+            echo "::error::Aborting deploy — alias-on-deploy would be a no-op and traffic would stay on a stale build."
+            echo "::error::Fix: Vercel dashboard -> spawnforge project -> Settings -> Domains -> Add ${missing[*]}"
+            echo "::error::See #8518 for the full incident write-up."
+            exit 1
+          fi
+
       # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
       # Adding working-directory:web here causes web/web path doubling on remote builds.
       - name: Pull Vercel environment (production)
