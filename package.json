@@ -50,6 +50,9 @@
   "devDependencies": {
     "@changesets/changelog-github": "^0.6.0",
     "@changesets/cli": "^2.30.0",
+    "@storybook/react": "^8.6",
+    "@storybook/react-vite": "^8.6",
+    "storybook": "^8.6",
     "turbo": "^2.5.4",
     "vitest": "^4.1.4"
   }
