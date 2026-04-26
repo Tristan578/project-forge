@@ -234,13 +234,13 @@ describe('POST /api/chat — negative cases', () => {
   // Conversation token budget (413)
   // -------------------------------------------------------------------------
   describe('conversation token budget', () => {
-    it('returns 413 when total string content exceeds 600K chars', async () => {
-      // Build a conversation that exceeds MAX_INPUT_CHARS (600000)
+    it('returns 413 when total string content exceeds the conversation budget', async () => {
+      // Build a conversation that exceeds MAX_INPUT_CHARS (2,000,000)
       const longContent = 'x'.repeat(3500); // Under per-message 4000 limit
-      const messages = Array.from({ length: 200 }, () => ({
+      const messages = Array.from({ length: 600 }, () => ({
         role: 'user',
         content: longContent,
-      })); // 200 * 3500 = 700,000 chars > 600K
+      })); // 600 * 3500 = 2,100,000 chars > 2,000,000
 
       const res = await POST(makeRequest({
         messages,
@@ -254,10 +254,10 @@ describe('POST /api/chat — negative cases', () => {
 
     it('counts text blocks within content arrays for budget', async () => {
       const longText = 'y'.repeat(3000);
-      const messages = Array.from({ length: 250 }, () => ({
+      const messages = Array.from({ length: 700 }, () => ({
         role: 'assistant',
         content: [{ type: 'text', text: longText }],
-      })); // 250 * 3000 = 750K chars via array content
+      })); // 700 * 3000 = 2,100,000 chars via array content > 2,000,000
 
       const res = await POST(makeRequest({
         messages,
