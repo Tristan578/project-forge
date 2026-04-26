@@ -27,6 +27,7 @@
     "analyze": "ANALYZE=true next build",
     "start": "next start",
     "lint": "eslint",
+    "pretest": "(cd ../packages/ui && npm run build)",
     "test": "NODE_OPTIONS='--no-experimental-webstorage' vitest run",
     "test:changed": "NODE_OPTIONS='--no-experimental-webstorage' vitest run --changed",
     "test:watch": "NODE_OPTIONS='--no-experimental-webstorage' vitest",
