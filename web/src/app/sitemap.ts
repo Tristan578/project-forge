@@ -80,6 +80,18 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "monthly" as const,
       priority: 0.6,
     })),
+    {
+      url: `${SITE_URL}/use-cases`,
+      lastModified: now,
+      changeFrequency: "monthly",
+      priority: 0.7,
+    },
+    ...["platformer", "rpg", "puzzle-game", "game-jam", "education"].map((slug) => ({
+      url: `${SITE_URL}/use-cases/${slug}`,
+      lastModified: now,
+      changeFrequency: "monthly" as const,
+      priority: 0.6,
+    })),
   ];
 
   // Query published games for dynamic sitemap entries
