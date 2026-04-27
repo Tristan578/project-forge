@@ -72,6 +72,12 @@ const nextConfig: NextConfig = {
     // so Next.js can skip re-rendering on subsequent requests.
     useCache: true,
   },
+  // Include CHANGELOG.md in the serverless function bundle so the
+  // changelog page can read it at runtime (cache revalidation).
+  // Top-level in Next.js 15+ (moved out of experimental).
+  outputFileTracingIncludes: {
+    '/changelog': ['../CHANGELOG.md'],
+  },
   images: {
     remotePatterns: [
       {
