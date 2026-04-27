@@ -28,6 +28,10 @@
     // where array access is guaranteed safe (e.g., after length checks, Map.get with existence guard).
     "noUncheckedIndexedAccess": false,
     "incremental": true,
+    // Resolve @spawnforge/ui from TS source (via "development" export condition)
+    // so tsc works in clean checkouts where packages/ui hasn't been built yet.
+    // Matches the conditions list in vitest.config.jsdom.ts.
+    "customConditions": ["development"],
     "plugins": [
       {
         "name": "next"
