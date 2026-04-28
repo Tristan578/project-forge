@@ -100,6 +100,13 @@ export interface SpawnforgeAgentOptions {
   instructions: string | InstructionBlock[];
   /** Enable Claude thinking mode (direct backend only). */
   thinking?: boolean;
+  /**
+   * Reasoning effort hint (direct Anthropic backend only). Replaces hand-tuned
+   * `thinking.budgetTokens` for callers that want the SDK to manage the budget.
+   * Independent of `thinking`; both can be set, though setting `effort` alone is
+   * preferred for non-chat generators.
+   */
+  effort?: 'low' | 'medium' | 'high';
   /** Maximum tool-calling steps before stopping. Default: 10. */
   maxSteps?: number;
 }
@@ -136,7 +143,7 @@ export function buildAgentInstructions(
  * backend (BYOK direct vs gateway). Tools and step limit are shared.
  */
 export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
-  const { isDirectBackend, model, instructions, thinking, maxSteps = 10 } = options;
+  const { isDirectBackend, model, instructions, thinking, effort, maxSteps = 10 } = options;
 
   const canonicalModel = model || AI_MODEL_PRIMARY;
 
@@ -146,11 +153,21 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
         canonicalModel.includes('/') ? canonicalModel : AI_MODELS.gatewayChat,
       );
 
-  // Provider options for thinking mode (Anthropic direct only)
+  // Provider options for thinking + effort (Anthropic direct only). Both fields
+  // are independent in the Anthropic provider schema — thinking sets a hard token
+  // budget, effort lets the SDK pick a sensible default. Gateway routes ignore
+  // these fields, so we only emit them on the direct backend.
+  const anthropicOptions: { thinking?: { type: 'enabled'; budgetTokens: number }; effort?: 'low' | 'medium' | 'high' } = {};
+  if (isDirectBackend) {
+    if (thinking) {
+      anthropicOptions.thinking = { type: 'enabled', budgetTokens: 10000 };
+    }
+    if (effort) {
+      anthropicOptions.effort = effort;
+    }
+  }
   const providerOptions =
-    thinking && isDirectBackend
-      ? { anthropic: { thinking: { type: 'enabled' as const, budgetTokens: 10000 } } }
-      : undefined;
+    Object.keys(anthropicOptions).length > 0 ? { anthropic: anthropicOptions } : undefined;
 
   return new ToolLoopAgent({
     id: 'spawnforge',

@@ -24,6 +24,11 @@ export interface AIClientOptions {
   sceneContext?: string;
   /** Enable extended thinking mode (Claude 3.7+). */
   thinking?: boolean;
+  /**
+   * Reasoning effort hint forwarded to providerOptions.anthropic.effort.
+   * Direct backend only — gateway routes ignore it. Independent of `thinking`.
+   */
+  effort?: 'low' | 'medium' | 'high';
   /** AbortSignal to cancel the in-flight request. */
   signal?: AbortSignal;
   /**
@@ -110,8 +115,9 @@ export async function fetchAI(prompt: string, options?: AIClientOptions): Promis
   // request cannot poison the cache with a partial result.
   if (!signal) {
     const thinking = options?.thinking ?? false;
+    const effort = options?.effort ?? 'none';
     const cacheKey = await aiResponseCache.computeKey(
-      `${model}:${thinking ? 'thinking' : 'standard'}`,
+      `${model}:${thinking ? 'thinking' : 'standard'}:effort=${effort}`,
       systemOverride ?? '',
       `${sceneContext}\x00${prompt}`,
     );
@@ -127,6 +133,7 @@ async function fetchAIUncached(prompt: string, options?: AIClientOptions): Promi
     systemOverride,
     sceneContext = '',
     thinking = false,
+    effort,
     signal,
     priority = 1,
   } = options ?? {};
@@ -144,6 +151,7 @@ async function fetchAIUncached(prompt: string, options?: AIClientOptions): Promi
           model,
           sceneContext,
           thinking,
+          ...(effort !== undefined ? { effort } : {}),
           ...(systemOverride !== undefined ? { systemOverride } : {}),
         }),
         ...fetchOptions,
