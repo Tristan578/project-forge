@@ -140,6 +140,14 @@ describe('generationHandlers', () => {
       expect(r.jobId).toBe('job-123');
     });
 
+    // Regression: route requires `mode` and rejects without it (#8544).
+    it('sends mode: text-to-3d to the model route', async () => {
+      mockFetchSuccess();
+      await invoke('generate_3d_model', { prompt: 'a sword' });
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.mode).toBe('text-to-3d');
+    });
+
     it('passes quality and artStyle', async () => {
       mockFetchSuccess();
       await invoke('generate_3d_model', {
@@ -204,6 +212,14 @@ describe('generationHandlers', () => {
       expect(result.success).toBe(true);
       const body = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(body.imageBase64).toBe('base64data');
+    });
+
+    // Regression: route requires `mode` and rejects without it (#8544).
+    it('sends mode: image-to-3d to the model route', async () => {
+      mockFetchSuccess();
+      await invoke('generate_3d_from_image', { imageBase64: 'base64data' });
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.mode).toBe('image-to-3d');
     });
 
     it('works without optional prompt', async () => {
