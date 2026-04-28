@@ -6,6 +6,7 @@ import {
   getCachedCompoundAnalysis,
   invalidateCompoundAnalysis,
   invalidateAllCaches,
+  buildAnthropicCacheControl,
 } from '../cachedContext';
 import { promptCache } from '../promptCache';
 
@@ -217,5 +218,28 @@ describe('invalidateAllCaches', () => {
     promptCache.setCachedPrompt('some:key', 'value');
     invalidateAllCaches();
     expect(promptCache.stats.size).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildAnthropicCacheControl
+// ---------------------------------------------------------------------------
+
+describe('buildAnthropicCacheControl', () => {
+  it('returns ephemeral cache control with no ttl for short tier', () => {
+    expect(buildAnthropicCacheControl('short')).toEqual({
+      anthropic: { cacheControl: { type: 'ephemeral' } },
+    });
+  });
+
+  it('returns ephemeral cache control with 1h ttl for long tier', () => {
+    expect(buildAnthropicCacheControl('long')).toEqual({
+      anthropic: { cacheControl: { type: 'ephemeral', ttl: '1h' } },
+    });
+  });
+
+  it('does not leak ttl into short tier output', () => {
+    const result = buildAnthropicCacheControl('short');
+    expect(result.anthropic.cacheControl).not.toHaveProperty('ttl');
   });
 });
