@@ -122,6 +122,10 @@
     "path-to-regexp": ">=8.4.0",
     "fast-xml-parser": ">=5.7.2",
     "uuid": ">=14.0.0",
+    "postcss": ">=8.5.10",
+    "next": {
+      "postcss": ">=8.5.10"
+    },
     "next-intl": {
       "typescript": "$typescript"
     }
