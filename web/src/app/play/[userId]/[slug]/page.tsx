@@ -13,6 +13,12 @@ interface PlayPageProps {
   params: Promise<{ userId: string; slug: string }>;
 }
 
+/**
+ * Fetch game data. Filters for status='published' so drafts never leak via
+ * metadata or JSON-LD. Returns null when game is missing, unpublished, or DB
+ * is unavailable. React.cache memoizes per-request so generateMetadata and the
+ * page body share a single round-trip.
+ */
 const getGameData = cache(async (clerkId: string, slug: string) => {
   try {
     const [user] = await queryWithResilience(() => getDb()
@@ -79,6 +85,7 @@ export async function generateMetadata({
 export default async function PlayPage({ params }: PlayPageProps) {
   const { userId, slug } = await params;
   const { userId: viewerClerkId } = await safeAuth();
+
   const game = await getGameData(userId, slug);
 
   // VideoGame JSON-LD — user-controlled values from DB (title, description).
