@@ -8,6 +8,7 @@
 
 import { create } from 'zustand';
 import { useGenerationHistoryStore } from './generationHistoryStore';
+import { autoWireGenerationResult } from './generationAutoWire';
 import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
 import { trackAIAssetGenerated } from '@/lib/analytics/events';
 import { captureException } from '@/lib/monitoring/sentry-client';
@@ -33,6 +34,7 @@ export interface GenerationJob {
   autoPlace?: boolean;       // Auto-import and attach to entity on completion
   targetEntityId?: string;   // Entity to attach result to (e.g. place model as child, assign texture)
   materialSlot?: string;     // Material texture slot for texture generation (e.g. 'base_color', 'normal_map')
+  appliedAt?: number;        // Date.now() when auto-wire fired — guards against double-application on hydrate
 }
 
 interface GenerationState {
@@ -137,6 +139,33 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         });
       }
 
+      // Auto-wire: when the job transitions to completed and the user opted in
+      // via autoPlace, fetch the result and dispatch it to the editor (texture
+      // → material slot, audio → entity, model → import). Idempotent via
+      // `appliedAt`: rehydration of an already-completed job will not re-fire
+      // because we set `appliedAt` synchronously here. Hydration also flips
+      // `appliedAt` so refresh-after-completion is a no-op (see
+      // hydrateFromServer below).
+      if (
+        updated.status === 'completed' &&
+        existing.status !== 'completed' &&
+        updated.resultUrl &&
+        updated.autoPlace &&
+        !updated.appliedAt
+      ) {
+        updated.appliedAt = Date.now();
+        // Fire-and-forget — fetch + dispatch run async; failures captured to Sentry.
+        autoWireGenerationResult({
+          type: updated.type,
+          resultUrl: updated.resultUrl,
+          prompt: updated.prompt,
+          targetEntityId: updated.targetEntityId,
+          materialSlot: updated.materialSlot,
+        }).catch((err: unknown) => {
+          captureException(err, { context: 'generationStore.autoWire', jobId: id });
+        });
+      }
+
       // Sync status to database (fire-and-forget)
       const dbId = updated.dbId;
       if (dbId && (updates.status || updates.progress !== undefined)) {
@@ -221,6 +250,11 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
             typeof params['targetEntityId'] === 'string' ? params['targetEntityId'] : undefined,
           materialSlot:
             typeof params['materialSlot'] === 'string' ? params['materialSlot'] : undefined,
+          // Jobs that are already completed at hydration time were either
+          // auto-wired in a prior session or never opted in; either way, we
+          // must not re-fire on refresh. Mark `appliedAt` so updateJob's
+          // auto-wire guard treats them as already-applied.
+          appliedAt: sj.status === 'completed' ? new Date(sj.createdAt).getTime() : undefined,
         };
       }
 

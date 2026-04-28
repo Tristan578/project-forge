@@ -12,6 +12,7 @@ import { addBreadcrumb } from '@/lib/monitoring/sentry-client';
 // the snapshot setter) don't throw at module load. We feature-detect the
 // export at runtime instead of relying on the named binding being present.
 import * as engineModule from '@/hooks/useEngine';
+import { setAutoWireDispatchers } from './generationAutoWire';
 
 // Import all slices
 import {
@@ -122,6 +123,18 @@ export const useEditorStore = create<EditorState>()((...args) => ({
   ...createLocalizationSlice(...args),
   ...createOrchestratorSlice(...args),
 }));
+
+// Wire generation auto-wire to editor actions. Resolves the store at call time
+// so the latest action references are used (slices may be replaced in tests via
+// resetForTest helpers). Decoupled via the registered-handler pattern in
+// generationAutoWire to avoid editorStore <-> generationStore import cycles.
+setAutoWireDispatchers({
+  importGltf: (dataBase64, name) => useEditorStore.getState().importGltf(dataBase64, name),
+  loadTexture: (dataBase64, name, entityId, slot) =>
+    useEditorStore.getState().loadTexture(dataBase64, name, entityId, slot),
+  importAudio: (dataBase64, name) => useEditorStore.getState().importAudio(dataBase64, name),
+  setAudio: (entityId, data) => useEditorStore.getState().setAudio(entityId, data),
+});
 
 // Best-effort store exposure for E2E tests (dev/test only).
 // The primary exposure happens in EditorLayout's useEffect (guaranteed client-side).
