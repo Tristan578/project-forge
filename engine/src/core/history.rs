@@ -535,6 +535,15 @@ impl HistoryStack {
     /// Push an action onto the redo stack (after undo).
     pub fn push_redo(&mut self, action: UndoableAction) {
         self.redo_stack.push(action);
+        self.dirty = true;
+
+        // Enforce max size — same invariant as push() and push_undo_only().
+        // In the in-flight undo flow this is bounded by undo_stack <= max_size,
+        // but enforcing it here makes the cap an explicit invariant of the type
+        // rather than a property of the caller.
+        while self.redo_stack.len() > self.max_size {
+            self.redo_stack.remove(0);
+        }
     }
 
     /// Push an action onto the undo stack without clearing the redo stack.
@@ -639,4 +648,59 @@ pub fn push_action_from_bridge(action: UndoableAction) -> bool {
             false
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rename_action(suffix: usize) -> UndoableAction {
+        UndoableAction::Rename {
+            entity_id: format!("e{suffix}"),
+            old_name: "old".into(),
+            new_name: format!("new{suffix}"),
+        }
+    }
+
+    #[test]
+    fn push_redo_sets_dirty() {
+        let mut history = HistoryStack::default();
+        history.dirty = false;
+
+        history.push_redo(rename_action(0));
+
+        assert!(history.dirty, "push_redo must mark history dirty");
+    }
+
+    #[test]
+    fn push_redo_caps_at_max_size() {
+        let mut history = HistoryStack::default();
+        history.max_size = 3;
+
+        for i in 0..5 {
+            history.push_redo(rename_action(i));
+        }
+
+        assert_eq!(history.redo_stack.len(), 3, "redo stack must respect max_size");
+        // Oldest entries dropped — newest survive.
+        let last = history.redo_stack.last().expect("non-empty");
+        match last {
+            UndoableAction::Rename { entity_id, .. } => assert_eq!(entity_id, "e4"),
+            other => panic!("unexpected action: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn push_clears_redo_after_new_action() {
+        // Regression guard: enforcing max_size on push_redo must not break the
+        // invariant that any new action wipes the redo stack.
+        let mut history = HistoryStack::default();
+        history.push_redo(rename_action(0));
+        history.push_redo(rename_action(1));
+
+        history.push(rename_action(2));
+
+        assert!(history.redo_stack.is_empty(), "push() must clear redo_stack");
+        assert_eq!(history.undo_stack.len(), 1);
+    }
 }
