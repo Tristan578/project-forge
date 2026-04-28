@@ -622,11 +622,18 @@ describe('POST /api/chat', () => {
       const userOneScene = userOneBlocks.find((b) => b.text.includes('<!-- session:'));
       expect(userOneScene?.text).toContain('<!-- session:user-1 -->');
 
-      // Switch to a second user with byte-identical scene context.
+      // Switch to a second user with byte-identical scene context. The route
+      // reads user.id from withApiMiddleware (not authenticateRequest), so we
+      // override that mock here.
       vi.mocked(authenticateRequest).mockResolvedValue({
         ok: true,
         ctx: { clerkId: 'clerk-2', user: { id: 'user-2', tier: 'pro' } as never },
       });
+      vi.mocked(withApiMiddleware).mockResolvedValue({
+        error: null,
+        authContext: { clerkId: 'clerk-2', user: { id: 'user-2', tier: 'pro' } as never },
+        rateLimit: { allowed: true, remaining: 9, resetAt: Date.now() + 60_000 },
+      } as never);
       await (await POST(makeRequest(validBody()))).text();
       const userTwoCall = vi.mocked(createSpawnforgeAgent).mock.calls.at(-1)?.[0];
       const userTwoBlocks = (userTwoCall?.instructions ?? []) as Array<{ text: string; tier?: string }>;
@@ -657,17 +664,17 @@ describe('POST /api/chat', () => {
     });
 
     it('counts sceneContext.length toward the MAX_INPUT_CHARS budget', async () => {
-      // sceneContext alone is well under 600k, but combined with messages
-      // the total exceeds the 600k MAX_INPUT_CHARS guard. Without summing
+      // sceneContext alone is well under 2M, but combined with messages
+      // the total exceeds the 2M MAX_INPUT_CHARS guard. Without summing
       // sceneContext.length into totalChars (the bug fixed in this change),
       // the request would slip past the size check.
-      const longScene = 'x'.repeat(500_000);
+      const longScene = 'x'.repeat(1_900_000);
       const longContent = 'y'.repeat(3999);
       const messages = Array.from({ length: 30 }, (_, i) => ({
         role: i % 2 === 0 ? 'user' : 'assistant',
         content: longContent,
       }));
-      // 30 * 3999 = 119_970; combined with 500_000 sceneContext → 619_970 > 600_000.
+      // 30 * 3999 = 119_970; combined with 1_900_000 sceneContext → 2_019_970 > 2_000_000.
 
       const res = await POST(makeRequest({
         messages,
