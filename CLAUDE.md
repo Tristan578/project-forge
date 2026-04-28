@@ -39,6 +39,9 @@ cd web && npm run db:push              # Push schema to Neon (dev only)
 
 Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_KEY`, `UPSTASH_REDIS_REST_URL`.
 
+Optional feature flags (all default off):
+- `NEXT_PUBLIC_USE_DEEP_GENERATION=true` — route GDD, world builder, and cutscene generators to Opus 4.7 (`AI_MODEL_DEEP`) instead of Sonnet 4.6. See `docs/decisions/2026-05-01-opus-deep-tier.md`. Any value other than the exact string `"true"` leaves the flag off.
+
 ## Key Architecture Rules
 
 - **Bridge isolation**: Only `engine/src/bridge/` may import web_sys/js_sys/wasm_bindgen. `core/` is pure Rust.

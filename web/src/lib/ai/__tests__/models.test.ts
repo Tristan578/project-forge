@@ -3,8 +3,10 @@ import {
   AI_MODEL_PRIMARY,
   AI_MODEL_FAST,
   AI_MODEL_PREMIUM,
+  AI_MODEL_DEEP,
   AI_MODELS,
   GATEWAY_MODEL_PREMIUM,
+  GATEWAY_MODEL_DEEP,
   isPremiumModel,
 } from '../models';
 
@@ -32,6 +34,21 @@ describe('AI model constants', () => {
   it('AI_MODEL_FAST matches expected claude-haiku pattern', () => {
     expect(AI_MODEL_FAST).toMatch(/^claude-/);
   });
+
+  it('exports AI_MODEL_DEEP as a non-empty claude-* string', () => {
+    expect(typeof AI_MODEL_DEEP).toBe('string');
+    expect(AI_MODEL_DEEP).toMatch(/^claude-/);
+  });
+
+  it('AI_MODEL_DEEP is distinct from primary and fast tiers', () => {
+    expect(AI_MODEL_DEEP).not.toBe(AI_MODEL_PRIMARY);
+    expect(AI_MODEL_DEEP).not.toBe(AI_MODEL_FAST);
+  });
+
+  it('GATEWAY_MODEL_DEEP uses provider-namespaced format', () => {
+    expect(GATEWAY_MODEL_DEEP).toContain('/');
+    expect(GATEWAY_MODEL_DEEP.split('/')[0]).toBe('anthropic');
+  });
 });
 
 describe('AI_MODELS object', () => {
@@ -39,9 +56,11 @@ describe('AI_MODELS object', () => {
     const requiredKeys = [
       'chat',
       'fast',
+      'deep',
       'embedding',
       'gatewayChat',
       'gatewayEmbedding',
+      'gatewayDeep',
       'githubDefault',
       'openrouterDefault',
     ] as const;
@@ -59,6 +78,14 @@ describe('AI_MODELS object', () => {
 
   it('fast key matches AI_MODEL_FAST', () => {
     expect(AI_MODELS.fast).toBe(AI_MODEL_FAST);
+  });
+
+  it('deep key matches AI_MODEL_DEEP', () => {
+    expect(AI_MODELS.deep).toBe(AI_MODEL_DEEP);
+  });
+
+  it('gatewayDeep matches GATEWAY_MODEL_DEEP', () => {
+    expect(AI_MODELS.gatewayDeep).toBe(GATEWAY_MODEL_DEEP);
   });
 
   it('embedding key is a non-empty string', () => {

@@ -26,6 +26,7 @@ export enum AnalyticsEvent {
   TIER_UPGRADE_PROMPTED = 'tier_upgrade_prompted',
   TEMPLATE_APPLIED = 'template_applied',
   WASM_CDN_FALLBACK = 'wasm_cdn_fallback',
+  AI_DEEP_GENERATION_EVAL = 'ai_deep_generation_eval',
 }
 
 const POSTHOG_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY ?? '';
