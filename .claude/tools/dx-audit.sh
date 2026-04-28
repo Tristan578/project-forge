@@ -95,14 +95,26 @@ fi
 section "Agent Profiles"
 
 AGENTS_DIR="$PROJECT_ROOT/.claude/agents"
+# Accept the Agent SDK short aliases AND the canonical full IDs currently in
+# use. When a new model ships, add the full ID here so this audit catches
+# drift instead of giving every agent a green pass on any unknown string.
+VALID_MODELS=(
+  "opus" "sonnet" "haiku"
+  "claude-opus-4-7"
+  "claude-sonnet-4-6"
+  "claude-haiku-4-5-20251001"
+)
 if [ -d "$AGENTS_DIR" ]; then
   for agent in "$AGENTS_DIR"/*.md; do
     name=$(basename "$agent" .md)
-    # Check model field — accepts both short (opus, sonnet, haiku) and full (claude-opus-4-7, claude-sonnet-4-6, etc.)
+    # Check model field
     model=$(grep "^model:" "$agent" 2>/dev/null | awk '{print $2}' || echo "")
     if [ -n "$model" ]; then
-      # Model is valid if it contains "opus", "sonnet", or "haiku" (covers all variations)
-      if echo "$model" | grep -qE "(opus|sonnet|haiku)"; then
+      valid=false
+      for m in "${VALID_MODELS[@]}"; do
+        if [ "$model" = "$m" ]; then valid=true; break; fi
+      done
+      if $valid; then
         pass "$name agent: model=$model"
       else
         fail "$name agent: invalid model '$model'"
@@ -179,7 +191,7 @@ if [ -f "$MCP" ] && [ -f "$WEB" ]; then
 fi
 
 # Stale version references
-STALE_BEVY=$(grep -rn "Bevy 0\." README.md .claude/CLAUDE.md 2>/dev/null | grep -v "0\.18" | head -3 || true)
+STALE_BEVY=$(grep -rn "Bevy 0\." README.md .claude/CLAUDE.md 2>/dev/null | grep -v "0\.18" | head -3)
 if [ -n "$STALE_BEVY" ]; then
   warn "Stale Bevy version references found (not 0.18)"
 fi

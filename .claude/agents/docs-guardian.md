@@ -1,7 +1,7 @@
 ---
 name: docs-guardian
 description: Documentation quality guardian. Reviews code comments, API docs, MCP docs, and repo docs for clarity, accuracy, and completeness. Antagonistic reviewer — PASS or FAIL only, no praise. Use when reviewing PRs, auditing documentation, or validating that code is self-documenting.
-model: claude-haiku-4-5
+model: claude-haiku-4-5-20251001
 effort: medium
 memory: project
 background: true
