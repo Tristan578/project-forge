@@ -46,7 +46,6 @@ export async function GET(req: NextRequest) {
       userProviderKeys,
       userApiKeys,
     ] = await queryWithResilience(() => {
-      // eslint-disable-next-line no-restricted-syntax -- db ref needed for Promise.all inside queryWithResilience
       const db = getDb();
       return Promise.all([
       db.select({

@@ -60,7 +60,6 @@ export async function GET(req: NextRequest) {
 
     // Fetch games with aggregated stats + apply sorting
     const results = await queryWithResilience(() => {
-      // eslint-disable-next-line no-restricted-syntax -- db ref needed for complex join inside queryWithResilience
       const db = getDb();
       const gamesQuery = db
         .select({
