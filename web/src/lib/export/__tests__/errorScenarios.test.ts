@@ -75,6 +75,7 @@ function mockFetchWithWasm() {
 // vi.advanceTimersByTimeAsync. The setTimeout here is intentional — it is
 // scheduled through vi's fake timer infrastructure, not a real sleep.
 function scheduleSceneExportedEvent(detail: unknown, delayMs = 50) {
+  // eslint-disable-next-line no-restricted-syntax
   setTimeout(() => {
     window.dispatchEvent(
       new CustomEvent('forge:scene-exported', { detail })
@@ -373,6 +374,7 @@ describe('exportGame: AbortSignal cancellation (#8266)', () => {
     }).catch((e: Error) => e);
 
     // Abort after 100ms (before the 5s timeout, before scene event fires)
+    // eslint-disable-next-line no-restricted-syntax
     setTimeout(() => controller.abort(), 100);
     await vi.advanceTimersByTimeAsync(200);
 
