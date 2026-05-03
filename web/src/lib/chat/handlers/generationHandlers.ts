@@ -127,6 +127,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     const result = await generateFetch('/api/generate/model', {
+      mode: 'text-to-3d',
       prompt: enrichPrompt(p.data.prompt, 'model', ctx.store),
       quality: p.data.quality ?? 'standard',
       artStyle: p.data.artStyle ?? 'realistic',
@@ -172,6 +173,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       ? enrichPrompt(p.data.prompt, 'model', ctx.store)
       : undefined;
     const result = await generateFetch('/api/generate/model', {
+      mode: 'image-to-3d',
       imageBase64: p.data.imageBase64,
       prompt: enrichedPrompt,
     });
