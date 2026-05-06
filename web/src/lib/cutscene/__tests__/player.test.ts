@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { applyEasing, buildCommand, CutscenePlayer, type CommandDispatcher } from '../player';
 import type { CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
