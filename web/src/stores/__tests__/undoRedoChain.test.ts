@@ -14,8 +14,10 @@
  *   4. History state flags reflect what the engine reports after each step.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useEditorStore, setCommandDispatcher } from '@/stores/editorStore';
+
+vi.mock('@/lib/analytics/events');
 import {
   createMockDispatch,
   makeSceneGraph,

@@ -6,8 +6,10 @@
  * script logs, and entity CRUD actions.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useEditorStore, setCommandDispatcher } from './editorStore';
+
+vi.mock('@/lib/analytics/events');
 import {
   createMockDispatch,
   makeSceneGraph,
