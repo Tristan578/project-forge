@@ -84,7 +84,7 @@ version = "0.34"
 default-features = false
 
 [dependencies.bevy_rapier3d]
-version = "0.33"
+version = "0.34"
 default-features = false
 features = ["dim3", "async-collider", "debug-render-3d"]
 
