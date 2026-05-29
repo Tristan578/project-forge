@@ -124,7 +124,7 @@ describe('GET /api/billing/status', () => {
     const { GET } = await import('./route');
     await GET(makeReq());
 
-    expect(capturedStripeOpts.value?.apiVersion).toBe('2026-04-22.dahlia');
+    expect(capturedStripeOpts.value?.apiVersion).toBe('2026-05-27.dahlia');
   });
 
   it('returns subscriptionStatus from Stripe', async () => {

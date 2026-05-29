@@ -74,11 +74,12 @@ Must enable these features for import paths to work through `bevy::`:
 
 ## Library-Specific
 
-### bevy_rapier3d v0.33
-- `RapierConfiguration` is a **Component** (not Resource) — use `Query<&mut RapierConfiguration>`
-- `DebugRenderContext` is a **Resource** (not Component) — use `Option<ResMut<DebugRenderContext>>`
+### bevy_rapier3d v0.33 / v0.34 (audited #8577 — 0.34 verified compatible)
+- `RapierConfiguration` is a **Component** (not Resource) — use `Query<&mut RapierConfiguration>` (unchanged in 0.34)
+- `DebugRenderContext` is a **Resource** (not Component) — use `Option<ResMut<DebugRenderContext>>` (unchanged in 0.34)
 - Never enable `parallel` feature (rayon panics on WASM)
 - Skip `picking-backend` (conflicts with bevy_picking)
+- **0.34 breaking changes do NOT affect us** (audit #8577): `Velocity` fields renamed `linvel`→`linear` / `angvel`→`angular` (we never read those — only `.remove::<Velocity>()`); Collider/joint/query APIs now take `glam` vectors instead of nalgebra (we use no rapier nalgebra conversions); `TransformInterpolation::{start,end}` now `Option<Pose>`. WASM build green on both backends with 0.34. If you start reading `Velocity.linvel`/`.angvel`, use `.linear`/`.angular` on 0.34+.
 
 ### bevy_panorbit_camera v0.34
 - Uses `yaw`/`pitch`/`target_yaw`/`target_pitch` — NO `alpha`/`beta` fields
