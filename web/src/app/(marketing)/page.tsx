@@ -186,7 +186,7 @@ const pricingTiers: PricingTier[] = [
     name: 'Starter',
     price: '$0',
     period: '/month',
-    description: 'Free forever. Start building immediately.',
+    description: 'Free forever. Reserve your spot for launch.',
     features: [
       'AI chat (limited)',
       '1 published game',
