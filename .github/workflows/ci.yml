@@ -351,7 +351,13 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('web/package-lock.json') }}
+          # Key on the REAL root lockfile. This is a single-root-lockfile
+          # monorepo: web/package-lock.json does not exist, so the old key
+          # hashFiles('web/package-lock.json') returned '' — a constant
+          # `playwright-` key that never invalidated, leaving stale browser
+          # caches that intermittently failed with "Executable doesn't exist"
+          # when Playwright's required browser revision changed. (#8589)
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
