@@ -79,7 +79,7 @@ describe('LandingPage', () => {
   });
 
   it('renders the primary CTA button linking to sign-up', () => {
-    const ctas = screen.getAllByText('Start Creating Free');
+    const ctas = screen.getAllByText('Request Early Access');
     // At least the hero CTA should link to /sign-up
     const heroLink = ctas[0].closest('a');
     expect(heroLink).not.toBeNull();

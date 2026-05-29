@@ -66,9 +66,11 @@ describe('PricingPage', () => {
     expect(screen.getByText('Studio')).toBeDefined();
   });
 
-  it('renders Get Started button for Free tier', () => {
+  it('renders the Free tier CTA as a waitlist prompt when not signed in', () => {
     render(<PricingPage />);
-    expect(screen.getByText('Get Started')).toBeDefined();
+    // Sign-ups are disabled pre-launch, so the logged-out Free-tier CTA invites
+    // joining the waitlist rather than starting immediately.
+    expect(screen.getByText('Join the Waitlist')).toBeDefined();
   });
 
   it('renders Sign In button when not signed in', () => {

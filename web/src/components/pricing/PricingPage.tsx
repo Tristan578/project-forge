@@ -95,7 +95,7 @@ export function PricingPage() {
               onClick={handleGetStarted}
               className="mb-6 w-full rounded bg-zinc-800 py-2 text-sm font-medium hover:bg-zinc-700"
             >
-              Get Started
+              {isSignedIn ? 'Get Started' : 'Join the Waitlist'}
             </button>
             <ul className="space-y-3 text-sm">
               <li className="flex items-start gap-2">
