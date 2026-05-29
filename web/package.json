@@ -103,6 +103,7 @@
     "@types/react-dom": "^19",
     "@vitest/coverage-v8": "^4.1.5",
     "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "^16.2.3",
