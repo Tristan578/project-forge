@@ -14,6 +14,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
 
 // ---------------------------------------------------------------------------
 // Global mocks (hoisted before any dynamic import)
@@ -359,10 +361,42 @@ describe('POST /api/chat — invalid body contract', () => {
 // Part 2: OpenAPI spec schema validation with Ajv
 // ===========================================================================
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const Ajv = require('ajv') as typeof import('ajv');
 import { readFileSync } from 'fs';
 import path from 'path';
+
+/**
+ * Convert OpenAPI 3.0 schemas to JSON Schema that Ajv v8 understands.
+ *
+ * OpenAPI uses `nullable: true` to permit null, but that keyword does not
+ * exist in JSON Schema — Ajv v8 (unlike the v6 we used before) has no
+ * `nullable` option. We rewrite `{ type: 'X', nullable: true }` into the
+ * equivalent `{ type: ['X', 'null'] }` and drop the `nullable` key so the
+ * spec's nullable fields (e.g. TokenBalance.nextRefillDate) still validate
+ * against null. The walk is generic, so it also covers nested properties,
+ * array items, and composed schemas.
+ */
+function openApiToJsonSchema(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(openApiToJsonSchema);
+  if (node === null || typeof node !== 'object') return node;
+
+  const src = node as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(src)) {
+    if (key === 'nullable') continue;
+    out[key] = openApiToJsonSchema(value);
+  }
+
+  if (src.nullable === true && 'type' in out) {
+    const type = out.type;
+    if (typeof type === 'string') {
+      out.type = [type, 'null'];
+    } else if (Array.isArray(type) && !type.includes('null')) {
+      out.type = [...type, 'null'];
+    }
+  }
+
+  return out;
+}
 
 /**
  * Load the OpenAPI spec and compile its component schemas into Ajv validators.
@@ -378,15 +412,17 @@ function loadOpenApiSchemas() {
     paths?: Record<string, Record<string, Record<string, unknown>>>;
   };
 
-  // Ajv v6 from webpack transitive dep — unknownFormats ignores OpenAPI
-  // format keywords like "float", "uuid", "date-time" that Ajv doesn't
-  // validate by default.
-  const ajv = new Ajv({ allErrors: true, unknownFormats: 'ignore', nullable: true }) as InstanceType<typeof import('ajv')>;
+  // Ajv v8: `strict: false` tolerates OpenAPI-isms (e.g. `example`) that
+  // aren't valid JSON Schema, and ajv-formats registers the format keywords
+  // ("date-time", "uuid", etc.) so they validate instead of throwing.
+  // Nullable is handled by the openApiToJsonSchema() transform below.
+  const ajv = new Ajv({ allErrors: true, strict: false });
+  addFormats(ajv);
 
   const schemas = spec.components?.schemas ?? {};
   const validators: Record<string, ReturnType<typeof ajv.compile>> = {};
   for (const [name, schema] of Object.entries(schemas)) {
-    validators[name] = ajv.compile(schema);
+    validators[name] = ajv.compile(openApiToJsonSchema(schema) as object);
   }
 
   return { spec, ajv, validators };
