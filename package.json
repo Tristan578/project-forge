@@ -37,14 +37,17 @@
     "esbuild": ">=0.25.0",
     "fast-xml-parser": ">=5.7.2",
     "hono": "^4.12.14",
+    "js-cookie": ">=3.0.7",
     "lodash": ">=4.18.1",
     "postcss": ">=8.5.10",
     "next": {
       "postcss": ">=8.5.10"
     },
-    "protobufjs": ">=7.5.5",
+    "protobufjs": ">=7.6.1",
+    "qs": ">=6.15.2",
     "uuid": ">=14.0.0",
-    "eslint-plugin-react-hooks": "7.0.1"
+    "eslint-plugin-react-hooks": "7.0.1",
+    "ws": ">=8.20.1"
   },
   "scripts": {
     "changeset": "changeset",
@@ -58,7 +61,7 @@
     "@storybook/react-vite": "^8.6",
     "@vitest/coverage-v8": "^4.1.7",
     "storybook": "^8.6",
-    "turbo": "^2.5.4",
+    "turbo": "^2.9.14",
     "vitest": "^4.1.7"
   }
 }
