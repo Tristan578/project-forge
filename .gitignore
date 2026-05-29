@@ -73,6 +73,9 @@ web/out/
 web/test-results/
 web/playwright-report/
 
+# ----- Coverage -----
+coverage/
+
 # ----- Packages -----
 packages/ui/dist/
 
