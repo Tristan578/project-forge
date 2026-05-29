@@ -186,14 +186,14 @@ const pricingTiers: PricingTier[] = [
     name: 'Starter',
     price: '$0',
     period: '/month',
-    description: 'Free forever. Start building immediately.',
+    description: 'Free forever. Reserve your spot for launch.',
     features: [
       'AI chat (limited)',
       '1 published game',
       'Community templates',
       'Basic export',
     ],
-    cta: 'Start Free',
+    cta: 'Join the Waitlist',
     highlighted: false,
   },
   {
@@ -208,7 +208,7 @@ const pricingTiers: PricingTier[] = [
       'Asset generation',
       'Priority support',
     ],
-    cta: 'Get Started',
+    cta: 'Join the Waitlist',
     highlighted: false,
   },
   {
@@ -223,7 +223,7 @@ const pricingTiers: PricingTier[] = [
       'Advanced AI tools',
       'Remove branding',
     ],
-    cta: 'Start Creating',
+    cta: 'Join the Waitlist',
     highlighted: true,
   },
   {
@@ -238,7 +238,7 @@ const pricingTiers: PricingTier[] = [
       'Dedicated support',
       'Custom integrations',
     ],
-    cta: 'Contact Us',
+    cta: 'Join the Waitlist',
     highlighted: false,
   },
 ];
@@ -311,7 +311,7 @@ export default async function LandingPage() {
               href="/sign-up"
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
             >
-              Start Creating Free
+              Request Early Access
             </Link>
           </div>
         </div>
@@ -342,7 +342,7 @@ export default async function LandingPage() {
               href="/sign-up"
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-base font-semibold text-white transition-colors hover:bg-blue-500"
             >
-              Start Creating Free
+              Request Early Access
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Link>
             <a
@@ -665,7 +665,7 @@ export default async function LandingPage() {
             href="/sign-up"
             className="mt-8 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-8 py-3 text-base font-semibold text-white transition-colors hover:bg-blue-500"
           >
-            Start Creating Free
+            Request Early Access
             <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </Link>
         </div>

@@ -262,7 +262,7 @@ export default async function UseCasePage({ params }: UseCasePageProps) {
             href="/sign-up"
             className="inline-flex rounded-lg bg-orange-500 px-6 py-3 font-medium text-white transition-colors hover:bg-orange-600"
           >
-            Get Started Free
+            Request Early Access
           </Link>
         </div>
       </div>
