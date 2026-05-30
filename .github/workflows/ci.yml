@@ -295,7 +295,27 @@ jobs:
         env:
           PREVIEW_URL: ${{ steps.deploy.outputs.url }}
         run: |
-          curl -sf "$PREVIEW_URL" -o /dev/null --retry 3 --retry-delay 5 || echo "::warning::Preview URL not reachable"
+          # Preview deployments sit behind Vercel Deployment Protection (#7994):
+          # an unauthenticated request is answered by the SSO gate with HTTP 401
+          # (server: Vercel, _vercel_sso_nonce cookie). That 401 PROVES the
+          # deployment is live and serving — it is not an outage. A plain
+          # `curl -sf` fails on any 4xx (exit 56), so it emitted false
+          # "Preview URL not reachable" warnings on every protected preview.
+          # Inspect the status code instead: only a missing response (000) or a
+          # 5xx means the preview is genuinely unreachable.
+          code=$(curl -s -o /dev/null -w "%{http_code}" --retry 3 --retry-delay 5 --max-time 30 "$PREVIEW_URL" || true)
+          echo "Preview responded with HTTP $code"
+          case "$code" in
+            000|5??)
+              echo "::warning::Preview URL not reachable (HTTP $code)"
+              ;;
+            401|403)
+              echo "Preview is reachable — HTTP $code is the expected Vercel Deployment Protection (SSO) gate."
+              ;;
+            *)
+              echo "Preview is reachable (HTTP $code)."
+              ;;
+          esac
 
   # Engine-dependent E2E tests (@engine) require WASM + GPU which CI runners lack.
   # Only UI-only E2E tests (@ui) run in CI — they test React shell without WASM.
@@ -331,7 +351,13 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('web/package-lock.json') }}
+          # Key on the REAL root lockfile. This is a single-root-lockfile
+          # monorepo: web/package-lock.json does not exist, so the old key
+          # hashFiles('web/package-lock.json') returned '' — a constant
+          # `playwright-` key that never invalidated, leaving stale browser
+          # caches that intermittently failed with "Executable doesn't exist"
+          # when Playwright's required browser revision changed. (#8589)
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
