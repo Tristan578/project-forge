@@ -521,6 +521,21 @@ describe('scrubEvent — hardened coverage (audit review)', () => {
     );
   });
 
+  it('scrubs the request BODY (request.data) — prompts can embed BYOK keys (F03)', () => {
+    // /api/chat and /api/generate/* bodies legitimately carry user prompts that
+    // can contain a decrypted provider key — exactly the F03/F04 threat model.
+    const event = makeEvent({
+      request: {
+        url: '/api/chat',
+        data: { prompt: 'my key is sk-ant-api03-AbCdEf0123456789xyz', contact: 'nolantj@live.com' },
+      },
+    });
+    const out = scrubEvent(event);
+    const data = out.request?.data as Record<string, string>;
+    expect(data.prompt).toBe('my key is [REDACTED_API_KEY]');
+    expect(data.contact).toBe('[REDACTED_EMAIL]');
+  });
+
   it('redacts sensitive tag keys and scrubs secret tag values', () => {
     const event = makeEvent({
       tags: { authorization: 'Bearer abc', note: 'ping nolantj@live.com', release: 'v1.2.3' },
@@ -627,7 +642,9 @@ describe('scrubString — false-positive & linearity guards (audit review)', () 
     expect(scrubString(path)).toBe(path);
   });
 
-  it('matches in linear time on a long adversarial run (no catastrophic backtracking)', () => {
+  it('does not stall on a long adversarial run (no catastrophic backtracking)', () => {
+    // A 100k-char run of a single class member would blow up under a nested or
+    // unbounded quantifier; the RFC-bounded patterns return promptly and unchanged.
     const long = 'a'.repeat(100_000);
     expect(scrubString(long)).toBe(long);
   });
