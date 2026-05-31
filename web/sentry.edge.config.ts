@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/nextjs';
-import { configureSentryFingerprinting } from '@/lib/monitoring/sentryConfig';
+import { configureSentryFingerprinting, scrubSentryEvent } from '@/lib/monitoring/sentryConfig';
 
 const DSN = process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -17,8 +17,12 @@ if (DSN) {
       return IS_PROD ? 0.1 : 1.0;
     },
 
-    sendDefaultPii: true,
+    // SECURITY (audit 2026-05-30, F03/F04): no default PII; scrub residual
+    // secrets/PII from every event before transmission.
+    sendDefaultPii: false,
     enableLogs: true,
+    beforeSend: scrubSentryEvent,
+    beforeSendTransaction: scrubSentryEvent,
   });
 
   configureSentryFingerprinting();

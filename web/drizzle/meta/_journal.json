@@ -22,6 +22,13 @@
       "when": 1775606400000,
       "tag": "0002_credit_txn_idempotent_index",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780185600000,
+      "tag": "0003_token_purchases_idempotent_index",
+      "breakpoints": true
     }
   ]
 }

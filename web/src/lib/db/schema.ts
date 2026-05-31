@@ -122,20 +122,26 @@ export const tokenUsage = pgTable(
   (table) => [index('idx_token_usage_user_date').on(table.userId, table.createdAt)]
 );
 
-export const tokenPurchases = pgTable('token_purchases', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id')
-    .notNull()
-    .references(() => users.id),
-  stripePaymentIntent: text('stripe_payment_intent').notNull(),
-  package: tokenPackageEnum('package').notNull(),
-  tokens: integer('tokens').notNull(),
-  amountCents: integer('amount_cents').notNull(),
-  // PF-526: Track cumulative refunded amount to prevent double-deduction
-  // when multiple partial refunds are issued for the same charge.
-  refundedCents: integer('refunded_cents').notNull().default(0),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const tokenPurchases = pgTable(
+  'token_purchases',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    stripePaymentIntent: text('stripe_payment_intent').notNull(),
+    package: tokenPackageEnum('package').notNull(),
+    tokens: integer('tokens').notNull(),
+    amountCents: integer('amount_cents').notNull(),
+    // PF-526: Track cumulative refunded amount to prevent double-deduction
+    // when multiple partial refunds are issued for the same charge.
+    refundedCents: integer('refunded_cents').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  // Audit 2026-05-30 (F02): UNIQUE on stripe_payment_intent makes creditAddonTokens
+  // idempotent across Stripe webhook redelivery (ON CONFLICT DO NOTHING).
+  (table) => [uniqueIndex('uq_token_purchases_payment_intent').on(table.stripePaymentIntent)]
+);
 
 export const projects = pgTable(
   'projects',

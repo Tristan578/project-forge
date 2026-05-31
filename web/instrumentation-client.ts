@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/nextjs';
-import { configureSentryFingerprinting } from '@/lib/monitoring/sentryConfig';
+import { configureSentryFingerprinting, scrubSentryEvent } from '@/lib/monitoring/sentryConfig';
 
 const DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -19,8 +19,13 @@ if (DSN) {
 
     // Tunnel handled by tunnelRoute in next.config.ts (bypasses ad-blockers)
 
-    sendDefaultPii: true,
+    // SECURITY (audit 2026-05-30, F03/F04): no default PII; scrub residual
+    // secrets/PII from every event before transmission. Session-replay text is
+    // already masked (maskAllText, #8001).
+    sendDefaultPii: false,
     enableLogs: true,
+    beforeSend: scrubSentryEvent,
+    beforeSendTransaction: scrubSentryEvent,
 
     integrations: [
       Sentry.browserTracingIntegration(),
