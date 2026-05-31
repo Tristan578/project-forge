@@ -426,3 +426,46 @@ jobs:
           name: e2e-report
           path: web/playwright-report/
           retention-days: 14
+
+  # ---- CI Success (aggregating required check) ----
+  # Audit 2026-05-30 (F01): branch protection previously required ONLY ci-gate,
+  # a no-op path detector that always passes — so a PR could merge with failing
+  # eslint/tsc/vitest/coverage/build because those jobs were conditionally
+  # skipped and not individually required. This job depends on every REAL gate
+  # and fails if any of them failed or was cancelled. A path-gated job that is
+  # legitimately skipped is allowed (result 'skipped' is not a failure).
+  #
+  # ACTION REQUIRED (user, one-time): make THIS job ("CI Success") the required
+  # status check in the `main` branch-protection ruleset, replacing/​alongside
+  # "CI Gate". Code cannot change branch-protection settings.
+  #
+  # preview-deploy (deployment, vars-gated) and merge-e2e-reports (reporting
+  # only) are intentionally excluded — neither gates correctness.
+  ci-success:
+    name: CI Success
+    if: ${{ always() }}
+    needs:
+      - ci-gate
+      - quality-gates
+      - command-parity
+      - build-nextjs
+      - docs-internal-gate
+      - design-internal-gate
+      - test-e2e-ui
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Verify all required gates passed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS_JSON" | tee needs.json
+          failed=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key' needs.json)
+          if [ -n "$failed" ]; then
+            echo "::error::Required CI gate(s) failed or were cancelled:"
+            echo "$failed" | sed 's/^/  - /'
+            exit 1
+          fi
+          echo "All required gates passed (or were correctly skipped via path filter)."
