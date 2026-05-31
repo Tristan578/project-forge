@@ -148,6 +148,135 @@ function fingerprintEvent(event: Event): Event {
 }
 
 // ---------------------------------------------------------------------------
+// PII / credential scrubbing (beforeSend / beforeSendTransaction)
+// ---------------------------------------------------------------------------
+//
+// Defence-in-depth for two High-severity audit findings (2026-05-30):
+//   - F04: stack-frame local variables can hold decrypted BYOK provider keys and
+//          prompts. We removed `includeLocalVariables` from the server init, and
+//          additionally strip `frame.vars` here in case it is ever re-enabled or
+//          populated by an integration.
+//   - F03: `sendDefaultPii` is now false, but breadcrumbs, exception messages,
+//          request bodies, and structured context can still embed emails, IPs,
+//          cookies, auth headers, and API keys. This hook redacts them.
+//
+// `scrubEvent` is wired as both `beforeSend` and `beforeSendTransaction` in every
+// Sentry.init (server, edge, client). It always returns the (mutated) event — the
+// goal is to keep the error for debugging, just without the secrets.
+
+/**
+ * Key names whose values are redacted wholesale, regardless of their content.
+ * Matched case-insensitively. Deliberately narrow on `token` (only credential
+ * tokens, not token *counts*) — secret-looking values are caught separately by
+ * {@link SECRET_VALUE_PATTERNS} even when the key name is innocuous.
+ */
+const SENSITIVE_KEY_RE =
+  /authorization|cookie|password|passwd|secret|credential|api[_-]?key|apikey|access[_-]?key|private[_-]?key|encrypted[_-]?key|client[_-]?secret|\bauth[_-]?token\b|\baccess[_-]?token\b|\brefresh[_-]?token\b|\bsession\b|\bbearer\b|x-api-key|\bdsn\b|\bemail\b|\bphone\b|\bssn\b|\biv\b/i;
+
+/**
+ * Value patterns redacted anywhere they appear inside a string (messages, stack
+ * values, breadcrumb text, query strings). Ordered most-specific first.
+ */
+const SECRET_VALUE_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
+  // Anthropic-style provider keys (sk-ant-…) then generic OpenAI-style (sk-…)
+  [/sk-ant-[A-Za-z0-9_-]{16,}/g, '[REDACTED_API_KEY]'],
+  [/sk-[A-Za-z0-9_-]{16,}/g, '[REDACTED_API_KEY]'],
+  // Replicate tokens (r8_…)
+  [/\br8_[A-Za-z0-9]{20,}/g, '[REDACTED_API_KEY]'],
+  // JSON Web Tokens (three base64url segments)
+  [/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[REDACTED_JWT]'],
+  // Bearer tokens embedded in header-like strings
+  [/Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, 'Bearer [REDACTED]'],
+  // Email addresses
+  [/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[REDACTED_EMAIL]'],
+  // IPv4 addresses
+  [/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[REDACTED_IP]'],
+];
+
+const REDACTED = '[REDACTED]';
+const MAX_SCRUB_DEPTH = 8;
+
+/** Apply every secret-value pattern to a single string. */
+function scrubString(input: string): string {
+  let out = input;
+  for (const [re, replacement] of SECRET_VALUE_PATTERNS) {
+    out = out.replace(re, replacement);
+  }
+  return out;
+}
+
+/**
+ * Recursively redact sensitive keys and scrub secret-looking values, mutating in
+ * place. Bounded by {@link MAX_SCRUB_DEPTH} to guard against pathological nesting.
+ */
+function deepScrub(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') return scrubString(value);
+  if (depth >= MAX_SCRUB_DEPTH) return value;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) value[i] = deepScrub(value[i], depth + 1);
+    return value;
+  }
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    for (const key of Object.keys(obj)) {
+      obj[key] = SENSITIVE_KEY_RE.test(key) ? REDACTED : deepScrub(obj[key], depth + 1);
+    }
+    return obj;
+  }
+  return value;
+}
+
+/**
+ * `beforeSend` / `beforeSendTransaction` hook: strip PII and credentials from an
+ * event before it leaves the process. Always returns the (mutated) event.
+ */
+function scrubEvent<T extends Event>(event: T): T {
+  // 1. Stack frames: drop local variables (may hold decrypted keys/prompts, F04)
+  //    and scrub the exception message text.
+  for (const value of event.exception?.values ?? []) {
+    for (const frame of value.stacktrace?.frames ?? []) {
+      delete frame.vars;
+    }
+    if (typeof value.value === 'string') value.value = scrubString(value.value);
+  }
+
+  // 2. Request context: drop cookies, redact sensitive headers, scrub body + query.
+  if (event.request) {
+    delete event.request.cookies;
+    const headers = event.request.headers as Record<string, string> | undefined;
+    if (headers) {
+      for (const key of Object.keys(headers)) {
+        if (SENSITIVE_KEY_RE.test(key)) headers[key] = REDACTED;
+      }
+    }
+    if (event.request.data !== undefined) {
+      event.request.data = deepScrub(event.request.data);
+    }
+    if (typeof event.request.query_string === 'string') {
+      event.request.query_string = scrubString(event.request.query_string);
+    }
+  }
+
+  // 3. User context: keep id for correlation, drop direct PII (F03).
+  if (event.user) {
+    delete event.user.ip_address;
+    delete event.user.email;
+    delete event.user.username;
+  }
+
+  // 4. Free-text + structured context that may embed secrets.
+  if (typeof event.message === 'string') event.message = scrubString(event.message);
+  for (const crumb of event.breadcrumbs ?? []) {
+    if (typeof crumb.message === 'string') crumb.message = scrubString(crumb.message);
+    if (crumb.data) crumb.data = deepScrub(crumb.data) as typeof crumb.data;
+  }
+  if (event.extra) event.extra = deepScrub(event.extra) as typeof event.extra;
+  if (event.contexts) event.contexts = deepScrub(event.contexts) as typeof event.contexts;
+
+  return event;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -170,6 +299,13 @@ export function configureSentryFingerprinting(): void {
   Sentry.addEventProcessor((event: Event) => fingerprintEvent(event));
 }
 
+/**
+ * `beforeSend` / `beforeSendTransaction` hook for every Sentry.init (server,
+ * edge, client). Strips PII and credentials from the event before transmission.
+ * Re-exported under a stable name so the init files import a single symbol.
+ */
+export const scrubSentryEvent = scrubEvent;
+
 // Export helpers for unit testing
 export {
   fingerprintEvent,
@@ -182,4 +318,7 @@ export {
   isAuthError,
   isWasmError,
   isGenerationError,
+  scrubEvent,
+  scrubString,
+  deepScrub,
 };

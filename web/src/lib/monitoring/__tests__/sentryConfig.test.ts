@@ -20,6 +20,9 @@ import {
   isAuthError,
   isWasmError,
   isGenerationError,
+  scrubEvent,
+  scrubString,
+  deepScrub,
 } from '../sentryConfig';
 import type { Event } from '@sentry/nextjs';
 
@@ -294,5 +297,171 @@ describe('fingerprintEvent', () => {
       const event = fingerprintEvent(makeExceptionEvent('unauthorized WASM call'));
       expect(event.fingerprint?.[0]).toBe('auth-error');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// scrubString — secret value redaction (audit 2026-05-30, F03/F04)
+// ---------------------------------------------------------------------------
+
+describe('scrubString', () => {
+  it('redacts Anthropic-style API keys', () => {
+    expect(scrubString('key=sk-ant-api03-AbCdEf0123456789xyz')).toBe('key=[REDACTED_API_KEY]');
+  });
+
+  it('redacts generic sk- API keys', () => {
+    expect(scrubString('OPENAI=sk-proj-0123456789abcdefghij')).toBe('OPENAI=[REDACTED_API_KEY]');
+  });
+
+  it('redacts Replicate r8_ tokens', () => {
+    expect(scrubString('token r8_abcdefghij0123456789KLMNO')).toBe('token [REDACTED_API_KEY]');
+  });
+
+  it('redacts JWTs', () => {
+    const jwt = 'eyJhbGciOi.eyJzdWIiOjEyMw.s5d-fakeSig_123';
+    expect(scrubString(`auth ${jwt}`)).toBe('auth [REDACTED_JWT]');
+  });
+
+  it('redacts Bearer tokens', () => {
+    expect(scrubString('Authorization: Bearer abc123def456ghi')).toBe('Authorization: Bearer [REDACTED]');
+  });
+
+  it('redacts email addresses', () => {
+    expect(scrubString('user nolantj@live.com signed in')).toBe('user [REDACTED_EMAIL] signed in');
+  });
+
+  it('redacts IPv4 addresses', () => {
+    expect(scrubString('from 192.168.1.42 ok')).toBe('from [REDACTED_IP] ok');
+  });
+
+  it('leaves innocuous strings untouched', () => {
+    expect(scrubString('spawn_entity failed at frame 12')).toBe('spawn_entity failed at frame 12');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deepScrub — recursive key/value redaction
+// ---------------------------------------------------------------------------
+
+describe('deepScrub', () => {
+  it('redacts values under sensitive keys regardless of content', () => {
+    const out = deepScrub({ apiKey: 'whatever', authorization: 'x', password: 'p' }) as Record<string, unknown>;
+    expect(out.apiKey).toBe('[REDACTED]');
+    expect(out.authorization).toBe('[REDACTED]');
+    expect(out.password).toBe('[REDACTED]');
+  });
+
+  it('scrubs secret-looking values under innocuous keys', () => {
+    const out = deepScrub({ note: 'contact nolantj@live.com from 10.0.0.1' }) as Record<string, string>;
+    expect(out.note).toBe('contact [REDACTED_EMAIL] from [REDACTED_IP]');
+  });
+
+  it('recurses into nested objects and arrays', () => {
+    const out = deepScrub({ a: { b: [{ secret: 'z' }] } }) as { a: { b: Array<{ secret: string }> } };
+    expect(out.a.b[0].secret).toBe('[REDACTED]');
+  });
+
+  it('preserves non-sensitive primitives', () => {
+    const out = deepScrub({ count: 42, ok: true, label: 'sprite' }) as Record<string, unknown>;
+    expect(out).toEqual({ count: 42, ok: true, label: 'sprite' });
+  });
+
+  it('does not throw on deeply nested structures', () => {
+    let nested: Record<string, unknown> = { secret: 'leaf' };
+    for (let i = 0; i < 20; i++) nested = { child: nested };
+    expect(() => deepScrub(nested)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// scrubEvent — beforeSend / beforeSendTransaction hook
+// ---------------------------------------------------------------------------
+
+describe('scrubEvent', () => {
+  it('deletes stack-frame local variables (F04)', () => {
+    const event = makeEvent({
+      exception: {
+        values: [
+          {
+            type: 'Error',
+            value: 'boom',
+            stacktrace: {
+              frames: [
+                { function: 'decryptKey', vars: { apiKey: 'sk-ant-api03-SECRET0123456789xyz' } },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    const out = scrubEvent(event);
+    expect(out.exception?.values?.[0]?.stacktrace?.frames?.[0]?.vars).toBeUndefined();
+  });
+
+  it('scrubs secrets embedded in the exception value', () => {
+    const out = scrubEvent(makeExceptionEvent('failed with key sk-ant-api03-AbCdEf0123456789xyz'));
+    expect(out.exception?.values?.[0]?.value).toBe('failed with key [REDACTED_API_KEY]');
+  });
+
+  it('drops cookies and redacts sensitive request headers (F03)', () => {
+    const event = makeEvent({
+      request: {
+        url: '/api/chat',
+        cookies: { session: 'abc' },
+        headers: { authorization: 'Bearer xyz', 'x-api-key': 'sk-123', 'content-type': 'application/json' },
+        query_string: 'email=nolantj@live.com',
+      },
+    });
+    const out = scrubEvent(event);
+    expect(out.request?.cookies).toBeUndefined();
+    const headers = out.request?.headers as Record<string, string>;
+    expect(headers.authorization).toBe('[REDACTED]');
+    expect(headers['x-api-key']).toBe('[REDACTED]');
+    expect(headers['content-type']).toBe('application/json');
+    expect(out.request?.query_string).toBe('email=[REDACTED_EMAIL]');
+  });
+
+  it('drops user PII but keeps the id for correlation (F03)', () => {
+    const event = makeEvent({
+      user: { id: 'user_123', ip_address: '203.0.113.5', email: 'nolantj@live.com', username: 'tristan' },
+    });
+    const out = scrubEvent(event);
+    expect(out.user?.id).toBe('user_123');
+    expect(out.user?.ip_address).toBeUndefined();
+    expect(out.user?.email).toBeUndefined();
+    expect(out.user?.username).toBeUndefined();
+  });
+
+  it('scrubs breadcrumb messages and data', () => {
+    const event = makeEvent({
+      breadcrumbs: [
+        { message: 'sent to nolantj@live.com', data: { apiKey: 'sk-secret' } },
+      ],
+    });
+    const out = scrubEvent(event);
+    expect(out.breadcrumbs?.[0]?.message).toBe('sent to [REDACTED_EMAIL]');
+    expect((out.breadcrumbs?.[0]?.data as Record<string, unknown>)?.apiKey).toBe('[REDACTED]');
+  });
+
+  it('scrubs event.extra and event.contexts', () => {
+    const event = makeEvent({
+      extra: { prompt: 'my key is sk-ant-api03-AbCdEf0123456789xyz' },
+      contexts: { custom: { clientSecret: 'topsecret' } } as Event['contexts'],
+    });
+    const out = scrubEvent(event);
+    expect((out.extra as Record<string, string>)?.prompt).toBe('my key is [REDACTED_API_KEY]');
+    expect((out.contexts as Record<string, Record<string, unknown>>)?.custom?.clientSecret).toBe('[REDACTED]');
+  });
+
+  it('returns the event when there is nothing sensitive (undefined fields safe)', () => {
+    const event = makeExceptionEvent('plain error');
+    expect(() => scrubEvent(event)).not.toThrow();
+    expect(scrubEvent(makeEvent())).toBeDefined();
+  });
+
+  it('is idempotent — scrubbing twice yields the same result', () => {
+    const once = scrubEvent(makeExceptionEvent('key sk-ant-api03-AbCdEf0123456789xyz'));
+    const twice = scrubEvent(once);
+    expect(twice.exception?.values?.[0]?.value).toBe('key [REDACTED_API_KEY]');
   });
 });
