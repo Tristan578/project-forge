@@ -176,19 +176,26 @@ const SENSITIVE_KEY_RE =
 /**
  * Value patterns redacted anywhere they appear inside a string (messages, stack
  * values, breadcrumb text, query strings). Ordered most-specific first.
+ *
+ * Every quantifier is UPPER-bounded (RFC-aware lengths) so matching stays linear
+ * in the input — there is no nested quantifier and no unbounded greedy run, which
+ * eliminates the backtracking/event-loop-stall class on attacker-influenced text.
+ * The `sk-`/`sk-ant-` patterns are `\b`-anchored so they never fire inside
+ * ordinary identifiers like `disk-cache-…`, `task-…`, or `risk-…`.
  */
 const SECRET_VALUE_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
   // Anthropic-style provider keys (sk-ant-…) then generic OpenAI-style (sk-…)
-  [/sk-ant-[A-Za-z0-9_-]{16,}/g, '[REDACTED_API_KEY]'],
-  [/sk-[A-Za-z0-9_-]{16,}/g, '[REDACTED_API_KEY]'],
+  [/\bsk-ant-[A-Za-z0-9_-]{16,256}/g, '[REDACTED_API_KEY]'],
+  [/\bsk-[A-Za-z0-9_-]{16,256}/g, '[REDACTED_API_KEY]'],
   // Replicate tokens (r8_…)
-  [/\br8_[A-Za-z0-9]{20,}/g, '[REDACTED_API_KEY]'],
-  // JSON Web Tokens (three base64url segments)
-  [/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[REDACTED_JWT]'],
+  [/\br8_[A-Za-z0-9]{20,256}/g, '[REDACTED_API_KEY]'],
+  // JSON Web Tokens (three base64url segments). `.` is outside the char class,
+  // so each segment match is unambiguous (no backtracking).
+  [/\beyJ[A-Za-z0-9_-]{1,2048}\.[A-Za-z0-9_-]{1,2048}\.[A-Za-z0-9_-]{1,2048}/g, '[REDACTED_JWT]'],
   // Bearer tokens embedded in header-like strings
-  [/Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, 'Bearer [REDACTED]'],
-  // Email addresses
-  [/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[REDACTED_EMAIL]'],
+  [/Bearer\s+[A-Za-z0-9._~+/=-]{8,512}/gi, 'Bearer [REDACTED]'],
+  // Email addresses (RFC-bounded local part / domain / TLD)
+  [/[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,24}/g, '[REDACTED_EMAIL]'],
   // IPv4 addresses
   [/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[REDACTED_IP]'],
 ];
@@ -227,45 +234,101 @@ function deepScrub(value: unknown, depth = 0): unknown {
 }
 
 /**
+ * Strip local variables (F04 — they can hold decrypted BYOK keys/prompts) and
+ * scrub source-context lines from every frame of a stacktrace, mutating in place.
+ * Shared by exception values AND thread stacktraces: server-side Node events
+ * attach frames under `event.threads[].stacktrace`, not just `exception.values`.
+ */
+function scrubStacktraceFrames(
+  frames:
+    | Array<{ vars?: unknown; context_line?: string; pre_context?: string[]; post_context?: string[] }>
+    | undefined
+): void {
+  for (const frame of frames ?? []) {
+    delete frame.vars;
+    if (typeof frame.context_line === 'string') frame.context_line = scrubString(frame.context_line);
+    if (Array.isArray(frame.pre_context)) {
+      frame.pre_context = frame.pre_context.map((l) => (typeof l === 'string' ? scrubString(l) : l));
+    }
+    if (Array.isArray(frame.post_context)) {
+      frame.post_context = frame.post_context.map((l) => (typeof l === 'string' ? scrubString(l) : l));
+    }
+  }
+}
+
+/**
  * `beforeSend` / `beforeSendTransaction` hook: strip PII and credentials from an
  * event before it leaves the process. Always returns the (mutated) event.
  */
 function scrubEvent<T extends Event>(event: T): T {
-  // 1. Stack frames: drop local variables (may hold decrypted keys/prompts, F04)
-  //    and scrub the exception message text.
+  // 1. Exception values: drop frame locals (F04), scrub context lines, the
+  //    exception message, and any mechanism data.
   for (const value of event.exception?.values ?? []) {
-    for (const frame of value.stacktrace?.frames ?? []) {
-      delete frame.vars;
-    }
+    scrubStacktraceFrames(value.stacktrace?.frames);
     if (typeof value.value === 'string') value.value = scrubString(value.value);
+    if (value.mechanism?.data) {
+      value.mechanism.data = deepScrub(value.mechanism.data) as typeof value.mechanism.data;
+    }
   }
 
-  // 2. Request context: drop cookies, redact sensitive headers, scrub body + query.
+  // 1b. Thread stacktraces — same frame scrub (F04 also reaches here server-side).
+  for (const thread of event.threads?.values ?? []) {
+    scrubStacktraceFrames(thread.stacktrace?.frames);
+  }
+
+  // 2. Request context: drop cookies; redact sensitive header KEYS and scrub
+  //    header VALUES (a secret can hide under an innocuous key name); scrub body,
+  //    query, and env (REMOTE_ADDR / CGI vars).
   if (event.request) {
     delete event.request.cookies;
-    const headers = event.request.headers as Record<string, string> | undefined;
+    const headers = event.request.headers;
     if (headers) {
       for (const key of Object.keys(headers)) {
-        if (SENSITIVE_KEY_RE.test(key)) headers[key] = REDACTED;
+        headers[key] = SENSITIVE_KEY_RE.test(key) ? REDACTED : scrubString(headers[key]);
       }
+    }
+    if (event.request.env) {
+      event.request.env = deepScrub(event.request.env) as typeof event.request.env;
     }
     if (event.request.data !== undefined) {
       event.request.data = deepScrub(event.request.data);
     }
-    if (typeof event.request.query_string === 'string') {
-      event.request.query_string = scrubString(event.request.query_string);
+    const qs = event.request.query_string;
+    if (typeof qs === 'string') {
+      event.request.query_string = scrubString(qs);
+    } else if (qs != null) {
+      event.request.query_string = deepScrub(qs) as typeof event.request.query_string;
     }
   }
 
-  // 3. User context: keep id for correlation, drop direct PII (F03).
+  // 3. User context: keep id for correlation, drop direct PII + geo (F03), scrub
+  //    any remaining custom fields.
   if (event.user) {
-    delete event.user.ip_address;
-    delete event.user.email;
-    delete event.user.username;
+    const user = event.user as Record<string, unknown>;
+    delete user.ip_address;
+    delete user.email;
+    delete user.username;
+    delete user.geo;
+    for (const key of Object.keys(user)) {
+      if (key === 'id') continue;
+      user[key] = SENSITIVE_KEY_RE.test(key) ? REDACTED : deepScrub(user[key]);
+    }
   }
 
   // 4. Free-text + structured context that may embed secrets.
   if (typeof event.message === 'string') event.message = scrubString(event.message);
+  if (event.logentry && typeof event.logentry.message === 'string') {
+    event.logentry.message = scrubString(event.logentry.message);
+  }
+  if (typeof event.transaction === 'string') event.transaction = scrubString(event.transaction);
+  if (typeof event.server_name === 'string') event.server_name = scrubString(event.server_name);
+  if (event.tags) {
+    for (const key of Object.keys(event.tags)) {
+      const v = event.tags[key];
+      if (SENSITIVE_KEY_RE.test(key)) event.tags[key] = REDACTED;
+      else if (typeof v === 'string') event.tags[key] = scrubString(v);
+    }
+  }
   for (const crumb of event.breadcrumbs ?? []) {
     if (typeof crumb.message === 'string') crumb.message = scrubString(crumb.message);
     if (crumb.data) crumb.data = deepScrub(crumb.data) as typeof crumb.data;

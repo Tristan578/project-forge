@@ -465,3 +465,170 @@ describe('scrubEvent', () => {
     expect(twice.exception?.values?.[0]?.value).toBe('key [REDACTED_API_KEY]');
   });
 });
+
+// ---------------------------------------------------------------------------
+// scrubEvent — hardened coverage (audit review 2026-05-30)
+//
+// The adversarial security review found several PII/credential paths the first
+// pass missed. Each test below pins one of those leak vectors closed.
+// ---------------------------------------------------------------------------
+
+describe('scrubEvent — hardened coverage (audit review)', () => {
+  it('deletes frame locals on THREAD stacktraces, not just exception values (F04)', () => {
+    // Server-side Node events attach frames under event.threads[].stacktrace.
+    const event = makeEvent({
+      threads: {
+        values: [
+          {
+            stacktrace: {
+              frames: [{ function: 'decrypt', vars: { key: 'sk-ant-api03-SECRET0123456789xyz' } }],
+            },
+          },
+        ],
+      },
+    });
+    const out = scrubEvent(event);
+    expect(out.threads?.values?.[0]?.stacktrace?.frames?.[0]?.vars).toBeUndefined();
+  });
+
+  it('scrubs request.env (REMOTE_ADDR / CGI vars)', () => {
+    const event = makeEvent({
+      request: { url: '/x', env: { REMOTE_ADDR: '203.0.113.9', SERVER_NAME: 'host' } },
+    });
+    const out = scrubEvent(event);
+    const env = out.request?.env as Record<string, string>;
+    expect(env.REMOTE_ADDR).toBe('[REDACTED_IP]');
+    expect(env.SERVER_NAME).toBe('host');
+  });
+
+  it('scrubs a secret header VALUE hiding under an innocuous key name', () => {
+    // `x-trace-token` is NOT in the sensitive-key list, so a key-only redactor
+    // would have leaked the value. The value scrub catches it.
+    const event = makeEvent({
+      request: { url: '/x', headers: { 'x-trace-token': 'sk-ant-api03-AbCdEf0123456789xyz' } },
+    });
+    const out = scrubEvent(event);
+    expect((out.request?.headers as Record<string, string>)['x-trace-token']).toBe('[REDACTED_API_KEY]');
+  });
+
+  it('scrubs non-string (object) query_string forms', () => {
+    const event = makeEvent({
+      request: { url: '/x', query_string: { redirect: 'https://x/?to=nolantj@live.com' } },
+    });
+    const out = scrubEvent(event);
+    expect((out.request?.query_string as Record<string, string>).redirect).toBe(
+      'https://x/?to=[REDACTED_EMAIL]'
+    );
+  });
+
+  it('redacts sensitive tag keys and scrubs secret tag values', () => {
+    const event = makeEvent({
+      tags: { authorization: 'Bearer abc', note: 'ping nolantj@live.com', release: 'v1.2.3' },
+    });
+    const out = scrubEvent(event);
+    expect(out.tags?.authorization).toBe('[REDACTED]');
+    expect(out.tags?.note).toBe('ping [REDACTED_EMAIL]');
+    // semver is NOT an IPv4 (only 3 octets) — must survive untouched.
+    expect(out.tags?.release).toBe('v1.2.3');
+  });
+
+  it('scrubs event.transaction, logentry.message, and server_name', () => {
+    const event = makeEvent({
+      transaction: 'GET /u/nolantj@live.com',
+      logentry: { message: 'key sk-ant-api03-AbCdEf0123456789xyz' },
+      server_name: 'host-10.0.0.1',
+    });
+    const out = scrubEvent(event);
+    expect(out.transaction).toBe('GET /u/[REDACTED_EMAIL]');
+    expect(out.logentry?.message).toBe('key [REDACTED_API_KEY]');
+    expect(out.server_name).toBe('host-[REDACTED_IP]');
+  });
+
+  it('scrubs exception mechanism.data', () => {
+    const event = makeEvent({
+      exception: {
+        values: [
+          {
+            type: 'Error',
+            value: 'boom',
+            mechanism: { type: 'generic', handled: true, data: { url: 'https://h/?u=nolantj@live.com' } },
+          },
+        ],
+      },
+    });
+    const out = scrubEvent(event);
+    expect((out.exception?.values?.[0]?.mechanism?.data as Record<string, string>)?.url).toBe(
+      'https://h/?u=[REDACTED_EMAIL]'
+    );
+  });
+
+  it('drops user.geo and scrubs custom user fields, keeping id', () => {
+    const event = makeEvent({
+      user: { id: 'u1', geo: { city: 'Austin' }, plan: 'pro', contact: 'nolantj@live.com' } as Event['user'],
+    });
+    const out = scrubEvent(event);
+    expect(out.user?.id).toBe('u1');
+    expect((out.user as Record<string, unknown>)?.geo).toBeUndefined();
+    expect((out.user as Record<string, unknown>)?.plan).toBe('pro');
+    expect((out.user as Record<string, unknown>)?.contact).toBe('[REDACTED_EMAIL]');
+  });
+
+  it('scrubs source context lines (context_line / pre_context / post_context) on frames', () => {
+    const event = makeEvent({
+      exception: {
+        values: [
+          {
+            type: 'Error',
+            value: 'x',
+            stacktrace: {
+              frames: [
+                {
+                  function: 'f',
+                  context_line: 'const k = "sk-ant-api03-AbCdEf0123456789xyz"',
+                  pre_context: ['// owner nolantj@live.com'],
+                  post_context: ['connect 10.0.0.1'],
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    const out = scrubEvent(event);
+    const frame = out.exception?.values?.[0]?.stacktrace?.frames?.[0];
+    expect(frame?.context_line).toBe('const k = "[REDACTED_API_KEY]"');
+    expect(frame?.pre_context?.[0]).toBe('// owner [REDACTED_EMAIL]');
+    expect(frame?.post_context?.[0]).toBe('connect [REDACTED_IP]');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// scrubString — false-positive & linearity guards (audit review 2026-05-30)
+//
+// The bounded, \b-anchored patterns must NOT corrupt ordinary identifiers and
+// must match in linear time on adversarial input.
+// ---------------------------------------------------------------------------
+
+describe('scrubString — false-positive & linearity guards (audit review)', () => {
+  it('does not corrupt identifiers that merely contain "sk-" (disk-, task-, risk-)', () => {
+    expect(scrubString('flushing disk-cache-0123456789abcdef now')).toBe(
+      'flushing disk-cache-0123456789abcdef now'
+    );
+    expect(scrubString('processing task-0123456789abcdef now')).toBe('processing task-0123456789abcdef now');
+    expect(scrubString('assessing risk-0123456789abcdef level')).toBe('assessing risk-0123456789abcdef level');
+  });
+
+  it('still redacts a real sk- key wrapped in punctuation (boundary fires)', () => {
+    expect(scrubString('(sk-proj-0123456789abcdefghij)')).toBe('([REDACTED_API_KEY])');
+  });
+
+  it('does not mistake scoped-package paths for emails', () => {
+    const path = 'at node_modules/@sentry/nextjs/build/index.js';
+    expect(scrubString(path)).toBe(path);
+  });
+
+  it('matches in linear time on a long adversarial run (no catastrophic backtracking)', () => {
+    const long = 'a'.repeat(100_000);
+    expect(scrubString(long)).toBe(long);
+  });
+});
