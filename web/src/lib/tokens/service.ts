@@ -369,23 +369,28 @@ export async function creditAddonTokens(
   const pkgInfo = TOKEN_PACKAGES[pkg];
   const now = new Date().toISOString();
 
-  // Use neon sql.transaction() to atomically:
-  //   1. Increment addon_tokens on the user row
-  //   2. Insert the purchase record
-  // If either statement fails, neither is committed (PF-977).
+  // Idempotent single-statement CTE (audit 2026-05-30, F02): Stripe can redeliver
+  // the same webhook (and thus the same payment_intent) more than once. The INSERT
+  // is guarded by ON CONFLICT (stripe_payment_intent) DO NOTHING, and the balance
+  // UPDATE only runs when the INSERT actually created a new row (EXISTS (... ins)).
+  // A redelivery therefore inserts nothing and credits nothing — exactly-once.
+  // Atomic by definition: one statement either commits or rolls back as a unit
+  // (replaces the two-statement transaction from PF-977). Requires the UNIQUE
+  // index uq_token_purchases_payment_intent (drizzle/0003).
   await queryWithResilience(() =>
-    neonSql.transaction([
-      neonSql`
-        UPDATE users
-        SET addon_tokens = addon_tokens + ${pkgInfo.tokens},
-            updated_at   = ${now}
-        WHERE id = ${userId}
-      `,
-      neonSql`
+    neonSql`
+      WITH ins AS (
         INSERT INTO token_purchases (user_id, stripe_payment_intent, package, tokens, amount_cents)
         VALUES (${userId}, ${stripePaymentIntent}, ${pkg}, ${pkgInfo.tokens}, ${pkgInfo.priceCents})
-      `,
-    ])
+        ON CONFLICT (stripe_payment_intent) DO NOTHING
+        RETURNING id
+      )
+      UPDATE users
+      SET addon_tokens = addon_tokens + ${pkgInfo.tokens},
+          updated_at   = ${now}
+      WHERE id = ${userId}
+        AND EXISTS (SELECT 1 FROM ins)
+    `
   );
 }
 
