@@ -6,7 +6,7 @@
  */
 
 import { rateLimit, type RateLimitResult } from '../rateLimit';
-import { captureException } from '@/lib/monitoring/sentry-server';
+import { sampledCaptureException } from '@/lib/monitoring/sampledCapture';
 
 /**
  * Alias of the canonical RateLimitResult from rateLimit.ts.
@@ -125,9 +125,16 @@ export async function distributedRateLimit(
   try {
     return await upstashSlidingWindow(key, limit, windowSeconds);
   } catch (err) {
-    // Report Upstash failure to Sentry so silent fallbacks are visible (#8210)
-    // Strip user-identifying suffixes from key to avoid PII in Sentry extra context
-    captureException(err, { component: 'distributedRateLimit', keyPrefix: key.split(':')[0], limit, windowSeconds });
+    // Report the Upstash failure so this silent fallback is visible (#8210), but
+    // through the per-action throttle: during a sustained outage this path can
+    // fire on every request, and an unconditional capture would become its own
+    // Sentry storm (#8666). Strip user-identifying suffixes from the key to keep
+    // PII out of the Sentry extra context.
+    sampledCaptureException('distributedRateLimit.failOpen', err, {
+      keyPrefix: key.split(':')[0],
+      limit,
+      windowSeconds,
+    });
     // Fall back to in-memory to avoid blocking requests
     const result = await rateLimit(key, limit, windowSeconds * 1000);
     return result;

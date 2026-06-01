@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
+// Throttled Sentry capture is mocked so the consumer's wiring can be asserted
+// directly. The sampling/throttle behaviour itself is covered by
+// monitoring/__tests__/sampledCapture.test.ts.
+vi.mock('@/lib/monitoring/sampledCapture', () => ({
+  sampledCaptureException: vi.fn(),
+  SAMPLE_THROTTLE_MS: 60_000,
+}));
+
 // Reset module state between tests
 let rateLimit: typeof import('../rateLimit').rateLimit;
 let getClientIp: typeof import('../rateLimit').getClientIp;
@@ -158,6 +166,75 @@ describe('Upstash integration', () => {
     warnSpy.mockRestore();
     delete process.env['UPSTASH_REDIS_REST_URL'];
     delete process.env['UPSTASH_REDIS_REST_TOKEN'];
+  });
+});
+
+describe('rateLimit — Upstash per-call failure observability (PF-842)', () => {
+  // These tests need real timers because they use async dynamic imports.
+  beforeEach(async () => {
+    vi.useRealTimers();
+    // The hoisted sampledCaptureException mock is a single instance for the
+    // whole file (vi.resetModules does not re-run the mock factory), so clear
+    // its call history between tests to prevent cross-test leakage.
+    const { sampledCaptureException } = await import('@/lib/monitoring/sampledCapture');
+    vi.mocked(sampledCaptureException).mockClear();
+  });
+
+  afterEach(() => {
+    vi.doUnmock('@upstash/redis');
+    vi.doUnmock('@upstash/ratelimit');
+    vi.resetModules();
+    delete process.env['UPSTASH_REDIS_REST_URL'];
+    delete process.env['UPSTASH_REDIS_REST_TOKEN'];
+    vi.useFakeTimers();
+  });
+
+  function mockUpstash(limitImpl: () => Promise<unknown>) {
+    vi.doMock('@upstash/redis', () => ({
+      Redis: vi.fn(function () { return {}; }),
+    }));
+    vi.doMock('@upstash/ratelimit', () => ({
+      Ratelimit: Object.assign(
+        vi.fn(function () { return { limit: vi.fn(limitImpl) }; }),
+        { slidingWindow: vi.fn(function () { return 'sliding-window-config'; }) },
+      ),
+    }));
+  }
+
+  it('reports the degradation via sampled captureException when Upstash limit() throws, then returns an in-memory result', async () => {
+    vi.resetModules();
+    process.env['UPSTASH_REDIS_REST_URL'] = 'https://test-redis.upstash.io';
+    process.env['UPSTASH_REDIS_REST_TOKEN'] = 'test-token-123';
+
+    const limitErr = new Error('Upstash 500');
+    mockUpstash(() => Promise.reject(limitErr));
+
+    const { sampledCaptureException } = await import('@/lib/monitoring/sampledCapture');
+    const mod = await import('../rateLimit');
+
+    // Degrades to in-memory limiting rather than rejecting the request outright.
+    const result = await mod.rateLimit('degrade-key', 5, 60_000);
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(4);
+
+    // The silent fallback is now observable.
+    expect(vi.mocked(sampledCaptureException)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sampledCaptureException)).toHaveBeenCalledWith('rateLimit.failOpen', limitErr);
+  });
+
+  it('does NOT log on the healthy Upstash path — no noise on success (PF-842)', async () => {
+    vi.resetModules();
+    process.env['UPSTASH_REDIS_REST_URL'] = 'https://test-redis.upstash.io';
+    process.env['UPSTASH_REDIS_REST_TOKEN'] = 'test-token-123';
+
+    mockUpstash(() => Promise.resolve({ success: true, remaining: 4, reset: Date.now() + 60_000 }));
+
+    const { sampledCaptureException } = await import('@/lib/monitoring/sampledCapture');
+    const mod = await import('../rateLimit');
+
+    const result = await mod.rateLimit('healthy-key', 5, 60_000);
+    expect(result.allowed).toBe(true);
+    expect(vi.mocked(sampledCaptureException)).not.toHaveBeenCalled();
   });
 });
 
