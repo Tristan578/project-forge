@@ -271,3 +271,43 @@ Claude Code only loads `CLAUDE.md` and `.claude/CLAUDE.md` on `SessionStart`. Af
 To test the hook manually: `bash .claude/hooks/inject-post-compact.sh`. To see the wall-clock cost: `time bash .claude/hooks/inject-post-compact.sh > /dev/null`. To verify the size budget: `bash .claude/hooks/inject-post-compact.sh | wc -c` (should be well under 10000).
 
 When you add a new file under `.claude/rules/`, the glob picks it up automatically — but the pointer-table summary in the hook is a hardcoded `case` block. Add a one-line summary for the new file there so the agent knows what topic the file covers.
+
+## 12. Testing Hooks (`.claude/hooks/__tests__/`)
+
+Hooks with non-trivial logic (verdict gates, deferred-fix detection, metadata
+checks) get a co-located bash test next to the hook under `.claude/hooks/__tests__/`.
+A hook silently exiting the wrong code is a hard-to-spot failure — a SubagentStop
+gate that loops, or a PreToolUse gate that blocks valid work — so these are tested
+like any other code, TEST-FIRST.
+
+### Running hook tests
+
+```bash
+# A single hook's suite
+bash .claude/hooks/__tests__/reject-incomplete-review.test.sh
+
+# All hook test suites
+for t in .claude/hooks/__tests__/*.test.sh; do echo "== $t =="; bash "$t" || break; done
+
+# Lint every hook + test (zero findings required, same bar as web lint)
+shellcheck .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
+```
+
+Each suite is a self-contained bash script that exits non-zero if any case fails
+(no bats dependency — bats is not installed). See
+`.claude/hooks/__tests__/reject-incomplete-review.test.sh` as the canonical
+pattern.
+
+### Writing a hook test
+
+- Drive the hook through its real contract: build the JSON payload (Edit/Write
+  hooks read `TOOL_INPUT_*` env vars; Stop/SubagentStop/Bash hooks read stdin
+  JSON) with `jq -nc --arg ...`, pipe it to `bash "$HOOK"`, and assert on `$?`.
+  Exit 0 = allow/continue, exit 2 = block — those two codes ARE the behavior, so
+  assert on them directly.
+- Cover the boundary, the fail-safe, and the "looks-like-but-isn't" cases, not
+  just the happy path — e.g. exact length thresholds, malformed/non-JSON stdin
+  (must fail safe, never propagate a `jq` error code through `set -e`), and
+  word-boundary near-misses (`PASSED` is not the `PASS` verdict).
+- Guard host assumptions at the top (`command -v jq` etc.) so a missing tool
+  reports clearly instead of every case failing.

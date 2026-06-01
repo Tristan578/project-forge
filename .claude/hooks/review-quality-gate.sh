@@ -6,6 +6,17 @@
 #   3. Actionable findings (not just a summary)
 #
 # Exit code 2 = block (sends the reviewer back to complete the review).
+#
+# DIVERGENCE FROM reject-incomplete-review.sh (intentional — do not "unify"):
+# This runs on the *Stop* event, where `.output` is the reviewer's COMPLETE
+# output, so it can safely demand a verdict + file ref + actionable verb and
+# block hard when any is missing. Its SubagentStop sibling
+# (reject-incomplete-review.sh) sees only a short terse "tail" of the run, not
+# the full review, so it deliberately does the opposite — it errs toward
+# allowing the stop and only blocks on a substantive-but-verdict-less body, to
+# avoid an infinite re-activation loop. The terse-tail hardening lives there,
+# NOT here; this gate needs no length/JSON heuristics because its payload is
+# always the real thing.
 
 set -euo pipefail
 
