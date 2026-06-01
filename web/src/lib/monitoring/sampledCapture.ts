@@ -45,7 +45,14 @@ export function sampledCaptureException(
     return false;
   }
   lastCapturedAt.set(action, now);
-  captureException(error, { action, ...extra });
+  // Reporting is best-effort. The callers (checkDbRateLimit, rateLimit) rely on
+  // failing open / degrading when their backing store is down — a throw from the
+  // Sentry SDK here must never escape and break that guarantee. Swallow it.
+  try {
+    captureException(error, { action, ...extra });
+  } catch {
+    // Monitoring failed; nothing more we can safely do on this path.
+  }
   return true;
 }
 

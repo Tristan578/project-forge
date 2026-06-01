@@ -68,4 +68,24 @@ describe('sampledCaptureException', () => {
     expect(sent).toBe(true);
     expect(mockCapture).toHaveBeenCalledTimes(2);
   });
+
+  it('never propagates a captureException failure to the caller (preserves fail-open)', () => {
+    // The whole point of the callers (checkDbRateLimit / rateLimit) is to fail
+    // open or degrade when Upstash is down. Reporting that bypass is best-effort:
+    // if the Sentry SDK itself throws, it must NOT escape and break the caller's
+    // fail-open guarantee.
+    mockCapture.mockImplementationOnce(() => {
+      throw new Error('Sentry SDK crash');
+    });
+
+    let sent: boolean | undefined;
+    expect(() => {
+      sent = sampledCaptureException('checkDbRateLimit.failOpen', new Error('upstash down'));
+    }).not.toThrow();
+    // The attempt still counts as forwarded so the throttle window engages.
+    expect(sent).toBe(true);
+
+    // The throttle still advanced — a follow-up in the same window is suppressed.
+    expect(sampledCaptureException('checkDbRateLimit.failOpen', new Error('again'))).toBe(false);
+  });
 });
