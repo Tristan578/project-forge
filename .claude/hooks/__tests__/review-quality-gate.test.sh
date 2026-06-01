@@ -68,6 +68,13 @@ assert_exit "FAIL missing a file reference blocks"        2 "$(run_hook "securit
 assert_exit "FAIL missing an actionable verb blocks"      2 "$(run_hook "security-reviewer" "$FAIL_NO_VERB")"
 assert_exit "guardian FAIL with file ref and verb ok"     0 "$(run_hook "docs-guardian" "VERDICT: FAIL — update the table in .claude/rules/agent-operations.md")"
 
+# --- FAIL citing only a config/workflow file is actionable (CI/infra/Rust reviews).
+# Use a *gated* agent type (matches reviewer|guardian) so the file-ref branch runs;
+# infra-devops/test-writer/architect are not matched by this gate and exit early. ---
+assert_exit "FAIL citing only a .yml file accepted"       0 "$(run_hook "security-reviewer" "VERDICT: FAIL — fix the download-artifact version in .github/workflows/ci.yml to match the upload step.")"
+assert_exit "FAIL citing only a .yaml file accepted"      0 "$(run_hook "security-reviewer" "VERDICT: FAIL — update the cache key in .github/actions/setup/action.yaml so it invalidates correctly.")"
+assert_exit "FAIL citing only a .toml file accepted"      0 "$(run_hook "docs-guardian" "VERDICT: FAIL — fix the wasm-bindgen pin in engine/Cargo.toml to restore the lockfile match.")"
+
 # --- Fail-safe on malformed / non-JSON input (never propagate a jq error code) ---
 assert_exit "non-JSON stdin fails safe"                   0 "$(run_hook_raw 'not valid json {{{')"
 assert_exit "empty stdin fails safe"                      0 "$(run_hook_raw '')"

@@ -48,8 +48,10 @@ VERDICT=$(echo "$OUTPUT" | grep -oiE '\bPASS\b|\bFAIL\b' | tail -1 | tr '[:lower
 
 # On FAIL, verify there are actionable findings
 if [ "$VERDICT" = "FAIL" ]; then
-  # Check for file references (e.g. src/lib/foo.ts, engine/src/bridge.rs)
-  if ! echo "$OUTPUT" | grep -qE '[a-zA-Z0-9_/-]+\.(ts|tsx|rs|sh|json|md|py|js|jsx)'; then
+  # Check for file references (e.g. src/lib/foo.ts, engine/src/bridge.rs,
+  # .github/workflows/ci.yml, engine/Cargo.toml — CI/infra/Rust reviews cite
+  # config files, so yml/yaml/toml count as actionable references too).
+  if ! echo "$OUTPUT" | grep -qE '[a-zA-Z0-9_/-]+\.(ts|tsx|rs|sh|json|md|py|js|jsx|yml|yaml|toml)'; then
     echo "REVIEW INCOMPLETE: FAIL verdict requires at least one file reference."
     echo ""
     echo "Specify the exact file(s) affected by each finding."
