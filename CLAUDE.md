@@ -85,5 +85,6 @@ All work tracked via taskboard. Use `/kanban` skill for full protocol.
 - **`replace_all` double-prefix danger** — Renaming `X` to `PREFIX_X` when some are already `PREFIX_X` produces `PREFIX_PREFIX_X`.
 - **Route `[name]` param validation** — Next.js decodes route params, but names containing `/%\` or control chars must be rejected early (before DB access) to match POST validation. Tests will pass locally with mocks but fail in production without it.
 - **Replicate API `model` vs `version`** — `version: 'owner/name:sha'` is deprecated. Use `model: 'owner/name'` field. Constant: `REPLICATE_MODEL_SDXL` in `models.ts`.
+- **Single-root lockfile: bump a `web/package.json` dep → regenerate the ROOT `package-lock.json` or `npm ci` breaks on main.** Only one lockfile exists (repo root). Dependabot's npm updater (`directory: /web`) edits manifests it can't relock → `EUSAGE` drift (broke main twice: #8655, #8658). The `Lockfile Sync` gate catches it pre-merge; fix with `npm install --package-lock-only` from the root. After merging ANY dependency PR, verify `npm ci` against `origin/main`. See `.claude/rules/gotchas.md` → Build & CI.
 
 See `.claude/rules/gotchas.md` for 40+ additional context-specific gotchas.

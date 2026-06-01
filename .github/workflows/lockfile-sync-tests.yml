@@ -1,0 +1,31 @@
+name: Lockfile Sync Tests
+
+# Exercises scripts/check-lockfile-sync.sh — the lockfile-drift gate's decision
+# logic — via its co-located bash suite. The gate's npm regeneration step needs
+# the network, so the suite injects a stub regenerate command ($LOCKFILE_REGEN_CMD)
+# and asserts the in-sync / drift / failure branches and exit codes hermetically.
+# Standalone and path-gated (like the gate it guards); not part of ci.yml's
+# CI Success aggregate.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/check-lockfile-sync.sh'
+      - 'scripts/__tests__/check-lockfile-sync.test.sh'
+      - '.github/workflows/lockfile-sync.yml'
+      - '.github/workflows/lockfile-sync-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  gate-tests:
+    name: Lockfile Sync Gate Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Shellcheck the gate and its suite
+        run: shellcheck scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh
+      - name: Run gate test suite
+        run: bash scripts/__tests__/check-lockfile-sync.test.sh
