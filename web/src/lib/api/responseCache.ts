@@ -256,11 +256,39 @@ export async function cachedGenerate<T>(
   const memResult = memoryGet<T>(key);
   if (memResult !== undefined) return { result: memResult, cached: true };
 
-  // 2. Check in-flight dedup
+  // 2. Check in-flight dedup.
+  //
+  // The in-flight map shares ONE promise (and thus one result) across every
+  // caller on a key. This is only safe because generateCacheKey incorporates
+  // userId (see step 1 and the GUARD test in responseCache.test.ts): joiners
+  // are therefore always the SAME user firing identical concurrent requests.
+  // That invariant matters because executeFn (in createGenerationHandler)
+  // performs the token deduction — joiners never run it, so they ride for free.
+  // A shared promise across DIFFERENT users would both leak one user's result
+  // to another AND let a joiner ride a generation it never paid for. Do not
+  // drop userId from the key without revisiting this.
   const existing = inFlight.get(key);
   if (existing) {
-    const result = await existing.promise as T;
-    return { result, cached: true };
+    try {
+      const result = await existing.promise as T;
+      return { result, cached: true };
+    } catch {
+      // Per-joiner failure isolation: the shared in-flight promise rejected (a
+      // transient provider blip, or — for a same-user request — the originator's
+      // ApiKeyError). Rather than binding every joiner to that single failure,
+      // re-check the cache (a concurrent attempt may have populated it, so a
+      // surviving joiner does not redundantly regenerate or re-charge) and
+      // otherwise fall through to run this caller's own independent attempt
+      // below. The failed originator already released any tokens it deducted, so
+      // a joiner only pays when its own attempt succeeds.
+      if (isUpstashConfigured()) {
+        const settled = await redisGet<T>(key);
+        if (settled !== undefined) return { result: settled, cached: true };
+      }
+      const settledMem = memoryGet<T>(key);
+      if (settledMem !== undefined) return { result: settledMem, cached: true };
+      // Fall through to step 3 and execute this caller's own attempt.
+    }
   }
 
   // 3. Execute and cache

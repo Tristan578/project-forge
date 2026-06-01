@@ -160,6 +160,139 @@ describe('responseCache', () => {
     });
   });
 
+  describe('in-flight dedup failure isolation (PF-843, #8667)', () => {
+    // The in-flight map shares ONE promise across every caller on a key. To test
+    // the joiner path deterministically we need to know the joiner has actually
+    // *joined* (attached to the shared promise) before we settle it — otherwise a
+    // late joiner would run its own attempt and a regression test would pass for
+    // the wrong reason. This helper exposes a thenable whose 2nd `.then`
+    // attachment (1st = the originator's internal `await`, 2nd = the joiner's
+    // `await`) resolves `whenJoined()`.
+    interface JoinDetectable<T> {
+      promise: Promise<T>;
+      resolve: (value: T) => void;
+      reject: (error: unknown) => void;
+      whenJoined: () => Promise<void>;
+    }
+
+    function makeJoinDetectable<T>(): JoinDetectable<T> {
+      let resolveInner!: (value: T) => void;
+      let rejectInner!: (error: unknown) => void;
+      const inner = new Promise<T>((res, rej) => {
+        resolveInner = res;
+        rejectInner = rej;
+      });
+      let attachCount = 0;
+      let signalJoined: (() => void) | undefined;
+      const thenable = {
+        then(onF?: ((value: T) => unknown) | null, onR?: ((error: unknown) => unknown) | null) {
+          attachCount += 1;
+          if (attachCount >= 2) signalJoined?.();
+          return inner.then(onF ?? undefined, onR ?? undefined);
+        },
+      };
+      return {
+        promise: thenable as unknown as Promise<T>,
+        resolve: (value: T) => resolveInner(value),
+        reject: (error: unknown) => rejectInner(error),
+        whenJoined: () =>
+          new Promise<void>((res) => {
+            if (attachCount >= 2) res();
+            else signalJoined = res;
+          }),
+      };
+    }
+
+    it('runs the joiner\'s own attempt when the shared in-flight promise rejects', async () => {
+      const ctl = makeJoinDetectable<{ audio: string }>();
+      const executeFn = vi.fn()
+        .mockReturnValueOnce(ctl.promise)               // originator — will reject
+        .mockResolvedValueOnce({ audio: 'joiner_own' }); // joiner's independent attempt
+
+      const originator = cachedGenerate('sfx_generation', { prompt: 'boom' }, executeFn, { userId: 'user_A' });
+      await vi.waitFor(() => expect(executeFn).toHaveBeenCalledTimes(1));
+      const joiner = cachedGenerate('sfx_generation', { prompt: 'boom' }, executeFn, { userId: 'user_A' });
+      await ctl.whenJoined();
+
+      ctl.reject(new Error('transient provider blip'));
+
+      // The originator surfaces its own failure...
+      await expect(originator).rejects.toThrow('transient provider blip');
+      // ...but the joiner is NOT permanently bound to it — it ran its own attempt.
+      const joinerResult = await joiner;
+      expect(joinerResult.result).toEqual({ audio: 'joiner_own' });
+      expect(joinerResult.cached).toBe(false);
+      expect(executeFn).toHaveBeenCalledTimes(2);
+    });
+
+    it('rides a concurrently-cached result instead of re-executing after a rejection', async () => {
+      const ctl = makeJoinDetectable<{ audio: string }>();
+      const executeFn = vi.fn().mockReturnValueOnce(ctl.promise); // ONLY the originator runs; joiner must not call again
+
+      const originator = cachedGenerate('sfx_generation', { prompt: 'boom' }, executeFn, { userId: 'user_A' });
+      await vi.waitFor(() => expect(executeFn).toHaveBeenCalledTimes(1));
+      const joiner = cachedGenerate('sfx_generation', { prompt: 'boom' }, executeFn, { userId: 'user_A' });
+      await ctl.whenJoined();
+
+      // A concurrent sibling attempt populated the cache for this exact key
+      // before the shared promise's rejection propagates to the joiner.
+      const key = await _generateCacheKey('sfx_generation', { prompt: 'boom' }, 'user_A');
+      _memoryCache.set(key, {
+        result: { audio: 'sibling_cached' },
+        createdAt: 0,
+        ttlMs: Number.MAX_SAFE_INTEGER,
+        operation: 'sfx_generation',
+      });
+
+      ctl.reject(new Error('transient provider blip'));
+
+      await expect(originator).rejects.toThrow('transient provider blip');
+      const joinerResult = await joiner;
+      // Joiner re-checked the cache after the rejection — no redundant regen/charge.
+      expect(joinerResult.result).toEqual({ audio: 'sibling_cached' });
+      expect(joinerResult.cached).toBe(true);
+      expect(executeFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets a same-user joiner independently re-derive the originator\'s ApiKeyError', async () => {
+      // The joiner is the SAME user (userId is in the key), so its own attempt
+      // hits the same missing-key failure. This is intentional: the joiner
+      // correctly re-derives the same 402 rather than inheriting a shared
+      // rejection it cannot retry.
+      const ctl = makeJoinDetectable<{ audio: string }>();
+      const apiKeyError = new Error('No API key configured');
+      const executeFn = vi.fn()
+        .mockReturnValueOnce(ctl.promise)
+        .mockRejectedValueOnce(apiKeyError); // joiner's own attempt — same user, same failure
+
+      const originator = cachedGenerate('sfx_generation', { prompt: 'boom' }, executeFn, { userId: 'user_A' });
+      await vi.waitFor(() => expect(executeFn).toHaveBeenCalledTimes(1));
+      const joiner = cachedGenerate('sfx_generation', { prompt: 'boom' }, executeFn, { userId: 'user_A' });
+      await ctl.whenJoined();
+
+      ctl.reject(apiKeyError);
+
+      await expect(originator).rejects.toThrow('No API key configured');
+      await expect(joiner).rejects.toThrow('No API key configured');
+      expect(executeFn).toHaveBeenCalledTimes(2);
+    });
+
+    it('GUARD: generateCacheKey must incorporate userId so dedup never spans users', async () => {
+      // In-flight dedup shares ONE promise (and its single result/failure) among
+      // all joiners on a key. That is only safe because the key includes userId,
+      // so joiners are always the SAME user. If userId is ever dropped from the
+      // key, different users would dedup onto each other: one user's result would
+      // leak to another AND a joiner would ride a generation it never paid for.
+      // This guard fails loudly if that invariant is broken.
+      const userA = await _generateCacheKey('sfx_generation', { prompt: 'boom' }, 'user_A');
+      const userB = await _generateCacheKey('sfx_generation', { prompt: 'boom' }, 'user_B');
+      const userAAgain = await _generateCacheKey('sfx_generation', { prompt: 'boom' }, 'user_A');
+
+      expect(userA, 'different users MUST get different cache keys (no cross-user dedup)').not.toBe(userB);
+      expect(userAAgain, 'same user + same request MUST get the same key (dedup works)').toBe(userA);
+    });
+  });
+
   describe('getCachedResult', () => {
     it('returns hit:false when nothing is cached', async () => {
       const result = await getCachedResult('sfx_generation', { prompt: 'boom' });
