@@ -12,3 +12,11 @@
  */
 
 export { captureException, captureMessage, startSpan } from './sentry-server';
+
+/**
+ * Throttled Sentry capture for hot fail-open / degrade paths (issues #8664,
+ * #8666). Re-exported here for discoverability — prefer this over a raw
+ * `captureException` on any path that can fire on every request during an
+ * outage (rate limiters, cache fallbacks). See `./sampledCapture`.
+ */
+export { sampledCaptureException, SAMPLE_THROTTLE_MS } from './sampledCapture';

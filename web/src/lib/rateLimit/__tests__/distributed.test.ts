@@ -31,6 +31,9 @@ beforeEach(async () => {
   vi.doMock('@/lib/rateLimit', () => ({
     rateLimit: vi.fn(),
   }));
+  vi.doMock('@/lib/monitoring/sampledCapture', () => ({
+    sampledCaptureException: vi.fn(),
+  }));
   globalThis.fetch = mockFetch;
   const mod = await import('../distributed');
   distributedRateLimit = mod.distributedRateLimit;
@@ -210,6 +213,48 @@ describe('distributedRateLimit — Upstash path', () => {
 
     expect(result.allowed).toBe(false);
     expect(mockFetch).toHaveBeenCalledTimes(1); // No second cleanup call
+  });
+});
+
+describe('distributedRateLimit — Upstash failure observability (PF-842 #8666)', () => {
+  beforeEach(() => {
+    process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+  });
+
+  it('reports an Upstash failure through the throttled sampledCaptureException helper (not a raw capture storm)', async () => {
+    mockFetch.mockRejectedValue(new Error('upstash down'));
+
+    const { rateLimit } = await import('@/lib/rateLimit');
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 });
+
+    const { sampledCaptureException } = await import('@/lib/monitoring/sampledCapture');
+
+    await distributedRateLimit('billing-checkout:user-123', 10, 60);
+
+    // The fail-open bypass must be observable — but through the per-action throttle,
+    // so a sustained Upstash outage can't turn the alert into its own storm.
+    expect(vi.mocked(sampledCaptureException)).toHaveBeenCalledWith(
+      'distributedRateLimit.failOpen',
+      expect.any(Error),
+      expect.objectContaining({ keyPrefix: 'billing-checkout' }),
+    );
+  });
+
+  it('strips the user-identifying suffix from the key before reporting (no PII in Sentry extra)', async () => {
+    mockFetch.mockRejectedValue(new Error('upstash down'));
+
+    const { rateLimit } = await import('@/lib/rateLimit');
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 });
+
+    const { sampledCaptureException } = await import('@/lib/monitoring/sampledCapture');
+
+    await distributedRateLimit('gen-all:user-secret-id', 30, 900);
+
+    const extra = vi.mocked(sampledCaptureException).mock.calls[0]?.[2] as Record<string, unknown>;
+    expect(extra.keyPrefix).toBe('gen-all');
+    // The raw user id must never reach Sentry.
+    expect(JSON.stringify(extra)).not.toContain('user-secret-id');
   });
 });
 
