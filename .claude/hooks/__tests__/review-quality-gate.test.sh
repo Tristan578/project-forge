@@ -61,6 +61,9 @@ assert_exit "guardian PASS verdict accepted"              0 "$(run_hook "dx-guar
 
 # --- Missing verdict blocks ---
 assert_exit "reviewer with no verdict blocks"             2 "$(run_hook "security-reviewer" "I looked at the diff and it seems mostly fine overall.")"
+# The gate matches reviewer|guardian — pin the no-verdict block path for a
+# *guardian* type too, so a regression narrowing the match is caught.
+assert_exit "guardian with no verdict blocks"             2 "$(run_hook "dx-guardian" "I looked at the docs and they seem mostly fine overall.")"
 
 # --- FAIL must be actionable (file ref + verb) ---
 assert_exit "FAIL with file ref and verb accepted"        0 "$(run_hook "code-architect-reviewer" "$FAIL_COMPLETE")"
@@ -74,6 +77,12 @@ assert_exit "guardian FAIL with file ref and verb ok"     0 "$(run_hook "docs-gu
 assert_exit "FAIL citing only a .yml file accepted"       0 "$(run_hook "security-reviewer" "VERDICT: FAIL — fix the download-artifact version in .github/workflows/ci.yml to match the upload step.")"
 assert_exit "FAIL citing only a .yaml file accepted"      0 "$(run_hook "security-reviewer" "VERDICT: FAIL — update the cache key in .github/actions/setup/action.yaml so it invalidates correctly.")"
 assert_exit "FAIL citing only a .toml file accepted"      0 "$(run_hook "docs-guardian" "VERDICT: FAIL — fix the wasm-bindgen pin in engine/Cargo.toml to restore the lockfile match.")"
+
+# --- 'tail -1' selects the LAST verdict token when output contains both ---
+# The gate resolves the verdict via `grep -oiE '\bPASS\b|\bFAIL\b' | tail -1`, so
+# a reviewer who corrects themselves mid-output is judged on their final word.
+assert_exit "FAIL then PASS: last verdict PASS, no file ref required" 0 "$(run_hook "security-reviewer" "VERDICT: FAIL — problem here. Actually: VERDICT: PASS")"
+assert_exit "PASS then FAIL: last verdict FAIL, requires file ref"    2 "$(run_hook "security-reviewer" "VERDICT: PASS — oops, wait. VERDICT: FAIL — no file here.")"
 
 # --- Fail-safe on malformed / non-JSON input (never propagate a jq error code) ---
 assert_exit "non-JSON stdin fails safe"                   0 "$(run_hook_raw 'not valid json {{{')"

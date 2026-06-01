@@ -93,6 +93,9 @@ assert_exit "lowercase 'pass' verdict accepted"             0 "$(run_hook "secur
 # --- The genuine loop-block case (must still fire) ---
 assert_exit "substantive review missing a verdict blocks"   2 "$(run_hook "security-reviewer" "$SUBSTANTIVE_NO_VERDICT")"
 assert_exit "PASSED/FAILED prose is not a verdict (blocks)" 2 "$(run_hook "security-reviewer" "$PASSED_FAILED_NO_VERDICT")"
+# The gate matches reviewer|guardian — pin the block path for a *guardian* type too,
+# so a regression narrowing the match to only '-reviewer' is caught.
+assert_exit "guardian substantive review missing verdict blocks" 2 "$(run_hook "docs-guardian" "$SUBSTANTIVE_NO_VERDICT")"
 
 # --- Threshold boundary (MIN_REVIEW_CHARS = 200) ---
 assert_exit "199 chars no verdict is unverifiable"          0 "$(run_hook "security-reviewer" "$(repeat_char x 199)")"
