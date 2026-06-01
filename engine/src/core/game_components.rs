@@ -1289,14 +1289,15 @@ fn system_projectile(
 }
 
 /// Win condition system: check score/collectAll/reachGoal
+///
+/// Reads and writes `GameComponentRuntime` through a single `ResMut` binding.
+/// Declaring both `Res` and `ResMut` of the same resource in one system is the
+/// canonical B0002 access conflict and panics the schedule on Play (see #8661).
 fn system_win_condition(
-    runtime: Option<Res<GameComponentRuntime>>,
-    mut runtime_mut: Option<ResMut<GameComponentRuntime>>,
+    runtime: Option<ResMut<GameComponentRuntime>>,
     entities: Query<(&EntityId, &GameComponents, &Transform)>,
 ) {
-
-
-    let Some(runtime) = runtime else { return; };
+    let Some(mut runtime) = runtime else { return; };
 
     for (_eid, gc, _transform) in entities.iter() {
         if let Some(GameComponentData::WinCondition(data)) = gc.get("win_condition") {
@@ -1315,14 +1316,12 @@ fn system_win_condition(
 
             if condition_met && !runtime.game_won {
                 // Emit game win event
-                if let Some(runtime_mut) = runtime_mut.as_mut() {
-                    runtime_mut.game_won = true;
-                    runtime_mut.pending_events.push(GameEvent {
-                        event_name: "game_win".to_string(),
-                        source_entity_id: None,
-                        target_entity_id: None,
-                    });
-                }
+                runtime.game_won = true;
+                runtime.pending_events.push(GameEvent {
+                    event_name: "game_win".to_string(),
+                    source_entity_id: None,
+                    target_entity_id: None,
+                });
             }
         }
     }
@@ -1379,5 +1378,114 @@ fn system_dialogue_trigger(
                 runtime.trigger_fired.remove(&trigger_id.0);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod win_condition_tests {
+    use super::{
+        system_win_condition, GameComponentData, GameComponentRuntime, GameComponents,
+        WinConditionData, WinConditionType,
+    };
+    use crate::core::entity_id::EntityId;
+    use bevy::prelude::*;
+
+    fn win_condition_entity(score_target: u32) -> (EntityId, GameComponents, Transform) {
+        let mut gc = GameComponents::default();
+        gc.components.push(GameComponentData::WinCondition(WinConditionData {
+            condition_type: WinConditionType::Score,
+            target_score: Some(score_target),
+            target_entity_id: None,
+        }));
+        (EntityId::new("player"), gc, Transform::default())
+    }
+
+    /// Regression for B0002 (acceptance criteria 1, 2, 4):
+    /// `system_win_condition` must declare the `GameComponentRuntime` resource
+    /// with exactly ONE access kind. If it declares both `Res` and `ResMut`,
+    /// Bevy aborts with the canonical access-conflict the instant the schedule
+    /// initialises and runs the system. A panic here is a test failure — which
+    /// is precisely the failing-first state we want before the fix.
+    #[test]
+    fn system_win_condition_has_no_resource_access_conflict() {
+        let mut world = World::new();
+        world.insert_resource(GameComponentRuntime::default());
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_win_condition);
+
+        // Initialising + running the schedule validates the system's world
+        // access. The buggy signature (Res + ResMut of the same resource)
+        // aborts here with the canonical B0002 conflict.
+        schedule.run(&mut world);
+    }
+
+    /// Behavioural guarantee (acceptance criterion 3): once the score meets the
+    /// target, the system flips `game_won` and emits a `game_win` event. This
+    /// proves the parameter merge does not regress win detection.
+    #[test]
+    fn win_condition_score_emits_game_win_event() {
+        let mut world = World::new();
+        world.insert_resource(GameComponentRuntime {
+            score: 50,
+            ..Default::default()
+        });
+        world.spawn(win_condition_entity(10));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_win_condition);
+        schedule.run(&mut world);
+
+        let runtime = world.resource::<GameComponentRuntime>();
+        assert!(runtime.game_won, "win condition met but game_won was not set");
+        assert!(
+            runtime.pending_events.iter().any(|e| e.event_name == "game_win"),
+            "win condition met but no game_win event was emitted",
+        );
+    }
+
+    /// The win event must fire exactly once. A second tick after winning must
+    /// not push another `game_win` (guards the `!game_won` short-circuit that
+    /// the merged single `ResMut` binding must preserve).
+    #[test]
+    fn win_condition_does_not_re_emit_after_won() {
+        let mut world = World::new();
+        world.insert_resource(GameComponentRuntime {
+            score: 50,
+            ..Default::default()
+        });
+        world.spawn(win_condition_entity(10));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_win_condition);
+        schedule.run(&mut world);
+        schedule.run(&mut world);
+
+        let runtime = world.resource::<GameComponentRuntime>();
+        let win_events = runtime
+            .pending_events
+            .iter()
+            .filter(|e| e.event_name == "game_win")
+            .count();
+        assert_eq!(win_events, 1, "game_win must fire exactly once, fired {win_events}");
+    }
+
+    /// A score below target must not win the game (no false positives).
+    #[test]
+    fn win_condition_not_met_below_target() {
+        let mut world = World::new();
+        world.insert_resource(GameComponentRuntime {
+            score: 5,
+            ..Default::default()
+        });
+        world.spawn(win_condition_entity(10));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_win_condition);
+        schedule.run(&mut world);
+
+        let runtime = world.resource::<GameComponentRuntime>();
+        assert!(!runtime.game_won, "game should not be won below the score target");
+        assert!(runtime.pending_events.is_empty(), "no events expected when not won");
     }
 }
