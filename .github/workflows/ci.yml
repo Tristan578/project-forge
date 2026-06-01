@@ -466,7 +466,9 @@ jobs:
       - run: npm ci
 
       - name: Download blob reports
-        uses: actions/download-artifact@v8
+        # Must match the upload-artifact major version used for blob-report-*
+        # above (@v4) — mixing artifact action majors is a documented gotcha.
+        uses: actions/download-artifact@v4
         with:
           path: web/all-blob-reports
           pattern: blob-report-*
@@ -522,7 +524,9 @@ jobs:
           failed=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key' needs.json)
           if [ -n "$failed" ]; then
             echo "::error::Required CI gate(s) failed or were cancelled:"
-            echo "$failed" | sed 's/^/  - /'
+            while IFS= read -r line; do
+              echo "  - $line"
+            done <<< "$failed"
             exit 1
           fi
           echo "All required gates passed (or were correctly skipped via path filter)."
