@@ -19,11 +19,18 @@ vi.mock('@upstash/ratelimit', () => ({
   ),
 }));
 
+vi.mock('@/lib/monitoring/sampledCapture', () => ({
+  sampledCaptureException: vi.fn(),
+}));
+
+import { sampledCaptureException } from '@/lib/monitoring/sampledCapture';
 import {
   checkDbRateLimit,
   DbRateLimitError,
   _resetDbRateLimiter,
 } from '../dbRateLimit';
+
+const mockSampledCapture = vi.mocked(sampledCaptureException);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -66,6 +73,7 @@ describe('checkDbRateLimit — with Upstash', () => {
 
   beforeEach(() => {
     mockLimit.mockReset();
+    mockSampledCapture.mockClear();
     _resetDbRateLimiter();
     process.env.UPSTASH_REDIS_REST_URL = 'https://fake.upstash.io';
     process.env.UPSTASH_REDIS_REST_TOKEN = 'fake-token';
@@ -114,8 +122,29 @@ describe('checkDbRateLimit — with Upstash', () => {
     expect(mockLimit).toHaveBeenCalledTimes(2);
   });
 
-  it('fails open when Upstash throws a network error', async () => {
-    mockLimit.mockRejectedValue(new Error('Network error'));
+  it('does NOT report observability when the limit is legitimately exceeded (PF-840)', async () => {
+    // A genuine over-limit is the expected signal, not a fail-open — it must
+    // propagate as DbRateLimitError without firing a Sentry alert.
+    mockLimit.mockResolvedValue({ success: false, remaining: 0, reset: Date.now() + 1000 });
+    const promise = checkDbRateLimit();
+    void promise.catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(promise).rejects.toThrow(DbRateLimitError);
+    expect(mockSampledCapture).not.toHaveBeenCalled();
+  });
+
+  it('reports the fail-open via sampled captureException when Upstash throws, then allows the query (PF-840)', async () => {
+    const err = new Error('Network error');
+    mockLimit.mockRejectedValue(err);
+
+    // Still fails open (query allowed through) ...
     await expect(checkDbRateLimit()).resolves.toBeUndefined();
+
+    // ... but the silent bypass is now observable.
+    expect(mockSampledCapture).toHaveBeenCalledTimes(1);
+    expect(mockSampledCapture).toHaveBeenCalledWith(
+      'checkDbRateLimit.failOpen',
+      err,
+    );
   });
 });

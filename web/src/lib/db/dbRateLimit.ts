@@ -11,6 +11,7 @@
  */
 
 import 'server-only';
+import { sampledCaptureException } from '@/lib/monitoring/sampledCapture';
 
 export class DbRateLimitError extends Error {
   constructor() {
@@ -97,7 +98,12 @@ export async function checkDbRateLimit(): Promise<void> {
     throw new DbRateLimitError();
   } catch (err) {
     if (err instanceof DbRateLimitError) throw err;
-    // Upstash failure = allow the query through (fail-open)
+    // Upstash failure (network error, timeout, 5xx) — fail open so a Redis
+    // incident doesn't take down every DB-backed request. This silently
+    // disables global DB-overload protection, so report it (sampled, to avoid
+    // a Sentry storm during a sustained outage) before allowing the query
+    // through (#8664).
+    sampledCaptureException('checkDbRateLimit.failOpen', err);
   }
 }
 
