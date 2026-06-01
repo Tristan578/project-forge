@@ -15,6 +15,7 @@ import {
   RATE_LIMIT_PUBLIC_MAX,
   RATE_LIMIT_ADMIN_MAX,
 } from '@/lib/config/timeouts';
+import { sampledCaptureException } from '@/lib/monitoring/sampledCapture';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -200,9 +201,13 @@ export async function rateLimit(
         rate: maxRequests,
         window: msToUpstashWindow(windowMs),
       });
-    } catch {
-      // If Upstash call fails (network error, etc.), fall back to in-memory
-      // so the request is not rejected outright.
+    } catch (err) {
+      // If the Upstash call fails (network error, 5xx, etc.), degrade to the
+      // in-memory limiter so the request is not rejected outright. In-memory
+      // limiting is per-instance and resets on cold start, so this is a real
+      // (if partial) protection downgrade — report it (sampled, to avoid a
+      // Sentry storm during a sustained outage) before falling back (#8666).
+      sampledCaptureException('rateLimit.failOpen', err);
       return inMemoryRateLimit(key, maxRequests, windowMs);
     }
   }
