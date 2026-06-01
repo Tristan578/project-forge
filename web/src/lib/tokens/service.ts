@@ -193,8 +193,8 @@ export interface RefundResult {
  * INTENTIONALLY scoped per-operation — a `'refund'` (this function) and a
  * `'partial_refund'` (`refundTokenAmount`) for the same `usageId` are independently
  * idempotent and would each credit once. Callers MUST treat full and partial refunds
- * for a given `usageId` as mutually exclusive (see `voice/batch/route.ts`, the only
- * caller of both, which dispatches them in an if/else). Calling both for the same
+ * for a given `usageId` as mutually exclusive (see `app/api/generate/voice/batch/route.ts`,
+ * the only caller of both, which dispatches them in an if/else). Calling both for the same
  * `usageId` would double-credit; the database does not prevent it by design, because
  * the two operations restore different amounts to potentially different pools.
  */
