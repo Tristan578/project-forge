@@ -59,9 +59,11 @@ jobs:
     environment:
       name: production
     steps:
+      # checkout is required so setup-node can read .node-version from the workspace
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .node-version
 
       - name: Install Vercel CLI
         run: npm i -g vercel@50.34.3
@@ -106,7 +108,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -129,7 +131,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -152,7 +154,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -197,7 +199,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
 
       - run: npm ci
@@ -368,7 +370,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -442,7 +444,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -550,7 +552,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -649,7 +651,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -878,7 +880,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -924,7 +926,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
 

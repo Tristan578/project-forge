@@ -1,6 +1,9 @@
 {
   "name": "@spawnforge/docs",
   "private": true,
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "dev": "tsx scripts/generate-mcp-docs.ts && next dev -p 3001",
     "build": "tsx scripts/generate-mcp-docs.ts && next build",
@@ -24,7 +27,7 @@
     "@testing-library/jest-dom": "^6",
     "@testing-library/react": "^16",
     "@testing-library/user-event": "^14",
-    "@types/node": "^20",
+    "@types/node": "^25",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "tsx": "^4",

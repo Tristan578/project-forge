@@ -15,12 +15,6 @@ updates:
         update-types:
           - minor
           - patch
-    ignore:
-      # portless >=0.13.1 requires Node >=24; this repo targets Node 20
-      # (.nvmrc, engines ">=20 <25", all CI node-version: 20). Allow 0.13.0
-      # (engines ">=20") but block the Node-24-only line until we adopt Node 24.
-      - dependency-name: "portless"
-        versions: [">=0.13.1"]
 
   # npm dependencies (mcp-server)
   - package-ecosystem: npm

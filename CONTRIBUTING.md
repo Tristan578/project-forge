@@ -13,7 +13,7 @@ Resolves: PF-420
 | Rust (stable) | stable | [rustup.rs](https://rustup.rs/) |
 | wasm32 target | — | `rustup target add wasm32-unknown-unknown` |
 | wasm-bindgen-cli | **0.2.108 exactly** | `cargo install wasm-bindgen-cli --version 0.2.108` |
-| Node.js | 20+ | [nodejs.org](https://nodejs.org/) |
+| Node.js | 24 | [nodejs.org](https://nodejs.org/) |
 | Bash or PowerShell | — | macOS/Linux have Bash; Windows uses PowerShell |
 
 The wasm-bindgen-cli version is pinned and must match `Cargo.lock`. Using a different version will produce a binary mismatch error at runtime.

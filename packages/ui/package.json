@@ -2,6 +2,9 @@
   "name": "@spawnforge/ui",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=24 <25"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

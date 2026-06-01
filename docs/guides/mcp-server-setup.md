@@ -4,7 +4,7 @@ Connect your AI agent to SpawnForge's MCP server to programmatically create and 
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 24
 - npm or yarn
 - A running SpawnForge editor instance at `http://localhost:3000` (the MCP server connects to it via WebSocket)
 
