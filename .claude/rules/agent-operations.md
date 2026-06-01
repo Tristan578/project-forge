@@ -289,14 +289,27 @@ bash .claude/hooks/__tests__/reject-incomplete-review.test.sh
 # All hook test suites
 for t in .claude/hooks/__tests__/*.test.sh; do echo "== $t =="; bash "$t" || break; done
 
-# Lint every hook + test (zero findings required, same bar as web lint)
-shellcheck .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
+# Lint the review-loop hooks this gate owns — zero findings required, and the CI
+# `hook-tests` job (.github/workflows/ci.yml) runs exactly this. Newly added or
+# edited hooks MUST be shellcheck-clean.
+shellcheck \
+  .claude/hooks/reject-incomplete-review.sh \
+  .claude/hooks/review-quality-gate.sh \
+  .claude/hooks/__tests__/reject-incomplete-review.test.sh \
+  .claude/hooks/__tests__/review-quality-gate.test.sh
+
+# Linting the WHOLE tree still surfaces ~10 pre-existing findings across 8 older
+# hooks (tracked in #8676). Scope shellcheck to the files you touched until that
+# cleanup lands rather than treating the legacy debt as a regression:
+#   shellcheck .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
 ```
 
 Each suite is a self-contained bash script that exits non-zero if any case fails
 (no bats dependency — bats is not installed). See
 `.claude/hooks/__tests__/reject-incomplete-review.test.sh` as the canonical
-pattern.
+pattern. CI runs every `*.test.sh` under `.claude/hooks/__tests__/` via the
+path-gated `hook-tests` job whenever `.claude/hooks/**` changes, so a regression
+in a hook's exit-code contract fails the PR instead of silently shipping.
 
 ### Writing a hook test
 
