@@ -346,6 +346,12 @@ describe('deductTokens', () => {
     if (!result.success) {
       expect(result.error).toBe('INSUFFICIENT_TOKENS');
     }
+
+    // Each of the 4 attempts (initial + 3 retries) issues EXACTLY ONE atomic CTE
+    // statement — not a separate UPDATE + INSERT. This pins the single-statement
+    // contract per attempt: a regression back to two writes per attempt would make
+    // this 8, not 4 (PF-839).
+    expect(mockNeonSql).toHaveBeenCalledTimes(4);
   });
 
   it('handles negative tokenCost as free operation', async () => {
@@ -445,6 +451,35 @@ describe('deductTokens', () => {
     expect(metadataArg).toBeDefined();
     const parsed = JSON.parse(metadataArg as string);
     expect(parsed._split).toEqual({ monthly: 10, addon: 20 });
+  });
+
+  it('propagates a CTE failure to the caller without charging the user (PF-839)', async () => {
+    const { deductTokens } = await import('../service');
+
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 100,
+      monthlyTokensUsed: 10,
+      addonTokens: 50,
+      billingCycleStart: null,
+    }]);
+
+    // The single atomic CTE throws mid-execution. Because the balance UPDATE and
+    // the usage INSERT are ONE statement, the failure rolls both back: the user is
+    // not charged, no usageId is fabricated, and the error surfaces to the caller
+    // (the pre-fix two-statement path could commit the UPDATE then crash on the
+    // INSERT, charging without a record).
+    mockNeonSql.mockRejectedValueOnce(new Error('connection reset'));
+
+    await expect(deductTokens('user-1', 'texture_generation', 30)).rejects.toThrow(
+      'connection reset'
+    );
+
+    // Exactly one statement was attempted — there is no separate write that could
+    // have partially committed.
+    expect(mockNeonSql).toHaveBeenCalledTimes(1);
+    // No post-deduction balance read happened: the function threw before returning
+    // success, so it never reached getTokenBalance.
+    expect(mockLimit).toHaveBeenCalledTimes(1);
   });
 });
 
