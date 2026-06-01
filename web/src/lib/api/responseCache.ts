@@ -296,7 +296,8 @@ export async function cachedGenerate<T>(
   const ttlMs = ttlSeconds * 1000;
 
   const promise = executeFn();
-  inFlight.set(key, { promise });
+  const entry: InFlightEntry<T> = { promise };
+  inFlight.set(key, entry);
 
   try {
     const result = await promise;
@@ -312,7 +313,12 @@ export async function cachedGenerate<T>(
 
     return { result, cached: false };
   } finally {
-    inFlight.delete(key);
+    // Identity-guarded cleanup: only remove the entry THIS call registered. The
+    // failure-isolation fall-through above lets multiple joiners run their own
+    // attempts on the same key concurrently, so a later attempt may have already
+    // overwritten inFlight[key]. A blind delete would evict that live sibling
+    // entry and break dedup for requests arriving in the gap before it settles.
+    if (inFlight.get(key) === entry) inFlight.delete(key);
   }
 }
 

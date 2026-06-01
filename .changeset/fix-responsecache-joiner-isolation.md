@@ -17,3 +17,8 @@ independent attempt. Because the failed originator already releases any tokens i
 deducted, a joiner only pays when its own attempt succeeds. The userId-in-key
 invariant that keeps dedup same-user-only is now documented next to the in-flight
 logic and locked by a guard test.
+
+In-flight cleanup is now identity-guarded: because multiple joiners can run their
+own attempts on the same key concurrently, a settling caller only deletes the
+in-flight entry it actually registered. A blind delete would evict a live sibling
+entry and break dedup for requests arriving before it settles.
