@@ -13,11 +13,13 @@ jobs:
     name: Require Changeset
     runs-on: ubuntu-latest
     steps:
-      - name: Skip if label present or Version Packages PR
+      - name: Skip for label, Version Packages, or non-npm Dependabot PR
         id: skip
         env:
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          ACTOR: ${{ github.event.pull_request.user.login }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           # Bypass for "skip changeset" label
           if echo "$LABELS" | grep -q '"skip changeset"'; then
@@ -30,6 +32,24 @@ jobs:
           if [[ "$PR_TITLE" == "chore: version packages"* ]]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "Changeset check bypassed — Version Packages PR."
+            exit 0
+          fi
+          # Bypass for Dependabot PRs in ecosystems that are NOT npm-versioned:
+          # cargo crates (compiled into the WASM engine) and pinned GitHub
+          # Actions. A changeset is structurally inapplicable to these —
+          # .changeset/config.json only version-manages the npm workspace
+          # packages (web, @spawnforge/ui, mcp-server, root). npm bumps
+          # (dependabot/npm_and_yarn/*) are deliberately NOT matched, so a
+          # user-facing web / @spawnforge/ui / mcp-server runtime bump still
+          # needs a changeset or the explicit 'skip changeset' label. Uses the
+          # same actor-gating idiom as pr-workitem-check.yml's Dependabot
+          # exemption, but narrower in scope: that job skips ALL Dependabot PRs
+          # (actor-only), whereas this skips only the non-npm ecosystems (by
+          # branch prefix), so npm bumps still reach the gate.
+          if [[ "$ACTOR" == "dependabot[bot]" ]] && \
+             [[ "$HEAD_REF" == dependabot/cargo/* || "$HEAD_REF" == dependabot/github_actions/* ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Changeset check bypassed — Dependabot non-npm ecosystem (cargo/github-actions); no npm package to version."
             exit 0
           fi
           echo "skip=false" >> "$GITHUB_OUTPUT"

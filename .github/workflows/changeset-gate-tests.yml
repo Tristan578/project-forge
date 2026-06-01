@@ -1,0 +1,30 @@
+name: Changeset Gate Tests
+
+# Exercises the inline "skip" decision of changeset-check.yml via its co-located
+# bash suite. The decision logic must stay inline in the gate workflow (it runs
+# before checkout), so the test extracts the real `run:` block and runs it — this
+# job guards that contract against silent drift. Standalone (like the gate it
+# tests), path-gated so it only runs when the gate or its test changes; it is not
+# part of ci.yml's ci-success aggregate.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/changeset-check.yml'
+      - '.github/workflows/changeset-gate-tests.yml'
+      - 'scripts/__tests__/changeset-skip-decision.test.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  skip-decision:
+    name: Changeset Skip Decision
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Shellcheck the suite
+        run: shellcheck scripts/__tests__/changeset-skip-decision.test.sh
+      - name: Run skip-decision suite
+        run: bash scripts/__tests__/changeset-skip-decision.test.sh
