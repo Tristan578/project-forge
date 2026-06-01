@@ -230,9 +230,7 @@ describe('deductTokens', () => {
       billingCycleStart: null,
     }]);
 
-    // neonSql UPDATE RETURNING (atomic deduction)
-    mockNeonSqlResults.push([{ id: 'user-1' }]);
-    // neonSql INSERT RETURNING (usage log)
+    // Single atomic CTE: UPDATE users (gated) + INSERT token_usage RETURNING id (PF-839).
     mockNeonSqlResults.push([{ id: 'usage-123' }]);
 
     // getTokenBalance call after deduction
@@ -262,9 +260,7 @@ describe('deductTokens', () => {
       billingCycleStart: null,
     }]);
 
-    // neonSql UPDATE RETURNING (atomic deduction)
-    mockNeonSqlResults.push([{ id: 'user-1' }]);
-    // neonSql INSERT RETURNING (usage log)
+    // Single atomic CTE: UPDATE users (gated) + INSERT token_usage RETURNING id (PF-839).
     mockNeonSqlResults.push([{ id: 'usage-456' }]);
 
     // getTokenBalance after
@@ -294,9 +290,7 @@ describe('deductTokens', () => {
       billingCycleStart: null,
     }]);
 
-    // neonSql UPDATE RETURNING (atomic deduction)
-    mockNeonSqlResults.push([{ id: 'user-1' }]);
-    // neonSql INSERT RETURNING (usage log)
+    // Single atomic CTE: UPDATE users (gated) + INSERT token_usage RETURNING id (PF-839).
     mockNeonSqlResults.push([{ id: 'usage-789' }]);
 
     // getTokenBalance after
@@ -352,6 +346,12 @@ describe('deductTokens', () => {
     if (!result.success) {
       expect(result.error).toBe('INSUFFICIENT_TOKENS');
     }
+
+    // Each of the 4 attempts (initial + 3 retries) issues EXACTLY ONE atomic CTE
+    // statement — not a separate UPDATE + INSERT. This pins the single-statement
+    // contract per attempt: a regression back to two writes per attempt would make
+    // this 8, not 4 (PF-839).
+    expect(mockNeonSql).toHaveBeenCalledTimes(4);
   });
 
   it('handles negative tokenCost as free operation', async () => {
@@ -370,6 +370,116 @@ describe('deductTokens', () => {
     if (result.success) {
       expect(result.usageId).toBe('free');
     }
+  });
+
+  it('performs the balance deduction and usage insert in a single atomic CTE (PF-839)', async () => {
+    const { deductTokens } = await import('../service');
+
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 100,
+      monthlyTokensUsed: 10,
+      addonTokens: 50,
+      billingCycleStart: null,
+    }]);
+
+    // ONE neonSql statement: the combined CTE returns the usage row id.
+    mockNeonSqlResults.push([{ id: 'usage-atomic' }]);
+
+    // getTokenBalance after
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 100,
+      monthlyTokensUsed: 40,
+      addonTokens: 50,
+      billingCycleStart: null,
+    }]);
+
+    const result = await deductTokens('user-1', 'texture_generation', 30);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.usageId).toBe('usage-atomic');
+    }
+
+    // Exactly ONE statement — the balance UPDATE and the usage INSERT are a single
+    // atomic write (not two separate statements that can partially commit).
+    expect(mockNeonSql).toHaveBeenCalledTimes(1);
+
+    const sql = (mockNeonSql.mock.calls[0][0] as TemplateStringsArray).join(' ');
+    // Balance change + usage row gated together in one CTE.
+    expect(sql).toContain('UPDATE users');
+    expect(sql).toContain('INSERT INTO token_usage');
+    expect(sql).toContain('EXISTS (SELECT 1 FROM upd)');
+    // The race-protection WHERE guard is preserved inside the atomic statement.
+    expect(sql).toContain('(monthly_tokens - monthly_tokens_used) >=');
+
+    // The usage id is returned by the SAME statement that changed the balance.
+    const values = mockNeonSql.mock.calls[0].slice(1);
+    expect(values).toContain('texture_generation');
+  });
+
+  it('persists _split metadata in the same atomic statement for mixed source (PF-839)', async () => {
+    const { deductTokens } = await import('../service');
+
+    // 10 monthly remaining, need 30 → mixed (10 monthly + 20 addon)
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 50,
+      monthlyTokensUsed: 40,
+      addonTokens: 100,
+      billingCycleStart: null,
+    }]);
+
+    mockNeonSqlResults.push([{ id: 'usage-mixed' }]);
+
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 50,
+      monthlyTokensUsed: 50,
+      addonTokens: 80,
+      billingCycleStart: null,
+    }]);
+
+    const result = await deductTokens('user-1', 'texture_generation', 30);
+
+    expect(result.success).toBe(true);
+    expect(mockNeonSql).toHaveBeenCalledTimes(1);
+
+    // The metadata JSON interpolated into the single statement carries the pool
+    // split, so the audit metadata is written atomically with the balance change.
+    const values = mockNeonSql.mock.calls[0].slice(1) as unknown[];
+    const metadataArg = values.find(
+      (v): v is string => typeof v === 'string' && v.includes('_split')
+    );
+    expect(metadataArg).toBeDefined();
+    const parsed = JSON.parse(metadataArg as string);
+    expect(parsed._split).toEqual({ monthly: 10, addon: 20 });
+  });
+
+  it('propagates a CTE failure to the caller without charging the user (PF-839)', async () => {
+    const { deductTokens } = await import('../service');
+
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 100,
+      monthlyTokensUsed: 10,
+      addonTokens: 50,
+      billingCycleStart: null,
+    }]);
+
+    // The single atomic CTE throws mid-execution. Because the balance UPDATE and
+    // the usage INSERT are ONE statement, the failure rolls both back: the user is
+    // not charged, no usageId is fabricated, and the error surfaces to the caller
+    // (the pre-fix two-statement path could commit the UPDATE then crash on the
+    // INSERT, charging without a record).
+    mockNeonSql.mockRejectedValueOnce(new Error('connection reset'));
+
+    await expect(deductTokens('user-1', 'texture_generation', 30)).rejects.toThrow(
+      'connection reset'
+    );
+
+    // Exactly one statement was attempted — there is no separate write that could
+    // have partially committed.
+    expect(mockNeonSql).toHaveBeenCalledTimes(1);
+    // No post-deduction balance read happened: the function threw before returning
+    // success, so it never reached getTokenBalance.
+    expect(mockLimit).toHaveBeenCalledTimes(1);
   });
 });
 

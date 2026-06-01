@@ -113,39 +113,51 @@ export async function deductTokens(
     source = 'addon';
   }
 
-  // Atomic deduction via UPDATE...WHERE...RETURNING (PF-996).
-  // The UPDATE's WHERE guards prevent the race condition (only succeeds if
-  // balance hasn't changed). We need the RETURNING result to check success,
-  // so this runs as a standalone statement (not in a transaction).
+  // Atomic deduction + usage record in a single CTE statement (PF-839).
   //
-  // The usage INSERT runs separately after. If it fails, the deduction still
-  // stands — worst case is a missing usage record (recoverable via admin
-  // tooling). This is acceptable because the UPDATE's WHERE guard is the
-  // critical atomicity point for financial correctness.
+  // The balance UPDATE and the usage INSERT are one statement, so they commit
+  // or roll back together: a user is never charged without a token_usage row,
+  // and deductTokens always returns the usageId that the refund-on-failure path
+  // (createGenerationHandler) acts on. The UPDATE's WHERE guards remain the
+  // race-protection point (only deduct if the balance is still sufficient); the
+  // INSERT is gated on EXISTS (SELECT 1 FROM upd) so it runs only when the
+  // guarded UPDATE actually matched a row. A single statement is atomic in
+  // Postgres, so an INSERT failure rolls back the UPDATE too — no charge without
+  // a record. This mirrors creditAddonTokens' atomic single-CTE pattern (PF-996
+  // moved the deduction into the WHERE-guarded UPDATE; PF-839 folds the usage
+  // INSERT into the same atomic statement).
   const neonSql = getNeonSql();
   const now = new Date().toISOString();
   // Always store the pool split so refundTokens/refundTokenAmount can
-  // proportionally credit back both pools for mixed-source deductions.
+  // proportionally credit back both pools for mixed-source deductions. Written
+  // atomically with the balance change via the CTE below.
   const enrichedMetadata = {
     ...(metadata ?? {}),
     _split: { monthly: monthlyDeduct, addon: addonDeduct },
   };
   const metadataJson = JSON.stringify(enrichedMetadata);
-  const updateRows = await queryWithResilience(() =>
+  const usageRows = await queryWithResilience(() =>
     neonSql`
-      UPDATE users
-      SET monthly_tokens_used = monthly_tokens_used + ${monthlyDeduct},
-          addon_tokens = addon_tokens - ${addonDeduct},
-          updated_at = ${now}
-      WHERE id = ${userId}
-        AND (monthly_tokens - monthly_tokens_used) >= ${monthlyDeduct}
-        AND addon_tokens >= ${addonDeduct}
+      WITH upd AS (
+        UPDATE users
+        SET monthly_tokens_used = monthly_tokens_used + ${monthlyDeduct},
+            addon_tokens = addon_tokens - ${addonDeduct},
+            updated_at = ${now}
+        WHERE id = ${userId}
+          AND (monthly_tokens - monthly_tokens_used) >= ${monthlyDeduct}
+          AND addon_tokens >= ${addonDeduct}
+        RETURNING id
+      )
+      INSERT INTO token_usage (user_id, operation, tokens, source, provider, metadata)
+      SELECT ${userId}, ${operation}, ${tokenCost}, ${source}, ${provider ?? null}, ${metadataJson}::jsonb
+      WHERE EXISTS (SELECT 1 FROM upd)
       RETURNING id
     `
   );
 
-  if (updateRows.length === 0) {
-    // Race condition: balance changed between read and update. Retry up to 3 times.
+  if (usageRows.length === 0) {
+    // The guarded UPDATE matched no row (balance changed between read and write),
+    // so the gated INSERT was skipped too — nothing was charged. Retry up to 3 times.
     if (_retryCount >= 3) {
       return {
         success: false,
@@ -157,19 +169,9 @@ export async function deductTokens(
     return deductTokens(userId, operation, tokenCost, provider, metadata, _retryCount + 1);
   }
 
-  // Log usage — if this fails, the deduction already committed (acceptable:
-  // user lost tokens without a usage record, but this is extremely rare and
-  // recoverable via admin tooling). We don't wrap in a transaction because
-  // the UPDATE's WHERE guard is the critical atomicity point.
-  const usageResult = await queryWithResilience(() =>
-    neonSql`
-      INSERT INTO token_usage (user_id, operation, tokens, source, provider, metadata)
-      VALUES (${userId}, ${operation}, ${tokenCost}, ${source}, ${provider ?? null}, ${metadataJson}::jsonb)
-      RETURNING id
-    `
-  );
-
-  const usageId = (usageResult[0] as { id: string }).id;
+  // The usageId comes from the SAME atomic statement that changed the balance,
+  // so a successful deduction always yields a refundable usage record.
+  const usageId = (usageRows[0] as { id: string }).id;
   const remaining = await getTokenBalance(userId);
 
   return {
