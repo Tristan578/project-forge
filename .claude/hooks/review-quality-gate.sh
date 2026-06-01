@@ -21,8 +21,11 @@
 set -euo pipefail
 
 INPUT=$(cat)
-AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // "unknown"' 2>/dev/null)
-OUTPUT=$(echo "$INPUT" | jq -r '.output // ""' 2>/dev/null)
+# Fail safe on malformed / non-JSON input: a jq parse error must not propagate
+# an undefined exit code through `set -e` — default to a non-reviewer/empty
+# payload so the gate allows the stop rather than aborting on unparseable input.
+AGENT_TYPE=$(printf '%s' "$INPUT" | jq -r '.agent_type // "unknown"' 2>/dev/null || echo "unknown")
+OUTPUT=$(printf '%s' "$INPUT" | jq -r '.output // ""' 2>/dev/null || echo "")
 
 # Only enforce on reviewer/guardian agents — non-reviewers don't produce verdicts
 if ! echo "$AGENT_TYPE" | grep -qiE "reviewer|guardian"; then
