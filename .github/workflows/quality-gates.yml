@@ -267,9 +267,21 @@ jobs:
       # in ~seconds on the host toolchain — far faster than a WASM build, so they
       # gate the expensive steps below and fail fast on a regression. The WASM
       # target cannot run these (no test harness on wasm32-unknown-unknown).
+      #
+      # bevy_winit is enabled unconditionally in engine/Cargo.toml (the WASM app
+      # needs it for the browser canvas). On wasm32 winit uses its web backend,
+      # but compiling for the host Linux runner requires an explicit windowing
+      # backend feature or winit fails its platform gate ("not supported by
+      # winit"). We enable bevy/x11 for the native build only — purely to satisfy
+      # winit's compile-time platform gate. No apt deps are needed: with bevy/x11
+      # the engine's Linux graph pulls only dlopen-based crates (x11-dl,
+      # xkbcommon-dl, ash) plus pure-Rust x11rb — nothing links a C library at
+      # build time (verified via `cargo tree --target x86_64-unknown-linux-gnu`).
+      # The headless ECS tests never open a window/renderer, so the runtime
+      # dlopen paths are never exercised either.
       - name: Run native engine unit tests
         working-directory: engine
-        run: cargo test --lib
+        run: cargo test --lib --features bevy/x11
 
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.108
