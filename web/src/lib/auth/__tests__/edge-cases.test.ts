@@ -219,10 +219,11 @@ describe('deductTokens — concurrent token deductions', () => {
 
   it('deducts from monthly tokens when sufficient', async () => {
     mockDbSelect.mockResolvedValue([makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0 })]);
-    // neonSql tagged-template calls: first = UPDATE RETURNING, second = INSERT RETURNING
-    mockNeonSql
-      .mockResolvedValueOnce([{ id: 'user-1' }])      // UPDATE ... RETURNING id
-      .mockResolvedValueOnce([{ id: 'usage-uuid-1' }]); // INSERT ... RETURNING id
+    // Single atomic CTE (PF-839): WITH upd AS (UPDATE users ... RETURNING id)
+    // INSERT INTO token_usage ... WHERE EXISTS (SELECT 1 FROM upd) RETURNING id.
+    // One neonSql tagged-template call per attempt, returning the token_usage row
+    // whose id becomes the usageId the refund-on-failure path acts on.
+    mockNeonSql.mockResolvedValueOnce([{ id: 'usage-uuid-1' }]);
     // getTokenBalance after deduction reads via Drizzle select
     mockDbSelect.mockResolvedValueOnce([makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0 })]);
     mockDbSelect.mockResolvedValueOnce([makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 100, addonTokens: 0 })]);
