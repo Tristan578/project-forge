@@ -6,12 +6,26 @@
 #   3. Actionable findings (not just a summary)
 #
 # Exit code 2 = block (sends the reviewer back to complete the review).
+#
+# DIVERGENCE FROM reject-incomplete-review.sh (intentional — do not "unify"):
+# This runs on the *Stop* event, where `.output` is the reviewer's COMPLETE
+# output, so it can safely demand a verdict + file ref + actionable verb and
+# block hard when any is missing. Its SubagentStop sibling
+# (reject-incomplete-review.sh) sees only a short terse "tail" of the run, not
+# the full review, so it deliberately does the opposite — it errs toward
+# allowing the stop and only blocks on a substantive-but-verdict-less body, to
+# avoid an infinite re-activation loop. The terse-tail hardening lives there,
+# NOT here; this gate needs no length/JSON heuristics because its payload is
+# always the real thing.
 
 set -euo pipefail
 
 INPUT=$(cat)
-AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // "unknown"' 2>/dev/null)
-OUTPUT=$(echo "$INPUT" | jq -r '.output // ""' 2>/dev/null)
+# Fail safe on malformed / non-JSON input: a jq parse error must not propagate
+# an undefined exit code through `set -e` — default to a non-reviewer/empty
+# payload so the gate allows the stop rather than aborting on unparseable input.
+AGENT_TYPE=$(printf '%s' "$INPUT" | jq -r '.agent_type // "unknown"' 2>/dev/null || echo "unknown")
+OUTPUT=$(printf '%s' "$INPUT" | jq -r '.output // ""' 2>/dev/null || echo "")
 
 # Only enforce on reviewer/guardian agents — non-reviewers don't produce verdicts
 if ! echo "$AGENT_TYPE" | grep -qiE "reviewer|guardian"; then
@@ -34,8 +48,10 @@ VERDICT=$(echo "$OUTPUT" | grep -oiE '\bPASS\b|\bFAIL\b' | tail -1 | tr '[:lower
 
 # On FAIL, verify there are actionable findings
 if [ "$VERDICT" = "FAIL" ]; then
-  # Check for file references (e.g. src/lib/foo.ts, engine/src/bridge.rs)
-  if ! echo "$OUTPUT" | grep -qE '[a-zA-Z0-9_/-]+\.(ts|tsx|rs|sh|json|md|py|js|jsx)'; then
+  # Check for file references (e.g. src/lib/foo.ts, engine/src/bridge.rs,
+  # .github/workflows/ci.yml, engine/Cargo.toml — CI/infra/Rust reviews cite
+  # config files, so yml/yaml/toml count as actionable references too).
+  if ! echo "$OUTPUT" | grep -qE '[a-zA-Z0-9_/-]+\.(ts|tsx|rs|sh|json|md|py|js|jsx|yml|yaml|toml)'; then
     echo "REVIEW INCOMPLETE: FAIL verdict requires at least one file reference."
     echo ""
     echo "Specify the exact file(s) affected by each finding."

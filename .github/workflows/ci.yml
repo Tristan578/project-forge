@@ -31,6 +31,7 @@ jobs:
       needs-ci: ${{ steps.changes.outputs.ci }}
       needs-docs: ${{ steps.changes.outputs.docs }}
       needs-design: ${{ steps.changes.outputs.design }}
+      needs-hooks: ${{ steps.changes.outputs.hooks }}
       needs-any-code: ${{ steps.changes.outputs.any-code }}
     steps:
       - uses: actions/checkout@v6
@@ -45,7 +46,7 @@ jobs:
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
-          web=false; engine=false; mcp=false; ci=false; docs=false; design=false
+          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false
 
           echo "$CHANGED" | grep -q '^web/' && web=true
           echo "$CHANGED" | grep -q '^engine/' && engine=true
@@ -53,24 +54,32 @@ jobs:
           echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
           echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && docs=true
           echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
+          # Claude Code hook scripts + their self-contained bash test suites.
+          # Kept OUT of `ci` and any-code on purpose: a hook change must trigger
+          # ONLY the lightweight hook-tests job, never the heavy quality-gates
+          # fan-out (lint/typecheck/test-web/test-mcp/build-wasm).
+          echo "$CHANGED" | grep -qE '^\.claude/hooks/' && hooks=true
 
           any_code=false
           if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] || [ "$design" = "true" ]; then
             any_code=true
           fi
 
-          echo "web=$web" >> "$GITHUB_OUTPUT"
-          echo "engine=$engine" >> "$GITHUB_OUTPUT"
-          echo "mcp=$mcp" >> "$GITHUB_OUTPUT"
-          echo "ci=$ci" >> "$GITHUB_OUTPUT"
-          echo "docs=$docs" >> "$GITHUB_OUTPUT"
-          echo "design=$design" >> "$GITHUB_OUTPUT"
-          echo "any-code=$any_code" >> "$GITHUB_OUTPUT"
+          {
+            echo "web=$web"
+            echo "engine=$engine"
+            echo "mcp=$mcp"
+            echo "ci=$ci"
+            echo "docs=$docs"
+            echo "design=$design"
+            echo "hooks=$hooks"
+            echo "any-code=$any_code"
+          } >> "$GITHUB_OUTPUT"
 
           echo "Changed paths detected:"
-          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design any-code=$any_code"
-          if [ "$any_code" = "false" ]; then
-            echo "No code changes — downstream jobs will be skipped"
+          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks any-code=$any_code"
+          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ]; then
+            echo "No relevant changes — downstream jobs will be skipped"
           fi
 
   # ---- Quality Gates (reusable workflow shared with CD) ----
@@ -209,6 +218,53 @@ jobs:
 
       - name: Build Storybook
         run: cd apps/design && npx storybook build -o storybook-static
+
+  # ---- Hook Tests ----
+  # Runs when .claude/hooks/** changed. Executes the self-contained bash test
+  # suites that guard the reviewer-loop hooks (reject-incomplete-review.sh and
+  # review-quality-gate.sh), so a regression in their exit-code contract is
+  # caught in CI instead of silently looping or letting incomplete reviews
+  # through. Gated on its own `hooks` path output (NOT any-code) so hook-only
+  # PRs pay only this ~30s gate, never the full quality-gates fan-out.
+  hook-tests:
+    name: Hook Tests
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-hooks == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run hook test suites
+        run: |
+          # jq + shellcheck are preinstalled on ubuntu-latest runners.
+          shopt -s nullglob
+          suites=(.claude/hooks/__tests__/*.test.sh)
+          if [ ${#suites[@]} -eq 0 ]; then
+            echo "::error::No hook test suites found under .claude/hooks/__tests__/"
+            exit 1
+          fi
+          rc=0
+          for suite in "${suites[@]}"; do
+            echo "::group::$suite"
+            bash "$suite" || rc=1
+            echo "::endgroup::"
+          done
+          exit "$rc"
+
+      - name: Shellcheck the hooks owned by this change
+        run: |
+          # Scope shellcheck to the hardened review hooks + their tests only.
+          # The wider .claude/hooks/ tree carries pre-existing findings tracked
+          # separately (see .claude/rules/agent-operations.md §12) — linting all
+          # of it here would fail this gate on unrelated, untouched debt.
+          shellcheck \
+            .claude/hooks/reject-incomplete-review.sh \
+            .claude/hooks/review-quality-gate.sh \
+            .claude/hooks/__tests__/reject-incomplete-review.test.sh \
+            .claude/hooks/__tests__/review-quality-gate.test.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without
@@ -410,7 +466,9 @@ jobs:
       - run: npm ci
 
       - name: Download blob reports
-        uses: actions/download-artifact@v8
+        # Must match the upload-artifact major version used for blob-report-*
+        # above (@v4) — mixing artifact action majors is a documented gotcha.
+        uses: actions/download-artifact@v4
         with:
           path: web/all-blob-reports
           pattern: blob-report-*
@@ -451,6 +509,7 @@ jobs:
       - build-nextjs
       - docs-internal-gate
       - design-internal-gate
+      - hook-tests
       - test-e2e-ui
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -465,7 +524,9 @@ jobs:
           failed=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key' needs.json)
           if [ -n "$failed" ]; then
             echo "::error::Required CI gate(s) failed or were cancelled:"
-            echo "$failed" | sed 's/^/  - /'
+            while IFS= read -r line; do
+              echo "  - $line"
+            done <<< "$failed"
             exit 1
           fi
           echo "All required gates passed (or were correctly skipped via path filter)."
