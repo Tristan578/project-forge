@@ -119,7 +119,17 @@ export const tokenUsage = pgTable(
     metadata: jsonb('metadata'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('idx_token_usage_user_date').on(table.userId, table.createdAt)]
+  (table) => [
+    index('idx_token_usage_user_date').on(table.userId, table.createdAt),
+    // NOTE: The real DB constraint is a UNIQUE partial index over
+    // (user_id, operation, (metadata->>'refundedUsageId')) created CONCURRENTLY in
+    // migration 0005_token_usage_refund_idempotent_index_concurrent.sql (enforced
+    // only when operation IN ('refund','partial_refund')). It makes refundTokens /
+    // refundTokenAmount idempotent under concurrency via ON CONFLICT DO NOTHING.
+    // Drizzle can't model WHERE predicates or jsonb-expression columns on an index,
+    // so this schema-only placeholder uses a distinct name to avoid db:push diffs.
+    index('idx_token_usage_refund_idempotent_schema').on(table.userId, table.operation),
+  ]
 );
 
 export const tokenPurchases = pgTable(

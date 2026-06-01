@@ -96,7 +96,9 @@ export async function reserveTokenBudget(
  * Release unused tokens after pipeline completes or cancels.
  *
  * Calculates (reserved - actualUsed) and refunds the difference.
- * Uses refundTokenAmount() which is idempotent via the CTE pattern.
+ * Uses refundTokenAmount() with a reservationId, so the refund is idempotent: its
+ * INSERT is guarded by ON CONFLICT DO NOTHING against the UNIQUE partial index
+ * uq_token_usage_refund_idempotent (#8662), crediting at most once even on retry.
  */
 export async function releaseUnusedBudget(
   userId: string,

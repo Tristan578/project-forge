@@ -185,6 +185,19 @@ export interface RefundResult {
   refunded: boolean;
 }
 
+/**
+ * Fully reverse the deduction recorded by a single usage record (all items failed).
+ *
+ * Idempotency boundary: the refund INSERT is keyed on
+ * `(user_id, operation, refundedUsageId)` with `operation = 'refund'`. This is
+ * INTENTIONALLY scoped per-operation — a `'refund'` (this function) and a
+ * `'partial_refund'` (`refundTokenAmount`) for the same `usageId` are independently
+ * idempotent and would each credit once. Callers MUST treat full and partial refunds
+ * for a given `usageId` as mutually exclusive (see `app/api/generate/voice/batch/route.ts`,
+ * the only caller of both, which dispatches them in an if/else). Calling both for the same
+ * `usageId` would double-credit; the database does not prevent it by design, because
+ * the two operations restore different amounts to potentially different pools.
+ */
 export async function refundTokens(userId: string, usageId: string): Promise<RefundResult> {
   if (usageId === 'free') return { refunded: false };
 
@@ -199,11 +212,16 @@ export async function refundTokens(userId: string, usageId: string): Promise<Ref
 
   if (!record) return { refunded: false };
 
-  // 2. Atomic idempotent refund using a CTE.
-  // The CTE INSERT uses WHERE NOT EXISTS to check-and-insert in one step.
-  // The UPDATE's WHERE depends on the CTE's RETURNING output (not a table scan),
-  // so it only runs when the INSERT actually inserted a row — preventing
-  // double-crediting when a pre-existing refund row matches.
+  // 2. Atomic idempotent refund using a CTE (#8662).
+  // The CTE INSERT is guarded by ON CONFLICT DO NOTHING against the UNIQUE partial
+  // index uq_token_usage_refund_idempotent (built CONCURRENTLY in drizzle/0005;
+  // pre-existing duplicates removed first in drizzle/0004), keyed on
+  // (user_id, operation, refundedUsageId). Unlike the previous WHERE NOT EXISTS —
+  // a READ COMMITTED snapshot check, NOT a lock — the unique index serialises two
+  // concurrent refunds for the same usageId: the first INSERT commits, the second
+  // hits the conflict and inserts nothing. The UPDATE's WHERE depends on the CTE's
+  // RETURNING output, so it only credits when the INSERT actually inserted a row —
+  // making the whole statement exactly-once even under concurrency.
   const neonSql = getNeonSql();
   const refundMetadata = JSON.stringify({ refundedUsageId: usageId });
 
@@ -227,13 +245,10 @@ export async function refundTokens(userId: string, usageId: string): Promise<Ref
     neonSql`
       WITH ins AS (
         INSERT INTO token_usage (user_id, operation, tokens, source, provider, metadata)
-        SELECT ${userId}::uuid, 'refund', ${-record.tokens}, ${record.source}, ${record.provider}, ${refundMetadata}::jsonb
-        WHERE NOT EXISTS (
-          SELECT 1 FROM token_usage
-          WHERE user_id = ${userId}::uuid
-            AND operation = 'refund'
-            AND metadata->>'refundedUsageId' = ${usageId}
-        )
+        VALUES (${userId}::uuid, 'refund', ${-record.tokens}, ${record.source}, ${record.provider}, ${refundMetadata}::jsonb)
+        ON CONFLICT (user_id, operation, (metadata->>'refundedUsageId'))
+          WHERE operation IN ('refund','partial_refund')
+          DO NOTHING
         RETURNING id
       )
       UPDATE users
@@ -261,6 +276,13 @@ export async function refundTokens(userId: string, usageId: string): Promise<Ref
  *
  * For a complete operation failure (all items failed), prefer `refundTokens`
  * which reverses the exact deduction amount from the usage record.
+ *
+ * Idempotency boundary: when `usageId` is provided, the refund INSERT is keyed on
+ * `(user_id, operation, refundedUsageId)` with `operation = 'partial_refund'`. This
+ * is a DIFFERENT key namespace from `refundTokens` (`operation = 'refund'`), so the
+ * two are independently idempotent. A given `usageId` must be refunded by exactly one
+ * of the two functions, never both (see `refundTokens` for the rationale). Without a
+ * `usageId` the refund is NOT idempotent — the caller must guarantee at-most-once.
  */
 export async function refundTokenAmount(
   userId: string,
@@ -296,10 +318,12 @@ export async function refundTokenAmount(
     }
   }
 
-  // Atomic idempotent refund using a CTE.
-  // When usageId is provided, the CTE INSERT uses WHERE NOT EXISTS to prevent
-  // duplicate partial refunds. The UPDATE depends on the CTE's RETURNING output
-  // so it only runs when the INSERT actually inserted — preventing double-credit.
+  // Atomic idempotent refund using a CTE (#8662).
+  // When usageId is provided, the CTE INSERT is guarded by ON CONFLICT DO NOTHING
+  // against uq_token_usage_refund_idempotent (built CONCURRENTLY in drizzle/0005) —
+  // a lock-backed unique index, NOT the previous WHERE NOT EXISTS snapshot check, so two concurrent
+  // partial refunds for one usageId credit at most once. The UPDATE depends on the
+  // CTE's RETURNING output so it only runs when the INSERT actually inserted.
   // When no usageId, the INSERT always succeeds (no idempotency needed).
   const neonSql = getNeonSql();
   const metadata = JSON.stringify({
@@ -321,38 +345,43 @@ export async function refundTokenAmount(
   }
 
   if (usageId) {
-    // Idempotent path: CTE INSERT + UPDATE in a single statement
+    // Idempotent path: CTE INSERT + UPDATE in a single statement.
+    // The ${userId}::uuid casts are load-bearing, not cosmetic: token_usage.user_id
+    // and users.id are uuid columns, but neon-http binds ${userId} as a text
+    // parameter. Without the cast the INSERT value is text, so Postgres cannot match
+    // it to the uuid-typed partial unique index uq_token_usage_refund_idempotent and
+    // the ON CONFLICT arbiter inference fails at runtime ("no unique or exclusion
+    // constraint matching the ON CONFLICT specification"). refundTokens casts the same
+    // way; keep the two in lockstep.
     await queryWithResilience(() =>
       neonSql`
         WITH ins AS (
           INSERT INTO token_usage (user_id, operation, tokens, source, metadata)
-          SELECT ${userId}, 'partial_refund', ${-tokens}, ${source}, ${metadata}::jsonb
-          WHERE NOT EXISTS (
-            SELECT 1 FROM token_usage
-            WHERE user_id = ${userId}
-              AND operation = 'partial_refund'
-              AND metadata->>'refundedUsageId' = ${usageId}
-          )
+          VALUES (${userId}::uuid, 'partial_refund', ${-tokens}, ${source}, ${metadata}::jsonb)
+          ON CONFLICT (user_id, operation, (metadata->>'refundedUsageId'))
+            WHERE operation IN ('refund','partial_refund')
+            DO NOTHING
           RETURNING id
         )
         UPDATE users
         SET ${setClause}, updated_at = NOW()
-        WHERE id = ${userId}
+        WHERE id = ${userId}::uuid
           AND EXISTS (SELECT 1 FROM ins)
       `
     );
   } else {
-    // No usageId: no idempotency guard needed, use transaction for atomicity
+    // No usageId: no idempotency guard needed, use transaction for atomicity.
+    // Cast ${userId}::uuid here too so both refund paths bind userId identically.
     await queryWithResilience(() =>
       neonSql.transaction([
         neonSql`
           INSERT INTO token_usage (user_id, operation, tokens, source, metadata)
-          VALUES (${userId}, 'partial_refund', ${-tokens}, ${source}, ${metadata}::jsonb)
+          VALUES (${userId}::uuid, 'partial_refund', ${-tokens}, ${source}, ${metadata}::jsonb)
         `,
         neonSql`
           UPDATE users
           SET ${setClause}, updated_at = NOW()
-          WHERE id = ${userId}
+          WHERE id = ${userId}::uuid
         `,
       ])
     );

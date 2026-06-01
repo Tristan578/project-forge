@@ -521,6 +521,62 @@ describe('refundTokens', () => {
 
     await expect(refundTokens('user-1', 'usage-err')).rejects.toThrow('connection reset');
   });
+
+  // #8662: WHERE NOT EXISTS is a READ COMMITTED snapshot check, not a lock — two
+  // concurrent refunds for the same usageId can each miss the other's uncommitted
+  // INSERT and both credit. The fix mirrors creditAddonTokens: a UNIQUE partial
+  // index + ON CONFLICT DO NOTHING so the DB serialises the second insert to a
+  // no-op. The service-level guarantee is that it emits the conflict-based
+  // mechanism (the index, added in drizzle/0004, enforces the actual exactly-once).
+  it('uses ON CONFLICT DO NOTHING (not a snapshot NOT EXISTS) for idempotency', async () => {
+    const { refundTokens } = await import('../service');
+
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{
+      id: 'usage-cc', userId: 'user-1', tokens: 30, source: 'addon', provider: 'anthropic',
+    }]);
+    mockNeonSqlResults.push([]); // setClause fragment
+    mockNeonSqlResults.push([{ id: 'user-1' }]); // CTE RETURNING
+
+    await refundTokens('user-1', 'usage-cc');
+
+    // calls[0] = setClause fragment, calls[1] = main CTE statement
+    const sql = (mockNeonSql.mock.calls[1][0] as TemplateStringsArray).join(' ');
+    expect(sql).toContain('ON CONFLICT');
+    expect(sql).toContain('DO NOTHING');
+    expect(sql).not.toContain('NOT EXISTS');
+    // Boundary (architect #8662): this function owns the 'refund' operation namespace,
+    // distinct from refundTokenAmount's 'partial_refund'. And userId is cast ::uuid so
+    // the ON CONFLICT arbiter resolves against the uuid-typed partial unique index.
+    expect(sql).toContain("'refund'");
+    expect(sql).toContain('::uuid');
+  });
+
+  it('AC1: two refunds for the same usageId credit exactly once (loser hits ON CONFLICT)', async () => {
+    const { refundTokens } = await import('../service');
+    const record = {
+      id: 'usage-once', userId: 'user-1', tokens: 25, source: 'addon', provider: 'anthropic',
+    };
+
+    // First refund: INSERT wins → CTE RETURNING a row → credited.
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([record]);
+    mockNeonSqlResults.push([]); // setClause fragment
+    mockNeonSqlResults.push([{ id: 'user-1' }]); // CTE inserted + credited
+    const first = await refundTokens('user-1', 'usage-once');
+
+    // Second refund: same usageId. The unique index forces ON CONFLICT → INSERT is
+    // a no-op → EXISTS(ins) false → UPDATE skipped → CTE RETURNING empty.
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([record]);
+    mockNeonSqlResults.push([]); // setClause fragment
+    mockNeonSqlResults.push([]); // CTE conflict → no credit
+    const second = await refundTokens('user-1', 'usage-once');
+
+    expect(first.refunded).toBe(true);
+    expect(second.refunded).toBe(false);
+    expect([first, second].filter((r) => r.refunded)).toHaveLength(1);
+  });
 });
 
 describe('refundTokenAmount', () => {
@@ -632,6 +688,74 @@ describe('refundTokenAmount', () => {
     const setClauseCall = mockNeonSql.mock.calls[0];
     const setClauseValues = setClauseCall.slice(1);
     expect(setClauseValues).toContain(40); // full amount to addon
+  });
+
+  // #8662: the partial_refund idempotent path shares the same WHERE NOT EXISTS race
+  // as refundTokens. Its INSERT must also use ON CONFLICT DO NOTHING so concurrent
+  // partial refunds for one usageId credit at most once (backed by the same
+  // drizzle/0004 unique index, which covers operation IN ('refund','partial_refund')).
+  it('idempotent path uses ON CONFLICT DO NOTHING (not a snapshot NOT EXISTS)', async () => {
+    const { refundTokenAmount } = await import('../service');
+
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{ source: 'addon', tokens: 50, metadata: null }]);
+    mockNeonSqlResults.push([]); // setClause fragment
+    mockNeonSqlResults.push([]); // CTE statement
+
+    await refundTokenAmount('user-1', 50, 'partial failure', 'usage-partial-cc');
+
+    // calls[0] = setClause fragment, calls[1] = idempotent CTE statement
+    const sql = (mockNeonSql.mock.calls[1][0] as TemplateStringsArray).join(' ');
+    expect(sql).toContain('ON CONFLICT');
+    expect(sql).toContain('DO NOTHING');
+    expect(sql).not.toContain('NOT EXISTS');
+  });
+
+  // #8662: token_usage.user_id and users.id are uuid columns, but neon-http binds
+  // ${userId} as text. The idempotent CTE INSERT must cast ${userId}::uuid so its
+  // value matches the uuid-typed partial unique index — otherwise the ON CONFLICT
+  // arbiter inference fails at runtime ("no unique or exclusion constraint matching
+  // the ON CONFLICT specification"). This regression test pins the cast that
+  // refundTokens already carries; without it the security guard silently breaks in
+  // production while mock-based tests stay green.
+  it('idempotent path casts userId to uuid so the ON CONFLICT arbiter resolves', async () => {
+    const { refundTokenAmount } = await import('../service');
+
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{ source: 'addon', tokens: 50, metadata: null }]);
+    mockNeonSqlResults.push([]); // setClause fragment
+    mockNeonSqlResults.push([]); // CTE statement
+
+    await refundTokenAmount('user-1', 50, 'partial failure', 'usage-cast');
+
+    const sql = (mockNeonSql.mock.calls[1][0] as TemplateStringsArray).join(' ');
+    // Both the INSERT value and the UPDATE predicate bind userId as uuid.
+    expect(sql).toContain('::uuid');
+    expect(sql).toContain('ON CONFLICT');
+  });
+
+  // #8662 boundary (architect finding): refundTokens writes operation='refund' and
+  // refundTokenAmount writes operation='partial_refund'. The idempotency key includes
+  // operation, so these two share a usageId but live in DIFFERENT key namespaces and
+  // each credits once. This is intentional (they restore different amounts/pools);
+  // callers must treat them as mutually exclusive per usageId. This test pins the
+  // operation literal so a refactor can't silently collapse the two namespaces (which
+  // would change refund semantics) without a failing test.
+  it('writes a distinct operation namespace (partial_refund) from refundTokens', async () => {
+    const { refundTokenAmount } = await import('../service');
+
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{ source: 'addon', tokens: 50, metadata: null }]);
+    mockNeonSqlResults.push([]); // setClause fragment
+    mockNeonSqlResults.push([]); // CTE statement
+
+    await refundTokenAmount('user-1', 50, 'partial failure', 'usage-boundary');
+
+    const sql = (mockNeonSql.mock.calls[1][0] as TemplateStringsArray).join(' ');
+    // partial_refund is this function's operation; the conflict predicate spans both
+    // refund operations, but the inserted row is keyed to partial_refund specifically.
+    expect(sql).toContain("'partial_refund'");
+    expect(sql).toContain("operation IN ('refund','partial_refund')");
   });
 });
 
