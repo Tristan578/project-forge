@@ -59,6 +59,8 @@ jobs:
     environment:
       name: production
     steps:
+      # checkout is required so setup-node can read .node-version from the workspace
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
