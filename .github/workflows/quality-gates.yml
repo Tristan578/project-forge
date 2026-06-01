@@ -262,6 +262,15 @@ jobs:
         with:
           workspaces: engine -> target
 
+      # Native host-target unit tests. These exercise ECS schedule/world access
+      # (e.g. win_condition_tests, which assert no B0002 access conflict) and run
+      # in ~seconds on the host toolchain — far faster than a WASM build, so they
+      # gate the expensive steps below and fail fast on a regression. The WASM
+      # target cannot run these (no test harness on wasm32-unknown-unknown).
+      - name: Run native engine unit tests
+        working-directory: engine
+        run: cargo test --lib
+
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.108
 

@@ -1183,7 +1183,6 @@ fn system_spawner(
 /// Follower system: move entity toward target
 fn system_follower(
     time: Res<Time>,
-    _runtime: Option<Res<GameComponentRuntime>>,
     mut queries: ParamSet<(
         Query<(&EntityId, &GameComponents, &mut Transform)>,
         Query<(&EntityId, &Transform)>,
@@ -1384,8 +1383,9 @@ fn system_dialogue_trigger(
 #[cfg(test)]
 mod win_condition_tests {
     use super::{
-        system_win_condition, GameComponentData, GameComponentRuntime, GameComponents,
-        WinConditionData, WinConditionType,
+        system_follower, system_projectile, system_spawner, system_win_condition,
+        GameComponentData, GameComponentRuntime, GameComponents, WinConditionData,
+        WinConditionType,
     };
     use crate::core::entity_id::EntityId;
     use bevy::prelude::*;
@@ -1395,6 +1395,16 @@ mod win_condition_tests {
         gc.components.push(GameComponentData::WinCondition(WinConditionData {
             condition_type: WinConditionType::Score,
             target_score: Some(score_target),
+            target_entity_id: None,
+        }));
+        (EntityId::new("player"), gc, Transform::default())
+    }
+
+    fn collect_all_entity() -> (EntityId, GameComponents, Transform) {
+        let mut gc = GameComponents::default();
+        gc.components.push(GameComponentData::WinCondition(WinConditionData {
+            condition_type: WinConditionType::CollectAll,
+            target_score: None,
             target_entity_id: None,
         }));
         (EntityId::new("player"), gc, Transform::default())
@@ -1487,5 +1497,93 @@ mod win_condition_tests {
         let runtime = world.resource::<GameComponentRuntime>();
         assert!(!runtime.game_won, "game should not be won below the score target");
         assert!(runtime.pending_events.is_empty(), "no events expected when not won");
+    }
+
+    /// CollectAll wins once every collectible is gathered (`collected >= total`,
+    /// `total > 0`). Exercises the previously-untested `CollectAll` branch so the
+    /// merged single-`ResMut` binding is proven across more than the `Score` path.
+    #[test]
+    fn win_condition_collect_all_emits_when_all_collected() {
+        let mut world = World::new();
+        world.insert_resource(GameComponentRuntime {
+            total_collectibles: 3,
+            collected_count: 3,
+            ..Default::default()
+        });
+        world.spawn(collect_all_entity());
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_win_condition);
+        schedule.run(&mut world);
+
+        let runtime = world.resource::<GameComponentRuntime>();
+        assert!(runtime.game_won, "collectAll met (3/3) but game_won was not set");
+        assert!(
+            runtime.pending_events.iter().any(|e| e.event_name == "game_win"),
+            "collectAll met but no game_win event was emitted",
+        );
+    }
+
+    /// A partial collection (2 of 3) must not win — guards the `collected >= total`
+    /// comparison against an off-by-one regression.
+    #[test]
+    fn win_condition_collect_all_not_met_when_partial() {
+        let mut world = World::new();
+        world.insert_resource(GameComponentRuntime {
+            total_collectibles: 3,
+            collected_count: 2,
+            ..Default::default()
+        });
+        world.spawn(collect_all_entity());
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_win_condition);
+        schedule.run(&mut world);
+
+        let runtime = world.resource::<GameComponentRuntime>();
+        assert!(!runtime.game_won, "collectAll partial (2/3) must not win");
+        assert!(runtime.pending_events.is_empty(), "no events expected when not won");
+    }
+
+    /// CollectAll with zero collectibles defined must NOT auto-win (the
+    /// `total_collectibles > 0` guard). A scene with no collectibles configured
+    /// would otherwise win instantly on Play.
+    #[test]
+    fn win_condition_collect_all_not_met_when_none_defined() {
+        let mut world = World::new();
+        world.insert_resource(GameComponentRuntime::default()); // total = collected = 0
+        world.spawn(collect_all_entity());
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_win_condition);
+        schedule.run(&mut world);
+
+        let runtime = world.resource::<GameComponentRuntime>();
+        assert!(!runtime.game_won, "no collectibles defined must not auto-win");
+    }
+
+    /// The real `PlaySystemSet` registration tuple — `system_spawner`,
+    /// `system_follower`, `system_projectile`, `system_win_condition` — must build
+    /// and run as a single schedule without an access-conflict panic. This guards
+    /// the inter-system registration boundary that the isolated single-system
+    /// tests cannot: a within-system `Res`+`ResMut` regression in ANY of these
+    /// (the #8661 bug class) aborts schedule init here, so the whole Play-mode
+    /// group is covered, not just `system_win_condition` in isolation.
+    #[test]
+    fn play_systemset_group_schedules_without_conflict() {
+        let mut world = World::new();
+        world.insert_resource(Time::<()>::default());
+        world.insert_resource(GameComponentRuntime::default());
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((
+            system_spawner,
+            system_follower,
+            system_projectile,
+            system_win_condition,
+        ));
+        schedule.run(&mut world);
     }
 }
