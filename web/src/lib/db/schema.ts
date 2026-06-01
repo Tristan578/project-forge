@@ -16,6 +16,7 @@ import {
   index,
   pgEnum,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { DEFAULT_API_KEY_SCOPES } from '@/lib/config/scopes';
 
 // --- Enums ---
@@ -119,7 +120,20 @@ export const tokenUsage = pgTable(
     metadata: jsonb('metadata'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('idx_token_usage_user_date').on(table.userId, table.createdAt)]
+  (table) => [
+    index('idx_token_usage_user_date').on(table.userId, table.createdAt),
+    // #8662: makes refundTokens / refundTokenAmount idempotent under concurrency.
+    // A UNIQUE partial index over (user_id, operation, refundedUsageId) lets the
+    // refund INSERTs use ON CONFLICT DO NOTHING so two concurrent refunds for the
+    // same usageId credit at most once. Keyed per-operation so a 'refund' and a
+    // 'partial_refund' for one usageId remain independently idempotent (matching
+    // the prior NOT EXISTS guards). Partial predicate keeps the index tiny (refunds
+    // are a small subset of token_usage) and excludes the NULL refundedUsageId rows
+    // of no-usageId partial refunds, which are intentionally non-idempotent.
+    uniqueIndex('uq_token_usage_refund_idempotent')
+      .on(table.userId, table.operation, sql`(${table.metadata}->>'refundedUsageId')`)
+      .where(sql`${table.operation} IN ('refund','partial_refund')`),
+  ]
 );
 
 export const tokenPurchases = pgTable(

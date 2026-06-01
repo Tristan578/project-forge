@@ -29,6 +29,13 @@
       "when": 1780185600000,
       "tag": "0003_token_purchases_idempotent_index",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780272000000,
+      "tag": "0004_token_usage_refund_idempotent_index",
+      "breakpoints": true
     }
   ]
 }

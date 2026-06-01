@@ -521,6 +521,57 @@ describe('refundTokens', () => {
 
     await expect(refundTokens('user-1', 'usage-err')).rejects.toThrow('connection reset');
   });
+
+  // #8662: WHERE NOT EXISTS is a READ COMMITTED snapshot check, not a lock — two
+  // concurrent refunds for the same usageId can each miss the other's uncommitted
+  // INSERT and both credit. The fix mirrors creditAddonTokens: a UNIQUE partial
+  // index + ON CONFLICT DO NOTHING so the DB serialises the second insert to a
+  // no-op. The service-level guarantee is that it emits the conflict-based
+  // mechanism (the index, added in drizzle/0004, enforces the actual exactly-once).
+  it('uses ON CONFLICT DO NOTHING (not a snapshot NOT EXISTS) for idempotency', async () => {
+    const { refundTokens } = await import('../service');
+
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{
+      id: 'usage-cc', userId: 'user-1', tokens: 30, source: 'addon', provider: 'anthropic',
+    }]);
+    mockNeonSqlResults.push([]); // setClause fragment
+    mockNeonSqlResults.push([{ id: 'user-1' }]); // CTE RETURNING
+
+    await refundTokens('user-1', 'usage-cc');
+
+    // calls[0] = setClause fragment, calls[1] = main CTE statement
+    const sql = (mockNeonSql.mock.calls[1][0] as TemplateStringsArray).join(' ');
+    expect(sql).toContain('ON CONFLICT');
+    expect(sql).toContain('DO NOTHING');
+    expect(sql).not.toContain('NOT EXISTS');
+  });
+
+  it('AC1: two refunds for the same usageId credit exactly once (loser hits ON CONFLICT)', async () => {
+    const { refundTokens } = await import('../service');
+    const record = {
+      id: 'usage-once', userId: 'user-1', tokens: 25, source: 'addon', provider: 'anthropic',
+    };
+
+    // First refund: INSERT wins → CTE RETURNING a row → credited.
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([record]);
+    mockNeonSqlResults.push([]); // setClause fragment
+    mockNeonSqlResults.push([{ id: 'user-1' }]); // CTE inserted + credited
+    const first = await refundTokens('user-1', 'usage-once');
+
+    // Second refund: same usageId. The unique index forces ON CONFLICT → INSERT is
+    // a no-op → EXISTS(ins) false → UPDATE skipped → CTE RETURNING empty.
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([record]);
+    mockNeonSqlResults.push([]); // setClause fragment
+    mockNeonSqlResults.push([]); // CTE conflict → no credit
+    const second = await refundTokens('user-1', 'usage-once');
+
+    expect(first.refunded).toBe(true);
+    expect(second.refunded).toBe(false);
+    expect([first, second].filter((r) => r.refunded)).toHaveLength(1);
+  });
 });
 
 describe('refundTokenAmount', () => {
@@ -632,6 +683,27 @@ describe('refundTokenAmount', () => {
     const setClauseCall = mockNeonSql.mock.calls[0];
     const setClauseValues = setClauseCall.slice(1);
     expect(setClauseValues).toContain(40); // full amount to addon
+  });
+
+  // #8662: the partial_refund idempotent path shares the same WHERE NOT EXISTS race
+  // as refundTokens. Its INSERT must also use ON CONFLICT DO NOTHING so concurrent
+  // partial refunds for one usageId credit at most once (backed by the same
+  // drizzle/0004 unique index, which covers operation IN ('refund','partial_refund')).
+  it('idempotent path uses ON CONFLICT DO NOTHING (not a snapshot NOT EXISTS)', async () => {
+    const { refundTokenAmount } = await import('../service');
+
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{ source: 'addon', tokens: 50, metadata: null }]);
+    mockNeonSqlResults.push([]); // setClause fragment
+    mockNeonSqlResults.push([]); // CTE statement
+
+    await refundTokenAmount('user-1', 50, 'partial failure', 'usage-partial-cc');
+
+    // calls[0] = setClause fragment, calls[1] = idempotent CTE statement
+    const sql = (mockNeonSql.mock.calls[1][0] as TemplateStringsArray).join(' ');
+    expect(sql).toContain('ON CONFLICT');
+    expect(sql).toContain('DO NOTHING');
+    expect(sql).not.toContain('NOT EXISTS');
   });
 });
 
