@@ -22,7 +22,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -35,18 +35,35 @@ const CANONICAL_MAJOR = 24;
 /** Canonical `engines.node` range string every workspace must declare. */
 const CANONICAL_ENGINES = '>=24 <25';
 
-/** Every workspace package.json that must declare `engines.node`. */
-const WORKSPACES = [
-  'package.json',
-  'web/package.json',
-  'mcp-server/package.json',
-  'apps/docs/package.json',
-  'apps/design/package.json',
-  'packages/ui/package.json',
-];
-
 function readRepoFile(rel: string): string {
   return readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+}
+
+/**
+ * Discover every npm workspace package.json the monorepo declares, derived from
+ * the root `package.json` `workspaces` field (this repo uses `dir/*` globs and
+ * literal dirs) plus the root package.json itself. Deriving instead of
+ * hardcoding means the guard self-heals: a workspace added later is checked
+ * automatically, closing the "new package escapes the engines check" gap.
+ */
+function discoverWorkspaces(): string[] {
+  const rootPkg = JSON.parse(readRepoFile('package.json')) as { workspaces?: string[] };
+  const dirs = new Set<string>(['.']); // root package.json always counts
+  for (const pattern of rootPkg.workspaces ?? []) {
+    if (pattern.endsWith('/*')) {
+      const parent = pattern.slice(0, -2);
+      const parentAbs = path.join(REPO_ROOT, parent);
+      if (!existsSync(parentAbs)) continue;
+      for (const entry of readdirSync(parentAbs, { withFileTypes: true })) {
+        if (entry.isDirectory() && existsSync(path.join(parentAbs, entry.name, 'package.json'))) {
+          dirs.add(`${parent}/${entry.name}`);
+        }
+      }
+    } else if (existsSync(path.join(REPO_ROOT, pattern, 'package.json'))) {
+      dirs.add(pattern);
+    }
+  }
+  return [...dirs].map((d) => (d === '.' ? 'package.json' : `${d}/package.json`));
 }
 
 function majorOf(versionish: string): number {
@@ -72,7 +89,22 @@ describe('Node version consistency (PF-841)', () => {
   });
 
   it('every workspace declares the canonical engines.node range', () => {
-    for (const ws of WORKSPACES) {
+    const workspaces = discoverWorkspaces();
+    // Floor: discovery must surface the known workspaces. Without this, a broken
+    // glob expansion returning an empty set would make the engines loop below
+    // pass vacuously. The completeness check itself is dynamic (any new
+    // workspace is picked up automatically); this floor only guards discovery.
+    expect(workspaces).toEqual(
+      expect.arrayContaining([
+        'package.json',
+        'web/package.json',
+        'mcp-server/package.json',
+        'apps/docs/package.json',
+        'apps/design/package.json',
+        'packages/ui/package.json',
+      ]),
+    );
+    for (const ws of workspaces) {
       const pkg = JSON.parse(readRepoFile(ws)) as { engines?: { node?: string } };
       expect(pkg.engines?.node, `${ws} must declare engines.node`).toBe(CANONICAL_ENGINES);
     }

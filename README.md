@@ -129,7 +129,7 @@ The MCP server and the visual editor share the same command interface — there 
 
 - [Rust](https://rustup.rs/) (stable) with the `wasm32-unknown-unknown` target
 - [wasm-bindgen-cli](https://rustwasm.github.io/wasm-bindgen/reference/cli.html)
-- [Node.js](https://nodejs.org/) 20-24
+- [Node.js](https://nodejs.org/) 24
 - Bash (macOS/Linux) or PowerShell (Windows) for build scripts
 
 ### Install the WASM target
