@@ -281,7 +281,7 @@ jobs:
   # breakage (a web/ or nested manifest bump without a relock) BEFORE it lands
   # on main, instead of after, when every `npm ci` is already broken. Shipped
   # twice this way (#8655, #8658 → #8683). Decision logic lives in
-  # scripts/check-lockfile-sync.sh (unit-tested by lockfile-sync-tests.yml).
+  # scripts/check-lockfile-sync.sh (unit-tested by the lockfile-sync-tests job below).
   #
   # Gated on its own `deps` output (NOT any-code) so a manifest-only PR pays
   # only this ~30s gate. Wired into ci-success below so it is a REQUIRED check
@@ -306,6 +306,34 @@ jobs:
 
       - name: Check root lockfile is in sync with the manifests
         run: bash scripts/check-lockfile-sync.sh
+
+  # ---- Lockfile Sync Tests ----
+  # Unit-tests the lockfile gate's OWN decision logic (scripts/check-lockfile-sync.sh)
+  # via its co-located bash suite, which injects a stub regenerate command
+  # ($LOCKFILE_REGEN_CMD) to exercise the in-sync / drift / regen-failure branches
+  # hermetically, AND structurally asserts the gate is wired into ci-success below.
+  # This rides ci-success as a REQUIRED check rather than living in a standalone
+  # advisory workflow: a standalone path-filtered suite can be left out of the
+  # required aggregate, which would let a PR that neuters the gate script merge
+  # green. Gated on `needs-ci` (fires on scripts/ and .github/workflows/ changes,
+  # see ci-gate), so it runs whenever the gate, its suite, or ci.yml itself move —
+  # exactly when an unwiring would happen — and skips cleanly otherwise.
+  lockfile-sync-tests:
+    name: Lockfile Sync Tests
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Shellcheck the gate and its suite
+        run: shellcheck scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh
+
+      - name: Run gate test suite
+        run: bash scripts/__tests__/check-lockfile-sync.test.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without
@@ -552,6 +580,7 @@ jobs:
       - design-internal-gate
       - hook-tests
       - lockfile-sync
+      - lockfile-sync-tests
       - test-e2e-ui
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -182,10 +182,36 @@ if [ -f "$CI_YML" ]; then
 
   # ci-success's needs: list is the required-check surface. Pull the block from
   # 'ci-success:' to its steps: and assert lockfile-sync is one of its needs.
-  if echo "$ci" | awk '/^  ci-success:/{f=1} f{print} /^    steps:/{if(f)exit}' | grep -q '      - lockfile-sync'; then
+  # Anchor each match to the whole list entry ($) so '- lockfile-sync' cannot be
+  # satisfied by the '- lockfile-sync-tests' entry (substring) and vice-versa.
+  cisuccess_needs="$(echo "$ci" | awk '/^  ci-success:/{f=1} f{print} /^    steps:/{if(f)exit}')"
+  if echo "$cisuccess_needs" | grep -qE '^      - lockfile-sync$'; then
     pass "ci-success requires the lockfile-sync job"
   else
     fail "lockfile-sync is not in ci-success needs — gate is not required"
+  fi
+
+  # The gate's OWN decision logic must be unit-tested by a REQUIRED check, not an
+  # advisory one. A standalone path-filtered workflow can be left out of ci-success
+  # (advisory), so a PR that neuters check-lockfile-sync.sh could merge even though
+  # the suite fails. Pin the self-tests as a ci.yml job that rides ci-success — the
+  # same pattern hook-tests uses — so unwiring the gate fails a REQUIRED check.
+  if echo "$ci" | grep -qE '^  lockfile-sync-tests:'; then
+    pass "ci.yml defines a lockfile-sync-tests job (gate self-tests are in the pipeline)"
+  else
+    fail "ci.yml has no lockfile-sync-tests job (gate self-tests are not in the required pipeline)"
+  fi
+
+  if echo "$ci" | grep -A16 '^  lockfile-sync-tests:' | grep -q 'check-lockfile-sync.test.sh'; then
+    pass "lockfile-sync-tests job runs the gate's bash suite"
+  else
+    fail "lockfile-sync-tests job does not run the gate bash suite"
+  fi
+
+  if echo "$cisuccess_needs" | grep -qE '^      - lockfile-sync-tests$'; then
+    pass "ci-success requires the lockfile-sync-tests job"
+  else
+    fail "lockfile-sync-tests is not in ci-success needs — gate self-tests are not required"
   fi
 else
   fail "ci.yml not found at $CI_YML"
