@@ -103,7 +103,7 @@ if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is n
 res="$(run_verify "$(mk true true skipped success success)")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "gate skipped while needs-deps=true fails (exit 1)"; else fail "tamper (gate) should exit 1, got $rc"; fi
-if echo "$out" | grep -q "lockfile-sync (" || echo "$out" | grep -qE "lockfile-sync \("; then pass "the unwired deps gate is named"; else fail "unwired deps gate not named"; fi
+if echo "$out" | grep -q "lockfile-sync ("; then pass "the unwired deps gate is named"; else fail "unwired deps gate not named"; fi
 
 # --- 7. Mixed legitimate skip: needs-deps=false (gate legit-skips) but --------
 #        needs-ci=true (tests must run, and do) → exit 0

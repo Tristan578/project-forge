@@ -222,6 +222,27 @@ if [ -f "$CI_YML" ]; then
     fail "ci.yml never invokes the gate script"
   fi
 
+  # SECURITY: $LOCKFILE_REGEN_CMD is a TEST-ONLY seam (the hermetic suite injects it
+  # via run_gate). It must NEVER appear in an EXECUTABLE line of the real lockfile-sync
+  # job. A PR that wired `env: LOCKFILE_REGEN_CMD: 'true'` into the job would make the
+  # gate `eval 'true'` — a no-op: it regenerates nothing, `git diff --quiet` passes, and
+  # the gate exits 0 "in sync" while real drift slips through. The ci-success anti-tamper
+  # cannot catch this (the job result is `success`, not `skipped`, so the
+  # skip-while-triggered check stays quiet). But a wiring PR edits ci.yml → needs-ci=true
+  # → runs THIS suite, so this assertion fails that required check at introduction time,
+  # closing the gap that otherwise leaves human review as the only defense.
+  #
+  # COMMENT-STRIP: the naive ls_block (job header → next job header) also captures the
+  # doc-comment block that PRECEDES the lockfile-sync-tests: header — and that prose
+  # legitimately names $LOCKFILE_REGEN_CMD ("injects a stub ..."). Strip full-comment
+  # lines first so the check keys on real YAML/shell, not documentation; an attacker's
+  # `env:` wiring is a non-comment line and is still caught.
+  if echo "$ls_block" | grep -v '^[[:space:]]*#' | grep -q 'LOCKFILE_REGEN_CMD'; then
+    fail "lockfile-sync job exposes the LOCKFILE_REGEN_CMD test seam in an executable line — gate can be no-op'd into a false pass"
+  else
+    pass "lockfile-sync job does not wire the LOCKFILE_REGEN_CMD test seam (gate cannot be bypassed via job env)"
+  fi
+
   # ci-success's needs: list is the required-check surface. Pull the block from
   # 'ci-success:' to its steps: and assert lockfile-sync is one of its needs.
   # Anchor each match to the whole list entry ($) so '- lockfile-sync' cannot be
@@ -324,6 +345,16 @@ if grep -qF "trap 'exit 143' TERM" "$SCRIPT"; then
   pass "gate installs a TERM handler so the EXIT trap fires on CI cancellation (Linux bash)"
 else
   fail "gate has no TERM handler — Linux bash won't run the EXIT trap on SIGTERM, leaking regen_log"
+fi
+
+# #3 — the matching INT (SIGINT / Ctrl-C) handler. The comment above and the gate
+# itself treat TERM and INT as a pair (both force the EXIT trap to run under Linux's
+# untrapped-signal semantics); assert INT too so a future edit cannot drop it while
+# the TERM assertion alone stays green. Mutation-provable like the TERM check.
+if grep -qF "trap 'exit 130' INT" "$SCRIPT"; then
+  pass "gate installs an INT handler so the EXIT trap fires on interactive cancellation"
+else
+  fail "gate has no INT handler — the EXIT trap won't fire on an untrapped SIGINT, leaking regen_log"
 fi
 
 # #4 — SECURITY invariant: the DEFAULT regeneration command runs with
