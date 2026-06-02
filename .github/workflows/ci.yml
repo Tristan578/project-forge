@@ -307,19 +307,25 @@ jobs:
       - name: Check root lockfile is in sync with the manifests
         run: bash scripts/check-lockfile-sync.sh
 
-  # ---- Lockfile Sync Tests ----
-  # Unit-tests the lockfile gate's OWN decision logic (scripts/check-lockfile-sync.sh)
-  # via its co-located bash suite, which injects a stub regenerate command
-  # ($LOCKFILE_REGEN_CMD) to exercise the in-sync / drift / regen-failure branches
-  # hermetically, AND structurally asserts the gate is wired into ci-success below.
-  # This rides ci-success as a REQUIRED check rather than living in a standalone
-  # advisory workflow: a standalone path-filtered suite can be left out of the
-  # required aggregate, which would let a PR that neuters the gate script merge
-  # green. Gated on `needs-ci` (fires on scripts/ and .github/workflows/ changes,
-  # see ci-gate), so it runs whenever the gate, its suite, or ci.yml itself move —
-  # exactly when an unwiring would happen — and skips cleanly otherwise.
+  # ---- CI Self-Defense Tests ----
+  # Unit-tests the decision logic of the repo's self-defending CI gates via
+  # their co-located bash suites:
+  #   * scripts/check-lockfile-sync.sh — the single-root lockfile-drift gate
+  #     (injects a stub $LOCKFILE_REGEN_CMD to exercise the in-sync / drift /
+  #     regen-failure branches hermetically) AND structurally asserts that gate
+  #     is wired into the required ci-success aggregate below.
+  #   * scripts/check-ci-success.sh — the ci-success verifier itself, including
+  #     its anti-tamper check that a self-defending gate may not be `skipped`
+  #     while its trigger fired (closes the one-line `if: false` unwiring vector).
+  # These ride ci-success as a REQUIRED check rather than a standalone advisory
+  # workflow: a standalone path-filtered suite can be left out of the required
+  # aggregate, which would let a PR that neuters a gate script merge green.
+  # Gated on `needs-ci` (fires on scripts/ and .github/workflows/ changes, see
+  # ci-gate), so it runs whenever a gate, its suite, or ci.yml itself moves —
+  # exactly when an unwiring would happen — and skips cleanly otherwise. The job
+  # id stays `lockfile-sync-tests` so the ci-success `needs:` wiring is stable.
   lockfile-sync-tests:
-    name: Lockfile Sync Tests
+    name: CI Self-Defense Tests
     needs: [ci-gate]
     if: ${{ needs.ci-gate.outputs.needs-ci == 'true' }}
     runs-on: ubuntu-latest
@@ -329,11 +335,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Shellcheck the gate and its suite
-        run: shellcheck scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh
+      - name: Shellcheck the gate scripts and their suites
+        run: |
+          shellcheck \
+            scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh \
+            scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh
 
-      - name: Run gate test suite
+      - name: Run lockfile gate test suite
         run: bash scripts/__tests__/check-lockfile-sync.test.sh
+
+      - name: Run ci-success verifier test suite
+        run: bash scripts/__tests__/check-ci-success.test.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without
@@ -587,17 +599,13 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@v6
+
+      # The verify logic lives in scripts/check-ci-success.sh (unit-tested by the
+      # lockfile-sync-tests job) so it can be exercised hermetically and so the
+      # anti-tamper check — a self-defending gate must not be `skipped` while its
+      # trigger fired — can't be silently reverted to a skip-tolerant inline jq.
       - name: Verify all required gates passed
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-        run: |
-          echo "$NEEDS_JSON" | tee needs.json
-          failed=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key' needs.json)
-          if [ -n "$failed" ]; then
-            echo "::error::Required CI gate(s) failed or were cancelled:"
-            while IFS= read -r line; do
-              echo "  - $line"
-            done <<< "$failed"
-            exit 1
-          fi
-          echo "All required gates passed (or were correctly skipped via path filter)."
+        run: bash scripts/check-ci-success.sh

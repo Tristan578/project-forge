@@ -161,11 +161,17 @@ if [ -f "$CI_YML" ]; then
   fi
 
   # The deps detector must match a package.json at ANY depth (apps/*, packages/*,
-  # web/, mcp-server/) — not just the root — so new workspaces are covered.
-  if echo "$ci" | grep -qE "package\\\\?\.json" && echo "$ci" | grep -q 'deps=true'; then
-    pass "ci-gate deps detection keys on package.json changes"
+  # web/, mcp-server/) — not just the root — AND the root lockfile. Assert against
+  # the LITERAL detection line (the one that sets deps=true), not the mere
+  # presence of the tokens somewhere in the file: 'package.json' and 'deps=true'
+  # both appear in dozens of unrelated places, so the old two-token check was a
+  # tautology that would still pass even if the detection regex were gutted.
+  deps_line="$(echo "$ci" | grep -F 'deps=true')"
+  if echo "$deps_line" | grep -qF '(^|/)package\.json$' \
+     && echo "$deps_line" | grep -qF '^package-lock\.json$'; then
+    pass "ci-gate deps detection regex keys on package.json (any depth) + root lockfile"
   else
-    fail "ci-gate does not set deps=true on package.json changes"
+    fail "ci-gate deps=true line does not key on package.json/lockfile changes"
   fi
 
   if echo "$ci" | grep -A12 '^  lockfile-sync:' | grep -q 'needs-deps'; then
@@ -202,16 +208,50 @@ if [ -f "$CI_YML" ]; then
     fail "ci.yml has no lockfile-sync-tests job (gate self-tests are not in the required pipeline)"
   fi
 
-  if echo "$ci" | grep -A16 '^  lockfile-sync-tests:' | grep -q 'check-lockfile-sync.test.sh'; then
-    pass "lockfile-sync-tests job runs the gate's bash suite"
+  # Extract the whole lockfile-sync-tests job block (header → next job header) so
+  # step assertions don't depend on a fixed grep -A window as steps are added.
+  lst_block="$(echo "$ci" | awk '/^  lockfile-sync-tests:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  lockfile-sync-tests:/{exit}')"
+
+  if echo "$lst_block" | grep -qF 'bash scripts/__tests__/check-lockfile-sync.test.sh'; then
+    pass "lockfile-sync-tests job runs the lockfile gate's bash suite"
   else
-    fail "lockfile-sync-tests job does not run the gate bash suite"
+    fail "lockfile-sync-tests job does not run the lockfile gate bash suite"
+  fi
+
+  # The self-tests job must be gated on a REAL trigger (needs-ci fires on scripts/
+  # and .github/workflows/ changes), not pinned to a constant. A future `if: false`
+  # would permanently skip the job; because ci-success tolerates skips, the LAST
+  # line of defense is the anti-tamper check in check-ci-success.sh (pinned by its
+  # own suite). Here we assert today's wiring keys on needs-ci.
+  if echo "$lst_block" | grep -qE 'needs-ci|needs\.ci-gate\.outputs'; then
+    pass "lockfile-sync-tests job is gated on needs-ci (a real path trigger, not a constant)"
+  else
+    fail "lockfile-sync-tests job is not gated on needs-ci"
+  fi
+
+  # The same job also runs the ci-success verifier's own suite — that is what pins
+  # the anti-tamper logic. Assert the run step is present so it can't be dropped.
+  if echo "$lst_block" | grep -qF 'bash scripts/__tests__/check-ci-success.test.sh'; then
+    pass "lockfile-sync-tests job also runs the ci-success verifier suite"
+  else
+    fail "lockfile-sync-tests job does not run the ci-success verifier suite"
   fi
 
   if echo "$cisuccess_needs" | grep -qE '^      - lockfile-sync-tests$'; then
     pass "ci-success requires the lockfile-sync-tests job"
   else
     fail "lockfile-sync-tests is not in ci-success needs — gate self-tests are not required"
+  fi
+
+  # The ci-success verify step must call the EXTRACTED, unit-tested verifier
+  # (check-ci-success.sh), not an inline jq. The script carries the anti-tamper
+  # check; a skip-tolerant inline jq would silently re-open the `if: false`
+  # unwiring vector. Pin the call site.
+  cisuccess_block="$(echo "$ci" | awk '/^  ci-success:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  ci-success:/{exit}')"
+  if echo "$cisuccess_block" | grep -qF 'bash scripts/check-ci-success.sh'; then
+    pass "ci-success runs the extracted, unit-tested verifier (check-ci-success.sh)"
+  else
+    fail "ci-success no longer calls check-ci-success.sh — anti-tamper logic may be bypassed"
   fi
 else
   fail "ci.yml not found at $CI_YML"
