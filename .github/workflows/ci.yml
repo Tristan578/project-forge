@@ -86,7 +86,7 @@ jobs:
 
           echo "Changed paths detected:"
           echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps any-code=$any_code"
-          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ]; then
+          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ]; then
             echo "No relevant changes — downstream jobs will be skipped"
           fi
 

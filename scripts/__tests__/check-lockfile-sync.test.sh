@@ -174,10 +174,29 @@ if [ -f "$CI_YML" ]; then
     fail "ci-gate deps=true line does not key on package.json/lockfile changes"
   fi
 
+  # The ci-gate "No relevant changes — downstream jobs will be skipped" diagnostic
+  # must account for `deps`. A manifest-only PR (e.g. a Dependabot web/ bump) sets
+  # any_code=false, hooks=false, but deps=true — the lockfile-sync gate DOES run.
+  # If the diagnostic's guard ignores deps it prints "downstream jobs will be
+  # skipped" on exactly the PRs the gate is meant to catch, a misleading log that
+  # invites a reader to assume nothing ran. Assert the guard keys on deps too. The
+  # `if:` precedes the echo, so pull the line before the message.
+  norel_if="$(echo "$ci" | awk '/No relevant changes — downstream jobs/{print prev} {prev=$0}')"
+  if echo "$norel_if" | grep -qF 'deps'; then
+    pass "ci-gate 'no relevant changes' diagnostic accounts for deps (manifest-only PRs)"
+  else
+    fail "ci-gate 'no relevant changes' guard ignores deps — mislabels manifest-only PRs as no-op"
+  fi
+
   # Extract the whole lockfile-sync job block (header → next 2-space job header).
-  # '/^  lockfile-sync:/' does NOT match 'lockfile-sync-tests:' (the char after
-  # 'lockfile-sync' there is '-', not ':'), so the block ends cleanly at the
-  # lockfile-sync-tests header that follows.
+  # The awk start-condition '/^  lockfile-sync:/' requires ':' immediately after
+  # 'lockfile-sync', so it fires ONLY on the exact '  lockfile-sync:' header — the
+  # later '  lockfile-sync-tests:' header (a '-' sits where the ':' would be) does
+  # NOT start a second block. The block then terminates at the exit guard, which
+  # fires on the first following 2-space job header that is NOT '  lockfile-sync:'
+  # — i.e. '  lockfile-sync-tests:'. (That header line is printed before the guard
+  # exits, so it is ls_block's last line; the lockfile-sync-tests job body — incl.
+  # its own if: — is not part of the block.)
   ls_block="$(echo "$ci" | awk '/^  lockfile-sync:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  lockfile-sync:/{exit}')"
 
   # Defense-in-depth against a constant-false unwiring. The job's `if:` MUST key
@@ -272,6 +291,67 @@ if [ -f "$CI_YML" ]; then
   fi
 else
   fail "ci.yml not found at $CI_YML"
+fi
+
+echo ""
+echo "=== gate script hardening (structural) ==="
+# These pin properties of check-lockfile-sync.sh that are NOT observable as a
+# portable runtime RED on this dev host, so we lock them structurally (each is
+# mutation-provable: gut the property in the script and the matching case fails).
+#
+# WHY STRUCTURAL, NOT A SIGNAL RACE (regen_log cleanup): the gate captures npm's
+# output to a mktemp file during a multi-second regeneration. If the job is
+# cancelled (CI sends SIGTERM) mid-regen, that tmpfile must still be removed.
+# macOS bash 3.2 (this host) DEFERS SIGTERM while waiting on a foreground child
+# and then runs the fail-branch cleanup, so the leak simply does not reproduce
+# here — only Linux bash 5.x (the CI runner), which does NOT run an EXIT trap on
+# an *untrapped* SIGTERM, leaks. A behavioural signal test would therefore pass
+# on macOS regardless of the fix (a fake green). We instead require the cleanup
+# to be wired as an EXIT trap PLUS an explicit TERM/INT handler (the handler's
+# `exit` is what makes the EXIT trap fire under Linux's signal semantics).
+
+# #3 — regen_log is cleaned via an EXIT trap, not only an explicit happy-path rm.
+if grep -Eq "trap .*rm -f .*regen_log.* EXIT" "$SCRIPT"; then
+  pass "gate cleans up regen_log via an EXIT trap (covers early-exit / signal paths)"
+else
+  fail "gate has no EXIT trap for regen_log — a signal/early-exit between mktemp and cleanup leaks it"
+fi
+
+# #3 — the TERM (and INT) handler that forces the EXIT trap to run under Linux
+# bash on CI cancellation. Without it the EXIT-only trap does NOT fire on an
+# untrapped SIGTERM on the CI runner, so the tmpfile leaks exactly when it matters.
+if grep -qF "trap 'exit 143' TERM" "$SCRIPT"; then
+  pass "gate installs a TERM handler so the EXIT trap fires on CI cancellation (Linux bash)"
+else
+  fail "gate has no TERM handler — Linux bash won't run the EXIT trap on SIGTERM, leaking regen_log"
+fi
+
+# #4 — SECURITY invariant: the DEFAULT regeneration command runs with
+# --ignore-scripts so a hostile package.json lifecycle script in a PR cannot
+# execute during CI lockfile regeneration. ($LOCKFILE_REGEN_CMD is a test-only
+# seam, never set in CI, so the default is what actually runs.)
+if grep -E '^(REGEN_CMD|BASE_REGEN)=' "$SCRIPT" | grep -q -- '--ignore-scripts'; then
+  pass "default regen command runs with --ignore-scripts (no PR lifecycle scripts in CI)"
+else
+  fail "default regen command is missing --ignore-scripts — a PR package.json script could run in CI"
+fi
+
+# #5 — the human remediation hint and the actual regen command single-source from
+# $BASE_REGEN, so the "Fix: run ..." line printed to a developer cannot drift from
+# the command the gate itself runs.
+if grep -qE '^BASE_REGEN=' "$SCRIPT"; then
+  pass "gate defines a single-sourced BASE_REGEN"
+else
+  fail "gate has no BASE_REGEN — remediation hint and regen command can drift apart"
+fi
+# SC2016: the single quotes are intentional — we assert the LITERAL token
+# '$BASE_REGEN' appears in the script source (i.e. the echo references the
+# variable rather than hardcoding the command), so it must NOT be expanded here.
+# shellcheck disable=SC2016
+if grep -A2 'Fix: from the repo root' "$SCRIPT" | grep -qF '$BASE_REGEN'; then
+  pass "remediation hint echoes \$BASE_REGEN (single-sourced, cannot drift)"
+else
+  fail "remediation hint hardcodes the command instead of \$BASE_REGEN"
 fi
 
 echo ""
