@@ -13,11 +13,12 @@
 #      one-line `if: false` slipped onto `lockfile-sync-tests` — in a PR that, by
 #      editing ci.yml, necessarily sets needs-ci=true — would skip the lockfile
 #      gate's self-tests while every required check stayed green. Requiring
-#      success-when-triggered closes that unwiring vector: the only remaining
-#      bypass needs BOTH the gate's `if:` disabled AND this script neutered in
-#      one PR (and that script edit re-fires needs-ci → the self-tests run and
-#      catch the neutering), which is visible coordination a human review must
-#      approve — not a one-line slip.
+#      success-when-triggered RAISES THE COST of that unwiring: a single `if:
+#      false` no longer suffices. This is defense-in-depth, NOT an airtight
+#      proof — a determined actor could still coordinate edits across the gate's
+#      `if:`, this script, and its suite in one PR. The ultimate backstop is
+#      human review of any ci.yml / scripts/ change; what automation closes here
+#      is the *silent, single-line* slip that no reviewer would notice.
 #
 # Unit-tested by scripts/__tests__/check-ci-success.test.sh (run in CI by the
 # lockfile-sync-tests job, gated on needs-ci so any edit here re-runs it).
@@ -32,6 +33,16 @@ fi
 needs_file="$(mktemp)"
 trap 'rm -f "$needs_file"' EXIT
 printf '%s' "$NEEDS_JSON" > "$needs_file"
+
+# Fail safe on malformed input. This script has no `set -e`, so a jq parse error
+# inside the $(...) queries below is swallowed — `failed` and the anti-tamper
+# lookups both come back empty and the verifier would fall through to "all
+# passed" (exit 0) on a non-empty but invalid blob. Reject invalid JSON up front
+# so a broken NEEDS_JSON can never read as a green CI.
+if ! jq empty "$needs_file" >/dev/null 2>&1; then
+  echo "::error::NEEDS_JSON is not valid JSON — cannot verify CI gates"
+  exit 1
+fi
 
 # 1. Hard failures (failure / cancelled). Legitimate path-filter skips pass.
 failed="$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key' "$needs_file")"

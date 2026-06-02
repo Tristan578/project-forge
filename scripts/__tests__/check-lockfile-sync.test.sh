@@ -174,10 +174,27 @@ if [ -f "$CI_YML" ]; then
     fail "ci-gate deps=true line does not key on package.json/lockfile changes"
   fi
 
-  if echo "$ci" | grep -A12 '^  lockfile-sync:' | grep -q 'needs-deps'; then
-    pass "lockfile-sync job is gated on needs-deps (skips when no manifest changed)"
+  # Extract the whole lockfile-sync job block (header → next 2-space job header).
+  # '/^  lockfile-sync:/' does NOT match 'lockfile-sync-tests:' (the char after
+  # 'lockfile-sync' there is '-', not ':'), so the block ends cleanly at the
+  # lockfile-sync-tests header that follows.
+  ls_block="$(echo "$ci" | awk '/^  lockfile-sync:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  lockfile-sync:/{exit}')"
+
+  # Defense-in-depth against a constant-false unwiring. The job's `if:` MUST key
+  # on `needs-deps == 'true'`. Why this matters as a SEPARATE check from the
+  # ci-success anti-tamper: the anti-tamper only fires when needs-deps=true AND
+  # the gate is skipped — it catches an `if: false` the moment a real drift PR
+  # (which changes a manifest → needs-deps=true) arrives, but NOT the PR that
+  # *introduces* the `if: false` if that PR touches no manifest (needs-deps=false
+  # → the gate legitimately skips → anti-tamper stays quiet). That introducing PR
+  # does edit ci.yml, though, so it sets needs-ci=true and runs THIS suite — and
+  # this assertion catches the constant-false at introduction time, closing the
+  # window the anti-tamper alone leaves open.
+  ls_if="$(echo "$ls_block" | grep -E '^[[:space:]]+if:')"
+  if echo "$ls_if" | grep -qF 'needs-deps' && echo "$ls_if" | grep -qF "== 'true'"; then
+    pass "lockfile-sync job if: keys on needs-deps == 'true' (a constant if:false is caught here)"
   else
-    fail "lockfile-sync job is not gated on needs-deps"
+    fail "lockfile-sync job if: is not gated on needs-deps == 'true' (possible constant-false unwiring)"
   fi
 
   if echo "$ci" | grep -q 'check-lockfile-sync.sh'; then

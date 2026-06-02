@@ -29,19 +29,30 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 
 [ -f "$SCRIPT" ] || { echo "verifier script not found: $SCRIPT"; exit 1; }
 
-# Build a toJSON(needs)-shaped object. Args:
+# Build a toJSON(needs)-shaped object mirroring the REAL ci-success `needs:` list
+# (all 10 jobs — see ci.yml), so a failure on ANY required gate is exercised, not
+# just the handful that used to be in the fixture. Jobs not parameterised default
+# to success. Args:
 #   $1 needs-ci   $2 needs-deps   $3 lockfile-sync.result
 #   $4 lockfile-sync-tests.result   $5 quality-gates.result (default success)
+#   $6 hook-tests.result (default success) — stands in for the other required
+#      gates so a case can fail a job that is neither lockfile job nor quality-gates.
 mk() {
-  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}"
+  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}"
   jq -nc \
-    --arg nci "$nci" --arg ndeps "$ndeps" --arg ls "$ls" --arg lst "$lst" --arg qg "$qg" '
+    --arg nci "$nci" --arg ndeps "$ndeps" --arg ls "$ls" --arg lst "$lst" \
+    --arg qg "$qg" --arg ht "$ht" '
     {
-      "ci-gate":             { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-any-code": "true" } },
-      "quality-gates":       { result: $qg },
-      "lockfile-sync":       { result: $ls },
-      "lockfile-sync-tests": { result: $lst },
-      "build-nextjs":        { result: "success" }
+      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-any-code": "true" } },
+      "quality-gates":        { result: $qg },
+      "command-parity":       { result: "success" },
+      "build-nextjs":         { result: "success" },
+      "docs-internal-gate":   { result: "success" },
+      "design-internal-gate": { result: "success" },
+      "hook-tests":           { result: $ht },
+      "lockfile-sync":        { result: $ls },
+      "lockfile-sync-tests":  { result: $lst },
+      "test-e2e-ui":          { result: "success" }
     }'
 }
 
@@ -105,6 +116,30 @@ res="$(run_verify "")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "empty NEEDS_JSON fails (exit 1)"; else fail "empty input should exit 1, got $rc"; fi
 if echo "$out" | grep -qi "empty"; then pass "empty input has a clear message"; else fail "empty-input message missing"; fi
+
+# --- 9. Malformed (non-empty) NEEDS_JSON → exit 1 (fail safe) -----------------
+# A non-empty but invalid JSON blob must NOT silently pass. The script has no
+# `set -e`, so a jq error inside $(...) is swallowed: `failed` and the
+# anti-tamper queries both come back empty and the verifier would fall through
+# to the success echo (exit 0) — inverting the fail-safe. Validate JSON up front.
+res="$(run_verify '{"malformed":')"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "malformed NEEDS_JSON fails (exit 1)"; else fail "malformed input should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "valid JSON"; then pass "malformed input has a clear message"; else fail "malformed-input message missing"; fi
+
+# --- 10. Garbage (non-JSON) NEEDS_JSON → exit 1 (fail safe) ------------------
+res="$(run_verify 'not json at all')"
+rc="${res%%|*}"
+if [ "$rc" = "1" ]; then pass "non-JSON NEEDS_JSON fails (exit 1)"; else fail "non-JSON input should exit 1, got $rc"; fi
+
+# --- 11. A required gate OTHER than quality-gates / the lockfile jobs fails ---
+# Guards against the verifier only noticing failures on the handful of jobs the
+# fixture used to model. hook-tests is one of the 10 real ci-success needs; a
+# failure there must be caught and named like any other.
+res="$(run_verify "$(mk true true success success success failure)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "an unrelated required gate failing fails (exit 1)"; else fail "hook-tests failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "hook-tests"; then pass "the failing unrelated gate is named"; else fail "failing unrelated gate not named"; fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
