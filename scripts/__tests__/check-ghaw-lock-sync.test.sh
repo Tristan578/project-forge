@@ -216,6 +216,33 @@ else
 fi
 rm -rf "$repo"
 
+# --- 7.5 Restore is SCOPED to the locks the compile touched — it must NOT revert
+#         an unrelated, pre-existing uncommitted edit elsewhere under
+#         .github/workflows/. -------------------------------------------------------
+# restore_tree now fires from the EXIT trap on EVERY path (so signal cancellation
+# can't leave the recompiled tree behind), INCLUDING the happy in-sync path. A
+# restore that did `git checkout -- .github/workflows/` wholesale would, on that
+# always-taken path, clobber any in-flight edit a developer has to a NON-generated
+# file in that dir (e.g. ci.yml itself). The gate is "a check, not a fix": it may
+# only undo what IT changed (the compiled locks), never the contributor's own
+# uncommitted work. Set up an unrelated tracked workflow with a local uncommitted
+# edit, run the happy path (no-op compile = in sync), and assert the edit survives.
+repo="$(make_ghaw_repo)"
+( cd "$repo" \
+    && printf 'name: unrelated\non: push\njobs: {}\n' > .github/workflows/unrelated.yml \
+    && git add -A && git commit -qm 'add unrelated non-lock workflow' \
+    && printf 'name: unrelated\non: push\njobs: {}\n# local uncommitted edit\n' > .github/workflows/unrelated.yml )
+res="$(run_gate "$repo" "true")"
+rc="${res%%|*}"
+edit_survived=no
+grep -q 'local uncommitted edit' "$repo/.github/workflows/unrelated.yml" 2>/dev/null && edit_survived=yes
+if [ "$rc" = "0" ] && [ "$edit_survived" = "yes" ]; then
+  pass "gate preserves an unrelated uncommitted .github/workflows/ edit (restores only the compiled locks)"
+else
+  fail "gate clobbered an unrelated uncommitted workflow edit (rc=$rc, survived=$edit_survived) — restore_tree reverts the whole dir, not just locks"
+fi
+rm -rf "$repo"
+
 echo ""
 echo "=== version-pin helper (scripts/get-ghaw-compiler-version.sh) ==="
 # The helper derives the gh-aw compiler version the CI install step pins to, from
@@ -232,14 +259,14 @@ run_helper() {
   printf '%s|%s' "$rc" "$out"
 }
 
-# 7a. Single committed lock recording a version → that version, verbatim.
+# 8a. Single committed lock recording a version → that version, verbatim.
 repo="$(make_ghaw_repo)"
 res="$(run_helper "$repo")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "0" ] && [ "$out" = "v0.53.1" ]; then pass "helper emits the single lock's compiler_version"; else fail "helper single-lock expected 'v0.53.1' (rc 0), got '$out' (rc $rc)"; fi
 rm -rf "$repo"
 
-# 7b. Two locks disagree {v0.51.0, v0.53.1} → the HIGHEST in SEMVER order. This is
+# 8b. Two locks disagree {v0.51.0, v0.53.1} → the HIGHEST in SEMVER order. This is
 # the regression guard: lexicographic `head -1` would return v0.51.0 (older); the
 # helper's `sort -Vu | tail -1` must return v0.53.1.
 repo="$(make_ghaw_repo)"
@@ -251,7 +278,7 @@ rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "0" ] && [ "$out" = "v0.53.1" ]; then pass "helper picks the highest SEMVER version across disagreeing locks (not lexicographic)"; else fail "helper multi-lock expected 'v0.53.1', got '$out' (rc $rc) — lexicographic sort bug?"; fi
 rm -rf "$repo"
 
-# 7c. A lock with NO compiler_version metadata → fall back to the known-good pin.
+# 8c. A lock with NO compiler_version metadata → fall back to the known-good pin.
 repo="$(mktemp -d)"
 ( cd "$repo" && git init -q && git config user.email t@t.t && git config user.name t \
     && mkdir -p .github/workflows \
@@ -262,7 +289,7 @@ rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "0" ] && [ -n "$out" ] && grep -qE '^v[0-9.]+$' <<<"$out"; then pass "helper falls back to a known-good version when no lock records one"; else fail "helper no-metadata fallback expected a vX.Y.Z fallback, got '$out' (rc $rc)"; fi
 rm -rf "$repo"
 
-# 7d. No locks at all → fall back (helper must never emit empty, which would pin
+# 8d. No locks at all → fall back (helper must never emit empty, which would pin
 # `gh extension install …@` to nothing and break the install step).
 repo="$(mktemp -d)"
 ( cd "$repo" && git init -q && git config user.email t@t.t && git config user.name t \
@@ -442,6 +469,25 @@ if grep -Eq "trap .*rm -f .*compile_log.* EXIT" "$SCRIPT"; then
   pass "gate cleans up compile_log via an EXIT trap (covers early-exit / signal paths)"
 else
   fail "gate has no EXIT trap for compile_log — a signal/early-exit between mktemp and cleanup leaks it"
+fi
+
+# The "check, not a fix" invariant (the gate restores the working tree it mutated
+# while recompiling) must hold on EVERY exit path, not just the two explicit
+# branches. restore_tree therefore has to be wired into the EXIT trap. Why
+# STRUCTURAL, not behavioural: the path that an explicit-call-only restore MISSES
+# is signal-driven cancellation — CI sends SIGTERM mid-drift-report, the TERM
+# handler `exit`s, and an EXIT trap that only rm'd compile_log would leave the
+# recompiled locks in place. macOS bash 3.2 (this host) DEFERS SIGTERM to the
+# foreground child and does not reproduce the leak, so a behavioural signal test
+# would be a fake green here (same reason the compile_log cleanup above is pinned
+# structurally). It is also defence against a future `set -e`: without -e the
+# post-`head -60` `restore_tree` is reached even when the diff pipeline SIGPIPEs,
+# but adding -e later would skip it — the EXIT trap makes restoration robust to
+# that too. Mutation-provable: drop restore_tree from the trap and this fails.
+if grep -Eq "trap '.*restore_tree.*' EXIT" "$SCRIPT"; then
+  pass "gate restores the working tree via the EXIT trap (covers signal cancellation / future set -e)"
+else
+  fail "gate does not wire restore_tree into the EXIT trap — a SIGTERM mid-drift-report leaves the tree mutated"
 fi
 
 # The TERM (and INT) handler that forces the EXIT trap to run under Linux bash on

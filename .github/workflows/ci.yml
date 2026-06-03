@@ -499,9 +499,26 @@ jobs:
           # a regression in its regex/sort/fallback fails a required check instead
           # of shipping green (see scripts/get-ghaw-compiler-version.sh).
           ver="$(bash scripts/get-ghaw-compiler-version.sh)"
+          # The helper is contracted to never emit empty (it falls back to a
+          # known-good pin), but guard anyway: an empty $ver would make
+          # `--pin ""` install whatever HEAD resolves to, silently defeating the
+          # pin. Fail loudly instead of compiling locks with an unknown version.
+          if [ -z "$ver" ]; then
+            echo "::error::get-ghaw-compiler-version.sh emitted no version — refusing to install gh-aw unpinned"
+            exit 1
+          fi
           echo "Pinning gh-aw to $ver"
+          # NOTE: `gh extension install --pin` pins to a git TAG/ref, not a content
+          # SHA — gh has no flag to pin an extension by commit digest. The tag is
+          # the same artifact the locks record, so this keeps the compiler aligned
+          # with the committed locks; it is not a supply-chain SHA pin and does not
+          # claim to be. (Tightening to a digest would require vendoring the
+          # extension, which is out of scope for this drift gate.)
           gh extension install github/gh-aw --pin "$ver"
-          gh aw version || true
+          # Verify the extension is actually runnable after install — a silent
+          # install failure here would make the drift gate below fail with a
+          # confusing "compile command failed" instead of a clear install error.
+          gh aw version || { echo "::error::gh aw extension verification failed after install"; exit 1; }
 
       - name: Reject drift between gh-aw sources and their compiled .lock.yml
         env:

@@ -77,12 +77,30 @@ COMPILE_CMD="${GHAW_COMPILE_CMD:-$BASE_COMPILE}"
 status_before="$(git status --porcelain -- .github/workflows/ 2>/dev/null || true)"
 BEFORE_UNTRACKED="$(grep -E '^\?\? .*\.lock\.yml$' <<<"$status_before" | sed 's/^?? //' || true)"
 
-# Restore the working tree to its committed state: revert tracked workflow files
-# (modified or deleted by the compile) and remove ONLY the untracked locks the
-# compile newly created. The gate is a check, not a fix — it leaves no mutation.
+# Restore the working tree to its committed state. The compile only ever touches
+# `*.lock.yml` files (recompiling tracked ones, deleting orphans via --purge,
+# creating new ones), so restore is SCOPED to lock files — it reverts the tracked
+# locks the compile modified or deleted and removes ONLY the untracked locks the
+# compile newly created. It deliberately does NOT `git checkout -- .github/workflows/`
+# wholesale: the EXIT trap fires restore on EVERY path (so signal cancellation
+# can't leave a recompiled tree behind), INCLUDING the happy in-sync path, and a
+# dir-wide checkout would clobber an unrelated in-flight edit (e.g. to ci.yml)
+# that the gate never made. A check may only undo what IT changed.
+# Invoked solely from the EXIT trap below. The trap is a single-quoted string,
+# which the linter cannot see into, so SC2329 "never invoked" is a false positive.
+# shellcheck disable=SC2329
 restore_tree() {
-  git checkout -- .github/workflows/ 2>/dev/null || true
-  local now f
+  local tracked now f
+  # Revert tracked locks the compile modified or deleted. `git ls-files` lists
+  # index entries, so a lock deleted in the worktree (orphan --purge) is still
+  # named here and `git checkout --` revives it. Scoped to *.lock.yml only.
+  tracked="$(git ls-files -- '.github/workflows/*.lock.yml' 2>/dev/null || true)"
+  if [ -n "$tracked" ]; then
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      git checkout -- "$f" 2>/dev/null || true
+    done <<<"$tracked"
+  fi
   now="$(git ls-files --others --exclude-standard -- .github/workflows/ 2>/dev/null | grep -E '\.lock\.yml$' || true)"
   [ -n "$now" ] || return 0
   while IFS= read -r f; do
@@ -99,13 +117,22 @@ restore_tree() {
 # toolchain error) is surfaced in the gate log instead of swallowed — a silent
 # "compile command failed" is un-actionable.
 compile_log="$(mktemp)"
-# Clean up the tmpfile on EVERY exit path. The explicit TERM/INT handlers are not
-# redundant with the EXIT trap: `gh aw compile` is a multi-second toolchain run,
-# and if CI cancels the job it sends SIGTERM mid-eval. On the Linux runner (bash
-# 5.x) an EXIT trap does NOT run for an *untrapped* terminating signal, so without
-# the TERM/INT handlers the tmpfile would leak exactly on cancellation; the
-# handler's `exit` is what triggers the EXIT trap.
-trap 'rm -f "$compile_log"' EXIT
+# Restore the tree AND clean up the tmpfile on EVERY exit path, via the EXIT trap.
+# Putting restore_tree in the trap (not only in the two explicit branches below)
+# is what makes the "check, not a fix" invariant hold unconditionally:
+#   * Signal cancellation — CI sends SIGTERM mid-compile/mid-drift-report. The
+#     TERM/INT handlers `exit`, which fires the EXIT trap; an explicit-call-only
+#     restore would be skipped on that path, leaving the recompiled locks in place.
+#   * Future `set -e` — today (no -e) the post-`head -60` restore is still reached
+#     even if the diff pipeline SIGPIPEs, but adding -e later would skip it; the
+#     trap makes restoration robust to that.
+# The explicit TERM/INT handlers are not redundant with the EXIT trap: on the
+# Linux runner (bash 5.x) an EXIT trap does NOT run for an *untrapped* terminating
+# signal, so without them the trap would not fire on cancellation; the handler's
+# `exit` is what triggers it. restore_tree is idempotent (a clean re-run is a
+# no-op: nothing to checkout, no newly-untracked locks to remove), so firing it on
+# the in-sync happy path costs nothing.
+trap 'restore_tree; rm -f "$compile_log"' EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 if ! eval "$COMPILE_CMD" >"$compile_log" 2>&1; then
@@ -113,7 +140,7 @@ if ! eval "$COMPILE_CMD" >"$compile_log" 2>&1; then
   echo "--- compile command output ---"
   cat "$compile_log"
   echo "--- end compile command output ---"
-  restore_tree
+  # restore_tree runs via the EXIT trap.
   exit 1
 fi
 
@@ -144,6 +171,9 @@ echo "Drift (porcelain status):"
 printf '%s\n' "$drift"
 echo ""
 echo "Diff (first 60 lines):"
-git --no-pager diff -- .github/workflows/ | head -60
-restore_tree
+# `|| true`: head closing the pipe early can SIGPIPE the diff (status 141) under
+# pipefail; swallow it so the report is never the script's failing status. The
+# real exit status is the explicit `exit 1` below, and restore_tree runs via the
+# EXIT trap regardless of how we leave (explicit exit or signal cancellation).
+git --no-pager diff -- .github/workflows/ | head -60 || true
 exit 1
