@@ -321,6 +321,29 @@ rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "0" ] && grep -qE '^v[0-9.]+$' <<<"$out"; then pass "helper emits a non-empty fallback when there are no locks"; else fail "helper no-locks expected a vX.Y.Z fallback, got '$out' (rc $rc)"; fi
 rm -rf "$repo"
 
+# 8e. SILENT-FAILURE GUARD: when locks DO record version(s) but the available
+# `sort` cannot rank them (e.g. an old build without -V, which exits non-zero),
+# the helper MUST fail loudly — never silently emit the fallback. A silent
+# fallback would pin the toolchain to the wrong compiler while reporting success,
+# masking exactly the skew this gate exists to catch. The Seer flagged this on
+# #8698: its literal premise ("sort -V unsupported on macOS") is inaccurate for
+# modern macOS (Apple sort 2.3+ supports -V), but the silent-fallback-on-sort-
+# failure mode it pointed at was real. Simulate by shadowing `sort` with a stub
+# that exits non-zero, in a repo recording v0.99.0 (≠ the v0.53.1 fallback) so a
+# silent fallback is unambiguously the WRONG answer, not a coincidental match.
+repo="$(mktemp -d)"
+( cd "$repo" && git init -q && git config user.email t@t.t && git config user.name t \
+    && mkdir -p .github/workflows \
+    && printf '# gh-aw-metadata: {"compiler_version":"v0.99.0"}\nname: hi\non: push\njobs: {}\n' > .github/workflows/hi.lock.yml \
+    && git add -A && git commit -qm init )
+stubdir="$(mktemp -d)"
+printf '#!/usr/bin/env bash\nexit 2\n' > "$stubdir/sort"
+chmod +x "$stubdir/sort"
+out="$(cd "$repo" && PATH="$stubdir:$PATH" bash "$HELPER" 2>&1)"; rc=$?
+if [ "$rc" != "0" ]; then pass "helper fails loudly when sort cannot rank recorded versions (no silent fallback)"; else fail "helper silently emitted '$out' (rc $rc) on sort failure — masks toolchain skew"; fi
+if printf '%s' "$out" | grep -qiE 'error|could not|unable|refus'; then pass "the sort-failure error is surfaced, not swallowed"; else fail "no error surfaced on sort failure, got '$out' (rc $rc)"; fi
+rm -rf "$repo" "$stubdir"
+
 echo ""
 echo "=== ci.yml integration wiring ==="
 # A standalone path-filtered workflow cannot be a SAFE required check: a PR that
