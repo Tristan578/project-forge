@@ -79,6 +79,7 @@ check_triggered "lockfile-sync"             "needs-deps"
 check_triggered "lockfile-sync-tests"       "needs-ci" "needs-agentic" "needs-onboarding"
 check_triggered "agentic-sync"              "needs-agentic"
 check_triggered "taskboard-onboarding-guard" "needs-onboarding"
+check_triggered "codex-config-guard"        "needs-codex"
 if [ -n "$tamper" ]; then
   echo "::error::Self-defending gate skipped despite its trigger firing (possible unwiring):"
   echo "$tamper"
