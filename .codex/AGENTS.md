@@ -14,8 +14,8 @@ Run these commands before doing any work:
 # 1. Ensure taskboard is running
 cd project-forge && bash .claude/hooks/on-session-start.sh
 
-# Or manually:
-cd project-forge && ../taskboard/taskboard.exe start --port 3010 --db .claude/taskboard.db
+# Or manually (see Canonical Project Facts for the start command):
+cd project-forge && taskboard start --port 3010
 ```
 This will auto-start the taskboard, pull GitHub Project changes, and display prioritized backlog.
 
@@ -40,10 +40,27 @@ cd project-forge && bash .claude/hooks/post-edit-lint.sh
 ## Taskboard Setup
 
 **Binary**: tcarac/taskboard (install via `go install github.com/tcarac/taskboard@latest`)
-**Start**: `cd project-forge && taskboard start --port 3010 --db .claude/taskboard.db`
-**Web UI**: http://localhost:3010
-**API**: http://localhost:3010/api
-**Project ID**: `01KK974VMNC16ZAW7MW1NH3T3M` (prefix: PF)
+
+<!-- AGENTIC-SYNC:START -->
+<!-- Generated from tools/agentic-sync/canonical.json by tools/agentic-sync/sync.mjs.
+     Do NOT hand-edit between these markers — edit canonical.json and run
+     `node tools/agentic-sync/sync.mjs --write`. CI gate: scripts/check-agentic-sync.sh. -->
+
+### Canonical Project Facts
+
+**Taskboard** — the single source of truth for all work:
+- Project: **Project Forge** (`01KMM9ZA6SBZ7RKJZJTZS9VR4R`, prefix `PF`)
+- Teams: Engineering `01KMR5E36TP59PRQA8GQEWJVM1`, PM `01KMR5E3852BWXAZ219W47CSKS`
+- API: `http://localhost:3010/api` · Web UI: `http://localhost:3010`
+- Start: `taskboard start --port 3010`  *(do not pass `--db` — it uses the OS-default DB)*
+- These IDs are board-local; if a query 404s, rediscover with `curl -s http://localhost:3010/api/projects`
+
+**Pinned versions:** Next.js 16.2.0 · React 19.2.4 · wasm-bindgen 0.2.108 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
+
+**Coverage thresholds (CI-enforced):** statements 70 · branches 60 · functions 65 · lines 72
+
+**Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
+<!-- AGENTIC-SYNC:END -->
 
 ## Required Ticket Fields
 
@@ -52,7 +69,7 @@ Every ticket MUST have ALL of these before work begins:
 - **Description**: Technical context, affected files, scope (at least 20 chars beyond user story + AC)
 - **Acceptance Criteria**: Given/When/Then format — **minimum 3 scenarios** (happy path, edge case, negative/error case)
 - **Priority**: urgent, high, medium, low
-- **Team**: Engineering (`01KK9751NZ4HM7VQM0AQ5WGME3`), PM (`01KK9751P7GKQYG9TZ96XXQCFN`), or Leadership (`01KK9751PD79RCWY462CYQ06CW`)
+- **Team**: Engineering or PM — use the team IDs in **Canonical Project Facts** above
 - **Subtasks**: At least 3 implementation steps (the plan)
 
 ### Ticket Template

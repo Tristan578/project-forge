@@ -33,6 +33,8 @@ jobs:
       needs-design: ${{ steps.changes.outputs.design }}
       needs-hooks: ${{ steps.changes.outputs.hooks }}
       needs-deps: ${{ steps.changes.outputs.deps }}
+      needs-agentic: ${{ steps.changes.outputs.agentic }}
+      needs-onboarding: ${{ steps.changes.outputs.onboarding }}
       needs-any-code: ${{ steps.changes.outputs.any-code }}
     steps:
       - uses: actions/checkout@v6
@@ -47,7 +49,7 @@ jobs:
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
-          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false
+          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false
 
           echo "$CHANGED" | grep -q '^web/' && web=true
           echo "$CHANGED" | grep -q '^engine/' && engine=true
@@ -66,6 +68,32 @@ jobs:
           # check, so a manifest-only change pays only this gate, not the full
           # quality-gates fan-out.
           echo "$CHANGED" | grep -qE '(^|/)package\.json$|^package-lock\.json$' && deps=true
+          # Cross-provider agentic-config drift gate (scripts/check-agentic-sync.sh).
+          # Fires on the single source of truth (tools/agentic-sync/), the
+          # per-provider instruction files it injects facts into, the gate script
+          # itself, or the cross-provider DX-audit tool that delegates to the gate
+          # (.claude/tools/dx-audit.sh + its contract test). Kept ORTHOGONAL to
+          # any-code (like hooks/deps): an instruction-file-only edit pays only this
+          # ~5s check, never the heavy quality-gates fan-out. (check-agentic-sync.sh
+          # also matches `ci` above, which is fine — editing a gate script warrants
+          # the wider run; .claude/tools/dx-audit.sh matches neither ci nor hooks,
+          # so wiring it here is what makes its contract test run at all.)
+          echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$' && agentic=true
+          # Taskboard onboarding-hygiene tripwire (scripts/check-taskboard-onboarding-hygiene.sh).
+          # Fires whenever a CONTRIBUTOR-FACING ONBOARDING SURFACE changes — the
+          # surfaces where a rotated taskboard project/team ULID or a forbidden
+          # `--db` start command has historically been copy-pasted and which the
+          # agentic-sync generator's marker injection cannot reach: every provider
+          # instruction dir (.claude .codex .gemini .github .windsurf .agent .agents),
+          # the root instruction/onboarding docs (AGENTS.md GEMINI.md .cursorrules
+          # README CONTRIBUTING), docs/, the canonical source of truth, and the
+          # tripwire's own files. Kept ORTHOGONAL to any-code (like hooks/deps/
+          # agentic): a docs-only onboarding edit pays only this ~1s, zero-dep,
+          # read-only grep, never the heavy quality-gates fan-out. (The threat model
+          # from the parity review is onboarding surfaces specifically; a dead ID in
+          # a non-onboarding file is still caught on any PR that also touches one of
+          # these surfaces or a gate script.)
+          echo "$CHANGED" | grep -qE '^README\.md$|^CONTRIBUTING\.md$|^AGENTS\.md$|^GEMINI\.md$|^\.cursorrules$|^\.claude/|^\.codex/|^\.gemini/|^\.github/|^\.windsurf/|^\.agent/|^\.agents/|^docs/|^tools/agentic-sync/|^scripts/check-taskboard-onboarding-hygiene\.sh$|^scripts/__tests__/check-taskboard-onboarding-hygiene\.test\.sh$' && onboarding=true
 
           any_code=false
           if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] || [ "$design" = "true" ]; then
@@ -81,11 +109,13 @@ jobs:
             echo "design=$design"
             echo "hooks=$hooks"
             echo "deps=$deps"
+            echo "agentic=$agentic"
+            echo "onboarding=$onboarding"
             echo "any-code=$any_code"
           } >> "$GITHUB_OUTPUT"
 
           echo "Changed paths detected:"
-          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps any-code=$any_code"
+          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding any-code=$any_code"
           if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ]; then
             echo "No relevant changes — downstream jobs will be skipped"
           fi
@@ -307,6 +337,73 @@ jobs:
       - name: Check root lockfile is in sync with the manifests
         run: bash scripts/check-lockfile-sync.sh
 
+  # ---- Agentic Config Sync ----
+  # Runs when the single source of truth (tools/agentic-sync/canonical.json), the
+  # generator, the per-provider instruction files it injects facts into
+  # (AGENTS.md, .github/copilot-instructions.md, .codex/AGENTS.md, .cursorrules),
+  # or the gate script change. Re-runs the generator in --check mode and fails the
+  # PR if any provider file drifted from the source — so a stale taskboard Project
+  # ID, a dead team ID, or a forbidden `--db` start command can never be
+  # hand-mirrored into a non-Claude contributor's onboarding file again. Decision
+  # logic lives in scripts/check-agentic-sync.sh + tools/agentic-sync/sync.mjs
+  # (unit-tested by the CI Self-Defense Tests job below).
+  #
+  # Gated on its own `agentic` output (NOT any-code) so an instruction-file-only
+  # PR pays only this ~5s gate. Wired into ci-success below so it is REQUIRED when
+  # it runs yet skips cleanly when no agentic-config file is touched. The generator
+  # is zero-dependency (node: builtins only), so no `npm ci` is needed.
+  agentic-sync:
+    name: Agentic Config Sync
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-agentic == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+
+      - name: Check provider instruction files are in sync with canonical.json
+        run: bash scripts/check-agentic-sync.sh
+
+  # ---- Taskboard Onboarding Hygiene ----
+  # The negative guard the parity review called for: greps the WHOLE tree and
+  # fails the PR if a stale taskboard onboarding FACT the agentic-sync generator
+  # cannot reach reappears anywhere —
+  #   (1) a rotated/dead project or team ULID (404s; the board-summary hook
+  #       silently filtered to a dead project and reported zero work), or
+  #   (2) a forbidden `--db .claude/taskboard.db` flag passed to `taskboard start`
+  #       (creates an EMPTY local DB → the board shows 0 tickets).
+  # The generator keeps the canonical FACTS BLOCK in sync across the 4 primary
+  # onboarding files, but it cannot reach a fact embedded inline in a curl
+  # command, a markdown table row, a code fence, or a non-target provider file
+  # (.windsurf, .agent, .agents). This tripwire closes that gap. Decision logic +
+  # the two-home allowlist (the parity-review doc; legacyProjectIds in
+  # github-sync-config.json) live in scripts/check-taskboard-onboarding-hygiene.sh
+  # (unit-tested by the CI Self-Defense Tests job below). It is a CHECK, never a fix.
+  #
+  # Gated on its own `onboarding` output (NOT any-code) so a docs/instruction-only
+  # PR pays only this ~1s, zero-dep, read-only grep. Wired into ci-success below so
+  # it is REQUIRED when it runs yet skips cleanly when no onboarding surface is
+  # touched — the safe path-filter + required-check pattern.
+  taskboard-onboarding-guard:
+    name: Taskboard Onboarding Hygiene
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-onboarding == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check for stale taskboard IDs and forbidden --db start commands
+        run: bash scripts/check-taskboard-onboarding-hygiene.sh
+
   # ---- CI Self-Defense Tests ----
   # Unit-tests the decision logic of the repo's self-defending CI gates via
   # their co-located bash suites:
@@ -317,17 +414,30 @@ jobs:
   #   * scripts/check-ci-success.sh — the ci-success verifier itself, including
   #     its anti-tamper check that a self-defending gate may not be `skipped`
   #     while its trigger fired (closes the one-line `if: false` unwiring vector).
+  #   * scripts/check-agentic-sync.sh + tools/agentic-sync/sync.mjs — the
+  #     cross-provider agentic-config drift gate (exercised against hermetic
+  #     fixtures, plus the same structural anti-unwiring assertions).
+  #   * scripts/check-taskboard-onboarding-hygiene.sh — the taskboard
+  #     onboarding-hygiene tripwire (stale ULIDs + forbidden `--db` start),
+  #     exercised against hermetic fixture trees via the STALE_ID_SCAN_ROOT seam,
+  #     plus the same structural anti-unwiring assertions.
+  #   * .claude/tools/dx-audit.sh — the cross-provider DX audit; its contract test
+  #     pins that the audit delegates to the agentic gate and covers the secondary
+  #     provider surfaces (.codex/AGENTS.md, .windsurf, .agents) instead of drifting.
   # These ride ci-success as a REQUIRED check rather than a standalone advisory
   # workflow: a standalone path-filtered suite can be left out of the required
   # aggregate, which would let a PR that neuters a gate script merge green.
-  # Gated on `needs-ci` (fires on scripts/ and .github/workflows/ changes, see
-  # ci-gate), so it runs whenever a gate, its suite, or ci.yml itself moves —
-  # exactly when an unwiring would happen — and skips cleanly otherwise. The job
-  # id stays `lockfile-sync-tests` so the ci-success `needs:` wiring is stable.
+  # Gated on `needs-ci` (scripts/ and .github/workflows/ changes) OR `needs-agentic`
+  # (the agentic source-of-truth generator under tools/agentic-sync/) OR
+  # `needs-onboarding` (any contributor-facing onboarding surface — the tripwire's
+  # own self-tests must re-run when onboarding files move), so it runs whenever any
+  # gate, its suite, the generator, an onboarding surface, or ci.yml itself moves —
+  # exactly when an unwiring would happen — and skips cleanly otherwise. The job id
+  # stays `lockfile-sync-tests` so the ci-success `needs:` wiring is stable.
   lockfile-sync-tests:
     name: CI Self-Defense Tests
     needs: [ci-gate]
-    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' }}
+    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' || needs.ci-gate.outputs.needs-agentic == 'true' || needs.ci-gate.outputs.needs-onboarding == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -335,17 +445,33 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+
       - name: Shellcheck the gate scripts and their suites
         run: |
           shellcheck \
             scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh \
-            scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh
+            scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh \
+            scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
+            scripts/check-taskboard-onboarding-hygiene.sh scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh \
+            .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
         run: bash scripts/__tests__/check-lockfile-sync.test.sh
 
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
+
+      - name: Run agentic-config gate test suite
+        run: bash scripts/__tests__/check-agentic-sync.test.sh
+
+      - name: Run taskboard onboarding-hygiene gate test suite
+        run: bash scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh
+
+      - name: Run cross-provider DX-audit contract test
+        run: bash .claude/tools/__tests__/dx-audit.test.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without
@@ -593,6 +719,8 @@ jobs:
       - hook-tests
       - lockfile-sync
       - lockfile-sync-tests
+      - agentic-sync
+      - taskboard-onboarding-guard
       - test-e2e-ui
     runs-on: ubuntu-latest
     timeout-minutes: 5

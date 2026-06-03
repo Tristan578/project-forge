@@ -30,7 +30,7 @@ python3 .claude/hooks/github_project_sync.py pull
 **CRITICAL:** NEVER pass `--db .claude/taskboard.db` — it creates an empty local copy. The OS default (`~/Library/Application Support/taskboard/`) is the source of truth.
 
 **Web UI:** http://taskboard.localhost:1355 (fallback: http://localhost:3010)
-**Project:** Project Forge (prefix: PF, ID: `01KK974VMNC16ZAW7MW1NH3T3M`)
+**Project:** Project Forge (prefix: PF, ID: `01KMM9ZA6SBZ7RKJZJTZS9VR4R`)
 
 ## MCP Tools Available
 
@@ -74,7 +74,7 @@ As a [persona], I want [specific goal] so that [measurable benefit].
 2. **Description** — MUST include technical context (at least 20 chars beyond user story + AC sections)
 3. **Acceptance Criteria** — MUST use Given/When/Then format, **minimum 3 complete scenarios**: happy path, edge case, negative/error case
 4. **Priority** — MUST be set: `urgent`, `high`, `medium`, or `low`
-5. **Team** — MUST be assigned: `SpawnForge PM`, `SpawnForge Engineering`, or `SpawnForge Leadership`
+5. **Team** — MUST be assigned: `SpawnForge PM` or `SpawnForge Engineering`
 6. **Subtasks** — MUST have at least 3 implementation steps before work begins
 7. **Labels** — SHOULD be set: `bug`, `feature`, `refactor`, `test`, `docs`, `chore`
 
@@ -82,9 +82,8 @@ As a [persona], I want [specific goal] so that [measurable benefit].
 
 | Team | ID | Assign When |
 |------|----|-------------|
-| SpawnForge PM | `01KK9751P7GKQYG9TZ96XXQCFN` | Spec writing, planning, audits, documentation |
-| SpawnForge Engineering | `01KK9751NZ4HM7VQM0AQ5WGME3` | Implementation, bug fixes, tests, code changes |
-| SpawnForge Leadership | `01KK9751PD79RCWY462CYQ06CW` | Manual tasks requiring user action (approvals, external work) |
+| SpawnForge PM | `01KMR5E3852BWXAZ219W47CSKS` | Spec writing, planning, audits, documentation |
+| SpawnForge Engineering | `01KMR5E36TP59PRQA8GQEWJVM1` | Implementation, bug fixes, tests, code changes |
 
 ## Workflow Protocol
 
@@ -148,7 +147,7 @@ Use MCP tool: get_board
 ### Create a well-formed ticket
 ```
 Use MCP tool: create_ticket
-  project: "01KK974VMNC16ZAW7MW1NH3T3M"
+  project: "01KMM9ZA6SBZ7RKJZJTZS9VR4R"
   title: "Fix X in Y"
   priority: "high"
   description: <full template with user story + description + acceptance criteria>
@@ -196,8 +195,8 @@ curl -s -X POST "http://taskboard.localhost:1355/api/tickets" \
     "title": "...",
     "description": "...",
     "priority": "high",
-    "projectId": "01KK974VMNC16ZAW7MW1NH3T3M",
-    "teamId": "01KK9751NZ4HM7VQM0AQ5WGME3"
+    "projectId": "01KMM9ZA6SBZ7RKJZJTZS9VR4R",
+    "teamId": "01KMR5E36TP59PRQA8GQEWJVM1"
   }'
 
 # Get ticket

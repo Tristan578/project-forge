@@ -23,11 +23,10 @@ python3 .claude/hooks/github_project_sync.py pull
 
 ## What's in the DB
 
-- **Project:** Project Forge (prefix: PF, ID: `01KK974VMNC16ZAW7MW1NH3T3M`)
+- **Project:** Project Forge (prefix: PF, ID: `01KMM9ZA6SBZ7RKJZJTZS9VR4R`)
 - **Teams:**
-  - Engineering: `01KK9751NZ4HM7VQM0AQ5WGME3`
-  - PM: `01KK9751P7GKQYG9TZ96XXQCFN`
-  - Leadership: `01KK9751PD79RCWY462CYQ06CW`
+  - Engineering: `01KMR5E36TP59PRQA8GQEWJVM1`
+  - PM: `01KMR5E3852BWXAZ219W47CSKS`
 - **Priorities:** urgent, high, medium, low
 - **Source of truth:** GitHub Project #2 (SpawnForge), synced via `github_project_sync.py`
 

@@ -1,0 +1,38 @@
+{
+  "_README": "Single source of truth for facts shared across the AI-assistant onboarding files (AGENTS.md, .github/copilot-instructions.md, .codex/AGENTS.md, .cursorrules). Edit values HERE, then run `node tools/agentic-sync/sync.mjs --write` to propagate them into every target's AGENTIC-SYNC marker block. CI (scripts/check-agentic-sync.sh) fails any PR where a target drifts from this file. Scope: only facts that have no other authoritative home (taskboard IDs, pinned versions, coverage thresholds). Command count lives in the MCP manifest; do not duplicate it here.",
+  "markerId": "AGENTIC-SYNC",
+  "facts": {
+    "taskboard": {
+      "projectName": "Project Forge",
+      "projectId": "01KMM9ZA6SBZ7RKJZJTZS9VR4R",
+      "projectPrefix": "PF",
+      "teams": {
+        "Engineering": "01KMR5E36TP59PRQA8GQEWJVM1",
+        "PM": "01KMR5E3852BWXAZ219W47CSKS"
+      },
+      "apiBaseUrl": "http://localhost:3010/api",
+      "webUrl": "http://localhost:3010",
+      "startCommand": "taskboard start --port 3010"
+    },
+    "versions": {
+      "Next.js": "16.2.0",
+      "React": "19.2.4",
+      "wasm-bindgen": "0.2.108",
+      "Bevy": "0.18"
+    },
+    "versionsNote": "wasm-bindgen must match Cargo.lock exactly",
+    "coverageThresholds": {
+      "statements": 70,
+      "branches": 60,
+      "functions": 65,
+      "lines": 72
+    },
+    "quickValidation": "cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run"
+  },
+  "targets": [
+    "AGENTS.md",
+    ".github/copilot-instructions.md",
+    ".codex/AGENTS.md",
+    ".cursorrules"
+  ]
+}

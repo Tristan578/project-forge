@@ -1,1 +1,9 @@
 .github/workflows/*.lock.yml linguist-generated=true merge=ours
+
+# Agentic-sync targets: the generator (tools/agentic-sync/sync.mjs) emits LF, so
+# pin the committed form to LF. Without this a CRLF checkout could drift the
+# marker block; the generator also normalizes CRLF->LF on read as a belt. `*.md`
+# covers AGENTS.md, .github/copilot-instructions.md and .codex/AGENTS.md;
+# .cursorrules is the only non-.md target.
+*.md            text eol=lf
+.cursorrules    text eol=lf

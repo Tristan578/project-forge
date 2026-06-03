@@ -30,20 +30,24 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 [ -f "$SCRIPT" ] || { echo "verifier script not found: $SCRIPT"; exit 1; }
 
 # Build a toJSON(needs)-shaped object mirroring the REAL ci-success `needs:` list
-# (all 10 jobs — see ci.yml), so a failure on ANY required gate is exercised, not
+# (all 12 jobs — see ci.yml), so a failure on ANY required gate is exercised, not
 # just the handful that used to be in the fixture. Jobs not parameterised default
 # to success. Args:
 #   $1 needs-ci   $2 needs-deps   $3 lockfile-sync.result
 #   $4 lockfile-sync-tests.result   $5 quality-gates.result (default success)
 #   $6 hook-tests.result (default success) — stands in for the other required
 #      gates so a case can fail a job that is neither lockfile job nor quality-gates.
+#   $7 needs-agentic (default true)   $8 agentic-sync.result (default success)
+#   $9 needs-onboarding (default true)
+#   $10 taskboard-onboarding-guard.result (default success)
 mk() {
-  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}"
+  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}"
   jq -nc \
     --arg nci "$nci" --arg ndeps "$ndeps" --arg ls "$ls" --arg lst "$lst" \
-    --arg qg "$qg" --arg ht "$ht" '
+    --arg qg "$qg" --arg ht "$ht" --arg nagentic "$nagentic" --arg as "$as" \
+    --arg nonboarding "$nonboarding" --arg tog "$tog" '
     {
-      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-any-code": "true" } },
+      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-any-code": "true" } },
       "quality-gates":        { result: $qg },
       "command-parity":       { result: "success" },
       "build-nextjs":         { result: "success" },
@@ -52,6 +56,8 @@ mk() {
       "hook-tests":           { result: $ht },
       "lockfile-sync":        { result: $ls },
       "lockfile-sync-tests":  { result: $lst },
+      "agentic-sync":         { result: $as },
+      "taskboard-onboarding-guard": { result: $tog },
       "test-e2e-ui":          { result: "success" }
     }'
 }
@@ -83,12 +89,15 @@ res="$(run_verify "$(mk true true success success cancelled)")"
 rc="${res%%|*}"
 if [ "$rc" = "1" ]; then pass "a cancelled gate fails (exit 1)"; else fail "cancelled gate should exit 1, got $rc"; fi
 
-# --- 4. Legitimate skips (triggers false) → exit 0 ---------------------------
-# needs-ci=false and needs-deps=false, so BOTH self-defending gates skipping is
-# correct path-filter behaviour and must NOT trip the anti-tamper check.
-res="$(run_verify "$(mk false false skipped skipped success)")"
+# --- 4. Legitimate skips (ALL triggers false) → exit 0 -----------------------
+# needs-ci=false, needs-deps=false, needs-agentic=false, needs-onboarding=false —
+# so ALL FOUR self-defending gates (lockfile-sync, lockfile-sync-tests,
+# agentic-sync, taskboard-onboarding-guard) skipping is correct path-filter
+# behaviour and must NOT trip the anti-tamper check. This is the clean baseline:
+# a docs-only / unrelated PR that touches none of the guarded surfaces.
+res="$(run_verify "$(mk false false skipped skipped success success false skipped false skipped)")"
 rc="${res%%|*}"
-if [ "$rc" = "0" ]; then pass "legitimately skipped gates pass (exit 0)"; else fail "legit skip should exit 0, got $rc"; fi
+if [ "$rc" = "0" ]; then pass "all four gates legitimately skipped pass (exit 0)"; else fail "legit skip should exit 0, got $rc"; fi
 
 # --- 5. TAMPER: lockfile-sync-tests skipped while needs-ci=true → exit 1 ------
 # This is the `if: false` unwiring vector: a ci.yml edit sets needs-ci=true, so
@@ -140,6 +149,99 @@ res="$(run_verify "$(mk true true success success success failure)")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "an unrelated required gate failing fails (exit 1)"; else fail "hook-tests failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "hook-tests"; then pass "the failing unrelated gate is named"; else fail "failing unrelated gate not named"; fi
+
+# --- 12. TAMPER: agentic-sync skipped while needs-agentic=true → exit 1 -------
+# The agentic-config drift gate is self-defending too: a ci.yml / instruction-file
+# edit sets needs-agentic=true, so the gate SHOULD run; a skip is an unwiring signal.
+res="$(run_verify "$(mk true true success success success success true skipped)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "agentic-sync skipped while needs-agentic=true fails (exit 1)"; else fail "tamper (agentic) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "agentic tamper is flagged as a possible unwiring"; else fail "agentic tamper message missing"; fi
+if echo "$out" | grep -q "agentic-sync ("; then pass "the unwired agentic gate is named"; else fail "unwired agentic gate not named"; fi
+
+# --- 13. agentic-sync legit-skips (needs-agentic=false) → exit 0 -------------
+res="$(run_verify "$(mk true true success success success success false skipped)")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "agentic-sync legit-skip passes (exit 0)"; else fail "agentic legit skip should exit 0, got $rc"; fi
+
+# --- 14. agentic-sync FAILED while triggered → exit 1 (hard-failure path) -----
+res="$(run_verify "$(mk true true success success success success true failure)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "agentic-sync failure fails (exit 1)"; else fail "agentic failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "agentic-sync"; then pass "the failing agentic gate is named"; else fail "failing agentic gate not named"; fi
+
+# --- 15. TAMPER via the SECOND trigger arm: lockfile-sync-tests skipped while --
+#        needs-agentic=true and needs-ci=false → exit 1.
+# The self-tests job fires on `needs-ci || needs-agentic` (ci.yml). A PR touching
+# ONLY agentic files (needs-ci=false, needs-agentic=true) that slips `if: false`
+# onto lockfile-sync-tests would skip it while needs-ci is false — so guarding
+# only the needs-ci arm leaves this single-line vector open. The anti-tamper must
+# treat EITHER trigger firing as "the job had to run."
+res="$(run_verify "$(mk false false skipped skipped success success true success false success)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "tests skipped while needs-agentic=true (needs-ci=false) fails (exit 1)"; else fail "tamper (tests via agentic arm) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is named (agentic arm)"; else fail "unwired gate not named (agentic arm)"; fi
+
+# --- 16. TAMPER via the FIRST trigger arm in ISOLATION: lockfile-sync-tests ----
+#        skipped while needs-ci=true and needs-agentic=FALSE → exit 1.
+# Mirror of case 15 for the other arm. Without it, EVERY tamper fixture that hits
+# lockfile-sync-tests also has needs-agentic=true (mk's default), so the needs-ci
+# argument could be silently dropped from check_triggered "lockfile-sync-tests"
+# and the whole suite would stay green — leaving the ci.yml-edit unwiring vector
+# (a scripts/ or ci.yml PR sets needs-ci=true, touches no agentic file) untested.
+# Both arms must be independently load-bearing.
+res="$(run_verify "$(mk true true success skipped success success false success false success)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "tests skipped while needs-ci=true (needs-agentic=false) fails (exit 1)"; else fail "tamper (tests via ci arm) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is named (ci arm)"; else fail "unwired gate not named (ci arm)"; fi
+
+# --- 17. TAMPER: taskboard-onboarding-guard skipped while needs-onboarding=true -
+# The onboarding-hygiene tripwire is self-defending too: a PR that edits an
+# onboarding surface (README/CONTRIBUTING/provider rules/...) sets
+# needs-onboarding=true, so the guard SHOULD run; an `if: false` skip is an
+# unwiring signal that would let a reintroduced dead ULID / forbidden `--db`
+# command slip past while every required check stayed green.
+res="$(run_verify "$(mk true true success success success success true success true skipped)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "onboarding guard skipped while needs-onboarding=true fails (exit 1)"; else fail "tamper (onboarding) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "onboarding tamper is flagged as a possible unwiring"; else fail "onboarding tamper message missing"; fi
+if echo "$out" | grep -q "taskboard-onboarding-guard ("; then pass "the unwired onboarding gate is named"; else fail "unwired onboarding gate not named"; fi
+
+# --- 18. onboarding guard legit-skips (needs-onboarding=false) → exit 0 --------
+res="$(run_verify "$(mk true true success success success success true success false skipped)")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "onboarding guard legit-skip passes (exit 0)"; else fail "onboarding legit skip should exit 0, got $rc"; fi
+
+# --- 19. onboarding guard FAILED while triggered → exit 1 (hard-failure path) --
+res="$(run_verify "$(mk true true success success success success true success true failure)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "onboarding guard failure fails (exit 1)"; else fail "onboarding failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "taskboard-onboarding-guard"; then pass "the failing onboarding gate is named"; else fail "failing onboarding gate not named"; fi
+
+# --- 20. TAMPER via the THIRD trigger arm: lockfile-sync-tests skipped while ---
+#        ONLY needs-onboarding=true (needs-ci=false, needs-agentic=false) → exit 1.
+# The self-defense suite also re-runs on onboarding-surface edits, so its `if:`
+# fires on `needs-ci || needs-agentic || needs-onboarding`. A PR touching ONLY an
+# onboarding doc (needs-onboarding=true, the other two false) that slips
+# `if: false` onto lockfile-sync-tests would skip it while needs-ci/needs-agentic
+# are false — so the anti-tamper map must treat the onboarding arm as load-bearing
+# too. lockfile-sync + agentic-sync legit-skip here (their triggers are false), so
+# the ONLY tamper is the skipped self-tests job.
+res="$(run_verify "$(mk false false skipped skipped success success false success true success)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "tests skipped while needs-onboarding=true (others false) fails (exit 1)"; else fail "tamper (tests via onboarding arm) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is named (onboarding arm)"; else fail "unwired gate not named (onboarding arm)"; fi
+
+# --- 21. ISOLATED onboarding-guard tamper: guard skipped while ONLY -----------
+#        needs-onboarding=true → exit 1, naming the guard (mirrors cases 15/16 for
+#        the onboarding arm). lockfile-sync-tests=success here (it ran because the
+#        onboarding arm fired), so the guard skip is the sole tamper — proving the
+#        guard's needs-onboarding mapping is independently load-bearing even when
+#        no other trigger is set.
+res="$(run_verify "$(mk false false skipped success success success false skipped true skipped)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "guard skipped while ONLY needs-onboarding=true fails (exit 1)"; else fail "isolated onboarding tamper should exit 1, got $rc"; fi
+if echo "$out" | grep -q "taskboard-onboarding-guard ("; then pass "the unwired onboarding gate is named (isolated arm)"; else fail "unwired onboarding gate not named (isolated arm)"; fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
