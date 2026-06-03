@@ -22,7 +22,11 @@
 #
 # Unit-tested by scripts/__tests__/check-ci-success.test.sh (run in CI by the
 # lockfile-sync-tests job, gated on needs-ci || needs-agentic || needs-onboarding
-# so any edit to a gate script OR an onboarding surface re-runs the suite).
+# || needs-codex so any edit to a gate script, an onboarding surface, OR the Codex
+# config re-runs the suite — the job's `if:` and the lockfile-sync-tests entry in
+# the anti-tamper map below name the SAME four triggers, so the suite re-runs on
+# any signal that fires it without depending on one trigger being a subset of
+# another).
 set -uo pipefail
 
 NEEDS_JSON="${NEEDS_JSON:-}"
@@ -76,7 +80,7 @@ check_triggered() {
   fi
 }
 check_triggered "lockfile-sync"             "needs-deps"
-check_triggered "lockfile-sync-tests"       "needs-ci" "needs-agentic" "needs-onboarding"
+check_triggered "lockfile-sync-tests"       "needs-ci" "needs-agentic" "needs-onboarding" "needs-codex"
 check_triggered "agentic-sync"              "needs-agentic"
 check_triggered "taskboard-onboarding-guard" "needs-onboarding"
 check_triggered "codex-config-guard"        "needs-codex"

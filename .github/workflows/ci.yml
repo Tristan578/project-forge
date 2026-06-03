@@ -485,16 +485,24 @@ jobs:
   # `needs-onboarding` (any contributor-facing onboarding surface — the tripwire's
   # own self-tests must re-run when onboarding files move), so it runs whenever any
   # gate, its suite, the generator, an onboarding surface, or ci.yml itself moves —
-  # exactly when an unwiring would happen — and skips cleanly otherwise. (The Codex
-  # guard's own trigger, needs-codex, is a strict subset of these: it fires only on
-  # a .codex/config.toml edit — which also sets needs-onboarding via `^\.codex/` —
-  # or a guard/test edit under scripts/ — which sets needs-ci — so the Codex
-  # self-test always re-runs here without widening this `if:`.) The job id stays
-  # `lockfile-sync-tests` so the ci-success `needs:` wiring is stable.
+  # exactly when an unwiring would happen — and skips cleanly otherwise. The Codex
+  # guard's own trigger, needs-codex, is named here as a fourth, EXPLICIT arm even
+  # though its paths (.codex/config.toml — which also sets needs-onboarding via
+  # `^\.codex/` — and the guard/test scripts — which set needs-ci) are today a
+  # strict subset of the first three: relying on that subset is an untested,
+  # silently-load-bearing invariant. If a future path-filter edit ever narrowed
+  # needs-ci or needs-onboarding so a Codex-only change stopped setting them, this
+  # suite — which runs the Codex guard's own tests — would skip while needs-codex
+  # fired, and check-ci-success.sh's anti-tamper map (which DOES list needs-codex
+  # for this job) would then flag a phantom unwiring on every Codex-only PR. Naming
+  # needs-codex in both the `if:` and the anti-tamper map keeps the trigger set and
+  # the tamper map identical, so the self-test re-runs on any Codex-config change
+  # without depending on the subset holding. The job id stays `lockfile-sync-tests`
+  # so the ci-success `needs:` wiring is stable.
   lockfile-sync-tests:
     name: CI Self-Defense Tests
     needs: [ci-gate]
-    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' || needs.ci-gate.outputs.needs-agentic == 'true' || needs.ci-gate.outputs.needs-onboarding == 'true' }}
+    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' || needs.ci-gate.outputs.needs-agentic == 'true' || needs.ci-gate.outputs.needs-onboarding == 'true' || needs.ci-gate.outputs.needs-codex == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

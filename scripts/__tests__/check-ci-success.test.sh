@@ -180,7 +180,9 @@ if echo "$out" | grep -q "agentic-sync"; then pass "the failing agentic gate is 
 # onto lockfile-sync-tests would skip it while needs-ci is false — so guarding
 # only the needs-ci arm leaves this single-line vector open. The anti-tamper must
 # treat EITHER trigger firing as "the job had to run."
-res="$(run_verify "$(mk false false skipped skipped success success true success false success)")"
+# needs-codex is held FALSE (ccg legit-skips) so the codex arm cannot mask a
+# dropped needs-agentic arm — this case must fail PURELY on the agentic mapping.
+res="$(run_verify "$(mk false false skipped skipped success success true success false success false skipped)")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "tests skipped while needs-agentic=true (needs-ci=false) fails (exit 1)"; else fail "tamper (tests via agentic arm) should exit 1, got $rc"; fi
 if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is named (agentic arm)"; else fail "unwired gate not named (agentic arm)"; fi
@@ -193,7 +195,9 @@ if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is n
 # and the whole suite would stay green — leaving the ci.yml-edit unwiring vector
 # (a scripts/ or ci.yml PR sets needs-ci=true, touches no agentic file) untested.
 # Both arms must be independently load-bearing.
-res="$(run_verify "$(mk true true success skipped success success false success false success)")"
+# needs-codex is held FALSE (ccg legit-skips) so the codex arm cannot mask a
+# dropped needs-ci arm — this case must fail PURELY on the needs-ci mapping.
+res="$(run_verify "$(mk true true success skipped success success false success false success false skipped)")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "tests skipped while needs-ci=true (needs-agentic=false) fails (exit 1)"; else fail "tamper (tests via ci arm) should exit 1, got $rc"; fi
 if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is named (ci arm)"; else fail "unwired gate not named (ci arm)"; fi
@@ -230,7 +234,9 @@ if echo "$out" | grep -q "taskboard-onboarding-guard"; then pass "the failing on
 # are false — so the anti-tamper map must treat the onboarding arm as load-bearing
 # too. lockfile-sync + agentic-sync legit-skip here (their triggers are false), so
 # the ONLY tamper is the skipped self-tests job.
-res="$(run_verify "$(mk false false skipped skipped success success false success true success)")"
+# needs-codex is held FALSE (ccg legit-skips) so the codex arm cannot mask a
+# dropped needs-onboarding arm — this case must fail PURELY on the onboarding map.
+res="$(run_verify "$(mk false false skipped skipped success success false success true success false skipped)")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "tests skipped while needs-onboarding=true (others false) fails (exit 1)"; else fail "tamper (tests via onboarding arm) should exit 1, got $rc"; fi
 if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is named (onboarding arm)"; else fail "unwired gate not named (onboarding arm)"; fi
@@ -268,6 +274,24 @@ res="$(run_verify "$(mk true true success success success success true success t
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "codex guard failure fails (exit 1)"; else fail "codex failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "codex-config-guard"; then pass "the failing codex gate is named"; else fail "failing codex gate not named"; fi
+
+# --- 25. TAMPER via the needs-codex arm in ISOLATION: lockfile-sync-tests -----
+#        skipped while ONLY needs-codex=true (needs-ci=false, needs-agentic=false,
+#        needs-onboarding=false) → exit 1, naming the self-tests job.
+# The CI Self-Defense Tests job RUNS the Codex guard's own suite
+# (check-codex-config-safety.test.sh), so lockfile-sync-tests must re-run whenever
+# needs-codex fires. Relying on the implicit subset invariant (every needs-codex
+# path ALSO sets needs-ci or needs-onboarding) is fragile: narrow those filters
+# later and a .codex/config.toml-only PR could set needs-codex alone, silently
+# skipping the Codex self-test while every required check stayed green. The
+# needs-codex arm of check_triggered "lockfile-sync-tests" makes that an explicit,
+# enforced unwiring signal. Here lockfile-sync + agentic-sync + onboarding-guard
+# legit-skip (their triggers are false) and codex-config-guard ran (needs-codex=true,
+# success), so the skipped self-tests job is the SOLE tamper.
+res="$(run_verify "$(mk false false skipped skipped success success false skipped false skipped true success)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "tests skipped while ONLY needs-codex=true fails (exit 1)"; else fail "tamper (tests via codex arm) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is named (codex arm)"; else fail "unwired gate not named (codex arm)"; fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
