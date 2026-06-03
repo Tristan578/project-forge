@@ -41,14 +41,16 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 #   $9 needs-onboarding (default true)
 #   $10 taskboard-onboarding-guard.result (default success)
 #   $11 needs-codex (default true)   $12 codex-config-guard.result (default success)
+#   $13 needs-ghaw (default true)    $14 ghaw-lock-sync.result (default success)
 mk() {
-  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}"
+  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}"
   jq -nc \
     --arg nci "$nci" --arg ndeps "$ndeps" --arg ls "$ls" --arg lst "$lst" \
     --arg qg "$qg" --arg ht "$ht" --arg nagentic "$nagentic" --arg as "$as" \
-    --arg nonboarding "$nonboarding" --arg tog "$tog" --arg ncodex "$ncodex" --arg ccg "$ccg" '
+    --arg nonboarding "$nonboarding" --arg tog "$tog" --arg ncodex "$ncodex" --arg ccg "$ccg" \
+    --arg nghaw "$nghaw" --arg glr "$glr" '
     {
-      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-any-code": "true" } },
+      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-any-code": "true" } },
       "quality-gates":        { result: $qg },
       "command-parity":       { result: "success" },
       "build-nextjs":         { result: "success" },
@@ -60,6 +62,7 @@ mk() {
       "agentic-sync":         { result: $as },
       "taskboard-onboarding-guard": { result: $tog },
       "codex-config-guard":   { result: $ccg },
+      "ghaw-lock-sync":       { result: $glr },
       "test-e2e-ui":          { result: "success" }
     }'
 }
@@ -93,14 +96,14 @@ if [ "$rc" = "1" ]; then pass "a cancelled gate fails (exit 1)"; else fail "canc
 
 # --- 4. Legitimate skips (ALL triggers false) → exit 0 -----------------------
 # needs-ci=false, needs-deps=false, needs-agentic=false, needs-onboarding=false,
-# needs-codex=false — so ALL FIVE self-defending gates (lockfile-sync,
-# lockfile-sync-tests, agentic-sync, taskboard-onboarding-guard, codex-config-guard)
-# skipping is correct path-filter behaviour and must NOT trip the anti-tamper
-# check. This is the clean baseline: a docs-only / unrelated PR that touches none
-# of the guarded surfaces.
-res="$(run_verify "$(mk false false skipped skipped success success false skipped false skipped false skipped)")"
+# needs-codex=false, needs-ghaw=false — so ALL SIX self-defending gates
+# (lockfile-sync, lockfile-sync-tests, agentic-sync, taskboard-onboarding-guard,
+# codex-config-guard, ghaw-lock-sync) skipping is correct path-filter behaviour
+# and must NOT trip the anti-tamper check. This is the clean baseline: a PR that
+# touches none of the guarded surfaces.
+res="$(run_verify "$(mk false false skipped skipped success success false skipped false skipped false skipped false skipped)")"
 rc="${res%%|*}"
-if [ "$rc" = "0" ]; then pass "all five gates legitimately skipped pass (exit 0)"; else fail "legit skip should exit 0, got $rc"; fi
+if [ "$rc" = "0" ]; then pass "all six gates legitimately skipped pass (exit 0)"; else fail "legit skip should exit 0, got $rc"; fi
 
 # --- 5. TAMPER: lockfile-sync-tests skipped while needs-ci=true → exit 1 ------
 # This is the `if: false` unwiring vector: a ci.yml edit sets needs-ci=true, so
@@ -280,7 +283,7 @@ if echo "$out" | grep -q "codex-config-guard"; then pass "the failing codex gate
 
 # --- 25. TAMPER via the needs-codex arm in ISOLATION: lockfile-sync-tests -----
 #        skipped while ONLY needs-codex=true (needs-ci=false, needs-agentic=false,
-#        needs-onboarding=false) → exit 1, naming the self-tests job.
+#        needs-onboarding=false, needs-ghaw=false) → exit 1, naming the self-tests job.
 # The CI Self-Defense Tests job RUNS the Codex guard's own suite
 # (check-codex-config-safety.test.sh), so lockfile-sync-tests must re-run whenever
 # needs-codex fires. Relying on the implicit subset invariant (every needs-codex
@@ -288,13 +291,40 @@ if echo "$out" | grep -q "codex-config-guard"; then pass "the failing codex gate
 # later and a .codex/config.toml-only PR could set needs-codex alone, silently
 # skipping the Codex self-test while every required check stayed green. The
 # needs-codex arm of check_triggered "lockfile-sync-tests" makes that an explicit,
-# enforced unwiring signal. Here lockfile-sync + agentic-sync + onboarding-guard
-# legit-skip (their triggers are false) and codex-config-guard ran (needs-codex=true,
-# success), so the skipped self-tests job is the SOLE tamper.
-res="$(run_verify "$(mk false false skipped skipped success success false skipped false skipped true success)")"
+# enforced unwiring signal. Every other gate legit-skips (its trigger is false) and
+# codex-config-guard ran (needs-codex=true, success) — needs-ghaw is held FALSE so
+# the separate ghaw-lock-sync gate cannot raise a competing tamper — leaving the
+# skipped self-tests job as the SOLE tamper, which proves the needs-codex arm is
+# independently load-bearing.
+res="$(run_verify "$(mk false false skipped skipped success success false skipped false skipped true success false skipped)")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "tests skipped while ONLY needs-codex=true fails (exit 1)"; else fail "tamper (tests via codex arm) should exit 1, got $rc"; fi
 if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is named (codex arm)"; else fail "unwired gate not named (codex arm)"; fi
+
+# --- 26. TAMPER: ghaw-lock-sync skipped while needs-ghaw=true → exit 1 ---------
+# The gh-aw lock-drift gate is self-defending too: a PR that edits a
+# .github/workflows/*.md source, a *.lock.yml, a .github/aw/ action pin, or the
+# guard/test scripts sets needs-ghaw=true, so the gate SHOULD run; an `if: false`
+# skip is an unwiring signal that would let a stale compiled .lock.yml (the
+# workflow GitHub actually runs diverging from its source) slip past while every
+# required check stayed green. All other gates pass/run here, so the skipped
+# ghaw-lock-sync is the sole tamper. Final two mk args: needs-ghaw=true, result=skipped.
+res="$(run_verify "$(mk true true success success success success true success true success true success true skipped)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "ghaw gate skipped while needs-ghaw=true fails (exit 1)"; else fail "tamper (ghaw) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "ghaw tamper is flagged as a possible unwiring"; else fail "ghaw tamper message missing"; fi
+if echo "$out" | grep -q "ghaw-lock-sync ("; then pass "the unwired ghaw gate is named"; else fail "unwired ghaw gate not named"; fi
+
+# --- 27. ghaw-lock-sync legit-skips (needs-ghaw=false) → exit 0 ----------------
+res="$(run_verify "$(mk true true success success success success true success true success true success false skipped)")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "ghaw gate legit-skip passes (exit 0)"; else fail "ghaw legit skip should exit 0, got $rc"; fi
+
+# --- 28. ghaw-lock-sync FAILED while triggered → exit 1 (hard-failure path) -----
+res="$(run_verify "$(mk true true success success success success true success true success true success true failure)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "ghaw gate failure fails (exit 1)"; else fail "ghaw failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "ghaw-lock-sync"; then pass "the failing ghaw gate is named"; else fail "failing ghaw gate not named"; fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
