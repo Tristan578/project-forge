@@ -243,6 +243,28 @@ else
 fi
 rm -rf "$repo"
 
+# --- 7.6 Restore preserves a PRE-EXISTING untracked lock — it removes only the
+#         untracked locks the COMPILE created, never one the developer already had.
+#         (Exercises the BEFORE_UNTRACKED snapshot + its grep -Fxq guard.) ----------
+# The gate snapshots untracked *.lock.yml BEFORE compiling so restore_tree's
+# untracked-removal loop can skip them. Without this case the guard is dead from a
+# testing standpoint: deleting `if ! grep -Fxq -- "$f" <<<"$BEFORE_UNTRACKED"` (so
+# restore rm -f's EVERY untracked lock) would still pass every other case, yet
+# would destroy a developer's uncommitted lock. Stage a pre-existing untracked lock,
+# drive the drift path (which always invokes restore), and assert it survives.
+repo="$(make_ghaw_repo)"
+printf 'name: pre\non: push\njobs: {}\n' > "$repo/.github/workflows/pre.lock.yml"   # untracked, present BEFORE the gate
+res="$(run_gate "$repo" 'printf "\n# drift\n" >> .github/workflows/demo.lock.yml')"
+rc="${res%%|*}"
+preexisting_survived=no
+[ -f "$repo/.github/workflows/pre.lock.yml" ] && preexisting_survived=yes
+if [ "$rc" = "1" ] && [ "$preexisting_survived" = "yes" ]; then
+  pass "restore preserves a pre-existing untracked lock (BEFORE_UNTRACKED guard works)"
+else
+  fail "gate deleted a pre-existing untracked lock (rc=$rc, survived=$preexisting_survived) — BEFORE_UNTRACKED guard broken"
+fi
+rm -rf "$repo"
+
 echo ""
 echo "=== version-pin helper (scripts/get-ghaw-compiler-version.sh) ==="
 # The helper derives the gh-aw compiler version the CI install step pins to, from
