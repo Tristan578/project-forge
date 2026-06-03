@@ -30,6 +30,16 @@
 # trusted (it originates from this repo's own workflow/test, never from PR
 # contents or any untrusted input), so the `eval` carries no injection risk.
 # Do NOT wire this variable to anything attacker-controllable.
+#
+# What the gate DOES feed the compiler is PR-contributed content: the .md
+# sources and .github/aw/actions-lock.json. That is an accepted, necessary trust
+# boundary — the gate cannot detect drift without recompiling from those files —
+# and it is safe because `gh aw compile` is a static template compiler that
+# transforms Markdown-plus-frontmatter into YAML; it does not execute code from
+# the sources or the pin manifest. There is therefore no --ignore-scripts-style
+# flag to add here (contrast scripts/check-lockfile-sync.sh, which passes
+# --ignore-scripts precisely because `npm install` WOULD otherwise run hostile
+# package.json lifecycle scripts).
 set -uo pipefail
 shopt -s nullglob
 

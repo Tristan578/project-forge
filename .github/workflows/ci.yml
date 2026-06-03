@@ -113,7 +113,7 @@ jobs:
           # `onboarding` (^\.github/), so needs-ghaw ⟹ (needs-ci ∨ needs-onboarding) —
           # which is what lets the gate's self-test ride the lockfile-sync-tests job
           # without widening that job's if:.
-          echo "$CHANGED" | grep -qE '^\.github/workflows/.*\.md$|^\.github/workflows/.*\.lock\.yml$|^\.github/aw/|^scripts/check-ghaw-lock-sync\.sh$|^scripts/__tests__/check-ghaw-lock-sync\.test\.sh$' && ghaw=true
+          echo "$CHANGED" | grep -qE '^\.github/workflows/.*\.md$|^\.github/workflows/.*\.lock\.yml$|^\.github/aw/|^scripts/check-ghaw-lock-sync\.sh$|^scripts/get-ghaw-compiler-version\.sh$|^scripts/__tests__/check-ghaw-lock-sync\.test\.sh$' && ghaw=true
 
           any_code=false
           if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] || [ "$design" = "true" ]; then
@@ -492,12 +492,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Derive the pin from the committed locks so the CI toolchain can never
-          # silently skew from the compiler that produced them. Fall back to a known
-          # version only if no lock records a compiler_version.
-          ver="$(grep -hoE '"compiler_version" *: *"v[0-9.]+"' .github/workflows/*.lock.yml 2>/dev/null \
-                   | grep -oE 'v[0-9.]+' | sort -u | head -1)"
-          ver="${ver:-v0.53.1}"
+          # Derive the pin from the committed locks (highest recorded
+          # compiler_version, fallback if none) so the CI toolchain can never
+          # silently skew from the compiler that produced them. The derivation
+          # lives in a standalone, unit-tested helper rather than inline here, so
+          # a regression in its regex/sort/fallback fails a required check instead
+          # of shipping green (see scripts/get-ghaw-compiler-version.sh).
+          ver="$(bash scripts/get-ghaw-compiler-version.sh)"
           echo "Pinning gh-aw to $ver"
           gh extension install github/gh-aw --pin "$ver"
           gh aw version || true
@@ -533,7 +534,9 @@ jobs:
   #     .github/workflows/*.md source or .github/aw/ action-pin change that was not
   #     recompiled into its .lock.yml), exercised against a throwaway git repo via
   #     the GHAW_COMPILE_CMD stub seam, plus the same structural anti-unwiring
-  #     assertions.
+  #     assertions. Its companion scripts/get-ghaw-compiler-version.sh (which the
+  #     ghaw-lock-sync job calls to pick the compiler pin from the committed locks)
+  #     is unit-tested by the same suite and shellchecked alongside it.
   #   * .claude/tools/dx-audit.sh — the cross-provider DX audit; its contract test
   #     pins that the audit delegates to the agentic gate and covers the secondary
   #     provider surfaces (.codex/AGENTS.md, .windsurf, .agents) instead of drifting.
@@ -593,7 +596,7 @@ jobs:
             scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
             scripts/check-taskboard-onboarding-hygiene.sh scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh \
             scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
-            scripts/check-ghaw-lock-sync.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
+            scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite

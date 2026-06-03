@@ -30,7 +30,7 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 [ -f "$SCRIPT" ] || { echo "verifier script not found: $SCRIPT"; exit 1; }
 
 # Build a toJSON(needs)-shaped object mirroring the REAL ci-success `needs:` list
-# (all 13 jobs — see ci.yml), so a failure on ANY required gate is exercised, not
+# (all 14 jobs — see ci.yml), so a failure on ANY required gate is exercised, not
 # just the handful that used to be in the fixture. Jobs not parameterised default
 # to success. Args:
 #   $1 needs-ci   $2 needs-deps   $3 lockfile-sync.result

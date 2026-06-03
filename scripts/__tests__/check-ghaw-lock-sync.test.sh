@@ -40,8 +40,15 @@ set -uo pipefail
 # lockfile suite. The structural guard at the end of this file keeps the
 # antipattern from creeping back in.
 
+# Host-dependency guard: every fixture builds a throwaway git repo, so a stripped
+# image missing git would otherwise fail ~all assertions with confusing cd errors
+# that never name the real cause. Fail loudly and early instead (matches the jq
+# guard in the sibling check-ci-success.test.sh).
+command -v git >/dev/null 2>&1 || { echo "git is required for these tests"; exit 1; }
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/../check-ghaw-lock-sync.sh"
+HELPER="$HERE/../get-ghaw-compiler-version.sh"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 FAILURES=0
@@ -50,6 +57,7 @@ pass() { echo "  PASS: $1"; }
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 
 [ -f "$SCRIPT" ] || { echo "gate script not found: $SCRIPT"; exit 1; }
+[ -f "$HELPER" ] || { echo "compiler-version helper not found: $HELPER"; exit 1; }
 
 # Build a throwaway git repo modelling a gh-aw layout: one .md source, its
 # committed .lock.yml, and the action-pin manifest. Echoes the repo path. Caller
@@ -184,6 +192,86 @@ if [ "$rc" = "0" ]; then pass "no gh-aw workflows passes without compiling (exit
 if grep -qi "no .*workflows\|no gh-aw" <<<"$out"; then pass "no-workflows has a clear message"; else fail "no-workflows message missing"; fi
 rm -rf "$repo"
 
+# --- 7. Drift via an ORPHAN LOCK: a committed .lock.yml whose .md source was
+#        deleted → `gh aw compile --purge` removes the orphan → exit 1, and the
+#        deleted TRACKED lock is restored afterward. -----------------------------
+# This is drift vector 3 — the one --purge exists to close. A contributor deletes
+# a workflow's .md source but leaves its .lock.yml committed; the real compiler's
+# --purge deletes the now-orphan lock. The stub simulates exactly that by removing
+# the committed lock. The gate must (a) see the tracked deletion as drift
+# (`git status --porcelain` shows ` D …lock.yml`, which the `\.lock\.yml$` matcher
+# catches), exit 1, and (b) restore the deleted tracked file on cleanup
+# (`git checkout` revives it), proving the check left no mutation. A `git diff
+# --quiet`-style detector keyed only on MODIFIED content would miss a pure
+# deletion — this case pins that the porcelain-status approach catches it.
+repo="$(make_ghaw_repo)"
+res="$(run_gate "$repo" 'rm .github/workflows/demo.lock.yml')"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "drift (orphan lock purged) fails (exit 1)"; else fail "orphan-lock drift should exit 1, got $rc"; fi
+if grep -qi "drift detected" <<<"$out"; then pass "orphan-lock drift prints 'drift detected'"; else fail "orphan-lock drift message missing"; fi
+if workflows_clean "$repo"; then
+  pass "deleted tracked lock restored after orphan-purge drift (clean working tree)"
+else
+  fail "gate left the purged tracked lock deleted"
+fi
+rm -rf "$repo"
+
+echo ""
+echo "=== version-pin helper (scripts/get-ghaw-compiler-version.sh) ==="
+# The helper derives the gh-aw compiler version the CI install step pins to, from
+# the committed locks' `# gh-aw-metadata: {"compiler_version":"vX.Y.Z"}` headers.
+# These cases pin its contract directly — the logic used to be inline in ci.yml
+# where this suite could not reach it, and an inline `sort -u | head -1` picked
+# the LEXICOGRAPHICALLY-smallest (older) version on disagreement, false-failing
+# the gate by recompiling with the wrong compiler. Exercised here so a regression
+# in the regex / sort order / fallback fails a required check instead of shipping.
+run_helper() {
+  local repo="$1" out rc
+  out="$(cd "$repo" && bash "$HELPER" 2>&1)"
+  rc=$?
+  printf '%s|%s' "$rc" "$out"
+}
+
+# 7a. Single committed lock recording a version → that version, verbatim.
+repo="$(make_ghaw_repo)"
+res="$(run_helper "$repo")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && [ "$out" = "v0.53.1" ]; then pass "helper emits the single lock's compiler_version"; else fail "helper single-lock expected 'v0.53.1' (rc 0), got '$out' (rc $rc)"; fi
+rm -rf "$repo"
+
+# 7b. Two locks disagree {v0.51.0, v0.53.1} → the HIGHEST in SEMVER order. This is
+# the regression guard: lexicographic `head -1` would return v0.51.0 (older); the
+# helper's `sort -Vu | tail -1` must return v0.53.1.
+repo="$(make_ghaw_repo)"
+( cd "$repo" \
+    && printf '# gh-aw-metadata: {"compiler_version":"v0.51.0"}\nname: other\non: push\njobs: {}\n' > .github/workflows/other.lock.yml \
+    && git add -A && git commit -qm 'add older-pinned lock' )
+res="$(run_helper "$repo")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && [ "$out" = "v0.53.1" ]; then pass "helper picks the highest SEMVER version across disagreeing locks (not lexicographic)"; else fail "helper multi-lock expected 'v0.53.1', got '$out' (rc $rc) — lexicographic sort bug?"; fi
+rm -rf "$repo"
+
+# 7c. A lock with NO compiler_version metadata → fall back to the known-good pin.
+repo="$(mktemp -d)"
+( cd "$repo" && git init -q && git config user.email t@t.t && git config user.name t \
+    && mkdir -p .github/workflows \
+    && printf 'name: nometa\non: push\njobs: {}\n' > .github/workflows/nometa.lock.yml \
+    && git add -A && git commit -qm init )
+res="$(run_helper "$repo")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && [ -n "$out" ] && grep -qE '^v[0-9.]+$' <<<"$out"; then pass "helper falls back to a known-good version when no lock records one"; else fail "helper no-metadata fallback expected a vX.Y.Z fallback, got '$out' (rc $rc)"; fi
+rm -rf "$repo"
+
+# 7d. No locks at all → fall back (helper must never emit empty, which would pin
+# `gh extension install …@` to nothing and break the install step).
+repo="$(mktemp -d)"
+( cd "$repo" && git init -q && git config user.email t@t.t && git config user.name t \
+    && mkdir -p .github/workflows && printf '{}' > package.json && git add -A && git commit -qm init )
+res="$(run_helper "$repo")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && grep -qE '^v[0-9.]+$' <<<"$out"; then pass "helper emits a non-empty fallback when there are no locks"; else fail "helper no-locks expected a vX.Y.Z fallback, got '$out' (rc $rc)"; fi
+rm -rf "$repo"
+
 echo ""
 echo "=== ci.yml integration wiring ==="
 # A standalone path-filtered workflow cannot be a SAFE required check: a PR that
@@ -241,10 +329,15 @@ if [ -f "$CI_YML" ]; then
     fail "ghaw-lock-sync job if: is not gated on needs-ghaw == 'true' (possible constant-false unwiring)"
   fi
 
-  if grep -q 'check-ghaw-lock-sync.sh' <<<"$ci"; then
+  # Scope this to the EXTRACTED job block, not the whole ci.yml: the script name
+  # also appears in the self-defense job's comment + shellcheck list, so a broad
+  # `<<<"$ci"` match would still PASS if the actual `run: bash …` line were
+  # deleted from THIS job while a comment elsewhere kept the token alive — a
+  # false green with the gate no longer invoked.
+  if grep -qF 'run: bash scripts/check-ghaw-lock-sync.sh' <<<"$ghaw_block"; then
     pass "ghaw-lock-sync job runs scripts/check-ghaw-lock-sync.sh"
   else
-    fail "ci.yml never invokes the gate script"
+    fail "ghaw-lock-sync job block never invokes the gate script via run:"
   fi
 
   # The job genuinely needs the real compiler, so it must install the gh-aw
@@ -255,6 +348,16 @@ if [ -f "$CI_YML" ]; then
     pass "ghaw-lock-sync job installs the gh-aw extension PINNED to a version"
   else
     fail "ghaw-lock-sync job does not install a pinned gh-aw (floating @latest would false-fail on compiler skew)"
+  fi
+
+  # The pin version MUST be derived via the standalone, unit-tested helper, not an
+  # inline `grep … | sort … | head` pipeline buried in the job (which the gate-
+  # family suite cannot reach — a sort-order or regex regression there would ship
+  # green). Pin that the job calls the helper so it cannot regress back to inline.
+  if grep -qF 'get-ghaw-compiler-version.sh' <<<"$ghaw_block"; then
+    pass "ghaw-lock-sync job derives the pin via the testable helper (not inline)"
+  else
+    fail "ghaw-lock-sync job does not use scripts/get-ghaw-compiler-version.sh — pin logic is untestable inline"
   fi
 
   # SECURITY: $GHAW_COMPILE_CMD is a TEST-ONLY seam (the hermetic suite injects it
@@ -303,13 +406,15 @@ if [ -f "$CI_YML" ]; then
     fail "CI Self-Defense Tests job does not run the gh-aw gate bash suite"
   fi
 
-  # The self-defense job shellchecks every gate script + suite; the new guard and
-  # its test must be in that list so a shell bug in them fails a required check.
+  # The self-defense job shellchecks every gate script + suite; the gate, the
+  # compiler-version helper it now delegates the pin derivation to, AND the suite
+  # must all be in that list so a shell bug in any of them fails a required check.
   if grep -qF 'scripts/check-ghaw-lock-sync.sh' <<<"$lst_block" \
+     && grep -qF 'scripts/get-ghaw-compiler-version.sh' <<<"$lst_block" \
      && grep -qF 'scripts/__tests__/check-ghaw-lock-sync.test.sh' <<<"$lst_block"; then
-    pass "CI Self-Defense Tests job shellchecks the gh-aw guard + its suite"
+    pass "CI Self-Defense Tests job shellchecks the gh-aw guard + helper + suite"
   else
-    fail "CI Self-Defense Tests job does not shellcheck the gh-aw guard/suite"
+    fail "CI Self-Defense Tests job does not shellcheck the gh-aw guard/helper/suite"
   fi
 else
   fail "ci.yml not found at $CI_YML"
@@ -401,9 +506,11 @@ echo "=== suite hygiene (structural) ==="
 # as a miss (this hit CI on the ~31 KB ci.yml). The fix is here-strings
 # (`grep PAT <<<"$var"`). This guard fails if the antipattern is reintroduced
 # anywhere in this suite. The needle below glues `echo` to `[[:space:]]` (no
-# space between them), so this guard line can never match itself.
+# space between them), so this guard line can never match itself. The variable
+# alternation covers BOTH the bare `$VAR` and the braced `${VAR}` forms — the
+# brace form is just as SIGPIPE-prone and must not slip past the guard.
 SELF="${BASH_SOURCE[0]}"
-if grep -nE 'echo[[:space:]]+"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*\|[[:space:]]*(grep|awk)' "$SELF" >/dev/null; then
+if grep -nE 'echo[[:space:]]+"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?"[[:space:]]*\|[[:space:]]*(grep|awk)' "$SELF" >/dev/null; then
   fail "a variable's echo output is piped into grep/awk — feed it via a here-string (see the SIGPIPE-safe note at the top) to stay correct under pipefail"
 else
   pass "suite feeds grep/awk via here-strings, not variable pipes (SIGPIPE-safe under pipefail)"
