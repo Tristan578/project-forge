@@ -7,7 +7,7 @@ description: "Taskboard management skill. View, create, update, and manage ticke
 
 Manage project work via the taskboard API at `http://localhost:3010`.
 
-**Project:** SpawnForge (prefix: PF, ID: `01KK974VMNC16ZAW7MW1NH3T3M`)
+**Project:** SpawnForge (prefix: PF, ID: `01KMM9ZA6SBZ7RKJZJTZS9VR4R`)
 
 ## API Endpoints
 
@@ -46,7 +46,7 @@ As a [persona], I want [specific goal] so that [measurable benefit].
 2. **Description** — Technical context (at least 20 chars beyond user story + AC sections)
 3. **Acceptance Criteria** — Given/When/Then format, **minimum 3 scenarios** (happy/edge/negative)
 4. **Priority** — Must be set: `urgent`, `high`, `medium`, or `low`
-5. **Team** — Must be assigned: Engineering (`01KK9751NZ4HM7VQM0AQ5WGME3`), PM (`01KK9751P7GKQYG9TZ96XXQCFN`), or Leadership (`01KK9751PD79RCWY462CYQ06CW`)
+5. **Team** — Must be assigned: Engineering (`01KMR5E36TP59PRQA8GQEWJVM1`), PM (`01KMR5E3852BWXAZ219W47CSKS`)
 6. **Subtasks** — At least 3 implementation steps before work begins
 
 ## Workflow

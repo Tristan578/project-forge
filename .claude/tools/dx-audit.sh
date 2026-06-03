@@ -42,6 +42,19 @@ for config in "${IDE_CONFIGS[@]}"; do
   fi
 done
 
+# Secondary provider surfaces — Codex CLI, Windsurf, and the shared .agents/.agent
+# skill trees. These do not carry the full skill/validation-tool prose the four
+# primary configs do (they point back at AGENTS.md), so they are presence-checked
+# here rather than added to IDE_CONFIGS above.
+PROVIDER_SURFACES=(".codex/AGENTS.md" ".windsurf/rules" ".agents/skills" ".agent/rules")
+for surface in "${PROVIDER_SURFACES[@]}"; do
+  if [ -e "$PROJECT_ROOT/$surface" ]; then
+    pass "provider surface $surface present"
+  else
+    warn "provider surface $surface missing"
+  fi
+done
+
 # Check that all configs reference domain skills
 SKILLS=("rust-engine" "frontend" "mcp-commands" "testing" "docs" "design")
 for config in "${IDE_CONFIGS[@]}"; do
@@ -68,6 +81,36 @@ for config in "${IDE_CONFIGS[@]}"; do
     fi
   fi
 done
+
+# ============================================
+# 1b. Cross-Provider Agentic Source-of-Truth
+# ============================================
+section "Cross-Provider Agentic Source-of-Truth"
+
+# The shared facts inside the <!-- AGENTIC-SYNC --> markers of every provider
+# config are generated from tools/agentic-sync/canonical.json. Delegate the
+# actual drift check to the unit-tested gate so this audit and CI agree on one
+# definition of "in sync" instead of re-implementing it here.
+SOT_DIR="$PROJECT_ROOT/tools/agentic-sync"
+AGENTIC_GATE="$PROJECT_ROOT/scripts/check-agentic-sync.sh"
+if [ -f "$SOT_DIR/sync.mjs" ] && [ -f "$SOT_DIR/canonical.json" ]; then
+  pass "source-of-truth generator + canonical.json present (tools/agentic-sync/)"
+else
+  fail "tools/agentic-sync/ generator or canonical.json missing"
+fi
+if [ -f "$AGENTIC_GATE" ]; then
+  if command -v node > /dev/null 2>&1; then
+    if bash "$AGENTIC_GATE" > /dev/null 2>&1; then
+      pass "agentic config in sync with canonical.json"
+    else
+      fail "agentic config DRIFTED — run: node tools/agentic-sync/sync.mjs --write"
+    fi
+  else
+    warn "node not found — cannot verify agentic config sync"
+  fi
+else
+  fail "scripts/check-agentic-sync.sh missing"
+fi
 
 # ============================================
 # 2. Validation Script Health

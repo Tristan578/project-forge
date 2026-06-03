@@ -17,8 +17,8 @@ This is enforced by hooks. All three contributors monitor progress via the share
 ## Taskboard Setup
 
 **Binary**: tcarac/taskboard (install via `go install github.com/tcarac/taskboard@latest`)
-**Start**: `cd project-forge && taskboard start --port 3010 --db .claude/taskboard.db`
-**Project ID**: `01KK974VMNC16ZAW7MW1NH3T3M` (prefix: PF)
+**Start**: `cd project-forge && taskboard start --port 3010`
+**Project ID**: `01KMM9ZA6SBZ7RKJZJTZS9VR4R` (prefix: PF)
 
 The session hooks will auto-start the server if the binary is found.
 
@@ -27,7 +27,7 @@ The session hooks will auto-start the server if the binary is found.
 - **Description**: Technical context, affected files, scope (at least 20 chars beyond user story + AC)
 - **Acceptance Criteria**: Given/When/Then format — **minimum 3 scenarios** (happy path, edge case, negative/error case)
 - **Priority**: urgent, high, medium, low
-- **Team**: Engineering (`01KK9751NZ4HM7VQM0AQ5WGME3`), PM (`01KK9751P7GKQYG9TZ96XXQCFN`), Leadership (`01KK9751PD79RCWY462CYQ06CW`)
+- **Team**: Engineering (`01KMR5E36TP59PRQA8GQEWJVM1`), PM (`01KMR5E3852BWXAZ219W47CSKS`)
 - **Subtasks**: At least 3 implementation steps (this IS the plan)
 
 ## GitHub Project Sync (v3 Architecture)

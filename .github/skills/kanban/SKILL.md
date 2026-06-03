@@ -6,7 +6,7 @@ user-invokable: true
 
 # Taskboard Management
 
-API: `http://localhost:3010/api` | Project ID: `01KK974VMNC16ZAW7MW1NH3T3M`
+API: `http://localhost:3010/api` | Project ID: `01KMM9ZA6SBZ7RKJZJTZS9VR4R`
 
 ## Key Endpoints
 - `GET /api/board` — Full Kanban view
@@ -18,6 +18,5 @@ API: `http://localhost:3010/api` | Project ID: `01KK974VMNC16ZAW7MW1NH3T3M`
 Every ticket needs: user story ("As a..."), description, acceptance criteria (Given/When/Then), priority (urgent/high/medium/low), team ID, and 3+ subtasks.
 
 ## Teams
-- Engineering: `01KK9751NZ4HM7VQM0AQ5WGME3`
-- PM: `01KK9751P7GKQYG9TZ96XXQCFN`
-- Leadership: `01KK9751PD79RCWY462CYQ06CW`
+- Engineering: `01KMR5E36TP59PRQA8GQEWJVM1`
+- PM: `01KMR5E3852BWXAZ219W47CSKS`

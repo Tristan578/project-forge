@@ -8,7 +8,7 @@ set -uo pipefail
 TICKET_ID="${1:-}"
 if [ -z "${TICKET_ID}" ]; then
   echo "Usage: $0 <TICKET_ID>"
-  echo "Example: $0 01KK974VMNC16ZAW7MW1NH3T3M"
+  echo "Example: $0 01KMM9ZA6SBZ7RKJZJTZS9VR4R"
   exit 0
 fi
 
@@ -94,7 +94,7 @@ check("Priority set",
 # 6. Team assigned
 check("Team assigned",
       bool(team),
-      f"'{team}'" if team else "MISSING — set teamId to Engineering/PM/Leadership")
+      f"'{team}'" if team else "MISSING — set teamId to Engineering/PM")
 
 # 7. Labels set
 check("Labels set",

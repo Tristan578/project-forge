@@ -21,7 +21,8 @@
 #      is the *silent, single-line* slip that no reviewer would notice.
 #
 # Unit-tested by scripts/__tests__/check-ci-success.test.sh (run in CI by the
-# lockfile-sync-tests job, gated on needs-ci so any edit here re-runs it).
+# lockfile-sync-tests job, gated on needs-ci || needs-agentic || needs-onboarding
+# so any edit to a gate script OR an onboarding surface re-runs the suite).
 set -uo pipefail
 
 NEEDS_JSON="${NEEDS_JSON:-}"
@@ -54,19 +55,30 @@ if [ -n "$failed" ]; then
   exit 1
 fi
 
-# 2. Anti-tamper: a self-defending gate skipped while its trigger fired is an
-#    unwiring signal. Map each gate job to the ci-gate output that triggers it.
+# 2. Anti-tamper: a self-defending gate skipped while ANY of its triggers fired
+#    is an unwiring signal. A job gated on `needs-ci || needs-agentic` must run if
+#    EITHER output is true, so each gate is mapped to ALL the ci-gate outputs in
+#    its `if:` — guarding only one arm would leave the other as a silent
+#    single-line `if: false` skip vector.
 tamper=""
 check_triggered() {
-  local job="$1" trigger="$2" trig result
-  trig="$(jq -r --arg t "$trigger" '."ci-gate".outputs[$t] // empty' "$needs_file")"
+  local job="$1"; shift
+  local trig result fired=""
   result="$(jq -r --arg j "$job" '.[$j].result // "absent"' "$needs_file")"
-  if [ "$trig" = "true" ] && [ "$result" != "success" ]; then
-    tamper="$tamper"$'\n'"  - $job (trigger $trigger=true but result=$result)"
+  for trigger in "$@"; do
+    trig="$(jq -r --arg t "$trigger" '."ci-gate".outputs[$t] // empty' "$needs_file")"
+    if [ "$trig" = "true" ]; then
+      fired="${fired:+$fired,}$trigger"
+    fi
+  done
+  if [ -n "$fired" ] && [ "$result" != "success" ]; then
+    tamper="$tamper"$'\n'"  - $job (trigger $fired=true but result=$result)"
   fi
 }
-check_triggered "lockfile-sync"       "needs-deps"
-check_triggered "lockfile-sync-tests" "needs-ci"
+check_triggered "lockfile-sync"             "needs-deps"
+check_triggered "lockfile-sync-tests"       "needs-ci" "needs-agentic" "needs-onboarding"
+check_triggered "agentic-sync"              "needs-agentic"
+check_triggered "taskboard-onboarding-guard" "needs-onboarding"
 if [ -n "$tamper" ]; then
   echo "::error::Self-defending gate skipped despite its trigger firing (possible unwiring):"
   echo "$tamper"
