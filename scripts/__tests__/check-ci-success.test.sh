@@ -183,9 +183,10 @@ if echo "$out" | grep -q "agentic-sync"; then pass "the failing agentic gate is 
 # onto lockfile-sync-tests would skip it while needs-ci is false — so guarding
 # only the needs-ci arm leaves this single-line vector open. The anti-tamper must
 # treat EITHER trigger firing as "the job had to run."
-# needs-codex is held FALSE (ccg legit-skips) so the codex arm cannot mask a
-# dropped needs-agentic arm — this case must fail PURELY on the agentic mapping.
-res="$(run_verify "$(mk false false skipped skipped success success true success false success false skipped)")"
+# needs-codex AND needs-ghaw are held FALSE (codex-config-guard / ghaw-lock-sync
+# both legit-skip) so neither standalone gate can raise a competing tamper that
+# masks a dropped needs-agentic arm — this case must fail PURELY on the agentic map.
+res="$(run_verify "$(mk false false skipped skipped success success true success false success false skipped false skipped)")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "tests skipped while needs-agentic=true (needs-ci=false) fails (exit 1)"; else fail "tamper (tests via agentic arm) should exit 1, got $rc"; fi
 if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is named (agentic arm)"; else fail "unwired gate not named (agentic arm)"; fi
@@ -198,9 +199,10 @@ if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is n
 # and the whole suite would stay green — leaving the ci.yml-edit unwiring vector
 # (a scripts/ or ci.yml PR sets needs-ci=true, touches no agentic file) untested.
 # Both arms must be independently load-bearing.
-# needs-codex is held FALSE (ccg legit-skips) so the codex arm cannot mask a
-# dropped needs-ci arm — this case must fail PURELY on the needs-ci mapping.
-res="$(run_verify "$(mk true true success skipped success success false success false success false skipped)")"
+# needs-codex AND needs-ghaw are held FALSE (codex-config-guard / ghaw-lock-sync
+# both legit-skip) so neither standalone gate can raise a competing tamper that
+# masks a dropped needs-ci arm — this case must fail PURELY on the needs-ci map.
+res="$(run_verify "$(mk true true success skipped success success false success false success false skipped false skipped)")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "tests skipped while needs-ci=true (needs-agentic=false) fails (exit 1)"; else fail "tamper (tests via ci arm) should exit 1, got $rc"; fi
 if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is named (ci arm)"; else fail "unwired gate not named (ci arm)"; fi
@@ -237,9 +239,10 @@ if echo "$out" | grep -q "taskboard-onboarding-guard"; then pass "the failing on
 # are false — so the anti-tamper map must treat the onboarding arm as load-bearing
 # too. lockfile-sync + agentic-sync legit-skip here (their triggers are false), so
 # the ONLY tamper is the skipped self-tests job.
-# needs-codex is held FALSE (ccg legit-skips) so the codex arm cannot mask a
-# dropped needs-onboarding arm — this case must fail PURELY on the onboarding map.
-res="$(run_verify "$(mk false false skipped skipped success success false success true success false skipped)")"
+# needs-codex AND needs-ghaw are held FALSE (codex-config-guard / ghaw-lock-sync
+# both legit-skip) so neither standalone gate can raise a competing tamper that
+# masks a dropped needs-onboarding arm — this case must fail PURELY on the onboarding map.
+res="$(run_verify "$(mk false false skipped skipped success success false success true success false skipped false skipped)")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "tests skipped while needs-onboarding=true (others false) fails (exit 1)"; else fail "tamper (tests via onboarding arm) should exit 1, got $rc"; fi
 if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is named (onboarding arm)"; else fail "unwired gate not named (onboarding arm)"; fi
@@ -250,10 +253,13 @@ if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is n
 #        onboarding arm fired), so the guard skip is the sole tamper — proving the
 #        guard's needs-onboarding mapping is independently load-bearing even when
 #        no other trigger is set.
-# needs-codex is held FALSE (ccg legit-skips) so the codex arm cannot mask the
-# onboarding tamper — this case must fail PURELY on the onboarding-guard map,
-# matching the isolation discipline of cases 15/16/20.
-res="$(run_verify "$(mk false false skipped success success success false skipped true skipped false skipped)")"
+# needs-codex AND needs-ghaw are held FALSE (codex-config-guard / ghaw-lock-sync
+# both legit-skip) so neither standalone gate can raise a competing tamper that masks
+# the onboarding tamper — this case must fail PURELY on the onboarding-guard map,
+# matching cases 15/16/20 and the needs-ghaw isolation discipline of case 25. (With
+# glr=skipped this is load-bearing: a leftover nghaw=true would let the skipped
+# ghaw-lock-sync forge a competing tamper and mask a dropped needs-onboarding map.)
+res="$(run_verify "$(mk false false skipped success success success false skipped true skipped false skipped false skipped)")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "guard skipped while ONLY needs-onboarding=true fails (exit 1)"; else fail "isolated onboarding tamper should exit 1, got $rc"; fi
 if echo "$out" | grep -q "taskboard-onboarding-guard ("; then pass "the unwired onboarding gate is named (isolated arm)"; else fail "unwired onboarding gate not named (isolated arm)"; fi
