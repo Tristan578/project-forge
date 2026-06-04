@@ -65,7 +65,8 @@ esac
 # command. These need NO shell operator, so the operator gate above never sees
 # them — the danger is an argument, not a metacharacter:
 #   --ext-diff / --extcmd / -x   git's external-diff command — runs an arbitrary
-#                                program (`git diff -x ./evil`, RCE)
+#                                program (`git diff -x ./evil` AND the glued short
+#                                form `git diff -x./evil`, both RCE)
 #   --output                     git diff/log/show write output to an arbitrary
 #                                path (`git diff --output=/etc/cron.d/evil`)
 #   --config                     cargo `build.rustc-wrapper` RCE, and JS tools
@@ -74,7 +75,7 @@ esac
 #   --exec / --upload-pack / --receive-pack   git transport command execution
 # The command is padded with spaces so each flag matches on a word boundary.
 case " $COMMAND " in
-  *' --ext-diff'* | *' --extcmd'* | *' -x '* | *' --output'* | *' --config'* | *' --exec'* | *' --upload-pack'* | *' --receive-pack'*)
+  *' --ext-diff'* | *' --extcmd'* | *' -x'* | *' --output'* | *' --config'* | *' --exec'* | *' --upload-pack'* | *' --receive-pack'*)
     emit ask "command carries a program-execution or file-write flag and requires explicit approval"
     exit 0
     ;;

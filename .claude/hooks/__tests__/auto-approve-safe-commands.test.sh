@@ -141,6 +141,7 @@ assert "npx drizzle-kit drop is gated"  "0:ask"   "$(run_decision 'npx drizzle-k
 # above: `git diff HEAD~1`, `cargo check --target ...`, `npx eslint .`). ---
 assert "git diff --output write gated"  "0:ask"   "$(run_decision 'git diff --output=/etc/cron.d/evil')"
 assert "git diff -x extcmd RCE gated"   "0:ask"   "$(run_decision 'git diff -x ./evil.sh HEAD')"
+assert "git diff -x glued RCE gated"    "0:ask"   "$(run_decision 'git diff -x./evil.sh HEAD')"
 assert "git diff --ext-diff gated"      "0:ask"   "$(run_decision 'git diff --ext-diff')"
 assert "git diff --extcmd RCE gated"    "0:ask"   "$(run_decision 'git diff --extcmd=./evil.sh')"
 assert "git log --output write gated"   "0:ask"   "$(run_decision 'git log -p --output=/tmp/x')"
