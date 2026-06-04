@@ -69,6 +69,18 @@ for rule in \
   assert_jq "deny contains $rule" --arg r "$rule" '.permissions.deny | index($r) != null'
 done
 
+# --- Negative guards: dangerous / side-effecting rules must NOT be auto-allowed.
+#     `npm exec` runs arbitrary package binaries; the rest mutate state. ---
+for rule in \
+  'Bash(npm exec:*)' \
+  'Bash(npm publish:*)' \
+  'Bash(git push:*)' \
+  'Bash(rm:*)' \
+  'Bash(rm -rf:*)' ; do
+  # shellcheck disable=SC2016  # $r is a jq variable bound via --arg, not a shell var
+  assert_jq "allow does NOT contain $rule" --arg r "$rule" '.permissions.allow | index($r) == null'
+done
+
 # --- The auto-approve hook is wired as a PreToolUse hook matching Bash ---
 # shellcheck disable=SC2016  # jq filter; no shell expansion intended
 assert_jq "auto-approve hook wired under PreToolUse with a Bash matcher" '
