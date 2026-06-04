@@ -225,10 +225,15 @@ if [ -f "$CI_YML" ]; then
     fail "lockfile-sync job if: is not gated on needs-deps == 'true' (possible constant-false unwiring)"
   fi
 
-  if grep -q 'check-lockfile-sync.sh' <<<"$ci"; then
+  # Scope this to the EXTRACTED job block, not the whole ci.yml: the script name
+  # also appears in the self-defense job's comment + shellcheck list, so a broad
+  # `<<<"$ci"` match would still PASS if the actual `run: bash …` line were deleted
+  # from THIS job while a comment/shellcheck-list mention elsewhere kept the token
+  # alive — a false green with the gate no longer invoked.
+  if grep -qF 'run: bash scripts/check-lockfile-sync.sh' <<<"$ls_block"; then
     pass "lockfile-sync job runs scripts/check-lockfile-sync.sh"
   else
-    fail "ci.yml never invokes the gate script"
+    fail "lockfile-sync job block never invokes the gate script via run:"
   fi
 
   # SECURITY: $LOCKFILE_REGEN_CMD is a TEST-ONLY seam (the hermetic suite injects it
