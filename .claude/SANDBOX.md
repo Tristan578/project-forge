@@ -77,7 +77,9 @@ whose danger lives in a *flag* is handled by the hook, which can inspect flags.
    - **Flag gate** — refuses any command carrying a program-execution, file-write,
      or module-loading flag (`--config`, `--output`, `--ext-diff`/`--extcmd`/`-x`,
      `--exec`/`--upload-pack`/`--receive-pack`, and `--reporter` — vitest/playwright
-     `import()` a reporter module). eslint's `--format`/`-f` load a formatter module
+     `import()` a reporter module). The gate is value-blind: it cannot tell a builtin
+     `--reporter=verbose` from `--reporter=./pwn.js`, so even the harmless builtin
+     form defers to a prompt — a deliberate, low-frequency cost. eslint's `--format`/`-f` load a formatter module
      the same way and are gated WITHIN `npx` only: `git log --format=...` is a benign
      pretty-print string and `npm install -f` means `--force`, so a global gate
      would wrongly defer those. These need no shell operator, so the operator gate

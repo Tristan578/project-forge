@@ -95,7 +95,7 @@ assert "cargo check is safe"            "0:allow" "$(run_decision 'cargo check -
 
 # --- Full hook allow-list coverage: EVERY verb is_safe() approves gets a positive
 #     assertion here. The hook's safe-set is DELIBERATELY BROADER than the
-#     settings.json static allow (8 entries, pinned by settings-permissions.test.sh)
+#     settings.json static allow (7 entries, pinned by settings-permissions.test.sh)
 #     — the static fast-path holds only commands safe with ANY argument, while the
 #     hook is the comprehensive flag-aware layer documented in .claude/SANDBOX.md.
 #     This suite is the source of truth for the hook's list: adding a verb to
