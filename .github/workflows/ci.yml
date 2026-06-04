@@ -63,8 +63,8 @@ jobs:
           # settings-permissions.test.sh validates). Kept OUT of `ci` and
           # any-code on purpose: a hook/settings change never fires the heavy
           # quality-gates fan-out (lint/typecheck/test-web/test-mcp/build-wasm).
-          # It does fire hook-tests (this output) AND — because every `^\.claude/`
-          # path is also an onboarding surface (line 99) — the lightweight
+          # It does fire hook-tests (this output) AND — because the `onboarding`
+          # matcher below also lists `^\.claude/` — the lightweight
           # onboarding-guard + lockfile-sync-tests self-tests. All three are fast,
           # self-contained checks; the fan-out is what stays gated off.
           echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$' && hooks=true
