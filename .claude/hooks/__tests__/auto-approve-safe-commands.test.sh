@@ -122,6 +122,7 @@ assert "git stash list is safe"         "0:allow" "$(run_decision 'git stash lis
 #     write-capable verb that must not be on a "safe read/build/test" fast-path. ---
 assert "npm pkg set is gated"           "0:ask"   "$(run_decision 'npm pkg set version=9.9.9')"
 assert "npm pkg delete is gated"        "0:ask"   "$(run_decision 'npm pkg delete scripts.test')"
+assert "npm pkg fix is gated"           "0:ask"   "$(run_decision 'npm pkg fix')"
 
 # --- `npx drizzle-kit` is NO LONGER auto-approved: `drizzle-kit drop`/`push`
 #     mutate the DB schema destructively and `generate` writes migration files.
@@ -150,6 +151,12 @@ assert "cargo check --config RCE gated" "0:ask"   "$(run_decision 'cargo check -
 assert "npx eslint --config gated"      "0:ask"   "$(run_decision 'npx eslint --config /tmp/evil.js .')"
 assert "npx vitest --config gated"      "0:ask"   "$(run_decision 'npx vitest run --config /tmp/evil.ts')"
 assert "git --exec flag gated"          "0:ask"   "$(run_decision 'git ls-files --exec=./evil.sh')"
+# --upload-pack / --receive-pack: git transport-program execution. Paired with an
+# ALLOW-LISTED verb (git ls-files) on purpose — that way deleting either gate arm
+# flips the result to "allow" and regresses this test (a non-allow-listed verb like
+# `git clone` would read "ask" from the allow-list miss even with the arm gone).
+assert "git --upload-pack RCE gated"    "0:ask"   "$(run_decision 'git ls-files --upload-pack=./evil.sh')"
+assert "git --receive-pack RCE gated"   "0:ask"   "$(run_decision 'git ls-files --receive-pack=./evil.sh')"
 
 # --- Operator-gate arms must each be INDEPENDENTLY falsifiable: a command with `(`
 #     but no `$`, and one with `)` but no `$`, so removing either case arm regresses
@@ -193,6 +200,11 @@ assert "git statusx is not git status"  "0:ask"   "$(run_decision 'git statusx -
 assert "npm installfoo is not install"  "0:ask"   "$(run_decision 'npm installfoo')"
 assert "npmci (no space) is not npm ci"  "0:ask"   "$(run_decision 'npmci')"
 assert "npx vitestx is not npx vitest"  "0:ask"   "$(run_decision 'npx vitestx run')"
+# `git difftool` / `cargo checkout` share an allow-listed token (`diff`, `check`)
+# as a prefix but are distinct subcommands — the trailing ( |$) boundary must keep
+# them OUT of the fast-path. Stripping that anchor would falsely match them.
+assert "git difftool is not git diff"   "0:ask"   "$(run_decision 'git difftool HEAD')"
+assert "cargo checkout is not check"    "0:ask"   "$(run_decision 'cargo checkout main')"
 
 # --- Boy Scout hardening: npm exec runs arbitrary binaries -> ask ---
 assert "npm exec is no longer safe"     "0:ask"   "$(run_decision 'npm exec some-cli')"
