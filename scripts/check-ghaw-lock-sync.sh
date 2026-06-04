@@ -87,8 +87,11 @@ BEFORE_UNTRACKED="$(grep -E '^\?\? .*\.lock\.yml$' <<<"$status_before" | sed 's/
 # dir-wide checkout would clobber an unrelated in-flight edit (e.g. to ci.yml)
 # that the gate never made. A check may only undo what IT changed.
 # Invoked solely from the EXIT trap below. The trap is a single-quoted string,
-# which the linter cannot see into, so SC2329 "never invoked" is a false positive.
-# shellcheck disable=SC2329
+# which the linter cannot see into, so SC2329 "never invoked" (on the function)
+# and SC2317 "command appears unreachable" (on its body, emitted by the newer
+# linter on the CI runner) are both false positives. A function-scoped disable
+# applies to the whole body, covering every command inside.
+# shellcheck disable=SC2329,SC2317
 restore_tree() {
   local tracked now f
   # Revert tracked locks the compile modified or deleted. `git ls-files` lists
