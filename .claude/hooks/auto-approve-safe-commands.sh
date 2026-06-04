@@ -77,8 +77,13 @@ is_safe() {
     return 0
   fi
 
-  # git — read-only commands only.
-  if printf '%s\n' "$cmd" | grep -qE '^git (status|diff|log|branch|worktree list|show|shortlog|describe|tag|remote -v|ls-files|rev-parse|stash list)( |$)'; then
+  # git — read-only commands only. `branch` and `tag` are deliberately EXCLUDED:
+  # the same prefix performs destructive writes (`git branch -D/-m/-f`, `git tag
+  # -d/-f`, and bare `git tag <name>` which creates a tag), and a prefix gate
+  # cannot separate the read form from the write form — both defer to a prompt.
+  # The verbs kept here are intrinsically read-only or pinned to a read
+  # subcommand (`worktree list`, `remote -v`, `stash list`).
+  if printf '%s\n' "$cmd" | grep -qE '^git (status|diff|log|worktree list|show|shortlog|describe|remote -v|ls-files|rev-parse|stash list)( |$)'; then
     return 0
   fi
 

@@ -102,6 +102,20 @@ assert "bash .claude validate defers"   "0:ask"   "$(run_decision 'bash .claude/
 assert "lookalike validate-evil defers" "0:ask"   "$(run_decision 'bash .claude/tools/validate-evil.sh')"
 assert "lookalike hooks .py defers"     "0:ask"   "$(run_decision 'python3 .claude/hooks/evil-attacker.py')"
 
+# --- git allow-list is READ-ONLY: `branch` and `tag` are NOT on it because the
+#     same subcommand prefix also performs destructive writes — `git branch -D`/
+#     `-m`/`-f`, `git tag -d`/`-f`, and bare `git tag <name>` (which CREATES a
+#     tag). A prefix gate cannot tell the read form from the write form, so both
+#     subcommands defer to an explicit prompt. Even the plain read forms
+#     (`git branch` to list, `git tag` to list) -> ask: we will not auto-approve a
+#     verb whose unflagged sibling mutates refs. ---
+assert "git branch -D main is gated"    "0:ask"   "$(run_decision 'git branch -D main')"
+assert "git branch -m rename is gated"  "0:ask"   "$(run_decision 'git branch -m old new')"
+assert "plain git branch is gated"      "0:ask"   "$(run_decision 'git branch')"
+assert "git tag -d delete is gated"     "0:ask"   "$(run_decision 'git tag -d v1.0.0')"
+assert "git tag -f move is gated"       "0:ask"   "$(run_decision 'git tag -f v1.0.0 HEAD')"
+assert "git tag create is gated"        "0:ask"   "$(run_decision 'git tag v1.0.0')"
+
 # --- Non-safe commands -> ask (NOT exit 2), exit 0 ---
 assert "rm -rf is not auto-safe"        "0:ask"   "$(run_decision 'rm -rf /tmp/x')"
 assert "git push is not auto-safe"      "0:ask"   "$(run_decision 'git push origin HEAD')"

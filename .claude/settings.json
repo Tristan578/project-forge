@@ -15,7 +15,6 @@
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
-      "Bash(git branch:*)",
       "Bash(git show:*)",
       "Bash(git rev-parse:*)",
       "Bash(cargo check:*)"

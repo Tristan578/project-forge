@@ -42,8 +42,11 @@ for routine work. Two layers cooperate:
 1. **Static `permissions.allow`** — Claude Code's native fast-path. A conservative,
    explicit list: `npm ci`/`install`/`run`/`test`/`ls`/`audit`, `npx vitest`/
    `eslint`/`tsc`/`playwright`/`drizzle-kit`, read-only `git status`/`diff`/`log`/
-   `branch`/`show`/`rev-parse`, and `cargo check`. Prefix rules (`Bash(npm ci:*)`)
-   match the command and its arguments.
+   `show`/`rev-parse`, and `cargo check`. Prefix rules (`Bash(npm ci:*)`) match the
+   command and its arguments. `git branch` and `git tag` are deliberately NOT on
+   the allow-list: a prefix rule cannot separate the read form from the
+   ref-mutating form (`git branch -D`, `git tag -d/-f`, bare `git tag <name>`), so
+   both defer to a prompt.
 
 2. **`auto-approve-safe-commands.sh`** (a `PreToolUse` hook, matcher `Bash`) — a
    broader dynamic layer for safe commands the static list does not enumerate
