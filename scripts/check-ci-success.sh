@@ -79,6 +79,13 @@ check_triggered() {
     tamper="$tamper"$'\n'"  - $job (trigger $fired=true but result=$result)"
   fi
 }
+# Each entry maps a gate JOB to the ci-gate trigger(s) in its OWN `if:`. Note this
+# whole anti-tamper pass runs inside the ci-success aggregate (ci.yml: `if:
+# always()`), so every entry is evaluated on EVERY PR — it is NOT scoped to the
+# lockfile-sync-tests job (that job only runs the *unit test* of this script). The
+# lockfile-sync-tests ENTRY needs four triggers because its job `if:` has four arms
+# (see lines 23-29); the others, including hook-tests, each name the single trigger
+# their job is gated on (hook-tests <-> needs-hooks, ci.yml hook-tests `if:`).
 check_triggered "lockfile-sync"             "needs-deps"
 check_triggered "lockfile-sync-tests"       "needs-ci" "needs-agentic" "needs-onboarding" "needs-codex"
 check_triggered "agentic-sync"              "needs-agentic"
