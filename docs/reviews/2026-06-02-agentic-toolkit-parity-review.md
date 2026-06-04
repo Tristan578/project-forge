@@ -115,7 +115,7 @@ Legend: ✅ present & current · ⚠️ present but stale/deprecated content · 
 
 <details><summary><b>Settings & permission / sandbox model</b></summary>
 
-- **Claude Code** — ◐ partial: Real shared config is fail-closed PreToolUse gate hooks (block-main-commits, check-pr-metadata, block-deferred-fixes, pre-push-quality-gate, verify-branch) + reviewer block-writes.sh; but settings.json has NO permissions allow/ask/deny block, NO permissionMode, NO Bash sandbox. The only allow-list is in .claude/settings.local.json which is gitignored (unshared), and auto-approve-safe-commands.sh is a PermissionRequest hook that is never wired (no PermissionRequest event) = dead code.
+- **Claude Code** — ◐ partial: Real shared config is fail-closed PreToolUse gate hooks (block-main-commits, check-pr-metadata, block-deferred-fixes, pre-push-quality-gate, verify-branch) + reviewer block-writes.sh; but settings.json has NO permissions allow/ask/deny block, NO permissionMode, NO Bash sandbox. The only allow-list is in .claude/settings.local.json which is gitignored (unshared), and auto-approve-safe-commands.sh is a PermissionRequest hook that is never wired (no PermissionRequest event) = dead code. **[Resolved — #8690]** A committed `permissions` block (curated `allow` read/build/test rules + `deny` guards on the two off-limits config files, root-anchored for both Edit and Write) now ships in `settings.json`, and `auto-approve-safe-commands.sh` was repaired (relabelled to its real `PreToolUse` event, emits an `allow`/`ask` decision instead of a blunt `exit 2`, drops `npm exec`, gates compound/redirected/substituted commands) and wired as a `PreToolUse` Bash hook.
 - **Codex CLI** — ⚠️ stale: .codex/config.toml is the only native approval_policy + sandbox_mode + workspace-write-network + features config in the repo, BUT the working tree has uncommitted permissive edits (approval_policy=never, sandbox_mode=workspace-write, network_access=true, shell_tool=true, web_search=true) that diverge from the restrictive committed HEAD (unless-allow-listed, shell_tool=false).
 - **Gemini CLI** — ◐ partial: .gemini/settings.json configures only model/context/hooks. No approval-mode (default/auto_edit/plan/yolo), no tools.sandbox (docker/podman/seatbelt), and checkpointing is left at its default-off — all three are GA and unused; enforcement is purely behavioral via the BeforeAgent ticket-gate + AfterTool lint hooks.
 - **GitHub Copilot CLI** — ◐ partial: No ~/.copilot/config.json trustedFolders, no /sandbox enable, no --allow-tool/--deny-tool/--available-tools config in-repo. CLI-side enforcement is only scripts/copilot-arch-check.sh (postToolUse, exit 1 on bridge/WASM/eslint/tsc violation); the capability-scoped permissions:/safe-outputs: model exists only for the cloud gh-aw workflows, not the interactive CLI.
@@ -257,6 +257,7 @@ source that confirmed the feature is real/GA.
 - **Source:** https://code.claude.com/docs/en/permission-modes
 - **2nd source (Phase D):** https://blog.vincentqiao.com/en/posts/claude-code-settings-permissions/
 - **Remediation:** Either wire auto-approve-safe-commands.sh as a real PreToolUse/PermissionRequest hook in the committed settings.json, or (preferred, simpler) replace it with a committed permissions block in .claude/settings.json using allow/ask/deny Tool rules (e.g. allow Bash(npm run *), Bash(git status:*), deny Bash(rm -rf *)) so the safe-command policy is shared and actually enforced. Delete auto-approve-safe-commands.sh if superseded so it stops reading as live config. ~1-2 hours.
+- **Resolution (#8690):** BOTH halves shipped — the off-limits constraint on `.claude/settings.json` was lifted by the user for this specific change. A committed `permissions` block adds the curated `allow` list plus `deny` guards `Edit(/.claude/settings.json)`, `Write(/.claude/settings.json)`, `Edit(/.codex/config.toml)`, `Write(/.codex/config.toml)` (project-root-anchored gitignore semantics, Edit+Write per file). `auto-approve-safe-commands.sh` was repaired rather than deleted: the doc's "PermissionRequest hook" was a misnomer — Claude Code has no `PermissionRequest` event, so the script is relabelled to its real `PreToolUse` (matcher `Bash`) event, now emits a `permissionDecision` of `allow` (known-safe) / `ask` (everything else) and **always exits 0** (the old blunt `exit 2` hard-block is gone), drops bare `npm exec` from the safe-list, and refuses to auto-approve any compound/piped/redirected/substituted command. Both behaviours are pinned by TDD bash suites under `.claude/hooks/__tests__/` (the hook: 33 assertions; the settings posture: 20 assertions), run by the path-gated `hook-tests` CI job.
 
 #### `Single-source-of#1` — Copilot's two instruction files directly contradict each other on a core validation rule, breaking onboarding correctness
 
@@ -351,10 +352,14 @@ Two files are **off-limits** this engagement (must not be modified or committed)
   Only the in-bounds slice is actioned: a CI guard that fails if the **committed**
   `.codex/config.toml` ever sets `approval_policy="never"` together with
   `network_access=true`. The file itself is left untouched.
-- **`Settings#1` (P1)** — the preferred fix (a committed `permissions` block in
+- **`Settings#1` (P1)** — ~~the preferred fix (a committed `permissions` block in
   `.claude/settings.json`) edits an off-limits file, so this ships as a **ticket only**
   with the blocker documented. The dead `auto-approve-safe-commands.sh` is *not*
-  deleted unilaterally.
+  deleted unilaterally.~~ **Resolved in #8690:** the user explicitly lifted the
+  off-limits constraint on `.claude/settings.json` for this change, so the preferred
+  fix shipped in full (committed `permissions` block + repaired-and-wired hook). The
+  `deny` rules in that block now gate the agent's own future edits to both off-limits
+  files — the intended, user-chosen posture.
 
 ## Phase F implementation plan (PRs — never merged here)
 
@@ -363,7 +368,7 @@ Two files are **off-limits** this engagement (must not be modified or committed)
 | **PR-1 source-of-truth generator + drift gate** | `SSoT#0` P0, `Memory#0` P1, `SSoT#1` P1, `SSoT#2` P1 (+ P2 dups) | `tools/agentic-sync/`, provider instruction files, `scripts/`, `ci.yml`, `.claude/tools/dx-audit.sh` | Keystone. TDD'd generator + `--check` drift gate. |
 | **PR-2 gh-aw actions-lock realignment + guard** | `Plugins#1` P1 | `.github/aw/`, `scripts/`, `ci.yml` | Realign lock files to the committed pin; guard against re-drift. |
 | **PR-3 Codex committed-config safety guard** | `Settings#0` P0 (in-bounds slice) | `scripts/`, `ci.yml` | Rejects a *committed* permissive Codex profile. Does **not** touch `.codex/config.toml`. |
-| _ticket only_ | `Settings#1` P1 | — | Blocked by off-limits `.claude/settings.json`. |
+| **PR-4 Claude permissions block + repaired auto-approve hook** | `Settings#1` P1 | `.claude/settings.json`, `.claude/hooks/auto-approve-safe-commands.sh`, `.claude/hooks/__tests__/` | #8690 — user lifted the off-limits constraint on `.claude/settings.json` for this change. Committed `permissions` block + TDD'd hook repair/wiring. |
 
 **Recommended merge order:** PR-1 → PR-2 → PR-3 (PR-1 is the largest, foundational
 diff; PR-2/PR-3 only append CI jobs and rebase cleanly on top). All `ci.yml` edits are
