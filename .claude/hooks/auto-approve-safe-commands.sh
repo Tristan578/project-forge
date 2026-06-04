@@ -11,10 +11,13 @@
 # stdout MUST be pure decision JSON; human-readable logging goes to stderr.
 #
 # "Safe" means a SINGLE command — no shell control operators (& | ; < > #), no
-# command substitution ($( ) or backticks), no variable expansion ($), and no
-# newline — whose program+subcommand is on the allow-list below: npm (read/
-# build/test subcommands, NOT `exec`, which runs arbitrary package binaries),
-# npx (a fixed tool allow-list), git (read-only), and cargo check. The project's
+# command substitution ($( ) or backticks), no variable expansion ($), no
+# newline, and NO program-execution / file-write flag (--config, --output,
+# --ext-diff/--extcmd/-x, --exec/--upload-pack/--receive-pack — see the flag gate
+# below) — whose program+subcommand is on the allow-list below: npm (read/build/
+# test subcommands, NOT `exec`, which runs arbitrary package binaries), npx (a
+# fixed tool allow-list), git (read subcommands — read ONLY once the flag gate
+# has stripped the exec/write flag forms), and cargo check. The project's
 # own scripts (python/bash under .claude/) are deliberately NOT auto-approved —
 # auto-running a repo script is higher-risk and lower-frequency than the build/
 # test tools above, so it defers to an explicit prompt. `#` is rejected too: a
@@ -58,31 +61,59 @@ case "$COMMAND" in
     ;;
 esac
 
+# Reject known program-execution / file-write FLAGS even on an otherwise-safe
+# command. These need NO shell operator, so the operator gate above never sees
+# them — the danger is an argument, not a metacharacter:
+#   --ext-diff / --extcmd / -x   git's external-diff command — runs an arbitrary
+#                                program (`git diff -x ./evil`, RCE)
+#   --output                     git diff/log/show write output to an arbitrary
+#                                path (`git diff --output=/etc/cron.d/evil`)
+#   --config                     cargo `build.rustc-wrapper` RCE, and JS tools
+#                                (eslint/vitest/playwright) load a config FILE
+#                                that is itself executable code
+#   --exec / --upload-pack / --receive-pack   git transport command execution
+# The command is padded with spaces so each flag matches on a word boundary.
+case " $COMMAND " in
+  *' --ext-diff'* | *' --extcmd'* | *' -x '* | *' --output'* | *' --config'* | *' --exec'* | *' --upload-pack'* | *' --receive-pack'*)
+    emit ask "command carries a program-execution or file-write flag and requires explicit approval"
+    exit 0
+    ;;
+esac
+
 # is_safe <command> — return 0 if the command is on the auto-approve allow-list.
 is_safe() {
   local cmd="$1"
 
   # npm — safe read/build/test subcommands. `exec` is intentionally excluded:
   # `npm exec <pkg>` runs arbitrary binaries, like npx without the tool gate.
-  if printf '%s\n' "$cmd" | grep -qE '^npm (install|ci|run|test|ls|outdated|view|explain|why|pkg|cache clean|audit)( |$)'; then
+  # `pkg` is narrowed to `pkg get` (read): `npm pkg set`/`delete`/`fix` MUTATE
+  # the tracked package.json, so they fall through to a prompt.
+  if printf '%s\n' "$cmd" | grep -qE '^npm (install|ci|run|test|ls|outdated|view|explain|why|pkg get|cache clean|audit)( |$)'; then
     return 0
   fi
 
-  # npx — only a fixed allow-list of project tools. @axe-core publishes many
-  # scoped subpackages; enumerate ONLY the two this project runs (@axe-core/cli,
-  # @axe-core/reporter) rather than an open `/[^ ]+` suffix, which would
-  # auto-approve any scoped binary (e.g. @axe-core/evil-tool) and even a bare
-  # `@axe-core` that resolves to no real binary. Both now fall through to "ask".
-  if printf '%s\n' "$cmd" | grep -qE '^npx (vitest|eslint|tsc|playwright|drizzle-kit|skills|@axe-core/(cli|reporter))( |$)'; then
+  # npx — only a fixed allow-list of project tools. `drizzle-kit` is deliberately
+  # EXCLUDED: `drizzle-kit drop`/`push` mutate the database schema destructively
+  # and even `generate` writes migration files, so it belongs behind a prompt,
+  # not the fast-path. @axe-core publishes many scoped subpackages; enumerate
+  # ONLY the two this project runs (@axe-core/cli, @axe-core/reporter) rather than
+  # an open `/[^ ]+` suffix, which would auto-approve any scoped binary (e.g.
+  # @axe-core/evil-tool) and even a bare `@axe-core` that resolves to no real
+  # binary. Both fall through to "ask". (A `--config` on any JS tool here is
+  # caught by the flag gate above — a config file is executable code.)
+  if printf '%s\n' "$cmd" | grep -qE '^npx (vitest|eslint|tsc|playwright|skills|@axe-core/(cli|reporter))( |$)'; then
     return 0
   fi
 
-  # git — read-only commands only. `branch` and `tag` are deliberately EXCLUDED:
-  # the same prefix performs destructive writes (`git branch -D/-m/-f`, `git tag
-  # -d/-f`, and bare `git tag <name>` which creates a tag), and a prefix gate
-  # cannot separate the read form from the write form — both defer to a prompt.
-  # The verbs kept here are intrinsically read-only or pinned to a read
-  # subcommand (`worktree list`, `remote -v`, `stash list`).
+  # git — read subcommands. Read-only ONLY in combination with the flag gate
+  # above: `git diff`/`log`/`show` share git's diff machinery, which accepts
+  # `--output=<path>` (arbitrary file write) and `-x`/`--ext-diff`/`--extcmd`
+  # (runs an external program) — those flag forms are sent to a prompt before
+  # this function is reached. `branch` and `tag` are EXCLUDED outright: the same
+  # prefix performs destructive writes (`git branch -D/-m/-f`, `git tag -d/-f`,
+  # and bare `git tag <name>` which creates a tag) that no flag gate can separate
+  # from the read form. The verbs kept here are intrinsically read-only or pinned
+  # to a read subcommand (`worktree list`, `remote -v`, `stash list`).
   if printf '%s\n' "$cmd" | grep -qE '^git (status|diff|log|worktree list|show|shortlog|describe|remote -v|ls-files|rev-parse|stash list)( |$)'; then
     return 0
   fi

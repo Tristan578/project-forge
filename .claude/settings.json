@@ -7,17 +7,8 @@
       "Bash(npm test:*)",
       "Bash(npm ls:*)",
       "Bash(npm audit:*)",
-      "Bash(npx vitest:*)",
-      "Bash(npx eslint:*)",
-      "Bash(npx tsc:*)",
-      "Bash(npx playwright:*)",
-      "Bash(npx drizzle-kit:*)",
       "Bash(git status:*)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)",
-      "Bash(git show:*)",
-      "Bash(git rev-parse:*)",
-      "Bash(cargo check:*)"
+      "Bash(git rev-parse:*)"
     ],
     "deny": [
       "Edit(/.claude/settings.json)",

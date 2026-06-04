@@ -42,8 +42,15 @@ assert_jq "permissions is an object"           '.permissions | type == "object"'
 assert_jq "permissions.allow is a non-empty array" '(.permissions.allow | type == "array") and (.permissions.allow | length > 0)'
 assert_jq "permissions.deny is a non-empty array"  '(.permissions.deny | type == "array") and (.permissions.deny | length > 0)'
 
-# --- Allow rules (safe read/build/test commands). Every entry in the committed
-#     allow-list is asserted here, so a silent drop or rename is caught. ---
+# --- Allow rules. The STATIC fast-path holds ONLY commands that are safe with
+#     ANY arguments, because a native prefix rule (`Bash(npm ci:*)`) is
+#     flag-blind — it cannot tell `git diff HEAD` from `git diff --output=/etc/x`
+#     or `cargo check` from `cargo check --config build.rustc-wrapper=./evil`.
+#     Flag-sensitive read/build commands (git diff/log/show, cargo check, the npx
+#     JS tools) live in the auto-approve HOOK instead, which gates the
+#     exec/write flag forms (asserted in auto-approve-safe-commands.test.sh).
+#     Every entry in the committed allow-list is asserted here, so a silent drop
+#     or rename is caught. ---
 for rule in \
   'Bash(npm ci:*)' \
   'Bash(npm install:*)' \
@@ -51,24 +58,15 @@ for rule in \
   'Bash(npm test:*)' \
   'Bash(npm ls:*)' \
   'Bash(npm audit:*)' \
-  'Bash(npx vitest:*)' \
-  'Bash(npx eslint:*)' \
-  'Bash(npx tsc:*)' \
-  'Bash(npx playwright:*)' \
-  'Bash(npx drizzle-kit:*)' \
   'Bash(git status:*)' \
-  'Bash(git diff:*)' \
-  'Bash(git log:*)' \
-  'Bash(git show:*)' \
-  'Bash(git rev-parse:*)' \
-  'Bash(cargo check:*)' ; do
+  'Bash(git rev-parse:*)' ; do
   # shellcheck disable=SC2016  # $r is a jq variable bound via --arg, not a shell var
   assert_jq "allow contains $rule" --arg r "$rule" '.permissions.allow | index($r) != null'
 done
 
-# The committed allow-list has exactly these 17 entries and no more — a new
+# The committed allow-list has exactly these 8 entries and no more — a new
 # auto-allow rule must be added to the loop above (and justified) before it lands.
-assert_jq "allow-list has exactly 17 entries" '.permissions.allow | length == 17'
+assert_jq "allow-list has exactly 8 entries" '.permissions.allow | length == 8'
 
 # --- Off-limits file guards: project-root-anchored, Edit AND Write ---
 for rule in \
@@ -80,22 +78,44 @@ for rule in \
   assert_jq "deny contains $rule" --arg r "$rule" '.permissions.deny | index($r) != null'
 done
 
-# --- Negative guards: dangerous / side-effecting rules must NOT be auto-allowed.
+# --- Negative guards (dangerous): never auto-allowed by EITHER layer.
 #     `npm exec` runs arbitrary package binaries; `git branch`/`git tag` look
 #     read-only but their flag forms mutate refs (`git branch -D`, `git tag -d`),
 #     so a `Bash(git branch:*)`/`Bash(git tag:*)` prefix rule would auto-approve
-#     destructive writes — they belong on a prompt, never the fast-path; the rest
-#     mutate state. ---
+#     destructive writes; `npx drizzle-kit` (`drop`/`push`) is DB-destructive; the
+#     rest mutate state. All belong on a prompt, never the fast-path. ---
 for rule in \
   'Bash(npm exec:*)' \
   'Bash(npm publish:*)' \
   'Bash(git push:*)' \
   'Bash(git branch:*)' \
   'Bash(git tag:*)' \
+  'Bash(npx drizzle-kit:*)' \
   'Bash(rm:*)' \
   'Bash(rm -rf:*)' ; do
   # shellcheck disable=SC2016  # $r is a jq variable bound via --arg, not a shell var
   assert_jq "allow does NOT contain $rule" --arg r "$rule" '.permissions.allow | index($r) == null'
+done
+
+# --- Negative guards (flag-sensitive): SAFE in the flag-aware hook, but
+#     deliberately kept OFF the static fast-path. A native prefix rule is
+#     flag-blind, so `Bash(git diff:*)` would auto-approve `git diff
+#     --output=/etc/cron.d/evil` (arbitrary write) or `git diff -x ./evil` (RCE),
+#     and `Bash(cargo check:*)` would auto-approve `cargo check --config
+#     build.rustc-wrapper=./evil` (RCE), and `Bash(npx eslint:*)` etc. would
+#     auto-approve `--config <executable-config>`. These run through the hook,
+#     which sends the exec/write flag forms to a prompt. ---
+for rule in \
+  'Bash(git diff:*)' \
+  'Bash(git log:*)' \
+  'Bash(git show:*)' \
+  'Bash(cargo check:*)' \
+  'Bash(npx vitest:*)' \
+  'Bash(npx eslint:*)' \
+  'Bash(npx tsc:*)' \
+  'Bash(npx playwright:*)' ; do
+  # shellcheck disable=SC2016  # $r is a jq variable bound via --arg, not a shell var
+  assert_jq "allow does NOT contain (hook-only) $rule" --arg r "$rule" '.permissions.allow | index($r) == null'
 done
 
 # --- The auto-approve hook is wired as a PreToolUse hook matching Bash ---

@@ -93,6 +93,69 @@ assert "git log is safe"                "0:allow" "$(run_decision 'git log --one
 assert "git rev-parse is safe"          "0:allow" "$(run_decision 'git rev-parse --short HEAD')"
 assert "cargo check is safe"            "0:allow" "$(run_decision 'cargo check --target wasm32-unknown-unknown')"
 
+# --- Full hook allow-list coverage: EVERY verb is_safe() approves gets a positive
+#     assertion here. The hook's safe-set is DELIBERATELY BROADER than the
+#     settings.json static allow (8 entries, pinned by settings-permissions.test.sh)
+#     — the static fast-path holds only commands safe with ANY argument, while the
+#     hook is the comprehensive flag-aware layer documented in .claude/SANDBOX.md.
+#     This suite is the source of truth for the hook's list: adding a verb to
+#     is_safe() WITHOUT a positive assertion here (or removing one without deleting
+#     its assertion) is a coverage gap, so the two must move together. A regex typo
+#     that silently turns a routine read into "ask" is then caught here. ---
+assert "npm outdated is safe"           "0:allow" "$(run_decision 'npm outdated')"
+assert "npm view is safe"               "0:allow" "$(run_decision 'npm view react version')"
+assert "npm explain is safe"            "0:allow" "$(run_decision 'npm explain lodash')"
+assert "npm why is safe"                "0:allow" "$(run_decision 'npm why lodash')"
+assert "npm pkg get is safe"            "0:allow" "$(run_decision 'npm pkg get version')"
+assert "npm cache clean is safe"        "0:allow" "$(run_decision 'npm cache clean --force')"
+assert "npx skills is safe"             "0:allow" "$(run_decision 'npx skills add foo')"
+assert "git worktree list is safe"      "0:allow" "$(run_decision 'git worktree list')"
+assert "git show is safe"               "0:allow" "$(run_decision 'git show HEAD')"
+assert "git shortlog is safe"           "0:allow" "$(run_decision 'git shortlog -sn')"
+assert "git describe is safe"           "0:allow" "$(run_decision 'git describe --tags')"
+assert "git remote -v is safe"          "0:allow" "$(run_decision 'git remote -v')"
+assert "git ls-files is safe"           "0:allow" "$(run_decision 'git ls-files')"
+assert "git stash list is safe"         "0:allow" "$(run_decision 'git stash list')"
+
+# --- `npm pkg` is READ-ONLY only (`npm pkg get`). The write forms `npm pkg set`/
+#     `delete`/`fix` MUTATE tracked package.json — same class as git branch/tag, a
+#     write-capable verb that must not be on a "safe read/build/test" fast-path. ---
+assert "npm pkg set is gated"           "0:ask"   "$(run_decision 'npm pkg set version=9.9.9')"
+assert "npm pkg delete is gated"        "0:ask"   "$(run_decision 'npm pkg delete scripts.test')"
+
+# --- `npx drizzle-kit` is NO LONGER auto-approved: `drizzle-kit drop`/`push`
+#     mutate the DB schema destructively and `generate` writes migration files.
+#     It defers to a prompt regardless of subcommand. ---
+assert "npx drizzle-kit generate gated" "0:ask"   "$(run_decision 'npx drizzle-kit generate')"
+assert "npx drizzle-kit push is gated"  "0:ask"   "$(run_decision 'npx drizzle-kit push')"
+assert "npx drizzle-kit drop is gated"  "0:ask"   "$(run_decision 'npx drizzle-kit drop')"
+
+# --- Flag gate: an otherwise-safe command carrying a program-execution or
+#     file-write FLAG is NOT auto-approved. These vectors use NO shell operator,
+#     so the operator gate above never sees them — the flag IS the payload:
+#       --ext-diff / --extcmd / -x  git external-diff program  (RCE)
+#       --output                    git diff/log/show write to an arbitrary path
+#       --config                    cargo build.rustc-wrapper RCE; JS-tool config
+#                                   files (eslint/vitest/playwright) are code
+# The safe, flag-free forms of these same verbs still auto-approve (asserted
+# above: `git diff HEAD~1`, `cargo check --target ...`, `npx eslint .`). ---
+assert "git diff --output write gated"  "0:ask"   "$(run_decision 'git diff --output=/etc/cron.d/evil')"
+assert "git diff -x extcmd RCE gated"   "0:ask"   "$(run_decision 'git diff -x ./evil.sh HEAD')"
+assert "git diff --ext-diff gated"      "0:ask"   "$(run_decision 'git diff --ext-diff')"
+assert "git diff --extcmd RCE gated"    "0:ask"   "$(run_decision 'git diff --extcmd=./evil.sh')"
+assert "git log --output write gated"   "0:ask"   "$(run_decision 'git log -p --output=/tmp/x')"
+assert "git show --output write gated"  "0:ask"   "$(run_decision 'git show --output=/tmp/x HEAD')"
+assert "cargo check --config RCE gated" "0:ask"   "$(run_decision 'cargo check --config build.rustc-wrapper=./evil.sh')"
+assert "npx eslint --config gated"      "0:ask"   "$(run_decision 'npx eslint --config /tmp/evil.js .')"
+assert "npx vitest --config gated"      "0:ask"   "$(run_decision 'npx vitest run --config /tmp/evil.ts')"
+assert "git --exec flag gated"          "0:ask"   "$(run_decision 'git ls-files --exec=./evil.sh')"
+
+# --- Operator-gate arms must each be INDEPENDENTLY falsifiable: a command with `(`
+#     but no `$`, and one with `)` but no `$`, so removing either case arm regresses
+#     a test (the $( ) substitution test alone also trips the `$` arm). ---
+assert "lone open-paren is gated"       "0:ask"   "$(run_decision 'npm ci (subshell')"
+assert "lone close-paren is gated"      "0:ask"   "$(run_decision 'npm ci subshell)')"
+
 # --- Project .claude scripts are deliberately NOT auto-approved (defer) ---
 # Auto-running a repo script is higher-risk / lower-frequency than the build/
 # test tools, and a name-prefix match (validate*, any hooks/*.py) is too loose

