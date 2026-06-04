@@ -78,10 +78,15 @@ assert "npx vitest run is safe"         "0:allow" "$(run_decision 'npx vitest ru
 assert "npx eslint is safe"             "0:allow" "$(run_decision 'npx eslint .')"
 assert "npx tsc --noEmit is safe"       "0:allow" "$(run_decision 'npx tsc --noEmit')"
 assert "npx playwright test is safe"    "0:allow" "$(run_decision 'npx playwright test')"
-# @axe-core ships as scoped subpackages (@axe-core/cli, @axe-core/reporter), so
-# the npx allow-rule must match the `/subpackage` suffix — a bare `@axe-core`
-# token never appears on a real command line.
-assert "npx @axe-core/cli is safe"      "0:allow" "$(run_decision 'npx @axe-core/cli http://localhost:3000')"
+# @axe-core ships as scoped subpackages; only the two this project actually uses
+# are on the allow-list (@axe-core/cli, @axe-core/reporter). The subpackage is
+# REQUIRED and ENUMERATED — an open `/[^ ]+` suffix would auto-approve ANY scoped
+# binary under @axe-core, so a bare `@axe-core` (no real binary) and an unknown
+# `@axe-core/evil-tool` both fall through to "ask" instead of auto-running.
+assert "npx @axe-core/cli is safe"       "0:allow" "$(run_decision 'npx @axe-core/cli http://localhost:3000')"
+assert "npx @axe-core/reporter is safe"  "0:allow" "$(run_decision 'npx @axe-core/reporter')"
+assert "npx @axe-core/evil-tool asks"    "0:ask"   "$(run_decision 'npx @axe-core/evil-tool --pwn')"
+assert "bare npx @axe-core asks"         "0:ask"   "$(run_decision 'npx @axe-core')"
 assert "git status is safe"             "0:allow" "$(run_decision 'git status')"
 assert "git diff is safe"               "0:allow" "$(run_decision 'git diff HEAD~1')"
 assert "git log is safe"                "0:allow" "$(run_decision 'git log --oneline -5')"
@@ -109,6 +114,7 @@ assert "curl is not auto-safe"          "0:ask"   "$(run_decision 'curl https://
 assert "git statusx is not git status"  "0:ask"   "$(run_decision 'git statusx --hack')"
 assert "npm installfoo is not install"  "0:ask"   "$(run_decision 'npm installfoo')"
 assert "npmci (no space) is not npm ci"  "0:ask"   "$(run_decision 'npmci')"
+assert "npx vitestx is not npx vitest"  "0:ask"   "$(run_decision 'npx vitestx run')"
 
 # --- Boy Scout hardening: npm exec runs arbitrary binaries -> ask ---
 assert "npm exec is no longer safe"     "0:ask"   "$(run_decision 'npm exec some-cli')"
