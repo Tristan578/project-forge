@@ -42,22 +42,33 @@ assert_jq "permissions is an object"           '.permissions | type == "object"'
 assert_jq "permissions.allow is a non-empty array" '(.permissions.allow | type == "array") and (.permissions.allow | length > 0)'
 assert_jq "permissions.deny is a non-empty array"  '(.permissions.deny | type == "array") and (.permissions.deny | length > 0)'
 
-# --- Representative allow rules (safe read/build/test commands) ---
+# --- Allow rules (safe read/build/test commands). Every entry in the committed
+#     allow-list is asserted here, so a silent drop or rename is caught. ---
 for rule in \
   'Bash(npm ci:*)' \
   'Bash(npm install:*)' \
   'Bash(npm run:*)' \
   'Bash(npm test:*)' \
+  'Bash(npm ls:*)' \
+  'Bash(npm audit:*)' \
   'Bash(npx vitest:*)' \
   'Bash(npx eslint:*)' \
   'Bash(npx tsc:*)' \
+  'Bash(npx playwright:*)' \
+  'Bash(npx drizzle-kit:*)' \
   'Bash(git status:*)' \
   'Bash(git diff:*)' \
   'Bash(git log:*)' \
+  'Bash(git show:*)' \
+  'Bash(git rev-parse:*)' \
   'Bash(cargo check:*)' ; do
   # shellcheck disable=SC2016  # $r is a jq variable bound via --arg, not a shell var
   assert_jq "allow contains $rule" --arg r "$rule" '.permissions.allow | index($r) != null'
 done
+
+# The committed allow-list has exactly these 17 entries and no more — a new
+# auto-allow rule must be added to the loop above (and justified) before it lands.
+assert_jq "allow-list has exactly 17 entries" '.permissions.allow | length == 17'
 
 # --- Off-limits file guards: project-root-anchored, Edit AND Write ---
 for rule in \
@@ -70,11 +81,17 @@ for rule in \
 done
 
 # --- Negative guards: dangerous / side-effecting rules must NOT be auto-allowed.
-#     `npm exec` runs arbitrary package binaries; the rest mutate state. ---
+#     `npm exec` runs arbitrary package binaries; `git branch`/`git tag` look
+#     read-only but their flag forms mutate refs (`git branch -D`, `git tag -d`),
+#     so a `Bash(git branch:*)`/`Bash(git tag:*)` prefix rule would auto-approve
+#     destructive writes — they belong on a prompt, never the fast-path; the rest
+#     mutate state. ---
 for rule in \
   'Bash(npm exec:*)' \
   'Bash(npm publish:*)' \
   'Bash(git push:*)' \
+  'Bash(git branch:*)' \
+  'Bash(git tag:*)' \
   'Bash(rm:*)' \
   'Bash(rm -rf:*)' ; do
   # shellcheck disable=SC2016  # $r is a jq variable bound via --arg, not a shell var
