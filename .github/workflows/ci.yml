@@ -35,6 +35,7 @@ jobs:
       needs-deps: ${{ steps.changes.outputs.deps }}
       needs-agentic: ${{ steps.changes.outputs.agentic }}
       needs-onboarding: ${{ steps.changes.outputs.onboarding }}
+      needs-codex: ${{ steps.changes.outputs.codex }}
       needs-any-code: ${{ steps.changes.outputs.any-code }}
     steps:
       - uses: actions/checkout@v6
@@ -49,7 +50,7 @@ jobs:
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
-          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false
+          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false
 
           echo "$CHANGED" | grep -q '^web/' && web=true
           echo "$CHANGED" | grep -q '^engine/' && engine=true
@@ -94,6 +95,14 @@ jobs:
           # a non-onboarding file is still caught on any PR that also touches one of
           # these surfaces or a gate script.)
           echo "$CHANGED" | grep -qE '^README\.md$|^CONTRIBUTING\.md$|^AGENTS\.md$|^GEMINI\.md$|^\.cursorrules$|^\.claude/|^\.codex/|^\.gemini/|^\.github/|^\.windsurf/|^\.agent/|^\.agents/|^docs/|^tools/agentic-sync/|^scripts/check-taskboard-onboarding-hygiene\.sh$|^scripts/__tests__/check-taskboard-onboarding-hygiene\.test\.sh$' && onboarding=true
+          # Codex permissive-profile guard (scripts/check-codex-config-safety.sh).
+          # Fires ONLY on the committed Codex config under test or the guard/its
+          # test — a ~1s, zero-dep, read-only `git show HEAD:` check. Kept
+          # ORTHOGONAL to any-code (like hooks/deps/agentic/onboarding): a
+          # config-only edit pays only this guard, never the heavy fan-out. The
+          # guard reads the COMMITTED blob, so it asserts "is the profile being
+          # merged permissive?" rather than inspecting the working tree.
+          echo "$CHANGED" | grep -qE '^\.codex/config\.toml$|^scripts/check-codex-config-safety\.sh$|^scripts/__tests__/check-codex-config-safety\.test\.sh$' && codex=true
 
           any_code=false
           if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] || [ "$design" = "true" ]; then
@@ -111,11 +120,12 @@ jobs:
             echo "deps=$deps"
             echo "agentic=$agentic"
             echo "onboarding=$onboarding"
+            echo "codex=$codex"
             echo "any-code=$any_code"
           } >> "$GITHUB_OUTPUT"
 
           echo "Changed paths detected:"
-          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding any-code=$any_code"
+          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex any-code=$any_code"
           if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ]; then
             echo "No relevant changes — downstream jobs will be skipped"
           fi
@@ -404,6 +414,44 @@ jobs:
       - name: Check for stale taskboard IDs and forbidden --db start commands
         run: bash scripts/check-taskboard-onboarding-hygiene.sh
 
+  # ---- Codex Config Safety ----
+  # Pure defense-in-depth (parity review gap Settings#0): fails the PR if the
+  # COMMITTED .codex/config.toml ever ships the fully-unattended, network-open
+  # combo — approval_policy = "never" AND network_access = true — which lets a
+  # Codex agent run shell with no human approval gate while reaching the network.
+  # The safe committed profile is approval-gated with the network off; this guard
+  # passes on it and only trips if a permissive profile is committed.
+  #
+  # It reads the COMMITTED blob via `git show HEAD:.codex/config.toml`, NEVER the
+  # working tree — a permissive profile may legitimately exist as an UNCOMMITTED
+  # local edit, and reading the working copy would both touch that off-limits file
+  # and false-fail locally. In CI the checkout == the ref under test, so this is
+  # exactly "is the profile being merged permissive?". Decision logic lives in
+  # scripts/check-codex-config-safety.sh (unit-tested by the CI Self-Defense Tests
+  # job below). It is a CHECK, never a fix.
+  #
+  # Gated on its own `codex` output (NOT any-code) so a config-only PR pays only
+  # this ~1s, zero-dep, read-only check. Wired into ci-success below so it is
+  # REQUIRED when it runs yet skips cleanly when no Codex config surface is touched
+  # — the safe path-filter + required-check pattern.
+  codex-config-guard:
+    name: Codex Config Safety
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-codex == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The guard reads `git show HEAD:.codex/config.toml`; a full history is
+          # not needed, but the committed blob at the checked-out ref must exist.
+          fetch-depth: 1
+
+      - name: Reject a committed permissive Codex config profile
+        run: bash scripts/check-codex-config-safety.sh
+
   # ---- CI Self-Defense Tests ----
   # Unit-tests the decision logic of the repo's self-defending CI gates via
   # their co-located bash suites:
@@ -421,6 +469,11 @@ jobs:
   #     onboarding-hygiene tripwire (stale ULIDs + forbidden `--db` start),
   #     exercised against hermetic fixture trees via the STALE_ID_SCAN_ROOT seam,
   #     plus the same structural anti-unwiring assertions.
+  #   * scripts/check-codex-config-safety.sh — the Codex permissive-profile guard
+  #     (rejects a COMMITTED approval_policy="never" + network_access=true combo),
+  #     exercised against hermetic fixtures via the CODEX_CONFIG_PATH seam and a
+  #     throwaway git repo via CODEX_CONFIG_SCAN_ROOT, plus the same structural
+  #     anti-unwiring assertions.
   #   * .claude/tools/dx-audit.sh — the cross-provider DX audit; its contract test
   #     pins that the audit delegates to the agentic gate and covers the secondary
   #     provider surfaces (.codex/AGENTS.md, .windsurf, .agents) instead of drifting.
@@ -432,12 +485,24 @@ jobs:
   # `needs-onboarding` (any contributor-facing onboarding surface — the tripwire's
   # own self-tests must re-run when onboarding files move), so it runs whenever any
   # gate, its suite, the generator, an onboarding surface, or ci.yml itself moves —
-  # exactly when an unwiring would happen — and skips cleanly otherwise. The job id
-  # stays `lockfile-sync-tests` so the ci-success `needs:` wiring is stable.
+  # exactly when an unwiring would happen — and skips cleanly otherwise. The Codex
+  # guard's own trigger, needs-codex, is named here as a fourth, EXPLICIT arm even
+  # though its paths (.codex/config.toml — which also sets needs-onboarding via
+  # `^\.codex/` — and the guard/test scripts — which set needs-ci) are today a
+  # strict subset of the first three: relying on that subset is an untested,
+  # silently-load-bearing invariant. If a future path-filter edit ever narrowed
+  # needs-ci or needs-onboarding so a Codex-only change stopped setting them, this
+  # suite — which runs the Codex guard's own tests — would skip while needs-codex
+  # fired, and check-ci-success.sh's anti-tamper map (which DOES list needs-codex
+  # for this job) would then flag a phantom unwiring on every Codex-only PR. Naming
+  # needs-codex in both the `if:` and the anti-tamper map keeps the trigger set and
+  # the tamper map identical, so the self-test re-runs on any Codex-config change
+  # without depending on the subset holding. The job id stays `lockfile-sync-tests`
+  # so the ci-success `needs:` wiring is stable.
   lockfile-sync-tests:
     name: CI Self-Defense Tests
     needs: [ci-gate]
-    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' || needs.ci-gate.outputs.needs-agentic == 'true' || needs.ci-gate.outputs.needs-onboarding == 'true' }}
+    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' || needs.ci-gate.outputs.needs-agentic == 'true' || needs.ci-gate.outputs.needs-onboarding == 'true' || needs.ci-gate.outputs.needs-codex == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -456,6 +521,7 @@ jobs:
             scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh \
             scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
             scripts/check-taskboard-onboarding-hygiene.sh scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh \
+            scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
@@ -469,6 +535,9 @@ jobs:
 
       - name: Run taskboard onboarding-hygiene gate test suite
         run: bash scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh
+
+      - name: Run Codex config-safety gate test suite
+        run: bash scripts/__tests__/check-codex-config-safety.test.sh
 
       - name: Run cross-provider DX-audit contract test
         run: bash .claude/tools/__tests__/dx-audit.test.sh
@@ -721,6 +790,7 @@ jobs:
       - lockfile-sync-tests
       - agentic-sync
       - taskboard-onboarding-guard
+      - codex-config-guard
       - test-e2e-ui
     runs-on: ubuntu-latest
     timeout-minutes: 5
