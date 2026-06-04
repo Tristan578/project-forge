@@ -242,12 +242,15 @@ if [ "$rc" = "1" ]; then pass "tests skipped while needs-onboarding=true (others
 if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is named (onboarding arm)"; else fail "unwired gate not named (onboarding arm)"; fi
 
 # --- 21. ISOLATED onboarding-guard tamper: guard skipped while ONLY -----------
-#        needs-onboarding=true → exit 1, naming the guard (mirrors cases 15/16 for
+#        needs-onboarding=true → exit 1, naming the guard (mirrors cases 15/16/20 for
 #        the onboarding arm). lockfile-sync-tests=success here (it ran because the
 #        onboarding arm fired), so the guard skip is the sole tamper — proving the
 #        guard's needs-onboarding mapping is independently load-bearing even when
 #        no other trigger is set.
-res="$(run_verify "$(mk false false skipped success success success false skipped true skipped)")"
+# needs-codex is held FALSE (ccg legit-skips) so the codex arm cannot mask the
+# onboarding tamper — this case must fail PURELY on the onboarding-guard map,
+# matching the isolation discipline of cases 15/16/20.
+res="$(run_verify "$(mk false false skipped success success success false skipped true skipped false skipped)")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "guard skipped while ONLY needs-onboarding=true fails (exit 1)"; else fail "isolated onboarding tamper should exit 1, got $rc"; fi
 if echo "$out" | grep -q "taskboard-onboarding-guard ("; then pass "the unwired onboarding gate is named (isolated arm)"; else fail "unwired onboarding gate not named (isolated arm)"; fi
