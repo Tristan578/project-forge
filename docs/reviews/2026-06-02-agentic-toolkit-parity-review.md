@@ -257,7 +257,7 @@ source that confirmed the feature is real/GA.
 - **Source:** https://code.claude.com/docs/en/permission-modes
 - **2nd source (Phase D):** https://blog.vincentqiao.com/en/posts/claude-code-settings-permissions/
 - **Remediation:** Either wire auto-approve-safe-commands.sh as a real PreToolUse/PermissionRequest hook in the committed settings.json, or (preferred, simpler) replace it with a committed permissions block in .claude/settings.json using allow/ask/deny Tool rules (e.g. allow Bash(npm run *), Bash(git status:*), deny Bash(rm -rf *)) so the safe-command policy is shared and actually enforced. Delete auto-approve-safe-commands.sh if superseded so it stops reading as live config. ~1-2 hours.
-- **Resolution (#8690):** BOTH halves shipped — the off-limits constraint on `.claude/settings.json` was lifted by the user for this specific change. A committed `permissions` block adds the curated `allow` list plus `deny` guards `Edit(/.claude/settings.json)`, `Write(/.claude/settings.json)`, `Edit(/.codex/config.toml)`, `Write(/.codex/config.toml)` (project-root-anchored gitignore semantics, Edit+Write per file). `auto-approve-safe-commands.sh` was repaired rather than deleted: the doc's "PermissionRequest hook" was a misnomer — Claude Code has no `PermissionRequest` event, so the script is relabelled to its real `PreToolUse` (matcher `Bash`) event, now emits a `permissionDecision` of `allow` (known-safe) / `ask` (everything else) and **always exits 0** (the old blunt `exit 2` hard-block is gone), drops bare `npm exec` from the safe-list, and refuses to auto-approve any compound/piped/redirected/substituted command. Both behaviours are pinned by TDD bash suites under `.claude/hooks/__tests__/` (the hook: 33 assertions; the settings posture: 20 assertions), run by the path-gated `hook-tests` CI job.
+- **Resolution (#8690):** BOTH halves shipped — the user granted a **one-time** authorization to edit `.claude/settings.json` *for this PR only* (not a standing exception; the `deny` rules below re-impose the off-limits status permanently afterward). A committed `permissions` block adds the curated `allow` list plus `deny` guards `Edit(/.claude/settings.json)`, `Write(/.claude/settings.json)`, `Edit(/.codex/config.toml)`, `Write(/.codex/config.toml)` (project-root-anchored gitignore semantics, Edit+Write per file). `auto-approve-safe-commands.sh` was repaired rather than deleted: the doc's "PermissionRequest hook" was a misnomer — Claude Code has no `PermissionRequest` event, so the script is relabelled to its real `PreToolUse` (matcher `Bash`) event, now emits a `permissionDecision` of `allow` (known-safe) / `ask` (everything else) and **always exits 0** (the old blunt `exit 2` hard-block is gone), drops bare `npm exec` from the safe-list, enumerates the npx `@axe-core/(cli|reporter)` subpackages (no open `/[^ ]+` suffix), and refuses to auto-approve any compound/piped/redirected/substituted command. Both behaviours are pinned by TDD bash suites under `.claude/hooks/__tests__/` (the hook: 51 assertions; the settings posture: 25 assertions), run by the path-gated `hook-tests` CI job. The posture is documented for contributors in `.claude/SANDBOX.md`.
 
 #### `Single-source-of#1` — Copilot's two instruction files directly contradict each other on a core validation rule, breaking onboarding correctness
 
@@ -355,11 +355,15 @@ Two files are **off-limits** this engagement (must not be modified or committed)
 - **`Settings#1` (P1)** — ~~the preferred fix (a committed `permissions` block in
   `.claude/settings.json`) edits an off-limits file, so this ships as a **ticket only**
   with the blocker documented. The dead `auto-approve-safe-commands.sh` is *not*
-  deleted unilaterally.~~ **Resolved in #8690:** the user explicitly lifted the
-  off-limits constraint on `.claude/settings.json` for this change, so the preferred
+  deleted unilaterally.~~ **Resolved in #8690:** the user granted a **one-time**
+  authorization to edit `.claude/settings.json` *for this PR only*, so the preferred
   fix shipped in full (committed `permissions` block + repaired-and-wired hook). The
-  `deny` rules in that block now gate the agent's own future edits to both off-limits
-  files — the intended, user-chosen posture.
+  one-time lift applied to landing this single edit — it is **not** a standing
+  exception. The `deny` rules that edit installs (`Edit`/`Write` blocks on both
+  `.claude/settings.json` and `.codex/config.toml`) **re-impose the off-limits status
+  permanently** and now enforce it programmatically as a hard block, strictly
+  stronger than the prior convention. Future agent edits to either file are denied
+  again; the only way to change them remains a human edit (see `.claude/SANDBOX.md`).
 
 ## Phase F implementation plan (PRs — never merged here)
 
@@ -368,7 +372,7 @@ Two files are **off-limits** this engagement (must not be modified or committed)
 | **PR-1 source-of-truth generator + drift gate** | `SSoT#0` P0, `Memory#0` P1, `SSoT#1` P1, `SSoT#2` P1 (+ P2 dups) | `tools/agentic-sync/`, provider instruction files, `scripts/`, `ci.yml`, `.claude/tools/dx-audit.sh` | Keystone. TDD'd generator + `--check` drift gate. |
 | **PR-2 gh-aw actions-lock realignment + guard** | `Plugins#1` P1 | `.github/aw/`, `scripts/`, `ci.yml` | Realign lock files to the committed pin; guard against re-drift. |
 | **PR-3 Codex committed-config safety guard** | `Settings#0` P0 (in-bounds slice) | `scripts/`, `ci.yml` | Rejects a *committed* permissive Codex profile. Does **not** touch `.codex/config.toml`. |
-| **PR-4 Claude permissions block + repaired auto-approve hook** | `Settings#1` P1 | `.claude/settings.json`, `.claude/hooks/auto-approve-safe-commands.sh`, `.claude/hooks/__tests__/` | #8690 — user lifted the off-limits constraint on `.claude/settings.json` for this change. Committed `permissions` block + TDD'd hook repair/wiring. |
+| **PR-4 Claude permissions block + repaired auto-approve hook** | `Settings#1` P1 | `.claude/settings.json`, `.claude/hooks/auto-approve-safe-commands.sh`, `.claude/hooks/__tests__/`, `.claude/SANDBOX.md`, `CONTRIBUTING.md` | #8690 — **one-time** user authorization to edit `.claude/settings.json` for this PR only; the committed `deny` rules then re-impose the off-limits status permanently (hard block, stronger than the prior convention). Committed `permissions` block + TDD'd hook repair/wiring + `SANDBOX.md` onboarding doc. |
 
 **Recommended merge order:** PR-1 → PR-2 → PR-3 (PR-1 is the largest, foundational
 diff; PR-2/PR-3 only append CI jobs and rebase cleanly on top). All `ci.yml` edits are
