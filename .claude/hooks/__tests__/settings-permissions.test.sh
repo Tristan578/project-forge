@@ -57,16 +57,15 @@ for rule in \
   'Bash(npm run:*)' \
   'Bash(npm test:*)' \
   'Bash(npm ls:*)' \
-  'Bash(npm audit:*)' \
   'Bash(git status:*)' \
   'Bash(git rev-parse:*)' ; do
   # shellcheck disable=SC2016  # $r is a jq variable bound via --arg, not a shell var
   assert_jq "allow contains $rule" --arg r "$rule" '.permissions.allow | index($r) != null'
 done
 
-# The committed allow-list has exactly these 8 entries and no more — a new
+# The committed allow-list has exactly these 7 entries and no more — a new
 # auto-allow rule must be added to the loop above (and justified) before it lands.
-assert_jq "allow-list has exactly 8 entries" '.permissions.allow | length == 8'
+assert_jq "allow-list has exactly 7 entries" '.permissions.allow | length == 7'
 
 # --- Off-limits file guards: project-root-anchored, Edit AND Write ---
 for rule in \
@@ -105,11 +104,16 @@ done
 #     build.rustc-wrapper=./evil` (RCE), and `Bash(npx eslint:*)` etc. would
 #     auto-approve `--config <executable-config>`. These run through the hook,
 #     which sends the exec/write flag forms to a prompt. ---
+#     `npm audit` is here too: bare `npm audit` is a read, but a `Bash(npm audit:*)`
+#     prefix rule is subcommand-blind and would auto-approve `npm audit fix` (which
+#     runs `npm install` lifecycle scripts and rewrites the lockfile). The hook
+#     distinguishes the read form from `fix`; the static fast-path cannot. ---
 for rule in \
   'Bash(git diff:*)' \
   'Bash(git log:*)' \
   'Bash(git show:*)' \
   'Bash(cargo check:*)' \
+  'Bash(npm audit:*)' \
   'Bash(npx vitest:*)' \
   'Bash(npx eslint:*)' \
   'Bash(npx tsc:*)' \

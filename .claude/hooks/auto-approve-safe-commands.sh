@@ -12,9 +12,10 @@
 #
 # "Safe" means a SINGLE command — no shell control operators (& | ; < > #), no
 # command substitution ($( ) or backticks), no variable expansion ($), no
-# newline, and NO program-execution / file-write flag (--config, --output,
-# --ext-diff/--extcmd/-x, --exec/--upload-pack/--receive-pack — see the flag gate
-# below) — whose program+subcommand is on the allow-list below: npm (read/build/
+# newline, and NO program-execution / file-write / module-loading flag (--config,
+# --output, --ext-diff/--extcmd/-x, --exec/--upload-pack/--receive-pack, --reporter,
+# and eslint's --format/-f within npx — see the flag gate below) — whose
+# program+subcommand is on the allow-list below: npm (read/build/
 # test subcommands, NOT `exec`, which runs arbitrary package binaries), npx (a
 # fixed tool allow-list), git (read subcommands — read ONLY once the flag gate
 # has stripped the exec/write flag forms), and cargo check. The project's
@@ -73,11 +74,32 @@ esac
 #                                (eslint/vitest/playwright) load a config FILE
 #                                that is itself executable code
 #   --exec / --upload-pack / --receive-pack   git transport command execution
+#   --reporter                   vitest/playwright import() an arbitrary reporter
+#                                MODULE — same RCE class as --config. Gated
+#                                GLOBALLY: no allow-listed non-npx command uses it,
+#                                and the gate is value-blind (cannot tell a builtin
+#                                `--reporter=verbose` from `--reporter=./pwn.js`).
 # The command is padded with spaces so each flag matches on a word boundary.
 case " $COMMAND " in
-  *' --ext-diff'* | *' --extcmd'* | *' -x'* | *' --output'* | *' --config'* | *' --exec'* | *' --upload-pack'* | *' --receive-pack'*)
+  *' --ext-diff'* | *' --extcmd'* | *' -x'* | *' --output'* | *' --config'* | *' --reporter'* | *' --exec'* | *' --upload-pack'* | *' --receive-pack'*)
     emit ask "command carries a program-execution or file-write flag and requires explicit approval"
     exit 0
+    ;;
+esac
+
+# eslint's --format / -f load an arbitrary JS formatter MODULE (require()), exactly
+# like --config. Gated WITHIN npx ONLY: `git log --format=%H` is a benign pretty-
+# print STRING (not a module) and `npm install -f` means --force, so a global gate
+# would wrongly defer those common git/npm reads. `--fix` is NOT matched ( -f needs
+# a space-dash-f boundary; `--fix` is space-dash-dash-f).
+case "$COMMAND" in
+  'npx '*)
+    case " $COMMAND " in
+      *' --format'* | *' -f'*)
+        emit ask "npx tool carries a module-loading flag (--format/-f) and requires explicit approval"
+        exit 0
+        ;;
+    esac
     ;;
 esac
 
@@ -89,7 +111,15 @@ is_safe() {
   # `npm exec <pkg>` runs arbitrary binaries, like npx without the tool gate.
   # `pkg` is narrowed to `pkg get` (read): `npm pkg set`/`delete`/`fix` MUTATE
   # the tracked package.json, so they fall through to a prompt.
-  if printf '%s\n' "$cmd" | grep -qE '^npm (install|ci|run|test|ls|outdated|view|explain|why|pkg get|cache clean|audit)( |$)'; then
+  if printf '%s\n' "$cmd" | grep -qE '^npm (install|ci|run|test|ls|outdated|view|explain|why|pkg get|cache clean)( |$)'; then
+    return 0
+  fi
+
+  # `npm audit` reports vulnerabilities (a read). `npm audit fix` is NOT a read —
+  # it runs `npm install` under the hood (lifecycle scripts) and rewrites the
+  # lockfile — so only bare `npm audit` and flag-qualified `npm audit --<flag>`
+  # auto-approve; the `fix` subcommand (and any bare positional) defers to a prompt.
+  if printf '%s\n' "$cmd" | grep -qE '^npm audit( --[a-z]|$)'; then
     return 0
   fi
 

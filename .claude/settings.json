@@ -6,7 +6,6 @@
       "Bash(npm run:*)",
       "Bash(npm test:*)",
       "Bash(npm ls:*)",
-      "Bash(npm audit:*)",
       "Bash(git status:*)",
       "Bash(git rev-parse:*)"
     ],

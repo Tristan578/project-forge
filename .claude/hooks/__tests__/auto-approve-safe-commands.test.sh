@@ -124,6 +124,17 @@ assert "npm pkg set is gated"           "0:ask"   "$(run_decision 'npm pkg set v
 assert "npm pkg delete is gated"        "0:ask"   "$(run_decision 'npm pkg delete scripts.test')"
 assert "npm pkg fix is gated"           "0:ask"   "$(run_decision 'npm pkg fix')"
 
+# --- `npm audit` (report) is a pure read -> allow (asserted above). `npm audit fix`
+#     is NOT a read: it runs `npm install` under the hood (executing lifecycle
+#     scripts) and rewrites package-lock.json. is_safe() matches only bare
+#     `npm audit` and flag-qualified `npm audit --<flag>`, so the `fix` SUBCOMMAND
+#     (and any positional) falls through to a prompt. `npm audit` is ALSO off the
+#     static allow-list for this reason — a `Bash(npm audit:*)` prefix rule is
+#     subcommand-blind and would auto-approve `npm audit fix`. ---
+assert "npm audit --flag is safe"       "0:allow" "$(run_decision 'npm audit --audit-level=high')"
+assert "npm audit fix is gated"         "0:ask"   "$(run_decision 'npm audit fix')"
+assert "npm audit fix --force is gated" "0:ask"   "$(run_decision 'npm audit fix --force')"
+
 # --- `npx drizzle-kit` is NO LONGER auto-approved: `drizzle-kit drop`/`push`
 #     mutate the DB schema destructively and `generate` writes migration files.
 #     It defers to a prompt regardless of subcommand. ---
@@ -157,6 +168,32 @@ assert "git --exec flag gated"          "0:ask"   "$(run_decision 'git ls-files 
 # `git clone` would read "ask" from the allow-list miss even with the arm gone).
 assert "git --upload-pack RCE gated"    "0:ask"   "$(run_decision 'git ls-files --upload-pack=./evil.sh')"
 assert "git --receive-pack RCE gated"   "0:ask"   "$(run_decision 'git ls-files --receive-pack=./evil.sh')"
+
+# --- Module-loading flags: like --config, these load EXECUTABLE code.
+#       --reporter      (vitest / playwright)  import()s an arbitrary reporter module
+#       --format / -f   (eslint)               require()s an arbitrary formatter module
+#     --reporter has NO benign non-npx user, so it is gated GLOBALLY (incl. builtin
+#     names like `--reporter=verbose` — the gate is value-blind and cannot tell a
+#     builtin from `--reporter=./pwn.js`). --format / -f are gated WITHIN npx ONLY:
+#     `git log --format=%H` is a benign pretty-print string (NOT a module) and
+#     `npm install -f` means --force, so a GLOBAL --format/-f gate would wrongly send
+#     those common git/npm reads to a prompt. ---
+assert "npx vitest --reporter path gated"    "0:ask"   "$(run_decision 'npx vitest run --reporter ./evil.js')"
+assert "npx vitest --reporter= gated"        "0:ask"   "$(run_decision 'npx vitest run --reporter=/tmp/evil.js')"
+assert "npx vitest --reporter builtin gated" "0:ask"   "$(run_decision 'npx vitest run --reporter=verbose')"
+assert "npx playwright --reporter gated"     "0:ask"   "$(run_decision 'npx playwright test --reporter ./evil.js')"
+assert "npx eslint --format spaced gated"    "0:ask"   "$(run_decision 'npx eslint --format /tmp/evil.js .')"
+assert "npx eslint --format= gated"          "0:ask"   "$(run_decision 'npx eslint --format=/tmp/evil.js .')"
+assert "npx eslint -f spaced gated"          "0:ask"   "$(run_decision 'npx eslint -f /tmp/evil.js .')"
+assert "npx eslint -f= gated"                "0:ask"   "$(run_decision 'npx eslint -f=/tmp/evil.js .')"
+assert "npx eslint -f glued gated"           "0:ask"   "$(run_decision 'npx eslint -f/tmp/evil.js .')"
+# Benign regressions: --format / -f are NOT module loads outside npx, and --fix is
+# not -f — none may be over-gated to "ask".
+assert "git log --format is benign"          "0:allow" "$(run_decision 'git log --format=%H -5')"
+assert "git show --format is benign"         "0:allow" "$(run_decision 'git show --format=fuller HEAD')"
+assert "npm install -f (force) is benign"    "0:allow" "$(run_decision 'npm install -f')"
+assert "npx eslint --fix is benign"          "0:allow" "$(run_decision 'npx eslint --fix .')"
+assert "npx eslint --max-warnings is benign" "0:allow" "$(run_decision 'npx eslint --max-warnings 0 .')"
 
 # --- Operator-gate arms must each be INDEPENDENTLY falsifiable: a command with `(`
 #     but no `$`, and one with `)` but no `$`, so removing either case arm regresses
