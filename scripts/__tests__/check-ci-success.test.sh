@@ -41,14 +41,18 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 #   $9 needs-onboarding (default true)
 #   $10 taskboard-onboarding-guard.result (default success)
 #   $11 needs-codex (default true)   $12 codex-config-guard.result (default success)
+#   $13 needs-hooks (default false) — hook-tests' OWN ci-gate trigger. Defaults
+#      false so the 25 pre-existing fixtures (which never touch .claude/hooks)
+#      keep hook-tests' success/skip as a legitimate path-filter skip; set true
+#      to exercise the hook-tests anti-tamper arm.
 mk() {
-  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}"
+  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nhooks="${13:-false}"
   jq -nc \
     --arg nci "$nci" --arg ndeps "$ndeps" --arg ls "$ls" --arg lst "$lst" \
     --arg qg "$qg" --arg ht "$ht" --arg nagentic "$nagentic" --arg as "$as" \
-    --arg nonboarding "$nonboarding" --arg tog "$tog" --arg ncodex "$ncodex" --arg ccg "$ccg" '
+    --arg nonboarding "$nonboarding" --arg tog "$tog" --arg ncodex "$ncodex" --arg ccg "$ccg" --arg nhooks "$nhooks" '
     {
-      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-any-code": "true" } },
+      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-hooks": $nhooks, "needs-any-code": "true" } },
       "quality-gates":        { result: $qg },
       "command-parity":       { result: "success" },
       "build-nextjs":         { result: "success" },
@@ -93,14 +97,15 @@ if [ "$rc" = "1" ]; then pass "a cancelled gate fails (exit 1)"; else fail "canc
 
 # --- 4. Legitimate skips (ALL triggers false) → exit 0 -----------------------
 # needs-ci=false, needs-deps=false, needs-agentic=false, needs-onboarding=false,
-# needs-codex=false — so ALL FIVE self-defending gates (lockfile-sync,
-# lockfile-sync-tests, agentic-sync, taskboard-onboarding-guard, codex-config-guard)
-# skipping is correct path-filter behaviour and must NOT trip the anti-tamper
-# check. This is the clean baseline: a docs-only / unrelated PR that touches none
-# of the guarded surfaces.
-res="$(run_verify "$(mk false false skipped skipped success success false skipped false skipped false skipped)")"
+# needs-codex=false, needs-hooks=false — so ALL SIX self-defending gates
+# (lockfile-sync, lockfile-sync-tests, agentic-sync, taskboard-onboarding-guard,
+# codex-config-guard, hook-tests) skipping is correct path-filter behaviour and
+# must NOT trip the anti-tamper check. This is the clean baseline: a docs-only /
+# unrelated PR that touches none of the guarded surfaces. hook-tests is skipped
+# here too (ht=skipped, needs-hooks=false), so the all-skip baseline is complete.
+res="$(run_verify "$(mk false false skipped skipped success skipped false skipped false skipped false skipped false)")"
 rc="${res%%|*}"
-if [ "$rc" = "0" ]; then pass "all five gates legitimately skipped pass (exit 0)"; else fail "legit skip should exit 0, got $rc"; fi
+if [ "$rc" = "0" ]; then pass "all six gates legitimately skipped pass (exit 0)"; else fail "legit skip should exit 0, got $rc"; fi
 
 # --- 5. TAMPER: lockfile-sync-tests skipped while needs-ci=true → exit 1 ------
 # This is the `if: false` unwiring vector: a ci.yml edit sets needs-ci=true, so
@@ -295,6 +300,27 @@ res="$(run_verify "$(mk false false skipped skipped success success false skippe
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "tests skipped while ONLY needs-codex=true fails (exit 1)"; else fail "tamper (tests via codex arm) should exit 1, got $rc"; fi
 if echo "$out" | grep -q "lockfile-sync-tests"; then pass "the unwired gate is named (codex arm)"; else fail "unwired gate not named (codex arm)"; fi
+
+# --- 26. TAMPER: hook-tests skipped while needs-hooks=true → exit 1 ------------
+# hook-tests is a required ci-success gate (it runs the .claude/hooks/ suites,
+# INCLUDING this permission gate's own tests). A PR editing .claude/hooks or
+# .claude/settings.json sets needs-hooks=true, so the job SHOULD run; an
+# `if: false` skip is the same single-line unwiring vector guarded for every
+# other self-defending gate. All other gates run+succeed here, so the skipped
+# hook-tests job is the SOLE tamper.
+res="$(run_verify "$(mk true true success success success skipped true success true success true success true)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "hook-tests skipped while needs-hooks=true fails (exit 1)"; else fail "tamper (hook-tests) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "hook-tests tamper is flagged as a possible unwiring"; else fail "hook-tests tamper message missing"; fi
+if echo "$out" | grep -q "hook-tests ("; then pass "the unwired hook-tests gate is named"; else fail "unwired hook-tests gate not named"; fi
+
+# --- 27. hook-tests legit-skips (needs-hooks=false) → exit 0 ------------------
+# A PR that touches no hook/settings surface (needs-hooks=false) legitimately
+# skips hook-tests; that must NOT trip the anti-tamper check (proves the new
+# needs-hooks arm does not false-positive on every non-hooks PR).
+res="$(run_verify "$(mk true true success success success skipped true success true success true success false)")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "hook-tests legit-skip (needs-hooks=false) passes (exit 0)"; else fail "hook-tests legit skip should exit 0, got $rc"; fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then

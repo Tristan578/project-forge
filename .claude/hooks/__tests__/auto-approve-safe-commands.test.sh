@@ -78,6 +78,10 @@ assert "npx vitest run is safe"         "0:allow" "$(run_decision 'npx vitest ru
 assert "npx eslint is safe"             "0:allow" "$(run_decision 'npx eslint .')"
 assert "npx tsc --noEmit is safe"       "0:allow" "$(run_decision 'npx tsc --noEmit')"
 assert "npx playwright test is safe"    "0:allow" "$(run_decision 'npx playwright test')"
+# @axe-core ships as scoped subpackages (@axe-core/cli, @axe-core/reporter), so
+# the npx allow-rule must match the `/subpackage` suffix — a bare `@axe-core`
+# token never appears on a real command line.
+assert "npx @axe-core/cli is safe"      "0:allow" "$(run_decision 'npx @axe-core/cli http://localhost:3000')"
 assert "git status is safe"             "0:allow" "$(run_decision 'git status')"
 assert "git diff is safe"               "0:allow" "$(run_decision 'git diff HEAD~1')"
 assert "git log is safe"                "0:allow" "$(run_decision 'git log --oneline -5')"
@@ -123,6 +127,17 @@ assert "git diff subst is gated"        "0:ask"   "$(run_decision 'git diff $(rm
 # shellcheck disable=SC2016  # the ${...} is literal attack input, must NOT expand
 assert "var-expansion is gated"         "0:ask"   "$(run_decision 'npm ci ${EVIL}')"
 assert "trailing-background is gated"    "0:ask"   "$(run_decision 'npm ci &')"
+# Backtick command substitution: a safe prefix + `...` must NOT auto-approve.
+# The literal backticks live in a single-quoted var so they are never executed
+# by the test harness itself — they are attack input handed to the hook.
+# shellcheck disable=SC2016  # the `...` is literal attack input, must NOT expand
+bt_cmd='npm ci `id`'
+assert "backtick subst is gated"        "0:ask"   "$(run_decision "$bt_cmd")"
+# Embedded newline: a second line after a safe prefix must NOT auto-approve.
+# $'...' yields a real newline; run_decision JSON-encodes it via jq --arg so the
+# hook receives a genuine multi-line command and its newline gate must fire.
+nl_cmd=$'npm ci\nevil'
+assert "embedded newline is gated"      "0:ask"   "$(run_decision "$nl_cmd")"
 
 # --- Defer / fail-safe: never exit 2, never crash ---
 assert "empty command defers"           "0:none"  "$(run_decision '')"

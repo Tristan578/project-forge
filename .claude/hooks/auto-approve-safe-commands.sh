@@ -68,8 +68,11 @@ is_safe() {
     return 0
   fi
 
-  # npx — only a fixed allow-list of project tools.
-  if printf '%s\n' "$cmd" | grep -qE '^npx (vitest|eslint|tsc|playwright|drizzle-kit|skills|@axe-core)( |$)'; then
+  # npx — only a fixed allow-list of project tools. @axe-core is published as
+  # scoped subpackages (@axe-core/cli, @axe-core/reporter), so it carries an
+  # optional `/subpackage` suffix; the leading-token gate above already rejects
+  # whitespace, so `[^ ]+` cannot smuggle a second command past this rule.
+  if printf '%s\n' "$cmd" | grep -qE '^npx (vitest|eslint|tsc|playwright|drizzle-kit|skills|@axe-core(/[^ ]+)?)( |$)'; then
     return 0
   fi
 
