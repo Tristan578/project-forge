@@ -157,6 +157,20 @@ describe('createGenerationHandler', () => {
     expect(res.status).toBe(402);
   });
 
+  it('returns a structured 500 and captures when resolveApiKey throws a non-ApiKeyError (#8597)', async () => {
+    // A server-side key/resolution failure (e.g. missing ANTHROPIC_API_KEY, or a
+    // DB error) surfaces as a plain Error, NOT an ApiKeyError. The non-cached
+    // path must convert it to a structured 500 and alert Sentry — not re-throw
+    // it as an uninstrumented unhandled rejection (the old bare `throw err`).
+    mockResolve.mockRejectedValue(new Error('Platform key not configured: ANTHROPIC_API_KEY'));
+    const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(500);
+    expect(mockCapture).toHaveBeenCalled();
+    // Nothing was deducted (resolveApiKey threw before returning a usageId), so
+    // there is no refund to issue.
+    expect(mockRefund).not.toHaveBeenCalled();
+  });
+
   it('returns 200 with result on success', async () => {
     const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
     expect(res.status).toBe(200);

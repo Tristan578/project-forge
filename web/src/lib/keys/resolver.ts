@@ -99,7 +99,14 @@ export async function resolveApiKey(
     );
   }
 
-  // 3. Platform key path — deduct tokens first
+  // 3. Platform key path.
+  // Resolve the platform key BEFORE deducting tokens. getPlatformKey throws when
+  // the provider's env var is unset (a server misconfiguration). If that throw
+  // happened after deductTokens, the user would be charged for a call that can
+  // never run and never gets refunded — silent token loss (#8597). Validate the
+  // key is present first so a missing key fails before any balance changes.
+  const platformKey = getPlatformKey(provider);
+
   const deduction = await deductTokens(userId, operation, tokenCost, provider, metadata);
   if (!deduction.success) {
     throw new ApiKeyError(
@@ -110,7 +117,7 @@ export async function resolveApiKey(
 
   return {
     type: 'platform',
-    key: getPlatformKey(provider),
+    key: platformKey,
     metered: true,
     usageId: deduction.usageId,
   };

@@ -275,7 +275,13 @@ export function createGenerationHandler<TParams, TResult>(
       if (err instanceof ApiKeyError) {
         return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
       }
-      throw err;
+      // A non-ApiKeyError here is a server-side failure (missing platform key,
+      // DB error, etc.). Re-throwing surfaced it as an uninstrumented unhandled
+      // rejection with no Sentry signal and a generic framework 500. Convert it
+      // to a structured 500 and alert Sentry, mirroring the cached path (#8597).
+      captureException(err, { route });
+      const message = err instanceof Error ? err.message : 'Provider error';
+      return NextResponse.json({ error: message }, { status: 500 });
     }
 
     try {
