@@ -1,0 +1,5 @@
+---
+"web": patch
+---
+
+Harden the script sandbox against the constructor-chain escape. User scripts run in a Web Worker whose dangerous globals were only *name-shadowed* (passed as `undefined` parameters), which does not stop `(0).constructor.constructor('return fetch')()` from reaching the real `Function` constructor and resolving `fetch` in global scope. Because the worker is same-origin to the editor, an escaped `fetch` carried the author's session cookies and could exfiltrate via a `no-cors` POST regardless of CORS. The worker now revokes the network/storage capabilities themselves at init (`revokeNetworkGlobals()` deletes `fetch`/`XMLHttpRequest`/`WebSocket`/`importScripts`/`EventSource`/`BroadcastChannel`/`indexedDB`/`caches` as non-configurable `undefined`), so an escaped script has no network capability to abuse. Misleading "this is mitigated by shadowing"/"CORS protects us" comments in the sandbox and its tests are corrected to reflect the real boundary (#8607). A true isolation boundary (sandboxed origin / AST interpreter) is tracked in #8700.
