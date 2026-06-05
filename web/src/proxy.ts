@@ -127,6 +127,11 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
     '/api/openapi(.*)',
     '/api/health(.*)',
     '/api/status(.*)',
+    // Vercel Cron jobs (e.g. /api/cron/health-monitor, vercel.json crons) carry
+    // only a CRON_SECRET bearer token, no Clerk session. The routes enforce that
+    // secret themselves, so they must bypass the Clerk proxy or the scheduled
+    // call 401s before its own auth check runs (#8605).
+    '/api/cron(.*)',
     '/api/sentry(.*)',
     '/monitoring(.*)',
     '/llms.txt',

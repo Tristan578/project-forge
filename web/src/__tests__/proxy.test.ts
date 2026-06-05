@@ -26,6 +26,17 @@ describe('proxy public route configuration', () => {
     expect(proxySource).toContain('/api/status');
   });
 
+  it('includes /api/cron in public routes (#8605)', () => {
+    // Vercel Cron (e.g. /api/cron/health-monitor, scheduled */5 in vercel.json)
+    // calls the route with only its own `Authorization: Bearer <CRON_SECRET>`
+    // header — it carries no Clerk session. If the Clerk proxy treats /api/cron
+    // as protected it 401s the request before the route's own CRON_SECRET check
+    // runs, silently killing the scheduled health monitor. The route is
+    // self-protecting (401 without a valid CRON_SECRET), so it must be public
+    // at the proxy layer.
+    expect(proxySource).toContain('/api/cron');
+  });
+
   it('includes webhook routes in public routes', () => {
     expect(proxySource).toContain('/api/auth/webhook');
     expect(proxySource).toContain('/api/stripe/webhook');
