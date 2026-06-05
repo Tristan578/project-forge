@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { clerkClient } from '@clerk/nextjs/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { deleteUserAccount } from '@/lib/auth/user-service';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -15,9 +16,12 @@ export async function POST(req: NextRequest) {
   });
   if (mid.error) return mid.error;
 
+  // 1. Purge all DB data first. This is the privacy-critical step (PII,
+  //    projects, financial records), so it must succeed before we touch Clerk —
+  //    if it fails we 500 and leave the Clerk identity intact so the user isn't
+  //    locked out of an account whose data still exists.
   try {
     await deleteUserAccount(mid.userId!);
-    return NextResponse.json({ deleted: true });
   } catch (err) {
     captureException(err, { route: '/api/user/delete' });
     return NextResponse.json(
@@ -25,4 +29,24 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+
+  // 2. Delete the Clerk identity. Without this the Clerk session/user survives,
+  //    and the next authenticated request re-syncs a fresh empty DB user from
+  //    Clerk — silently resurrecting the "deleted" account (#8606). The
+  //    destructive DB delete has already committed, so a Clerk-side failure must
+  //    NOT surface as a 500 (that would imply nothing was deleted and invite a
+  //    confusing retry). Report success and alert Sentry for manual cleanup of
+  //    the orphaned Clerk user.
+  try {
+    const client = await clerkClient();
+    await client.users.deleteUser(mid.authContext!.clerkId);
+  } catch (err) {
+    captureException(err, {
+      route: '/api/user/delete',
+      step: 'clerk-delete',
+      clerkId: mid.authContext!.clerkId,
+    });
+  }
+
+  return NextResponse.json({ deleted: true });
 }
