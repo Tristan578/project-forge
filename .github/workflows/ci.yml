@@ -59,11 +59,16 @@ jobs:
           echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
           echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && docs=true
           echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
-          # Claude Code hook scripts + their self-contained bash test suites.
-          # Kept OUT of `ci` and any-code on purpose: a hook change must trigger
-          # ONLY the lightweight hook-tests job, never the heavy quality-gates
-          # fan-out (lint/typecheck/test-web/test-mcp/build-wasm).
-          echo "$CHANGED" | grep -qE '^\.claude/hooks/' && hooks=true
+          # Claude Code hook scripts + their self-contained bash test suites,
+          # plus .claude/settings.json (the committed permissions posture, which
+          # settings-permissions.test.sh validates). Kept OUT of `ci` and
+          # any-code on purpose: a hook/settings change never fires the heavy
+          # quality-gates fan-out (lint/typecheck/test-web/test-mcp/build-wasm).
+          # It does fire hook-tests (this output) AND — because the `onboarding`
+          # matcher below also lists `^\.claude/` — the lightweight
+          # onboarding-guard + lockfile-sync-tests self-tests. All three are fast,
+          # self-contained checks; the fan-out is what stays gated off.
+          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$' && hooks=true
           # Any package.json at ANY depth (web/, mcp-server/, apps/*, packages/*,
           # root) or the single root lockfile → run the lockfile-sync gate. Kept
           # ORTHOGONAL to any-code (like hooks): the gate is a ~30s self-contained
@@ -316,15 +321,20 @@ jobs:
 
       - name: Shellcheck the hooks owned by this change
         run: |
-          # Scope shellcheck to the hardened review hooks + their tests only.
+          # Scope shellcheck to the hooks this gate owns + their tests: the
+          # hardened review-loop hooks and the auto-approve permission gate.
           # The wider .claude/hooks/ tree carries pre-existing findings tracked
           # separately (see .claude/rules/agent-operations.md §12) — linting all
-          # of it here would fail this gate on unrelated, untouched debt.
+          # of it here would fail this gate on unrelated, untouched debt. Newly
+          # added or edited hooks MUST be shellcheck-clean, so they go here.
           shellcheck \
             .claude/hooks/reject-incomplete-review.sh \
             .claude/hooks/review-quality-gate.sh \
+            .claude/hooks/auto-approve-safe-commands.sh \
             .claude/hooks/__tests__/reject-incomplete-review.test.sh \
-            .claude/hooks/__tests__/review-quality-gate.test.sh
+            .claude/hooks/__tests__/review-quality-gate.test.sh \
+            .claude/hooks/__tests__/auto-approve-safe-commands.test.sh \
+            .claude/hooks/__tests__/settings-permissions.test.sh
 
   # ---- Lockfile Sync ----
   # Runs when any package.json (at any depth) or the root package-lock.json
