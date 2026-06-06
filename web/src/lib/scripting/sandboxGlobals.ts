@@ -23,8 +23,15 @@
  *   capabilities revoked by revokeNetworkGlobals() (the actual enforcement,
  *   since the constructor chain bypasses the name shadow).
  * - indexedDB / caches — persistent storage side-channels (also revoked).
- * - navigator / location — fingerprinting / URL leak (name shadow only; these
- *   are not revoked because they carry no network/storage capability).
+ * - navigator — fingerprinting AND a network primitive: `navigator.sendBeacon`
+ *   is a credentialed `no-cors` POST. `navigator` stays readable but its
+ *   `sendBeacon` is neutralised by revokeNetworkGlobals() (the constructor chain
+ *   bypasses the name shadow, so the capability itself is removed).
+ * - location — URL leak (name shadow only; carries no network/storage
+ *   capability of its own).
+ * - Worker / SharedWorker — name-shadowed here AND their constructors revoked by
+ *   revokeNetworkGlobals(): an escaped script could otherwise spawn a nested
+ *   same-origin worker with a fresh, network-capable global.
  * - self / globalThis / window — direct global scope access that bypasses
  *   parameter shadowing (name shadow only — these cannot be revoked; the worker
  *   needs `self` for postMessage).
@@ -44,6 +51,7 @@ export const SHADOWED_GLOBALS = [
   'fetch', 'XMLHttpRequest', 'WebSocket', 'importScripts',
   'indexedDB', 'caches', 'navigator', 'location',
   'EventSource', 'BroadcastChannel',
+  'Worker', 'SharedWorker',
   'self', 'globalThis', 'window',
   'Function', 'eval',
   'Reflect', 'Proxy',
