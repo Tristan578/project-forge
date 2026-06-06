@@ -148,16 +148,17 @@ type ProxyAuth = () => Promise<{
 }>;
 
 /**
- * The proxy's per-request auth decision, factored out of the clerkMiddleware
- * callback so it can be unit-tested directly.
+ * The proxy's per-request auth decision. This is the SINGLE implementation: the
+ * production clerkMiddleware callback in buildProxy() delegates straight to it, and
+ * proxy.test.ts drives it directly — so the unit tests exercise the exact code that
+ * runs in production, with no parallel copy that can silently diverge.
  *
- * It cannot be tested through `proxy` itself: clerkMiddleware is pulled in via a
- * runtime `require()` (to keep Clerk's import-time key validation out of the
+ * It cannot be reached through `proxy` itself in tests: clerkMiddleware is pulled in
+ * via a runtime `require()` (to keep Clerk's import-time key validation out of the
  * CI/E2E passthrough path), and the test runner cannot intercept that require to
- * stub auth. Exposing the decision as a pure function — given an `auth` result
- * and an `isPublicRoute` matcher — lets the real 401-vs-redirect logic be
- * exercised with the real Clerk route matcher and no live keys (see
- * `proxy.test.ts`).
+ * stub auth. Exposing the decision as a pure function — given an `auth` result and
+ * an `isPublicRoute` matcher — lets the real 401-vs-redirect logic be exercised with
+ * the real Clerk route matcher and no live keys (see `proxy.test.ts`).
  */
 export async function applyAuthDecision(
   auth: ProxyAuth,
@@ -222,38 +223,14 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
     buildPublicRoutes({ includeDev: process.env.NODE_ENV !== 'production' }),
   );
 
+  // The production callback delegates to applyAuthDecision so the unit tests in
+  // proxy.test.ts exercise the EXACT logic that runs in production — not a parallel
+  // copy that can silently diverge. A single decision implementation is the whole
+  // point of #8605 (route tests that never hit the real request path left CI blind).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return clerkMiddleware(async (auth: any, req: NextRequest) => {
-    const corsResponse = handleCors(req);
-    if (corsResponse) return corsResponse;
-
-    // Redirect authenticated users from landing page to dashboard.
-    // This runs in the proxy so the landing page itself can be statically cached.
-    if (req.nextUrl.pathname === '/') {
-      const { userId } = await auth();
-      if (userId) {
-        return NextResponse.redirect(new URL('/dashboard', req.url));
-      }
-    }
-
-    if (!isPublicRoute(req)) {
-      const { userId, redirectToSignIn } = await auth();
-      if (!userId) {
-        // Browser navigations: redirect to sign-in (preserves the original URL
-        // as `redirect_url` so users land back where they started after auth).
-        // API requests: return 401 so client code can distinguish unauthenticated
-        // from "not found". Clerk's default `auth.protect()` would rewrite browser
-        // requests to /404 — bad UX (no recovery path) and breaks the prod smoke
-        // test. See #8529.
-        if (req.nextUrl.pathname.startsWith('/api/')) {
-          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
-        return redirectToSignIn({ returnBackUrl: req.url });
-      }
-    }
-
-    return addSecurityHeaders(NextResponse.next(), req);
-  });
+  return clerkMiddleware((auth: any, req: NextRequest) =>
+    applyAuthDecision(auth, req, isPublicRoute),
+  );
 }
 
 export const proxy = buildProxy();
