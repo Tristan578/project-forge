@@ -131,7 +131,8 @@ describe('POST /api/generate/sprite', () => {
     const res = await POST(makeRequest({ prompt: 'pixel art hero', style: 'pixel-art' }));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Provider error');
+    expect(data.error).toBe('Generation failed due to a server error. Please try again later.');
+    expect(data.error).not.toContain('Provider error');
   });
 
   it('calls refundTokens when provider throws and usageId exists', async () => {

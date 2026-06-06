@@ -142,7 +142,8 @@ describe('POST /api/generate/model', () => {
     const res = await POST(makeRequest({ prompt: 'a red dragon', mode: 'text-to-3d' }));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Meshy API down');
+    expect(data.error).toBe('Generation failed due to a server error. Please try again later.');
+    expect(data.error).not.toContain('Meshy');
   });
 
   it('calls refundTokens when provider throws and usageId exists', async () => {

@@ -143,16 +143,22 @@ describe('POST /api/generate/tileset-gen', () => {
     const data = await res.json();
 
     expect(res.status).toBe(500);
-    expect(data.error).toBe('Replicate error');
+    expect(data.error).toBe('Generation failed due to a server error. Please try again later.');
+    expect(data.error).not.toContain('Replicate');
     expect(captureException).toHaveBeenCalled();
   });
 
-  it('rethrows non-ApiKeyError during key resolution', async () => {
+  it('returns a structured 500 (not a rethrow) and captures a non-ApiKeyError during key resolution', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
     vi.mocked(resolveApiKey).mockRejectedValue(new Error('DB connection failed'));
 
-    await expect(POST(makeRequest({ prompt: 'forest tileset texture' }))).rejects.toThrow('DB connection failed');
+    const res = await POST(makeRequest({ prompt: 'forest tileset texture' }));
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.error).toBe('Generation failed due to a server error. Please try again later.');
+    expect(data.error).not.toContain('DB connection');
+    expect(captureException).toHaveBeenCalled();
   });
 
   it('returns 422 when sanitizePrompt returns safe:false', async () => {

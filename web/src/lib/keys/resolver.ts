@@ -45,9 +45,14 @@ function getPlatformKey(provider: Provider): string {
 /**
  * Resolve which API key to use for a provider call.
  *
- * 1. Check if user has a BYOK key → use it (no token cost)
- * 2. Check if user can use platform keys → deduct tokens first
- * 3. No key available → throw with guidance
+ * 1. BYOK key configured → use it (no token cost).
+ * 2. No BYOK, tier/balance allows platform keys → resolve the platform key
+ *    BEFORE deducting tokens, then deduct. Ordering matters: getPlatformKey()
+ *    throws on a missing env var, so resolving first means a server
+ *    misconfiguration fails before any balance change — the user is never
+ *    charged for a call that can't run (#8597).
+ * 3. No key available (starter tier, zero balance, or unconfigured platform
+ *    key) → throw with guidance.
  */
 export async function resolveApiKey(
   userId: string,

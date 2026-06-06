@@ -139,7 +139,8 @@ describe('POST /api/generate/music', () => {
     const res = await POST(makeRequest({ prompt: 'epic battle theme', durationSeconds: 30 }));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Suno API down');
+    expect(data.error).toBe('Generation failed due to a server error. Please try again later.');
+    expect(data.error).not.toContain('Suno');
   });
 
   it('calls refundTokens when provider throws and usageId exists', async () => {

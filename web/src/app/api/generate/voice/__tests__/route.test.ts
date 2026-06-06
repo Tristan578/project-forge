@@ -310,7 +310,8 @@ describe('POST /api/generate/voice', () => {
       const body = await res.json();
 
       expect(res.status).toBe(500);
-      expect(body.error).toBe('Network failure');
+      expect(body.error).toBe('Generation failed due to a server error. Please try again later.');
+      expect(body.error).not.toContain('Network failure');
     });
   });
 
@@ -372,10 +373,11 @@ describe('POST /api/generate/voice', () => {
       const body = await res.json();
 
       expect(res.status).toBe(500);
-      expect(body.error).toContain('ElevenLabs TTS API error');
+      expect(body.error).toBe('Generation failed due to a server error. Please try again later.');
+      expect(body.error).not.toContain('ElevenLabs');
     });
 
-    it('returns "Provider error" for non-Error thrown objects', async () => {
+    it('returns the generic 500 message for non-Error thrown objects', async () => {
       const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
       vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
         this.generateSfx = vi.fn();
@@ -387,7 +389,8 @@ describe('POST /api/generate/voice', () => {
       const body = await res.json();
 
       expect(res.status).toBe(500);
-      expect(body.error).toBe('Provider error');
+      expect(body.error).toBe('Generation failed due to a server error. Please try again later.');
+      expect(body.error).not.toContain('Provider error');
     });
   });
 });
