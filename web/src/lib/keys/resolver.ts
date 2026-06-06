@@ -45,9 +45,14 @@ function getPlatformKey(provider: Provider): string {
 /**
  * Resolve which API key to use for a provider call.
  *
- * 1. Check if user has a BYOK key → use it (no token cost)
- * 2. Check if user can use platform keys → deduct tokens first
- * 3. No key available → throw with guidance
+ * 1. BYOK key configured → use it (no token cost).
+ * 2. No BYOK, tier/balance allows platform keys → resolve the platform key
+ *    BEFORE deducting tokens, then deduct. Ordering matters: getPlatformKey()
+ *    throws on a missing env var, so resolving first means a server
+ *    misconfiguration fails before any balance change — the user is never
+ *    charged for a call that can't run (#8597).
+ * 3. No key available (starter tier, zero balance, or unconfigured platform
+ *    key) → throw with guidance.
  */
 export async function resolveApiKey(
   userId: string,
@@ -99,7 +104,14 @@ export async function resolveApiKey(
     );
   }
 
-  // 3. Platform key path — deduct tokens first
+  // 3. Platform key path.
+  // Resolve the platform key BEFORE deducting tokens. getPlatformKey throws when
+  // the provider's env var is unset (a server misconfiguration). If that throw
+  // happened after deductTokens, the user would be charged for a call that can
+  // never run and never gets refunded — silent token loss (#8597). Validate the
+  // key is present first so a missing key fails before any balance changes.
+  const platformKey = getPlatformKey(provider);
+
   const deduction = await deductTokens(userId, operation, tokenCost, provider, metadata);
   if (!deduction.success) {
     throw new ApiKeyError(
@@ -110,7 +122,7 @@ export async function resolveApiKey(
 
   return {
     type: 'platform',
-    key: getPlatformKey(provider),
+    key: platformKey,
     metered: true,
     usageId: deduction.usageId,
   };

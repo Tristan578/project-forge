@@ -45,6 +45,20 @@ vi.mock('@/lib/db/client', () => ({
     Object.assign(vi.fn(), { transaction: vi.fn().mockResolvedValue([]) }),
   ),
 }));
+// Drive the cached path deterministically: run the miss factory and surface any
+// thrown error to the handler's cached-path catch site (so its 500 behaviour,
+// including the #8597 message-leak guard, is exercised without real Redis).
+vi.mock('../responseCache', () => ({
+  cachedGenerate: vi.fn(async (_op: string, _params: unknown, factory: () => Promise<unknown>) => ({
+    result: await factory(),
+    cached: false,
+  })),
+}));
+
+// Client-facing message for every 500 (#8597). Raw err.message can leak server
+// internals (env var names, DB DSNs, provider request IDs), so the client gets
+// this opaque string while the full error goes only to Sentry.
+const GENERIC_500 = 'Generation failed due to a server error. Please try again later.';
 
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey } from '@/lib/keys/resolver';
@@ -157,6 +171,30 @@ describe('createGenerationHandler', () => {
     expect(res.status).toBe(402);
   });
 
+  it('returns a structured 500 and captures when resolveApiKey throws a non-ApiKeyError (#8597)', async () => {
+    // A server-side key/resolution failure (e.g. missing ANTHROPIC_API_KEY, or a
+    // DB error) surfaces as a plain Error, NOT an ApiKeyError. The non-cached
+    // path must convert it to a structured 500 and alert Sentry — not re-throw
+    // it as an uninstrumented unhandled rejection (the old bare `throw err`).
+    mockResolve.mockRejectedValue(new Error('Platform key not configured: ANTHROPIC_API_KEY'));
+    const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(500);
+    expect(mockCapture).toHaveBeenCalled();
+    // The client must NOT see the raw server error — env var names / infra detail
+    // leak server internals (#8597). It gets the generic message instead…
+    const data = await res.json();
+    expect(data.error).not.toContain('ANTHROPIC_API_KEY');
+    expect(data.error).not.toMatch(/not configured/i);
+    expect(data.error).toBe(GENERIC_500);
+    // …while the full error still reaches Sentry for debugging.
+    expect((mockCapture.mock.calls[0][0] as Error).message).toBe(
+      'Platform key not configured: ANTHROPIC_API_KEY',
+    );
+    // Nothing was deducted (resolveApiKey threw before returning a usageId), so
+    // there is no refund to issue.
+    expect(mockRefund).not.toHaveBeenCalled();
+  });
+
   it('returns 200 with result on success', async () => {
     const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
     expect(res.status).toBe(200);
@@ -172,13 +210,43 @@ describe('createGenerationHandler', () => {
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
       validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
-      execute: async () => { throw new Error('Provider timeout'); },
+      execute: async () => { throw new Error('ElevenLabs internal: request 0xDEADBEEF failed'); },
     });
 
     const res = await failHandler(makeRequest({ prompt: 'test prompt' }));
     expect(res.status).toBe(500);
     expect(mockRefund).toHaveBeenCalledWith('user-1', 'usage-1');
     expect(mockCapture).toHaveBeenCalled();
+    // Raw provider error (request IDs / internals) must not reach the client (#8597).
+    const data = await res.json();
+    expect(data.error).not.toContain('0xDEADBEEF');
+    expect(data.error).not.toContain('ElevenLabs internal');
+    expect(data.error).toBe(GENERIC_500);
+    expect((mockCapture.mock.calls.at(-1)?.[0] as Error).message).toBe(
+      'ElevenLabs internal: request 0xDEADBEEF failed',
+    );
+  });
+
+  it('does not leak a raw error message to the client on a 500 (cached path) (#8597)', async () => {
+    const cachedHandler = createGenerationHandler({
+      route: '/api/generate/test',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-test',
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      cacheKeyParams: (p) => ({ prompt: (p as { prompt: string }).prompt }),
+      execute: async () => { throw new Error('DB error: postgres://secret@host/db'); },
+    });
+
+    const res = await cachedHandler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    // The cached-path catch site must scrub the message too — a DB DSN would
+    // otherwise leak credentials to the client.
+    expect(data.error).not.toContain('postgres://');
+    expect(data.error).not.toContain('secret@host');
+    expect(data.error).toBe(GENERIC_500);
+    expect((mockCapture.mock.calls.at(-1)?.[0] as Error).message).toContain('postgres://secret@host');
   });
 
   it('does not refund when usageId is undefined (BYOK)', async () => {

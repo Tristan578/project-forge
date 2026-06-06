@@ -239,7 +239,8 @@ describe('POST /api/generate/pacing', () => {
     const res = await POST(makeRequest({ report: validReport }));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Anthropic API timeout');
+    expect(data.error).toBe('Generation failed due to a server error. Please try again later.');
+    expect(data.error).not.toContain('Anthropic');
     expect(captureException).toHaveBeenCalled();
   });
 
@@ -256,9 +257,14 @@ describe('POST /api/generate/pacing', () => {
     );
   });
 
-  it('rethrows non-ApiKeyError during key resolution', async () => {
+  it('returns a structured 500 (not a rethrow) and captures a non-ApiKeyError during key resolution', async () => {
     vi.mocked(resolveApiKey).mockRejectedValue(new Error('DB connection failed'));
 
-    await expect(POST(makeRequest({ report: validReport }))).rejects.toThrow('DB connection failed');
+    const res = await POST(makeRequest({ report: validReport }));
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.error).toBe('Generation failed due to a server error. Please try again later.');
+    expect(data.error).not.toContain('DB connection');
+    expect(captureException).toHaveBeenCalled();
   });
 });

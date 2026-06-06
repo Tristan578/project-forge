@@ -125,7 +125,8 @@ describe('POST /api/generate/sprite-sheet', () => {
     const res = await POST(makeRequest({ prompt: 'walk cycle', frameCount: 4 }));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Replicate down');
+    expect(data.error).toBe('Generation failed due to a server error. Please try again later.');
+    expect(data.error).not.toContain('Replicate');
   });
 
   it('returns 201 on successful sprite-sheet generation', async () => {

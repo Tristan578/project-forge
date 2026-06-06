@@ -28,6 +28,16 @@ import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 import { cachedGenerate } from './responseCache';
 
+/**
+ * Client-facing message for every 500. Raw `err.message` can carry server
+ * internals — env var names ("Platform key not configured: ANTHROPIC_API_KEY"),
+ * DB connection strings, provider request IDs — so it must never be returned to
+ * the caller. The full error goes only to Sentry via captureException; the
+ * client gets this opaque string and a 500 (#8597). ApiKeyError messages are
+ * exempt: they are deliberately user-facing guidance returned as 402, not 500.
+ */
+const GENERIC_500_MESSAGE = 'Generation failed due to a server error. Please try again later.';
+
 /** Validation result: either the parsed params or an error response. */
 type ValidateResult<T> =
   | { ok: true; params: T }
@@ -257,8 +267,7 @@ export function createGenerationHandler<TParams, TResult>(
           return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
         }
         captureException(err, { route });
-        const message = err instanceof Error ? err.message : 'Provider error';
-        return NextResponse.json({ error: message }, { status: 500 });
+        return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
       }
     }
 
@@ -275,7 +284,12 @@ export function createGenerationHandler<TParams, TResult>(
       if (err instanceof ApiKeyError) {
         return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
       }
-      throw err;
+      // A non-ApiKeyError here is a server-side failure (missing platform key,
+      // DB error, etc.). Re-throwing surfaced it as an uninstrumented unhandled
+      // rejection with no Sentry signal and a generic framework 500. Convert it
+      // to a structured 500 and alert Sentry, mirroring the cached path (#8597).
+      captureException(err, { route });
+      return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
     }
 
     try {
@@ -291,8 +305,7 @@ export function createGenerationHandler<TParams, TResult>(
         }
       }
       captureException(err, { route });
-      const message = err instanceof Error ? err.message : 'Provider error';
-      return NextResponse.json({ error: message }, { status: 500 });
+      return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
     }
   };
 }

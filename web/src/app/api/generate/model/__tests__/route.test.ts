@@ -198,13 +198,15 @@ describe('POST /api/generate/model', () => {
       expect(body.code).toBe('TIER_NOT_ALLOWED');
     });
 
-    it('rethrows non-ApiKeyError exceptions', async () => {
+    it('returns a structured 500 (not a rethrow) for non-ApiKeyError exceptions', async () => {
       vi.mocked(resolveApiKey).mockRejectedValue(new Error('DB connection failed'));
 
       const { POST } = await import('../route');
-      await expect(
-        POST(makeRequest({ prompt: 'dragon', mode: 'text-to-3d' }))
-      ).rejects.toThrow('DB connection failed');
+      const res = await POST(makeRequest({ prompt: 'dragon', mode: 'text-to-3d' }));
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.error).toBe('Generation failed due to a server error. Please try again later.');
+      expect(body.error).not.toContain('DB connection');
     });
   });
 
@@ -277,10 +279,11 @@ describe('POST /api/generate/model', () => {
       const body = await res.json();
 
       expect(res.status).toBe(500);
-      expect(body.error).toContain('Meshy API error');
+      expect(body.error).toBe('Generation failed due to a server error. Please try again later.');
+      expect(body.error).not.toContain('Meshy');
     });
 
-    it('returns "Provider error" for non-Error thrown objects', async () => {
+    it('returns the generic 500 message for non-Error thrown objects', async () => {
       const { MeshyClient } = await import('@/lib/generate/meshyClient');
       vi.mocked(MeshyClient).mockImplementationOnce(function (this: MeshyClient) {
         this.createTextTo3D = vi.fn().mockRejectedValue('string error');
@@ -295,7 +298,8 @@ describe('POST /api/generate/model', () => {
       const body = await res.json();
 
       expect(res.status).toBe(500);
-      expect(body.error).toBe('Provider error');
+      expect(body.error).toBe('Generation failed due to a server error. Please try again later.');
+      expect(body.error).not.toContain('Provider error');
     });
   });
 });

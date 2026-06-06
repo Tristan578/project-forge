@@ -158,7 +158,8 @@ describe('POST /api/generate/voice', () => {
     const data = await res.json();
 
     expect(res.status).toBe(500);
-    expect(data.error).toBe('ElevenLabs quota exceeded');
+    expect(data.error).toBe('Generation failed due to a server error. Please try again later.');
+    expect(data.error).not.toContain('ElevenLabs');
     expect(captureException).toHaveBeenCalled();
   });
 
@@ -171,7 +172,8 @@ describe('POST /api/generate/voice', () => {
     const body = await res.json();
 
     expect(res.status).toBe(500);
-    expect(body.error).toBe('DB connection failed');
+    expect(body.error).toBe('Generation failed due to a server error. Please try again later.');
+    expect(body.error).not.toContain('DB connection');
   });
 
   it('returns 422 when sanitizePrompt returns safe:false', async () => {
