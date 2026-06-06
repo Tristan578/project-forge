@@ -85,6 +85,117 @@ function passthroughMiddleware(req: NextRequest): NextResponse {
 }
 
 /**
+ * Public (unauthenticated) route patterns for the Clerk proxy, in Clerk
+ * `createRouteMatcher` glob syntax.
+ *
+ * Exported so the proxy's public-vs-protected decision can be unit-tested
+ * against the REAL Clerk matcher (see `proxy.test.ts`) instead of grepping the
+ * source. A substring check over the source can't tell a live pattern from one
+ * buried in a comment, and — worse — can't catch a missing `(.*)` that would
+ * silently stop a subpath like `/api/cron/health-monitor` from matching while
+ * the bare `/api/cron` string still appears in the file.
+ *
+ * `includeDev` adds the `/dev` auth-bypass route. It is only ever true outside
+ * production: in production the `/dev` editor requires authentication like any
+ * other editor route, to prevent unauthenticated access to the full editor UI
+ * (#7915).
+ */
+export function buildPublicRoutes({ includeDev }: { includeDev: boolean }): string[] {
+  const publicRoutes = [
+    '/',
+    '/sign-in(.*)',
+    '/sign-up(.*)',
+    '/api/auth/webhook(.*)',
+    '/api/stripe/webhook(.*)',
+    '/pricing',
+    '/play(.*)',
+    '/terms(.*)',
+    '/privacy(.*)',
+    '/community(.*)',
+    '/api/community(.*)',
+    '/api/docs(.*)',
+    '/api-docs(.*)',
+    '/api/openapi(.*)',
+    '/api/health(.*)',
+    '/api/status(.*)',
+    // Vercel Cron jobs (e.g. /api/cron/health-monitor, vercel.json crons) carry
+    // only a CRON_SECRET bearer token, no Clerk session. The routes enforce that
+    // secret themselves (see the cron-self-enforcement guard in proxy.test.ts),
+    // so they must bypass the Clerk proxy or the scheduled call 401s before its
+    // own auth check runs (#8605).
+    '/api/cron(.*)',
+    '/api/sentry(.*)',
+    '/monitoring(.*)',
+    '/llms.txt',
+    '/llms-full.txt',
+    '/faq(.*)',
+    '/about(.*)',
+    '/compare(.*)',
+    '/use-cases(.*)',
+    '/changelog(.*)',
+    '/blog(.*)',
+  ];
+  if (includeDev) {
+    publicRoutes.push('/dev(.*)');
+  }
+  return publicRoutes;
+}
+
+/** Minimal shape of Clerk's `auth()` result that the proxy depends on. */
+type ProxyAuth = () => Promise<{
+  userId: string | null;
+  redirectToSignIn: (opts: { returnBackUrl: string }) => Response;
+}>;
+
+/**
+ * The proxy's per-request auth decision, factored out of the clerkMiddleware
+ * callback so it can be unit-tested directly.
+ *
+ * It cannot be tested through `proxy` itself: clerkMiddleware is pulled in via a
+ * runtime `require()` (to keep Clerk's import-time key validation out of the
+ * CI/E2E passthrough path), and the test runner cannot intercept that require to
+ * stub auth. Exposing the decision as a pure function — given an `auth` result
+ * and an `isPublicRoute` matcher — lets the real 401-vs-redirect logic be
+ * exercised with the real Clerk route matcher and no live keys (see
+ * `proxy.test.ts`).
+ */
+export async function applyAuthDecision(
+  auth: ProxyAuth,
+  req: NextRequest,
+  isPublicRoute: (req: NextRequest) => boolean,
+): Promise<Response> {
+  const corsResponse = handleCors(req);
+  if (corsResponse) return corsResponse;
+
+  // Redirect authenticated users from landing page to dashboard.
+  // This runs in the proxy so the landing page itself can be statically cached.
+  if (req.nextUrl.pathname === '/') {
+    const { userId } = await auth();
+    if (userId) {
+      return NextResponse.redirect(new URL('/dashboard', req.url));
+    }
+  }
+
+  if (!isPublicRoute(req)) {
+    const { userId, redirectToSignIn } = await auth();
+    if (!userId) {
+      // Browser navigations: redirect to sign-in (preserves the original URL
+      // as `redirect_url` so users land back where they started after auth).
+      // API requests: return 401 so client code can distinguish unauthenticated
+      // from "not found". Clerk's default `auth.protect()` would rewrite browser
+      // requests to /404 — bad UX (no recovery path) and breaks the prod smoke
+      // test. See #8529.
+      if (req.nextUrl.pathname.startsWith('/api/')) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+      return redirectToSignIn({ returnBackUrl: req.url });
+    }
+  }
+
+  return addSecurityHeaders(NextResponse.next(), req);
+}
+
+/**
  * Build the proxy middleware.
  *
  * When valid Clerk keys are present, use clerkMiddleware for auth.
@@ -107,46 +218,9 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { clerkMiddleware, createRouteMatcher } = require('@clerk/nextjs/server');
 
-  // /dev route bypasses auth for local development only.
-  // In production, /dev requires authentication like any other editor route
-  // to prevent unauthenticated access to the full editor UI (#7915).
-  const publicRoutes = [
-    '/',
-    '/sign-in(.*)',
-    '/sign-up(.*)',
-    '/api/auth/webhook(.*)',
-    '/api/stripe/webhook(.*)',
-    '/pricing',
-    '/play(.*)',
-    '/terms(.*)',
-    '/privacy(.*)',
-    '/community(.*)',
-    '/api/community(.*)',
-    '/api/docs(.*)',
-    '/api-docs(.*)',
-    '/api/openapi(.*)',
-    '/api/health(.*)',
-    '/api/status(.*)',
-    // Vercel Cron jobs (e.g. /api/cron/health-monitor, vercel.json crons) carry
-    // only a CRON_SECRET bearer token, no Clerk session. The routes enforce that
-    // secret themselves, so they must bypass the Clerk proxy or the scheduled
-    // call 401s before its own auth check runs (#8605).
-    '/api/cron(.*)',
-    '/api/sentry(.*)',
-    '/monitoring(.*)',
-    '/llms.txt',
-    '/llms-full.txt',
-    '/faq(.*)',
-    '/about(.*)',
-    '/compare(.*)',
-    '/use-cases(.*)',
-    '/changelog(.*)',
-    '/blog(.*)',
-  ];
-  if (process.env.NODE_ENV !== 'production') {
-    publicRoutes.push('/dev(.*)');
-  }
-  const isPublicRoute = createRouteMatcher(publicRoutes);
+  const isPublicRoute = createRouteMatcher(
+    buildPublicRoutes({ includeDev: process.env.NODE_ENV !== 'production' }),
+  );
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return clerkMiddleware(async (auth: any, req: NextRequest) => {
