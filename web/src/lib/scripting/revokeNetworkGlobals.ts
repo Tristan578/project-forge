@@ -17,13 +17,23 @@
  * the compiler needs it to build user scripts).
  *
  * ## The actual mitigation: remove the capability, not the name
- * Instead of hiding the name, delete the network/storage *bindings* from the
- * worker global. The constructor chain can still reach `Function`, but
- * `Function('return fetch')()` then resolves to `undefined` — there is nothing
- * left to fetch, connect, or persist with. The worker itself never uses any of
- * these APIs (it only `postMessage`s back to the main thread; the AI/asset
- * channels that do use `fetch` run on the main thread), so revoking them does
- * not affect legitimate operation.
+ * Instead of hiding the name, revoke the network/storage *capability* from the
+ * worker global. Per WebIDL these methods/constructors are NOT own properties of
+ * the global — the `fetch`/`importScripts` operations and the
+ * `XMLHttpRequest`/`WebSocket`/`Worker`/... interface objects are configurable
+ * data properties on the global's PROTOTYPE chain
+ * (`WorkerGlobalScope.prototype` / `DedicatedWorkerGlobalScope.prototype`). So
+ * revocation walks the whole prototype chain ({@link lockMethodThroughChain}),
+ * locking the binding to `undefined` wherever it actually lives — an
+ * instance-only shadow would hide `globalThis.fetch` yet leave
+ * `Object.getPrototypeOf(globalThis).fetch` live and callable. After this the
+ * constructor chain can still reach `Function`, but `Function('return fetch')()`
+ * resolves to `undefined` AND the prototype-walk
+ * `Object.getPrototypeOf(globalThis).fetch` resolves to `undefined` too — there
+ * is nothing left to fetch, connect, or persist with. The worker itself never
+ * uses any of these APIs (it only `postMessage`s back to the main thread; the
+ * AI/asset channels that do use `fetch` run on the main thread), so revoking
+ * them does not affect legitimate operation.
  *
  * This includes capabilities that do NOT look like `fetch` but are equivalent
  * exfiltration primitives:
@@ -147,7 +157,19 @@ function lockMethodThroughChain(target: object, name: string): void {
  */
 export function revokeNetworkGlobals(scope: typeof globalThis = globalThis): void {
   for (const name of REVOKED_GLOBALS) {
-    lockToUndefined(scope, name);
+    // Walk the whole prototype chain, not just the instance. Per WebIDL, a
+    // worker's network/storage globals (the `fetch`/`importScripts` operations
+    // and the `XMLHttpRequest`/`WebSocket`/`Worker`/... interface objects) live
+    // as configurable data properties on the global's PROTOTYPE chain
+    // (WorkerGlobalScope.prototype / DedicatedWorkerGlobalScope.prototype), NOT
+    // as own properties of the global. An instance-only own-property shadow
+    // ({@link lockToUndefined}) defeats `scope.fetch` and the bareword
+    // `Function('return fetch')()` lookup, but leaves the prototype-resident
+    // capability live and callable via the constructor-chain + prototype-walk
+    // bypass: `Object.getPrototypeOf(globalThis).fetch.call(globalThis, ...)` —
+    // a same-origin credentialed exfil POST CORS does not block. Revoke the
+    // capability where it actually lives.
+    lockMethodThroughChain(scope, name);
   }
   // navigator stays readable (userAgent etc.), but its network primitive —
   // sendBeacon, a credentialed no-cors POST — is revoked. In a real worker

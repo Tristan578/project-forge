@@ -21,8 +21,13 @@
  * - fetch / XMLHttpRequest / WebSocket / importScripts / EventSource /
  *   BroadcastChannel — network exfiltration. Names blocked here AND the
  *   capabilities revoked by revokeNetworkGlobals() (the actual enforcement,
- *   since the constructor chain bypasses the name shadow).
- * - indexedDB / caches — persistent storage side-channels (also revoked).
+ *   since the constructor chain bypasses the name shadow). The revoke walks the
+ *   whole prototype chain: in a real worker these live on
+ *   WorkerGlobalScope.prototype, NOT as own properties of the global, so an
+ *   instance-only shadow would leave Object.getPrototypeOf(globalThis).fetch
+ *   live and callable.
+ * - indexedDB / caches — persistent storage side-channels (also revoked through
+ *   the prototype chain).
  * - navigator — fingerprinting AND a network primitive: `navigator.sendBeacon`
  *   is a credentialed `no-cors` POST. `navigator` stays readable but its
  *   `sendBeacon` is revoked by revokeNetworkGlobals() through the whole prototype
