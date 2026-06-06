@@ -25,8 +25,10 @@
  * - indexedDB / caches — persistent storage side-channels (also revoked).
  * - navigator — fingerprinting AND a network primitive: `navigator.sendBeacon`
  *   is a credentialed `no-cors` POST. `navigator` stays readable but its
- *   `sendBeacon` is neutralised by revokeNetworkGlobals() (the constructor chain
- *   bypasses the name shadow, so the capability itself is removed).
+ *   `sendBeacon` is revoked by revokeNetworkGlobals() through the whole prototype
+ *   chain (the method lives on WorkerNavigator.prototype in a real worker, so an
+ *   instance-only shadow would leave it callable; the constructor chain bypasses
+ *   the name shadow regardless, so the capability itself is removed).
  * - location — URL leak (name shadow only; carries no network/storage
  *   capability of its own).
  * - Worker / SharedWorker — name-shadowed here AND their constructors revoked by

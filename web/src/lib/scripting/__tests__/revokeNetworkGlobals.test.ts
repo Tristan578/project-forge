@@ -89,6 +89,48 @@ describe('revokeNetworkGlobals', () => {
     ).toBeUndefined();
   });
 
+  it('neutralizes navigator.sendBeacon when it lives on the prototype (real WorkerNavigator layout, not an own property)', () => {
+    // In a real worker, sendBeacon is a method on WorkerNavigator.prototype, NOT
+    // an own property of the navigator instance. An instance-only own-property
+    // shadow hides `navigator.sendBeacon` but leaves the prototype method live
+    // and reachable through the constructor-chain + prototype-walk bypass:
+    //   Object.getPrototypeOf(navigator).sendBeacon.call(navigator, url, data)
+    // This test reproduces that layout and is the regression guard for the gap.
+    class WorkerNavigator {
+      sendBeacon(): boolean {
+        return true;
+      }
+    }
+    // userAgent on the prototype too, to prove we don't nuke navigator wholesale.
+    Object.defineProperty(WorkerNavigator.prototype, 'userAgent', {
+      value: 'test-agent',
+      configurable: true,
+      enumerable: true,
+      writable: false,
+    });
+    const sandbox: Record<string, unknown> = { navigator: new WorkerNavigator() };
+    vm.createContext(sandbox);
+    revokeNetworkGlobals(sandbox as unknown as typeof globalThis);
+
+    const nav = sandbox.navigator as { sendBeacon?: unknown; userAgent?: unknown };
+    // Direct access is undefined...
+    expect(nav.sendBeacon).toBeUndefined();
+    // ...AND the prototype method itself is revoked — this is the bypass the
+    // instance-only shadow left open. (Fails on instance-only code.)
+    const proto = Object.getPrototypeOf(nav) as { sendBeacon?: unknown };
+    expect(proto.sendBeacon).toBeUndefined();
+    // navigator stays readable: userAgent (also on the prototype) still resolves.
+    expect(nav.userAgent).toBe('test-agent');
+    // The full constructor-chain prototype-walk exfil expression resolves to
+    // undefined — there is no callable sendBeacon left anywhere on the chain.
+    expect(
+      vm.runInContext(
+        `(0).constructor.constructor('return typeof Object.getPrototypeOf(globalThis.navigator).sendBeacon')()`,
+        sandbox,
+      ),
+    ).toBe('undefined');
+  });
+
   it('locks the binding so an escaped script cannot reattach a working impl', () => {
     const realm = makeRevokedRealm();
     // Strict-mode assignment to a non-writable property throws.

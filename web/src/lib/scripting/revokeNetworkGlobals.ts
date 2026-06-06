@@ -30,7 +30,10 @@
  *  - `navigator.sendBeacon` — a credentialed, fire-and-forget `no-cors` POST
  *    that carries the author's same-origin session cookies and is not blocked by
  *    CORS. `navigator` is otherwise left readable (it carries no other network
- *    capability in a worker), but `sendBeacon` is neutralised.
+ *    capability in a worker), but `sendBeacon` is revoked. In a real worker the
+ *    method lives on `WorkerNavigator.prototype`, not on the instance, so the
+ *    revocation walks the whole prototype chain — an instance-only shadow would
+ *    leave `Object.getPrototypeOf(navigator).sendBeacon` callable.
  *  - `Worker`/`SharedWorker` — an escaped script could construct a *nested*
  *    same-origin worker whose fresh global still has `fetch`/`importScripts`/etc.
  *    intact, fully restoring the capability this module removes. Revoking the
@@ -101,6 +104,37 @@ function lockToUndefined(target: object, name: string): void {
 }
 
 /**
+ * Lock `name` to a non-configurable `undefined` on `target` AND on every object
+ * in its prototype chain (up to, but never including, `Object.prototype`).
+ *
+ * Web-platform methods such as `navigator.sendBeacon` live on a `*.prototype`
+ * (`WorkerNavigator.prototype`), NOT as an own property of the instance. An
+ * instance-only shadow ({@link lockToUndefined}) hides `nav.sendBeacon` yet
+ * leaves the prototype method live and reachable through the constructor-chain +
+ * prototype-walk bypass:
+ *
+ *     Object.getPrototypeOf(navigator).sendBeacon.call(navigator, url, data)
+ *
+ * Walking the chain revokes the capability where it actually lives; the trailing
+ * instance lock additionally blocks an escaped script from reattaching a fresh
+ * own property. `Object.prototype` is deliberately never touched — these
+ * primitives never live there, and locking a binding onto it would corrupt every
+ * object in the realm.
+ */
+function lockMethodThroughChain(target: object, name: string): void {
+  let obj: object | null = target;
+  while (obj && obj !== Object.prototype) {
+    if (Object.prototype.hasOwnProperty.call(obj, name)) {
+      lockToUndefined(obj, name);
+    }
+    obj = Object.getPrototypeOf(obj) as object | null;
+  }
+  // Plant a non-configurable `undefined` own property even if no own copy
+  // existed anywhere, so the capability cannot be reattached to the instance.
+  lockToUndefined(target, name);
+}
+
+/**
  * Permanently remove network/storage capabilities from `scope` (defaults to the
  * worker's `globalThis`). Idempotent: each binding is locked to `undefined` as
  * a non-configurable, non-writable property, so repeated calls are safe no-ops
@@ -115,12 +149,15 @@ export function revokeNetworkGlobals(scope: typeof globalThis = globalThis): voi
   for (const name of REVOKED_GLOBALS) {
     lockToUndefined(scope, name);
   }
-  // navigator stays readable (userAgent etc.), but its network primitive is
-  // neutralised. In a real worker `sendBeacon` lives on WorkerNavigator.prototype;
-  // an own non-configurable `undefined` shadows the inherited method.
+  // navigator stays readable (userAgent etc.), but its network primitive —
+  // sendBeacon, a credentialed no-cors POST — is revoked. In a real worker
+  // sendBeacon lives on WorkerNavigator.prototype, NOT on the instance, so an
+  // instance-only own-property shadow would leave the prototype method callable
+  // via `Object.getPrototypeOf(navigator).sendBeacon.call(navigator, ...)`. Walk
+  // the whole chain to revoke the capability wherever it actually lives.
   const nav = (scope as { navigator?: object }).navigator;
   if (nav) {
-    lockToUndefined(nav, 'sendBeacon');
+    lockMethodThroughChain(nav, 'sendBeacon');
   }
 }
 
