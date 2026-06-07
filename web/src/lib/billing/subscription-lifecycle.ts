@@ -536,37 +536,77 @@ export async function reverseAddonTokens(
   // user UPDATE depends on the INSERT via EXISTS, so it only runs when the
   // INSERT actually created a row.
   //
-  // NOTE: `${refundRatio}` MUST be cast `::float8`. The neon-http driver sends
-  // bound params as text with no type annotation; Postgres then infers the type
-  // of `addon_tokens * $n` from the integer column and tries to parse a
-  // fractional ratio ("0.5") as an integer, throwing
-  // `invalid input syntax for type integer`. The explicit cast forces float
-  // multiplication before FLOOR. (Caught by the real-DB test, #8608.)
+  // NOTE: integer-typed bound params (`${amountRefunded}`, `${amountTotal}`) MUST
+  // be cast (`::bigint`). The neon-http driver sends bound params as text with no
+  // type annotation; without a cast Postgres can mis-infer the type from the
+  // surrounding integer columns and throw `invalid input syntax for type
+  // integer`. (The original `::float8` cast bug was caught by the real-DB test,
+  // #8608; the same class applies to the integer math below.)
   //
-  // Incremental refunds on this fallback path are approximate (#8706): with no
-  // purchase row to anchor exact token proportions, each tranche deducts a ratio
-  // of the CURRENT addon balance. A single full or single partial refund is
-  // exact; a partial-then-larger-partial sequence (e.g. 50% then 75%) can
-  // over-deduct slightly. The per-tranche `refundRef` still guarantees a true
-  // redelivery (the same cumulative amount) is an exact no-op via NOT EXISTS, and
-  // the precise purchase-based path above handles incremental refunds exactly.
-  const refundRatio = Math.min(amountRefunded / amountTotal, 1);
+  // Incremental refunds on this fallback path (no purchase row to anchor exact
+  // token proportions) reconstruct a STABLE original base from the FIRST tranche
+  // we already recorded, rather than re-applying the cumulative ratio to the
+  // shrinking CURRENT balance (#8706). Each fallback audit row stores the
+  // cumulative refunded cents in its `reference_id` (`<chargeId>:<cents>`) and the
+  // tokens it clawed in `amount`, so for a later tranche:
+  //
+  //     base   = total * prior_clawed / prior_cum_cents   (independent of `cur`)
+  //     target = ratio * base = amountRefunded * prior_clawed / prior_cum_cents
+  //     delta  = target - prior_clawed                    (clamped >=0, <= cur)
+  //
+  // The `total` cancels, so the target is exact integer math with no float. Because
+  // the base is derived from the recorded clawback (NOT the live balance), a spend
+  // OR a NEW addon purchase landing between webhook deliveries can never inflate
+  // the clawback — `delta` is capped at the cumulative target and at `cur`, so the
+  // path NEVER over-deducts. A true redelivery (same cumulative amount) yields
+  // delta 0 AND fails the NOT EXISTS guard; an out-of-order lower cumulative yields
+  // a negative delta clamped to 0. The first tranche (no prior rows) falls back to
+  // a ratio of the current balance, identical to the single-refund behavior.
   const source = `charge_refunded:${chargeId}`;
   const now = new Date().toISOString();
 
   await queryWithResilience(() =>
     neonSql`
-      WITH audit AS (
+      WITH prior AS (
+        -- Aggregate this charge's prior fallback clawbacks. source is
+        -- charge-specific (it embeds the chargeId), so it scopes precisely; the
+        -- LIKE '%:%' filter excludes any legacy chargeId-only rows that predate
+        -- the per-tranche key so split_part always has a cents segment to parse.
+        SELECT
+          COALESCE(SUM(ABS(ct.amount)), 0)::int AS clawed_tokens,
+          COALESCE(MAX(split_part(ct.reference_id, ':', 2)::bigint), 0)::bigint AS cum_cents
+        FROM credit_transactions ct
+        WHERE ct.user_id = ${userId}
+          AND ct.source = ${source}
+          AND ct.reference_id LIKE '%:%'
+      ),
+      calc AS (
+        SELECT u.addon_tokens AS cur, p.clawed_tokens, p.cum_cents
+        FROM users u CROSS JOIN prior p
+        WHERE u.id = ${userId}
+      ),
+      deduction AS (
+        SELECT GREATEST(0, LEAST(
+          CASE
+            WHEN c.clawed_tokens > 0 AND c.cum_cents > 0
+              THEN (${amountRefunded}::bigint * c.clawed_tokens / c.cum_cents)::int - c.clawed_tokens
+            ELSE (c.cur::bigint * ${amountRefunded}::bigint / NULLIF(${amountTotal}::bigint, 0))::int
+          END,
+          c.cur
+        ))::int AS to_deduct
+        FROM calc c
+      ),
+      audit AS (
         INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
         SELECT ${userId}, 'adjustment',
-               -LEAST(FLOOR(u.addon_tokens * ${refundRatio}::float8)::int, u.addon_tokens),
+               -(SELECT to_deduct FROM deduction),
                GREATEST(0, u.monthly_tokens - u.monthly_tokens_used)
-                 + GREATEST(0, u.addon_tokens - FLOOR(u.addon_tokens * ${refundRatio}::float8)::int)
+                 + GREATEST(0, u.addon_tokens - (SELECT to_deduct FROM deduction))
                  + u.earned_credits,
                ${source}, ${refundRef}
         FROM users u
         WHERE u.id = ${userId}
-          AND FLOOR(u.addon_tokens * ${refundRatio}::float8)::int > 0
+          AND (SELECT to_deduct FROM deduction) > 0
           AND NOT EXISTS (
             SELECT 1 FROM credit_transactions ct
             WHERE ct.user_id = ${userId}

@@ -195,40 +195,44 @@ describe('handleChargeRefunded (PF-526)', () => {
   });
 
   describe('div-by-zero and ratio edge cases (#8187)', () => {
-    it('refundRatio is capped at 1 when amountRefunded > amountTotal', async () => {
+    it('passes the raw cumulative refund amounts to the CTE (over-refund clamped in SQL)', async () => {
       mockSelectLimit.mockResolvedValueOnce([mockUserRecord]);
 
-      // Over-refund: refunded more than total (edge case from payment processor)
+      // Over-refund: refunded more than total (edge case from payment processor).
+      // The SUT no longer precomputes a JS ratio — it passes amountRefunded and
+      // amountTotal through, and the SQL caps the deduction at the current balance
+      // (LEAST(.., cur)). (Behaviour covered by the real-DB suite,
+      // reverseAddonTokens.test.ts → "clamps the refund ratio to 1".)
       await handleChargeRefunded('cus_abc', 'ch_over', 10000, 4900);
 
       const cteCall = mockNeonSqlCalls.find(c =>
         c.strings.some(s => s.includes('audit'))
       );
       expect(cteCall).toBeDefined();
-      // refundRatio = Math.min(10000/4900, 1) = 1
-      // The ratio passed to SQL should be 1
-      expect(cteCall!.values).toContain(1);
+      expect(cteCall!.values).toContain(10000);
+      expect(cteCall!.values).toContain(4900);
+      expect(cteCall!.values).toContain('ch_over:10000');
     });
 
-    it('fallback path passes ratio through and SQL guard prevents deduction when addonTokens is zero', async () => {
-      // The fallback path (no purchase record) avoids division entirely —
-      // it uses multiplication by the pre-computed ratio. The SQL WHERE guard
-      // (FLOOR(addon_tokens * ratio) > 0) prevents deduction when result is 0.
+    it('issues the fallback CTE with the cumulative refund amounts (zero-balance guard is in SQL)', async () => {
+      // The fallback path reads the live addon balance INSIDE the CTE; when it is
+      // 0 the SQL deduction computes to 0 and the WHERE to_deduct > 0 guard skips
+      // the INSERT/UPDATE entirely. (Behaviour covered by the real-DB suite,
+      // reverseAddonTokens.test.ts → "writes nothing when the user has no addon
+      // tokens".) Here we only assert the CTE is issued with the raw refund amounts.
       mockSelectLimit.mockResolvedValueOnce([{
         ...mockUserRecord,
         addonTokens: 0,
       }]);
 
-      // amountRefunded = amountTotal, ratio = 1, but addonTokens = 0
-      // SQL WHERE guard: FLOOR(0 * 1) = 0, so > 0 is false → no deduction
       await handleChargeRefunded('cus_abc', 'ch_zero_tok', 4900, 4900);
 
       const cteCall = mockNeonSqlCalls.find(c =>
         c.strings.some(s => s.includes('audit'))
       );
       expect(cteCall).toBeDefined();
-      // ratio = 1 passed through
-      expect(cteCall!.values).toContain(1);
+      expect(cteCall!.values).toContain(4900);
+      expect(cteCall!.values).toContain('ch_zero_tok:4900');
     });
   });
 

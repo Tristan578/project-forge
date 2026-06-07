@@ -417,7 +417,7 @@ describe('reverseAddonTokens — fallback balance-based path (no paymentIntent)'
     expect(await creditTxns(sql, user.id)).toHaveLength(1);
   });
 
-  it('treats a higher cumulative refund as a new tranche (per-tranche dedup, #8706)', async () => {
+  it('escalates a cumulative refund to a full clawback via the stable base (#8706)', async () => {
     const sql = harness().neonSql;
     const user = await seedUser(sql, { addonTokens: 1000 });
 
@@ -425,14 +425,64 @@ describe('reverseAddonTokens — fallback balance-based path (no paymentIntent)'
     await reverseAddonTokens(user.id, 'ch_esc', 500, 1000);
     expect(await addonBalance(sql, user.id)).toBe(500);
 
-    // The cumulative refund grows to 100% → distinct refundRef → deducts again.
+    // The cumulative refund grows to 100%. The stable base reconstructed from the
+    // first tranche (clawed 500 at 500c) is 1000, so the cumulative target is the
+    // full 1000 and the second tranche deducts the remaining 500 delta.
     await reverseAddonTokens(user.id, 'ch_esc', 1000, 1000);
 
-    // A 50%→100% escalation nets to a full clawback of the addon balance.
     expect(await addonBalance(sql, user.id)).toBe(0);
     const txns = await creditTxns(sql, user.id);
     expect(txns).toHaveLength(2);
     expect(txns.map((t) => t.reference_id).sort()).toEqual(['ch_esc:1000', 'ch_esc:500']);
+    // Each tranche deducts exactly its delta; the total equals the 1000-token grant.
+    expect(txns.map((t) => Number(t.amount)).sort((a, b) => a - b)).toEqual([-500, -500]);
+  });
+
+  it('does NOT over-deduct on a non-terminal escalation: 50% then 75% nets to 75% (#8706)', async () => {
+    const sql = harness().neonSql;
+    const user = await seedUser(sql, { addonTokens: 1000 });
+
+    // 50% partial → claw 500 (fallback path, no purchase row).
+    await reverseAddonTokens(user.id, 'ch_step', 500, 1000);
+    expect(await addonBalance(sql, user.id)).toBe(500);
+
+    // Cumulative refund rises to 75%. The fair clawback for 75% of a 1000-token
+    // grant is 750. The previous per-tranche code re-applied the ratio to the
+    // SHRUNKEN current balance — 500 + floor(0.75 * 500) = 875 — over-charging the
+    // customer by 125. The stable-base reconstruction deducts only the 250 delta
+    // needed to reach the cumulative target of 750.
+    await reverseAddonTokens(user.id, 'ch_step', 750, 1000);
+
+    expect(await addonBalance(sql, user.id)).toBe(250);
+    const txns = await creditTxns(sql, user.id);
+    expect(txns).toHaveLength(2);
+    const totalClawed = txns.reduce((s, t) => s + Math.abs(Number(t.amount)), 0);
+    expect(totalClawed).toBe(750);
+    const second = txns.find((t) => t.reference_id === 'ch_step:750')!;
+    expect(Number(second.amount)).toBe(-250);
+  });
+
+  it('never over-deducts when the user buys MORE addon tokens between tranches (stable base)', async () => {
+    const sql = harness().neonSql;
+    const user = await seedUser(sql, { addonTokens: 1000 });
+
+    // 50% partial of a 1000-token grant → claw 500, leaving 500.
+    await reverseAddonTokens(user.id, 'ch_buy', 500, 1000);
+    expect(await addonBalance(sql, user.id)).toBe(500);
+
+    // User buys a 1000-token addon pack between webhook deliveries → balance 1500.
+    await sql`UPDATE users SET addon_tokens = 1500 WHERE id = ${user.id}`;
+
+    // Cumulative refund rises to 75%. The clawback must target 75% of the ORIGINAL
+    // 1000-token grant (750 total → +250 now), NOT 75% of the inflated 1500
+    // balance. The freshly purchased tokens belong to the user and must survive.
+    await reverseAddonTokens(user.id, 'ch_buy', 750, 1000);
+
+    // 1500 − 250 = 1250: the 1000 newly bought tokens are fully preserved.
+    expect(await addonBalance(sql, user.id)).toBe(1250);
+    const txns = await creditTxns(sql, user.id);
+    const second = txns.find((t) => t.reference_id === 'ch_buy:750')!;
+    expect(Number(second.amount)).toBe(-250);
   });
 
   it('writes nothing when the user has no addon tokens to reverse', async () => {
