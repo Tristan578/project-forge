@@ -82,11 +82,18 @@ async function refundedCents(sql: NeonSqlAdapter, purchaseId: string): Promise<n
 }
 
 async function creditTxns(sql: NeonSqlAdapter, userId: string): Promise<QueryRow[]> {
+  // No monotonic insertion column exists: `id` is a random UUID (not a serial),
+  // so `id ASC` is lexical-on-random — it does NOT reflect write order. And
+  // `created_at` is transaction-time `now()`, which ties for rows written in the
+  // same statement/transaction. We therefore order by the deterministic,
+  // meaningful tranche key (`reference_id`) so single-row reads are stable; any
+  // multi-row assertion additionally `.sort()`s to stay independent of the
+  // ordering of equal-`created_at` rows.
   return sql`
     SELECT amount, balance_after, transaction_type, source, reference_id
     FROM credit_transactions
     WHERE user_id = ${userId}::uuid
-    ORDER BY created_at ASC, id ASC
+    ORDER BY created_at ASC, reference_id ASC NULLS LAST
   `;
 }
 
@@ -242,6 +249,11 @@ describe('handleChargeRefunded — precise path (paymentIntent matches a purchas
     const txns = await creditTxns(sql, user.id);
     expect(txns).toHaveLength(1);
     expect(Number(txns[0].amount)).toBe(-5000);
+    // balance_after snapshots the post-clawback balance the SUT itself computed:
+    // GREATEST(0, monthly−used) + GREATEST(0, addon−deduct) + earned = 0+0+0.
+    // A mutant that writes the pre-refund balance (or omits the addon term) is
+    // caught here, where the bare `amount`/`source` asserts above pass it.
+    expect(Number(txns[0].balance_after)).toBe(0);
     expect(txns[0].source).toBe('charge_refunded:ch_pr');
   });
 
@@ -264,6 +276,10 @@ describe('handleChargeRefunded — precise path (paymentIntent matches a purchas
     const txns = await creditTxns(sql, user.id);
     expect(txns).toHaveLength(1);
     expect(Number(txns[0].amount)).toBe(-2500);
+    // Non-zero remainder: GREATEST(0, 4000−2500) = 1500 (monthly/earned both 0).
+    // This pins the running balance, not just the delta — the value a credits
+    // ledger UI and the next deduction both read.
+    expect(Number(txns[0].balance_after)).toBe(1500);
   });
 
   it('does not double-deduct across the precise path on a re-fired webhook', async () => {
@@ -320,6 +336,46 @@ describe('handleChargeRefunded — precise path (paymentIntent matches a purchas
   });
 });
 
+describe('handleChargeRefunded — cross-path idempotency (fallback then precise)', () => {
+  it('does not double-deduct when a fallback refund is followed by a precise refund of the SAME charge', async () => {
+    // Real Stripe race: charge.refunded arrives before the checkout.session
+    // webhook has written the token_purchases row, so the first delivery takes
+    // the FALLBACK path; the row lands; the at-least-once redelivery then finds
+    // the purchase and takes the PRECISE path. Both paths key the audit row on
+    // the SAME (user, source=`charge_refunded:<charge>`, reference_id=`<charge>:<amt>`),
+    // so the precise INSERT hits ON CONFLICT DO NOTHING → the `audit` CTE is empty
+    // → `EXISTS (SELECT 1 FROM audit)` is false → the precise UPDATE is suppressed.
+    // Deleting that gate would let the precise path deduct a SECOND time off an
+    // already-reversed balance — this test is its executable proof.
+    const sql = harness().neonSql;
+    const user = await seedUser(sql, { stripeCustomerId: 'cus_xp', addonTokens: 20000 });
+
+    // Delivery 1 — no purchase row yet → fallback: FLOOR(20000 × 2450/4900) = 10000.
+    await handleChargeRefunded('cus_xp', 'ch_xp', 2450, 4900, 'pi_xp');
+    expect(await addonBalance(sql, user.id)).toBe(10000);
+
+    // The purchase row arrives late, then the SAME charge is redelivered → precise.
+    const purchaseId = await seedPurchase(sql, {
+      userId: user.id,
+      paymentIntent: 'pi_xp',
+      tokens: 5000,
+      amountCents: 4900,
+    });
+    await handleChargeRefunded('cus_xp', 'ch_xp', 2450, 4900, 'pi_xp');
+
+    // No second deduction: addon stays 10000, exactly one ledger row for the charge.
+    // (The precise path still CLAIMS refunded_cents — harmless bookkeeping — but
+    // the EXISTS(audit) gate blocks the balance mutation.)
+    expect(await addonBalance(sql, user.id)).toBe(10000);
+    expect(await refundedCents(sql, purchaseId)).toBe(2450);
+    const txns = await creditTxns(sql, user.id);
+    expect(txns).toHaveLength(1);
+    expect(Number(txns[0].amount)).toBe(-10000);
+    expect(txns[0].reference_id).toBe('ch_xp:2450');
+    expect(txns[0].source).toBe('charge_refunded:ch_xp');
+  });
+});
+
 describe('handleChargeRefunded — comped purchase (amount_cents = 0)', () => {
   it('reclaims the full comped grant rather than no-opping (NULLIF/LEAST clawback)', async () => {
     const sql = harness().neonSql;
@@ -370,16 +426,19 @@ describe('handleChargeRefunded — incremental (partial-then-cumulative) refunds
     expect(await refundedCents(sql, purchaseId)).toBe(2450);
 
     // 2nd refund: CUMULATIVE 4900c. Before #8706 this collided on reference_id
-    // 'ch_inc' → 23505 → whole CTE rolled back → 2nd clawback LOST, addon stuck
-    // at 2500. After: distinct key 'ch_inc:4900', delta = (4900-2450)/4900 → 2500.
+    // 'ch_inc' → unique_violation (SQLSTATE 23505) → whole CTE rolled back → 2nd
+    // clawback LOST, addon stuck at 2500. After: distinct key 'ch_inc:4900',
+    // delta = (4900-2450)/4900 → 2500.
     await handleChargeRefunded('cus_inc', 'ch_inc', 4900, 4900, 'pi_inc');
     expect(await addonBalance(sql, user.id)).toBe(0);
     expect(await refundedCents(sql, purchaseId)).toBe(4900);
 
     const txns = await creditTxns(sql, user.id);
     expect(txns).toHaveLength(2);
-    expect(txns.map(t => Number(t.amount))).toEqual([-2500, -2500]);
-    expect(txns.map(t => t.reference_id)).toEqual(['ch_inc:2450', 'ch_inc:4900']);
+    // Both tranche rows share created_at (transaction-time now()), so assert the
+    // SET of rows order-independently — never depend on a random-UUID tiebreaker.
+    expect(txns.map(t => Number(t.amount)).sort((a, b) => a - b)).toEqual([-2500, -2500]);
+    expect(txns.map(t => String(t.reference_id)).sort()).toEqual(['ch_inc:2450', 'ch_inc:4900']);
     expect(txns.every(t => t.source === 'charge_refunded:ch_inc')).toBe(true);
   });
 
@@ -421,8 +480,10 @@ describe('handleChargeRefunded — incremental (partial-then-cumulative) refunds
 
     const txns = await creditTxns(sql, user.id);
     expect(txns).toHaveLength(2);
-    expect(txns.map(t => Number(t.amount))).toEqual([-500, -500]);
-    expect(txns.map(t => t.reference_id)).toEqual(['ch_fbinc:500', 'ch_fbinc:1000']);
+    // Order-independent: both rows tie on created_at. Sorted lexically,
+    // 'ch_fbinc:1000' precedes 'ch_fbinc:500' ('1' < '5').
+    expect(txns.map(t => Number(t.amount)).sort((a, b) => a - b)).toEqual([-500, -500]);
+    expect(txns.map(t => String(t.reference_id)).sort()).toEqual(['ch_fbinc:1000', 'ch_fbinc:500']);
     expect(txns.every(t => t.source === 'charge_refunded:ch_fbinc')).toBe(true);
   });
 });
