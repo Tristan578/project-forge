@@ -1,0 +1,5 @@
+---
+"web": patch
+---
+
+Convert `handleChargeRefunded` tests to real-database behavioural assertions (F18, #8610). The previous suite mocked `@/lib/db/client` and asserted only on interpolated SQL substrings (`strings.includes('audit')`, `values.toContain('charge_refunded:ch_abc')`) — and its "idempotency" case asserted the refund CTE fired *twice*, the opposite of the property it claimed to prove. The mock never executed one line of SQL, so a query could contain every right substring and still double-deduct or mis-round. The tests now run the real refund SQL against in-process Postgres (PGlite) and assert on resulting row state — `users.addon_tokens`, `token_purchases.refunded_cents`, and `credit_transactions` — across both the fallback and precise reversal paths, proving the wrapper guards (unknown customer / non-positive amount-or-total), proportional and clamped deduction, the zero-balance guard, and idempotency under sequential webhook re-fire (Stripe at-least-once redelivery), including the incremental partial-then-cumulative refund case. (The #8706 per-tranche refund-key SUT fix these tests exercise ships in #8608, on which this PR is stacked.)
