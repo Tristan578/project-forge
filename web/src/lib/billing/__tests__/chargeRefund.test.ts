@@ -334,6 +334,41 @@ describe('handleChargeRefunded — precise path (paymentIntent matches a purchas
     expect(Number(txns[0].amount)).toBe(-2500);
     expect(txns[0].reference_id).toBe('ch_delta:4900');
   });
+
+  it('caps the audited clawback at the remaining addon balance when the purchase granted more than the user still holds (LEAST cap)', async () => {
+    // The precise-path audit amount is -LEAST(tokens_to_deduct, addon_tokens):
+    // the ledger may never record clawing back more tokens than the user
+    // actually held. The partial-refund test above keeps tokens_to_deduct (2500)
+    // BELOW the balance (4000), so LEAST always picks tokens_to_deduct and the
+    // cap is never exercised — a mutant dropping LEAST to a bare
+    // `-d.tokens_to_deduct` survives it. This case makes tokens_to_deduct exceed
+    // the balance so the cap is the only thing keeping the audit honest.
+    const sql = harness().neonSql;
+    // Purchase granted 5000 tokens; the user has since spent 2000, leaving 3000.
+    const user = await seedUser(sql, { stripeCustomerId: 'cus_cap', addonTokens: 3000 });
+    const purchaseId = await seedPurchase(sql, {
+      userId: user.id,
+      paymentIntent: 'pi_cap',
+      tokens: 5000,
+      amountCents: 4900,
+    });
+
+    // Full refund → tokens_to_deduct = FLOOR(5000 × 4900/4900) = 5000, but only
+    // 3000 addon tokens remain. The audit row must book -LEAST(5000, 3000) =
+    // -3000 (and balance_after 0), never the phantom -5000 a missing LEAST cap
+    // would write. The balance floors to 0 either way (GREATEST(0, …)), so the
+    // ledger amount is the ONLY observable that separates correct from mutant.
+    await handleChargeRefunded('cus_cap', 'ch_cap', 4900, 4900, 'pi_cap');
+
+    expect(await addonBalance(sql, user.id)).toBe(0);
+    expect(await refundedCents(sql, purchaseId)).toBe(4900);
+    const txns = await creditTxns(sql, user.id);
+    expect(txns).toHaveLength(1);
+    expect(Number(txns[0].amount)).toBe(-3000); // LEAST cap — NOT the raw -5000
+    expect(Number(txns[0].balance_after)).toBe(0);
+    expect(txns[0].source).toBe('charge_refunded:ch_cap');
+    expect(txns[0].reference_id).toBe('ch_cap:4900');
+  });
 });
 
 describe('handleChargeRefunded — cross-path idempotency (fallback then precise)', () => {
