@@ -170,9 +170,12 @@ describe('handleChargeRefunded (PF-526)', () => {
         c.strings.some(s => s.includes('NOT EXISTS'))
       );
       expect(cteCall).toBeDefined();
-      // The source and reference_id values must match
+      // `source` groups by charge; `reference_id` is the per-tranche key
+      // (`${chargeId}:${amountRefunded}`) introduced by the #8706 SUT fix so
+      // incremental refunds of one charge each record their own audit row.
+      // (Full real-DB behavioural conversion of this file is #8610 / F18, stacked on this PR.)
       expect(cteCall!.values).toContain('charge_refunded:ch_dup');
-      expect(cteCall!.values).toContain('ch_dup');
+      expect(cteCall!.values).toContain('ch_dup:2450');
     });
 
     it('second call with same chargeId produces same CTE (SQL idempotency)', async () => {
