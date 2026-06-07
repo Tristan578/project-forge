@@ -319,7 +319,19 @@ export async function handleInvoicePaid(
     `);
   }
 
-  // Reset monthly tokens for the new billing cycle
+  // Reset monthly tokens for the new billing cycle.
+  //
+  // Gated on the renewal grant row so a REDELIVERED invoice.paid does not
+  // re-zero monthly_tokens_used. Statements in a neonSql.transaction see prior
+  // statements' effects, but the grant INSERT below runs AFTER this reset: on
+  // the FIRST fire the grant row does not exist yet → NOT EXISTS is true → the
+  // reset runs. On a redelivery the grant row from the first fire is already
+  // committed → NOT EXISTS is false → the reset is skipped, preserving any
+  // tokens the user spent since the original renewal (and not re-stamping
+  // billing_cycle_start). Without this guard, spend interleaved between the
+  // first fire and a redelivery is silently gifted back (monthly_tokens_used
+  // reset to 0) — the same class of money bug as the rollover double-credit
+  // (#8708) fixed above, on the reset half of the same handler.
   statements.push(neonSql`
     UPDATE users
     SET monthly_tokens      = ${allocation},
@@ -327,6 +339,12 @@ export async function handleInvoicePaid(
         billing_cycle_start = ${now},
         updated_at          = ${now}
     WHERE id = ${user.id}
+      AND NOT EXISTS (
+        SELECT 1 FROM credit_transactions
+        WHERE user_id      = ${user.id}
+          AND source       = ${`renewal:${tier}`}
+          AND reference_id = ${invoiceId}
+      )
   `);
 
   // Grant balance: reads addon_tokens (which now includes rollover) at execution time

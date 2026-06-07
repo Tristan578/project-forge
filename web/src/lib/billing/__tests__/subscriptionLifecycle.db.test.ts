@@ -566,6 +566,45 @@ describe('subscription lifecycle — real Postgres (F19, #8611)', () => {
       expect(all.filter((r) => r.source === 'renewal_rollover:hobbyist')).toHaveLength(1);
       expect(all.filter((r) => r.source === 'renewal:hobbyist')).toHaveLength(1);
     });
+
+    it('redelivery after interleaved spend does NOT re-zero monthly_tokens_used (#8611)', async () => {
+      const seeded = await seedUser(harness().neonSql, {
+        stripeCustomerId: 'cus_a',
+        tier: 'hobbyist',
+        monthlyTokens: 300,
+        monthlyTokensUsed: 100, // 200 unused → rolls over on the first fire
+        addonTokens: 200,
+        earnedCredits: 0,
+        stripeSubscriptionId: 'sub_x',
+      });
+
+      // First renewal: rolls 200 → addon (200 → 400), resets the cycle, grants 300.
+      await handleInvoicePaid('cus_a', 'inv_1', 'sub_x');
+
+      // The user spends 150 of the freshly-granted monthly allocation BEFORE
+      // Stripe redelivers the same invoice. This is the case the immediate
+      // re-fire test above cannot exercise: there the used-counter is still 0
+      // when the duplicate lands, so a re-run of the reset is invisible.
+      await harness().neonSql`
+        UPDATE users SET monthly_tokens_used = 150 WHERE id = ${seeded.id}::uuid
+      `;
+
+      // Stripe redelivers invoice.paid (at-least-once). The reset must be a
+      // no-op now — re-zeroing monthly_tokens_used here silently refunds the
+      // 150 already-spent tokens, letting the user spend the monthly allocation
+      // twice per cycle for the price of a webhook retry.
+      await handleInvoicePaid('cus_a', 'inv_1', 'sub_x');
+
+      const row = (await getUserRow(harness().neonSql, seeded.id))!;
+      expect(num(row.monthly_tokens_used)).toBe(150); // preserved, NOT reset to 0
+      expect(num(row.monthly_tokens)).toBe(300);
+      expect(num(row.addon_tokens)).toBe(400); // no second rollover (#8708)
+
+      // The renewal is still recorded exactly once on each axis.
+      const all = await txns(seeded.id);
+      expect(all.filter((r) => r.source === 'renewal:hobbyist')).toHaveLength(1);
+      expect(all.filter((r) => r.source === 'renewal_rollover:hobbyist')).toHaveLength(1);
+    });
   });
 
   // ───────────────────────── invoice.payment_failed ─────────────────────────
