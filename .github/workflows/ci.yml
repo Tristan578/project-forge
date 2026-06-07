@@ -624,6 +624,7 @@ jobs:
             scripts/check-taskboard-onboarding-hygiene.sh scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh \
             scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
             scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
+            scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
@@ -643,6 +644,9 @@ jobs:
 
       - name: Run gh-aw lock-sync gate test suite
         run: bash scripts/__tests__/check-ghaw-lock-sync.test.sh
+
+      - name: Run vitest exit-gate test suite
+        run: bash scripts/__tests__/check-vitest-exit.test.sh
 
       - name: Run cross-provider DX-audit contract test
         run: bash .claude/tools/__tests__/dx-audit.test.sh
