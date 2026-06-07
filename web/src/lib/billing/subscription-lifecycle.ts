@@ -494,8 +494,15 @@ export async function reverseAddonTokens(
       `
       );
       // If claim matched 0 rows (already refunded), the entire CTE chain
-      // produces no rows — done. If amount_cents=0 (comped purchase),
-      // NULLIF returns NULL and the deduction rounds to 0, skipping audit+update.
+      // produces no rows — done.
+      //
+      // Edge case — amount_cents=0 (comped purchase): NULLIF(amount_cents,0)
+      // yields NULL, so the division is NULL and LEAST(NULL, 1) collapses to 1
+      // (Postgres LEAST/GREATEST ignore NULL args). The deduction is therefore
+      // FLOOR(tokens * 1) = ALL of the purchase's tokens (capped at the user's
+      // addon balance), i.e. a full clawback of the comped grant — NOT a no-op.
+      // Reviewed as acceptable: refunding a comped purchase reclaims the tokens
+      // it granted. (Behaviour locked by the real-DB test, #8608.)
       return;
     }
   }
@@ -510,6 +517,13 @@ export async function reverseAddonTokens(
   // Fix: CTE INSERT...WHERE NOT EXISTS atomically checks and inserts. The
   // user UPDATE depends on the INSERT via EXISTS, so it only runs when the
   // INSERT actually created a row.
+  //
+  // NOTE: `${refundRatio}` MUST be cast `::float8`. The neon-http driver sends
+  // bound params as text with no type annotation; Postgres then infers the type
+  // of `addon_tokens * $n` from the integer column and tries to parse a
+  // fractional ratio ("0.5") as an integer, throwing
+  // `invalid input syntax for type integer`. The explicit cast forces float
+  // multiplication before FLOOR. (Caught by the real-DB test, #8608.)
   const refundRatio = Math.min(amountRefunded / amountTotal, 1);
   const source = `charge_refunded:${chargeId}`;
   const now = new Date().toISOString();
@@ -519,14 +533,14 @@ export async function reverseAddonTokens(
       WITH audit AS (
         INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
         SELECT ${userId}, 'adjustment',
-               -LEAST(FLOOR(u.addon_tokens * ${refundRatio})::int, u.addon_tokens),
+               -LEAST(FLOOR(u.addon_tokens * ${refundRatio}::float8)::int, u.addon_tokens),
                GREATEST(0, u.monthly_tokens - u.monthly_tokens_used)
-                 + GREATEST(0, u.addon_tokens - FLOOR(u.addon_tokens * ${refundRatio})::int)
+                 + GREATEST(0, u.addon_tokens - FLOOR(u.addon_tokens * ${refundRatio}::float8)::int)
                  + u.earned_credits,
                ${source}, ${chargeId}
         FROM users u
         WHERE u.id = ${userId}
-          AND FLOOR(u.addon_tokens * ${refundRatio})::int > 0
+          AND FLOOR(u.addon_tokens * ${refundRatio}::float8)::int > 0
           AND NOT EXISTS (
             SELECT 1 FROM credit_transactions ct
             WHERE ct.user_id = ${userId}

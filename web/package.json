@@ -90,6 +90,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.1",
+    "@electric-sql/pglite": "^0.5.1",
     "@next/bundle-analyzer": "^16.2.3",
     "@playwright/test": "^1.60.0",
     "@swc/helpers": "^0.5.19",
