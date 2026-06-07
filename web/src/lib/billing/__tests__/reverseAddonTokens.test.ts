@@ -45,8 +45,10 @@ import { createTestHarness, getUserRow, seedUser } from '@/lib/db/__tests__/pgli
 import { reverseAddonTokens } from '../subscription-lifecycle';
 
 // ───────────────────────── test-local seed / read helpers ─────────────────────
-// The shared harness stays frozen across the audit branches; purchase rows are
-// inserted via its neon adapter here so this file owns its own fixtures.
+// The shared harness seeds only `users`; purchase rows are inserted via its neon
+// adapter here so this file owns its own `token_purchases` fixtures. The optional
+// `refundedCents` override seeds a row that already carries a prior partial
+// refund, exercising the incremental-refund delta arithmetic (#8706).
 
 async function seedPurchase(
   sql: NeonSqlAdapter,
@@ -121,7 +123,8 @@ describe('reverseAddonTokens — precise purchase-based path (PF-734, PF-7514)',
     expect(Number(txns[0].balance_after)).toBe(0);
     expect(txns[0].transaction_type).toBe('adjustment');
     expect(txns[0].source).toBe('charge_refunded:ch_full');
-    expect(txns[0].reference_id).toBe('ch_full');
+    // Per-tranche idempotency key: chargeId suffixed with the cumulative amount (#8706).
+    expect(txns[0].reference_id).toBe('ch_full:4900');
   });
 
   it('deducts proportionally (FLOOR of tokens × refund ratio) on a partial refund', async () => {
@@ -252,6 +255,69 @@ describe('reverseAddonTokens — precise purchase-based path (PF-734, PF-7514)',
     expect(Number(txns[0].balance_after)).toBe(0);
   });
 
+  it('records an incremental partial-then-cumulative refund without colliding on the idempotency index (#8706)', async () => {
+    const sql = harness().neonSql;
+    const user = await seedUser(sql, { addonTokens: 5000 });
+    const purchaseId = await seedPurchase(sql, {
+      userId: user.id,
+      paymentIntent: 'pi_inc',
+      tokens: 5000,
+      amountCents: 4900,
+    });
+
+    // Stripe fires charge.refunded per refund with a STABLE charge.id and a
+    // CUMULATIVE amount_refunded. First a 2450c (50%) partial...
+    await reverseAddonTokens(user.id, 'ch_inc', 2450, 4900, 'pi_inc');
+    expect(await addonBalance(sql, user.id)).toBe(2500);
+    expect(await refundedCents(sql, purchaseId)).toBe(2450);
+
+    // ...then the remainder, arriving as a cumulative 4900c on the SAME charge.
+    // Pre-fix, this second clawback's audit INSERT collided on
+    // idx_credit_txn_idempotent (reference_id = chargeId for both tranches),
+    // rolled the whole CTE back, lost the deduction, and 500'd the webhook into
+    // an infinite Stripe retry. The per-tranche refundRef makes the keys distinct.
+    await reverseAddonTokens(user.id, 'ch_inc', 4900, 4900, 'pi_inc');
+
+    expect(await addonBalance(sql, user.id)).toBe(0);
+    expect(await refundedCents(sql, purchaseId)).toBe(4900);
+
+    const txns = await creditTxns(sql, user.id);
+    expect(txns).toHaveLength(2);
+    expect(txns.map((t) => Number(t.amount)).sort((a, b) => a - b)).toEqual([-2500, -2500]);
+    // Distinct per-tranche reference_ids — the discriminator that avoids the collision.
+    expect(txns.map((t) => t.reference_id).sort()).toEqual(['ch_inc:2450', 'ch_inc:4900']);
+    // Both tranches share the stable, charge-scoped source.
+    expect(new Set(txns.map((t) => t.source))).toEqual(new Set(['charge_refunded:ch_inc']));
+  });
+
+  it('deducts only the incremental delta when the purchase already carries a prior partial refund (refundedCents override)', async () => {
+    const sql = harness().neonSql;
+    // A 5000-token / 4900c purchase already 50%-refunded (refunded_cents=2450,
+    // 2500 tokens already clawed back), plus 1500 addon tokens from elsewhere.
+    const user = await seedUser(sql, { addonTokens: 4000 });
+    const purchaseId = await seedPurchase(sql, {
+      userId: user.id,
+      paymentIntent: 'pi_delta',
+      tokens: 5000,
+      amountCents: 4900,
+      refundedCents: 2450,
+    });
+
+    // The rest of the refund lands as a cumulative 4900c.
+    await reverseAddonTokens(user.id, 'ch_delta', 4900, 4900, 'pi_delta');
+
+    // Deduction is the DELTA, not the cumulative total:
+    // FLOOR(5000 × (4900 − 2450)/4900) = FLOOR(2500) = 2500 (a mutant that used
+    // the cumulative 4900 would deduct the full 4000 and floor addon to 0).
+    expect(await addonBalance(sql, user.id)).toBe(1500);
+    expect(await refundedCents(sql, purchaseId)).toBe(4900);
+
+    const txns = await creditTxns(sql, user.id);
+    expect(txns).toHaveLength(1);
+    expect(Number(txns[0].amount)).toBe(-2500);
+    expect(txns[0].reference_id).toBe('ch_delta:4900');
+  });
+
   it('falls back to the balance-based path when the paymentIntent matches no purchase', async () => {
     const sql = harness().neonSql;
     const user = await seedUser(sql, { addonTokens: 1000 });
@@ -266,7 +332,7 @@ describe('reverseAddonTokens — precise purchase-based path (PF-734, PF-7514)',
     expect(txns).toHaveLength(1);
     expect(Number(txns[0].amount)).toBe(-500);
     expect(txns[0].source).toBe('charge_refunded:ch_fb');
-    expect(txns[0].reference_id).toBe('ch_fb');
+    expect(txns[0].reference_id).toBe('ch_fb:500');
   });
 });
 
@@ -308,6 +374,24 @@ describe('reverseAddonTokens — fallback balance-based path (no paymentIntent)'
     // reference_id exists → NOT EXISTS is false → audit inserts nothing → no UPDATE.
     expect(await addonBalance(sql, user.id)).toBe(500);
     expect(await creditTxns(sql, user.id)).toHaveLength(1);
+  });
+
+  it('treats a higher cumulative refund as a new tranche (per-tranche dedup, #8706)', async () => {
+    const sql = harness().neonSql;
+    const user = await seedUser(sql, { addonTokens: 1000 });
+
+    // First a 50% partial (no purchase row → fallback path).
+    await reverseAddonTokens(user.id, 'ch_esc', 500, 1000);
+    expect(await addonBalance(sql, user.id)).toBe(500);
+
+    // The cumulative refund grows to 100% → distinct refundRef → deducts again.
+    await reverseAddonTokens(user.id, 'ch_esc', 1000, 1000);
+
+    // A 50%→100% escalation nets to a full clawback of the addon balance.
+    expect(await addonBalance(sql, user.id)).toBe(0);
+    const txns = await creditTxns(sql, user.id);
+    expect(txns).toHaveLength(2);
+    expect(txns.map((t) => t.reference_id).sort()).toEqual(['ch_esc:1000', 'ch_esc:500']);
   });
 
   it('writes nothing when the user has no addon tokens to reverse', async () => {

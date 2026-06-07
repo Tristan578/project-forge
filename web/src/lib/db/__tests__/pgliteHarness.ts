@@ -33,9 +33,10 @@
  * the partial/expression unique indexes that `ON CONFLICT` arbiters depend on —
  * `idx_credit_txn_idempotent`, `uq_token_usage_refund_idempotent` — are created
  * exactly as production has them; Drizzle's schema DSL cannot model their WHERE
- * predicates). One reconciliation follows: `token_purchases.refunded_cents`
- * (PF-526) is declared in `schema.ts` but no migration creates it — production
- * carries it via `db:push`. See SCHEMA_RECONCILIATIONS.
+ * predicates). Two reconciliations follow for columns declared in `schema.ts`
+ * that no migration creates — production carries them via `db:push`:
+ * `token_purchases.refunded_cents` (PF-526) and `users.banned` (the latter a
+ * P0-class drift, since the auth path selects it). See SCHEMA_RECONCILIATIONS.
  *
  * NEON ADAPTER FIDELITY
  * ---------------------
@@ -178,14 +179,26 @@ export function makeNeonAdapter(pglite: PGlite): NeonSqlAdapter {
 const MIGRATIONS_DIR = fileURLToPath(new URL('../../../../drizzle/', import.meta.url));
 
 /**
- * Known schema.ts ↔ migration drift, applied after migration replay.
- * `token_purchases.refunded_cents` (PF-526) is declared in schema.ts but no
- * migration creates the column; production carries it via `db:push`. Without
- * this, replay omits the column and `reverseAddonTokens` fails. `IF NOT EXISTS`
- * keeps it a no-op should a migration ever add it.
+ * Known schema.ts ↔ migration drift, applied after migration replay. Each entry
+ * is a column declared in schema.ts that NO migration creates; production carries
+ * them via `db:push` (the "Schema changes need migrations" gotcha in CLAUDE.md).
+ * `IF NOT EXISTS` keeps every entry a no-op should a migration ever add it.
+ *
+ *  - `token_purchases.refunded_cents` (PF-526): the partial-refund money path
+ *    fails without it.
+ *  - `users.banned` (added in 34c8018b "feat: add admin user management API
+ *    routes", no migration): read on the security-critical auth path
+ *    (api-auth.ts rejects `user.banned > 0`), so any full-row `SELECT users.*` —
+ *    findUserByStripeCustomer here, and the entire auth path in production —
+ *    throws `column "banned" does not exist` on a DB provisioned purely from
+ *    migration history (fresh CI DB, DR restore, new region). This reconciliation
+ *    only makes the harness match production; the missing migration is a real
+ *    P0-class latent bug tracked in #8707 (it warrants its own reviewed
+ *    migration-chain PR, not a bundle into a test-quality change).
  */
 const SCHEMA_RECONCILIATIONS: readonly string[] = [
   'ALTER TABLE token_purchases ADD COLUMN IF NOT EXISTS refunded_cents integer NOT NULL DEFAULT 0',
+  'ALTER TABLE users ADD COLUMN IF NOT EXISTS banned integer NOT NULL DEFAULT 0',
 ];
 
 async function buildSchema(pglite: PGlite): Promise<void> {

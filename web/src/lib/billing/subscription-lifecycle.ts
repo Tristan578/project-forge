@@ -411,6 +411,16 @@ export async function reverseAddonTokens(
 ): Promise<void> {
   const neonSql = getNeonSql();
 
+  // Per-tranche idempotency key (#8706). Stripe fires `charge.refunded` once per
+  // refund with a STABLE `charge.id` and a CUMULATIVE `amount_refunded`. Keying
+  // the audit row on `chargeId` alone collides on `idx_credit_txn_idempotent`
+  // when one charge is refunded incrementally (e.g. 2450c, then a cumulative
+  // 4900c): the second clawback's audit INSERT hits the duplicate key, the whole
+  // CTE rolls back, the deduction is permanently lost, and the webhook 500s into
+  // an infinite Stripe retry. Suffixing the cumulative amount makes every tranche
+  // a distinct key, so successive incremental refunds each record their own row.
+  const refundRef = `${chargeId}:${amountRefunded}`;
+
   // --- Try to find the original token purchase for precise reversal ---
   if (paymentIntentId) {
     const [purchase] = await queryWithResilience(() =>
@@ -480,9 +490,10 @@ export async function reverseAddonTokens(
           INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
           SELECT ${userId}, 'adjustment', -LEAST(d.tokens_to_deduct, u.addon_tokens),
                  GREATEST(0, u.monthly_tokens - u.monthly_tokens_used) + GREATEST(0, u.addon_tokens - d.tokens_to_deduct) + u.earned_credits,
-                 ${`charge_refunded:${chargeId}`}, ${chargeId}
+                 ${`charge_refunded:${chargeId}`}, ${refundRef}
           FROM deduction d, users u
           WHERE u.id = ${userId} AND d.tokens_to_deduct > 0
+          ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
           RETURNING id
         )
         UPDATE users
@@ -524,6 +535,14 @@ export async function reverseAddonTokens(
   // fractional ratio ("0.5") as an integer, throwing
   // `invalid input syntax for type integer`. The explicit cast forces float
   // multiplication before FLOOR. (Caught by the real-DB test, #8608.)
+  //
+  // Incremental refunds on this fallback path are approximate (#8706): with no
+  // purchase row to anchor exact token proportions, each tranche deducts a ratio
+  // of the CURRENT addon balance. A single full or single partial refund is
+  // exact; a partial-then-larger-partial sequence (e.g. 50% then 75%) can
+  // over-deduct slightly. The per-tranche `refundRef` still guarantees a true
+  // redelivery (the same cumulative amount) is an exact no-op via NOT EXISTS, and
+  // the precise purchase-based path above handles incremental refunds exactly.
   const refundRatio = Math.min(amountRefunded / amountTotal, 1);
   const source = `charge_refunded:${chargeId}`;
   const now = new Date().toISOString();
@@ -537,14 +556,14 @@ export async function reverseAddonTokens(
                GREATEST(0, u.monthly_tokens - u.monthly_tokens_used)
                  + GREATEST(0, u.addon_tokens - FLOOR(u.addon_tokens * ${refundRatio}::float8)::int)
                  + u.earned_credits,
-               ${source}, ${chargeId}
+               ${source}, ${refundRef}
         FROM users u
         WHERE u.id = ${userId}
           AND FLOOR(u.addon_tokens * ${refundRatio}::float8)::int > 0
           AND NOT EXISTS (
             SELECT 1 FROM credit_transactions ct
             WHERE ct.user_id = ${userId}
-              AND ct.reference_id = ${chargeId}
+              AND ct.reference_id = ${refundRef}
               AND ct.source = ${source}
           )
         RETURNING amount
