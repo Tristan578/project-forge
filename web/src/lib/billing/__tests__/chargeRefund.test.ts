@@ -284,6 +284,40 @@ describe('handleChargeRefunded — precise path (paymentIntent matches a purchas
     expect(await refundedCents(sql, purchaseId)).toBe(4900);
     expect(await creditTxns(sql, user.id)).toHaveLength(1);
   });
+
+  it('deducts only the incremental delta when the purchase already carries a prior partial refund (refundedCents override)', async () => {
+    // Independent wrapper-suite guard for the precise-path delta-vs-cumulative
+    // arithmetic. The incremental test above depletes the addon balance in
+    // lockstep with the refund, so the GREATEST(0, …)/LEAST(…) clamps mask a
+    // cumulative-amount regression (a mutant deducting the CUMULATIVE total
+    // still floors to the same 0). Seeding a prior partial refund alongside a
+    // HIGH addon balance makes the two arithmetics diverge observably.
+    const sql = harness().neonSql;
+    // A 5000-token / 4900c purchase already 50%-refunded (refunded_cents=2450,
+    // 2500 tokens already clawed back), plus 1500 addon tokens from elsewhere →
+    // 4000 addon remain.
+    const user = await seedUser(sql, { stripeCustomerId: 'cus_delta', addonTokens: 4000 });
+    const purchaseId = await seedPurchase(sql, {
+      userId: user.id,
+      paymentIntent: 'pi_delta',
+      tokens: 5000,
+      amountCents: 4900,
+      refundedCents: 2450,
+    });
+
+    // The rest of the refund lands as a cumulative 4900c.
+    await handleChargeRefunded('cus_delta', 'ch_delta', 4900, 4900, 'pi_delta');
+
+    // Deduction is the DELTA (4900 − 2450), NOT the cumulative total:
+    // FLOOR(5000 × 2450/4900) = 2500 → addon 4000 → 1500. A mutant using the
+    // cumulative 4900 would deduct the full 4000 and floor addon to 0.
+    expect(await addonBalance(sql, user.id)).toBe(1500);
+    expect(await refundedCents(sql, purchaseId)).toBe(4900);
+    const txns = await creditTxns(sql, user.id);
+    expect(txns).toHaveLength(1);
+    expect(Number(txns[0].amount)).toBe(-2500);
+    expect(txns[0].reference_id).toBe('ch_delta:4900');
+  });
 });
 
 describe('handleChargeRefunded — comped purchase (amount_cents = 0)', () => {
