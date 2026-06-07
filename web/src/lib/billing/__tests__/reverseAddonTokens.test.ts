@@ -318,6 +318,47 @@ describe('reverseAddonTokens — precise purchase-based path (PF-734, PF-7514)',
     expect(txns[0].reference_id).toBe('ch_delta:4900');
   });
 
+  it('does NOT deduct when the audit INSERT is swallowed by ON CONFLICT — no balance change without an audit row', async () => {
+    // Regression for the deduct-without-audit divergence opened by the #8706
+    // `ON CONFLICT (user_id, source, reference_id) DO NOTHING` backstop. The
+    // precise-path final `UPDATE users` must depend on the `audit` CTE (mirroring
+    // the fallback path), NOT on `deduction` alone. Otherwise, whenever the audit
+    // INSERT conflicts with a pre-existing credit_transactions row carrying the
+    // same (user, source, reference_id), the balance is still debited while NO
+    // audit row is written — breaking the money-path invariant 'every balance
+    // change has exactly one corresponding credit_transactions row'.
+    const sql = harness().neonSql;
+    const user = await seedUser(sql, { addonTokens: 5000 });
+    const purchaseId = await seedPurchase(sql, {
+      userId: user.id,
+      paymentIntent: 'pi_orphan',
+      tokens: 5000,
+      amountCents: 4900,
+      // refunded_cents=0 so the claim guard PASSES (looks like a fresh 2450c
+      // refund) even though an audit row for this exact tranche already exists.
+      refundedCents: 0,
+    });
+
+    // Seed the EXACT (user, source, reference_id) the precise path will generate
+    // for a 2450c refund of charge ch_orphan, so its audit INSERT conflicts on
+    // idx_credit_txn_idempotent while the claim guard still admits the deduction.
+    await sql`
+      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+      VALUES (${user.id}::uuid, 'adjustment', -2500, 2500, 'charge_refunded:ch_orphan', 'ch_orphan:2450')
+    `;
+
+    await reverseAddonTokens(user.id, 'ch_orphan', 2450, 4900, 'pi_orphan');
+
+    // FIXED: audit INSERT conflicts → audit CTE empty → UPDATE suppressed →
+    // addon balance is UNCHANGED. (Buggy SUT deducts to 2500 with no new row.)
+    expect(await addonBalance(sql, user.id)).toBe(5000);
+    // Exactly one audit row total — the pre-existing one. No silent second debit.
+    expect(await creditTxns(sql, user.id)).toHaveLength(1);
+    // The claim CTE reconciles refunded_cents to the already-recorded tranche;
+    // the safety property is that this happens WITHOUT a balance change.
+    expect(await refundedCents(sql, purchaseId)).toBe(2450);
+  });
+
   it('falls back to the balance-based path when the paymentIntent matches no purchase', async () => {
     const sql = harness().neonSql;
     const user = await seedUser(sql, { addonTokens: 1000 });

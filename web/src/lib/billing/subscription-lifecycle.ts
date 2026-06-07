@@ -446,9 +446,15 @@ export async function reverseAddonTokens(
       // reading stale refundedCents=0 would both deduct tokens.
       //
       // Fix: a single SQL statement where the CTE atomically claims the refund
-      // increment and computes tokensToDeduct. The audit INSERT and user UPDATE
-      // both depend on the claim via EXISTS/JOIN, so they only execute when the
-      // claim actually succeeds.
+      // increment and computes tokensToDeduct. The audit INSERT depends on the
+      // claim (JOIN on `deduction`), and the user UPDATE depends on the audit
+      // (`EXISTS (SELECT 1 FROM audit)`), so a balance change is impossible
+      // without a matching credit_transactions row. The `EXISTS (audit)` gate is
+      // load-bearing because of the #8706 `ON CONFLICT ... DO NOTHING` backstop:
+      // when the audit INSERT is swallowed by a pre-existing row for the same
+      // (user, source, reference_id), the audit CTE is empty and the deduction
+      // is suppressed — mirroring the fallback path. Without it, an ON CONFLICT
+      // hit would silently debit the balance with no audit row.
       const now = new Date().toISOString();
 
       // Step 1: Read the old refunded_cents with FOR UPDATE (row lock).
@@ -501,6 +507,7 @@ export async function reverseAddonTokens(
             updated_at   = ${now}
         FROM deduction d
         WHERE users.id = ${userId} AND d.tokens_to_deduct > 0
+          AND EXISTS (SELECT 1 FROM audit)
         RETURNING users.id
       `
       );
