@@ -605,6 +605,59 @@ describe('subscription lifecycle — real Postgres (F19, #8611)', () => {
       expect(all.filter((r) => r.source === 'renewal:hobbyist')).toHaveLength(1);
       expect(all.filter((r) => r.source === 'renewal_rollover:hobbyist')).toHaveLength(1);
     });
+
+    it('redelivery after a no-rollover first fire does NOT credit a bogus rollover (#8709)', async () => {
+      // The leak the #8708 fix above does NOT close. When the FIRST fire has no
+      // monthly tokens left (remaining == 0), the rollover statement is skipped
+      // entirely, so no `renewal_rollover` anchor row is ever written — yet the
+      // reset and grant still run, marking the invoice processed via `renewal:tier`.
+      // The user then spends part of the freshly-granted allocation and Stripe
+      // redelivers the same invoice (at-least-once). The handler's pre-read now
+      // sees remaining > 0 (used was reset to 0, only part re-spent), turns the
+      // rollover statement back ON, finds no `renewal_rollover` anchor to suppress
+      // it, and credits a free rollover into the non-expiring addon balance — a
+      // pure money leak gated only on the *conditionally-written* rollover anchor,
+      // not on the always-written per-invoice `renewal:tier` marker.
+      const seeded = await seedUser(harness().neonSql, {
+        stripeCustomerId: 'cus_a',
+        tier: 'creator',
+        monthlyTokens: 1000,
+        monthlyTokensUsed: 1000, // remaining == 0 → NO rollover on the first fire
+        addonTokens: 0,
+        earnedCredits: 0,
+        stripeSubscriptionId: 'sub_x',
+      });
+
+      // First fire: no rollover (nothing to roll), reset the cycle, grant 1000.
+      await handleInvoicePaid('cus_a', 'inv_1', 'sub_x');
+
+      const afterFirst = (await getUserRow(harness().neonSql, seeded.id))!;
+      expect(num(afterFirst.addon_tokens)).toBe(0); // no rollover credit
+      expect(num(afterFirst.monthly_tokens_used)).toBe(0); // reset
+      const firstTxns = await txns(seeded.id);
+      expect(firstTxns.filter((r) => r.source === 'renewal_rollover:creator')).toHaveLength(0);
+      expect(firstTxns.filter((r) => r.source === 'renewal:creator')).toHaveLength(1);
+
+      // User spends 400 of the fresh 1000-token allocation → remaining 600.
+      await harness().neonSql`
+        UPDATE users SET monthly_tokens_used = 400 WHERE id = ${seeded.id}::uuid
+      `;
+
+      // Stripe redelivers the SAME invoice. A fresh read now shows remaining 600,
+      // so a leaky handler re-enables the rollover and credits +600 to addon.
+      await handleInvoicePaid('cus_a', 'inv_1', 'sub_x');
+
+      const afterRedeliver = (await getUserRow(harness().neonSql, seeded.id))!;
+      // Rollover must stay gated on the per-invoice renewal-grant anchor: a
+      // redelivery cannot create one, even when the fresh read shows remaining > 0.
+      expect(num(afterRedeliver.addon_tokens)).toBe(0); // NO bogus rollover credit
+      expect(num(afterRedeliver.monthly_tokens_used)).toBe(400); // spend preserved (#8611)
+      expect(num(afterRedeliver.monthly_tokens)).toBe(1000);
+
+      const all = await txns(seeded.id);
+      expect(all.filter((r) => r.source === 'renewal_rollover:creator')).toHaveLength(0);
+      expect(all.filter((r) => r.source === 'renewal:creator')).toHaveLength(1);
+    });
   });
 
   // ───────────────────────── invoice.payment_failed ─────────────────────────

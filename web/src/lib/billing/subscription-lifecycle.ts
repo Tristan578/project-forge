@@ -276,10 +276,14 @@ export async function handleInvoicePaid(
   // All SQL expressions read current DB state at execution time to prevent
   // stale snapshot races. Rollover uses LEAST(remaining, allocation) in SQL.
   //
-  // The pre-read snapshot is only used for the conditional (whether to include
-  // rollover statements). A concurrent deduction that exhausts remaining tokens
-  // between the read and the transaction would result in a 0-amount rollover
-  // UPDATE + INSERT — harmless (addon_tokens + 0, amount = 0).
+  // The pre-read snapshot is only a statement-count optimization (whether to
+  // bother pushing the rollover CTE). It is NOT load-bearing for correctness:
+  // the rollover's amount is computed in SQL (LEAST(remaining, allocation)) and
+  // its idempotency is gated in SQL on the per-invoice `renewal:tier` grant row
+  // (see the CTE below, #8709). So a redelivery that flips this flag back ON —
+  // because the fresh read now shows remaining > 0 after the cycle reset — still
+  // cannot leak a rollover. A concurrent deduction that exhausts remaining tokens
+  // between the read and the transaction likewise just yields a 0-amount rollover.
   const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
   const hasRollover = monthlyRemaining > 0;
 
@@ -289,17 +293,24 @@ export async function handleInvoicePaid(
     // Single data-modifying CTE so the audit INSERT is the *arbiter* of the
     // addon credit: the UPDATE adds only what the INSERT actually inserted.
     //
-    // Stripe redelivers invoice.paid (at-least-once). On the first fire the
-    // INSERT succeeds and RETURNING yields the rollover amount, so addon_tokens
-    // grows by exactly that much. On a redelivery the ON CONFLICT arbiter
-    // (idx_credit_txn_idempotent on user_id+source+reference_id) suppresses the
-    // INSERT, RETURNING is empty, and COALESCE(...,0) makes the addon UPDATE a
-    // no-op. Splitting these into two statements (the prior implementation) made
-    // the audit row idempotent but left the addon UPDATE an *un-gated* relative
-    // increment — every redelivery re-rolled the freshly-granted monthly tokens
-    // into the purchased-token balance, permanently inflating it while the audit
-    // log showed a single rollover. Both INSERT and UPDATE read the same
-    // statement snapshot, so balance_after still reads pre-rollover addon_tokens.
+    // Idempotency is gated on the per-invoice `renewal:tier` grant row via the
+    // NOT EXISTS below — the SAME anchor the reset uses (#8611) — NOT on the
+    // rollover's own `renewal_rollover:tier` row. Why this matters: when the
+    // first fire has no remaining tokens (remaining == 0) the rollover statement
+    // is skipped entirely (hasRollover is false), so the `renewal_rollover`
+    // anchor is NEVER written — yet the reset + grant still run, marking the
+    // invoice processed via `renewal:tier`. A later redelivery (after the user
+    // spends part of the fresh allocation) sees remaining > 0, flips hasRollover
+    // back ON, and — gated only on the missing `renewal_rollover` anchor — would
+    // credit a free rollover into the non-expiring addon balance (#8709). Gating
+    // on the always-written `renewal:tier` grant row closes that: the grant
+    // INSERT below runs AFTER this CTE, so on the FIRST fire the grant row does
+    // not exist yet → NOT EXISTS is true → rollover runs; on ANY redelivery the
+    // committed grant row makes NOT EXISTS false → the INSERT matches 0 rows,
+    // RETURNING is empty, and COALESCE(...,0) makes the addon UPDATE a no-op.
+    // (The `renewal_rollover` ON CONFLICT arbiter is retained as defence in depth
+    // and to keep the audit row's own identity.) Both INSERT and UPDATE read the
+    // same statement snapshot, so balance_after still reads pre-rollover addon.
     statements.push(neonSql`
       WITH rollover_ins AS (
         INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
@@ -309,6 +320,12 @@ export async function handleInvoicePaid(
                  + LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${allocation}),
                ${`renewal_rollover:${tier}`}, ${invoiceId}
         FROM users WHERE id = ${user.id}
+          AND NOT EXISTS (
+            SELECT 1 FROM credit_transactions
+            WHERE user_id      = ${user.id}
+              AND source       = ${`renewal:${tier}`}
+              AND reference_id = ${invoiceId}
+          )
         ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
         RETURNING amount
       )
