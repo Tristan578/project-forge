@@ -24,7 +24,12 @@
  * `getNeonSql()` / `getDb()` / `queryWithResilience()` resolve to the harness.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { NeonSqlAdapter, QueryRow, TestHarness } from '@/lib/db/__tests__/pgliteHarness';
+import type {
+  NeonQueryPromise,
+  NeonSqlAdapter,
+  QueryRow,
+  TestHarness,
+} from '@/lib/db/__tests__/pgliteHarness';
 
 const harnessRef = vi.hoisted(() => ({ current: null as TestHarness | null }));
 
@@ -68,6 +73,36 @@ async function purchaseRows(sql: NeonSqlAdapter, userId: string): Promise<QueryR
 async function addonBalance(sql: NeonSqlAdapter, userId: string): Promise<number> {
   const row = await getUserRow(sql, userId);
   return Number(row?.addon_tokens);
+}
+
+/**
+ * Wrap a real adapter so a test can count HOW the SUT reaches the DB —
+ * tagged-template invocations vs `.transaction([...])` calls — while still
+ * executing every query against real Postgres (each method delegates to `real`).
+ * Lets us assert the single-CTE / no-transaction atomicity contract that pure
+ * row-state assertions cannot observe (a non-atomic two-statement version can
+ * leave identical rows). Restores the original adapter responsibility to caller.
+ */
+function countingAdapter(real: NeonSqlAdapter): {
+  adapter: NeonSqlAdapter;
+  counts: { template: number; transaction: number };
+} {
+  const counts = { template: 0, transaction: 0 };
+  const adapter = Object.assign(
+    (strings: TemplateStringsArray, ...values: unknown[]): NeonQueryPromise => {
+      counts.template++;
+      return real(strings, ...values);
+    },
+    {
+      query: real.query,
+      unsafe: real.unsafe,
+      transaction: (queries: NeonQueryPromise[]): Promise<QueryRow[][]> => {
+        counts.transaction++;
+        return real.transaction(queries);
+      },
+    },
+  ) as NeonSqlAdapter;
+  return { adapter, counts };
 }
 
 // The credited amounts ARE the product spec — see TOKEN_PACKAGES in pricing.ts.
@@ -161,5 +196,27 @@ describe('creditAddonTokens — real Postgres behaviour (F17, #8609)', () => {
 
     expect(await addonBalance(sql, first.id)).toBe(1000);
     expect(await addonBalance(sql, second.id)).toBe(0);
+  });
+
+  it('writes through one atomic CTE — a single tagged-template statement, never a multi-statement transaction', async () => {
+    // The deleted mock suite proved the *shape* (ON CONFLICT substring) but the
+    // atomicity guarantee is "purchase-insert and balance-update succeed or fail
+    // together in ONE statement". A non-atomic rewrite (insert, THEN a separate
+    // update) leaves identical rows on the happy path, so row assertions can't
+    // catch the regression. Counting the adapter's calls can: exactly one
+    // tagged-template invocation, zero `.transaction([...])` calls.
+    const real = harness().neonSql;
+    const user = await seedUser(real, { addonTokens: 0 });
+    const { adapter, counts } = countingAdapter(real);
+    harnessRef.current!.neonSql = adapter;
+    try {
+      await creditAddonTokens(user.id, 'blaze', 'pi_atomic');
+    } finally {
+      harnessRef.current!.neonSql = real;
+    }
+
+    expect(counts.template).toBe(1);
+    expect(counts.transaction).toBe(0);
+    expect(await addonBalance(real, user.id)).toBe(5000);
   });
 });
