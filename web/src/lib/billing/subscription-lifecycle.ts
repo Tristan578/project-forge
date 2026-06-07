@@ -286,22 +286,34 @@ export async function handleInvoicePaid(
   const statements: ReturnType<typeof neonSql>[] = [];
 
   if (hasRollover) {
-    // INSERT before UPDATE: audit record must read addon_tokens BEFORE the
-    // rollover is added, otherwise balance_after double-counts the rollover.
+    // Single data-modifying CTE so the audit INSERT is the *arbiter* of the
+    // addon credit: the UPDATE adds only what the INSERT actually inserted.
+    //
+    // Stripe redelivers invoice.paid (at-least-once). On the first fire the
+    // INSERT succeeds and RETURNING yields the rollover amount, so addon_tokens
+    // grows by exactly that much. On a redelivery the ON CONFLICT arbiter
+    // (idx_credit_txn_idempotent on user_id+source+reference_id) suppresses the
+    // INSERT, RETURNING is empty, and COALESCE(...,0) makes the addon UPDATE a
+    // no-op. Splitting these into two statements (the prior implementation) made
+    // the audit row idempotent but left the addon UPDATE an *un-gated* relative
+    // increment — every redelivery re-rolled the freshly-granted monthly tokens
+    // into the purchased-token balance, permanently inflating it while the audit
+    // log showed a single rollover. Both INSERT and UPDATE read the same
+    // statement snapshot, so balance_after still reads pre-rollover addon_tokens.
     statements.push(neonSql`
-      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-      SELECT ${user.id}, 'rollover',
-             LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${allocation}),
-             GREATEST(0, monthly_tokens - monthly_tokens_used) + addon_tokens + earned_credits
-               + LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${allocation}),
-             ${`renewal_rollover:${tier}`}, ${invoiceId}
-      FROM users WHERE id = ${user.id}
-      ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
-    `);
-
-    statements.push(neonSql`
+      WITH rollover_ins AS (
+        INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+        SELECT ${user.id}, 'rollover',
+               LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${allocation}),
+               GREATEST(0, monthly_tokens - monthly_tokens_used) + addon_tokens + earned_credits
+                 + LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${allocation}),
+               ${`renewal_rollover:${tier}`}, ${invoiceId}
+        FROM users WHERE id = ${user.id}
+        ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
+        RETURNING amount
+      )
       UPDATE users
-      SET addon_tokens = addon_tokens + LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${allocation}),
+      SET addon_tokens = addon_tokens + COALESCE((SELECT amount FROM rollover_ins), 0),
           updated_at   = ${now}
       WHERE id = ${user.id}
     `);
