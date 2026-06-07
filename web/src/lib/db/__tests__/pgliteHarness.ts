@@ -347,17 +347,3 @@ export async function getUserRow(
   const rows = await sql`SELECT * FROM users WHERE id = ${userId}::uuid`;
   return rows[0];
 }
-
-/** `COUNT(*)` over `table` filtered by `userId`, as a number. */
-export async function countByUser(
-  sql: NeonSqlAdapter,
-  table: 'token_purchases' | 'token_usage' | 'credit_transactions',
-  userId: string,
-): Promise<number> {
-  // `table` is a closed union of literal identifiers — never user input.
-  const rows = await sql.query(
-    `SELECT count(*)::int AS n FROM ${table} WHERE user_id = $1::uuid`,
-    [userId],
-  );
-  return Number(rows[0]?.n ?? 0);
-}

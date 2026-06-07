@@ -194,6 +194,38 @@ describe('subscription lifecycle — real Postgres (F19, #8611)', () => {
       // ...and the audit INSERT's ON CONFLICT arbiter keeps exactly one row.
       expect(await txns(seeded.id)).toHaveLength(1);
     });
+
+    it('redelivery after interleaved spend does NOT re-zero monthly_tokens_used (#8711)', async () => {
+      const seeded = await seedUser(harness().neonSql, {
+        stripeCustomerId: 'cus_a',
+        tier: 'starter',
+        monthlyTokens: 0,
+        monthlyTokensUsed: 0,
+        addonTokens: 0,
+        stripeSubscriptionId: null,
+      });
+
+      // First create: grants 300 hobbyist tokens, resets the cycle.
+      await handleSubscriptionCreated('cus_a', 'sub_1', 'hobbyist');
+
+      // The user spends 120 of the freshly-granted allocation BEFORE Stripe
+      // redelivers the same subscription.created (at-least-once). The
+      // immediate-refire test above cannot exercise this: there used is still 0
+      // when the duplicate lands, so a re-run of the reset is invisible.
+      await harness().neonSql`
+        UPDATE users SET monthly_tokens_used = 120 WHERE id = ${seeded.id}::uuid
+      `;
+
+      await handleSubscriptionCreated('cus_a', 'sub_1', 'hobbyist'); // redelivery
+
+      const row = (await getUserRow(harness().neonSql, seeded.id))!;
+      // The reset must be a no-op now — re-zeroing monthly_tokens_used here
+      // silently refunds the 120 already-spent tokens, letting the user spend
+      // the monthly allocation twice for the price of a webhook retry.
+      expect(num(row.monthly_tokens_used)).toBe(120); // preserved, NOT reset to 0
+      expect(num(row.monthly_tokens)).toBe(300);
+      expect(await txns(seeded.id)).toHaveLength(1); // one grant audit row
+    });
   });
 
   // ───────────────────────── subscription.updated ─────────────────────────
@@ -407,8 +439,51 @@ describe('subscription lifecycle — real Postgres (F19, #8611)', () => {
       expect(row.tier).toBe('starter');
       expect(num(row.monthly_tokens)).toBe(50);
       expect(num(row.addon_tokens)).toBe(200);
-      // The genuine transition is recorded exactly once (ON CONFLICT arbiter).
+      // The genuine transition is recorded exactly once (ON CONFLICT arbiter)...
       const all = await txns(seeded.id);
+      expect(all.filter((r) => r.source === 'cancellation:creator->starter')).toHaveLength(1);
+      // ...and NO second cancellation row is written. previousTier is read at
+      // processing time, so the redelivery sees tier='starter' and would compute
+      // a DIFFERENT source ('cancellation:starter->starter') that the per-source
+      // ON CONFLICT cannot suppress. Assert the total cancellation count, not
+      // just the first source, or the bogus duplicate slips through (#8712).
+      expect(all.filter((r) => String(r.source).startsWith('cancellation:'))).toHaveLength(1);
+    });
+
+    it('redelivery after interleaved starter spend does NOT re-zero used or write a duplicate audit row (#8712)', async () => {
+      const seeded = await seedUser(harness().neonSql, {
+        stripeCustomerId: 'cus_a',
+        tier: 'creator',
+        monthlyTokens: 1000,
+        monthlyTokensUsed: 400,
+        addonTokens: 200,
+        earnedCredits: 0,
+        stripeSubscriptionId: 'sub_1',
+      });
+
+      await handleSubscriptionDeleted('cus_a', 'sub_1');
+
+      // After cancellation the user is on starter (50 tokens). They spend 30
+      // before Stripe redelivers subscription.deleted (at-least-once). The
+      // immediate-refire test above cannot catch this: used is 0 at re-fire, so
+      // the unconditional reset's re-zero is invisible.
+      await harness().neonSql`
+        UPDATE users SET monthly_tokens_used = 30 WHERE id = ${seeded.id}::uuid
+      `;
+
+      await handleSubscriptionDeleted('cus_a', 'sub_1'); // redelivery
+
+      const row = (await getUserRow(harness().neonSql, seeded.id))!;
+      // The reset must be a no-op now — re-zeroing here refunds the 30 spent
+      // starter tokens.
+      expect(num(row.monthly_tokens_used)).toBe(30); // preserved, NOT reset to 0
+      expect(num(row.monthly_tokens)).toBe(50);
+      expect(num(row.addon_tokens)).toBe(200);
+
+      const all = await txns(seeded.id);
+      // Exactly ONE cancellation row total — the redelivery must not write a
+      // second 'cancellation:starter->starter' row (previousTier mutates).
+      expect(all.filter((r) => String(r.source).startsWith('cancellation:'))).toHaveLength(1);
       expect(all.filter((r) => r.source === 'cancellation:creator->starter')).toHaveLength(1);
     });
   });
@@ -657,6 +732,74 @@ describe('subscription lifecycle — real Postgres (F19, #8611)', () => {
       const all = await txns(seeded.id);
       expect(all.filter((r) => r.source === 'renewal_rollover:creator')).toHaveLength(0);
       expect(all.filter((r) => r.source === 'renewal:creator')).toHaveLength(1);
+    });
+
+    it('cross-tier redelivery is idempotent — a tier change between deliveries cannot defeat the anchor (#8710)', async () => {
+      const seeded = await seedUser(harness().neonSql, {
+        stripeCustomerId: 'cus_a',
+        tier: 'creator',
+        monthlyTokens: 1000,
+        monthlyTokensUsed: 200, // 800 remaining → rolls over on the first fire
+        addonTokens: 0,
+        earnedCredits: 0,
+        stripeSubscriptionId: 'sub_x',
+      });
+
+      // First fire at 'creator': rolls LEAST(800, 1000)=800 into addon (0 → 800),
+      // resets the cycle, grants 1000, writes renewal:creator / inv_xt.
+      await handleInvoicePaid('cus_a', 'inv_xt', 'sub_x');
+      const afterFirst = (await getUserRow(harness().neonSql, seeded.id))!;
+      expect(num(afterFirst.addon_tokens)).toBe(800);
+
+      // The user is upgraded to 'pro' (a separate subscription.updated) and
+      // spends 400 of the fresh allocation BEFORE Stripe redelivers the SAME
+      // invoice. The idempotency anchor must be the invoice id, NOT
+      // renewal:<tier>: keying on the mutable user.tier lets the redelivery's
+      // renewal:pro != the committed renewal:creator, re-opening every gate
+      // (double rollover into addon + a second monthly grant + re-zeroed spend).
+      await harness().neonSql`
+        UPDATE users SET tier = 'pro', monthly_tokens_used = 400 WHERE id = ${seeded.id}::uuid
+      `;
+
+      await handleInvoicePaid('cus_a', 'inv_xt', 'sub_x'); // redelivery, now at 'pro'
+
+      const row = (await getUserRow(harness().neonSql, seeded.id))!;
+      expect(num(row.addon_tokens)).toBe(800);        // NO second rollover credit
+      expect(num(row.monthly_tokens_used)).toBe(400); // spend preserved (no re-zero)
+      expect(num(row.monthly_tokens)).toBe(1000);     // reset skipped → first-fire value
+
+      // Exactly one renewal grant + one rollover row for this invoice,
+      // regardless of which tier suffix the redelivery would have used.
+      const all = await txns(seeded.id);
+      expect(all.filter((r) => String(r.source).startsWith('renewal:'))).toHaveLength(1);
+      expect(all.filter((r) => String(r.source).startsWith('renewal_rollover:'))).toHaveLength(1);
+    });
+
+    it('caps rollover at one allocation when remaining exceeds it (LEAST boundary)', async () => {
+      // monthly_tokens can exceed the tier allocation (carried over from a prior
+      // higher tier, or a promo grant). The rollover is LEAST(remaining, allocation),
+      // never the full remaining — otherwise a renewal mints free non-expiring addon.
+      const seeded = await seedUser(harness().neonSql, {
+        stripeCustomerId: 'cus_a',
+        tier: 'hobbyist',
+        monthlyTokens: 900, // 3x the hobbyist allocation
+        monthlyTokensUsed: 0, // 900 remaining > allocation 300
+        addonTokens: 0,
+        earnedCredits: 0,
+        stripeSubscriptionId: 'sub_x',
+      });
+
+      await handleInvoicePaid('cus_a', 'inv_1', 'sub_x');
+
+      const row = (await getUserRow(harness().neonSql, seeded.id))!;
+      // Rollover capped at LEAST(900, 300) = 300, NOT 900.
+      expect(num(row.addon_tokens)).toBe(300);
+      expect(num(row.monthly_tokens)).toBe(300); // reset to allocation
+      expect(num(row.monthly_tokens_used)).toBe(0);
+
+      const all = await txns(seeded.id);
+      expect(num(bySource(all, 'renewal_rollover:hobbyist').amount)).toBe(300); // capped
+      expect(num(bySource(all, 'renewal:hobbyist').amount)).toBe(300);
     });
   });
 

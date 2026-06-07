@@ -80,11 +80,29 @@ describe('subscription-lifecycle', () => {
       mockSelectWhere.mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) });
       await expect(handleSubscriptionDeleted('cus_gone', 'sub_gone')).resolves.toBeUndefined();
       expect(mockNeonTransaction).not.toHaveBeenCalled();
+      expect(mockNeonSqlCalls).toHaveLength(0);
     });
 
-    it('wraps tier revert in neonSql.transaction (PF-77)', async () => {
+    it('reverts tier in a single atomic CTE — audit INSERT arbitrates the reset (PF-77, #8712)', async () => {
       await handleSubscriptionDeleted('cus_abc', 'sub_abc');
-      expect(mockNeonTransaction).toHaveBeenCalledOnce();
+
+      // Idempotent deletion is one atomic CTE statement, NOT a transaction
+      // array: a single SQL statement is inherently atomic, so PF-77's
+      // atomicity intent holds while the UPDATE can be gated on the audit row.
+      expect(mockNeonTransaction).not.toHaveBeenCalled();
+      const deleteCall = mockNeonSqlCalls.find((c) =>
+        c.strings.some((s) => s.includes('WITH audit')),
+      );
+      expect(deleteCall).toBeDefined();
+      const sql = deleteCall!.strings.join('');
+      // Both halves live in the one statement…
+      expect(sql).toContain('INSERT INTO credit_transactions');
+      expect(sql).toContain('UPDATE users');
+      // …the reset UPDATE only runs when the audit row was written this delivery…
+      expect(sql).toContain('EXISTS (SELECT 1 FROM audit)');
+      // …and the idempotency anchor is tier-independent (#8712): keyed on the
+      // subscription id via `cancellation:%`, never the mutable previousTier.
+      expect(sql).toContain("source LIKE 'cancellation:%'");
     });
   });
 

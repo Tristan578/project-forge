@@ -43,6 +43,15 @@ export async function findUserByStripeCustomer(customerId: string): Promise<User
  * All mutations are wrapped in a single neon sql.transaction() for
  * atomicity (PF-77). Balance is computed from the snapshot + planned
  * mutations since neon-http transactions don't support interactive SELECTs.
+ *
+ * Idempotent under Stripe at-least-once redelivery (#8711): BOTH the reset
+ * UPDATE and the grant INSERT are gated on `NOT EXISTS` of the canonical
+ * `subscription_created:%` anchor for this subscription id. The gate is keyed
+ * on the SUBSCRIPTION ID, never the (mutable) tier — so a tier change between
+ * an event's deliveries cannot defeat it. On first fire the anchor is absent,
+ * so the UPDATE resets the cycle and the INSERT writes the anchor; on every
+ * redelivery the committed anchor makes both a no-op, preserving any spend the
+ * user accrued in between (an unconditional re-zero would refund that spend).
  */
 export async function handleSubscriptionCreated(
   customerId: string,
@@ -69,6 +78,12 @@ export async function handleSubscriptionCreated(
             billing_cycle_start    = ${now},
             updated_at             = ${now}
         WHERE id = ${user.id}
+          AND NOT EXISTS (
+            SELECT 1 FROM credit_transactions
+            WHERE user_id = ${user.id}
+              AND source LIKE 'subscription_created:%'
+              AND reference_id = ${subscriptionId}
+          )
       `,
       neonSql`
         INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
@@ -76,6 +91,12 @@ export async function handleSubscriptionCreated(
                ${allocation} + addon_tokens + earned_credits,
                ${`subscription_created:${tier}`}, ${subscriptionId}
         FROM users WHERE id = ${user.id}
+          AND NOT EXISTS (
+            SELECT 1 FROM credit_transactions
+            WHERE user_id = ${user.id}
+              AND source LIKE 'subscription_created:%'
+              AND reference_id = ${subscriptionId}
+          )
         ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
       `,
     ])
@@ -208,7 +229,17 @@ export async function handleSubscriptionUpdated(
  * - Clears subscription ID
  * - Records an audit transaction
  *
- * All mutations atomic via neon sql.transaction() (PF-77).
+ * Idempotent under Stripe at-least-once redelivery (#8712) via the single-CTE
+ * "audit INSERT is the arbiter" idiom: the cancellation audit row is written
+ * first, gated on `NOT EXISTS` of any prior `cancellation:%` row for this
+ * subscription id, and the reset UPDATE only runs `WHERE EXISTS (SELECT 1 FROM
+ * audit)`. The anchor is keyed on the SUBSCRIPTION ID, never `previousTier`:
+ * on redelivery `findUserByStripeCustomer` re-reads the now-starter tier, so a
+ * tier-keyed source ('cancellation:starter->starter') would dodge the
+ * exact-source ON CONFLICT and write a bogus duplicate audit row with a phantom
+ * amount; the tier-independent gate blocks both the duplicate row AND the
+ * re-zero (which would otherwise refund any starter-tier spend accrued between
+ * deliveries). One atomic statement → no transaction array needed.
  */
 export async function handleSubscriptionDeleted(
   customerId: string,
@@ -222,29 +253,36 @@ export async function handleSubscriptionDeleted(
   const starterAllocation = TIER_MONTHLY_TOKENS['starter'];
   const now = new Date().toISOString();
 
-  // INSERT before UPDATE: the audit record must read pre-cancellation state
-  // (remaining tokens, addon balance) before the UPDATE resets them.
+  // Single CTE: the audit INSERT reads pre-cancellation state (remaining
+  // tokens, addon balance) and is the arbiter — the UPDATE cannot reset the
+  // balance unless a fresh audit row was written this delivery.
   await queryWithResilience(() =>
-    neonSql.transaction([
-      neonSql`
+    neonSql`
+      WITH audit AS (
         INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
         SELECT ${user.id}, 'adjustment',
                -GREATEST(0, monthly_tokens - monthly_tokens_used),
                ${starterAllocation} + addon_tokens + earned_credits,
                ${`cancellation:${previousTier}->starter`}, ${subscriptionId}
         FROM users WHERE id = ${user.id}
+          AND NOT EXISTS (
+            SELECT 1 FROM credit_transactions
+            WHERE user_id = ${user.id}
+              AND source LIKE 'cancellation:%'
+              AND reference_id = ${subscriptionId}
+          )
         ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
-      `,
-      neonSql`
-        UPDATE users
-        SET tier                   = 'starter',
-            stripe_subscription_id = NULL,
-            monthly_tokens         = ${starterAllocation},
-            monthly_tokens_used    = 0,
-            updated_at             = ${now}
-        WHERE id = ${user.id}
-      `,
-    ])
+        RETURNING id
+      )
+      UPDATE users
+      SET tier                   = 'starter',
+          stripe_subscription_id = NULL,
+          monthly_tokens         = ${starterAllocation},
+          monthly_tokens_used    = 0,
+          updated_at             = ${now}
+      WHERE id = ${user.id}
+        AND EXISTS (SELECT 1 FROM audit)
+    `
   );
 }
 
@@ -293,21 +331,33 @@ export async function handleInvoicePaid(
     // Single data-modifying CTE so the audit INSERT is the *arbiter* of the
     // addon credit: the UPDATE adds only what the INSERT actually inserted.
     //
-    // Idempotency is gated on the per-invoice `renewal:tier` grant row via the
+    // Idempotency is gated on the per-invoice renewal grant row via the
     // NOT EXISTS below — the SAME anchor the reset uses (#8611) — NOT on the
     // rollover's own `renewal_rollover:tier` row. Why this matters: when the
     // first fire has no remaining tokens (remaining == 0) the rollover statement
     // is skipped entirely (hasRollover is false), so the `renewal_rollover`
     // anchor is NEVER written — yet the reset + grant still run, marking the
-    // invoice processed via `renewal:tier`. A later redelivery (after the user
+    // invoice processed via the renewal grant. A later redelivery (after the user
     // spends part of the fresh allocation) sees remaining > 0, flips hasRollover
     // back ON, and — gated only on the missing `renewal_rollover` anchor — would
     // credit a free rollover into the non-expiring addon balance (#8709). Gating
-    // on the always-written `renewal:tier` grant row closes that: the grant
+    // on the always-written renewal grant row closes that: the grant
     // INSERT below runs AFTER this CTE, so on the FIRST fire the grant row does
     // not exist yet → NOT EXISTS is true → rollover runs; on ANY redelivery the
     // committed grant row makes NOT EXISTS false → the INSERT matches 0 rows,
     // RETURNING is empty, and COALESCE(...,0) makes the addon UPDATE a no-op.
+    //
+    // The gate matches `source LIKE 'renewal:%'`, NOT the tier-specific
+    // `renewal:<tier>` literal (#8710): `tier` is read mutably from
+    // `user.tier` at processing time, so if the user's tier changes between an
+    // invoice's original delivery and a redelivery, a tier-keyed anchor would
+    // differ ('renewal:pro' != the committed 'renewal:creator'), re-opening
+    // every gate → double rollover + double grant. `'renewal:%'` is
+    // tier-independent yet still excludes the rollover's own
+    // `renewal_rollover:<tier>` rows: in a LIKE pattern the 8th char is a
+    // literal ':' which cannot match the '_' in 'renewal_rollover', so only the
+    // `renewal:<tier>` grant rows qualify. (Gating on reference_id alone is
+    // wrong — `payment_failed:attempt_N` rows share the invoice id.)
     // (The `renewal_rollover` ON CONFLICT arbiter is retained as defence in depth
     // and to keep the audit row's own identity.) Both INSERT and UPDATE read the
     // same statement snapshot, so balance_after still reads pre-rollover addon.
@@ -323,7 +373,7 @@ export async function handleInvoicePaid(
           AND NOT EXISTS (
             SELECT 1 FROM credit_transactions
             WHERE user_id      = ${user.id}
-              AND source       = ${`renewal:${tier}`}
+              AND source LIKE 'renewal:%'
               AND reference_id = ${invoiceId}
           )
         ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
@@ -349,6 +399,10 @@ export async function handleInvoicePaid(
   // first fire and a redelivery is silently gifted back (monthly_tokens_used
   // reset to 0) — the same class of money bug as the rollover double-credit
   // (#8708) fixed above, on the reset half of the same handler.
+  //
+  // Matches `source LIKE 'renewal:%'` (tier-independent), NOT the mutable
+  // `renewal:<tier>` literal, for the same reason as the rollover gate (#8710):
+  // a tier change between deliveries must not re-open the reset.
   statements.push(neonSql`
     UPDATE users
     SET monthly_tokens      = ${allocation},
@@ -359,18 +413,31 @@ export async function handleInvoicePaid(
       AND NOT EXISTS (
         SELECT 1 FROM credit_transactions
         WHERE user_id      = ${user.id}
-          AND source       = ${`renewal:${tier}`}
+          AND source LIKE 'renewal:%'
           AND reference_id = ${invoiceId}
       )
   `);
 
-  // Grant balance: reads addon_tokens (which now includes rollover) at execution time
+  // Grant balance: reads addon_tokens (which now includes rollover) at execution time.
+  //
+  // Gated on the tier-independent `renewal:%` anchor (#8710): the ON CONFLICT
+  // arbiter keys on (user_id, source, reference_id), so a cross-tier redelivery
+  // whose source is 'renewal:pro' would NOT collide with the committed
+  // 'renewal:creator' grant row and would write a SECOND grant for the same
+  // invoice. The NOT EXISTS gate closes that — on any redelivery a prior
+  // `renewal:%` row for this invoice makes the INSERT match 0 rows.
   statements.push(neonSql`
     INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
     SELECT ${user.id}, 'monthly_grant', ${allocation},
            ${allocation} + addon_tokens + earned_credits,
            ${`renewal:${tier}`}, ${invoiceId}
     FROM users WHERE id = ${user.id}
+      AND NOT EXISTS (
+        SELECT 1 FROM credit_transactions
+        WHERE user_id      = ${user.id}
+          AND source LIKE 'renewal:%'
+          AND reference_id = ${invoiceId}
+      )
     ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
   `);
 
