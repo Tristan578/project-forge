@@ -10,10 +10,18 @@
 #
 # vitest exits non-zero in three distinct situations:
 #   1. A test actually failed              → summary has "Test Files ... failed"
-#   2. A coverage threshold was not met    → "Coverage for X does not meet threshold",
-#                                            but NO "Test Files ... failed" line
+#   2. A coverage threshold was not met    → one of vitest's two threshold-failure
+#                                            forms (see below), but NO
+#                                            "Test Files ... failed" line
 #   3. Open handles after a green run      → non-zero exit, neither marker present
 # Only (3) is a false positive. (1) and (2) MUST propagate.
+#
+# vitest emits the coverage-threshold failure in TWO forms (vitest source
+# coverage chunk; verified against 4.1.7), and BOTH must be caught or the gate
+# silently swallows them — the #8598 regression class:
+#   A. positive % threshold:  "ERROR: Coverage for statements (50%) does not meet global threshold (85%)"
+#   B. negative (max-uncovered) threshold: "ERROR: Uncovered statements (33) exceed global threshold (30)"
+# Per-file variants substitute "\"path\" threshold" for "global threshold".
 #
 # Usage: check-vitest-exit.sh <vitest_exit_code> <output_file>
 #   <output_file> is the captured (tee'd) combined stdout+stderr of the run.
@@ -64,9 +72,13 @@ if printf '%s\n' "$CLEAN" | grep -qE "Test Files.*failed"; then
   exit "$EXIT_CODE"
 fi
 
-# (2) A coverage threshold was not met → propagate (the #8598 fix). Matches both
-#     "does not meet global threshold" and per-file "does not meet threshold".
-if printf '%s\n' "$CLEAN" | grep -qiE "coverage for .*does not meet.*threshold"; then
+# (2) A coverage threshold was not met → propagate (the #8598 fix). Matches BOTH
+#     vitest forms: the positive-% "Coverage for X does not meet ... threshold"
+#     and the negative-count "Uncovered X exceed ... threshold" — global and
+#     per-file variants alike. Missing form B would re-open #8598 for any repo
+#     (or future config) that sets a max-uncovered threshold.
+if printf '%s\n' "$CLEAN" \
+  | grep -qiE "coverage for .*does not meet .*threshold|uncovered .*exceed .*threshold"; then
   echo "::error::vitest coverage thresholds not met — failing the build (this was previously swallowed: #8598)"
   exit "$EXIT_CODE"
 fi

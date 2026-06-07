@@ -63,6 +63,17 @@ Error: A worker process has failed to exit gracefully'
 # ANSI-colored coverage error (vitest colorizes ERROR lines).
 ANSI_COVERAGE_OUTPUT=$' Test Files  120 passed (120)\n\x1b[31mERROR: Coverage for branches (55%) does not meet global threshold (60%)\x1b[0m'
 
+# vitest's SECOND threshold-failure form (negative / max-uncovered threshold):
+# "Uncovered X (N) exceed global threshold (M)". All tests pass, exit still 1.
+# Missing this form re-opens #8598 for max-uncovered thresholds (F06 follow-up).
+COVERAGE_UNCOVERED_GLOBAL_OUTPUT=' Test Files  120 passed (120)
+      Tests  1400 passed (1400)
+ERROR: Uncovered statements (33) exceed global threshold (30)'
+
+COVERAGE_UNCOVERED_PERFILE_OUTPUT=' Test Files  120 passed (120)
+      Tests  1400 passed (1400)
+ERROR: Uncovered lines (12) exceed "src/math.ts" threshold (10)'
+
 echo "== check-vitest-exit.sh =="
 
 # 1. Clean pass (exit 0) → gate passes.
@@ -125,6 +136,16 @@ f="$(mkfile both.txt "$TESTFAIL_OUTPUT
 ERROR: Coverage for lines (1%) does not meet global threshold (72%)")"
 rc="$(run_gate 1 "$f")"
 if [ "$rc" = "1" ]; then pass "both test-fail + coverage → gate 1"; else fail "both → expected 1, got $rc"; fi
+
+# 13. THE FOLLOW-UP FIX: form-B (max-uncovered) global threshold miss → propagate.
+f="$(mkfile unc.txt "$COVERAGE_UNCOVERED_GLOBAL_OUTPUT")"
+rc="$(run_gate 1 "$f")"
+if [ "$rc" = "1" ]; then pass "uncovered global miss → gate 1 (form B NOT swallowed)"; else fail "uncovered global miss → expected 1, got $rc (REGRESSION: form B swallowed)"; fi
+
+# 14. Form-B per-file (quoted path, no 'global') threshold miss → propagate.
+f="$(mkfile uncpf.txt "$COVERAGE_UNCOVERED_PERFILE_OUTPUT")"
+rc="$(run_gate 1 "$f")"
+if [ "$rc" = "1" ]; then pass "uncovered per-file miss → gate 1 (form B)"; else fail "uncovered per-file miss → expected 1, got $rc"; fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
