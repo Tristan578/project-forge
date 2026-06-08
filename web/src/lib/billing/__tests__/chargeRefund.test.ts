@@ -521,4 +521,45 @@ describe('handleChargeRefunded — incremental (partial-then-cumulative) refunds
     expect(txns.map(t => String(t.reference_id)).sort()).toEqual(['ch_fbinc:1000', 'ch_fbinc:500']);
     expect(txns.every(t => t.source === 'charge_refunded:ch_fbinc')).toBe(true);
   });
+
+  it('fallback path: a NEW addon purchase between tranches does NOT inflate the clawback (stable-base #8706)', async () => {
+    // TEETH for the stable-base reconstruction. The lockstep test above depletes
+    // the balance in step with the refund, so a naive "deduct a ratio of the
+    // CURRENT balance" implementation computes the same 500 for the 2nd tranche
+    // and SURVIVES. Here the user BUYS 1000 more addon tokens between deliveries,
+    // so current-balance-ratio and the shipped stable-base math diverge
+    // observably: the later tranche must anchor to the ORIGINAL refunded base
+    // (reconstructed from the recorded prior clawback: amountRefunded ×
+    // prior_clawed / prior_cum_cents − prior_clawed), NEVER to the inflated live
+    // balance. The SUT comment promises exactly this ("a NEW addon purchase
+    // landing between webhook deliveries can never inflate the clawback"); this is
+    // its executable proof.
+    const sql = harness().neonSql;
+    const user = await seedUser(sql, { stripeCustomerId: 'cus_fbbuy', addonTokens: 1000 });
+
+    // T1: 50% cumulative → FLOOR(1000 × 500/1000) = 500 deducted, addon 1000→500.
+    await handleChargeRefunded('cus_fbbuy', 'ch_fbbuy', 500, 1000);
+    expect(await addonBalance(sql, user.id)).toBe(500);
+
+    // User buys a fresh 1000-token addon pack BEFORE the next refund tranche.
+    await sql`UPDATE users SET addon_tokens = addon_tokens + 1000 WHERE id = ${user.id}::uuid`;
+    expect(await addonBalance(sql, user.id)).toBe(1500);
+
+    // T2: CUMULATIVE 1000/1000. Stable-base: target = 1000 × prior_clawed(500) /
+    // prior_cum_cents(500) = 1000; delta = 1000 − 500 = 500 → addon 1500→1000.
+    // A current-balance-ratio mutant deducts 100% of 1500 = 1500 → addon 0.
+    await handleChargeRefunded('cus_fbbuy', 'ch_fbbuy', 1000, 1000);
+
+    // The newly bought 1000 tokens are untouched: addon = 1000, NOT 0.
+    expect(await addonBalance(sql, user.id)).toBe(1000);
+    const txns = await creditTxns(sql, user.id);
+    expect(txns).toHaveLength(2);
+    // The 2nd tranche books the DELTA (-500), never the inflated balance (-1500).
+    const second = txns.find(t => String(t.reference_id) === 'ch_fbbuy:1000')!;
+    expect(Number(second.amount)).toBe(-500);
+    expect(Number(second.balance_after)).toBe(1000);
+    expect(txns.map(t => Number(t.amount)).sort((a, b) => a - b)).toEqual([-500, -500]);
+    expect(txns.map(t => String(t.reference_id)).sort()).toEqual(['ch_fbbuy:1000', 'ch_fbbuy:500']);
+    expect(txns.every(t => t.source === 'charge_refunded:ch_fbbuy')).toBe(true);
+  });
 });
