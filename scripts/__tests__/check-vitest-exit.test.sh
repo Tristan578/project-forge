@@ -60,8 +60,16 @@ OPENHANDLE_OUTPUT=' Test Files  120 passed (120)
 
 Error: A worker process has failed to exit gracefully'
 
-# ANSI-colored coverage error (vitest colorizes ERROR lines).
-ANSI_COVERAGE_OUTPUT=$' Test Files  120 passed (120)\n\x1b[31mERROR: Coverage for branches (55%) does not meet global threshold (60%)\x1b[0m'
+# ANSI-colored coverage error (vitest colorizes ERROR lines). The escapes here
+# SPLIT two regex-load-bearing tokens mid-word — "Co\x1b[31mverage" and
+# "thr\x1b[0meshold" — NOT just colorize at the line boundary. That distinction
+# is what gives test #7 teeth: the detection regex's `.*` wildcards already span
+# a boundary escape, so a boundary-only fixture would still match even if the
+# sed ANSI-strip were deleted (a surviving mutant). With the escapes inside the
+# tokens, the literal substrings "coverage"/"threshold" only exist AFTER the
+# strip runs, so removing the strip makes the gate miss the line and the test
+# fails — proving the strip line is the code under test, not decoration.
+ANSI_COVERAGE_OUTPUT=$' Test Files  120 passed (120)\n\x1b[31mERROR: Co\x1b[31mverage for branches (55%) does not meet global thr\x1b[0meshold (60%)\x1b[0m'
 
 # vitest's SECOND threshold-failure form (negative / max-uncovered threshold):
 # "Uncovered X (N) exceed global threshold (M)". All tests pass, exit still 1.
@@ -106,10 +114,12 @@ f="$(mkfile oh.txt "$OPENHANDLE_OUTPUT")"
 rc="$(run_gate 1 "$f")"
 if [ "$rc" = "0" ]; then pass "open-handle noise → gate 0 (workaround preserved)"; else fail "open-handle noise → expected 0, got $rc"; fi
 
-# 7. ANSI-colored coverage error still detected → propagate.
+# 7. ANSI escapes split the "coverage"/"threshold" tokens mid-word → the gate
+#    only matches after the sed strip runs (delete the strip and this regresses
+#    to a swallowed miss). Real teeth on the ANSI-strip line, not boundary color.
 f="$(mkfile ansi.txt "$ANSI_COVERAGE_OUTPUT")"
 rc="$(run_gate 1 "$f")"
-if [ "$rc" = "1" ]; then pass "ANSI coverage miss → gate 1 (ANSI stripped)"; else fail "ANSI coverage miss → expected 1, got $rc"; fi
+if [ "$rc" = "1" ]; then pass "ANSI mid-token coverage miss → gate 1 (strip is load-bearing)"; else fail "ANSI mid-token coverage miss → expected 1, got $rc"; fi
 
 # 8. Fail closed: non-zero exit but evidence file MISSING → propagate, never swallow.
 rc="$(run_gate 1 "$TMPDIR_T/does-not-exist.txt")"
