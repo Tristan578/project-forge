@@ -54,6 +54,24 @@
  * compose representative SUT queries through BOTH this adapter and the real
  * driver's tagged template via a capturing `fetchFunction`, asserting identical
  * `{ query, params }` — is tracked in #8713.
+ *
+ * CANONICAL SHARED COPY — cross-branch convergence
+ * ------------------------------------------------
+ * This file is one canonical harness shared by the four real-DB money-path test
+ * branches from the 2026-05-30 audit (F16 reverseAddonTokens, F17
+ * creditAddonTokens, F18 handleChargeRefunded, F19 subscription lifecycle). It is
+ * introduced *byte-identically* on every one of those branches — same git blob —
+ * so the add/add merges into `main` auto-resolve regardless of merge order and
+ * the second-through-fourth merges see it as already present. KEEP THE COPIES
+ * IDENTICAL: edit the harness on one branch, then copy that exact blob to the
+ * others (`git checkout <branch> -- <this path>`) rather than re-typing the edit.
+ *
+ * Consequence: this file exports the UNION of helpers every branch needs, so any
+ * single branch leaves some exports unused (e.g. `countByUser` — see its note).
+ * That is intentional, not dead code to prune — dropping a "locally unused" helper
+ * would fork the blob and reintroduce the add/add conflict the convergence avoids.
+ * `@typescript-eslint/no-unused-vars` does not flag unused *exported* members, so
+ * the zero-warnings lint gate stays green either way.
  */
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
@@ -355,7 +373,14 @@ export async function getUserRow(
   return rows[0];
 }
 
-/** `COUNT(*)` over `table` filtered by `userId`, as a number. */
+/**
+ * `COUNT(*)` over `table` filtered by `userId`, as a number.
+ *
+ * Part of the harness's union API (see "CANONICAL SHARED COPY" above): some
+ * branches assert row counts with this, others don't. Kept exported even where a
+ * given branch never calls it so all four copies stay byte-identical — do not
+ * delete as "unused".
+ */
 export async function countByUser(
   sql: NeonSqlAdapter,
   table: 'token_purchases' | 'token_usage' | 'credit_transactions',
