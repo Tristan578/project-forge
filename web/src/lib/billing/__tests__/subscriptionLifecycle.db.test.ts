@@ -801,6 +801,43 @@ describe('subscription lifecycle — real Postgres (F19, #8611)', () => {
       expect(num(bySource(all, 'renewal_rollover:hobbyist').amount)).toBe(300); // capped
       expect(num(bySource(all, 'renewal:hobbyist').amount)).toBe(300);
     });
+
+    it('a prior payment_failed row on the SAME invoice does NOT suppress the renewal (#8611)', async () => {
+      // The renewal gate is `source LIKE 'renewal:%' AND reference_id = invoiceId`,
+      // NOT `reference_id = invoiceId` alone. Stripe writes a `payment_failed:attempt_N`
+      // audit row keyed on the SAME invoice id before the retry succeeds, so a gate
+      // that looked only at reference_id would see that row and skip the entire
+      // renewal — never resetting the cycle, never rolling over, never granting the
+      // new allocation. This is the exact bug the SUT comment guards ("Gating on
+      // reference_id alone is wrong — payment_failed:attempt_N rows share the
+      // invoice id"); this test has teeth on that qualifier.
+      const seeded = await seedUser(harness().neonSql, {
+        stripeCustomerId: 'cus_a',
+        tier: 'hobbyist',
+        monthlyTokens: 300,
+        monthlyTokensUsed: 100, // 200 unused → must still roll over
+        addonTokens: 200,
+        earnedCredits: 0,
+        stripeSubscriptionId: 'sub_x',
+      });
+
+      // Attempt 1 fails first, stamping payment_failed:attempt_1 / inv_1.
+      await handleInvoicePaymentFailed('cus_a', 'inv_1', 1, null);
+      // Stripe retries the SAME invoice and it succeeds.
+      await handleInvoicePaid('cus_a', 'inv_1', 'sub_x');
+
+      const row = (await getUserRow(harness().neonSql, seeded.id))!;
+      // Renewal processed in full despite the shared-invoice-id failure row.
+      expect(num(row.monthly_tokens)).toBe(300); // reset to allocation
+      expect(num(row.monthly_tokens_used)).toBe(0);
+      expect(num(row.addon_tokens)).toBe(400); // 200 + LEAST(200, 300) rollover
+
+      const all = await txns(seeded.id);
+      // The failure audit row is untouched and the renewal rows are written once each.
+      expect(all.filter((r) => r.source === 'payment_failed:attempt_1')).toHaveLength(1);
+      expect(num(bySource(all, 'renewal_rollover:hobbyist').amount)).toBe(200);
+      expect(num(bySource(all, 'renewal:hobbyist').amount)).toBe(300);
+    });
   });
 
   // ───────────────────────── invoice.payment_failed ─────────────────────────

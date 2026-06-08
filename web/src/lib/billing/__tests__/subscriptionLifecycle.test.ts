@@ -83,26 +83,19 @@ describe('subscription-lifecycle', () => {
       expect(mockNeonSqlCalls).toHaveLength(0);
     });
 
-    it('reverts tier in a single atomic CTE — audit INSERT arbitrates the reset (PF-77, #8712)', async () => {
+    it('reverts the tier in one neonSql statement, never db.transaction (PF-77, #8712)', async () => {
       await handleSubscriptionDeleted('cus_abc', 'sub_abc');
 
-      // Idempotent deletion is one atomic CTE statement, NOT a transaction
-      // array: a single SQL statement is inherently atomic, so PF-77's
-      // atomicity intent holds while the UPDATE can be gated on the audit row.
+      // STRUCTURE ONLY. This mock suite proves the call SHAPE: a single atomic
+      // neonSql tagged-template statement (a lone SQL statement is inherently
+      // atomic — no transaction array needed) and never the broken
+      // db.transaction(). It deliberately does NOT assert SQL substrings — that
+      // would only prove the source contains certain literals, not that the
+      // handler behaves. The audit-arbitrated reset and the tier-independent
+      // `cancellation:%` idempotency anchor (#8712) are verified behaviourally,
+      // against real Postgres, in subscriptionLifecycle.db.test.ts.
       expect(mockNeonTransaction).not.toHaveBeenCalled();
-      const deleteCall = mockNeonSqlCalls.find((c) =>
-        c.strings.some((s) => s.includes('WITH audit')),
-      );
-      expect(deleteCall).toBeDefined();
-      const sql = deleteCall!.strings.join('');
-      // Both halves live in the one statement…
-      expect(sql).toContain('INSERT INTO credit_transactions');
-      expect(sql).toContain('UPDATE users');
-      // …the reset UPDATE only runs when the audit row was written this delivery…
-      expect(sql).toContain('EXISTS (SELECT 1 FROM audit)');
-      // …and the idempotency anchor is tier-independent (#8712): keyed on the
-      // subscription id via `cancellation:%`, never the mutable previousTier.
-      expect(sql).toContain("source LIKE 'cancellation:%'");
+      expect(mockNeonSqlCalls).toHaveLength(1);
     });
   });
 
