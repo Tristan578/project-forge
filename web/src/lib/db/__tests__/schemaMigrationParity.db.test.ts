@@ -1,3 +1,7 @@
+// @vitest-environment node
+// (pgliteHarness resolves web/drizzle/ via import.meta.url, which is not a
+// file:// URL under the jsdom default of the standalone vitest.config.ts —
+// same docblock pattern as creditAddonTokens.db.test.ts.)
 /**
  * Schema ↔ migration-chain parity (#8707).
  *
