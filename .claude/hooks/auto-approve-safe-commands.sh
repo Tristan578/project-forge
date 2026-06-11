@@ -5,7 +5,14 @@
 #
 # Decision contract (stdout JSON, ALWAYS exit 0 — never a hard block):
 #   safe simple command  -> permissionDecision "allow"
-#   anything else         -> permissionDecision "ask"  (defer to the user)
+#   anything else         -> permissionDecision "ask"  (defer to the user) —
+#                            EXCEPT when the session permission_mode is one the
+#                            user chose to silence prompts (bypassPermissions,
+#                            dontAsk, auto): then no decision is emitted and the
+#                            mode itself decides. A hook "ask" OVERRIDES the
+#                            session mode, so an unconditional "ask" forced a
+#                            prompt on every non-safe command even under
+#                            --dangerously-skip-permissions.
 #   empty / unparseable   -> no decision emitted        (defer to permission rules)
 #
 # stdout MUST be pure decision JSON; human-readable logging goes to stderr.
@@ -44,6 +51,28 @@ INPUT="$(cat)"
 # exit code (no `set -e`; `|| true` guards the assignment).
 COMMAND="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
 
+# Session permission mode, as sent by Claude Code in the hook payload (e.g.
+# "default", "plan", "acceptEdits", "auto", "dontAsk", "bypassPermissions").
+# Same fail-safe extraction as COMMAND: parse failure leaves it empty.
+PERMISSION_MODE="$(printf '%s' "$INPUT" | jq -r '.permission_mode // empty' 2>/dev/null || true)"
+
+# ask <reason> — defer the command to the user UNLESS the session runs in a
+# mode the user chose specifically to suppress prompts. A PreToolUse "ask"
+# decision OVERRIDES the session permission mode, so emitting it
+# unconditionally forced a prompt on every non-safe command even under
+# --dangerously-skip-permissions. In prompt-suppressing modes this hook stays
+# silent and lets the mode decide; "allow" fast-paths are mode-independent.
+# Fail-safe: an empty or unrecognized mode keeps the prompting behavior.
+ask() {
+  case "$PERMISSION_MODE" in
+    bypassPermissions | dontAsk | auto)
+      exit 0
+      ;;
+  esac
+  emit ask "$1"
+  exit 0
+}
+
 # Trim leading and trailing whitespace.
 COMMAND="${COMMAND#"${COMMAND%%[![:space:]]*}"}"
 COMMAND="${COMMAND%"${COMMAND##*[![:space:]]}"}"
@@ -57,8 +86,7 @@ fi
 # expanded, or multi-line command — even if its leading token is safe.
 case "$COMMAND" in
   *'&'* | *'|'* | *';'* | *'<'* | *'>'* | *'`'* | *'$'* | *'('* | *')'* | *'#'* | *$'\n'*)
-    emit ask "compound, redirected, or substituted command requires explicit approval"
-    exit 0
+    ask "compound, redirected, or substituted command requires explicit approval"
     ;;
 esac
 
@@ -82,8 +110,7 @@ esac
 # The command is padded with spaces so each flag matches on a word boundary.
 case " $COMMAND " in
   *' --ext-diff'* | *' --extcmd'* | *' -x'* | *' --output'* | *' --config'* | *' --reporter'* | *' --exec'* | *' --upload-pack'* | *' --receive-pack'*)
-    emit ask "command carries a program-execution or file-write flag and requires explicit approval"
-    exit 0
+    ask "command carries a program-execution or file-write flag and requires explicit approval"
     ;;
 esac
 
@@ -96,8 +123,7 @@ case "$COMMAND" in
   'npx '*)
     case " $COMMAND " in
       *' --format'* | *' -f'*)
-        emit ask "npx tool carries a module-loading flag (--format/-f) and requires explicit approval"
-        exit 0
+        ask "npx tool carries a module-loading flag (--format/-f) and requires explicit approval"
         ;;
     esac
     ;;
@@ -163,5 +189,4 @@ if is_safe "$COMMAND"; then
   exit 0
 fi
 
-emit ask "command is not on the auto-approve safe-list"
-exit 0
+ask "command is not on the auto-approve safe-list"
