@@ -43,6 +43,13 @@
       "when": 1780358400000,
       "tag": "0005_token_usage_refund_idempotent_index_concurrent",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781136000000,
+      "tag": "0006_backfill_schema_drift",
+      "breakpoints": true
     }
   ]
 }
