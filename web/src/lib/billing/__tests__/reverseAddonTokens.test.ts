@@ -24,6 +24,8 @@
  * proven by *sequential* webhook re-fire (the shape Stripe at-least-once
  * redelivery produces), the exact threat the CTE guards defend against.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NeonSqlAdapter, QueryRow, TestHarness } from '@/lib/db/__tests__/pgliteHarness';
 
@@ -493,5 +495,90 @@ describe('reverseAddonTokens — fallback balance-based path (no paymentIntent)'
 
     expect(await addonBalance(sql, user.id)).toBe(0);
     expect(await creditTxns(sql, user.id)).toHaveLength(0);
+  });
+});
+
+describe('reverseAddonTokens — fallback audit CTE ON CONFLICT arbiter (#8729)', () => {
+  // KNOWN CONSTRAINT: PGlite is single-connection, so the true concurrent race
+  // this fix closes — two deliveries of the same `charge.refunded` webhook whose
+  // snapshots BOTH pass the `NOT EXISTS` subquery, after which the loser's
+  // INSERT raises a unique violation on `idx_credit_txn_idempotent` — cannot be
+  // reproduced behaviourally in a unit test (sequential calls commit between
+  // statements, so the second call's NOT EXISTS always sees the first row).
+  //
+  // The accepted composite is therefore:
+  //   (a) a source-contract test pinning the exact ON CONFLICT arbiter clause
+  //       onto the fallback audit CTE (red pre-fix, green post-fix), and
+  //   (b) behavioural tests proving the post-fix statement still executes
+  //       end-to-end against real Postgres and that sequential redelivery of
+  //       the fallback path remains a clean no-op (no error, no extra row,
+  //       no double deduction).
+
+  it('fallback audit CTE carries the ON CONFLICT arbiter between its SELECT and RETURNING (source contract)', () => {
+    const src = readFileSync(
+      fileURLToPath(new URL('../subscription-lifecycle.ts', import.meta.url)),
+      'utf8',
+    );
+
+    // Anchor on the FALLBACK statement, not a global substring count — the
+    // precise path's audit CTE already carries an identical arbiter (#8706).
+    // `WITH prior AS (` opens the fallback CTE chain and appears nowhere else.
+    const fallbackStart = src.indexOf('WITH prior AS (');
+    expect(fallbackStart, 'fallback statement (`WITH prior AS (`) not found').toBeGreaterThan(-1);
+
+    const auditStart = src.indexOf('audit AS (', fallbackStart);
+    expect(auditStart, 'fallback audit CTE not found').toBeGreaterThan(fallbackStart);
+
+    const returningIdx = src.indexOf('RETURNING amount', auditStart);
+    expect(returningIdx, 'fallback audit CTE RETURNING not found').toBeGreaterThan(auditStart);
+
+    const auditCte = src.slice(auditStart, returningIdx);
+
+    // Confirm we sliced the fallback's audit CTE (it interpolates the `source`
+    // variable; the precise path inlines its template literal instead).
+    expect(auditCte).toContain('${source}, ${refundRef}');
+
+    // The snapshot-level fast path must be KEPT — it suppresses the deduction
+    // arithmetic cheaply on ordinary sequential redelivery.
+    expect(auditCte).toContain('NOT EXISTS');
+
+    // The arbiter must sit between the INSERT's SELECT source and RETURNING,
+    // mirroring the precise path: a concurrent loser that passed NOT EXISTS in
+    // its snapshot degrades to a no-op instead of a unique violation on
+    // idx_credit_txn_idempotent.
+    const arbiter =
+      'ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING';
+    expect(auditCte, `fallback audit CTE must carry the arbiter:\n${auditCte}`).toContain(arbiter);
+    expect(auditCte.indexOf(arbiter)).toBeGreaterThan(auditCte.indexOf('NOT EXISTS'));
+  });
+
+  it('first fallback delivery (precise path miss) deducts once; identical redelivery resolves as a clean no-op', async () => {
+    const sql = harness().neonSql;
+    const user = await seedUser(sql, { addonTokens: 800 });
+
+    // paymentIntentId is provided but matches NO token_purchases row, so the
+    // precise path misses and the legacy balance-based fallback runs — the
+    // exact route #8729 concerns.
+    await reverseAddonTokens(user.id, 'ch_8729', 250, 1000, 'pi_no_match_8729');
+
+    // floor(800 × 250/1000) = 200 deducted, one audit row.
+    expect(await addonBalance(sql, user.id)).toBe(600);
+    const first = await creditTxns(sql, user.id);
+    expect(first).toHaveLength(1);
+    expect(first[0].source).toBe('charge_refunded:ch_8729');
+    expect(first[0].reference_id).toBe('ch_8729:250');
+    expect(Number(first[0].amount)).toBe(-200);
+
+    // An identical second delivery must RESOLVE (never reject) and change
+    // nothing: no extra audit row, no extra deduction. This also proves the
+    // post-fix statement — with the ON CONFLICT clause in place — still
+    // executes end-to-end against real Postgres (PGlite would reject a
+    // malformed arbiter at parse time).
+    await expect(
+      reverseAddonTokens(user.id, 'ch_8729', 250, 1000, 'pi_no_match_8729'),
+    ).resolves.toBeUndefined();
+
+    expect(await addonBalance(sql, user.id)).toBe(600);
+    expect(await creditTxns(sql, user.id)).toHaveLength(1);
   });
 });
