@@ -164,9 +164,11 @@ jobs:
         # environments) but workspace mode does not enforce root-level coverage
         # thresholds — so CI uses the standalone config instead.
         # Timeout safety net: vitest hangs after test completion due to jsdom/coverage
-        # open handles (known issue vitest#3077). Exit 124 = the timeout killed the
-        # process; the gate below swallows it ONLY when the captured output proves a
-        # fully passing run — a timed-out run with test/coverage failures still fails.
+        # open handles (known issue vitest#3077). A non-zero exit (timeout 124, OOM
+        # 137, segfault 139, ...) is swallowed by the gate below ONLY when the
+        # captured output proves a fully COMPLETED run — green test summary AND
+        # (because this job runs --coverage) the coverage report — so a run killed
+        # mid-tests or before coverage thresholds were adjudicated still fails.
         run: |
           set +e
           timeout 600 npx vitest run --coverage 2>&1 | tee /tmp/vitest-output.txt
@@ -177,9 +179,13 @@ jobs:
           # Tests job). It propagates real test failures AND coverage-threshold
           # failures (#8598 — these were previously swallowed because a coverage
           # miss has no "Test Files ... failed" line), and swallows only the
-          # vitest#3077 open-handle / timeout false positives. Invoked by repo-root
-          # path because this step runs with working-directory: web.
-          bash "$GITHUB_WORKSPACE/scripts/check-vitest-exit.sh" "$EXIT_CODE" /tmp/vitest-output.txt
+          # vitest#3077 open-handle / timeout false positives. The --coverage flag
+          # makes the gate also require the "Coverage report from" marker before
+          # swallowing — a green test summary alone does not prove the coverage
+          # thresholds were ever adjudicated (report generation is the hang-prone
+          # tail of the run). Invoked by repo-root path because this step runs
+          # with working-directory: web.
+          bash "$GITHUB_WORKSPACE/scripts/check-vitest-exit.sh" "$EXIT_CODE" /tmp/vitest-output.txt --coverage
 
       - name: Upload coverage artifact
         if: always()

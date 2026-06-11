@@ -6,12 +6,26 @@
 # and .github/workflows/cd.yml (without). The workaround swallows a non-zero
 # vitest exit when no tests actually failed (open handles after a green run).
 #
-# The bug this suite locks down (#8598 / F06): a COVERAGE-THRESHOLD failure
-# also exits non-zero with NO "Test Files ... failed" line, so the old inline
-# `grep "Test Files.*failed"` check mistook it for an open-handle false positive
-# and exited 0 — silently green-lighting a coverage regression. The gate MUST
-# propagate coverage failures (fail closed), and MUST fail closed when the exit
-# is non-zero but the evidence file is missing/empty.
+# The bugs this suite locks down:
+#   - #8598 / F06: a COVERAGE-THRESHOLD failure also exits non-zero with NO
+#     "Test Files ... failed" line, so the old inline `grep "Test Files.*failed"`
+#     check mistook it for an open-handle false positive and exited 0 — silently
+#     green-lighting a coverage regression. Coverage failures MUST propagate.
+#   - PR #8721 P0 (Sentry r3391661666): exit 124 used to get an early `exit 0`
+#     that bypassed every evidence check. 124 must flow through the same
+#     pipeline as every other code.
+#   - PR #8721 review follow-up: the positive-proof rule ("Test Files ... passed"
+#     required before swallowing) is generalized to EVERY non-zero exit code —
+#     a mid-run kill via OOM SIGKILL (137), segfault (134/139), SIGTERM (143),
+#     or worker crash (1) leaves truncated output with no markers, and the old
+#     lenient path swallowed it green exactly like the 124 class.
+#   - PR #8721 review follow-up (--coverage mode): for the --coverage caller,
+#     the green summary proves only TEST-phase completion — coverage report
+#     generation + threshold adjudication happen after it. In --coverage mode
+#     the gate additionally requires the "Coverage report from" marker before
+#     swallowing, or a kill in that window hides never-adjudicated thresholds.
+# The gate MUST also fail closed when the exit is non-zero but the evidence
+# file is missing/empty.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,9 +39,9 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 
 [ -f "$GATE" ] || { echo "gate script not found: $GATE"; exit 1; }
 
-# Run the gate, capturing its exit code. Usage: run_gate <code> <file>
+# Run the gate, capturing its exit code. Usage: run_gate <code> <file> [--coverage]
 run_gate() {
-  bash "$GATE" "$1" "$2" >/dev/null 2>&1
+  bash "$GATE" "$1" "$2" ${3:+"$3"} >/dev/null 2>&1
   echo $?
 }
 
@@ -87,14 +101,36 @@ ERROR: Uncovered lines (12) exceed "src/math.ts" threshold (10)'
 # ANSI strip, same teeth rationale as ANSI_COVERAGE_OUTPUT above.
 ANSI_TESTFAIL_OUTPUT=$' Test Fi\x1b[31mles  2 fai\x1b[1mled | 118 passed (120)\x1b[0m\n      Tests  3 failed | 1397 passed (1400)'
 
-# Truncated mid-run output: the CI `timeout` wrapper killed vitest BEFORE the
-# "Test Files ..." summary printed. Non-empty, no failure markers — but also no
-# positive proof the run completed. A 124 with this evidence MUST fail closed:
-# absence of failure markers proves nothing when the run never finished.
+# Truncated mid-run output: vitest was killed BEFORE the "Test Files ..."
+# summary printed (timeout 124, OOM SIGKILL 137, segfault 134/139, SIGTERM 143,
+# worker crash 1, ...). Non-empty, no failure markers — but also no positive
+# proof the run completed. ANY non-zero exit with this evidence MUST fail
+# closed: absence of failure markers proves nothing when the run never finished.
 TRUNCATED_OUTPUT=' RUN  v4.1.7 /home/runner/work/project-forge/web
 
  ✓ src/lib/tokens/creditManager.test.ts (12 tests) 34ms
  ✓ src/stores/slices/selectionSlice.test.ts (8 tests) 21ms'
+
+# A --coverage run that completed BOTH phases: green test summary AND the
+# coverage report (vitest prints " % Coverage report from v8" before the table,
+# and threshold adjudication happens right after the report). This is the only
+# evidence strong enough to swallow a non-zero exit in --coverage mode.
+COVERAGE_PASS_OUTPUT=' Test Files  120 passed (120)
+      Tests  1400 passed (1400)
+ % Coverage report from v8
+----------|---------|----------|---------|---------|-------------------
+File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+All files |   75.21 |    64.03 |   70.11 |   76.42 |'
+
+# --coverage-mode open-handle false positive: both phases completed, then the
+# worker failed to exit (vitest#3077). Must still be swallowed in coverage mode.
+COVERAGE_OPENHANDLE_OUTPUT=' Test Files  120 passed (120)
+      Tests  1400 passed (1400)
+ % Coverage report from v8
+----------|---------|----------|---------|---------|-------------------
+All files |   75.21 |    64.03 |   70.11 |   76.42 |
+
+Error: A worker process has failed to exit gracefully'
 
 echo "== check-vitest-exit.sh =="
 
@@ -125,7 +161,11 @@ f="$(mkfile covpf.txt "$COVERAGE_PERFILE_OUTPUT")"
 rc="$(run_gate 1 "$f")"
 if [ "$rc" = "1" ]; then pass "coverage per-file miss → gate 1"; else fail "coverage per-file miss → expected 1, got $rc"; fi
 
-# 6. Open-handle false positive → swallowed (preserve #3077 workaround).
+# 6. Open-handle false positive → swallowed (preserve #3077 workaround). The
+#    fixture contains the green "Test Files ... passed" summary — that POSITIVE
+#    proof of a completed run is what licenses the swallow, not the mere absence
+#    of failure markers (every legitimate vitest#3077 scenario has it: the hang
+#    occurs after the summary prints).
 f="$(mkfile oh.txt "$OPENHANDLE_OUTPUT")"
 rc="$(run_gate 1 "$f")"
 if [ "$rc" = "0" ]; then pass "open-handle noise → gate 0 (workaround preserved)"; else fail "open-handle noise → expected 0, got $rc"; fi
@@ -226,6 +266,79 @@ if [ "$rc" = "124" ]; then pass "124 + empty evidence → gate 124 (fail closed)
 f="$(mkfile to-trunc.txt "$TRUNCATED_OUTPUT")"
 rc="$(run_gate 124 "$f")"
 if [ "$rc" = "124" ]; then pass "124 + truncated evidence → gate 124 (no positive proof)"; else fail "124 + truncated evidence → expected 124, got $rc"; fi
+
+# ── The positive-proof rule applies to EVERY non-zero exit, not just 124
+#    (PR #8721 review follow-up). An OOM SIGKILL (137), a segfault (139, a
+#    documented Node gotcha in this repo), a SIGTERM (143), or a worker crash
+#    (1) kills vitest mid-run exactly like the timeout does — truncated output
+#    with no markers must fail closed for ALL of them, or a killed half-run is
+#    silently green through the lenient path the 124 fix removed. ──────────────
+
+# 22. Fail closed: 137 (OOM SIGKILL) + truncated evidence → propagate 137.
+f="$(mkfile oom-trunc.txt "$TRUNCATED_OUTPUT")"
+rc="$(run_gate 137 "$f")"
+if [ "$rc" = "137" ]; then pass "137 + truncated evidence → gate 137 (no positive proof)"; else fail "137 + truncated evidence → expected 137, got $rc (REGRESSION: OOM-killed half-run swallowed)"; fi
+
+# 23. Fail closed: 139 (segfault) + truncated evidence → propagate 139.
+f="$(mkfile segv-trunc.txt "$TRUNCATED_OUTPUT")"
+rc="$(run_gate 139 "$f")"
+if [ "$rc" = "139" ]; then pass "139 + truncated evidence → gate 139 (no positive proof)"; else fail "139 + truncated evidence → expected 139, got $rc (REGRESSION: segfaulted half-run swallowed)"; fi
+
+# 24. Fail closed: exit 1 (worker crash) + truncated evidence, no markers and no
+#     green summary → propagate. This was the old lenient path (3): it inferred
+#     a green run from marker ABSENCE, the exact inference the 124 fix declared
+#     invalid.
+f="$(mkfile one-trunc.txt "$TRUNCATED_OUTPUT")"
+rc="$(run_gate 1 "$f")"
+if [ "$rc" = "1" ]; then pass "1 + truncated evidence → gate 1 (fail closed, lenient path removed)"; else fail "1 + truncated evidence → expected 1, got $rc (REGRESSION: crashed half-run swallowed)"; fi
+
+# 25. The generalized rule does NOT over-block: 137 AFTER a proven green run
+#     (summary present, open-handle noise) is still the #3077 class → swallowed.
+f="$(mkfile oom-green.txt "$OPENHANDLE_OUTPUT")"
+rc="$(run_gate 137 "$f")"
+if [ "$rc" = "0" ]; then pass "137 + proven green run → gate 0 (workaround preserved)"; else fail "137 + proven green run → expected 0, got $rc"; fi
+
+# ── --coverage mode (PR #8721 review follow-up): the green summary proves the
+#    TEST phase only — coverage report generation + threshold adjudication
+#    happen AFTER it and are the hang-prone tail. Swallowing in this mode also
+#    requires the "Coverage report from" marker, or a kill in that window hides
+#    never-adjudicated thresholds (the ratchet skips silently without
+#    coverage-summary.json). ──────────────────────────────────────────────────
+
+# 26. Coverage mode fail closed: 124 + green summary but NO coverage report →
+#     thresholds were never adjudicated → propagate.
+f="$(mkfile cov-mode-nocov.txt "$PASS_OUTPUT")"
+rc="$(run_gate 124 "$f" --coverage)"
+if [ "$rc" = "124" ]; then pass "--coverage: 124 + green tests, no coverage report → gate 124 (thresholds never adjudicated)"; else fail "--coverage: 124 + green tests, no coverage report → expected 124, got $rc (REGRESSION: unadjudicated coverage swallowed)"; fi
+
+# 27. Coverage mode swallow: 124 + green summary + coverage report marker →
+#     both phases proven complete → gate 0 (#3077 workaround intact).
+f="$(mkfile cov-mode-full.txt "$COVERAGE_PASS_OUTPUT")"
+rc="$(run_gate 124 "$f" --coverage)"
+if [ "$rc" = "0" ]; then pass "--coverage: 124 + green tests + coverage report → gate 0"; else fail "--coverage: 124 + green tests + coverage report → expected 0, got $rc"; fi
+
+# 28. Coverage mode swallow: exit 1 open-handle noise after BOTH phases → gate 0.
+f="$(mkfile cov-mode-oh.txt "$COVERAGE_OPENHANDLE_OUTPUT")"
+rc="$(run_gate 1 "$f" --coverage)"
+if [ "$rc" = "0" ]; then pass "--coverage: 1 + both phases complete + open-handle noise → gate 0"; else fail "--coverage: 1 + both phases + noise → expected 0, got $rc"; fi
+
+# 29. Coverage mode fail closed: exit 1 + green summary, no coverage report →
+#     propagate (same window as case 26, non-timeout code).
+f="$(mkfile cov-mode-one.txt "$PASS_OUTPUT")"
+rc="$(run_gate 1 "$f" --coverage)"
+if [ "$rc" = "1" ]; then pass "--coverage: 1 + green tests, no coverage report → gate 1"; else fail "--coverage: 1 + green tests, no coverage report → expected 1, got $rc"; fi
+
+# 30. Coverage mode still propagates a threshold failure (marker check (2) runs
+#     before the mode logic — the mode must never weaken it).
+f="$(mkfile cov-mode-miss.txt "$COVERAGE_GLOBAL_OUTPUT")"
+rc="$(run_gate 1 "$f" --coverage)"
+if [ "$rc" = "1" ]; then pass "--coverage: threshold miss → gate 1 (mode does not weaken #8598 fix)"; else fail "--coverage: threshold miss → expected 1, got $rc"; fi
+
+# 31. Usage error: unknown third arg (misconfigured call site) → exit 2, never a
+#     silent behavior change.
+f="$(mkfile badflag.txt "$PASS_OUTPUT")"
+bash "$GATE" 1 "$f" "--coverag" >/dev/null 2>&1; rc=$?
+if [ "$rc" = "2" ]; then pass "unknown third arg → exit 2 (usage)"; else fail "unknown third arg → expected 2, got $rc"; fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then

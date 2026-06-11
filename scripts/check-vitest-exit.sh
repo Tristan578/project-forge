@@ -3,26 +3,35 @@
 # failure or the known vitest#3077 open-handle false positive.
 #
 # Single source of truth for the exit-code workaround used by BOTH
-# .github/workflows/quality-gates.yml (vitest --coverage) and
-# .github/workflows/cd.yml (vitest). Keeping it in one tested script stops the
-# two inline copies from drifting and — the reason this script exists (#8598) —
-# stops a COVERAGE-THRESHOLD failure from being silently swallowed.
+# .github/workflows/quality-gates.yml (vitest --coverage, invoked with the
+# --coverage mode flag) and .github/workflows/cd.yml (vitest). Keeping it in
+# one tested script stops the two inline copies from drifting and — the reason
+# this script exists (#8598) — stops a COVERAGE-THRESHOLD failure from being
+# silently swallowed.
 #
 # vitest exits non-zero in four distinct situations:
 #   1. A test actually failed              → summary has "Test Files ... failed"
 #   2. A coverage threshold was not met    → one of vitest's two threshold-failure
 #                                            forms (see below), but NO
 #                                            "Test Files ... failed" line
-#   3. Open handles after a green run      → non-zero exit, neither marker present
-#   4. The CI `timeout` wrapper killed it  → exit 124; the run may have hung
-#                                            during cleanup AFTER passing
-#                                            (vitest#3077) OR been killed mid-run
-#                                            with failures already on record
-# Only (3), and (4) when the evidence proves a fully passing run, are false
-# positives. (1) and (2) MUST propagate — INCLUDING when the exit code is 124.
-# An early `exit 0` on 124 used to bypass every evidence check below, silently
-# green-lighting timed-out runs that also failed tests or coverage thresholds
-# (PR #8721 P0, Sentry r3391661666).
+#   3. The process died/hung AFTER a green run → open handles (vitest#3077) or a
+#                                            late kill (e.g. the CI `timeout`
+#                                            wrapper, exit 124); the
+#                                            "Test Files ... passed" summary IS
+#                                            present in the output
+#   4. The process died MID-RUN            → killed before the summary printed:
+#                                            timeout (124), OOM SIGKILL (137),
+#                                            V8 abort/segfault (134/139),
+#                                            SIGTERM (143), worker crash (1), …
+#                                            Output is truncated — no summary.
+# Only (3) is a false positive. (1) and (2) MUST propagate regardless of the
+# exit code. (4) MUST fail closed: when the run never finished, the ABSENCE of
+# failure markers proves nothing, so swallowing requires POSITIVE evidence of a
+# completed passing run — the "Test Files ... passed" summary. That rule applies
+# to EVERY non-zero exit code, not just 124: an early `exit 0` on 124 used to
+# bypass every evidence check (PR #8721 P0, Sentry r3391661666), and the same
+# silent-green class remained open for 137/139/143/1 with truncated output
+# until the positive-proof rule was generalized (review of PR #8721).
 #
 # vitest emits the coverage-threshold failure in TWO forms (vitest source
 # coverage chunk; verified against 4.1.7), and BOTH must be caught or the gate
@@ -31,8 +40,16 @@
 #   B. negative (max-uncovered) threshold: "ERROR: Uncovered statements (33) exceed global threshold (30)"
 # Per-file variants substitute "\"path\" threshold" for "global threshold".
 #
-# Usage: check-vitest-exit.sh <vitest_exit_code> <output_file>
+# Usage: check-vitest-exit.sh <vitest_exit_code> <output_file> [--coverage]
 #   <output_file> is the captured (tee'd) combined stdout+stderr of the run.
+#   --coverage: the caller ran `vitest run --coverage` (quality-gates.yml). The
+#     "Test Files ... passed" summary then proves only that the TEST phase
+#     completed — coverage report generation and threshold adjudication happen
+#     AFTER the summary prints, and are the slow (hang-prone) tail of the run.
+#     In this mode, swallowing additionally requires the coverage-report marker
+#     ("Coverage report from ...") as positive proof that coverage was produced
+#     and adjudicated before the process died; otherwise a kill in that window
+#     would swallow never-adjudicated thresholds.
 # Exit: 0 = treat as success; the original code = real failure; 2 = usage error.
 #
 # Fail-closed contract: if the exit code is non-zero and the evidence file is
@@ -41,21 +58,28 @@
 set -uo pipefail
 
 usage() {
-  echo "usage: $(basename "$0") <vitest_exit_code> <output_file>" >&2
+  echo "usage: $(basename "$0") <vitest_exit_code> <output_file> [--coverage]" >&2
   exit 2
 }
 
-[ "$#" -eq 2 ] || usage
+[ "$#" -eq 2 ] || [ "$#" -eq 3 ] || usage
 EXIT_CODE="$1"
 OUTPUT_FILE="$2"
+COVERAGE_MODE=0
+if [ "$#" -eq 3 ]; then
+  # Only the exact mode flag is valid — anything else is a misconfigured call
+  # site and must surface as a usage error, never silently change behavior.
+  [ "$3" = "--coverage" ] || usage
+  COVERAGE_MODE=1
+fi
 
 # Exit code must be a non-negative integer.
 case "$EXIT_CODE" in
   ''|*[!0-9]*) usage ;;
 esac
 
-# NOTE: 124 (`timeout` kill) deliberately gets NO early exit — it must flow
-# through the same evidence checks as every other non-zero code. See header.
+# NOTE: no exit code gets an early exit — every non-zero code (124, 137, 139,
+# 143, 1, …) flows through the same evidence checks below. See header.
 
 # Clean exit — nothing to adjudicate.
 if [ "$EXIT_CODE" -eq 0 ]; then
@@ -68,7 +92,7 @@ if [ ! -s "$OUTPUT_FILE" ]; then
   exit "$EXIT_CODE"
 fi
 
-# Strip ANSI color codes once; both markers can be colorized by vitest.
+# Strip ANSI color codes once; the markers below can be colorized by vitest.
 CLEAN="$(sed 's/\x1b\[[0-9;]*m//g' "$OUTPUT_FILE")"
 
 # (1) A test actually failed → propagate.
@@ -87,21 +111,36 @@ if printf '%s\n' "$CLEAN" \
   exit "$EXIT_CODE"
 fi
 
-# (4) Exit 124 with neither failure marker: the `timeout` wrapper can kill
-#     vitest BEFORE the summary prints, so for 124 the ABSENCE of failure
-#     markers proves nothing. Swallowing a timeout requires POSITIVE evidence
-#     of a completed passing run — the "Test Files ... passed" summary. Any
-#     "Test Files ... failed" line was already propagated above, so a match
-#     here can only be a fully green summary. Without it, fail closed.
-if [ "$EXIT_CODE" -eq 124 ]; then
-  if printf '%s\n' "$CLEAN" | grep -qE "Test Files.*passed"; then
-    echo "::warning::vitest was killed by the timeout wrapper after a fully passing run — likely hung during cleanup (vitest#3077)"
-    exit 0
-  fi
-  echo "::error::vitest was killed by the timeout wrapper (exit 124) and the captured output shows no completed passing run — failing closed (cannot prove the vitest#3077 false positive)"
+# (4) No failure markers — but that alone is NOT enough to swallow: any abnormal
+#     termination (timeout 124, OOM SIGKILL 137, segfault 134/139, SIGTERM 143,
+#     worker crash 1, …) can kill vitest BEFORE the summary prints, so for a
+#     truncated run the absence of failure markers proves nothing. Swallowing
+#     requires POSITIVE evidence of a completed passing run — the
+#     "Test Files ... passed" summary. Any "Test Files ... failed" line was
+#     already propagated above, so a match here can only be a fully green
+#     summary. Without it, fail closed.
+if ! printf '%s\n' "$CLEAN" | grep -qE "Test Files.*passed"; then
+  echo "::error::vitest exited with code $EXIT_CODE and the captured output shows no completed passing run — failing closed (likely killed mid-run; cannot prove the vitest#3077 false positive)"
   exit "$EXIT_CODE"
 fi
 
-# (3) Neither marker → assume the vitest#3077 open-handle false positive.
-echo "::warning::vitest exited with code $EXIT_CODE but no test failures or coverage-threshold failures detected — likely open handle issue (vitest#3077)"
+# (--coverage mode) The green summary proves the TEST phase completed, but
+# coverage report generation + threshold adjudication happen AFTER it and are
+# the hang-prone tail of the run. Require the coverage-report marker too — a
+# kill in that window means the thresholds were never adjudicated, and nothing
+# downstream catches it (the coverage ratchet skips with a warning when
+# coverage-summary.json is absent).
+if [ "$COVERAGE_MODE" -eq 1 ] \
+  && ! printf '%s\n' "$CLEAN" | grep -qiE "coverage report from"; then
+  echo "::error::vitest exited with code $EXIT_CODE after a passing test run but BEFORE the coverage report was produced — coverage thresholds were never adjudicated; failing closed"
+  exit "$EXIT_CODE"
+fi
+
+# (3) Proven completed passing run with no threshold failures → the vitest#3077
+#     false positive (open handles / hang after green). Safe to swallow.
+if [ "$EXIT_CODE" -eq 124 ]; then
+  echo "::warning::vitest was killed by the timeout wrapper after a fully passing run — likely hung during cleanup (vitest#3077)"
+else
+  echo "::warning::vitest exited with code $EXIT_CODE after a fully passing run with no coverage-threshold failures — likely open handle noise (vitest#3077)"
+fi
 exit 0
