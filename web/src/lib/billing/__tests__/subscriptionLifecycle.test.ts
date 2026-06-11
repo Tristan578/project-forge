@@ -80,11 +80,22 @@ describe('subscription-lifecycle', () => {
       mockSelectWhere.mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) });
       await expect(handleSubscriptionDeleted('cus_gone', 'sub_gone')).resolves.toBeUndefined();
       expect(mockNeonTransaction).not.toHaveBeenCalled();
+      expect(mockNeonSqlCalls).toHaveLength(0);
     });
 
-    it('wraps tier revert in neonSql.transaction (PF-77)', async () => {
+    it('reverts the tier in one neonSql statement, never db.transaction (PF-77, #8712)', async () => {
       await handleSubscriptionDeleted('cus_abc', 'sub_abc');
-      expect(mockNeonTransaction).toHaveBeenCalledOnce();
+
+      // STRUCTURE ONLY. This mock suite proves the call SHAPE: a single atomic
+      // neonSql tagged-template statement (a lone SQL statement is inherently
+      // atomic — no transaction array needed) and never the broken
+      // db.transaction(). It deliberately does NOT assert SQL substrings — that
+      // would only prove the source contains certain literals, not that the
+      // handler behaves. The audit-arbitrated reset and the tier-independent
+      // `cancellation:%` idempotency anchor (#8712) are verified behaviourally,
+      // against real Postgres, in subscriptionLifecycle.db.test.ts.
+      expect(mockNeonTransaction).not.toHaveBeenCalled();
+      expect(mockNeonSqlCalls).toHaveLength(1);
     });
   });
 
