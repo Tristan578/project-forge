@@ -232,6 +232,18 @@ describe('resolveApiKey - platform key', () => {
     await expect(resolveApiKey('user-1', 'meshy', 10, 'texture_generation')).rejects.toThrow('Platform key not configured');
   });
 
+  it('does NOT deduct tokens when the platform key is missing (#8597)', async () => {
+    // Regression: previously deductTokens ran BEFORE getPlatformKey, so a
+    // missing platform key (server misconfig) charged the user and then threw
+    // with no refund — silent paid-token loss. The key must be resolved before
+    // any deduction so a missing key costs nothing.
+    delete process.env['PLATFORM_MESHY_KEY'];
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValue({ success: true, remaining: { monthlyRemaining: 50, monthlyTotal: 3000, addon: 0, total: 50, nextRefillDate: null }, usageId: 'u-leak' });
+    await expect(resolveApiKey('user-1', 'meshy', 10, 'texture_generation')).rejects.toThrow('Platform key not configured');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
   it('throws when user is not found in DB', async () => {
     wireDb([], []); // no user returned
     await expect(resolveApiKey('user-1', 'meshy', 50, 'texture_generation')).rejects.toThrow('User not found');

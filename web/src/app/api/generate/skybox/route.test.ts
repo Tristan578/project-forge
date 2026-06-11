@@ -132,7 +132,8 @@ describe('POST /api/generate/skybox', () => {
     const res = await POST(makeRequest({ prompt: 'sunset sky' }));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Meshy API down');
+    expect(data.error).toBe('Generation failed due to a server error. Please try again later.');
+    expect(data.error).not.toContain('Meshy');
   });
 
   it('calls refundTokens when provider throws and usageId exists', async () => {

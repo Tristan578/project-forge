@@ -5,7 +5,7 @@
 **No code changes without a ticket.** This rule has no exceptions.
 
 Before writing ANY code:
-1. Ensure taskboard is running (auto-started by hooks, or: `taskboard start --port 3010 --db .claude/taskboard.db`)
+1. Ensure taskboard is running (auto-started by hooks, or: `taskboard start --port 3010`)
 2. Check the board for existing work
 3. Pick an existing ticket OR create a new one with ALL required fields
 4. Move the ticket to `in_progress`
@@ -28,7 +28,7 @@ Place in: `../taskboard/`, `~/.local/bin/`, `/usr/local/bin/`, or PATH.
 - **Description**: Technical context, affected files, scope (at least 20 chars beyond user story + AC)
 - **Acceptance Criteria**: Given/When/Then format — **minimum 3 scenarios** (happy path, edge case, negative/error case)
 - **Priority**: urgent, high, medium, low
-- **Team**: Engineering (`01KK9751NZ4HM7VQM0AQ5WGME3`), PM (`01KK9751P7GKQYG9TZ96XXQCFN`), Leadership (`01KK9751PD79RCWY462CYQ06CW`)
+- **Team**: Engineering (`01KMR5E36TP59PRQA8GQEWJVM1`), PM (`01KMR5E3852BWXAZ219W47CSKS`)
 - **Subtasks**: At least 3 implementation steps
 
 ## GitHub Project Sync (v3 Architecture)

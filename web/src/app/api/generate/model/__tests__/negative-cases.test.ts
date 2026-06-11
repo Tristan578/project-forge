@@ -227,7 +227,8 @@ describe('POST /api/generate/model — negative cases', () => {
       const res = await POST(makeRequest({ prompt: 'slow model', mode: 'text-to-3d' }));
       expect(res.status).toBe(500);
       const body = await res.json();
-      expect(body.error).toContain('timeout');
+      expect(body.error).toBe('Generation failed due to a server error. Please try again later.');
+      expect(body.error).not.toContain('timeout');
     });
 
     it('captures exception with route context on provider error', async () => {
@@ -250,7 +251,8 @@ describe('POST /api/generate/model — negative cases', () => {
       }));
       expect(res.status).toBe(500);
       const body = await res.json();
-      expect(body.error).toContain('Image processing failed');
+      expect(body.error).toBe('Generation failed due to a server error. Please try again later.');
+      expect(body.error).not.toContain('Image processing');
     });
   });
 

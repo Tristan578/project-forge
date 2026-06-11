@@ -78,11 +78,11 @@ All work requires a ticket before any code is written. The taskboard is the sing
 
 ```bash
 # Start the taskboard server (auto-started by Claude Code hooks)
-taskboard start --port 3010 --db .claude/taskboard.db
+taskboard start --port 3010
 ```
 
 - Web UI: http://localhost:3010
-- Project ID: `01KK974VMNC16ZAW7MW1NH3T3M`
+- Project ID: `01KMM9ZA6SBZ7RKJZJTZS9VR4R`
 
 Pick an existing ticket or create one. Every ticket requires a user story, acceptance criteria (Given/When/Then), priority, and team assignment. See `.claude/CLAUDE.md` for the full ticket template.
 
@@ -239,6 +239,87 @@ It enforces 7 rules: bridge isolation, Rust file size (800 lines), TypeScript fi
 
 ---
 
+## Maintaining onboarding facts (maintainers)
+
+Onboarding facts — the taskboard project/team IDs, the taskboard start command,
+the coverage thresholds, the pinned tool versions — appear in *many*
+contributor-facing files so that a contributor on **any** assistant (Claude,
+Codex, Gemini, Copilot, Cursor, Windsurf, Antigravity) gets the same answer. When
+one of those facts changes (most often: the taskboard IDs get rotated, or the
+board's start command changes), update it in this order so the two CI gates stay
+green and no surface drifts.
+
+### 1. Edit the canonical source
+
+`tools/agentic-sync/canonical.json` is the single source of truth for the synced
+facts. Change the value there — e.g. under `facts.taskboard` (`projectId`, the
+`teams` map, `startCommand`, `apiBaseUrl`) or `facts.coverageThresholds`.
+
+> The taskboard has exactly two teams — **Engineering** and **PM**. There is no
+> "Leadership" team; never reintroduce one.
+
+### 2. Regenerate the synced targets
+
+```bash
+node tools/agentic-sync/sync.mjs --write
+```
+
+This rewrites the marker-delimited `<!-- AGENTIC-SYNC:START -->…END -->` block in
+the **four** generated targets — `AGENTS.md`, `.github/copilot-instructions.md`,
+`.codex/AGENTS.md`, and `.cursorrules` — from `canonical.json`. Never hand-edit
+the text *inside* those markers; the generator owns it and CI re-checks it
+(`node tools/agentic-sync/sync.mjs --check`).
+
+### 3. Hand-update the surfaces the generator can't reach
+
+The generator only manages the marker block in those four files. The same fact
+embedded **outside** a marker block — inline in a `curl` example, a markdown table
+row, a code fence, or a non-target provider file — must be grep-replaced by hand:
+
+```bash
+# Find every place the OLD id / command still appears, then fix each:
+grep -rnI --exclude-dir=.git --exclude-dir=node_modules '<OLD_VALUE>' .
+```
+
+Typical hand-edit homes (the project ID in particular recurs in `curl` examples):
+
+- Provider rule/skill dirs: `.windsurf/`, `.agent/`, `.agents/`,
+  `.github/instructions/`, `.github/skills/` (e.g. `kanban/SKILL.md`),
+  `.codex/skills/` (e.g. `kanban/SKILL.md`), and `.claude/` skills/rules.
+- Repo docs: `README.md`, this file (`CONTRIBUTING.md`), and `docs/`.
+
+> **`GEMINI.md` needs no hand-edit for the synced facts.** It pulls them in with
+> an `@AGENTS.md` import directive rather than copying them, so regenerating
+> `AGENTS.md` in step 2 propagates to Gemini automatically. That import is exactly
+> why `GEMINI.md` is *not* a fifth `sync.mjs` target — there is nothing inside it
+> to keep in sync. Only hand-edit `GEMINI.md` if you change its prose pointers.
+
+### 4. Let the gates catch what you missed
+
+Two required CI gates enforce this so a missed surface fails the PR instead of
+silently onboarding the next contributor against a broken board:
+
+- **`agentic-sync`** — re-runs `sync.mjs --check`; fails if any of the four
+  generated targets drifts from `canonical.json`. Fix: re-run step 2 and commit.
+- **`taskboard-onboarding-guard`** (`scripts/check-taskboard-onboarding-hygiene.sh`)
+  — greps the **whole tree** and fails on a known-dead taskboard ULID *or* a
+  taskboard start command carrying the forbidden `--db` flag (which points the
+  board at a throwaway local `.claude/taskboard.db` copy and shows zero tickets —
+  always use `taskboard start --port 3010`, letting it use the OS-default DB
+  path). Both gates are wired into the required **CI Success** aggregate.
+
+### Allowlisted homes for retired IDs
+
+A retired ID may legitimately survive in exactly two places, and nowhere else:
+
+1. `docs/reviews/2026-06-02-agentic-toolkit-parity-review.md` — the parity review
+   that documents the rotation, quoting the dead IDs as its finding.
+2. `legacyProjectIds` in `.claude/hooks/github-sync-config.json` — the
+   intentional old→new project-id mapping. Only a dead **project** id is allowed
+   there; a dead **team** id has no legacy home and still trips the guard.
+
+---
+
 ## Deeper Reference
 
 | Document | Contents |
@@ -246,6 +327,7 @@ It enforces 7 rules: bridge isolation, Rust file size (800 lines), TypeScript fi
 | [README.md](README.md) | Feature overview, project structure, tech stack |
 | [TESTING.md](TESTING.md) | Manual test cases for all shipped features |
 | [.claude/CLAUDE.md](.claude/CLAUDE.md) | Full project constitution: architecture rules, workflow rules, phase roadmap, component checklist |
+| [.claude/SANDBOX.md](.claude/SANDBOX.md) | Agent permission posture: what is auto-approved, the two off-limits config files (and why), how a human changes them |
 | [.claude/rules/bevy-api.md](.claude/rules/bevy-api.md) | Bevy 0.18 API patterns, 0.16→0.18 migration notes |
 | [.claude/rules/entity-snapshot.md](.claude/rules/entity-snapshot.md) | EntityType, EntitySnapshot, history system |
 | [.claude/rules/web-quality.md](.claude/rules/web-quality.md) | ESLint rules, React patterns, Next.js constraints |

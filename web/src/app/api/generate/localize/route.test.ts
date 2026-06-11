@@ -269,7 +269,8 @@ describe('POST /api/generate/localize', () => {
     const res = await POST(makeRequest(validBody));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Anthropic API error');
+    expect(data.error).toBe('Generation failed due to a server error. Please try again later.');
+    expect(data.error).not.toContain('Anthropic');
     expect(refundTokens).toHaveBeenCalledWith('user-1', 'usage-abc');
     expect(captureException).toHaveBeenCalled();
   });
@@ -295,6 +296,7 @@ describe('POST /api/generate/localize', () => {
     const body = await res.json();
 
     expect(res.status).toBe(500);
-    expect(body.error).toBe('DB connection failed');
+    expect(body.error).toBe('Generation failed due to a server error. Please try again later.');
+    expect(body.error).not.toContain('DB connection');
   });
 });

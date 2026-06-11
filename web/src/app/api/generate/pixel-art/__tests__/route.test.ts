@@ -183,7 +183,8 @@ describe('POST /api/generate/pixel-art', () => {
     const res = await POST(makeRequest(validBody));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toContain('Replicate API error 503');
+    expect(data.error).toBe('Generation failed due to a server error. Please try again later.');
+    expect(data.error).not.toContain('Replicate');
     // Tokens must be refunded when provider fails
     expect(mockRefundTokens).toHaveBeenCalledWith('user-123', 'usage-abc');
   });

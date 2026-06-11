@@ -4,6 +4,19 @@
 
 import { injectLoopGuards } from './loopGuards';
 import { SHADOWED_GLOBALS } from './sandboxGlobals';
+import { revokeNetworkGlobalsIfWorker } from './revokeNetworkGlobals';
+
+// Hard-revoke network/storage globals from this worker's scope BEFORE any user
+// script is compiled or run. Parameter shadowing (SHADOWED_GLOBALS) only hides
+// the *names*; the documented constructor-chain escape
+// `(0).constructor.constructor('return fetch')()` reaches the real global
+// `fetch`. Removing the capability itself makes that escape resolve to
+// undefined. The worker uses none of these APIs (it only postMessages back to
+// the main thread), so this is safe. The `IfWorker` guard ensures this only
+// fires inside a real WorkerGlobalScope — importing this module under a test
+// runner (jsdom/node) is a no-op, so it never locks the shared test global.
+// See revokeNetworkGlobals.ts (#8607).
+revokeNetworkGlobalsIfWorker();
 
 interface ScriptInstance {
   entityId: string;

@@ -9,7 +9,7 @@
 
 These rules are enforced across ALL AI tools. Violations break the shared workflow.
 
-1. **No code without a ticket.** Check taskboard at http://localhost:3010 first. Create or pick a ticket, move to `in_progress`, then code.
+1. **No code without a ticket.** Check the taskboard first — its URL and project/team IDs are in the **Canonical Project Facts** block imported from `AGENTS.md` (above), so they stay in sync from one source. Create or pick a ticket, move to `in_progress`, then code.
 2. **Worktree commit safety.** When in a git worktree, commit after every logical chunk (each test, feature, bug fix). Rate limits and crashes kill agents — uncommitted work is permanently lost.
 3. **CI must pass.** All PRs require passing CI before merge. Never skip checks or force-merge. Fix failures in code.
 4. **Zero ESLint warnings.** `npx eslint --max-warnings 0` is enforced in CI. Fix warnings immediately.

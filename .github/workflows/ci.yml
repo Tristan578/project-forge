@@ -33,6 +33,10 @@ jobs:
       needs-design: ${{ steps.changes.outputs.design }}
       needs-hooks: ${{ steps.changes.outputs.hooks }}
       needs-deps: ${{ steps.changes.outputs.deps }}
+      needs-agentic: ${{ steps.changes.outputs.agentic }}
+      needs-onboarding: ${{ steps.changes.outputs.onboarding }}
+      needs-codex: ${{ steps.changes.outputs.codex }}
+      needs-ghaw: ${{ steps.changes.outputs.ghaw }}
       needs-any-code: ${{ steps.changes.outputs.any-code }}
     steps:
       - uses: actions/checkout@v6
@@ -47,7 +51,7 @@ jobs:
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
-          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false
+          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false
 
           echo "$CHANGED" | grep -q '^web/' && web=true
           echo "$CHANGED" | grep -q '^engine/' && engine=true
@@ -55,17 +59,66 @@ jobs:
           echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
           echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && docs=true
           echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
-          # Claude Code hook scripts + their self-contained bash test suites.
-          # Kept OUT of `ci` and any-code on purpose: a hook change must trigger
-          # ONLY the lightweight hook-tests job, never the heavy quality-gates
-          # fan-out (lint/typecheck/test-web/test-mcp/build-wasm).
-          echo "$CHANGED" | grep -qE '^\.claude/hooks/' && hooks=true
+          # Claude Code hook scripts + their self-contained bash test suites,
+          # plus .claude/settings.json (the committed permissions posture, which
+          # settings-permissions.test.sh validates). Kept OUT of `ci` and
+          # any-code on purpose: a hook/settings change never fires the heavy
+          # quality-gates fan-out (lint/typecheck/test-web/test-mcp/build-wasm).
+          # It does fire hook-tests (this output) AND — because the `onboarding`
+          # matcher below also lists `^\.claude/` — the lightweight
+          # onboarding-guard + lockfile-sync-tests self-tests. All three are fast,
+          # self-contained checks; the fan-out is what stays gated off.
+          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$' && hooks=true
           # Any package.json at ANY depth (web/, mcp-server/, apps/*, packages/*,
           # root) or the single root lockfile → run the lockfile-sync gate. Kept
           # ORTHOGONAL to any-code (like hooks): the gate is a ~30s self-contained
           # check, so a manifest-only change pays only this gate, not the full
           # quality-gates fan-out.
           echo "$CHANGED" | grep -qE '(^|/)package\.json$|^package-lock\.json$' && deps=true
+          # Cross-provider agentic-config drift gate (scripts/check-agentic-sync.sh).
+          # Fires on the single source of truth (tools/agentic-sync/), the
+          # per-provider instruction files it injects facts into, the gate script
+          # itself, or the cross-provider DX-audit tool that delegates to the gate
+          # (.claude/tools/dx-audit.sh + its contract test). Kept ORTHOGONAL to
+          # any-code (like hooks/deps): an instruction-file-only edit pays only this
+          # ~5s check, never the heavy quality-gates fan-out. (check-agentic-sync.sh
+          # also matches `ci` above, which is fine — editing a gate script warrants
+          # the wider run; .claude/tools/dx-audit.sh matches neither ci nor hooks,
+          # so wiring it here is what makes its contract test run at all.)
+          echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$' && agentic=true
+          # Taskboard onboarding-hygiene tripwire (scripts/check-taskboard-onboarding-hygiene.sh).
+          # Fires whenever a CONTRIBUTOR-FACING ONBOARDING SURFACE changes — the
+          # surfaces where a rotated taskboard project/team ULID or a forbidden
+          # `--db` start command has historically been copy-pasted and which the
+          # agentic-sync generator's marker injection cannot reach: every provider
+          # instruction dir (.claude .codex .gemini .github .windsurf .agent .agents),
+          # the root instruction/onboarding docs (AGENTS.md GEMINI.md .cursorrules
+          # README CONTRIBUTING), docs/, the canonical source of truth, and the
+          # tripwire's own files. Kept ORTHOGONAL to any-code (like hooks/deps/
+          # agentic): a docs-only onboarding edit pays only this ~1s, zero-dep,
+          # read-only grep, never the heavy quality-gates fan-out. (The threat model
+          # from the parity review is onboarding surfaces specifically; a dead ID in
+          # a non-onboarding file is still caught on any PR that also touches one of
+          # these surfaces or a gate script.)
+          echo "$CHANGED" | grep -qE '^README\.md$|^CONTRIBUTING\.md$|^AGENTS\.md$|^GEMINI\.md$|^\.cursorrules$|^\.claude/|^\.codex/|^\.gemini/|^\.github/|^\.windsurf/|^\.agent/|^\.agents/|^docs/|^tools/agentic-sync/|^scripts/check-taskboard-onboarding-hygiene\.sh$|^scripts/__tests__/check-taskboard-onboarding-hygiene\.test\.sh$' && onboarding=true
+          # Codex permissive-profile guard (scripts/check-codex-config-safety.sh).
+          # Fires ONLY on the committed Codex config under test or the guard/its
+          # test — a ~1s, zero-dep, read-only `git show HEAD:` check. Kept
+          # ORTHOGONAL to any-code (like hooks/deps/agentic/onboarding): a
+          # config-only edit pays only this guard, never the heavy fan-out. The
+          # guard reads the COMMITTED blob, so it asserts "is the profile being
+          # merged permissive?" rather than inspecting the working tree.
+          echo "$CHANGED" | grep -qE '^\.codex/config\.toml$|^scripts/check-codex-config-safety\.sh$|^scripts/__tests__/check-codex-config-safety\.test\.sh$' && codex=true
+          # gh-aw lock-drift gate (scripts/check-ghaw-lock-sync.sh). Fires on a
+          # gh-aw workflow SOURCE (.github/workflows/*.md), its generated sibling
+          # (.github/workflows/*.lock.yml), the SHA-pinned action manifest the
+          # compiler injects from (.github/aw/), or the guard/its test. An action-pin
+          # bump under .github/aw/ drifts the locks with no .md edit, so it MUST be a
+          # trigger surface. These paths also set `ci` (^\.github/workflows/) and/or
+          # `onboarding` (^\.github/), so needs-ghaw ⟹ (needs-ci ∨ needs-onboarding) —
+          # which is what lets the gate's self-test ride the lockfile-sync-tests job
+          # without widening that job's if:.
+          echo "$CHANGED" | grep -qE '^\.github/workflows/.*\.md$|^\.github/workflows/.*\.lock\.yml$|^\.github/aw/|^scripts/check-ghaw-lock-sync\.sh$|^scripts/get-ghaw-compiler-version\.sh$|^scripts/__tests__/check-ghaw-lock-sync\.test\.sh$' && ghaw=true
 
           any_code=false
           if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] || [ "$design" = "true" ]; then
@@ -81,11 +134,15 @@ jobs:
             echo "design=$design"
             echo "hooks=$hooks"
             echo "deps=$deps"
+            echo "agentic=$agentic"
+            echo "onboarding=$onboarding"
+            echo "codex=$codex"
+            echo "ghaw=$ghaw"
             echo "any-code=$any_code"
           } >> "$GITHUB_OUTPUT"
 
           echo "Changed paths detected:"
-          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps any-code=$any_code"
+          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw any-code=$any_code"
           if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ]; then
             echo "No relevant changes — downstream jobs will be skipped"
           fi
@@ -264,15 +321,20 @@ jobs:
 
       - name: Shellcheck the hooks owned by this change
         run: |
-          # Scope shellcheck to the hardened review hooks + their tests only.
+          # Scope shellcheck to the hooks this gate owns + their tests: the
+          # hardened review-loop hooks and the auto-approve permission gate.
           # The wider .claude/hooks/ tree carries pre-existing findings tracked
           # separately (see .claude/rules/agent-operations.md §12) — linting all
-          # of it here would fail this gate on unrelated, untouched debt.
+          # of it here would fail this gate on unrelated, untouched debt. Newly
+          # added or edited hooks MUST be shellcheck-clean, so they go here.
           shellcheck \
             .claude/hooks/reject-incomplete-review.sh \
             .claude/hooks/review-quality-gate.sh \
+            .claude/hooks/auto-approve-safe-commands.sh \
             .claude/hooks/__tests__/reject-incomplete-review.test.sh \
-            .claude/hooks/__tests__/review-quality-gate.test.sh
+            .claude/hooks/__tests__/review-quality-gate.test.sh \
+            .claude/hooks/__tests__/auto-approve-safe-commands.test.sh \
+            .claude/hooks/__tests__/settings-permissions.test.sh
 
   # ---- Lockfile Sync ----
   # Runs when any package.json (at any depth) or the root package-lock.json
@@ -307,6 +369,172 @@ jobs:
       - name: Check root lockfile is in sync with the manifests
         run: bash scripts/check-lockfile-sync.sh
 
+  # ---- Agentic Config Sync ----
+  # Runs when the single source of truth (tools/agentic-sync/canonical.json), the
+  # generator, the per-provider instruction files it injects facts into
+  # (AGENTS.md, .github/copilot-instructions.md, .codex/AGENTS.md, .cursorrules),
+  # or the gate script change. Re-runs the generator in --check mode and fails the
+  # PR if any provider file drifted from the source — so a stale taskboard Project
+  # ID, a dead team ID, or a forbidden `--db` start command can never be
+  # hand-mirrored into a non-Claude contributor's onboarding file again. Decision
+  # logic lives in scripts/check-agentic-sync.sh + tools/agentic-sync/sync.mjs
+  # (unit-tested by the CI Self-Defense Tests job below).
+  #
+  # Gated on its own `agentic` output (NOT any-code) so an instruction-file-only
+  # PR pays only this ~5s gate. Wired into ci-success below so it is REQUIRED when
+  # it runs yet skips cleanly when no agentic-config file is touched. The generator
+  # is zero-dependency (node: builtins only), so no `npm ci` is needed.
+  agentic-sync:
+    name: Agentic Config Sync
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-agentic == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+
+      - name: Check provider instruction files are in sync with canonical.json
+        run: bash scripts/check-agentic-sync.sh
+
+  # ---- Taskboard Onboarding Hygiene ----
+  # The negative guard the parity review called for: greps the WHOLE tree and
+  # fails the PR if a stale taskboard onboarding FACT the agentic-sync generator
+  # cannot reach reappears anywhere —
+  #   (1) a rotated/dead project or team ULID (404s; the board-summary hook
+  #       silently filtered to a dead project and reported zero work), or
+  #   (2) a forbidden `--db .claude/taskboard.db` flag passed to `taskboard start`
+  #       (creates an EMPTY local DB → the board shows 0 tickets).
+  # The generator keeps the canonical FACTS BLOCK in sync across the 4 primary
+  # onboarding files, but it cannot reach a fact embedded inline in a curl
+  # command, a markdown table row, a code fence, or a non-target provider file
+  # (.windsurf, .agent, .agents). This tripwire closes that gap. Decision logic +
+  # the two-home allowlist (the parity-review doc; legacyProjectIds in
+  # github-sync-config.json) live in scripts/check-taskboard-onboarding-hygiene.sh
+  # (unit-tested by the CI Self-Defense Tests job below). It is a CHECK, never a fix.
+  #
+  # Gated on its own `onboarding` output (NOT any-code) so a docs/instruction-only
+  # PR pays only this ~1s, zero-dep, read-only grep. Wired into ci-success below so
+  # it is REQUIRED when it runs yet skips cleanly when no onboarding surface is
+  # touched — the safe path-filter + required-check pattern.
+  taskboard-onboarding-guard:
+    name: Taskboard Onboarding Hygiene
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-onboarding == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check for stale taskboard IDs and forbidden --db start commands
+        run: bash scripts/check-taskboard-onboarding-hygiene.sh
+
+  # ---- Codex Config Safety ----
+  # Pure defense-in-depth (parity review gap Settings#0): fails the PR if the
+  # COMMITTED .codex/config.toml ever ships the fully-unattended, network-open
+  # combo — approval_policy = "never" AND network_access = true — which lets a
+  # Codex agent run shell with no human approval gate while reaching the network.
+  # The safe committed profile is approval-gated with the network off; this guard
+  # passes on it and only trips if a permissive profile is committed.
+  #
+  # It reads the COMMITTED blob via `git show HEAD:.codex/config.toml`, NEVER the
+  # working tree — a permissive profile may legitimately exist as an UNCOMMITTED
+  # local edit, and reading the working copy would both touch that off-limits file
+  # and false-fail locally. In CI the checkout == the ref under test, so this is
+  # exactly "is the profile being merged permissive?". Decision logic lives in
+  # scripts/check-codex-config-safety.sh (unit-tested by the CI Self-Defense Tests
+  # job below). It is a CHECK, never a fix.
+  #
+  # Gated on its own `codex` output (NOT any-code) so a config-only PR pays only
+  # this ~1s, zero-dep, read-only check. Wired into ci-success below so it is
+  # REQUIRED when it runs yet skips cleanly when no Codex config surface is touched
+  # — the safe path-filter + required-check pattern.
+  codex-config-guard:
+    name: Codex Config Safety
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-codex == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The guard reads `git show HEAD:.codex/config.toml`; a full history is
+          # not needed, but the committed blob at the checked-out ref must exist.
+          fetch-depth: 1
+
+      - name: Reject a committed permissive Codex config profile
+        run: bash scripts/check-codex-config-safety.sh
+
+  # ---- gh-aw Lock Sync ----
+  # Fails the PR when a GitHub Agentic Workflow source (.github/workflows/*.md) or
+  # an injected action pin (.github/aw/) changed without recompiling its generated
+  # .lock.yml — the gh-aw analogue of the Lockfile Sync gate. Path-gated on
+  # needs-ghaw and wired into the required ci-success aggregate (same safe pattern
+  # as the other guards), so it is required when it runs and skips cleanly
+  # otherwise. UNLIKE the other guards it needs the real gh-aw compiler, so it
+  # installs the extension PINNED to the compiler version recorded in the committed
+  # locks (a floating @latest would recompile to different output and false-fail on
+  # drift the contributor never introduced). The gate recompiles and fails on any
+  # source↔lock diff; it restores the tree afterward (a check, not a fix).
+  ghaw-lock-sync:
+    name: gh-aw Lock Sync
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-ghaw == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Install the gh-aw extension (pinned to the committed compiler version)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Derive the pin from the committed locks (highest recorded
+          # compiler_version, fallback if none) so the CI toolchain can never
+          # silently skew from the compiler that produced them. The derivation
+          # lives in a standalone, unit-tested helper rather than inline here, so
+          # a regression in its regex/sort/fallback fails a required check instead
+          # of shipping green (see scripts/get-ghaw-compiler-version.sh).
+          ver="$(bash scripts/get-ghaw-compiler-version.sh)"
+          # The helper is contracted to never emit empty (it falls back to a
+          # known-good pin), but guard anyway: an empty $ver would make
+          # `--pin ""` install whatever HEAD resolves to, silently defeating the
+          # pin. Fail loudly instead of compiling locks with an unknown version.
+          if [ -z "$ver" ]; then
+            echo "::error::get-ghaw-compiler-version.sh emitted no version — refusing to install gh-aw unpinned"
+            exit 1
+          fi
+          echo "Pinning gh-aw to $ver"
+          # NOTE: `gh extension install --pin` pins to a git TAG/ref, not a content
+          # SHA — gh has no flag to pin an extension by commit digest. The tag is
+          # the same artifact the locks record, so this keeps the compiler aligned
+          # with the committed locks; it is not a supply-chain SHA pin and does not
+          # claim to be. (Tightening to a digest would require vendoring the
+          # extension, which is out of scope for this drift gate.)
+          gh extension install github/gh-aw --pin "$ver"
+          # Verify the extension is actually runnable after install — a silent
+          # install failure here would make the drift gate below fail with a
+          # confusing "compile command failed" instead of a clear install error.
+          gh aw version || { echo "::error::gh aw extension verification failed after install"; exit 1; }
+
+      - name: Reject drift between gh-aw sources and their compiled .lock.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/check-ghaw-lock-sync.sh
+
   # ---- CI Self-Defense Tests ----
   # Unit-tests the decision logic of the repo's self-defending CI gates via
   # their co-located bash suites:
@@ -317,17 +545,65 @@ jobs:
   #   * scripts/check-ci-success.sh — the ci-success verifier itself, including
   #     its anti-tamper check that a self-defending gate may not be `skipped`
   #     while its trigger fired (closes the one-line `if: false` unwiring vector).
+  #   * scripts/check-agentic-sync.sh + tools/agentic-sync/sync.mjs — the
+  #     cross-provider agentic-config drift gate (exercised against hermetic
+  #     fixtures, plus the same structural anti-unwiring assertions).
+  #   * scripts/check-taskboard-onboarding-hygiene.sh — the taskboard
+  #     onboarding-hygiene tripwire (stale ULIDs + forbidden `--db` start),
+  #     exercised against hermetic fixture trees via the STALE_ID_SCAN_ROOT seam,
+  #     plus the same structural anti-unwiring assertions.
+  #   * scripts/check-codex-config-safety.sh — the Codex permissive-profile guard
+  #     (rejects a COMMITTED approval_policy="never" + network_access=true combo),
+  #     exercised against hermetic fixtures via the CODEX_CONFIG_PATH seam and a
+  #     throwaway git repo via CODEX_CONFIG_SCAN_ROOT, plus the same structural
+  #     anti-unwiring assertions.
+  #   * scripts/check-ghaw-lock-sync.sh — the gh-aw lock-drift gate (rejects a
+  #     .github/workflows/*.md source or .github/aw/ action-pin change that was not
+  #     recompiled into its .lock.yml), exercised against a throwaway git repo via
+  #     the GHAW_COMPILE_CMD stub seam, plus the same structural anti-unwiring
+  #     assertions. Its companion scripts/get-ghaw-compiler-version.sh (which the
+  #     ghaw-lock-sync job calls to pick the compiler pin from the committed locks)
+  #     is unit-tested by the same suite and shellchecked alongside it.
+  #   * .claude/tools/dx-audit.sh — the cross-provider DX audit; its contract test
+  #     pins that the audit delegates to the agentic gate and covers the secondary
+  #     provider surfaces (.codex/AGENTS.md, .windsurf, .agents) instead of drifting.
   # These ride ci-success as a REQUIRED check rather than a standalone advisory
   # workflow: a standalone path-filtered suite can be left out of the required
   # aggregate, which would let a PR that neuters a gate script merge green.
-  # Gated on `needs-ci` (fires on scripts/ and .github/workflows/ changes, see
-  # ci-gate), so it runs whenever a gate, its suite, or ci.yml itself moves —
-  # exactly when an unwiring would happen — and skips cleanly otherwise. The job
-  # id stays `lockfile-sync-tests` so the ci-success `needs:` wiring is stable.
+  # Gated on `needs-ci` (scripts/ and .github/workflows/ changes) OR `needs-agentic`
+  # (the agentic source-of-truth generator under tools/agentic-sync/) OR
+  # `needs-onboarding` (any contributor-facing onboarding surface — the tripwire's
+  # own self-tests must re-run when onboarding files move), so it runs whenever any
+  # gate, its suite, the generator, an onboarding surface, or ci.yml itself moves —
+  # exactly when an unwiring would happen — and skips cleanly otherwise. The Codex
+  # guard's own trigger, needs-codex, is named here as a fourth, EXPLICIT arm even
+  # though its paths (.codex/config.toml — which also sets needs-onboarding via
+  # `^\.codex/` — and the guard/test scripts — which set needs-ci) are today a
+  # strict subset of the first three: relying on that subset is an untested,
+  # silently-load-bearing invariant. If a future path-filter edit ever narrowed
+  # needs-ci or needs-onboarding so a Codex-only change stopped setting them, this
+  # suite — which runs the Codex guard's own tests — would skip while needs-codex
+  # fired, and check-ci-success.sh's anti-tamper map (which DOES list needs-codex
+  # for this job) would then flag a phantom unwiring on every Codex-only PR. Naming
+  # needs-codex in both the `if:` and the anti-tamper map keeps the trigger set and
+  # the tamper map identical, so the self-test re-runs on any Codex-config change
+  # without depending on the subset holding.
+  #
+  # needs-ghaw is deliberately NOT a fifth arm here. Unlike needs-codex, it maps to
+  # the STANDALONE `ghaw-lock-sync` job (gated on its own `if: needs-ghaw == 'true'`
+  # and listed under that job's name in check-ci-success.sh's anti-tamper map), so
+  # there is no if:/map mismatch forcing it to be named here — the phantom-unwiring
+  # pressure that justified the needs-codex arm simply does not exist for needs-ghaw.
+  # The gh-aw guard's own unit suite still re-runs in THIS job whenever it could be
+  # touched, via the documented subset: needs-ghaw fires on .github/workflows/*.md
+  # or *.lock.yml (both set needs-ci via `^\.github/workflows/`), on .github/aw/**
+  # (sets needs-onboarding), or on a guard/test edit under scripts/ (sets needs-ci)
+  # — all of which already trigger this job. The job id stays `lockfile-sync-tests`
+  # so the ci-success `needs:` wiring is stable.
   lockfile-sync-tests:
     name: CI Self-Defense Tests
     needs: [ci-gate]
-    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' }}
+    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' || needs.ci-gate.outputs.needs-agentic == 'true' || needs.ci-gate.outputs.needs-onboarding == 'true' || needs.ci-gate.outputs.needs-codex == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -335,17 +611,41 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+
       - name: Shellcheck the gate scripts and their suites
         run: |
           shellcheck \
             scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh \
-            scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh
+            scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh \
+            scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
+            scripts/check-taskboard-onboarding-hygiene.sh scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh \
+            scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
+            scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
+            .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
         run: bash scripts/__tests__/check-lockfile-sync.test.sh
 
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
+
+      - name: Run agentic-config gate test suite
+        run: bash scripts/__tests__/check-agentic-sync.test.sh
+
+      - name: Run taskboard onboarding-hygiene gate test suite
+        run: bash scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh
+
+      - name: Run Codex config-safety gate test suite
+        run: bash scripts/__tests__/check-codex-config-safety.test.sh
+
+      - name: Run gh-aw lock-sync gate test suite
+        run: bash scripts/__tests__/check-ghaw-lock-sync.test.sh
+
+      - name: Run cross-provider DX-audit contract test
+        run: bash .claude/tools/__tests__/dx-audit.test.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without
@@ -593,6 +893,10 @@ jobs:
       - hook-tests
       - lockfile-sync
       - lockfile-sync-tests
+      - agentic-sync
+      - taskboard-onboarding-guard
+      - codex-config-guard
+      - ghaw-lock-sync
       - test-e2e-ui
     runs-on: ubuntu-latest
     timeout-minutes: 5

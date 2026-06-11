@@ -21,7 +21,12 @@
 #      is the *silent, single-line* slip that no reviewer would notice.
 #
 # Unit-tested by scripts/__tests__/check-ci-success.test.sh (run in CI by the
-# lockfile-sync-tests job, gated on needs-ci so any edit here re-runs it).
+# lockfile-sync-tests job, gated on needs-ci || needs-agentic || needs-onboarding
+# || needs-codex so any edit to a gate script, an onboarding surface, OR the Codex
+# config re-runs the suite — the job's `if:` and the lockfile-sync-tests entry in
+# the anti-tamper map below name the SAME four triggers, so the suite re-runs on
+# any signal that fires it without depending on one trigger being a subset of
+# another).
 set -uo pipefail
 
 NEEDS_JSON="${NEEDS_JSON:-}"
@@ -54,19 +59,40 @@ if [ -n "$failed" ]; then
   exit 1
 fi
 
-# 2. Anti-tamper: a self-defending gate skipped while its trigger fired is an
-#    unwiring signal. Map each gate job to the ci-gate output that triggers it.
+# 2. Anti-tamper: a self-defending gate skipped while ANY of its triggers fired
+#    is an unwiring signal. A job gated on `needs-ci || needs-agentic` must run if
+#    EITHER output is true, so each gate is mapped to ALL the ci-gate outputs in
+#    its `if:` — guarding only one arm would leave the other as a silent
+#    single-line `if: false` skip vector.
 tamper=""
 check_triggered() {
-  local job="$1" trigger="$2" trig result
-  trig="$(jq -r --arg t "$trigger" '."ci-gate".outputs[$t] // empty' "$needs_file")"
+  local job="$1"; shift
+  local trig result fired=""
   result="$(jq -r --arg j "$job" '.[$j].result // "absent"' "$needs_file")"
-  if [ "$trig" = "true" ] && [ "$result" != "success" ]; then
-    tamper="$tamper"$'\n'"  - $job (trigger $trigger=true but result=$result)"
+  for trigger in "$@"; do
+    trig="$(jq -r --arg t "$trigger" '."ci-gate".outputs[$t] // empty' "$needs_file")"
+    if [ "$trig" = "true" ]; then
+      fired="${fired:+$fired,}$trigger"
+    fi
+  done
+  if [ -n "$fired" ] && [ "$result" != "success" ]; then
+    tamper="$tamper"$'\n'"  - $job (trigger $fired=true but result=$result)"
   fi
 }
-check_triggered "lockfile-sync"       "needs-deps"
-check_triggered "lockfile-sync-tests" "needs-ci"
+# Each entry maps a gate JOB to the ci-gate trigger(s) in its OWN `if:`. Note this
+# whole anti-tamper pass runs inside the ci-success aggregate (ci.yml: `if:
+# always()`), so every entry is evaluated on EVERY PR — it is NOT scoped to the
+# lockfile-sync-tests job (that job only runs the *unit test* of this script). The
+# lockfile-sync-tests ENTRY needs four triggers because its job `if:` has four arms
+# (see lines 23-29); the others, including hook-tests, each name the single trigger
+# their job is gated on (hook-tests <-> needs-hooks, ci.yml hook-tests `if:`).
+check_triggered "lockfile-sync"             "needs-deps"
+check_triggered "lockfile-sync-tests"       "needs-ci" "needs-agentic" "needs-onboarding" "needs-codex"
+check_triggered "agentic-sync"              "needs-agentic"
+check_triggered "taskboard-onboarding-guard" "needs-onboarding"
+check_triggered "codex-config-guard"        "needs-codex"
+check_triggered "hook-tests"                "needs-hooks"
+check_triggered "ghaw-lock-sync"            "needs-ghaw"
 if [ -n "$tamper" ]; then
   echo "::error::Self-defending gate skipped despite its trigger firing (possible unwiring):"
   echo "$tamper"

@@ -26,6 +26,15 @@
 # CI, not here — these tests pin the branching/exit-code/messaging contract.
 set -uo pipefail
 
+# SIGPIPE-safe matching: feed grep/awk from a here-string — `grep PAT <<<"$var"`
+# — and never pipe a large variable's `echo` output into grep/awk. Under
+# `pipefail`, `grep -q` closes the pipe on its FIRST match; on a payload larger
+# than the runner's pipe buffer (e.g. the ~31 KB ci.yml read below) the
+# still-writing `echo` then takes SIGPIPE, which `pipefail` turns into a non-zero
+# pipeline status — silently converting a real match into a false "missing"
+# failure. That bit CI on the integration-wiring assertions. The structural
+# guard at the end of this file keeps the antipattern from creeping back in.
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/../check-lockfile-sync.sh"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
@@ -70,7 +79,7 @@ repo="$(make_repo)"
 res="$(run_gate "$repo" "true")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "0" ]; then pass "in-sync lockfile passes (exit 0)"; else fail "in-sync should exit 0, got $rc"; fi
-if echo "$out" | grep -qi "in sync"; then pass "in-sync prints a success message"; else fail "in-sync success message missing"; fi
+if grep -qi "in sync" <<<"$out"; then pass "in-sync prints a success message"; else fail "in-sync success message missing"; fi
 rm -rf "$repo"
 
 # --- 2. Drift: regen mutates the lockfile → exit 1 + drift message -----------
@@ -78,8 +87,8 @@ repo="$(make_repo)"
 res="$(run_gate "$repo" 'printf "\n  \"drift\": true\n" >> package-lock.json')"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "drift fails (exit 1)"; else fail "drift should exit 1, got $rc"; fi
-if echo "$out" | grep -qi "drift detected"; then pass "drift prints 'drift detected'"; else fail "drift message missing"; fi
-if echo "$out" | grep -q "npm install --package-lock-only"; then pass "drift prints the remediation command"; else fail "remediation command missing"; fi
+if grep -qi "drift detected" <<<"$out"; then pass "drift prints 'drift detected'"; else fail "drift message missing"; fi
+if grep -q "npm install --package-lock-only" <<<"$out"; then pass "drift prints the remediation command"; else fail "remediation command missing"; fi
 rm -rf "$repo"
 
 # --- 3. Drift is non-destructive: gate exits 1 AND restores the working tree -
@@ -117,8 +126,8 @@ repo="$(make_repo)"
 res="$(run_gate "$repo" 'printf "\n  \"partial\": true\n" >> package-lock.json; printf "REGEN_DIAG_%s\n" "$(printf MARKER)" >&2; false')"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "regen failure fails (exit 1)"; else fail "regen failure should exit 1, got $rc"; fi
-if echo "$out" | grep -qi "regeneration command failed"; then pass "regen failure has clear message"; else fail "regen failure message missing"; fi
-if echo "$out" | grep -q "REGEN_DIAG_MARKER"; then pass "regen failure surfaces the command's own output"; else fail "regen failure swallowed the underlying diagnostic"; fi
+if grep -qi "regeneration command failed" <<<"$out"; then pass "regen failure has clear message"; else fail "regen failure message missing"; fi
+if grep -q "REGEN_DIAG_MARKER" <<<"$out"; then pass "regen failure surfaces the command's own output"; else fail "regen failure swallowed the underlying diagnostic"; fi
 if (cd "$repo" && git diff --quiet -- package-lock.json); then
   pass "partial write rolled back on regen failure (clean working tree)"
 else
@@ -133,7 +142,7 @@ repo="$(mktemp -d)"
 res="$(run_gate "$repo" "true")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "missing lockfile fails (exit 1)"; else fail "missing lockfile should exit 1, got $rc"; fi
-if echo "$out" | grep -qi "not found"; then pass "missing lockfile has clear message"; else fail "missing lockfile message missing"; fi
+if grep -qi "not found" <<<"$out"; then pass "missing lockfile has clear message"; else fail "missing lockfile message missing"; fi
 rm -rf "$repo"
 
 echo ""
@@ -148,13 +157,13 @@ echo "=== ci.yml integration wiring ==="
 if [ -f "$CI_YML" ]; then
   ci="$(cat "$CI_YML")"
 
-  if echo "$ci" | grep -qE '^  lockfile-sync:'; then
+  if grep -qE '^  lockfile-sync:' <<<"$ci"; then
     pass "ci.yml defines a lockfile-sync job"
   else
     fail "ci.yml has no lockfile-sync job (gate is not in the required pipeline)"
   fi
 
-  if echo "$ci" | grep -qE 'needs-deps:'; then
+  if grep -qE 'needs-deps:' <<<"$ci"; then
     pass "ci-gate exposes a needs-deps output"
   else
     fail "ci-gate has no needs-deps output to gate the lockfile job on"
@@ -166,9 +175,9 @@ if [ -f "$CI_YML" ]; then
   # presence of the tokens somewhere in the file: 'package.json' and 'deps=true'
   # both appear in dozens of unrelated places, so the old two-token check was a
   # tautology that would still pass even if the detection regex were gutted.
-  deps_line="$(echo "$ci" | grep -F 'deps=true')"
-  if echo "$deps_line" | grep -qF '(^|/)package\.json$' \
-     && echo "$deps_line" | grep -qF '^package-lock\.json$'; then
+  deps_line="$(grep -F 'deps=true' <<<"$ci")"
+  if grep -qF '(^|/)package\.json$' <<<"$deps_line" \
+     && grep -qF '^package-lock\.json$' <<<"$deps_line"; then
     pass "ci-gate deps detection regex keys on package.json (any depth) + root lockfile"
   else
     fail "ci-gate deps=true line does not key on package.json/lockfile changes"
@@ -181,8 +190,8 @@ if [ -f "$CI_YML" ]; then
   # skipped" on exactly the PRs the gate is meant to catch, a misleading log that
   # invites a reader to assume nothing ran. Assert the guard keys on deps too. The
   # `if:` precedes the echo, so pull the line before the message.
-  norel_if="$(echo "$ci" | awk '/No relevant changes — downstream jobs/{print prev} {prev=$0}')"
-  if echo "$norel_if" | grep -qF 'deps'; then
+  norel_if="$(awk '/No relevant changes — downstream jobs/{print prev} {prev=$0}' <<<"$ci")"
+  if grep -qF 'deps' <<<"$norel_if"; then
     pass "ci-gate 'no relevant changes' diagnostic accounts for deps (manifest-only PRs)"
   else
     fail "ci-gate 'no relevant changes' guard ignores deps — mislabels manifest-only PRs as no-op"
@@ -197,7 +206,7 @@ if [ -f "$CI_YML" ]; then
   # — i.e. '  lockfile-sync-tests:'. (That header line is printed before the guard
   # exits, so it is ls_block's last line; the lockfile-sync-tests job body — incl.
   # its own if: — is not part of the block.)
-  ls_block="$(echo "$ci" | awk '/^  lockfile-sync:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  lockfile-sync:/{exit}')"
+  ls_block="$(awk '/^  lockfile-sync:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  lockfile-sync:/{exit}' <<<"$ci")"
 
   # Defense-in-depth against a constant-false unwiring. The job's `if:` MUST key
   # on `needs-deps == 'true'`. Why this matters as a SEPARATE check from the
@@ -209,17 +218,22 @@ if [ -f "$CI_YML" ]; then
   # does edit ci.yml, though, so it sets needs-ci=true and runs THIS suite — and
   # this assertion catches the constant-false at introduction time, closing the
   # window the anti-tamper alone leaves open.
-  ls_if="$(echo "$ls_block" | grep -E '^[[:space:]]+if:')"
-  if echo "$ls_if" | grep -qF 'needs-deps' && echo "$ls_if" | grep -qF "== 'true'"; then
+  ls_if="$(grep -E '^[[:space:]]+if:' <<<"$ls_block")"
+  if grep -qF 'needs-deps' <<<"$ls_if" && grep -qF "== 'true'" <<<"$ls_if"; then
     pass "lockfile-sync job if: keys on needs-deps == 'true' (a constant if:false is caught here)"
   else
     fail "lockfile-sync job if: is not gated on needs-deps == 'true' (possible constant-false unwiring)"
   fi
 
-  if echo "$ci" | grep -q 'check-lockfile-sync.sh'; then
+  # Scope this to the EXTRACTED job block, not the whole ci.yml: the script name
+  # also appears in the self-defense job's comment + shellcheck list, so a broad
+  # `<<<"$ci"` match would still PASS if the actual `run: bash …` line were deleted
+  # from THIS job while a comment/shellcheck-list mention elsewhere kept the token
+  # alive — a false green with the gate no longer invoked.
+  if grep -qF 'run: bash scripts/check-lockfile-sync.sh' <<<"$ls_block"; then
     pass "lockfile-sync job runs scripts/check-lockfile-sync.sh"
   else
-    fail "ci.yml never invokes the gate script"
+    fail "lockfile-sync job block never invokes the gate script via run:"
   fi
 
   # SECURITY: $LOCKFILE_REGEN_CMD is a TEST-ONLY seam (the hermetic suite injects it
@@ -236,8 +250,9 @@ if [ -f "$CI_YML" ]; then
   # doc-comment block that PRECEDES the lockfile-sync-tests: header — and that prose
   # legitimately names $LOCKFILE_REGEN_CMD ("injects a stub ..."). Strip full-comment
   # lines first so the check keys on real YAML/shell, not documentation; an attacker's
-  # `env:` wiring is a non-comment line and is still caught.
-  if echo "$ls_block" | grep -v '^[[:space:]]*#' | grep -q 'LOCKFILE_REGEN_CMD'; then
+  # `env:` wiring is a non-comment line and is still caught. ls_block is one job block
+  # (well under the pipe buffer), so the inner grep|grep pipe carries no SIGPIPE risk.
+  if grep -v '^[[:space:]]*#' <<<"$ls_block" | grep -q 'LOCKFILE_REGEN_CMD'; then
     fail "lockfile-sync job exposes the LOCKFILE_REGEN_CMD test seam in an executable line — gate can be no-op'd into a false pass"
   else
     pass "lockfile-sync job does not wire the LOCKFILE_REGEN_CMD test seam (gate cannot be bypassed via job env)"
@@ -247,8 +262,8 @@ if [ -f "$CI_YML" ]; then
   # 'ci-success:' to its steps: and assert lockfile-sync is one of its needs.
   # Anchor each match to the whole list entry ($) so '- lockfile-sync' cannot be
   # satisfied by the '- lockfile-sync-tests' entry (substring) and vice-versa.
-  cisuccess_needs="$(echo "$ci" | awk '/^  ci-success:/{f=1} f{print} /^    steps:/{if(f)exit}')"
-  if echo "$cisuccess_needs" | grep -qE '^      - lockfile-sync$'; then
+  cisuccess_needs="$(awk '/^  ci-success:/{f=1} f{print} /^    steps:/{if(f)exit}' <<<"$ci")"
+  if grep -qE '^      - lockfile-sync$' <<<"$cisuccess_needs"; then
     pass "ci-success requires the lockfile-sync job"
   else
     fail "lockfile-sync is not in ci-success needs — gate is not required"
@@ -259,7 +274,7 @@ if [ -f "$CI_YML" ]; then
   # (advisory), so a PR that neuters check-lockfile-sync.sh could merge even though
   # the suite fails. Pin the self-tests as a ci.yml job that rides ci-success — the
   # same pattern hook-tests uses — so unwiring the gate fails a REQUIRED check.
-  if echo "$ci" | grep -qE '^  lockfile-sync-tests:'; then
+  if grep -qE '^  lockfile-sync-tests:' <<<"$ci"; then
     pass "ci.yml defines a lockfile-sync-tests job (gate self-tests are in the pipeline)"
   else
     fail "ci.yml has no lockfile-sync-tests job (gate self-tests are not in the required pipeline)"
@@ -267,9 +282,9 @@ if [ -f "$CI_YML" ]; then
 
   # Extract the whole lockfile-sync-tests job block (header → next job header) so
   # step assertions don't depend on a fixed grep -A window as steps are added.
-  lst_block="$(echo "$ci" | awk '/^  lockfile-sync-tests:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  lockfile-sync-tests:/{exit}')"
+  lst_block="$(awk '/^  lockfile-sync-tests:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  lockfile-sync-tests:/{exit}' <<<"$ci")"
 
-  if echo "$lst_block" | grep -qF 'bash scripts/__tests__/check-lockfile-sync.test.sh'; then
+  if grep -qF 'bash scripts/__tests__/check-lockfile-sync.test.sh' <<<"$lst_block"; then
     pass "lockfile-sync-tests job runs the lockfile gate's bash suite"
   else
     fail "lockfile-sync-tests job does not run the lockfile gate bash suite"
@@ -280,7 +295,7 @@ if [ -f "$CI_YML" ]; then
   # would permanently skip the job; because ci-success tolerates skips, the LAST
   # line of defense is the anti-tamper check in check-ci-success.sh (pinned by its
   # own suite). Here we assert today's wiring keys on needs-ci.
-  if echo "$lst_block" | grep -qE 'needs-ci|needs\.ci-gate\.outputs'; then
+  if grep -qE 'needs-ci|needs\.ci-gate\.outputs' <<<"$lst_block"; then
     pass "lockfile-sync-tests job is gated on needs-ci (a real path trigger, not a constant)"
   else
     fail "lockfile-sync-tests job is not gated on needs-ci"
@@ -288,13 +303,13 @@ if [ -f "$CI_YML" ]; then
 
   # The same job also runs the ci-success verifier's own suite — that is what pins
   # the anti-tamper logic. Assert the run step is present so it can't be dropped.
-  if echo "$lst_block" | grep -qF 'bash scripts/__tests__/check-ci-success.test.sh'; then
+  if grep -qF 'bash scripts/__tests__/check-ci-success.test.sh' <<<"$lst_block"; then
     pass "lockfile-sync-tests job also runs the ci-success verifier suite"
   else
     fail "lockfile-sync-tests job does not run the ci-success verifier suite"
   fi
 
-  if echo "$cisuccess_needs" | grep -qE '^      - lockfile-sync-tests$'; then
+  if grep -qE '^      - lockfile-sync-tests$' <<<"$cisuccess_needs"; then
     pass "ci-success requires the lockfile-sync-tests job"
   else
     fail "lockfile-sync-tests is not in ci-success needs — gate self-tests are not required"
@@ -304,8 +319,8 @@ if [ -f "$CI_YML" ]; then
   # (check-ci-success.sh), not an inline jq. The script carries the anti-tamper
   # check; a skip-tolerant inline jq would silently re-open the `if: false`
   # unwiring vector. Pin the call site.
-  cisuccess_block="$(echo "$ci" | awk '/^  ci-success:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  ci-success:/{exit}')"
-  if echo "$cisuccess_block" | grep -qF 'bash scripts/check-ci-success.sh'; then
+  cisuccess_block="$(awk '/^  ci-success:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  ci-success:/{exit}' <<<"$ci")"
+  if grep -qF 'bash scripts/check-ci-success.sh' <<<"$cisuccess_block"; then
     pass "ci-success runs the extracted, unit-tested verifier (check-ci-success.sh)"
   else
     fail "ci-success no longer calls check-ci-success.sh — anti-tamper logic may be bypassed"
@@ -383,6 +398,23 @@ if grep -A2 'Fix: from the repo root' "$SCRIPT" | grep -qF '$BASE_REGEN'; then
   pass "remediation hint echoes \$BASE_REGEN (single-sourced, cannot drift)"
 else
   fail "remediation hint hardcodes the command instead of \$BASE_REGEN"
+fi
+
+echo ""
+echo "=== suite hygiene (structural) ==="
+# Regression lock for the SIGPIPE-under-pipefail false failure documented at the
+# top of this file. Piping a large variable into grep/awk (via `echo`) lets the
+# reader close the pipe on an early match and SIGPIPE the upstream writer;
+# pipefail then reports the whole pipeline as failed — a real match misreported
+# as a miss (this hit CI on the ~31 KB ci.yml). The fix is here-strings
+# (`grep PAT <<<"$var"`). This guard fails if the antipattern is reintroduced
+# anywhere in this suite. The needle below glues `echo` to `[[:space:]]` (no
+# space between them), so this guard line can never match itself.
+SELF="${BASH_SOURCE[0]}"
+if grep -nE 'echo[[:space:]]+"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*\|[[:space:]]*(grep|awk)' "$SELF" >/dev/null; then
+  fail "a variable's echo output is piped into grep/awk — feed it via a here-string (see the SIGPIPE-safe note at the top) to stay correct under pipefail"
+else
+  pass "suite feeds grep/awk via here-strings, not variable pipes (SIGPIPE-safe under pipefail)"
 fi
 
 echo ""

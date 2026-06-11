@@ -9,8 +9,8 @@ Manage project work via the taskboard REST API at http://localhost:3010/api.
 curl -s http://localhost:3010/api/board | python3 -m json.tool
 
 # List tickets (optionally filter by status)
-curl -s "http://localhost:3010/api/tickets?project=01KK974VMNC16ZAW7MW1NH3T3M" | python3 -m json.tool
-curl -s "http://localhost:3010/api/tickets?project=01KK974VMNC16ZAW7MW1NH3T3M&status=todo" | python3 -m json.tool
+curl -s "http://localhost:3010/api/tickets?project=01KMM9ZA6SBZ7RKJZJTZS9VR4R" | python3 -m json.tool
+curl -s "http://localhost:3010/api/tickets?project=01KMM9ZA6SBZ7RKJZJTZS9VR4R&status=todo" | python3 -m json.tool
 
 # Get a single ticket
 curl -s http://localhost:3010/api/tickets/<TICKET_ID> | python3 -m json.tool
@@ -22,8 +22,8 @@ curl -s -X POST http://localhost:3010/api/tickets \
     "title": "Fix X in Y",
     "description": "**User Story:**\nAs a developer, I want ... so that ...\n\n**Description:**\n...\n\n**Acceptance Criteria:**\n- Given ..., When ..., Then ...\n- Given ..., When ..., Then ...\n- Given ..., When ..., Then ...",
     "priority": "high",
-    "projectId": "01KK974VMNC16ZAW7MW1NH3T3M",
-    "teamId": "01KK9751NZ4HM7VQM0AQ5WGME3"
+    "projectId": "01KMM9ZA6SBZ7RKJZJTZS9VR4R",
+    "teamId": "01KMR5E36TP59PRQA8GQEWJVM1"
   }'
 
 # Move ticket to in_progress
@@ -61,7 +61,7 @@ cd project-forge && bash -c 'source .claude/hooks/taskboard-state.sh && tb_valid
 2. **Description** — Technical context (at least 20 chars beyond user story + AC sections)
 3. **Acceptance Criteria** — Given/When/Then format, **minimum 3 scenarios** (happy/edge/negative)
 4. **Priority** — Must be set: `urgent`, `high`, `medium`, or `low`
-5. **Team** — Must be assigned: Engineering (`01KK9751NZ4HM7VQM0AQ5WGME3`), PM (`01KK9751P7GKQYG9TZ96XXQCFN`), or Leadership (`01KK9751PD79RCWY462CYQ06CW`)
+5. **Team** — Must be assigned: Engineering (`01KMR5E36TP59PRQA8GQEWJVM1`), PM (`01KMR5E3852BWXAZ219W47CSKS`)
 6. **Subtasks** — At least 3 implementation steps before work begins
 
 ## Workflow

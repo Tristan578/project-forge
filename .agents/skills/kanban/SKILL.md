@@ -8,7 +8,7 @@ user-invokable: true
 
 Manage project work via the taskboard API at `http://localhost:3010`.
 
-**Project:** SpawnForge (prefix: PF, ID: `01KK974VMNC16ZAW7MW1NH3T3M`)
+**Project:** SpawnForge (prefix: PF, ID: `01KMM9ZA6SBZ7RKJZJTZS9VR4R`)
 
 ## API Endpoints
 
@@ -41,7 +41,7 @@ As a [persona], I want [specific goal] so that [measurable benefit].
 
 ## Required Fields
 - **Priority**: urgent, high, medium, low
-- **Team**: Engineering (`01KK9751NZ4HM7VQM0AQ5WGME3`), PM (`01KK9751P7GKQYG9TZ96XXQCFN`), or Leadership (`01KK9751PD79RCWY462CYQ06CW`)
+- **Team**: Engineering (`01KMR5E36TP59PRQA8GQEWJVM1`), PM (`01KMR5E3852BWXAZ219W47CSKS`)
 - **Subtasks**: At least 3 implementation steps before work begins
 
 ## Workflow

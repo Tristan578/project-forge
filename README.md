@@ -389,7 +389,7 @@ The `tb_validate_ticket()` function in `taskboard-state.sh` enforces:
 2. **Acceptance Criteria** — Minimum 3 complete Given/When/Then scenarios (happy path, edge case, negative)
 3. **Description Substance** — At least 20 characters of technical context beyond user story and AC
 4. **Priority** — Must be `urgent`, `high`, `medium`, or `low`
-5. **Team** — Must be assigned to Engineering, PM, or Leadership
+5. **Team** — Must be assigned to Engineering or PM
 6. **Subtasks** — At least 3 implementation steps
 
 ### Skills Reference
@@ -478,10 +478,10 @@ taskboard start --port 3010
 
 - **Web UI:** http://localhost:3010
 - **API:** http://localhost:3010/api
-- **Project ID:** `01KK974VMNC16ZAW7MW1NH3T3M` (prefix: PF)
-- **Database:** `.claude/taskboard.db` (SQLite, 186+ tickets)
+- **Project ID:** `01KMM9ZA6SBZ7RKJZJTZS9VR4R` (prefix: PF)
+- **Database:** OS-default path (`~/Library/Application Support/taskboard/` on macOS) — do **not** pass `--db`, which points the board at an empty local copy instead of the shared store.
 
-Tools with hook support auto-start the taskboard on session start. The database is committed to the repo so all contributors share the same ticket state.
+Tools with hook support auto-start the taskboard on session start. Ticket state is shared across contributors via the GitHub Projects sync (`.claude/hooks/github_project_sync.py`), not a committed database.
 
 ### Config Directory Map
 

