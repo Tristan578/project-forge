@@ -411,6 +411,16 @@ export async function reverseAddonTokens(
 ): Promise<void> {
   const neonSql = getNeonSql();
 
+  // Per-tranche idempotency key (#8706). Stripe fires `charge.refunded` once per
+  // refund with a STABLE `charge.id` and a CUMULATIVE `amount_refunded`. Keying
+  // the audit row on `chargeId` alone collides on `idx_credit_txn_idempotent`
+  // when one charge is refunded incrementally (e.g. 2450c, then a cumulative
+  // 4900c): the second clawback's audit INSERT hits the duplicate key, the whole
+  // CTE rolls back, the deduction is permanently lost, and the webhook 500s into
+  // an infinite Stripe retry. Suffixing the cumulative amount makes every tranche
+  // a distinct key, so successive incremental refunds each record their own row.
+  const refundRef = `${chargeId}:${amountRefunded}`;
+
   // --- Try to find the original token purchase for precise reversal ---
   if (paymentIntentId) {
     const [purchase] = await queryWithResilience(() =>
@@ -436,9 +446,15 @@ export async function reverseAddonTokens(
       // reading stale refundedCents=0 would both deduct tokens.
       //
       // Fix: a single SQL statement where the CTE atomically claims the refund
-      // increment and computes tokensToDeduct. The audit INSERT and user UPDATE
-      // both depend on the claim via EXISTS/JOIN, so they only execute when the
-      // claim actually succeeds.
+      // increment and computes tokensToDeduct. The audit INSERT depends on the
+      // claim (JOIN on `deduction`), and the user UPDATE depends on the audit
+      // (`EXISTS (SELECT 1 FROM audit)`), so a balance change is impossible
+      // without a matching credit_transactions row. The `EXISTS (audit)` gate is
+      // load-bearing because of the #8706 `ON CONFLICT ... DO NOTHING` backstop:
+      // when the audit INSERT is swallowed by a pre-existing row for the same
+      // (user, source, reference_id), the audit CTE is empty and the deduction
+      // is suppressed — mirroring the fallback path. Without it, an ON CONFLICT
+      // hit would silently debit the balance with no audit row.
       const now = new Date().toISOString();
 
       // Step 1: Read the old refunded_cents with FOR UPDATE (row lock).
@@ -480,9 +496,10 @@ export async function reverseAddonTokens(
           INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
           SELECT ${userId}, 'adjustment', -LEAST(d.tokens_to_deduct, u.addon_tokens),
                  GREATEST(0, u.monthly_tokens - u.monthly_tokens_used) + GREATEST(0, u.addon_tokens - d.tokens_to_deduct) + u.earned_credits,
-                 ${`charge_refunded:${chargeId}`}, ${chargeId}
+                 ${`charge_refunded:${chargeId}`}, ${refundRef}
           FROM deduction d, users u
           WHERE u.id = ${userId} AND d.tokens_to_deduct > 0
+          ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
           RETURNING id
         )
         UPDATE users
@@ -490,12 +507,20 @@ export async function reverseAddonTokens(
             updated_at   = ${now}
         FROM deduction d
         WHERE users.id = ${userId} AND d.tokens_to_deduct > 0
+          AND EXISTS (SELECT 1 FROM audit)
         RETURNING users.id
       `
       );
       // If claim matched 0 rows (already refunded), the entire CTE chain
-      // produces no rows — done. If amount_cents=0 (comped purchase),
-      // NULLIF returns NULL and the deduction rounds to 0, skipping audit+update.
+      // produces no rows — done.
+      //
+      // Edge case — amount_cents=0 (comped purchase): NULLIF(amount_cents,0)
+      // yields NULL, so the division is NULL and LEAST(NULL, 1) collapses to 1
+      // (Postgres LEAST/GREATEST ignore NULL args). The deduction is therefore
+      // FLOOR(tokens * 1) = ALL of the purchase's tokens (capped at the user's
+      // addon balance), i.e. a full clawback of the comped grant — NOT a no-op.
+      // Reviewed as acceptable: refunding a comped purchase reclaims the tokens
+      // it granted. (Behaviour locked by the real-DB test, #8608.)
       return;
     }
   }
@@ -510,27 +535,82 @@ export async function reverseAddonTokens(
   // Fix: CTE INSERT...WHERE NOT EXISTS atomically checks and inserts. The
   // user UPDATE depends on the INSERT via EXISTS, so it only runs when the
   // INSERT actually created a row.
-  const refundRatio = Math.min(amountRefunded / amountTotal, 1);
+  //
+  // NOTE: integer-typed bound params (`${amountRefunded}`, `${amountTotal}`) MUST
+  // be cast (`::bigint`). The neon-http driver sends bound params as text with no
+  // type annotation; without a cast Postgres can mis-infer the type from the
+  // surrounding integer columns and throw `invalid input syntax for type
+  // integer`. (The original `::float8` cast bug was caught by the real-DB test,
+  // #8608; the same class applies to the integer math below.)
+  //
+  // Incremental refunds on this fallback path (no purchase row to anchor exact
+  // token proportions) reconstruct a STABLE original base from the FIRST tranche
+  // we already recorded, rather than re-applying the cumulative ratio to the
+  // shrinking CURRENT balance (#8706). Each fallback audit row stores the
+  // cumulative refunded cents in its `reference_id` (`<chargeId>:<cents>`) and the
+  // tokens it clawed in `amount`, so for a later tranche:
+  //
+  //     base   = total * prior_clawed / prior_cum_cents   (independent of `cur`)
+  //     target = ratio * base = amountRefunded * prior_clawed / prior_cum_cents
+  //     delta  = target - prior_clawed                    (clamped >=0, <= cur)
+  //
+  // The `total` cancels, so the target is exact integer math with no float. Because
+  // the base is derived from the recorded clawback (NOT the live balance), a spend
+  // OR a NEW addon purchase landing between webhook deliveries can never inflate
+  // the clawback — `delta` is capped at the cumulative target and at `cur`, so the
+  // path NEVER over-deducts. A true redelivery (same cumulative amount) yields
+  // delta 0 AND fails the NOT EXISTS guard; an out-of-order lower cumulative yields
+  // a negative delta clamped to 0. The first tranche (no prior rows) falls back to
+  // a ratio of the current balance, identical to the single-refund behavior.
   const source = `charge_refunded:${chargeId}`;
   const now = new Date().toISOString();
 
   await queryWithResilience(() =>
     neonSql`
-      WITH audit AS (
+      WITH prior AS (
+        -- Aggregate this charge's prior fallback clawbacks. source is
+        -- charge-specific (it embeds the chargeId), so it scopes precisely; the
+        -- LIKE '%:%' filter excludes any legacy chargeId-only rows that predate
+        -- the per-tranche key so split_part always has a cents segment to parse.
+        SELECT
+          COALESCE(SUM(ABS(ct.amount)), 0)::int AS clawed_tokens,
+          COALESCE(MAX(split_part(ct.reference_id, ':', 2)::bigint), 0)::bigint AS cum_cents
+        FROM credit_transactions ct
+        WHERE ct.user_id = ${userId}
+          AND ct.source = ${source}
+          AND ct.reference_id LIKE '%:%'
+      ),
+      calc AS (
+        SELECT u.addon_tokens AS cur, p.clawed_tokens, p.cum_cents
+        FROM users u CROSS JOIN prior p
+        WHERE u.id = ${userId}
+      ),
+      deduction AS (
+        SELECT GREATEST(0, LEAST(
+          CASE
+            WHEN c.clawed_tokens > 0 AND c.cum_cents > 0
+              THEN (${amountRefunded}::bigint * c.clawed_tokens / c.cum_cents)::int - c.clawed_tokens
+            ELSE (c.cur::bigint * ${amountRefunded}::bigint / NULLIF(${amountTotal}::bigint, 0))::int
+          END,
+          c.cur
+        ))::int AS to_deduct
+        FROM calc c
+      ),
+      audit AS (
         INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
         SELECT ${userId}, 'adjustment',
-               -LEAST(FLOOR(u.addon_tokens * ${refundRatio})::int, u.addon_tokens),
+               -(SELECT to_deduct FROM deduction),
                GREATEST(0, u.monthly_tokens - u.monthly_tokens_used)
-                 + GREATEST(0, u.addon_tokens - FLOOR(u.addon_tokens * ${refundRatio})::int)
+                 + GREATEST(0, u.addon_tokens - (SELECT to_deduct FROM deduction))
                  + u.earned_credits,
-               ${source}, ${chargeId}
+               ${source}, ${refundRef}
         FROM users u
         WHERE u.id = ${userId}
-          AND FLOOR(u.addon_tokens * ${refundRatio})::int > 0
+          AND (SELECT to_deduct FROM deduction) > 0
           AND NOT EXISTS (
             SELECT 1 FROM credit_transactions ct
             WHERE ct.user_id = ${userId}
-              AND ct.reference_id = ${chargeId}
+              AND ct.reference_id = ${refundRef}
               AND ct.source = ${source}
           )
         RETURNING amount
