@@ -183,9 +183,12 @@ describe('reverseAddonTokens (fallback path, no paymentIntentId)', () => {
       c.strings.some(s => s.includes('audit'))
     );
     expect(cteCall).toBeDefined();
-    // refundRatio = 500/1000 = 0.5
-    expect(cteCall!.values).toContain(0.5);
+    // The CTE receives amountRefunded/amountTotal directly (no precomputed ratio);
+    // refundRef encodes the cumulative refunded cents as `<chargeId>:<cents>`.
+    expect(cteCall!.values).toContain(500);
+    expect(cteCall!.values).toContain(1000);
     expect(cteCall!.values).toContain('charge_refunded:ch_partial');
+    expect(cteCall!.values).toContain('ch_partial:500');
   });
 
   it('deducts all tokens for full refund via CTE', async () => {
@@ -194,8 +197,9 @@ describe('reverseAddonTokens (fallback path, no paymentIntentId)', () => {
       c.strings.some(s => s.includes('audit'))
     );
     expect(cteCall).toBeDefined();
-    // refundRatio = 1000/1000 = 1
-    expect(cteCall!.values).toContain(1);
+    // Full refund: amountRefunded == amountTotal == 1000 (no precomputed ratio).
+    expect(cteCall!.values).toContain(1000);
+    expect(cteCall!.values).toContain('ch_full:1000');
   });
 
   it('does nothing when calculated deduction is 0', async () => {
