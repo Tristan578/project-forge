@@ -869,81 +869,14 @@ describe('refundTokenAmount', () => {
   });
 });
 
-describe('creditAddonTokens', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.resetModules();
-    resetChain();
-    // CTE returns the inserted id by default (new purchase → credit applied).
-    mockNeonSqlResults.push([{ id: 'user-1' }]);
-  });
-
-  it('credits spark package tokens via a single idempotent CTE (F02)', async () => {
-    const { creditAddonTokens } = await import('../service');
-
-    await creditAddonTokens('user-1', 'spark', 'pi_stripe_123');
-
-    // One tagged-template statement — NOT a multi-statement transaction.
-    expect(mockNeonSql).toHaveBeenCalledTimes(1);
-    expect(mockNeonSql.transaction).not.toHaveBeenCalled();
-
-    const sql = (mockNeonSql.mock.calls[0][0] as TemplateStringsArray).join(' ');
-    // Idempotency guard: INSERT ... ON CONFLICT DO NOTHING, UPDATE gated on EXISTS.
-    expect(sql).toContain('token_purchases');
-    expect(sql).toContain('ON CONFLICT');
-    expect(sql).toContain('DO NOTHING');
-    expect(sql).toContain('addon_tokens = addon_tokens +');
-    expect(sql).toContain('EXISTS (SELECT 1 FROM ins)');
-
-    // Interpolated values carry the user, payment intent, package, and amounts.
-    const values = mockNeonSql.mock.calls[0].slice(1);
-    expect(values).toContain('user-1');
-    expect(values).toContain('pi_stripe_123');
-    expect(values).toContain('spark');
-    expect(values).toContain(1000); // spark tokens
-    expect(values).toContain(1200); // spark priceCents
-  });
-
-  it('credits blaze package tokens via a single statement', async () => {
-    const { creditAddonTokens } = await import('../service');
-
-    await creditAddonTokens('user-1', 'blaze', 'pi_stripe_456');
-
-    expect(mockNeonSql).toHaveBeenCalledTimes(1);
-    expect(mockNeonSql.transaction).not.toHaveBeenCalled();
-    const values = mockNeonSql.mock.calls[0].slice(1);
-    expect(values).toContain(5000); // blaze tokens
-  });
-
-  it('credits inferno package tokens via a single statement', async () => {
-    const { creditAddonTokens } = await import('../service');
-
-    await creditAddonTokens('user-1', 'inferno', 'pi_stripe_789');
-
-    expect(mockNeonSql).toHaveBeenCalledTimes(1);
-    expect(mockNeonSql.transaction).not.toHaveBeenCalled();
-    const values = mockNeonSql.mock.calls[0].slice(1);
-    expect(values).toContain(20000); // inferno tokens
-  });
-
-  it('passes the payment intent so a redelivered webhook hits ON CONFLICT (idempotent)', async () => {
-    const { creditAddonTokens } = await import('../service');
-
-    // Simulate redelivery: the CTE INSERT conflicts, RETURNING is empty.
-    mockNeonSqlResults.length = 0;
-    mockNeonSqlResults.push([]); // ON CONFLICT DO NOTHING → no row returned → no credit
-
-    await creditAddonTokens('user-1', 'spark', 'pi_dup_001');
-
-    // Still a single statement; the DB (not JS) enforces exactly-once via the
-    // EXISTS(ins) guard, so no second credit path exists to call.
-    expect(mockNeonSql).toHaveBeenCalledTimes(1);
-    const sql = (mockNeonSql.mock.calls[0][0] as TemplateStringsArray).join(' ');
-    expect(sql).toContain('ON CONFLICT');
-    const values = mockNeonSql.mock.calls[0].slice(1);
-    expect(values).toContain('pi_dup_001');
-  });
-});
+// creditAddonTokens is covered by real-Postgres behavioural tests in
+// `creditAddonTokens.db.test.ts` (F17 · #8609). The previous mock-based block
+// here only asserted that the interpolated SQL *string* contained 'ON CONFLICT'
+// / 'DO NOTHING' and that the package's token count appeared among the bound
+// values — it never asserted the credited balance, the purchase row, or that a
+// redelivered webhook credits nothing. Those are now proven against in-process
+// Postgres (the idempotency guard lives in the DB, so only running the statement
+// can verify it). Kept the breadcrumb so the gap doesn't silently reappear.
 
 describe('resetMonthlyTokens', () => {
   beforeEach(() => {
