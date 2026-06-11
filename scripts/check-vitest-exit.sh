@@ -8,13 +8,21 @@
 # two inline copies from drifting and — the reason this script exists (#8598) —
 # stops a COVERAGE-THRESHOLD failure from being silently swallowed.
 #
-# vitest exits non-zero in three distinct situations:
+# vitest exits non-zero in four distinct situations:
 #   1. A test actually failed              → summary has "Test Files ... failed"
 #   2. A coverage threshold was not met    → one of vitest's two threshold-failure
 #                                            forms (see below), but NO
 #                                            "Test Files ... failed" line
 #   3. Open handles after a green run      → non-zero exit, neither marker present
-# Only (3) is a false positive. (1) and (2) MUST propagate.
+#   4. The CI `timeout` wrapper killed it  → exit 124; the run may have hung
+#                                            during cleanup AFTER passing
+#                                            (vitest#3077) OR been killed mid-run
+#                                            with failures already on record
+# Only (3), and (4) when the evidence proves a fully passing run, are false
+# positives. (1) and (2) MUST propagate — INCLUDING when the exit code is 124.
+# An early `exit 0` on 124 used to bypass every evidence check below, silently
+# green-lighting timed-out runs that also failed tests or coverage thresholds
+# (PR #8721 P0, Sentry r3391661666).
 #
 # vitest emits the coverage-threshold failure in TWO forms (vitest source
 # coverage chunk; verified against 4.1.7), and BOTH must be caught or the gate
@@ -46,12 +54,8 @@ case "$EXIT_CODE" in
   ''|*[!0-9]*) usage ;;
 esac
 
-# 124 = `timeout` killed a process that hung during cleanup after tests already
-# completed (vitest#3077). Treat as a warning, not a failure.
-if [ "$EXIT_CODE" -eq 124 ]; then
-  echo "::warning::vitest process was killed after timeout — likely hung during cleanup (vitest#3077)"
-  exit 0
-fi
+# NOTE: 124 (`timeout` kill) deliberately gets NO early exit — it must flow
+# through the same evidence checks as every other non-zero code. See header.
 
 # Clean exit — nothing to adjudicate.
 if [ "$EXIT_CODE" -eq 0 ]; then
@@ -80,6 +84,21 @@ fi
 if printf '%s\n' "$CLEAN" \
   | grep -qiE "coverage for .*does not meet .*threshold|uncovered .*exceed .*threshold"; then
   echo "::error::vitest coverage thresholds not met — failing the build (this was previously swallowed: #8598)"
+  exit "$EXIT_CODE"
+fi
+
+# (4) Exit 124 with neither failure marker: the `timeout` wrapper can kill
+#     vitest BEFORE the summary prints, so for 124 the ABSENCE of failure
+#     markers proves nothing. Swallowing a timeout requires POSITIVE evidence
+#     of a completed passing run — the "Test Files ... passed" summary. Any
+#     "Test Files ... failed" line was already propagated above, so a match
+#     here can only be a fully green summary. Without it, fail closed.
+if [ "$EXIT_CODE" -eq 124 ]; then
+  if printf '%s\n' "$CLEAN" | grep -qE "Test Files.*passed"; then
+    echo "::warning::vitest was killed by the timeout wrapper after a fully passing run — likely hung during cleanup (vitest#3077)"
+    exit 0
+  fi
+  echo "::error::vitest was killed by the timeout wrapper (exit 124) and the captured output shows no completed passing run — failing closed (cannot prove the vitest#3077 false positive)"
   exit "$EXIT_CODE"
 fi
 

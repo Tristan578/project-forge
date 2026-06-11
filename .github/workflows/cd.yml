@@ -166,8 +166,9 @@ jobs:
       - name: Run tests
         working-directory: web
         # Timeout safety net: vitest hangs after test completion due to jsdom open
-        # handles (known issue vitest#3077). Exit 124 = timeout killed a hung process
-        # after tests already completed successfully -- treat as warning, not failure.
+        # handles (known issue vitest#3077). Exit 124 = the timeout killed the process;
+        # the gate below swallows it ONLY when the captured output proves a fully
+        # passing run -- a timed-out run with test/coverage failures still fails.
         run: |
           set +e
           timeout 600 npx vitest run 2>&1 | tee /tmp/vitest-output.txt
