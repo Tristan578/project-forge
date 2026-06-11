@@ -646,9 +646,20 @@ export async function reverseAddonTokens(
   // if not found. Two concurrent webhooks could both see "no existing refund"
   // and both insert + deduct.
   //
-  // Fix: CTE INSERT...WHERE NOT EXISTS atomically checks and inserts. The
-  // user UPDATE depends on the INSERT via EXISTS, so it only runs when the
-  // INSERT actually created a row.
+  // Fix: CTE INSERT...WHERE NOT EXISTS checks and inserts in one statement.
+  // The user UPDATE depends on the INSERT via EXISTS, so it only runs when
+  // the INSERT actually created a row.
+  //
+  // NOT EXISTS alone is NOT concurrency-safe (#8729): it is a snapshot-level
+  // read, so two CONCURRENT deliveries of the same `charge.refunded` webhook
+  // can both pass it, and the loser then raises a unique violation on
+  // `idx_credit_txn_idempotent` — a loud 500/retry instead of a no-op. The
+  // `ON CONFLICT (user_id, source, reference_id) ... DO NOTHING` arbiter on
+  // the audit INSERT (mirroring the precise path, #8706) degrades that loser
+  // to a clean no-op: the audit CTE returns no rows, so the dependent user
+  // UPDATE is suppressed and no deduction happens without an audit row. The
+  // NOT EXISTS is kept as the cheap snapshot-level fast path for ordinary
+  // sequential redelivery.
   //
   // NOTE: integer-typed bound params (`${amountRefunded}`, `${amountTotal}`) MUST
   // be cast (`::bigint`). The neon-http driver sends bound params as text with no
@@ -727,6 +738,7 @@ export async function reverseAddonTokens(
               AND ct.reference_id = ${refundRef}
               AND ct.source = ${source}
           )
+        ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
         RETURNING amount
       )
       UPDATE users
