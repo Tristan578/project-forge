@@ -14,6 +14,9 @@
 --   5. leaderboards                  — whole table + leaderboard_sort_order enum.
 --   6. leaderboard_entries           — whole table.
 --   7. moderation_appeals            — whole table + appeal_status enum.
+--   8. idx_published_games_slug      — slug-lookup index on play/community pages;
+--                                      0000 created only the unique (user_id,slug)
+--                                      and the user_id index.
 --
 -- Every statement is idempotent (IF NOT EXISTS / duplicate_object guard) so the
 -- migration is a no-op against production while fully provisioning a fresh DB.
@@ -66,4 +69,5 @@ CREATE INDEX IF NOT EXISTS "idx_leaderboards_game" ON "leaderboards" ("game_id")
 CREATE INDEX IF NOT EXISTS "idx_leaderboard_entries_leaderboard_score" ON "leaderboard_entries" ("leaderboard_id","score");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_leaderboard_entries_leaderboard_created" ON "leaderboard_entries" ("leaderboard_id","created_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_moderation_appeals_user" ON "moderation_appeals" ("user_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "idx_moderation_appeals_status" ON "moderation_appeals" ("status");
+CREATE INDEX IF NOT EXISTS "idx_moderation_appeals_status" ON "moderation_appeals" ("status");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_published_games_slug" ON "published_games" ("slug");
