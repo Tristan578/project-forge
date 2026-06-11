@@ -58,10 +58,15 @@ const SCHEMA_ONLY_PLACEHOLDERS: Record<string, string> = {
   idx_credit_txn_idempotent_schema: 'idx_credit_txn_idempotent',
 };
 
-// Every named index()/uniqueIndex() declared in schema.ts, grouped by table,
-// with placeholders mapped to the real index the migrations must create.
-// Unnamed indexes (none today — schema.ts names every index) are skipped: their
-// generated name lives in drizzle-kit, not in the runtime config.
+// Every index()/uniqueIndex() declared in schema.ts, grouped by table, with
+// placeholders mapped to the real index the migrations must create. An unnamed
+// index has no runtime name (its generated name lives in drizzle-kit, not in
+// getTableConfig), so it cannot be checked here — the enumeration test below
+// therefore REJECTS unnamed indexes outright rather than skipping them.
+const unnamedIndexTables: string[] = tables.flatMap(([name, table]) =>
+  getTableConfig(table).indexes.some((ix) => typeof ix.config.name !== 'string') ? [name] : [],
+);
+
 const tableIndexes: [string, string[]][] = tables
   .map(([name, table]): [string, string[]] => [
     name,
@@ -85,6 +90,11 @@ afterAll(async () => {
 describe('schema.ts ↔ migration-chain parity (#8707)', () => {
   it('enumerates the schema (a refactor that empties this list must fail loudly)', () => {
     expect(tables.length).toBeGreaterThanOrEqual(20);
+    // An unnamed index() still reaches production via db:push under a
+    // drizzle-kit-generated name the migration chain never carries — the exact
+    // drift class this file exists to catch — but it is invisible to the
+    // pg_indexes check above. Reject it here instead of silently skipping it.
+    expect(unnamedIndexTables).toEqual([]);
     expect(tableIndexes.flatMap(([, names]) => names).length).toBeGreaterThanOrEqual(30);
   });
 
