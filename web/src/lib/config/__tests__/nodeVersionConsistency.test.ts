@@ -19,6 +19,10 @@
  *     rather than a hardcoded `node-version:` literal, so there is exactly one
  *     place to bump.
  *   - Every workspace `package.json` pins `engines.node` to the canonical range.
+ *
+ * Scope: authored workflows only — generated gh-aw `*.lock.yml` files are
+ * exempt (see workflowFiles() below for why), and the exemption is itself
+ * guarded: every exempted lock must carry the gh-aw generated-file marker.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -72,10 +76,30 @@ function majorOf(versionish: string): number {
   return Number(m![1]);
 }
 
+/**
+ * Authored workflows only. Generated gh-aw `*.lock.yml` files are exempt:
+ * they must stay byte-identical to `gh aw compile` output (the gh-aw Lock
+ * Sync gate recompiles and fails the PR on any diff), and the v0.77.5+
+ * compiler injects its own `actions/setup-node` step — the agent runtime
+ * that installs the Copilot CLI — with a literal `node-version`. The
+ * compiler's `runtimes:` frontmatter override accepts only literal versions
+ * (no version-file mode), so the literal cannot be repointed at
+ * `.node-version`; nor should it be — the agent runtime is pinned to the
+ * Node the gh-aw compiler is tested against, not the app toolchain this
+ * guard keeps consistent. The exemption is verified below: every excluded
+ * lock must carry the gh-aw generated-file marker.
+ */
 function workflowFiles(): string[] {
   const dir = path.join(REPO_ROOT, '.github', 'workflows');
   return readdirSync(dir)
-    .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
+    .filter((f) => (f.endsWith('.yml') || f.endsWith('.yaml')) && !f.endsWith('.lock.yml'))
+    .map((f) => path.join('.github', 'workflows', f));
+}
+
+function generatedLockFiles(): string[] {
+  const dir = path.join(REPO_ROOT, '.github', 'workflows');
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.lock.yml'))
     .map((f) => path.join('.github', 'workflows', f));
 }
 
@@ -134,6 +158,21 @@ describe('Node version consistency (PF-841)', () => {
         fileRefs,
         `${wf}: ${setupNodeSteps} setup-node step(s) but ${fileRefs} node-version-file ref(s)`,
       ).toBe(setupNodeSteps);
+    }
+  });
+
+  it('every workflow exempted as a generated gh-aw lock really is one', () => {
+    const locks = generatedLockFiles();
+    // Floor: the exemption is live (this repo carries gh-aw locks). If the
+    // locks ever go away, delete generatedLockFiles() and this test together.
+    expect(locks.length).toBeGreaterThanOrEqual(1);
+    for (const lock of locks) {
+      expect(
+        readRepoFile(lock).slice(0, 4096),
+        `${lock} is exempt from the node-version guard as a generated gh-aw lock, ` +
+          `but lacks the gh-aw-metadata marker — an authored workflow must not ` +
+          `hide behind the .lock.yml suffix`,
+      ).toContain('gh-aw-metadata');
     }
   });
 });
