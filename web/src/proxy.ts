@@ -113,6 +113,12 @@ export function buildPublicRoutes({ includeDev }: { includeDev: boolean }): stri
     '/privacy(.*)',
     '/community(.*)',
     '/api/community(.*)',
+    // Public waitlist capture: the /sign-up page's form posts here WITHOUT a
+    // Clerk session — the page exists precisely for unauthenticated visitors.
+    // The route self-enforces its abuse controls (IP rate limit + honeypot +
+    // idempotent insert), none of which are reachable if the proxy 401s the
+    // request first (#8730).
+    '/api/waitlist(.*)',
     '/api/docs(.*)',
     '/api-docs(.*)',
     '/api/openapi(.*)',
