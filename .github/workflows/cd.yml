@@ -166,27 +166,23 @@ jobs:
       - name: Run tests
         working-directory: web
         # Timeout safety net: vitest hangs after test completion due to jsdom open
-        # handles (known issue vitest#3077). Exit 124 = timeout killed a hung process
-        # after tests already completed successfully -- treat as warning, not failure.
+        # handles (known issue vitest#3077). A non-zero exit (timeout 124, OOM 137,
+        # segfault 139, ...) is swallowed by the gate below ONLY when the captured
+        # output proves a fully passing run -- a run killed mid-tests (or with
+        # test/coverage failures on record) still fails.
         run: |
           set +e
           timeout 600 npx vitest run 2>&1 | tee /tmp/vitest-output.txt
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
-          if [ $EXIT_CODE -eq 124 ]; then
-            echo "::warning::vitest process was killed after 600s -- likely hung during cleanup (vitest#3077)"
-            exit 0
-          fi
-          # vitest 4.x may exit non-zero due to open handles even when all tests pass.
-          # Check if any tests actually failed before propagating the exit code.
-          if [ $EXIT_CODE -ne 0 ]; then
-            if sed 's/\x1b\[[0-9;]*m//g' /tmp/vitest-output.txt | grep -q "Test Files.*failed"; then
-              exit $EXIT_CODE
-            else
-              echo "::warning::vitest exited with code $EXIT_CODE but no test failures detected -- likely open handle issue (vitest#3077)"
-              exit 0
-            fi
-          fi
+          # Adjudicate the exit code via the single tested gate
+          # (scripts/check-vitest-exit.sh, unit-tested by the CI Self-Defense
+          # Tests job) — the same gate quality-gates.yml uses, so the two no
+          # longer drift. It propagates real test failures (and coverage-threshold
+          # failures, though this job runs without --coverage) and swallows only
+          # the vitest#3077 open-handle / timeout false positives. Invoked by
+          # repo-root path because this step runs with working-directory: web.
+          bash "$GITHUB_WORKSPACE/scripts/check-vitest-exit.sh" "$EXIT_CODE" /tmp/vitest-output.txt
 
   test-mcp:
     name: MCP Tests
