@@ -166,11 +166,21 @@ export async function refundCredits(
   );
   if (!user) throw new Error(`User not found: ${userId}`);
 
-  // Atomic idempotent refund using a CTE (PF-996).
+  // Idempotent refund using a CTE (PF-996, #8729).
   // The CTE INSERT only succeeds if no refund for this transactionId exists yet
   // (WHERE NOT EXISTS). The UPDATE's WHERE depends on the CTE's RETURNING output,
   // so it only runs when the INSERT actually inserted a row — NOT when a
   // pre-existing refund row happens to match. This prevents double-crediting.
+  //
+  // NOT EXISTS alone is NOT concurrency-safe (#8729): it is a snapshot-level
+  // read, so two CONCURRENT refunds for the same transactionId can both pass
+  // it, and the loser then raises a unique violation on
+  // `idx_credit_txn_idempotent` — a loud 500 instead of a no-op. The
+  // `ON CONFLICT (user_id, source, reference_id) ... DO NOTHING` arbiter on
+  // the audit INSERT (mirroring reverseAddonTokens) degrades that loser to a
+  // clean no-op: the CTE returns no rows, so the dependent balance UPDATE is
+  // suppressed and no credit happens without its audit row. The NOT EXISTS is
+  // kept as the cheap snapshot-level fast path for ordinary sequential retries.
   const neonSql = getNeonSql();
 
   await queryWithResilience(() =>
@@ -187,6 +197,7 @@ export async function refundCredits(
             AND transaction_type = 'refund'
             AND reference_id = ${transactionId}
         )
+      ON CONFLICT (user_id, source, reference_id) WHERE reference_id IS NOT NULL DO NOTHING
       RETURNING id
     )
     UPDATE users
