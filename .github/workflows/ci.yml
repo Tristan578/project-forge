@@ -853,7 +853,7 @@ jobs:
       - name: Download blob reports
         # Must match the upload-artifact major version used for blob-report-*
         # above (@v4) — mixing artifact action majors is a documented gotcha.
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: web/all-blob-reports
           pattern: blob-report-*
