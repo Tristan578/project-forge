@@ -106,27 +106,49 @@ describe('SignUpClient (waitlist capture)', () => {
     expect(screen.queryByRole('button', { name: /join the waitlist/i })).toBeNull();
   });
 
-  it('disables the submit button while the request is in flight', async () => {
+  it('guards the submit button with aria-disabled while in flight and blocks re-submission', async () => {
     let resolveFetch: (value: Response) => void = () => {};
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(
-        () => new Promise<Response>((resolve) => { resolveFetch = resolve; })
-      )
+    const fetchMock = vi.fn().mockImplementation(
+      () => new Promise<Response>((resolve) => { resolveFetch = resolve; })
     );
+    vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
     render(<SignUpClient />);
 
     await user.type(screen.getByLabelText(/email address/i), 'fan@example.com');
     await user.click(screen.getByRole('button', { name: /join the waitlist/i }));
 
+    // aria-disabled, NOT the disabled attribute: real browsers move focus to
+    // <body> the moment a focused button is hard-disabled, so the click
+    // submitter would lose their place even on the error path.
     const pending = await screen.findByRole('button', { name: /joining/i });
-    expect(pending).toBeDisabled();
+    expect(pending).toHaveAttribute('aria-disabled', 'true');
+    expect(pending).not.toHaveAttribute('disabled');
+
+    // The handler's re-entry guard (not the attribute) prevents double posts.
+    await user.click(pending);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     resolveFetch(okResponse());
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(/you're on the list/i);
     });
+  });
+
+  it('moves focus to the status region on success (form unmounts under the focused element)', async () => {
+    const user = userEvent.setup();
+    render(<SignUpClient />);
+
+    const input = screen.getByLabelText(/email address/i);
+    await user.type(input, 'fan@example.com{enter}');
+
+    // Without explicit focus management, unmounting the form drops focus to
+    // document.body and a keyboard user's next Tab restarts from the top of
+    // the document (WCAG 2.4.3 Focus Order).
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveFocus();
+    });
+    expect(screen.getByRole('status')).toHaveTextContent(/you're on the list/i);
   });
 
   it('shows an accessible error and keeps the form usable when the API fails', async () => {
@@ -141,24 +163,60 @@ describe('SignUpClient (waitlist capture)', () => {
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(/something went wrong/i);
     });
-    // Error is programmatically associated with the input.
-    expect(input).toHaveAttribute('aria-invalid', 'true');
-    expect(input).toHaveAttribute('aria-describedby');
+    // The error text is programmatically associated with the input, but the
+    // VALUE is fine — a server failure must not announce "invalid entry" and
+    // steer the user to edit a correct address.
+    expect(input).not.toHaveAttribute('aria-invalid');
+    expect(input).toHaveAttribute('aria-describedby', 'waitlist-status');
     // Form stays mounted and re-enabled for retry.
     expect(screen.getByRole('button', { name: /join the waitlist/i })).toBeEnabled();
   });
 
-  it('shows a rate-limit-specific message on 429', async () => {
+  it('marks the email field invalid for a server-side validation rejection (400)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(400)));
+    const user = userEvent.setup();
+    render(<SignUpClient />);
+
+    const input = screen.getByLabelText(/email address/i);
+    await user.type(input, 'fan@example.com');
+    await user.click(screen.getByRole('button', { name: /join the waitlist/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(/does not look right/i);
+    });
+    // A 400 means the entered value itself was rejected — here aria-invalid
+    // is truthful.
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAttribute('aria-describedby', 'waitlist-status');
+  });
+
+  it('marks the email field invalid for the client-side empty-email check without fetching', async () => {
+    const user = userEvent.setup();
+    render(<SignUpClient />);
+
+    await user.click(screen.getByRole('button', { name: /join the waitlist/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(/enter your email address/i);
+    });
+    expect(screen.getByLabelText(/email address/i)).toHaveAttribute('aria-invalid', 'true');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('shows a rate-limit-specific message on 429 without flagging the value as invalid', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(429)));
     const user = userEvent.setup();
     render(<SignUpClient />);
 
-    await user.type(screen.getByLabelText(/email address/i), 'fan@example.com');
+    const input = screen.getByLabelText(/email address/i);
+    await user.type(input, 'fan@example.com');
     await user.click(screen.getByRole('button', { name: /join the waitlist/i }));
 
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(/too many attempts/i);
     });
+    // Rate limiting is operational, not a value problem.
+    expect(input).not.toHaveAttribute('aria-invalid');
   });
 
   it('shows a network-error message when fetch rejects', async () => {
@@ -172,6 +230,14 @@ describe('SignUpClient (waitlist capture)', () => {
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(/network error/i);
     });
+  });
+
+  it('offers a mailto link to support as a secondary contact', () => {
+    render(<SignUpClient />);
+    const support = screen
+      .getAllByRole('link')
+      .find((a) => a.getAttribute('href') === 'mailto:support@spawnforge.ai');
+    expect(support).toBeDefined();
   });
 
   it('links back to the home page', () => {

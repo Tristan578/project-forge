@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /**
  * Pre-launch waitlist page (#8730).
@@ -14,8 +14,13 @@ import { useState } from 'react';
  *
  * Accessibility: a real <label> on the input, a persistent aria-live="polite"
  * status region for success/error announcements, error text programmatically
- * associated via aria-describedby/aria-invalid, and the submit disabled while
- * a request is in flight.
+ * associated via aria-describedby (aria-invalid only for field-validation
+ * failures — a 429/500/network error does not make the VALUE invalid), and
+ * the submit guarded with aria-disabled while a request is in flight (the
+ * real `disabled` attribute would drop focus to <body> in Chrome/Firefox the
+ * moment it lands on the focused button; re-entry is blocked in the handler).
+ * On success the form unmounts, so focus is explicitly moved to the status
+ * region — otherwise keyboard users are dropped to <body> (WCAG 2.4.3).
  *
  * Honeypot: the "website" field is visually hidden by OFF-SCREEN POSITIONING
  * rather than display:none — naive bots skip display:none fields, while an
@@ -26,12 +31,36 @@ import { useState } from 'react';
 
 type FormStatus = 'idle' | 'submitting' | 'success' | 'error';
 
+/**
+ * Why two error kinds: aria-invalid on the input is only truthful when the
+ * VALUE the user entered is bad ('field': empty email, HTTP 400). Operational
+ * failures (429 rate limit, 5xx, network) leave a perfectly valid value —
+ * announcing "invalid entry" there contradicts the visible message and steers
+ * the user to edit a correct address.
+ */
+type ErrorKind = 'field' | 'operational';
+
 export function SignUpClient() {
   const [status, setStatus] = useState<FormStatus>('idle');
   const [errorMessage, setErrorMessage] = useState('');
+  const [errorKind, setErrorKind] = useState<ErrorKind>('operational');
+  const statusRef = useRef<HTMLParagraphElement>(null);
+
+  // On success the whole <form> unmounts while focus is inside it (the email
+  // input for Enter-key submitters, the button for click submitters). Without
+  // explicit management focus falls to document.body and the next Tab restarts
+  // from the top of the page — so move it to the status region, which holds
+  // the confirmation text the user needs next.
+  useEffect(() => {
+    if (status === 'success') {
+      statusRef.current?.focus();
+    }
+  }, [status]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Re-entry guard: with aria-disabled (not `disabled`) the button stays
+    // clickable, so THIS is what prevents double submission in flight.
     if (status === 'submitting') return;
 
     const formData = new FormData(event.currentTarget);
@@ -42,6 +71,7 @@ export function SignUpClient() {
 
     if (email.length === 0) {
       setStatus('error');
+      setErrorKind('field');
       setErrorMessage('Enter your email address to join the waitlist.');
       return;
     }
@@ -60,14 +90,18 @@ export function SignUpClient() {
       }
       setStatus('error');
       if (res.status === 429) {
+        setErrorKind('operational');
         setErrorMessage('Too many attempts. Please wait a minute and try again.');
       } else if (res.status === 400) {
+        setErrorKind('field');
         setErrorMessage('That email address does not look right. Please check it and try again.');
       } else {
+        setErrorKind('operational');
         setErrorMessage('Something went wrong. Please try again.');
       }
     } catch {
       setStatus('error');
+      setErrorKind('operational');
       setErrorMessage('Network error. Please check your connection and try again.');
     }
   }
@@ -94,11 +128,15 @@ export function SignUpClient() {
         </p>
 
         {/* Persistent live region: present from first paint so screen readers
-            announce later success/error updates. */}
+            announce later success/error updates. tabIndex={-1} keeps it out of
+            the tab order but lets the success effect move focus here when the
+            form unmounts. */}
         <p
           id="waitlist-status"
+          ref={statusRef}
           role="status"
           aria-live="polite"
+          tabIndex={-1}
           className={`mt-6 min-h-5 text-sm ${status === 'error' ? 'text-red-400' : 'text-emerald-400'}`}
         >
           {statusText}
@@ -136,14 +174,18 @@ export function SignUpClient() {
               maxLength={254}
               autoComplete="email"
               placeholder="you@example.com"
-              aria-invalid={status === 'error' ? true : undefined}
+              aria-invalid={status === 'error' && errorKind === 'field' ? true : undefined}
               aria-describedby={status === 'error' ? 'waitlist-status' : undefined}
-              className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+              className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-white placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
             />
+            {/* aria-disabled (not `disabled`): real browsers drop focus to
+                <body> the instant a focused button gets the disabled attribute,
+                losing the keyboard user's place even on the error path. The
+                handler's re-entry guard blocks double submission instead. */}
             <button
               type="submit"
-              disabled={status === 'submitting'}
-              className="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+              aria-disabled={status === 'submitting' ? true : undefined}
+              className="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-500 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
             >
               {status === 'submitting' ? 'Joining…' : 'Join the waitlist'}
             </button>
