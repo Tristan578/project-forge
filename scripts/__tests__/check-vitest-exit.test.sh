@@ -112,9 +112,12 @@ TRUNCATED_OUTPUT=' RUN  v4.1.7 /home/runner/work/project-forge/web
  ✓ src/stores/slices/selectionSlice.test.ts (8 tests) 21ms'
 
 # A --coverage run that completed BOTH phases: green test summary AND the
-# coverage report (vitest prints " % Coverage report from v8" before the table,
-# and threshold adjudication happens right after the report). This is the only
-# evidence strong enough to swallow a non-zero exit in --coverage mode.
+# coverage report (vitest prints " % Coverage report from v8" after the remap,
+# immediately BEFORE the reporters execute and thresholds are adjudicated).
+# The marker is the strongest in-band evidence available — a passing
+# adjudication prints nothing — and the minimum required to swallow a non-zero
+# exit in --coverage mode; it proves report generation began, not that
+# adjudication finished (accepted residual, see the gate header).
 COVERAGE_PASS_OUTPUT=' Test Files  120 passed (120)
       Tests  1400 passed (1400)
  % Coverage report from v8
@@ -312,7 +315,10 @@ rc="$(run_gate 124 "$f" --coverage)"
 if [ "$rc" = "124" ]; then pass "--coverage: 124 + green tests, no coverage report → gate 124 (thresholds never adjudicated)"; else fail "--coverage: 124 + green tests, no coverage report → expected 124, got $rc (REGRESSION: unadjudicated coverage swallowed)"; fi
 
 # 27. Coverage mode swallow: 124 + green summary + coverage report marker →
-#     both phases proven complete → gate 0 (#3077 workaround intact).
+#     tests proven complete + coverage proven to have reached report generation
+#     (the marker prints BEFORE reporters/threshold adjudication — strongest
+#     in-band evidence available, not proof adjudication finished; see the gate
+#     header) → gate 0 (#3077 workaround intact).
 f="$(mkfile cov-mode-full.txt "$COVERAGE_PASS_OUTPUT")"
 rc="$(run_gate 124 "$f" --coverage)"
 if [ "$rc" = "0" ]; then pass "--coverage: 124 + green tests + coverage report → gate 0"; else fail "--coverage: 124 + green tests + coverage report → expected 0, got $rc"; fi

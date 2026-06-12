@@ -47,9 +47,25 @@
 #     completed — coverage report generation and threshold adjudication happen
 #     AFTER the summary prints, and are the slow (hang-prone) tail of the run.
 #     In this mode, swallowing additionally requires the coverage-report marker
-#     ("Coverage report from ...") as positive proof that coverage was produced
-#     and adjudicated before the process died; otherwise a kill in that window
-#     would swallow never-adjudicated thresholds.
+#     ("Coverage report from ...").
+#     What the marker actually proves (verified against the pinned
+#     @vitest/coverage-v8 4.1.7, dist/provider.js generateReports()): it prints
+#     AFTER the expensive v8→istanbul remap completes but BEFORE the reporters
+#     execute and BEFORE reportThresholds() runs. So it is positive proof the
+#     coverage phase reached report generation — the strongest in-band evidence
+#     available, since a passing adjudication prints nothing — NOT proof that
+#     thresholds were adjudicated. A kill landing inside the remaining
+#     reporter-write + threshold-math window (typically seconds of a ~600s
+#     budget) is still swallowed. This narrows the unprotected window
+#     enormously but does not close it: defense-in-depth, not an airtight
+#     proof (same honesty contract as check-ci-success.sh).
+#     CI-redness trap, not a security hole: vitest prints the marker only when
+#     coverage.reporter includes a terminal reporter (text / text-summary /
+#     text-lcov / teamcity — vitest's DEFAULT reporters include "text", which
+#     this repo relies on). If coverage.reporter is ever overridden to
+#     file-only reporters (e.g. ['json-summary'] alone), coverage mode fails
+#     closed on EVERY vitest#3077 hang. That is the fail-safe direction, but
+#     the fix is to restore a terminal reporter — never to loosen this gate.
 # Exit: 0 = treat as success; the original code = real failure; 2 = usage error.
 #
 # Fail-closed contract: if the exit code is non-zero and the evidence file is
@@ -126,10 +142,17 @@ fi
 
 # (--coverage mode) The green summary proves the TEST phase completed, but
 # coverage report generation + threshold adjudication happen AFTER it and are
-# the hang-prone tail of the run. Require the coverage-report marker too — a
-# kill in that window means the thresholds were never adjudicated, and nothing
-# downstream catches it (the coverage ratchet skips with a warning when
+# the hang-prone tail of the run. Require the coverage-report marker too: it
+# prints after the expensive remap and immediately BEFORE the reporters and
+# threshold adjudication (see header), so — given a terminal coverage reporter
+# is configured (vitest default "text"; see the header's reporter-override
+# trap) — its ABSENCE means thresholds were never adjudicated, and nothing
+# downstream catches that (the coverage ratchet skips with a warning when
 # coverage-summary.json is absent).
+# Its PRESENCE proves report generation began, not that adjudication finished:
+# a kill inside the brief remaining reporter-write/threshold window is still
+# swallowed (accepted residual — no in-band output exists after a passing
+# adjudication that could anchor a stronger check).
 if [ "$COVERAGE_MODE" -eq 1 ] \
   && ! printf '%s\n' "$CLEAN" | grep -qiE "coverage report from"; then
   echo "::error::vitest exited with code $EXIT_CODE after a passing test run but BEFORE the coverage report was produced — coverage thresholds were never adjudicated; failing closed"
