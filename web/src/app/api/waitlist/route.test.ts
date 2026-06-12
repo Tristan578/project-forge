@@ -61,6 +61,33 @@ describe('POST /api/waitlist', () => {
     expect(values).toHaveBeenCalledWith({ email: 'user@example.com' });
   });
 
+  it('inserts for the real browser payload — empty-string honeypot is NOT a bot', async () => {
+    // SignUpClient always submits { email, website: '' } (the hidden honeypot
+    // field serializes as an empty string). This pins the cross-seam contract:
+    // an empty-string honeypot must be treated as a legitimate signup, or every
+    // real browser submission would be silently dropped with a fake success.
+    const { insert, values } = mockInsertChain();
+    const { POST } = await import('./route');
+
+    const res = await POST(makeReq({ email: 'user@example.com', website: '' }));
+
+    expect(res.status).toBe(200);
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(values).toHaveBeenCalledWith({ email: 'user@example.com' });
+  });
+
+  it('inserts when the honeypot is explicitly null (null is the legit carve-out, not a bot)', async () => {
+    // The honeypot check deliberately exempts null alongside undefined: a
+    // client serializing the untouched field as null is not bot behaviour.
+    const { insert } = mockInsertChain();
+    const { POST } = await import('./route');
+
+    const res = await POST(makeReq({ email: 'user@example.com', website: null }));
+
+    expect(res.status).toBe(200);
+    expect(insert).toHaveBeenCalledTimes(1);
+  });
+
   it('is idempotent via onConflictDoNothing on the named unique index', async () => {
     const { onConflictDoNothing } = mockInsertChain();
     const { POST } = await import('./route');
@@ -102,11 +129,14 @@ describe('POST /api/waitlist', () => {
     const res = await POST(makeReq({ email: 'user@example.com' }));
 
     expect(rateLimitPublicRoute).toHaveBeenCalledTimes(1);
+    // Literal limits pin the abuse budget (repo convention — see the
+    // marketplace/assets and community/games route suites): a silent bump of
+    // WAITLIST_RATE_LIMIT_MAX or the window must fail this test.
     expect(rateLimitPublicRoute).toHaveBeenCalledWith(
       expect.anything(),
       'waitlist',
-      expect.any(Number),
-      expect.any(Number)
+      10,
+      60_000
     );
     expect(res.status).toBe(429);
     expect(insert).not.toHaveBeenCalled();
@@ -135,6 +165,33 @@ describe('POST /api/waitlist', () => {
     const res = await POST(makeReq({ email: 'bot@example.com', website: 42 }));
 
     expect(res.status).toBe(200);
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it('accepts an email at exactly the RFC 5321 max length (254 chars)', async () => {
+    // Boundary pin: 242 + '@example.com' (12) = 254. The cap is `> 254`,
+    // not `>= 254` — an off-by-one here silently rejects valid maximal
+    // addresses, and only an accept case at the exact boundary catches it.
+    const email = `${'a'.repeat(242)}@example.com`;
+    expect(email).toHaveLength(254);
+    const { insert } = mockInsertChain();
+    const { POST } = await import('./route');
+
+    const res = await POST(makeReq({ email }));
+
+    expect(res.status).toBe(200);
+    expect(insert).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an email one char over the RFC 5321 max length (255 chars)', async () => {
+    const email = `${'a'.repeat(243)}@example.com`;
+    expect(email).toHaveLength(255);
+    const { insert } = mockInsertChain();
+    const { POST } = await import('./route');
+
+    const res = await POST(makeReq({ email }));
+
+    expect(res.status).toBe(400);
     expect(insert).not.toHaveBeenCalled();
   });
 
