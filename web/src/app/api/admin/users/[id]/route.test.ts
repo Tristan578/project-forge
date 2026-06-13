@@ -4,11 +4,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GET, PATCH } from './route';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
+import { applyAdminTierChange } from '@/lib/billing/admin-tier-grant';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/db/client');
+vi.mock('@/lib/billing/admin-tier-grant');
+
+/** getDb mock whose select().from().where() resolves each call in sequence. */
+function mockSelectSequence(...resultsPerCall: unknown[][]) {
+  const where = vi.fn();
+  for (const rows of resultsPerCall) where.mockResolvedValueOnce(rows);
+  const selectChain = { from: vi.fn().mockReturnThis(), where };
+  return { select: vi.fn().mockReturnValue(selectChain) };
+}
 
 const PARAMS = { params: Promise.resolve({ id: 'user-uuid-1' }) };
 
@@ -135,75 +145,137 @@ describe('PATCH /api/admin/users/[id]', () => {
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
     vi.mocked(assertAdmin).mockReturnValue(null);
 
-    const updateChain = {
-      set: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      returning: vi.fn().mockResolvedValue([]),
-    };
-    vi.mocked(getDb).mockReturnValue({ update: vi.fn().mockReturnValue(updateChain) } as unknown as ReturnType<typeof getDb>);
+    // Read-first: the missing row surfaces on the initial select, before any
+    // grant or update is attempted.
+    vi.mocked(getDb).mockReturnValue(
+      mockSelectSequence([]) as unknown as ReturnType<typeof getDb>,
+    );
 
     const res = await PATCH(makeReq('http://localhost/api/admin/users/user-uuid-1', 'PATCH', { tier: 'pro' }), PARAMS);
     expect(res.status).toBe(404);
+    expect(applyAdminTierChange).not.toHaveBeenCalled();
   });
 
-  it('updates user tier successfully', async () => {
+  it('grants the new tier allocation when the tier actually changes', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
     vi.mocked(assertAdmin).mockReturnValue(null);
+    vi.mocked(applyAdminTierChange).mockResolvedValue(undefined);
 
-    const updatedUser = makeUser({ tier: 'pro' });
-    const updateChain = {
-      set: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      returning: vi.fn().mockResolvedValue([updatedUser]),
-    };
-    vi.mocked(getDb).mockReturnValue({ update: vi.fn().mockReturnValue(updateChain) } as unknown as ReturnType<typeof getDb>);
+    // First select = current row (starter); second select = post-grant re-read.
+    vi.mocked(getDb).mockReturnValue(
+      mockSelectSequence(
+        [makeUser({ tier: 'starter' })],
+        [makeUser({ tier: 'pro', monthlyTokens: 3000 })],
+      ) as unknown as ReturnType<typeof getDb>,
+    );
 
     const res = await PATCH(makeReq('http://localhost/api/admin/users/user-uuid-1', 'PATCH', { tier: 'pro' }), PARAMS);
     const data = await res.json();
 
     expect(res.status).toBe(200);
     expect(data.user.tier).toBe('pro');
+    expect(data.user.monthlyTokens).toBe(3000);
+    // The grant ran with the previous tier + the acting admin's clerk id.
+    expect(applyAdminTierChange).toHaveBeenCalledWith('user-uuid-1', 'pro', {
+      previousTier: 'starter',
+      grantedByClerkId: 'admin_123',
+      banned: undefined,
+    });
   });
 
-  it('bans a user successfully', async () => {
+  it('folds a ban into the grant when tier and banned change together', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
+    vi.mocked(assertAdmin).mockReturnValue(null);
+    vi.mocked(applyAdminTierChange).mockResolvedValue(undefined);
+
+    vi.mocked(getDb).mockReturnValue(
+      mockSelectSequence(
+        [makeUser({ tier: 'starter' })],
+        [makeUser({ tier: 'creator' })],
+      ) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const res = await PATCH(
+      makeReq('http://localhost/api/admin/users/user-uuid-1', 'PATCH', { tier: 'creator', banned: true }),
+      PARAMS,
+    );
+    expect(res.status).toBe(200);
+    expect(applyAdminTierChange).toHaveBeenCalledWith('user-uuid-1', 'creator', {
+      previousTier: 'starter',
+      grantedByClerkId: 'admin_123',
+      banned: true,
+    });
+  });
+
+  it('does NOT grant tokens when the tier is unchanged (same-tier PATCH)', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
     vi.mocked(assertAdmin).mockReturnValue(null);
 
-    const updatedUser = { ...makeUser(), banned: 1 };
+    const selectMock = mockSelectSequence([makeUser({ tier: 'starter' })]);
     const updateChain = {
       set: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
-      returning: vi.fn().mockResolvedValue([updatedUser]),
+      returning: vi.fn().mockResolvedValue([makeUser({ tier: 'starter' })]),
     };
-    vi.mocked(getDb).mockReturnValue({ update: vi.fn().mockReturnValue(updateChain) } as unknown as ReturnType<typeof getDb>);
+    vi.mocked(getDb).mockReturnValue({
+      ...selectMock,
+      update: vi.fn().mockReturnValue(updateChain),
+    } as unknown as ReturnType<typeof getDb>);
+
+    const res = await PATCH(makeReq('http://localhost/api/admin/users/user-uuid-1', 'PATCH', { tier: 'starter' }), PARAMS);
+    expect(res.status).toBe(200);
+    expect(applyAdminTierChange).not.toHaveBeenCalled();
+  });
+
+  it('bans a user successfully (plain update, no token grant)', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
+    vi.mocked(assertAdmin).mockReturnValue(null);
+
+    const selectMock = mockSelectSequence([makeUser()]);
+    const updateChain = {
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      returning: vi.fn().mockResolvedValue([{ ...makeUser(), banned: 1 }]),
+    };
+    vi.mocked(getDb).mockReturnValue({
+      ...selectMock,
+      update: vi.fn().mockReturnValue(updateChain),
+    } as unknown as ReturnType<typeof getDb>);
 
     const res = await PATCH(makeReq('http://localhost/api/admin/users/user-uuid-1', 'PATCH', { banned: true }), PARAMS);
     const data = await res.json();
 
     expect(res.status).toBe(200);
     expect(data.user.banned).toBe(1);
+    expect(applyAdminTierChange).not.toHaveBeenCalled();
   });
 
-  it('unbans a user successfully', async () => {
+  it('unbans a user successfully (plain update, no token grant)', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
     vi.mocked(assertAdmin).mockReturnValue(null);
 
-    const updatedUser = { ...makeUser(), banned: 0 };
+    const selectMock = mockSelectSequence([{ ...makeUser(), banned: 1 }]);
     const updateChain = {
       set: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
-      returning: vi.fn().mockResolvedValue([updatedUser]),
+      returning: vi.fn().mockResolvedValue([{ ...makeUser(), banned: 0 }]),
     };
-    vi.mocked(getDb).mockReturnValue({ update: vi.fn().mockReturnValue(updateChain) } as unknown as ReturnType<typeof getDb>);
+    vi.mocked(getDb).mockReturnValue({
+      ...selectMock,
+      update: vi.fn().mockReturnValue(updateChain),
+    } as unknown as ReturnType<typeof getDb>);
 
     const res = await PATCH(makeReq('http://localhost/api/admin/users/user-uuid-1', 'PATCH', { banned: false }), PARAMS);
     const data = await res.json();
 
     expect(res.status).toBe(200);
     expect(data.user.banned).toBe(0);
+    expect(applyAdminTierChange).not.toHaveBeenCalled();
   });
 
   it('returns 400 for invalid JSON body', async () => {

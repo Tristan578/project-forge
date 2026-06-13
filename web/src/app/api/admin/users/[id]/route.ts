@@ -4,9 +4,11 @@ import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
+import type { Tier } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { applyAdminTierChange } from '@/lib/billing/admin-tier-grant';
 
 const patchUserSchema = z
   .object({
@@ -66,11 +68,46 @@ export async function PATCH(
   const { id } = await params;
   const body = mid.body as z.infer<typeof patchUserSchema>;
 
-  const updates: Partial<{ tier: 'starter' | 'hobbyist' | 'creator' | 'pro'; banned: number }> = {};
-  if (body.tier !== undefined) updates.tier = body.tier;
-  if (body.banned !== undefined) updates.banned = body.banned ? 1 : 0;
-
   try {
+    // Load the current row first: it backs the 404, supplies the previous tier
+    // for the audit trail, and decides whether the tier actually changed.
+    const [current] = await queryWithResilience(() =>
+      getDb().select().from(users).where(eq(users.id, id))
+    );
+
+    if (!current) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    const previousTier = current.tier as Tier;
+    const tierChanged = body.tier !== undefined && body.tier !== previousTier;
+
+    if (tierChanged) {
+      // A real tier change must ALSO grant the new tier's monthly token
+      // allotment + write a credit_transactions audit row, atomically — else a
+      // comped paid user holds 0 tokens and is blocked at every /api/generate/*
+      // route, so the 5-10 min core journey never starts (#8744). Any `banned`
+      // change is folded into the same transaction.
+      await applyAdminTierChange(id, body.tier as Tier, {
+        previousTier,
+        grantedByClerkId: clerkId,
+        banned: body.banned,
+      });
+
+      // Re-read so the admin UI sees the granted balance + new tier/ban state.
+      const [granted] = await queryWithResilience(() =>
+        getDb().select().from(users).where(eq(users.id, id))
+      );
+      return NextResponse.json({ user: granted });
+    }
+
+    // Banned-only edit (or tier set to its current value): a plain update with
+    // NO token grant. Re-granting on a no-op tier change would zero accrued
+    // spend, so the grant path is reserved for genuine tier changes.
+    const updates: Partial<{ tier: Tier; banned: number }> = {};
+    if (body.tier !== undefined) updates.tier = body.tier;
+    if (body.banned !== undefined) updates.banned = body.banned ? 1 : 0;
+
     const [updated] = await queryWithResilience(() =>
       getDb()
         .update(users)
