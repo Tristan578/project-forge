@@ -48,4 +48,10 @@ updates:
       - dependencies
       - ci
     ignore:
-      - dependency-name: "github/gh-aw-actions/**" # Managed by gh aw compile. Version-locked to the gh-aw compiler; do not bump.
+      # gh-aw-actions are managed by `gh aw compile` (version-locked to the gh-aw
+      # compiler) — Dependabot must never bump them. Both the bare repo ref AND any
+      # sub-action paths are ignored: the `/**` glob alone does NOT match the bare
+      # `github/gh-aw-actions` name, which is what let #8717 and #8738 slip through
+      # and fail the `gh-aw Lock Sync` gate by design.
+      - dependency-name: "github/gh-aw-actions"
+      - dependency-name: "github/gh-aw-actions/**"
