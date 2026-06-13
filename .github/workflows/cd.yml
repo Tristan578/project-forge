@@ -456,6 +456,14 @@ jobs:
       - name: npm audit (web) — allowlist gate
         run: bash scripts/check-npm-audit.sh web
 
+      # Install mcp-server's workspace deps before auditing it, mirroring
+      # quality-gates.yml. The root `npm ci` above already installs every
+      # workspace, but this keeps the two security jobs byte-for-byte identical
+      # so the (main-only) cd.yml audit can never diverge from the PR-exercised
+      # quality-gates path.
+      - run: npm ci
+        working-directory: mcp-server
+
       - name: npm audit (mcp-server) — allowlist gate
         run: bash scripts/check-npm-audit.sh mcp-server
 
