@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import { Button, Input, Label, cn } from '@spawnforge/ui';
 
 /**
  * Pre-launch waitlist page (#8730).
@@ -11,6 +12,10 @@ import { useEffect, useRef, useState } from 'react';
  * authenticate at /sign-in). Every marketing CTA ("Join the Waitlist",
  * "Request Early Access") lands here, so instead of a dead-end notice the
  * page captures the promised lead: an email form posting to /api/waitlist.
+ *
+ * Built on the @spawnforge/ui design system — Label/Input/Button primitives
+ * and var(--sf-*) tokens — so it renders correctly across all 7 themes and in
+ * light mode (no hardcoded zinc/blue/red/emerald that would be theme-blind).
  *
  * Accessibility: a real <label> on the input, a persistent aria-live="polite"
  * status region for success/error announcements, error text programmatically
@@ -97,7 +102,9 @@ export function SignUpClient() {
         setErrorMessage('That email address does not look right. Please check it and try again.');
       } else {
         setErrorKind('operational');
-        setErrorMessage('Something went wrong. Please try again.');
+        setErrorMessage(
+          "We couldn't add you to the list just now. Please try again, or email support@spawnforge.ai if it keeps happening."
+        );
       }
     } catch {
       setStatus('error');
@@ -113,16 +120,18 @@ export function SignUpClient() {
         ? errorMessage
         : '';
 
+  const isFieldError = status === 'error' && errorKind === 'field';
+
   return (
-    <main className="flex min-h-screen items-center justify-center bg-zinc-950 px-6">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900/50 p-8 text-center">
-        <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-1.5 text-sm text-zinc-300">
+    <main className="flex min-h-screen items-center justify-center bg-[var(--sf-bg-app)] px-6">
+      <div className="w-full max-w-md rounded-[var(--sf-radius-xl)] border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] p-8 text-center">
+        <div className="mb-6 inline-flex items-center gap-2 rounded-[var(--sf-radius-full)] border border-[var(--sf-border-strong)] bg-[var(--sf-bg-app)] px-4 py-1.5 text-sm text-[var(--sf-text-secondary)]">
           SpawnForge
         </div>
-        <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
+        <h1 className="text-2xl font-bold tracking-tight text-[var(--sf-text)] sm:text-3xl">
           SpawnForge is in development
         </h1>
-        <p className="mt-4 text-base leading-relaxed text-zinc-400">
+        <p className="mt-4 text-base leading-relaxed text-[var(--sf-text-secondary)]">
           Sign-ups open with early access. Join the waitlist and we&apos;ll
           email you when your spot is ready.
         </p>
@@ -137,14 +146,20 @@ export function SignUpClient() {
           role="status"
           aria-live="polite"
           tabIndex={-1}
-          className={`mt-6 min-h-5 text-sm ${status === 'error' ? 'text-red-400' : 'text-emerald-400'}`}
+          className={cn(
+            'mt-6 min-h-5 text-sm',
+            status === 'error' ? 'text-[var(--sf-destructive)]' : 'text-[var(--sf-success)]'
+          )}
         >
           {statusText}
         </p>
 
         {status !== 'success' && (
           <form onSubmit={handleSubmit} className="relative mt-2 text-left" noValidate>
-            {/* Honeypot — see the component docblock for the hiding rationale. */}
+            {/* Honeypot — see the component docblock for the hiding rationale.
+                Kept as raw, color-free, off-screen markup on purpose: it is
+                aria-hidden and must look like a plain fillable field to bots,
+                so it deliberately does NOT use the themed primitives. */}
             <div
               aria-hidden="true"
               className="absolute -left-[9999px] top-auto h-px w-px overflow-hidden"
@@ -160,13 +175,10 @@ export function SignUpClient() {
               />
             </div>
 
-            <label
-              htmlFor="waitlist-email"
-              className="block text-sm font-medium text-zinc-300"
-            >
+            <Label htmlFor="waitlist-email" className="block">
               Email address
-            </label>
-            <input
+            </Label>
+            <Input
               id="waitlist-email"
               name="email"
               type="email"
@@ -174,36 +186,39 @@ export function SignUpClient() {
               maxLength={254}
               autoComplete="email"
               placeholder="you@example.com"
-              aria-invalid={status === 'error' && errorKind === 'field' ? true : undefined}
+              error={isFieldError}
               aria-describedby={status === 'error' ? 'waitlist-status' : undefined}
-              className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-white placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+              className="mt-2"
             />
             {/* aria-disabled (not `disabled`): real browsers drop focus to
                 <body> the instant a focused button gets the disabled attribute,
-                losing the keyboard user's place even on the error path. The
-                handler's re-entry guard blocks double submission instead. */}
-            <button
+                losing the keyboard user's place even on the error path. Passed
+                via {...props} (NOT the `disabled` prop) so the Button keeps the
+                real attribute off; the handler's re-entry guard blocks double
+                submission, and aria-disabled:* variants carry the visual state. */}
+            <Button
               type="submit"
+              size="lg"
               aria-disabled={status === 'submitting' ? true : undefined}
-              className="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-500 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+              className="mt-4 w-full aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
             >
               {status === 'submitting' ? 'Joining…' : 'Join the waitlist'}
-            </button>
+            </Button>
           </form>
         )}
 
-        <p className="mt-6 text-sm text-zinc-400">
+        <p className="mt-6 text-sm text-[var(--sf-text-secondary)]">
           Questions?{' '}
           <a
             href="mailto:support@spawnforge.ai"
-            className="font-medium text-blue-400 underline-offset-4 transition-colors hover:text-blue-300 hover:underline"
+            className="font-medium text-[var(--sf-accent)] underline-offset-4 transition-colors hover:text-[var(--sf-accent-hover)] hover:underline"
           >
             support@spawnforge.ai
           </a>
         </p>
         <Link
           href="/"
-          className="mt-8 inline-flex items-center justify-center rounded-lg border border-zinc-700 px-5 py-2.5 text-sm font-semibold text-zinc-300 transition-colors hover:border-zinc-500 hover:text-white"
+          className="mt-8 inline-flex min-h-[44px] items-center justify-center rounded-[var(--sf-radius-md)] border border-[var(--sf-border-strong)] px-6 text-base font-medium text-[var(--sf-text-secondary)] transition-all duration-[var(--sf-transition)] hover:border-[var(--sf-accent)] hover:text-[var(--sf-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sf-bg-app)]"
         >
           Back to home
         </Link>

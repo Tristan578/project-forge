@@ -82,6 +82,9 @@ describe('proxy public-route matcher (real Clerk matcher)', () => {
     // real submission before the route's own rate limit/honeypot/validation
     // ever run — the exact omission class this matcher suite exists to catch.
     expect(isPublic('/api/waitlist')).toBe(true);
+    // Pin the trailing (.*) — any future sub-path (e.g. /api/waitlist/confirm)
+    // must stay public too; an exact-match tightening would silently 401 it.
+    expect(isPublic('/api/waitlist/confirm')).toBe(true);
   });
 
   it('only exposes the /dev auth-bypass route when includeDev (non-production) (#7915)', () => {

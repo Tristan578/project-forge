@@ -161,7 +161,10 @@ describe('SignUpClient (waitlist capture)', () => {
     await user.click(screen.getByRole('button', { name: /join the waitlist/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(/something went wrong/i);
+      // Specific, actionable copy — NOT a generic "something went wrong" (the
+      // ux-reviewer rubric fails that): names the failed operation and offers
+      // both a retry and the support fallback already on the page.
+      expect(screen.getByRole('status')).toHaveTextContent(/add you to the list/i);
     });
     // The error text is programmatically associated with the input, but the
     // VALUE is fine — a server failure must not announce "invalid entry" and
@@ -170,6 +173,8 @@ describe('SignUpClient (waitlist capture)', () => {
     expect(input).toHaveAttribute('aria-describedby', 'waitlist-status');
     // Form stays mounted and re-enabled for retry.
     expect(screen.getByRole('button', { name: /join the waitlist/i })).toBeEnabled();
+    // …and the typed value survives the failure so retry is one click, not a re-type.
+    expect(input).toHaveValue('fan@example.com');
   });
 
   it('marks the email field invalid for a server-side validation rejection (400)', async () => {
@@ -230,6 +235,8 @@ describe('SignUpClient (waitlist capture)', () => {
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(/network error/i);
     });
+    // A transient network failure must not wipe the address the user typed.
+    expect(screen.getByLabelText(/email address/i)).toHaveValue('fan@example.com');
   });
 
   it('offers a mailto link to support as a secondary contact', () => {

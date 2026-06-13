@@ -252,5 +252,15 @@ describe('POST /api/waitlist', () => {
 
     expect(res.status).toBe(500);
     expect(captureException).toHaveBeenCalledTimes(1);
+    // The client body is generic — the raw driver error ('connection refused')
+    // must never leak to the caller as an internal-detail oracle.
+    const body = await res.json();
+    expect(body.error).toMatch(/something went wrong/i);
+    expect(body.error).not.toMatch(/connection refused/i);
+    // Sentry receives the real Error plus route/method tags for triage.
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error), {
+      route: '/api/waitlist',
+      method: 'POST',
+    });
   });
 });
