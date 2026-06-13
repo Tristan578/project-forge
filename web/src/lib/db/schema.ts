@@ -611,6 +611,21 @@ export const moderationAppeals = pgTable(
   ]
 );
 
+// --- Waitlist Signups ---
+
+export const waitlistSignups = pgTable(
+  'waitlist_signups',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // POST /api/waitlist normalizes (trim + toLowerCase) BEFORE insert, so a
+    // plain unique index on the raw column is the ON CONFLICT arbiter — no
+    // lower(email) expression index needed (Drizzle's DSL cannot model those).
+    email: text('email').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex('uq_waitlist_signups_email').on(table.email)]
+);
+
 // --- Types ---
 
 export type User = typeof users.$inferSelect;

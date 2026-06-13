@@ -76,6 +76,17 @@ describe('proxy public-route matcher (real Clerk matcher)', () => {
     expect(isPublic('/sign-up/sso-callback')).toBe(true);
   });
 
+  it('treats the waitlist endpoint as public so unauthenticated visitors can sign up (#8730)', () => {
+    // The /sign-up waitlist form posts here from visitors who BY DEFINITION
+    // have no Clerk session. If this pattern disappears, production 401s every
+    // real submission before the route's own rate limit/honeypot/validation
+    // ever run — the exact omission class this matcher suite exists to catch.
+    expect(isPublic('/api/waitlist')).toBe(true);
+    // Pin the trailing (.*) — any future sub-path (e.g. /api/waitlist/confirm)
+    // must stay public too; an exact-match tightening would silently 401 it.
+    expect(isPublic('/api/waitlist/confirm')).toBe(true);
+  });
+
   it('only exposes the /dev auth-bypass route when includeDev (non-production) (#7915)', () => {
     const prod = createRouteMatcher(buildPublicRoutes({ includeDev: false }));
     const dev = createRouteMatcher(buildPublicRoutes({ includeDev: true }));
@@ -101,6 +112,16 @@ describe('proxy auth decision (applyAuthDecision, real matcher)', () => {
     const res = await applyAuthDecision(unauthed, reqFor('/api/cron/health-monitor'), isPublicRoute);
     expect(res.status).toBe(200);
     // Never asked Clerk to redirect — the route was treated as public.
+    expect(redirectToSignIn).not.toHaveBeenCalled();
+  });
+
+  it('lets an unauthenticated POST through to the public waitlist endpoint (#8730)', async () => {
+    const res = await applyAuthDecision(
+      unauthed,
+      reqFor('/api/waitlist', { method: 'POST' }),
+      isPublicRoute,
+    );
+    expect(res.status).toBe(200);
     expect(redirectToSignIn).not.toHaveBeenCalled();
   });
 
