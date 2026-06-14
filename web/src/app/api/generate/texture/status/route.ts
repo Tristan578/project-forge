@@ -45,10 +45,26 @@ export async function GET(request: NextRequest) {
   try {
     const status = await client.getTextureStatus(jobId);
 
+    // A truthy-but-empty `{}` is not a real result — gate completion on at least
+    // one actual map being present.
+    const hasMaps = !!status.maps && Object.keys(status.maps).length > 0;
+
     // Map Meshy status to our format
     let mappedStatus: 'pending' | 'processing' | 'completed' | 'failed';
+    let succeededButEmpty = false;
     if (status.status === 'SUCCEEDED') {
-      mappedStatus = 'completed';
+      // Meshy reported SUCCEEDED — but only treat it as completed if it produced PBR
+      // maps. A success with no maps must map to `failed`, not `completed`:
+      // useGenerationPolling throws an uncaught "No texture maps" on a completed job
+      // with no maps, so the job sticks in `downloading` for the full poll cap
+      // before a generic timeout refund (#8757). Reporting `failed` here routes
+      // through the poller's refund path immediately.
+      if (hasMaps) {
+        mappedStatus = 'completed';
+      } else {
+        mappedStatus = 'failed';
+        succeededButEmpty = true;
+      }
     } else if (status.status === 'FAILED' || status.status === 'EXPIRED') {
       mappedStatus = 'failed';
     } else if (status.status === 'IN_PROGRESS') {
@@ -61,8 +77,10 @@ export async function GET(request: NextRequest) {
       jobId,
       status: mappedStatus,
       progress: status.progress,
-      maps: status.maps,
-      error: mappedStatus === 'failed' ? 'Generation failed' : undefined,
+      maps: mappedStatus === 'completed' ? status.maps : undefined,
+      error: mappedStatus === 'failed'
+        ? (succeededButEmpty ? 'Texture generation produced no maps' : 'Texture generation failed')
+        : undefined,
     });
   } catch (err) {
     captureException(err, { route: '/api/generate/texture/status', jobId });

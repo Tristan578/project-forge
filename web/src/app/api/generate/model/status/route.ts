@@ -48,8 +48,20 @@ export async function GET(request: NextRequest) {
 
     // Map Meshy status to our format
     let mappedStatus: 'pending' | 'processing' | 'completed' | 'failed';
+    let succeededButEmpty = false;
     if (status.status === 'SUCCEEDED') {
-      mappedStatus = 'completed';
+      // Meshy reported SUCCEEDED — but only treat it as completed if it produced a
+      // downloadable GLB. A success with no model file must map to `failed`, not
+      // `completed`: useGenerationPolling throws an uncaught "No result URL" on a
+      // completed job with no resultUrl, so the job sticks in `downloading` for the
+      // full poll cap before a generic timeout refund (#8757). Reporting `failed`
+      // here routes through the poller's refund path immediately.
+      if (status.modelUrls?.glb) {
+        mappedStatus = 'completed';
+      } else {
+        mappedStatus = 'failed';
+        succeededButEmpty = true;
+      }
     } else if (status.status === 'FAILED' || status.status === 'EXPIRED') {
       mappedStatus = 'failed';
     } else if (status.status === 'IN_PROGRESS') {
@@ -62,9 +74,11 @@ export async function GET(request: NextRequest) {
       jobId,
       status: mappedStatus,
       progress: status.progress,
-      resultUrl: status.modelUrls?.glb,
+      resultUrl: mappedStatus === 'completed' ? status.modelUrls?.glb : undefined,
       thumbnailUrl: status.thumbnailUrl,
-      error: mappedStatus === 'failed' ? 'Generation failed' : undefined,
+      error: mappedStatus === 'failed'
+        ? (succeededButEmpty ? 'Model generation produced no file' : 'Model generation failed')
+        : undefined,
     });
   } catch (err) {
     captureException(err, { route: '/api/generate/model/status', jobId });

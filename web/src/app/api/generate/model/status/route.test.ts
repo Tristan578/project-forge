@@ -100,7 +100,52 @@ describe('GET /api/generate/model/status', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Generation failed');
+    expect(data.error).toBe('Model generation failed');
+  });
+
+  it('maps SUCCEEDED-with-no-model-file to failed (so the poller refunds, not hangs)', async () => {
+    vi.mocked(MeshyClient).mockImplementation(
+      function (this: InstanceType<typeof MeshyClient>) {
+        // Meshy reports SUCCEEDED but produced no downloadable GLB. Mapping this
+        // to `completed` hands the client a completed job with no resultUrl, which
+        // throws an uncaught "No result URL" in useGenerationPolling — the job then
+        // sticks in `downloading` for the full poll cap before refunding with a
+        // generic timeout (#8757). The route must surface it as `failed` so the
+        // poller refunds immediately with a meaningful error.
+        this.getTaskStatus = vi.fn().mockResolvedValue({
+          status: 'SUCCEEDED',
+          progress: 100,
+          modelUrls: {},
+        });
+      } as unknown as typeof MeshyClient
+    );
+
+    const res = await GET(makeRequest('job-123'));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('failed');
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.error).toBe('Model generation produced no file');
+  });
+
+  it('does not leak a resultUrl while still processing', async () => {
+    vi.mocked(MeshyClient).mockImplementation(
+      function (this: InstanceType<typeof MeshyClient>) {
+        // Meshy can surface a partial modelUrls before completion; the route must
+        // gate resultUrl on completion so the client doesn't download a partial model.
+        this.getTaskStatus = vi.fn().mockResolvedValue({
+          status: 'IN_PROGRESS',
+          progress: 50,
+          modelUrls: { glb: 'https://cdn.meshy.ai/partial.glb' },
+        });
+      } as unknown as typeof MeshyClient
+    );
+
+    const res = await GET(makeRequest('job-123'));
+    const data = await res.json();
+    expect(data.status).toBe('processing');
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.error).toBeUndefined();
   });
 
   it('returns processing status for IN_PROGRESS task', async () => {

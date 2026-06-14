@@ -94,7 +94,7 @@ describe('GET /api/generate/texture/status', () => {
 
     expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Generation failed');
+    expect(data.error).toBe('Texture generation failed');
   });
 
   it('returns failed status when Meshy reports EXPIRED', async () => {
@@ -108,6 +108,63 @@ describe('GET /api/generate/texture/status', () => {
 
     expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
+  });
+
+  it('maps SUCCEEDED-with-no-maps to failed (so the poller refunds, not hangs)', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'meshy_key', metered: true });
+    // Meshy reports SUCCEEDED but produced no PBR maps. Mapping this to `completed`
+    // hands the client a completed job with no maps, which throws an uncaught
+    // "No texture maps" in useGenerationPolling — the job then sticks in
+    // `downloading` for the full poll cap before refunding with a generic timeout
+    // (#8757). The route must surface it as `failed` so the poller refunds
+    // immediately with a meaningful error.
+    mockGetTextureStatus.mockResolvedValue({ status: 'SUCCEEDED', progress: 100, maps: undefined });
+
+    const res = await GET(makeRequest({ jobId: 'task_123' }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.status).toBe('failed');
+    expect(data.maps).toBeUndefined();
+    expect(data.error).toBe('Texture generation produced no maps');
+  });
+
+  it('maps SUCCEEDED-with-empty-maps-object to failed', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'meshy_key', metered: true });
+    mockGetTextureStatus.mockResolvedValue({ status: 'SUCCEEDED', progress: 100, maps: {} });
+
+    const res = await GET(makeRequest({ jobId: 'task_123' }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.status).toBe('failed');
+    expect(data.maps).toBeUndefined();
+    expect(data.error).toBe('Texture generation produced no maps');
+  });
+
+  it('does not leak maps while still processing', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'meshy_key', metered: true });
+    // Meshy can surface partial maps before completion; the route must gate maps on
+    // completion so the client doesn't apply a partial texture set.
+    mockGetTextureStatus.mockResolvedValue({
+      status: 'IN_PROGRESS',
+      progress: 45,
+      maps: { albedo: 'https://cdn.meshy.ai/partial.png' },
+    });
+
+    const res = await GET(makeRequest({ jobId: 'task_123' }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.status).toBe('processing');
+    expect(data.maps).toBeUndefined();
+    expect(data.error).toBeUndefined();
   });
 
   it('returns processing status when Meshy reports IN_PROGRESS', async () => {

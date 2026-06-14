@@ -98,7 +98,52 @@ describe('GET /api/generate/music/status', () => {
     const res = await GET(makeRequest('job-123'));
     const data = await res.json();
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Generation failed');
+    expect(data.error).toBe('Music generation failed');
+  });
+
+  it('maps success-with-no-audio to failed (so the poller refunds, not hangs)', async () => {
+    vi.mocked(SunoClient).mockImplementation(
+      function (this: InstanceType<typeof SunoClient>) {
+        // Suno reports success but produced no audio URL. Mapping this to
+        // `completed` hands the client a completed job with no resultUrl, which
+        // throws an uncaught "No result URL" in useGenerationPolling — the job then
+        // sticks in `downloading` for the full poll cap before refunding with a
+        // generic timeout (#8757). The route must surface it as `failed` so the
+        // poller refunds immediately with a meaningful error.
+        this.getStatus = vi.fn().mockResolvedValue({
+          status: 'completed',
+          progress: 100,
+          audioUrl: undefined,
+        });
+      } as unknown as typeof SunoClient
+    );
+
+    const res = await GET(makeRequest('job-123'));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('failed');
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.error).toBe('Music generation produced no audio');
+  });
+
+  it('does not leak a resultUrl while still processing', async () => {
+    vi.mocked(SunoClient).mockImplementation(
+      function (this: InstanceType<typeof SunoClient>) {
+        // Suno can surface a partial audioUrl before completion; the route must gate
+        // resultUrl on completion so the client doesn't import a partial track.
+        this.getStatus = vi.fn().mockResolvedValue({
+          status: 'generating',
+          progress: 60,
+          audioUrl: 'https://cdn.suno.ai/partial.mp3',
+        });
+      } as unknown as typeof SunoClient
+    );
+
+    const res = await GET(makeRequest('job-123'));
+    const data = await res.json();
+    expect(data.status).toBe('processing');
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.error).toBeUndefined();
   });
 
   it('returns processing status for generating task', async () => {
