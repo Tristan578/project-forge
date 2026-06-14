@@ -13,6 +13,7 @@ import type { ExportFormat } from './presets';
 import type { ScriptData } from '@/stores/editorStore';
 import { compressTexture, COMPRESSION_PRESETS, type CompressionConfig } from './textureCompression';
 import { escapeHtml, escapeScriptContent, validateCssColor } from './exportUtils';
+import { generateGameLoopFragment } from './gameLoopFragment';
 
 export interface ZipExportOptions {
   format: ExportFormat;
@@ -400,42 +401,8 @@ export function generateZipIndexHtml(options: {
       // Run script onStart hooks
       if (window.__forgeScriptStart) window.__forgeScriptStart();
 
-      // Main game loop
-      var lastTime = performance.now();
-      function gameLoop() {
-        var now = performance.now();
-        var dt = (now - lastTime) / 1000;
-        lastTime = now;
-
-        // Merge touch input BEFORE the script reads it. The engine's PLAY_TICK
-        // callback overwrites __forgeInputState wholesale with keyboard/gamepad
-        // state only, so the touch layer must be re-merged each frame before
-        // __forgeScriptUpdate runs — otherwise an intervening PLAY_TICK drops
-        // touch state before any script sees it and touch controls go dead (#8754).
-        if (window.__forgeTouchInput) {
-          if (!window.__forgeInputState) window.__forgeInputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
-          var ti = window.__forgeTouchInput;
-          for (var k in ti.pressed) { if (ti.pressed[k]) window.__forgeInputState.pressed[k] = true; }
-          for (var k2 in ti.justPressed) { if (ti.justPressed[k2]) window.__forgeInputState.justPressed[k2] = true; }
-          for (var k3 in ti.justReleased) { if (ti.justReleased[k3]) window.__forgeInputState.justReleased[k3] = true; }
-          for (var k4 in ti.axes) { window.__forgeInputState.axes[k4] = ti.axes[k4]; }
-          if (window.__forgeTouchFlush) window.__forgeTouchFlush();
-        }
-
-        // Run script onUpdate hooks
-        if (window.__forgeScriptUpdate) window.__forgeScriptUpdate(dt);
-
-        // Flush script commands to WASM engine
-        if (window.__forgeFlushCommands) {
-          var cmds = window.__forgeFlushCommands();
-          for (var i = 0; i < cmds.length; i++) {
-            wasm.handle_command(cmds[i].cmd, JSON.stringify(cmds[i]));
-          }
-        }
-
-        requestAnimationFrame(gameLoop);
-      }
-      requestAnimationFrame(gameLoop);
+      // Main game loop (shared with the single-HTML exporter — see gameLoopFragment.ts)
+${generateGameLoopFragment({ handleCommand: 'wasm.handle_command', indent: '      ' })}
 
       // Signal engine ready (for loading screen)
       window.dispatchEvent(new CustomEvent('forge:engine-ready'));

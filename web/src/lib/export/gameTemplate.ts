@@ -2,6 +2,7 @@ import { generateUIRuntimeCode } from './uiRuntime';
 import { generateTouchCSS, generateTouchJS } from './touchControls';
 import type { MobileTouchConfig } from './touchControls';
 import { escapeHtml, escapeScriptContent, validateCssColor } from './exportUtils';
+import { generateGameLoopFragment } from './gameLoopFragment';
 
 export interface EmbeddedWasmData {
   jsBase64: string;     // JS glue code, base64-encoded
@@ -165,46 +166,8 @@ export function generateGameHTML(options: GameTemplateOptions): string {
           handle_command('play', '{}');
           if (window.__forgeScriptStart) window.__forgeScriptStart();
 
-          // Script update loop
-          let lastTime = performance.now();
-          function gameLoop() {
-            const now = performance.now();
-            const dt = (now - lastTime) / 1000;
-            lastTime = now;
-
-            // Merge touch input BEFORE the frame's script update. PLAY_TICK
-            // overwrites __forgeInputState wholesale every engine frame with
-            // keyboard/gamepad state only (the engine has no knowledge of JS
-            // touch input), so the touch layer must be re-applied on top within
-            // the same synchronous gameLoop tick that the scripts read — JS is
-            // single-threaded, so no PLAY_TICK can interleave between this merge
-            // and __forgeScriptUpdate below. Merging after the script read (the
-            // prior order) let an intervening PLAY_TICK obliterate touch input
-            // before scripts ever saw it — touch controls were dead in exported
-            // mobile games (#8754).
-            if (window.__forgeTouchInput) {
-              if (!window.__forgeInputState) window.__forgeInputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
-              var ti = window.__forgeTouchInput;
-              for (var k in ti.pressed) { if (ti.pressed[k]) window.__forgeInputState.pressed[k] = true; }
-              for (var k2 in ti.justPressed) { if (ti.justPressed[k2]) window.__forgeInputState.justPressed[k2] = true; }
-              for (var k3 in ti.justReleased) { if (ti.justReleased[k3]) window.__forgeInputState.justReleased[k3] = true; }
-              for (var k4 in ti.axes) { window.__forgeInputState.axes[k4] = ti.axes[k4]; }
-              if (window.__forgeTouchFlush) window.__forgeTouchFlush();
-            }
-
-            if (window.__forgeScriptUpdate) window.__forgeScriptUpdate(dt);
-
-            // Flush script commands to engine
-            if (window.__forgeFlushCommands) {
-              const cmds = window.__forgeFlushCommands();
-              for (const cmd of cmds) {
-                handle_command(cmd.cmd, JSON.stringify(cmd));
-              }
-            }
-
-            requestAnimationFrame(gameLoop);
-          }
-          requestAnimationFrame(gameLoop);
+          // Script update loop (shared with the ZIP exporter — see gameLoopFragment.ts)
+${generateGameLoopFragment({ handleCommand: 'handle_command', indent: '          ' })}
 
           // Hide loading screen
           document.getElementById('loading').classList.add('hidden');
