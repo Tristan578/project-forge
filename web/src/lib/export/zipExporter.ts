@@ -233,9 +233,12 @@ export async function exportAsZip(
 }
 
 /**
- * Generate index.html for ZIP export (loads WASM engine and assets from separate files)
+ * Generate index.html for ZIP export (loads WASM engine and assets from separate files).
+ *
+ * Exported for tests that pin the generated game-loop structure — notably that
+ * the touch-input merge runs before `__forgeScriptUpdate` each frame (#8754).
  */
-function generateZipIndexHtml(options: {
+export function generateZipIndexHtml(options: {
   title: string;
   bgColor: string;
   resolution: GameTemplateOptions['resolution'];
@@ -404,10 +407,11 @@ function generateZipIndexHtml(options: {
         var dt = (now - lastTime) / 1000;
         lastTime = now;
 
-        // Run script onUpdate hooks
-        if (window.__forgeScriptUpdate) window.__forgeScriptUpdate(dt);
-
-        // Merge touch input
+        // Merge touch input BEFORE the script reads it. The engine's PLAY_TICK
+        // callback overwrites __forgeInputState wholesale with keyboard/gamepad
+        // state only, so the touch layer must be re-merged each frame before
+        // __forgeScriptUpdate runs — otherwise an intervening PLAY_TICK drops
+        // touch state before any script sees it and touch controls go dead (#8754).
         if (window.__forgeTouchInput) {
           if (!window.__forgeInputState) window.__forgeInputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
           var ti = window.__forgeTouchInput;
@@ -417,6 +421,9 @@ function generateZipIndexHtml(options: {
           for (var k4 in ti.axes) { window.__forgeInputState.axes[k4] = ti.axes[k4]; }
           if (window.__forgeTouchFlush) window.__forgeTouchFlush();
         }
+
+        // Run script onUpdate hooks
+        if (window.__forgeScriptUpdate) window.__forgeScriptUpdate(dt);
 
         // Flush script commands to WASM engine
         if (window.__forgeFlushCommands) {
