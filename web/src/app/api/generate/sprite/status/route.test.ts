@@ -187,6 +187,27 @@ describe('GET /api/generate/sprite/status', () => {
     expect(data.progress).toBe(50);
   });
 
+  it('returns pending status for a freshly-started prediction', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+    // Replicate predictions begin in `starting` (and may sit in `queued`) before
+    // flipping to `processing`. Both fall through to the else branch → `pending`
+    // at progress 10. Guards against a regression that mis-buckets `starting`
+    // into the `processing` branch (progress 50).
+    mockGetReplicateStatus.mockResolvedValue({ status: 'starting', output: undefined });
+
+    const res = await GET(makeRequest({ jobId: 'pred_abc123' }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.jobId).toBe('pred_abc123');
+    expect(data.status).toBe('pending');
+    expect(data.progress).toBe(10);
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.error).toBeUndefined();
+  });
+
   it('returns 500 if client throws unexpectedly', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
