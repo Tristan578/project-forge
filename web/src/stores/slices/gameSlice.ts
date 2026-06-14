@@ -22,6 +22,10 @@ export interface GameSlice {
   loadingScreenConfig: LoadingScreenConfig | null;
   accessibilityProfile: AccessibilityProfile | null;
   exportPreset: { presetKey: string; config: ExportPreset } | null;
+  /** True once the active play session has been won (engine win condition met or `forge.game.win()`). */
+  gameWon: boolean;
+  /** Current player score for the active play session, surfaced to the HUD. */
+  gameScore: number;
 
   addGameComponent: (entityId: string, component: GameComponentData) => void;
   updateGameComponent: (entityId: string, component: GameComponentData) => void;
@@ -40,6 +44,8 @@ export interface GameSlice {
   updateAccessibilityProfile: (partial: Partial<AccessibilityProfile>) => void;
   setExportPreset: (presetKey: string, config: ExportPreset) => void;
   clearExportPreset: () => void;
+  setGameWon: (won: boolean) => void;
+  setGameScore: (score: number) => void;
   play: () => void;
   stop: () => void;
   pause: () => void;
@@ -117,6 +123,8 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   loadingScreenConfig: null,
   accessibilityProfile: null,
   exportPreset: null,
+  gameWon: false,
+  gameScore: 0,
 
   addGameComponent: (entityId, component) => {
     set(state => ({
@@ -188,6 +196,8 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   },
   setExportPreset: (presetKey, config) => set({ exportPreset: { presetKey, config } }),
   clearExportPreset: () => set({ exportPreset: null }),
+  setGameWon: (won) => set({ gameWon: won }),
+  setGameScore: (score) => set({ gameScore: score }),
   play: () => {
     // Pre-play winnability gate: block entry and explain why if the scene
     // can never be won, so the user isn't dropped into an unwinnable game.
@@ -206,10 +216,14 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
         /* gate failure must never block Play — proceed as if winnable */
       }
     }
+    // Each play session starts fresh: clear any win/score carried over from a prior run.
+    // Runs only after the winnability gate passes — a blocked Play leaves state untouched.
+    set({ gameWon: false, gameScore: 0 });
     if (dispatchCommand) dispatchCommand('play', {});
     import('@/lib/analytics/events').then(m => m.trackPlayModeStarted()).catch(() => { /* analytics non-critical */ });
   },
   stop: () => {
+    set({ gameWon: false, gameScore: 0 });
     if (dispatchCommand) dispatchCommand('stop', {});
   },
   pause: () => {

@@ -71,6 +71,54 @@ describe('gameSlice', () => {
       const state = store.getState();
       expect(state.engineMode).toBe('edit');
     });
+
+    it('should not be won and have zero score', () => {
+      const state = store.getState();
+      expect(state.gameWon).toBe(false);
+      expect(state.gameScore).toBe(0);
+    });
+  });
+
+  describe('Win State', () => {
+    it('should set gameWon without dispatch', () => {
+      store.getState().setGameWon(true);
+
+      const state = store.getState();
+      expect(state.gameWon).toBe(true);
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+
+    it('should set gameScore without dispatch', () => {
+      store.getState().setGameScore(42);
+
+      const state = store.getState();
+      expect(state.gameScore).toBe(42);
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+
+    it('should reset win/score when starting play', () => {
+      store.getState().setGameWon(true);
+      store.getState().setGameScore(99);
+
+      store.getState().play();
+
+      const state = store.getState();
+      expect(state.gameWon).toBe(false);
+      expect(state.gameScore).toBe(0);
+      expect(mockDispatch).toHaveBeenCalledWith('play', {});
+    });
+
+    it('should reset win/score when stopping play', () => {
+      store.getState().setGameWon(true);
+      store.getState().setGameScore(99);
+
+      store.getState().stop();
+
+      const state = store.getState();
+      expect(state.gameWon).toBe(false);
+      expect(state.gameScore).toBe(0);
+      expect(mockDispatch).toHaveBeenCalledWith('stop', {});
+    });
   });
 
   describe('Game Components', () => {

@@ -3,6 +3,7 @@
  */
 
 import { useEditorStore, type GameCameraData, firePlayTick } from '@/stores/editorStore';
+import { getScriptGameEventCallback } from '@/lib/scripting/useScriptRunner';
 import { castPayload, type SetFn, type GetFn } from './types';
 
 export function handleGameEvent(
@@ -46,6 +47,18 @@ export function handleGameEvent(
         inputState: { pressed: Record<string, boolean>; justPressed: Record<string, boolean>; justReleased: Record<string, boolean>; axes: Record<string, number> };
       }>(data);
       firePlayTick(payload);
+      return true;
+    }
+
+    case 'GAME_EVENT': {
+      // Per-frame game events drained from the engine runtime (win, collectible
+      // pickup, …). game_win flips the store flag (drives the HUD win overlay);
+      // all events are forwarded to the script worker so forge.game.onWin fires.
+      const payload = castPayload<{ eventName: string; sourceEntityId: string | null; targetEntityId: string | null }>(data);
+      if (payload.eventName === 'game_win') {
+        useEditorStore.getState().setGameWon(true);
+      }
+      getScriptGameEventCallback()?.(payload);
       return true;
     }
 
