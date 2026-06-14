@@ -7,6 +7,7 @@
  */
 
 import type { ToolHandler, ExecutionResult } from './types';
+import { validateWinnability, formatWinnabilityMessage } from '@/lib/playMode/winnabilityValidator';
 
 export const entityHandlers: Record<string, ToolHandler> = {
   get_scene_graph: async (_args, ctx): Promise<ExecutionResult> => {
@@ -52,6 +53,15 @@ export const entityHandlers: Record<string, ToolHandler> = {
 
   play: async (_args, ctx): Promise<ExecutionResult> => {
     if (ctx.store.engineMode !== 'edit') return { success: false, error: 'Already in play mode' };
+    // AI path: validate here so an unwinnable scene comes back as a tool RESULT
+    // (the AI's actionable channel) instead of silently entering Play. We do NOT
+    // surface it to chat on this path — that would duplicate the message into the
+    // model. store.play() re-runs the same pure check for the human Play-button
+    // path; both call the same function on the same snapshot, so they can't diverge.
+    const report = validateWinnability(ctx.store.sceneGraph, ctx.store.allGameComponents);
+    if (!report.winnable) {
+      return { success: false, error: formatWinnabilityMessage(report) };
+    }
     ctx.store.play();
     return { success: true, result: { message: 'Entered play mode' } };
   },

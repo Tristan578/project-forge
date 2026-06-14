@@ -3,11 +3,12 @@
  */
 
 import { StateCreator } from 'zustand';
-import type { GameComponentData, GameCameraData, MobileTouchConfig, HudElement, EngineMode } from './types';
+import type { GameComponentData, GameCameraData, MobileTouchConfig, HudElement, EngineMode, SceneGraph } from './types';
 import type { LoadingScreenConfig } from '@/lib/export/loadingScreen';
 import type { AccessibilityProfile } from '@/lib/ai/accessibilityGenerator';
 import { createDefaultProfile } from '@/lib/ai/accessibilityGenerator';
 import type { ExportPreset } from '@/lib/export/presets';
+import { validateWinnability, formatWinnabilityMessage } from '@/lib/playMode/winnabilityValidator';
 
 export interface GameSlice {
   allGameComponents: Record<string, GameComponentData[]>;
@@ -56,6 +57,55 @@ let dispatchCommand: ((command: string, payload: unknown) => void) | null = null
 
 export function setGameDispatcher(dispatcher: (command: string, payload: unknown) => void): void {
   dispatchCommand = dispatcher;
+}
+
+/**
+ * Cross-slice reader for the pre-play winnability gate. `play()` lives in this
+ * slice but the validator needs the scene graph (a different slice), so the
+ * composition root wires a reader that returns the full state it needs. When
+ * unset (e.g. before the engine mounts, or in slice-only unit tests) the gate
+ * is skipped and `play()` behaves exactly as before.
+ */
+type WinnabilityState = { sceneGraph: SceneGraph; allGameComponents: Record<string, GameComponentData[]> };
+let readWinnabilityState: (() => WinnabilityState) | null = null;
+
+export function setWinnabilityStateReader(reader: (() => WinnabilityState) | null): void {
+  readWinnabilityState = reader;
+}
+
+/** Best-effort unique id; `crypto.randomUUID` is unavailable in non-secure contexts. */
+function messageId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `wnbl-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
+/**
+ * Surface an actionable message into the chat panel without coupling slices.
+ * Posted as `role: 'system'` so it renders as a notice to the user (ChatMessage)
+ * but is filtered out of the AI request payload (chatStore.buildApiMessages) —
+ * the gate's feedback never re-enters the model's context as if the AI said it.
+ */
+function surfaceWinnabilityMessage(message: string): void {
+  // Compute the impure id/timestamp once, outside the updater, so the message
+  // is identical no matter how many times the store runs the updater.
+  const entry = { id: messageId(), role: 'system' as const, content: message, timestamp: Date.now() };
+  import('@/stores/chatStore').then(({ useChatStore }) => {
+    // Updater form: read-modify-write atomically so a concurrent chat write
+    // (e.g. a streaming token) can't be clobbered between get and set.
+    useChatStore.setState((state) => ({
+      messages: [...state.messages, entry],
+      rightPanelTab: 'chat',
+      // We switch the user TO the chat tab in this same update, so the message
+      // is immediately on-screen — there is nothing "unread". Setting it true
+      // would flag an unread badge on the very tab they're now viewing, and
+      // contradicts chatStore's invariant (tab === 'chat' ⟹ unread false; see
+      // chatStore setRightPanelTab + the rightPanelTab !== 'chat' append rule).
+      hasUnreadMessages: false,
+    }));
+  }).catch(() => { /* chat surface is best-effort */ });
 }
 
 export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set, get) => ({
@@ -154,7 +204,25 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   setGameWon: (won) => set({ gameWon: won }),
   setGameScore: (score) => set({ gameScore: score }),
   play: () => {
+    // Pre-play winnability gate: block entry and explain why if the scene
+    // can never be won, so the user isn't dropped into an unwinnable game.
+    // This is a UX safety net, not a security control — if the check itself
+    // throws, fail OPEN (fall through to dispatch) rather than trapping the
+    // user out of Play.
+    if (readWinnabilityState) {
+      try {
+        const { sceneGraph, allGameComponents } = readWinnabilityState();
+        const report = validateWinnability(sceneGraph, allGameComponents);
+        if (!report.winnable) {
+          surfaceWinnabilityMessage(formatWinnabilityMessage(report));
+          return;
+        }
+      } catch {
+        /* gate failure must never block Play — proceed as if winnable */
+      }
+    }
     // Each play session starts fresh: clear any win/score carried over from a prior run.
+    // Runs only after the winnability gate passes — a blocked Play leaves state untouched.
     set({ gameWon: false, gameScore: 0 });
     if (dispatchCommand) dispatchCommand('play', {});
     import('@/lib/analytics/events').then(m => m.trackPlayModeStarted()).catch(() => { /* analytics non-critical */ });

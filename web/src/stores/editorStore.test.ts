@@ -6,8 +6,9 @@
  * script logs, and entity CRUD actions.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { useEditorStore, setCommandDispatcher } from './editorStore';
+import { setWinnabilityStateReader } from './slices/gameSlice';
 import {
   createMockDispatch,
   makeSceneGraph,
@@ -100,6 +101,12 @@ describe('editorStore', () => {
     // Set up mock dispatcher
     mockDispatch = createMockDispatch();
     setCommandDispatcher(mockDispatch as (command: string, payload: unknown) => void);
+  });
+
+  afterEach(() => {
+    // setCommandDispatcher wires the cross-slice winnability reader at the
+    // editorStore singleton; clear it so the gate can't leak across tests.
+    setWinnabilityStateReader(null);
   });
 
   describe('Selection', () => {
@@ -408,11 +415,34 @@ describe('editorStore', () => {
       expect(updated.engineMode).toBe('play');
     });
 
-    it('play() dispatches play command', () => {
+    it('play() dispatches play command when the scene is winnable', () => {
+      // play() now runs a pre-play winnability gate, so the dispatch only
+      // happens for a scene that can actually be won.
+      useEditorStore.setState({
+        sceneGraph: {
+          nodes: {
+            player: { entityId: 'player', name: 'player', parentId: null, children: [], components: [], visible: true },
+            goal: { entityId: 'goal', name: 'goal', parentId: null, children: [], components: [], visible: true },
+          },
+          rootIds: ['player', 'goal'],
+        },
+        allGameComponents: {
+          player: [{ type: 'characterController', characterController: { speed: 5, jumpHeight: 2, gravityScale: 1, canDoubleJump: false } }],
+          wc: [{ type: 'winCondition', winCondition: { conditionType: 'reachGoal', targetScore: null, targetEntityId: 'goal' } }],
+        },
+      });
       const state = useEditorStore.getState();
       state.play();
 
       expect(mockDispatch).toHaveBeenCalledWith('play', {});
+    });
+
+    it('play() blocks dispatch when the scene is not winnable', () => {
+      // Empty scene from beforeEach → no win condition → gate blocks entry.
+      const state = useEditorStore.getState();
+      state.play();
+
+      expect(mockDispatch).not.toHaveBeenCalledWith('play', {});
     });
 
     it('stop() dispatches stop command', () => {

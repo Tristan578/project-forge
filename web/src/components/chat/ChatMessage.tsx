@@ -20,7 +20,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
   if (message.role === 'system') {
     return (
-      <div className="px-3 py-1.5 text-center text-xs text-zinc-400">
+      <div className="whitespace-pre-line px-3 py-1.5 text-center text-xs text-zinc-400">
         {message.content}
       </div>
     );

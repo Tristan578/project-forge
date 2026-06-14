@@ -1,7 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
-import { createGameSlice, setGameDispatcher, type GameSlice } from '../gameSlice';
-import type { GameComponentData, GameCameraData, MobileTouchConfig, HudElement } from '../types';
+import { createGameSlice, setGameDispatcher, setWinnabilityStateReader, type GameSlice } from '../gameSlice';
+import type { GameComponentData, GameCameraData, MobileTouchConfig, HudElement, SceneGraph } from '../types';
+
+const { chatSetState, chatGetState } = vi.hoisted(() => ({
+  chatSetState: vi.fn(),
+  chatGetState: vi.fn(() => ({ messages: [] as unknown[] })),
+}));
+vi.mock('@/stores/chatStore', () => ({
+  useChatStore: { getState: chatGetState, setState: chatSetState },
+}));
 
 describe('gameSlice', () => {
   let store: ReturnType<typeof createSliceStore<GameSlice>>;
@@ -15,6 +23,9 @@ describe('gameSlice', () => {
 
   afterEach(() => {
     setGameDispatcher(null as unknown as (command: string, payload: unknown) => void);
+    setWinnabilityStateReader(null);
+    chatSetState.mockClear();
+    chatGetState.mockClear();
   });
 
   describe('Initial State', () => {
@@ -452,6 +463,98 @@ describe('gameSlice', () => {
       expect(state.engineMode).toBe('edit');
 
       expect(mockDispatch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Pre-play winnability gate', () => {
+    const player: GameComponentData = {
+      type: 'characterController',
+      characterController: { speed: 5, jumpHeight: 2, gravityScale: 1, canDoubleJump: false },
+    };
+    const winnableReader = () => ({
+      sceneGraph: {
+        nodes: {
+          player: { entityId: 'player', name: 'Player', parentId: null, children: [], components: [], visible: true },
+          goal: { entityId: 'goal', name: 'Goal', parentId: null, children: [], components: [], visible: true },
+        },
+        rootIds: ['player', 'goal'],
+      } as SceneGraph,
+      allGameComponents: {
+        player: [player],
+        wc: [{ type: 'winCondition', winCondition: { conditionType: 'reachGoal', targetScore: null, targetEntityId: 'goal' } }] as GameComponentData[],
+      },
+    });
+
+    it('dispatches play when the scene is winnable', () => {
+      setWinnabilityStateReader(winnableReader);
+
+      store.getState().play();
+
+      expect(mockDispatch).toHaveBeenCalledWith('play', {});
+    });
+
+    it('blocks play and surfaces a chat message when the scene has no win condition', async () => {
+      setWinnabilityStateReader(() => ({
+        sceneGraph: { nodes: {}, rootIds: [] } as SceneGraph,
+        allGameComponents: {},
+      }));
+
+      // play() is synchronous, but surfaceWinnabilityMessage dynamically imports
+      // chatStore (a floating promise), so the chat write lands on a later
+      // microtask — vi.waitFor polls until that async surface completes.
+      store.getState().play();
+
+      expect(mockDispatch).not.toHaveBeenCalledWith('play', {});
+      await vi.waitFor(() => expect(chatSetState).toHaveBeenCalled());
+      // surfaceWinnabilityMessage uses the updater form: setState((state) => next)
+      const updater = chatSetState.mock.calls[0][0] as (
+        state: { messages: unknown[] },
+      ) => {
+        rightPanelTab: string;
+        hasUnreadMessages: boolean;
+        messages: Array<{ role: string; content: string }>;
+      };
+      const payload = updater({ messages: [] });
+      expect(payload.rightPanelTab).toBe('chat');
+      // Switching to the chat tab makes the message immediately visible, so it
+      // must NOT be flagged unread — that would badge the tab the user is now
+      // viewing and break chatStore's tab==='chat' ⟹ unread-false invariant.
+      expect(payload.hasUnreadMessages).toBe(false);
+      // role:'system' — visible to the user, filtered out of the AI request.
+      expect(payload.messages[0].role).toBe('system');
+      expect(payload.messages[0].content).toContain("can't be won");
+    });
+
+    it('blocks play when a goal win condition targets a missing entity', async () => {
+      setWinnabilityStateReader(() => ({
+        sceneGraph: { nodes: {}, rootIds: [] } as SceneGraph,
+        allGameComponents: {
+          wc: [{ type: 'winCondition', winCondition: { conditionType: 'reachGoal', targetScore: null, targetEntityId: 'ghost' } }] as GameComponentData[],
+        },
+      }));
+
+      store.getState().play();
+
+      expect(mockDispatch).not.toHaveBeenCalledWith('play', {});
+      await vi.waitFor(() => expect(chatSetState).toHaveBeenCalled());
+    });
+
+    it('skips the gate entirely when no reader is wired', () => {
+      // Default: reader is null (cleared in afterEach) — legacy behavior.
+      store.getState().play();
+      expect(mockDispatch).toHaveBeenCalledWith('play', {});
+    });
+
+    it('fails open and dispatches play when the winnability reader throws', () => {
+      // The gate is a UX safety net, never a lock: a bug in the reader or the
+      // validator must NOT trap the user out of Play. play() catches and proceeds.
+      setWinnabilityStateReader(() => {
+        throw new Error('reader boom');
+      });
+
+      store.getState().play();
+
+      expect(mockDispatch).toHaveBeenCalledWith('play', {});
     });
   });
 
