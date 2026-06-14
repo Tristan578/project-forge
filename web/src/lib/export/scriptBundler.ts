@@ -55,7 +55,7 @@ export function bundleScripts(
       isPressed: function(action) { return !!(window.__forgeInputState && window.__forgeInputState.pressed && window.__forgeInputState.pressed[action]); },
       justPressed: function(action) { return !!(window.__forgeInputState && window.__forgeInputState.justPressed && window.__forgeInputState.justPressed[action]); },
       justReleased: function(action) { return !!(window.__forgeInputState && window.__forgeInputState.justReleased && window.__forgeInputState.justReleased[action]); },
-      getAxis: function(action) { return (window.__forgeInputState && window.__forgeInputState.axes && window.__forgeInputState.axes[action]) || 0; },
+      getAxis: function(action) { return window.__forgeInputState?.axes?.[action] ?? 0; },
     },
     audio: {
       play: function(id) { pendingCommands.push({cmd: 'play_audio', entityId: id}); _audioPlaying[id] = true; },
