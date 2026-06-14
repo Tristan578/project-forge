@@ -96,34 +96,49 @@ describe('entityHandlers', () => {
   // -----------------------------------------------------------------------
   describe('spawn_entity', () => {
     it('calls spawnEntity with type and name', async () => {
-      const { result, store } = await invokeHandler(transformHandlers, 'spawn_entity', {
-        entityType: 'cube',
-        name: 'MyCube',
-      });
+      const { result, store } = await invokeHandler(
+        transformHandlers,
+        'spawn_entity',
+        { entityType: 'cube', name: 'MyCube' },
+        { spawnEntity: vi.fn(() => 'cube-1') },
+      );
       expect(result.success).toBe(true);
       expect(store.spawnEntity).toHaveBeenCalledWith('cube', 'MyCube');
     });
 
     it('calls spawnEntity with type only (no name)', async () => {
-      const { result, store } = await invokeHandler(transformHandlers, 'spawn_entity', {
-        entityType: 'sphere',
-      });
+      const { result, store } = await invokeHandler(
+        transformHandlers,
+        'spawn_entity',
+        { entityType: 'sphere' },
+        { spawnEntity: vi.fn(() => 'sphere-1') },
+      );
       expect(result.success).toBe(true);
       expect(store.spawnEntity).toHaveBeenCalledWith('sphere', undefined);
     });
 
     it('returns a message containing the entity type', async () => {
-      const { result } = await invokeHandler(transformHandlers, 'spawn_entity', {
-        entityType: 'cylinder',
-      });
+      const { result } = await invokeHandler(
+        transformHandlers,
+        'spawn_entity',
+        { entityType: 'cylinder' },
+        { spawnEntity: vi.fn(() => 'cylinder-1') },
+      );
       expect(result.success).toBe(true);
       expect((result.result as { message: string }).message).toContain('cylinder');
     });
 
     it('supports different entity types', async () => {
-      const types = ['cube', 'sphere', 'plane', 'capsule', 'torus', 'cone', 'point_light', 'directional_light', 'spot_light', 'empty'];
+      // The full set of engine-spawnable types (SPAWNABLE_ENTITY_TYPES). 'empty' is
+      // intentionally excluded — it is not spawnable via spawn_entity (#8748).
+      const types = ['cube', 'sphere', 'plane', 'cylinder', 'capsule', 'torus', 'cone', 'point_light', 'directional_light', 'spot_light'];
       for (const entityType of types) {
-        const { result, store } = await invokeHandler(transformHandlers, 'spawn_entity', { entityType });
+        const { result, store } = await invokeHandler(
+          transformHandlers,
+          'spawn_entity',
+          { entityType },
+          { spawnEntity: vi.fn(() => `${entityType}-1`) },
+        );
         expect(result.success).toBe(true);
         expect(store.spawnEntity).toHaveBeenCalledWith(entityType, undefined);
       }
