@@ -275,4 +275,15 @@ describe('formatWinnabilityMessage', () => {
     // The benign prefix still survives so the message stays useful.
     expect(message).toContain('goal');
   });
+
+  it('falls back to "unknown" when a goal id sanitizes to an empty string', () => {
+    // An id made entirely of stripped characters reduces to '' — safeLabel must
+    // emit the 'unknown' placeholder rather than an empty ("") reference.
+    const report = validateWinnability(graph(['player']), {
+      player: [player],
+      wc: [reachGoal('!!!@@@###')],
+    });
+    const message = formatWinnabilityMessage(report);
+    expect(message).toContain('"unknown"');
+  });
 });

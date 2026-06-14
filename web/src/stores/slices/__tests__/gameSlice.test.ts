@@ -493,6 +493,18 @@ describe('gameSlice', () => {
       store.getState().play();
       expect(mockDispatch).toHaveBeenCalledWith('play', {});
     });
+
+    it('fails open and dispatches play when the winnability reader throws', () => {
+      // The gate is a UX safety net, never a lock: a bug in the reader or the
+      // validator must NOT trap the user out of Play. play() catches and proceeds.
+      setWinnabilityStateReader(() => {
+        throw new Error('reader boom');
+      });
+
+      store.getState().play();
+
+      expect(mockDispatch).toHaveBeenCalledWith('play', {});
+    });
   });
 
   describe('HUD', () => {
