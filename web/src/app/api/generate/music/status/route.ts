@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
       resultUrl: mappedStatus === 'completed' ? status.audioUrl : undefined,
       durationSeconds: status.durationSeconds,
       error: mappedStatus === 'failed'
-        ? (succeededButEmpty ? 'Music generation produced no audio' : 'Generation failed')
+        ? (succeededButEmpty ? 'Music generation produced no audio' : 'Music generation failed')
         : undefined,
     });
   } catch (err) {

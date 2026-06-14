@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
       progress: status.progress,
       resultUrl: mappedStatus === 'completed' ? skyboxUrl : undefined,
       error: mappedStatus === 'failed'
-        ? (succeededButEmpty ? 'Skybox generation produced no image' : 'Generation failed')
+        ? (succeededButEmpty ? 'Skybox generation produced no image' : 'Skybox generation failed')
         : undefined,
     });
   } catch (err) {

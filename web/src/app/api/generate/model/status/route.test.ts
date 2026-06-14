@@ -100,7 +100,7 @@ describe('GET /api/generate/model/status', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Generation failed');
+    expect(data.error).toBe('Model generation failed');
   });
 
   it('maps SUCCEEDED-with-no-model-file to failed (so the poller refunds, not hangs)', async () => {

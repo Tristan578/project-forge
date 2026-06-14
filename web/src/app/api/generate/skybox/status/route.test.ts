@@ -161,7 +161,7 @@ describe('GET /api/generate/skybox/status', () => {
     const res = await GET(makeRequest('job-123'));
     const data = await res.json();
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Generation failed');
+    expect(data.error).toBe('Skybox generation failed');
   });
 
   it('returns 500 when provider throws', async () => {

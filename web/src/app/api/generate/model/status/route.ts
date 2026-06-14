@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
       resultUrl: mappedStatus === 'completed' ? status.modelUrls?.glb : undefined,
       thumbnailUrl: status.thumbnailUrl,
       error: mappedStatus === 'failed'
-        ? (succeededButEmpty ? 'Model generation produced no file' : 'Generation failed')
+        ? (succeededButEmpty ? 'Model generation produced no file' : 'Model generation failed')
         : undefined,
     });
   } catch (err) {

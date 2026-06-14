@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
       progress: status.progress,
       maps: mappedStatus === 'completed' ? status.maps : undefined,
       error: mappedStatus === 'failed'
-        ? (succeededButEmpty ? 'Texture generation produced no maps' : 'Generation failed')
+        ? (succeededButEmpty ? 'Texture generation produced no maps' : 'Texture generation failed')
         : undefined,
     });
   } catch (err) {

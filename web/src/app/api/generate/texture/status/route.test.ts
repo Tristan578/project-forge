@@ -94,7 +94,7 @@ describe('GET /api/generate/texture/status', () => {
 
     expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Generation failed');
+    expect(data.error).toBe('Texture generation failed');
   });
 
   it('returns failed status when Meshy reports EXPIRED', async () => {

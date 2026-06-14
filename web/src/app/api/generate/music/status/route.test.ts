@@ -98,7 +98,7 @@ describe('GET /api/generate/music/status', () => {
     const res = await GET(makeRequest('job-123'));
     const data = await res.json();
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Generation failed');
+    expect(data.error).toBe('Music generation failed');
   });
 
   it('maps success-with-no-audio to failed (so the poller refunds, not hangs)', async () => {
