@@ -967,5 +967,239 @@ describe('chatStore', () => {
         ]),
       );
     });
+
+    it('executes a streamed tool call and continues the agentic loop (#8746)', async () => {
+      // The server agent has NO execute functions — tool calls are forwarded as
+      // `tool-input-available` chunks and the CLIENT must run them, then re-POST
+      // with tool_result blocks. This is the exact path the legacy underscored
+      // parser silently dropped (blank reply, zero tools). Turn 1 streams a tool
+      // call (finishReason 'tool-calls' → stopReason 'tool_use', loop continues);
+      // turn 2 streams plain text (stopReason 'end_turn', loop ends).
+      //
+      // NOTE: the shared beforeEach registers the executor doMock as
+      // '../lib/chat/executor', which resolves relative to THIS test file
+      // (src/stores/__tests__/) and so never matches the store's own
+      // '../lib/chat/executor' (resolved from src/stores/). No prior test drove a
+      // streamed tool call to execution, so that broken path went unnoticed. Use
+      // the correctly-resolved specifier here so client tool execution is mocked.
+      const executeToolCall = vi.fn(() => Promise.resolve({ success: true, result: 'Spawned' }));
+      vi.doMock('../../lib/chat/executor', () => ({ executeToolCall }));
+
+      const turn1 = makeChatSSEEvents({
+        toolCalls: [{ id: 'tc-1', name: 'spawn_entity', input: { type: 'cube', name: 'Box' } }],
+        inputTokens: 40,
+        outputTokens: 8,
+      });
+      const turn2 = makeChatSSEEvents({ text: 'Created your cube.', inputTokens: 12, outputTokens: 6 });
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(mockSSEResponse(turn1))
+        .mockResolvedValue(mockSSEResponse(turn2));
+
+      const { useChatStore: store } = await import('../chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-6',
+        rightPanelTab: 'chat',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('Create a cube');
+
+      // The agentic loop continued past the tool turn (two POSTs: tool turn +
+      // follow-up). This only happens when `tool-input-available` flips
+      // stopReason to 'tool_use' — the exact path the legacy parser dropped.
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+      // The client-side executor actually ran with the parsed tool input — the
+      // coverage gap that let #8746 ship: no test asserted streamed tool calls
+      // reach executeToolCall. The legacy parser never flipped to 'tool_use', so
+      // this call was silently skipped on every real turn.
+      expect(executeToolCall).toHaveBeenCalledTimes(1);
+      expect(executeToolCall).toHaveBeenCalledWith(
+        'spawn_entity',
+        { type: 'cube', name: 'Box' },
+        expect.any(Object),
+      );
+
+      const assistant = store.getState().messages[1];
+      expect(assistant.role).toBe('assistant');
+      // The executed tool call landed on the assistant message as a success.
+      const spawnCall = assistant.toolCalls?.find((t) => t.name === 'spawn_entity');
+      expect(spawnCall?.status).toBe('success');
+      // The full parsed input from `tool-input-available` was recorded verbatim
+      // (this is bulletproof regardless of mock-instance identity).
+      expect(spawnCall?.input).toEqual({ type: 'cube', name: 'Box' });
+      // Final-turn text rendered from `text-delta`/`delta`.
+      expect(assistant.content).toContain('Created your cube.');
+    });
+
+    it('renders assistant text from v6 text-delta chunks (#8746)', async () => {
+      // Guards the single most user-visible symptom: a `text-delta` carrying
+      // `delta` (NOT `text`) must accumulate onto the assistant message.
+      const events = makeChatSSEEvents({ text: 'Hello from the model.' });
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockSSEResponse(events));
+
+      const { useChatStore: store } = await import('../chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-6',
+        rightPanelTab: 'chat',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('Say hello');
+
+      expect(store.getState().messages[1].content).toBe('Hello from the model.');
+    });
+
+    it('previews (does NOT execute) streamed tool calls in approval mode (#8746)', async () => {
+      // Guards the approval gate. A `tool-input-available` chunk ALWAYS implies
+      // stopReason 'tool_use', so the loop's old "auto-execute mid-loop" branch
+      // bypassed approval entirely — running tools the user never OK'd. With
+      // approvalMode on, the call must be deferred (never executed) and surfaced as
+      // a 'preview'. This test pins that bug shut.
+      const executeToolCall = vi.fn(() => Promise.resolve({ success: true, result: 'Spawned' }));
+      vi.doMock('../../lib/chat/executor', () => ({ executeToolCall }));
+
+      const turn = makeChatSSEEvents({
+        toolCalls: [{ id: 'tc-approve', name: 'spawn_entity', input: { type: 'sphere', name: 'Orb' } }],
+      });
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockSSEResponse(turn));
+
+      const { useChatStore: store } = await import('../chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-6',
+        rightPanelTab: 'chat',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: true,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('Spawn a sphere');
+
+      // Never executed — approval mode defers the call.
+      expect(executeToolCall).not.toHaveBeenCalled();
+      // Loop broke after the single tool turn — no follow-up POST.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      const assistant = store.getState().messages[1];
+      const previewCall = assistant.toolCalls?.find((t) => t.name === 'spawn_entity');
+      // Surfaced as a preview awaiting approval, parsed input intact.
+      expect(previewCall?.status).toBe('preview');
+      expect(previewCall?.input).toEqual({ type: 'sphere', name: 'Orb' });
+      // Streaming settled cleanly at the approval break.
+      expect(store.getState().isStreaming).toBe(false);
+    });
+
+    it('marks a streamed tool call errored on a tool-input-error chunk (#8746)', async () => {
+      // A malformed tool input streams `tool-input-error` (not -available). The
+      // pending call created by `tool-input-start` must flip to 'error' carrying the
+      // server's errorText — never stay stuck 'pending' or silently vanish.
+      const events = [
+        { type: 'start' },
+        { type: 'start-step' },
+        { type: 'tool-input-start', toolCallId: 'tc-bad', toolName: 'spawn_entity' },
+        {
+          type: 'tool-input-error',
+          toolCallId: 'tc-bad',
+          toolName: 'spawn_entity',
+          input: {},
+          errorText: 'Schema validation failed',
+        },
+        { type: 'finish-step' },
+        { type: 'finish', finishReason: 'stop' },
+      ];
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockSSEResponse(events));
+
+      const { useChatStore: store } = await import('../chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-6',
+        rightPanelTab: 'chat',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('Spawn something invalid');
+
+      const assistant = store.getState().messages[1];
+      const badCall = assistant.toolCalls?.find((t) => t.id === 'tc-bad');
+      expect(badCall?.status).toBe('error');
+      expect(badCall?.error).toContain('Schema validation failed');
+    });
+
+    it('surfaces a stream-level error chunk as store error (#8746)', async () => {
+      // A top-level `error` chunk (e.g. upstream rate limit) must land in
+      // store.error so the UI can show it. The legacy parser read `message`, not
+      // the v6 `errorText` field, and dropped these on the floor.
+      const events = [
+        { type: 'start' },
+        { type: 'start-step' },
+        { type: 'error', errorText: 'rate limited by upstream' },
+        { type: 'finish', finishReason: 'stop' },
+      ];
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockSSEResponse(events));
+
+      const { useChatStore: store } = await import('../chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-6',
+        rightPanelTab: 'chat',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('Trigger an error');
+
+      expect(store.getState().error).toContain('rate limited by upstream');
+    });
   });
 });

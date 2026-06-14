@@ -2,9 +2,6 @@ import { create } from 'zustand';
 import { estimateMessageTokens } from '../lib/chat/tokenCounter';
 import { showError } from '@/lib/toast';
 import { AI_MODEL_PRIMARY, AI_MODEL_FAST, AI_MODEL_PREMIUM } from '@/lib/ai/models';
-import { readUIMessageStream, isToolUIPart, uiMessageChunkSchema } from 'ai';
-import { parseJsonEventStream } from '@ai-sdk/provider-utils';
-import type { UIMessage, UIMessageChunk } from 'ai';
 
 export interface ToolCallStatus {
   id: string;
@@ -70,15 +67,6 @@ interface ChatState {
   setShowTokenDepletedModal: (show: boolean) => void;
 
   sendMessage: (text: string, images?: string[], entityRefs?: Record<string, string>) => Promise<void>;
-  /**
-   * Send a message and stream the response via the AI SDK UI message stream
-   * protocol. This is the Phase 3 path — uses the rewritten /api/chat route
-   * which returns toUIMessageStreamResponse() format.
-   *
-   * chatStore remains the single source of truth. The AI SDK stream is read
-   * and translated back into ChatMessage updates.
-   */
-  sendMessageViaSDK: (text: string, images?: string[], entityRefs?: Record<string, string>) => Promise<void>;
   stopStreaming: () => void;
   setModel: (model: ChatModel) => void;
   setRightPanelTab: (tab: RightPanelTab) => void;
@@ -174,9 +162,67 @@ async function streamOneTurn(
   const { executeToolCall } = await import('../lib/chat/executor');
   const decoder = new TextDecoder();
   let buffer = '';
-  const toolInputBuffers: Record<string, string> = {};
   let stopReason = 'end_turn';
   const deferredTools: DeferredTool[] = [];
+
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+  // Process one fully-resolved tool call. AI SDK v6 delivers the COMPLETE parsed
+  // input in the `tool-input-available` chunk, so there is no client-side JSON
+  // accumulation (the v0.x underscored protocol streamed partial JSON and
+  // assembled it on `content_block_stop` — that path is gone). The server agent
+  // has no `execute` functions, so a forwarded tool MUST run here and the turn
+  // cannot be `end_turn`: seeing any tool input flips stopReason to `tool_use`
+  // so sendMessage's agentic loop continues and feeds the tool_result back.
+  const handleToolInput = async (
+    id: string,
+    name: string,
+    parsedInput: Record<string, unknown>,
+  ) => {
+    stopReason = 'tool_use';
+
+    // Ensure the call is on the message (`tool-input-start` may have created it).
+    onUpdate((msg) => {
+      if ((msg.toolCalls || []).some((t) => t.id === id)) return msg;
+      const tc: ToolCallStatus = { id, name, input: parsedInput, status: 'pending', undoable: true };
+      return { ...msg, toolCalls: [...(msg.toolCalls || []), tc] };
+    });
+
+    if (deferToolExecution) {
+      // Approval mode — record the parsed input, leave the call pending.
+      deferredTools.push({ id, name, input: parsedInput });
+      onUpdate((msg) => ({
+        ...msg,
+        toolCalls: (msg.toolCalls || []).map((t) => (t.id === id ? { ...t, input: parsedInput } : t)),
+      }));
+      return;
+    }
+
+    const currentEditorState = (await import('./editorStore')).useEditorStore.getState();
+    const result = await executeToolCall(name, parsedInput, currentEditorState);
+    onUpdate((msg) => ({
+      ...msg,
+      toolCalls: (msg.toolCalls || []).map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              input: parsedInput,
+              status: result.success ? ('success' as const) : ('error' as const),
+              result: result.result,
+              error: result.error,
+            }
+          : t,
+      ),
+    }));
+  };
+
+  // Usage rides on the `finish` chunk (the route's messageMetadata callback) or a
+  // standalone `message-metadata` chunk — read defensively from either shape.
+  const readUsage = (meta: unknown) => {
+    const usage = (meta as { usage?: { inputTokens?: number; outputTokens?: number } } | undefined)
+      ?.usage;
+    if (usage) onUsage(usage.inputTokens || 0, usage.outputTokens || 0);
+  };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -191,117 +237,83 @@ async function streamOneTurn(
       const data = line.slice(6);
       if (data === '[DONE]') continue;
 
+      let event: Record<string, unknown>;
       try {
-        const event = JSON.parse(data);
-
-        switch (event.type) {
-          case 'text_delta':
-            onUpdate((msg) => ({ ...msg, content: msg.content + event.text }));
-            break;
-
-          case 'thinking_start':
-            // Thinking block starting
-            break;
-
-          case 'thinking_delta':
-            onUpdate((msg) => ({ ...msg, thinking: (msg.thinking || '') + event.text }));
-            break;
-
-          case 'tool_start': {
-            const tc: ToolCallStatus = {
-              id: event.id,
-              name: event.name,
-              input: {},
-              status: 'pending',
-              undoable: true,
-            };
-            onUpdate((msg) => ({ ...msg, toolCalls: [...(msg.toolCalls || []), tc] }));
-            toolInputBuffers[event.id] = '';
-            break;
-          }
-
-          case 'tool_input_delta': {
-            onUpdate((msg) => {
-              const pending = (msg.toolCalls || []).filter((t) => t.status === 'pending');
-              if (pending.length > 0) {
-                const activeTc = pending[pending.length - 1];
-                toolInputBuffers[activeTc.id] = (toolInputBuffers[activeTc.id] || '') + event.json;
-              }
-              return msg; // no state change yet
-            });
-            break;
-          }
-
-          case 'content_block_stop': {
-            let toolToProcess: { id: string; name: string; inputJson: string } | null = null;
-
-            onUpdate((msg) => {
-              const pending = (msg.toolCalls || []).filter((t) => t.status === 'pending');
-              if (pending.length > 0) {
-                const tc = pending[pending.length - 1];
-                const inputJson = toolInputBuffers[tc.id];
-                if (inputJson !== undefined) {
-                  toolToProcess = { id: tc.id, name: tc.name, inputJson };
-                }
-              }
-              return msg;
-            });
-
-            if (toolToProcess) {
-              const { id, name, inputJson } = toolToProcess;
-              let parsedInput: Record<string, unknown> = {};
-              if (inputJson) {
-                try { parsedInput = JSON.parse(inputJson); } catch { /* partial */ }
-              }
-
-              if (deferToolExecution) {
-                // Defer execution — just parse input, keep pending
-                deferredTools.push({ id, name, input: parsedInput });
-                onUpdate((msg) => ({
-                  ...msg,
-                  toolCalls: (msg.toolCalls || []).map((t) =>
-                    t.id === id ? { ...t, input: parsedInput } : t
-                  ),
-                }));
-              } else {
-                // Execute immediately
-                const currentEditorState = (await import('./editorStore')).useEditorStore.getState();
-                const result = await executeToolCall(name, parsedInput, currentEditorState);
-
-                onUpdate((msg) => ({
-                  ...msg,
-                  toolCalls: (msg.toolCalls || []).map((t) =>
-                    t.id === id
-                      ? {
-                          ...t,
-                          input: parsedInput,
-                          status: result.success ? 'success' as const : 'error' as const,
-                          result: result.result,
-                          error: result.error,
-                        }
-                      : t
-                  ),
-                }));
-              }
-              delete toolInputBuffers[id];
-            }
-            break;
-          }
-
-          case 'usage':
-            onUsage(event.inputTokens || 0, event.outputTokens || 0);
-            break;
-
-          case 'turn_complete':
-            stopReason = event.stop_reason || 'end_turn';
-            break;
-
-          case 'error':
-            onError(event.message);
-            break;
-        }
+        event = JSON.parse(data);
       } catch {
-        // Skip malformed JSON
+        continue; // Skip malformed JSON
+      }
+
+      // AI SDK v6 UIMessageChunk protocol — HYPHENATED chunk types, v6 field
+      // names. `streamingTestUtils.makeChatSSEEvents` is the canonical wire shape
+      // this parser is tested against (#8746).
+      switch (event.type) {
+        case 'text-delta':
+          onUpdate((msg) => ({ ...msg, content: msg.content + str(event.delta) }));
+          break;
+
+        case 'reasoning-delta':
+          onUpdate((msg) => ({ ...msg, thinking: (msg.thinking || '') + str(event.delta) }));
+          break;
+
+        case 'tool-input-start': {
+          const id = str(event.toolCallId);
+          const tc: ToolCallStatus = {
+            id,
+            name: str(event.toolName),
+            input: {},
+            status: 'pending',
+            undoable: true,
+          };
+          onUpdate((msg) => {
+            if ((msg.toolCalls || []).some((t) => t.id === id)) return msg;
+            return { ...msg, toolCalls: [...(msg.toolCalls || []), tc] };
+          });
+          break;
+        }
+
+        // Partial input JSON for live display only — the complete parsed input
+        // arrives in `tool-input-available`, so nothing to accumulate here.
+        case 'tool-input-delta':
+          break;
+
+        case 'tool-input-available':
+          await handleToolInput(
+            str(event.toolCallId),
+            str(event.toolName),
+            (event.input as Record<string, unknown>) ?? {},
+          );
+          break;
+
+        case 'tool-input-error':
+        case 'tool-output-error': {
+          const id = str(event.toolCallId);
+          const errorText = str(event.errorText) || 'Tool error';
+          onUpdate((msg) => ({
+            ...msg,
+            toolCalls: (msg.toolCalls || []).map((t) =>
+              t.id === id ? { ...t, status: 'error' as const, error: errorText } : t,
+            ),
+          }));
+          break;
+        }
+
+        case 'message-metadata':
+          readUsage(event.messageMetadata);
+          break;
+
+        case 'finish':
+          readUsage(event.messageMetadata);
+          break;
+
+        case 'error':
+          onError(str(event.errorText) || 'Unknown streaming error');
+          break;
+
+        // start, start-step, text-start, text-end, reasoning-start/end,
+        // finish-step, abort, etc. need no client-side handling.
+        default:
+          break;
       }
     }
   }
@@ -440,38 +452,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
           currentApprovalMode,
         );
 
-        // In approval mode with deferred tools:
+        // Approval mode: when the turn produced tool calls (which always means
+        // the model returned stop_reason 'tool_use' — a turn with no tools cannot
+        // populate deferredTools), pause the loop. Present every pending call as a
+        // 'preview' and break to wait for the user. There is deliberately no
+        // "auto-execute mid-loop" path: approval mode exists precisely so nothing
+        // runs without an explicit OK. approveToolCalls() executes the previews and
+        // rejectToolCalls() marks them rejected.
         if (currentApprovalMode && deferredTools.length > 0) {
-          if (stopReason === 'end_turn') {
-            // Final turn — set tools to 'preview' for user approval
-            updateAssistant((msg) => ({
-              ...msg,
-              toolCalls: (msg.toolCalls || []).map((t) =>
-                t.status === 'pending' ? { ...t, status: 'preview' as const } : t
-              ),
-            }));
-            break; // Wait for user to approve/reject
-          } else {
-            // Mid-loop — execute deferred tools to continue the loop
-            const { executeToolCall } = await import('../lib/chat/executor');
-            for (const tool of deferredTools) {
-              const currentEditorState = (await import('./editorStore')).useEditorStore.getState();
-              const result = await executeToolCall(tool.name, tool.input, currentEditorState);
-              updateAssistant((msg) => ({
-                ...msg,
-                toolCalls: (msg.toolCalls || []).map((t) =>
-                  t.id === tool.id
-                    ? {
-                        ...t,
-                        status: result.success ? 'success' as const : 'error' as const,
-                        result: result.result,
-                        error: result.error,
-                      }
-                    : t
-                ),
-              }));
-            }
-          }
+          updateAssistant((msg) => ({
+            ...msg,
+            toolCalls: (msg.toolCalls || []).map((t) =>
+              t.status === 'pending' ? { ...t, status: 'preview' as const } : t
+            ),
+          }));
+          break; // Wait for user to approve/reject
         }
 
         // If Claude finished (end_turn) or max iterations, stop
@@ -531,233 +526,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           output: prev.output + turnTokens.output,
         },
       });
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        // User cancelled
-      } else {
-        const errorMessage = err instanceof Error ? err.message : 'Chat request failed';
-        set({ error: errorMessage });
-        showError(`AI chat error: ${errorMessage}`);
-      }
-    } finally {
-      set({ isStreaming: false, abortController: null, loopIteration: 0 });
-
-      // Sync current messages to the active conversation so they persist
-      const { messages: finalMessages, activeConversationId: convId, conversations: convs } = get();
-      if (convId) {
-        const syncedConversations = convs.map((c) =>
-          c.id === convId
-            ? { ...c, messages: finalMessages.slice(-MAX_STORED_MESSAGES), updatedAt: Date.now() }
-            : c
-        );
-        set({ conversations: syncedConversations });
-        saveConversationsToStorage(syncedConversations, convId);
-      }
-    }
-  },
-
-  // ---------------------------------------------------------------------------
-  // Phase 3: sendMessageViaSDK — AI SDK UI message stream transport
-  // ---------------------------------------------------------------------------
-
-  sendMessageViaSDK: async (text: string, images?: string[], entityRefs?: Record<string, string>) => {
-    const { messages, activeModel, isStreaming, thinkingEnabled, rightPanelTab } = get();
-    if (isStreaming) return;
-
-    // Track AI chat usage
-    try { const { trackAIChatMessageSent } = await import('@/lib/analytics/events'); trackAIChatMessageSent(activeModel); } catch { /* analytics non-critical */ }
-
-    // Append entity reference context to the message if @-mentions were used
-    let messageContent = text;
-    if (entityRefs && Object.keys(entityRefs).length > 0) {
-      const refList = Object.entries(entityRefs)
-        .map(([name, id]) => `${name} (id: ${id})`)
-        .join(', ');
-      messageContent += `\n\n[Referenced entities: ${refList}]`;
-    }
-
-    const userMessage: ChatMessage = {
-      id: nextId(),
-      role: 'user',
-      content: messageContent,
-      images,
-      entityRefs,
-      timestamp: Date.now(),
-    };
-
-    const assistantMessage: ChatMessage = {
-      id: nextId(),
-      role: 'assistant',
-      content: '',
-      toolCalls: [],
-      timestamp: Date.now(),
-    };
-
-    const abortController = new AbortController();
-
-    set({
-      messages: [...messages, userMessage, assistantMessage],
-      isStreaming: true,
-      error: null,
-      abortController,
-      loopIteration: 0,
-      hasUnreadMessages: rightPanelTab !== 'chat',
-    });
-
-    const assistantMsgId = assistantMessage.id;
-
-    function updateAssistant(cb: (msg: ChatMessage) => ChatMessage) {
-      const state = get();
-      const msgs = state.messages.map((m) =>
-        m.id === assistantMsgId ? cb(m) : m
-      );
-      set({ messages: msgs });
-    }
-
-    try {
-      const { useEditorStore } = await import('./editorStore');
-      const editorState = useEditorStore.getState();
-      const { buildSceneContext } = await import('../lib/chat/context');
-      const sceneContext = buildSceneContext(editorState);
-
-      // Build API messages from conversation history
-      const allMessages = [...messages, userMessage];
-      const apiMessages = buildTruncatedApiMessages(allMessages);
-
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: apiMessages,
-          model: activeModel,
-          sceneContext,
-          thinking: thinkingEnabled,
-        }),
-        signal: abortController.signal,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: response.statusText }));
-        throw new Error(errorData.error || `Chat request failed: ${response.status}`);
-      }
-
-      if (!response.body) throw new Error('No response body');
-
-      // Parse the AI SDK UI message stream.
-      // The route returns raw SSE bytes (ReadableStream<Uint8Array>).
-      // Step 1: parse bytes → UIMessageChunk via parseJsonEventStream + uiMessageChunkSchema.
-      // Step 2: pass UIMessageChunk stream to readUIMessageStream → UIMessage snapshots.
-      const chunkStream = parseJsonEventStream<UIMessageChunk>({
-        stream: response.body as ReadableStream<Uint8Array>,
-        schema: uiMessageChunkSchema,
-      }).pipeThrough(
-        new TransformStream({
-          transform(parseResult, controller) {
-            if (parseResult.success) {
-              controller.enqueue(parseResult.value);
-            }
-          },
-        })
-      );
-
-      const uiMessageStream = readUIMessageStream<UIMessage>({
-        stream: chunkStream,
-        onError: (err) => {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          set({ error: errMsg });
-        },
-      });
-
-      for await (const uiMsg of uiMessageStream) {
-        // Translate UIMessage parts back into chatStore ChatMessage format
-        let textContent = '';
-        let thinkingContent = '';
-
-        for (const part of uiMsg.parts ?? []) {
-          if (part.type === 'text') {
-            // AI SDK v6 TextUIPart
-            textContent += part.text;
-          } else if (part.type === 'reasoning') {
-            // AI SDK v6 ReasoningUIPart (extended thinking)
-            thinkingContent += part.text;
-          } else if (isToolUIPart(part)) {
-            // AI SDK v6: tool parts use type `tool-<toolName>` (static) or `dynamic-tool`.
-            // Use isToolUIPart() helper — never check for removed `tool-invocation` type.
-            const toolId = part.toolCallId;
-            const toolName = part.type === 'dynamic-tool'
-              ? part.toolName
-              : part.type.slice('tool-'.length); // strip "tool-" prefix to get tool name
-
-            if (part.state === 'input-streaming' || part.state === 'input-available') {
-              // Tool input arriving — add to tool calls if not already present
-              const toolInput = (part.input as Record<string, unknown>) ?? {};
-              updateAssistant((msg) => {
-                const existing = (msg.toolCalls || []).find((t) => t.id === toolId);
-                if (existing) {
-                  // Update input as it streams in
-                  return {
-                    ...msg,
-                    toolCalls: (msg.toolCalls || []).map((t) =>
-                      t.id === toolId ? { ...t, input: toolInput } : t
-                    ),
-                  };
-                }
-                return {
-                  ...msg,
-                  toolCalls: [
-                    ...(msg.toolCalls || []),
-                    {
-                      id: toolId,
-                      name: toolName,
-                      input: toolInput,
-                      status: 'pending' as const,
-                      undoable: true,
-                    },
-                  ],
-                };
-              });
-            } else if (part.state === 'output-available') {
-              // Tool output available — execute tool client-side and update status
-              const { executeToolCall } = await import('../lib/chat/executor');
-              const currentEditorState = (await import('./editorStore')).useEditorStore.getState();
-              const toolInput = (part.input as Record<string, unknown>) ?? {};
-              const result = await executeToolCall(toolName, toolInput, currentEditorState);
-
-              updateAssistant((msg) => ({
-                ...msg,
-                toolCalls: (msg.toolCalls || []).map((t) =>
-                  t.id === toolId
-                    ? {
-                        ...t,
-                        input: toolInput,
-                        status: result.success ? 'success' as const : 'error' as const,
-                        result: result.result,
-                        error: result.error,
-                      }
-                    : t
-                ),
-              }));
-            } else if (part.state === 'output-error') {
-              // Tool errored on server side
-              updateAssistant((msg) => ({
-                ...msg,
-                toolCalls: (msg.toolCalls || []).map((t) =>
-                  t.id === toolId
-                    ? { ...t, status: 'error' as const, error: part.errorText }
-                    : t
-                ),
-              }));
-            }
-          }
-        }
-
-        // Update text + thinking content
-        updateAssistant((msg) => ({
-          ...msg,
-          content: textContent || msg.content,
-          ...(thinkingContent ? { thinking: thinkingContent } : {}),
-        }));
-      }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
         // User cancelled
