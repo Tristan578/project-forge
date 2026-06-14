@@ -402,6 +402,10 @@ pub struct GameComponentRuntime {
     pub score: u32,
     pub total_collectibles: u32,
     pub collected_count: u32,
+    /// IDs of collectibles already picked up this play session. Prevents a
+    /// single collectible from being counted on every frame it overlaps the
+    /// player (and double-scoring when `destroy_on_collect` is false).
+    pub collected_ids: std::collections::HashSet<String>,
     pub game_won: bool,
     /// Invincibility timers: entity_id -> remaining seconds
     pub invincibility_timers: std::collections::HashMap<String, f32>,
@@ -424,6 +428,20 @@ pub struct GameComponentRuntime {
     pub active_collisions: std::collections::HashSet<(String, String)>,
     /// Previous frame's active collisions (for detecting enter/exit transitions)
     pub prev_collisions: std::collections::HashSet<(String, String)>,
+}
+
+impl GameComponentRuntime {
+    /// Drain every queued game event, leaving `pending_events` empty.
+    ///
+    /// This is the native, testable seam for the bridge drain: the bridge's
+    /// `emit_game_events_system` only compiles under `wasm32` (it calls the JS
+    /// `emit_event` callback), so the "take all events and clear the queue"
+    /// behaviour cannot be asserted there. Extracting it here lets a native
+    /// unit test prove the queue is emptied while the bridge stays a thin
+    /// `for event in runtime.take_pending_events() { emit_event(...) }` loop.
+    pub fn take_pending_events(&mut self) -> Vec<GameEvent> {
+        std::mem::take(&mut self.pending_events)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -688,18 +706,73 @@ fn system_health(
     }
 }
 
-/// Collectible system: rotate collectibles
+/// Collectible system: spin collectibles for visual feedback and, during Play,
+/// pick them up when a CharacterController-bearing entity overlaps them.
+///
+/// Pickup is the engine's score writer: each collected item adds its `value` to
+/// `runtime.score` (feeding the `Score` win condition), bumps `collected_count`
+/// (feeding the `CollectAll` win condition), emits a `collectible_collected`
+/// event for scripts, and — when `destroy_on_collect` is set — despawns the
+/// collectible. `collected_ids` guards against re-counting the same item while it
+/// stays in contact for multiple frames. Despawned collectibles are restored on
+/// Stop via `engine_mode::restore_scene` (step 5 respawns from the snapshot).
 fn system_collectible(
+    mut commands: Commands,
     time: Res<Time>,
-    mut entities: Query<(&GameComponents, &mut Transform)>,
+    runtime: Option<ResMut<GameComponentRuntime>>,
+    mut entities: Query<(Entity, &EntityId, &GameComponents, &mut Transform)>,
 ) {
     let dt = time.delta_secs();
 
-    for (gc, mut transform) in entities.iter_mut() {
+    // Visual spin — runs whether or not the runtime exists (e.g. Edit preview).
+    for (_entity, _eid, gc, mut transform) in entities.iter_mut() {
         if let Some(GameComponentData::Collectible(data)) = gc.get("collectible") {
-            // Rotate around Y axis
             let rotation_speed = data.rotate_speed.to_radians();
             transform.rotate_y(rotation_speed * dt);
+        }
+    }
+
+    // Pickup logic only runs during Play (when the runtime resource exists).
+    let Some(mut runtime) = runtime else { return; };
+
+    // Entities that can pick collectibles up: those with a CharacterController.
+    let player_ids: std::collections::HashSet<String> = entities
+        .iter()
+        .filter_map(|(_e, eid, gc, _t)| gc.has("character_controller").then(|| eid.0.clone()))
+        .collect();
+
+    // Uncollected collectibles: (entity, id, value, destroy_on_collect).
+    let collectibles: Vec<(Entity, String, u32, bool)> = entities
+        .iter()
+        .filter_map(|(entity, eid, gc, _t)| match gc.get("collectible") {
+            Some(GameComponentData::Collectible(data)) if !runtime.collected_ids.contains(&eid.0) => {
+                Some((entity, eid.0.clone(), data.value, data.destroy_on_collect))
+            }
+            _ => None,
+        })
+        .collect();
+
+    // A collectible is picked up when it shares an active collision pair with a player.
+    let picked_up: Vec<(Entity, String, u32, bool)> = collectibles
+        .into_iter()
+        .filter(|(_e, cid, _v, _d)| {
+            runtime.active_collisions.iter().any(|(a, b)| {
+                (a == cid && player_ids.contains(b)) || (b == cid && player_ids.contains(a))
+            })
+        })
+        .collect();
+
+    for (entity, cid, value, destroy_on_collect) in picked_up {
+        runtime.collected_ids.insert(cid.clone());
+        runtime.collected_count += 1;
+        runtime.score = runtime.score.saturating_add(value);
+        runtime.pending_events.push(GameEvent {
+            event_name: "collectible_collected".to_string(),
+            source_entity_id: Some(cid),
+            target_entity_id: None,
+        });
+        if destroy_on_collect {
+            commands.entity(entity).despawn();
         }
     }
 }
@@ -1298,6 +1371,14 @@ fn system_win_condition(
 ) {
     let Some(mut runtime) = runtime else { return; };
 
+    // Entities that count as "the player" for ReachGoal: CharacterController holders.
+    // Precomputed before the win-condition loop so the immutable `entities` borrow
+    // is released before we mutate the runtime resource.
+    let player_ids: std::collections::HashSet<String> = entities
+        .iter()
+        .filter_map(|(eid, gc, _t)| gc.has("character_controller").then(|| eid.0.clone()))
+        .collect();
+
     for (_eid, gc, _transform) in entities.iter() {
         if let Some(GameComponentData::WinCondition(data)) = gc.get("win_condition") {
             let condition_met = match &data.condition_type {
@@ -1308,8 +1389,17 @@ fn system_win_condition(
                     runtime.total_collectibles > 0 && runtime.collected_count >= runtime.total_collectibles
                 }
                 WinConditionType::ReachGoal => {
-                    // Known limitation: handled via script API (forge.physics.onCollisionEnter)
-                    false
+                    // Win when a player (CharacterController) overlaps the goal entity.
+                    // `system_track_collisions` populates `active_collisions` from
+                    // Rapier events each frame; we look for a pair linking the goal
+                    // id with any player id.
+                    match &data.target_entity_id {
+                        Some(goal_id) => runtime.active_collisions.iter().any(|(a, b)| {
+                            (a == goal_id && player_ids.contains(b))
+                                || (b == goal_id && player_ids.contains(a))
+                        }),
+                        None => false,
+                    }
                 }
             };
 
@@ -1383,12 +1473,57 @@ fn system_dialogue_trigger(
 #[cfg(test)]
 mod win_condition_tests {
     use super::{
-        system_follower, system_projectile, system_spawner, system_win_condition,
-        GameComponentData, GameComponentRuntime, GameComponents, WinConditionData,
-        WinConditionType,
+        system_collectible, system_follower, system_projectile, system_spawner,
+        system_win_condition, CharacterControllerData, CollectibleData, GameComponentData,
+        GameComponentRuntime, GameComponents, GameEvent, WinConditionData, WinConditionType,
     };
     use crate::core::entity_id::EntityId;
     use bevy::prelude::*;
+
+    // ---- Shared test entity builders ----
+
+    fn player_entity(id: &str) -> (EntityId, GameComponents, Transform) {
+        let mut gc = GameComponents::default();
+        gc.components.push(GameComponentData::CharacterController(
+            CharacterControllerData::default(),
+        ));
+        (EntityId::new(id), gc, Transform::default())
+    }
+
+    fn collectible_entity(
+        id: &str,
+        value: u32,
+        destroy_on_collect: bool,
+    ) -> (EntityId, GameComponents, Transform) {
+        let mut gc = GameComponents::default();
+        gc.components.push(GameComponentData::Collectible(CollectibleData {
+            value,
+            destroy_on_collect,
+            pickup_sound_asset: None,
+            rotate_speed: 0.0,
+        }));
+        (EntityId::new(id), gc, Transform::default())
+    }
+
+    fn reach_goal_entity(target: &str) -> (EntityId, GameComponents, Transform) {
+        let mut gc = GameComponents::default();
+        gc.components.push(GameComponentData::WinCondition(WinConditionData {
+            condition_type: WinConditionType::ReachGoal,
+            target_score: None,
+            target_entity_id: Some(target.to_string()),
+        }));
+        (EntityId::new("mgr"), gc, Transform::default())
+    }
+
+    /// Canonical-ordered collision pair, matching `system_track_collisions`
+    /// (which stores the lexicographically smaller id first).
+    fn pair(a: &str, b: &str) -> (String, String) {
+        if a <= b {
+            (a.to_string(), b.to_string())
+        } else {
+            (b.to_string(), a.to_string())
+        }
+    }
 
     fn win_condition_entity(score_target: u32) -> (EntityId, GameComponents, Transform) {
         let mut gc = GameComponents::default();
@@ -1585,5 +1720,239 @@ mod win_condition_tests {
             system_win_condition,
         ));
         schedule.run(&mut world);
+    }
+
+    // ---- ReachGoal win condition ----
+
+    /// ReachGoal wins the instant a CharacterController entity shares a collision
+    /// pair with the goal entity. This is the #8764 fix: the arm previously
+    /// hardcoded `false`, so a goal-touch game could never be won.
+    #[test]
+    fn win_condition_reach_goal_emits_on_player_touch() {
+        let mut world = World::new();
+        let mut rt = GameComponentRuntime::default();
+        rt.active_collisions.insert(pair("goal", "player"));
+        world.insert_resource(rt);
+        world.spawn(player_entity("player"));
+        world.spawn(reach_goal_entity("goal"));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_win_condition);
+        schedule.run(&mut world);
+
+        let runtime = world.resource::<GameComponentRuntime>();
+        assert!(runtime.game_won, "player touched the goal but game_won was not set");
+        assert!(
+            runtime.pending_events.iter().any(|e| e.event_name == "game_win"),
+            "goal reached but no game_win event was emitted",
+        );
+    }
+
+    /// Without a collision touching the goal, ReachGoal must not win.
+    #[test]
+    fn win_condition_reach_goal_not_met_without_touch() {
+        let mut world = World::new();
+        world.insert_resource(GameComponentRuntime::default());
+        world.spawn(player_entity("player"));
+        world.spawn(reach_goal_entity("goal"));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_win_condition);
+        schedule.run(&mut world);
+
+        let runtime = world.resource::<GameComponentRuntime>();
+        assert!(!runtime.game_won, "no goal contact must not win");
+        assert!(runtime.pending_events.is_empty(), "no events expected when not won");
+    }
+
+    /// Only a CharacterController entity counts as reaching the goal. A non-player
+    /// object resting against the goal (e.g. a crate) must not trigger the win.
+    #[test]
+    fn win_condition_reach_goal_ignores_non_player_touch() {
+        let mut world = World::new();
+        let mut rt = GameComponentRuntime::default();
+        rt.active_collisions.insert(pair("goal", "crate"));
+        world.insert_resource(rt);
+        world.spawn(player_entity("player")); // exists but not touching the goal
+        world.spawn((EntityId::new("crate"), GameComponents::default(), Transform::default()));
+        world.spawn(reach_goal_entity("goal"));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_win_condition);
+        schedule.run(&mut world);
+
+        let runtime = world.resource::<GameComponentRuntime>();
+        assert!(!runtime.game_won, "a non-player touching the goal must not win");
+    }
+
+    /// A ReachGoal with no `target_entity_id` configured cannot be satisfied and
+    /// must never auto-win (guards the `None` arm).
+    #[test]
+    fn win_condition_reach_goal_no_target_never_wins() {
+        let mut world = World::new();
+        let mut rt = GameComponentRuntime::default();
+        rt.active_collisions.insert(pair("goal", "player"));
+        world.insert_resource(rt);
+        world.spawn(player_entity("player"));
+        let mut gc = GameComponents::default();
+        gc.components.push(GameComponentData::WinCondition(WinConditionData {
+            condition_type: WinConditionType::ReachGoal,
+            target_score: None,
+            target_entity_id: None,
+        }));
+        world.spawn((EntityId::new("mgr"), gc, Transform::default()));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_win_condition);
+        schedule.run(&mut world);
+
+        assert!(
+            !world.resource::<GameComponentRuntime>().game_won,
+            "ReachGoal with no target must not win",
+        );
+    }
+
+    // ---- Collectible pickup (engine score writer) ----
+
+    /// Picking up a collectible increments `collected_count`, adds its `value` to
+    /// `score`, emits `collectible_collected`, and despawns it when
+    /// `destroy_on_collect` is set.
+    #[test]
+    fn collectible_pickup_scores_counts_emits_and_despawns() {
+        let mut world = World::new();
+        world.insert_resource(Time::<()>::default());
+        let mut rt = GameComponentRuntime { total_collectibles: 1, ..Default::default() };
+        rt.active_collisions.insert(pair("coin", "player"));
+        world.insert_resource(rt);
+        let coin = world.spawn(collectible_entity("coin", 5, true)).id();
+        world.spawn(player_entity("player"));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_collectible);
+        schedule.run(&mut world);
+
+        let runtime = world.resource::<GameComponentRuntime>();
+        assert_eq!(runtime.collected_count, 1, "pickup must increment collected_count");
+        assert_eq!(runtime.score, 5, "pickup must add the collectible value to score");
+        assert!(runtime.collected_ids.contains("coin"), "collected id must be recorded");
+        assert!(
+            runtime.pending_events.iter().any(|e| e.event_name == "collectible_collected"),
+            "pickup must emit a collectible_collected event",
+        );
+        assert!(
+            world.get_entity(coin).is_err(),
+            "destroy_on_collect collectible must be despawned after pickup",
+        );
+    }
+
+    /// A collectible that stays in contact (destroy_on_collect = false) must be
+    /// counted and scored exactly once across multiple frames.
+    #[test]
+    fn collectible_pickup_does_not_double_count() {
+        let mut world = World::new();
+        world.insert_resource(Time::<()>::default());
+        let mut rt = GameComponentRuntime { total_collectibles: 1, ..Default::default() };
+        rt.active_collisions.insert(pair("coin", "player"));
+        world.insert_resource(rt);
+        world.spawn(collectible_entity("coin", 3, false));
+        world.spawn(player_entity("player"));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_collectible);
+        schedule.run(&mut world);
+        schedule.run(&mut world);
+
+        let runtime = world.resource::<GameComponentRuntime>();
+        assert_eq!(runtime.collected_count, 1, "a persistent collectible must count once");
+        assert_eq!(runtime.score, 3, "a persistent collectible must score once");
+    }
+
+    /// A collectible overlapping a non-player entity (no CharacterController) must
+    /// not be collected.
+    #[test]
+    fn collectible_not_collected_without_player_overlap() {
+        let mut world = World::new();
+        world.insert_resource(Time::<()>::default());
+        let mut rt = GameComponentRuntime { total_collectibles: 1, ..Default::default() };
+        rt.active_collisions.insert(pair("coin", "wall"));
+        world.insert_resource(rt);
+        world.spawn(collectible_entity("coin", 1, true));
+        world.spawn((EntityId::new("wall"), GameComponents::default(), Transform::default()));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_collectible);
+        schedule.run(&mut world);
+
+        let runtime = world.resource::<GameComponentRuntime>();
+        assert_eq!(runtime.collected_count, 0, "no player overlap must not collect");
+        assert_eq!(runtime.score, 0);
+    }
+
+    /// End-to-end: a player picking up the final collectible drives `collected_count`
+    /// to `total_collectibles`, and the CollectAll win condition fires in the same
+    /// schedule run. Proves pickup → win wiring, not just the systems in isolation.
+    #[test]
+    fn collectible_pickup_then_collect_all_wins() {
+        let mut world = World::new();
+        world.insert_resource(Time::<()>::default());
+        let mut rt = GameComponentRuntime { total_collectibles: 1, ..Default::default() };
+        rt.active_collisions.insert(pair("coin", "player"));
+        world.insert_resource(rt);
+        world.spawn(collectible_entity("coin", 1, true));
+        // Player carries the CollectAll win condition.
+        let mut gc = GameComponents::default();
+        gc.components.push(GameComponentData::CharacterController(CharacterControllerData::default()));
+        gc.components.push(GameComponentData::WinCondition(WinConditionData {
+            condition_type: WinConditionType::CollectAll,
+            target_score: None,
+            target_entity_id: None,
+        }));
+        world.spawn((EntityId::new("player"), gc, Transform::default()));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((system_collectible, system_win_condition).chain());
+        schedule.run(&mut world);
+
+        let runtime = world.resource::<GameComponentRuntime>();
+        assert_eq!(runtime.collected_count, 1, "final collectible must be collected");
+        assert!(runtime.game_won, "collecting all items must win the game");
+        assert!(
+            runtime.pending_events.iter().any(|e| e.event_name == "game_win"),
+            "collectAll completion must emit game_win",
+        );
+    }
+
+    /// The bridge drain (`emit_game_events_system`, wasm-only) forwards each
+    /// queued event to JS via `take_pending_events`. This proves the seam returns
+    /// every queued event in order AND leaves the queue empty — without it, the
+    /// win event never reaches scripts/UI and `pending_events` grows unbounded
+    /// for the whole play session.
+    #[test]
+    fn take_pending_events_returns_all_and_empties_queue() {
+        let mut runtime = GameComponentRuntime::default();
+        runtime.pending_events.push(GameEvent {
+            event_name: "collectible_collected".into(),
+            source_entity_id: Some("coin".into()),
+            target_entity_id: Some("player".into()),
+        });
+        runtime.pending_events.push(GameEvent {
+            event_name: "game_win".into(),
+            source_entity_id: None,
+            target_entity_id: None,
+        });
+
+        let drained = runtime.take_pending_events();
+
+        assert_eq!(drained.len(), 2, "every queued event must be returned");
+        assert_eq!(drained[0].event_name, "collectible_collected", "order preserved");
+        assert_eq!(drained[1].event_name, "game_win", "order preserved");
+        assert!(
+            runtime.pending_events.is_empty(),
+            "queue must be empty after draining so events are not re-emitted",
+        );
+
+        // Draining an already-empty queue is a safe no-op (matches the bridge's
+        // every-frame call when nothing happened).
+        assert!(runtime.take_pending_events().is_empty());
     }
 }

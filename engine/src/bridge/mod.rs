@@ -361,6 +361,9 @@ impl Plugin for SelectionPlugin {
 
         app
             .add_systems(Update, scripts::emit_play_tick_system)
+            // Drain per-frame game events (win, collectible pickup, …) to JS during Play.
+            // Not runtime-gated: exported games need win/score events too.
+            .add_systems(Update, game::emit_game_events_system)
             .add_systems(Update, core_systems::apply_mode_change_requests)
             .add_systems(Update, scripts::apply_input_binding_updates)
             .add_systems(Update, physics::apply_physics_updates)

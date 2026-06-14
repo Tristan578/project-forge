@@ -185,6 +185,13 @@ const _sharedState: Record<string, unknown> & { cameraMode: string; dialogueActi
 const collisionEnterCallbacks: Map<string, (otherId: string) => void> = new Map();
 const collisionExitCallbacks: Map<string, (otherId: string) => void> = new Map();
 
+// Game-event callback registry. Keyed by script entity id so each script registers
+// at most one onWin handler and clearing on stop is trivial.
+const gameWinCallbacks: Map<string, () => void> = new Map();
+// Worker-local score, shared across all scripts in this play session. Mirrored to
+// the editor store (for the HUD) whenever a script calls forge.game.setScore().
+let gameScore = 0;
+
 function distanceBetween(a: [number, number, number], b: [number, number, number]): number {
   const dx = a[0] - b[0];
   const dy = a[1] - b[1];
@@ -773,6 +780,25 @@ function buildForgeApi(scriptEntityId: string) {
       },
     },
 
+    // --- Game flow control (win / score) ---
+    game: {
+      /** Declare the game won — sets the win state and fires all onWin handlers. */
+      win: () => {
+        (self as unknown as Worker).postMessage({ type: 'game_win' });
+      },
+      /** Set the player's score. Mirrored to the editor store for the HUD. */
+      setScore: (score: number) => {
+        gameScore = score;
+        (self as unknown as Worker).postMessage({ type: 'game_set_score', score });
+      },
+      /** Get the current score. */
+      getScore: () => gameScore,
+      /** Register a callback fired once when the game is won (any source). */
+      onWin: (callback: () => void) => {
+        gameWinCallbacks.set(scriptEntityId, callback);
+      },
+    },
+
     // --- Sprite animation control ---
     sprite: {
       playAnimation: (eid: string, clipName: string) => {
@@ -1291,6 +1317,8 @@ self.onmessage = (e: MessageEvent) => {
       sharedState = {};
       collisionEnterCallbacks.clear();
       collisionExitCallbacks.clear();
+      gameWinCallbacks.clear();
+      gameScore = 0;
       // Send final UI clear
       (self as unknown as Worker).postMessage({ type: 'ui', elements: [] });
       break;
@@ -1317,6 +1345,23 @@ self.onmessage = (e: MessageEvent) => {
         } catch (err) {
           const msg_ = err instanceof Error ? err.message : String(err);
           (self as unknown as Worker).postMessage({ type: 'error', entityId: entityB, line: 0, message: `Collision callback error: ${msg_}` });
+        }
+      }
+      break;
+    }
+
+    case 'GAME_EVENT': {
+      // Engine- or script-driven game events forwarded from the main thread.
+      // Currently only `game_win` is surfaced to scripts (via forge.game.onWin).
+      const eventName = msg.eventName;
+      if (eventName === 'game_win') {
+        for (const [eid, cb] of gameWinCallbacks) {
+          try {
+            cb();
+          } catch (err) {
+            const msg_ = err instanceof Error ? err.message : String(err);
+            (self as unknown as Worker).postMessage({ type: 'error', entityId: eid, line: 0, message: `onWin callback error: ${msg_}` });
+          }
         }
       }
       break;

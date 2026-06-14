@@ -12,6 +12,13 @@ vi.mock('@/stores/editorStore', () => ({
   firePlayTick: vi.fn(),
 }));
 
+// Mock the script-runner bridge so we can assert game events are forwarded to
+// the worker (forge.game.onWin) without importing the React-hook module.
+const mockScriptGameEventCallback = vi.fn();
+vi.mock('@/lib/scripting/useScriptRunner', () => ({
+  getScriptGameEventCallback: () => mockScriptGameEventCallback,
+}));
+
 import { useEditorStore, firePlayTick } from '@/stores/editorStore';
 import { handleGameEvent } from '../gameEvents';
 
@@ -327,6 +334,35 @@ describe('handleGameEvent', () => {
 
       expect(result).toBe(true);
       expect(firePlayTick).toHaveBeenCalledWith(payload);
+    });
+  });
+
+  describe('GAME_EVENT', () => {
+    it('flips the win flag and forwards game_win to the script worker', () => {
+      const setGameWon = vi.fn();
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, setGameWon } as unknown as StoreState);
+
+      const payload = { eventName: 'game_win', sourceEntityId: 'goal-1', targetEntityId: 'player-1' };
+
+      const result = handleGameEvent('GAME_EVENT', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(result).toBe(true);
+      expect(setGameWon).toHaveBeenCalledWith(true);
+      // Win event must reach the script worker so forge.game.onWin handlers fire.
+      expect(mockScriptGameEventCallback).toHaveBeenCalledWith(payload);
+    });
+
+    it('forwards non-win game events without flipping the win flag', () => {
+      const setGameWon = vi.fn();
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, setGameWon } as unknown as StoreState);
+
+      const payload = { eventName: 'collectible_collected', sourceEntityId: 'coin-1', targetEntityId: 'player-1' };
+
+      const result = handleGameEvent('GAME_EVENT', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(result).toBe(true);
+      expect(setGameWon).not.toHaveBeenCalled();
+      expect(mockScriptGameEventCallback).toHaveBeenCalledWith(payload);
     });
   });
 });

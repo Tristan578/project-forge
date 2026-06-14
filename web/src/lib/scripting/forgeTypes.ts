@@ -392,11 +392,24 @@ declare namespace forge {
     function loadModel(url: string): Promise<{ assetId: string } | null>;
   }
 
+  namespace game {
+    /** Declare the game won — sets the win state and fires all forge.game.onWin handlers. */
+    function win(): void;
+    /** Set the player's score for the active play session (surfaced to the HUD). */
+    function setScore(score: number): void;
+    /** Get the current score for the active play session. */
+    function getScore(): number;
+    /** Register a callback fired once when the game is won (engine win condition or forge.game.win()). */
+    function onWin(callback: () => void): void;
+  }
+
   namespace leaderboard {
     /** Submit a score to a named leaderboard. Returns rank (1-based) or null on failure. */
     function submit(name: string, playerName: string, score: number, metadata?: Record<string, unknown>): Promise<{ rank: number } | null>;
     /** Get the top N entries for a named leaderboard (default: top 10). */
     function getTop(name: string, limit?: number): Promise<Array<{ rank: number; playerName: string; score: number; metadata: Record<string, unknown> | null; createdAt: string }> | null>;
+  }
+
   namespace i18n {
     /**
      * Resolve a string ID to its translation for the current locale.
