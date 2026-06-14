@@ -634,13 +634,17 @@ describe('editorStore', () => {
   });
 
   describe('Entity CRUD', () => {
-    it('spawnEntity dispatches spawn_entity', () => {
+    it('spawnEntity dispatches spawn_entity with a generated id and returns it', () => {
       const state = useEditorStore.getState();
-      state.spawnEntity('cube', 'MyCube');
+      const returnedId = state.spawnEntity('cube', 'MyCube');
 
+      // #8748: the id is generated client-side, passed into the command, and
+      // returned synchronously so callers never read the async-updated primaryId.
+      expect(typeof returnedId).toBe('string');
       expect(mockDispatch).toHaveBeenCalledWith('spawn_entity', {
         entityType: 'cube',
         name: 'MyCube',
+        id: returnedId,
       });
     });
 

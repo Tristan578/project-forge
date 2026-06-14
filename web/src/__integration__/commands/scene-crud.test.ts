@@ -55,21 +55,25 @@ describe('scene CRUD integration', () => {
   // -------------------------------------------------------------------------
 
   describe('spawn entity', () => {
-    it('dispatches spawn_entity with entityType and name', () => {
-      h.getState().spawnEntity('cube', 'MyCube');
+    it('dispatches spawn_entity with entityType, name, and the returned id', () => {
+      const returnedId = h.getState().spawnEntity('cube', 'MyCube');
 
+      // #8748: id generated client-side and returned synchronously.
+      expect(typeof returnedId).toBe('string');
       expect(h.dispatch).toHaveBeenCalledWith('spawn_entity', {
         entityType: 'cube',
         name: 'MyCube',
+        id: returnedId,
       });
     });
 
     it('dispatches spawn_entity without a name when omitted', () => {
-      h.getState().spawnEntity('sphere');
+      const returnedId = h.getState().spawnEntity('sphere');
 
       expect(h.dispatch).toHaveBeenCalledWith('spawn_entity', {
         entityType: 'sphere',
         name: undefined,
+        id: returnedId,
       });
     });
 
@@ -104,8 +108,13 @@ describe('scene CRUD integration', () => {
       expect(state.sceneGraph.rootIds).not.toContain('child-1');
     });
 
-    it('dispatches spawn_entity for each supported entity type', () => {
-      const types = ['cube', 'sphere', 'plane', 'cylinder', 'cone', 'empty'] as const;
+    it('dispatches spawn_entity for each engine-spawnable entity type', () => {
+      // Only the primitive mesh / light types are spawned by the engine's
+      // `apply_spawn_requests`. `'empty'` is intentionally excluded here — the
+      // engine `EntityType` enum has no `Empty` variant, so a `spawn_entity`
+      // for it would never deserialize and would create nothing (see the
+      // non-spawnable assertion below). #8748.
+      const types = ['cube', 'sphere', 'plane', 'cylinder', 'cone'] as const;
       for (const type of types) {
         h.getState().spawnEntity(type);
       }
@@ -113,6 +122,16 @@ describe('scene CRUD integration', () => {
       for (const type of types) {
         expect(h.dispatch).toHaveBeenCalledWith('spawn_entity', expect.objectContaining({ entityType: type }));
       }
+    });
+
+    it('does NOT dispatch spawn_entity for a non-spawnable type (empty) and returns undefined', () => {
+      // `'empty'` reaches no spawn arm in `apply_spawn_requests`, so returning a
+      // generated id would be a phantom reference. The guard returns undefined
+      // and suppresses the dispatch so the caller's `if (!id)` surfaces the
+      // failure instead of targeting a missing entity. #8748.
+      const returnedId = h.getState().spawnEntity('empty');
+      expect(returnedId).toBeUndefined();
+      expect(h.dispatch).not.toHaveBeenCalledWith('spawn_entity', expect.anything());
     });
   });
 

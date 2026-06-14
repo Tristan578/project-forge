@@ -327,17 +327,27 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     const prefab = getPrefab(p.data.prefabId);
     if (!prefab) return { success: false, error: `Prefab not found: ${p.data.prefabId}` };
 
-    ctx.store.spawnEntity(prefab.snapshot.entityType as EntityType, p.data.name || prefab.snapshot.name);
-
-    if (prefab.snapshot.material && ctx.store.primaryId) {
-      ctx.store.updateMaterial(ctx.store.primaryId, prefab.snapshot.material);
+    const entityId = ctx.store.spawnEntity(prefab.snapshot.entityType as EntityType, p.data.name || prefab.snapshot.name);
+    if (!entityId) {
+      // spawnEntity returns undefined for a non-spawnable entityType (imported prefabs
+      // carry an unvalidated `entityType: string`) or when the engine isn't loaded yet.
+      // Report a real failure rather than a phantom success that claims the prefab was
+      // instantiated while no entity was created and no material/transform applied (#8748).
+      return {
+        success: false,
+        error: `Cannot instantiate prefab "${prefab.name}": '${prefab.snapshot.entityType}' is not a spawnable type or the engine is not ready`,
+      };
     }
 
-    if (p.data.position && ctx.store.primaryId) {
-      ctx.store.updateTransform(ctx.store.primaryId, 'position', p.data.position);
+    if (prefab.snapshot.material) {
+      ctx.store.updateMaterial(entityId, prefab.snapshot.material);
     }
 
-    return { success: true, result: { message: `Instantiated prefab "${prefab.name}"` } };
+    if (p.data.position) {
+      ctx.store.updateTransform(entityId, 'position', p.data.position);
+    }
+
+    return { success: true, result: { message: `Instantiated prefab "${prefab.name}"`, entityId } };
   },
 
   list_prefabs: async (args, _ctx) => {

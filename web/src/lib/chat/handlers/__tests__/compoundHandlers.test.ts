@@ -351,7 +351,7 @@ describe('compoundHandlers', () => {
           { type: 'sphere', name: 'Ball', position: [0, 2, 0] },
         ],
       }, {
-        primaryId: 'spawned-1',
+        spawnEntity: vi.fn((_t: unknown, n: string) => `id-${n}`),
       });
 
       expect(result.success).toBe(true);
@@ -366,7 +366,7 @@ describe('compoundHandlers', () => {
         entities: [],
         clearExisting: true,
       }, {
-        primaryId: 'spawned-1',
+        spawnEntity: vi.fn(() => 'spawned-1'),
       });
 
       expect(store.newScene).toHaveBeenCalled();
@@ -395,7 +395,7 @@ describe('compoundHandlers', () => {
       const { store } = await invoke('create_scene_from_description', {
         entities: [{ type: 'cube', name: 'Red', material: { presetId: 'glossy-red' } }],
       }, {
-        primaryId: 'e1',
+        spawnEntity: vi.fn(() => 'e1'),
       });
 
       expect(mockGetPresetById).toHaveBeenCalledWith('glossy-red');
@@ -406,35 +406,33 @@ describe('compoundHandlers', () => {
       const { store } = await invoke('create_scene_from_description', {
         entities: [{ type: 'cube', name: 'Box', physics: { bodyType: 'dynamic' } }],
       }, {
-        primaryId: 'e1',
+        spawnEntity: vi.fn(() => 'e1'),
       });
 
       expect(store.togglePhysics).toHaveBeenCalledWith('e1', true);
       expect(store.updatePhysics).toHaveBeenCalled();
     });
 
-    it('reparents entities when parentName is specified', async () => {
-      let callCount = 0;
+    it('reparents entities using the distinct ids returned by spawnEntity', async () => {
+      // Each spawn returns a distinct id derived from the name, proving the
+      // name→id map is built from spawnEntity's return value (not stale primaryId).
       const { store } = await invoke('create_scene_from_description', {
         entities: [
           { type: 'cube', name: 'Parent' },
           { type: 'sphere', name: 'Child', parentName: 'Parent' },
         ],
       }, {
-        get primaryId() {
-          callCount++;
-          return `e${callCount}`;
-        },
+        spawnEntity: vi.fn((_t: unknown, n: string) => `id-${n}`),
       });
 
-      expect(store.reparentEntity).toHaveBeenCalled();
+      expect(store.reparentEntity).toHaveBeenCalledWith('id-Child', 'id-Parent');
     });
 
     it('handles spawn failure gracefully', async () => {
       const { result } = await invoke('create_scene_from_description', {
         entities: [{ type: 'cube', name: 'Broken' }],
       }, {
-        primaryId: null,
+        spawnEntity: vi.fn(() => null),
       });
 
       expect(result.success).toBe(true);
@@ -453,7 +451,7 @@ describe('compoundHandlers', () => {
       const { result, store } = await invoke('create_level_layout', {
         levelName: 'Level1',
       }, {
-        primaryId: 'root-1',
+        spawnEntity: vi.fn(() => 'root-1'),
       });
 
       expect(result.success).toBe(true);
@@ -462,9 +460,9 @@ describe('compoundHandlers', () => {
       expect(data.entityIds).toHaveProperty('Level1', 'root-1');
     });
 
-    it('returns error when root spawn fails', async () => {
+    it('returns error when root spawn returns no id', async () => {
       const { result } = await invoke('create_level_layout', {}, {
-        primaryId: null,
+        spawnEntity: vi.fn(() => null),
       });
 
       expect(result.success).toBe(false);
@@ -473,7 +471,7 @@ describe('compoundHandlers', () => {
 
     it('uses default level name "Level"', async () => {
       const { store } = await invoke('create_level_layout', {}, {
-        primaryId: 'root',
+        spawnEntity: vi.fn(() => 'root'),
       });
 
       expect(store.spawnEntity).toHaveBeenCalledWith('cube', 'Level');
@@ -483,10 +481,39 @@ describe('compoundHandlers', () => {
       const { store } = await invoke('create_level_layout', {
         inputPreset: 'platformer',
       }, {
-        primaryId: 'root',
+        spawnEntity: vi.fn(() => 'root'),
       });
 
       expect(store.setInputPreset).toHaveBeenCalledWith('platformer');
+    });
+
+    it('reports the terrain ground as an explicit failure when its id is unavailable (#8749 boundary)', async () => {
+      // The terrain path still reads the stale `primaryId` (#8749). On a fresh
+      // scene that is null, so the ground cannot be parented. The handler must
+      // surface that as a failed operation — never silently drop it and imply
+      // the ground exists.
+      const { result, store } = await invoke('create_level_layout', {
+        levelName: 'TerrainLevel',
+        ground: { useTerrain: true, terrainConfig: { size: 64 } },
+      }, {
+        spawnEntity: vi.fn(() => 'root-1'),
+        // primaryId left at its default null; spawnTerrain does not set it (#8749)
+      });
+
+      expect(store.spawnTerrain).toHaveBeenCalled();
+      const data = result.result as {
+        success: boolean;
+        operations: Array<{ action: string; success: boolean; error?: string }>;
+        partialSuccess: boolean;
+      };
+      const groundOp = data.operations.find((op) => op.action === 'create terrain ground');
+      expect(groundOp).toBeDefined();
+      expect(groundOp?.success).toBe(false);
+      expect(groundOp?.error).toContain('#8749');
+      // Root succeeded, ground failed → the compound result reports partial
+      // success, not a clean success that would imply the ground exists.
+      expect(data.success).toBe(false);
+      expect(data.partialSuccess).toBe(true);
     });
   });
 
@@ -497,11 +524,13 @@ describe('compoundHandlers', () => {
   describe('setup_character', () => {
     it('spawns a character with default settings', async () => {
       const { result, store } = await invoke('setup_character', {}, {
-        primaryId: 'char-1',
+        spawnEntity: vi.fn(() => 'char-1'),
       });
 
       expect(result.success).toBe(true);
       expect(store.spawnEntity).toHaveBeenCalledWith('capsule', 'Player');
+      // primaryId stays null on a fresh scene — all follow-ups target the returned id.
+      expect(store.primaryId).toBeNull();
       expect(store.updateTransform).toHaveBeenCalledWith('char-1', 'position', [0, 1, 0]);
       expect(store.togglePhysics).toHaveBeenCalledWith('char-1', true);
       expect(store.updatePhysics).toHaveBeenCalled();
@@ -515,7 +544,7 @@ describe('compoundHandlers', () => {
         position: [5, 0, 3],
         entityType: 'sphere',
       }, {
-        primaryId: 'char-2',
+        spawnEntity: vi.fn(() => 'char-2'),
       });
 
       expect(store.spawnEntity).toHaveBeenCalledWith('sphere', 'Hero');
@@ -526,7 +555,7 @@ describe('compoundHandlers', () => {
       const { store } = await invoke('setup_character', {
         material: { baseColor: [1, 0, 0, 1] },
       }, {
-        primaryId: 'char-3',
+        spawnEntity: vi.fn(() => 'char-3'),
       });
 
       expect(store.updateMaterial).toHaveBeenCalled();
@@ -536,7 +565,7 @@ describe('compoundHandlers', () => {
       const { store } = await invoke('setup_character', {
         health: null,
       }, {
-        primaryId: 'char-4',
+        spawnEntity: vi.fn(() => 'char-4'),
       });
 
       // addGameComponent should be called once for character_controller only
@@ -547,7 +576,7 @@ describe('compoundHandlers', () => {
       const { store } = await invoke('setup_character', {
         cameraFollow: true,
       }, {
-        primaryId: 'char-5',
+        spawnEntity: vi.fn(() => 'char-5'),
       });
 
       expect(store.setScript).toHaveBeenCalled();
@@ -560,15 +589,15 @@ describe('compoundHandlers', () => {
       const { store } = await invoke('setup_character', {
         cameraFollow: false,
       }, {
-        primaryId: 'char-6',
+        spawnEntity: vi.fn(() => 'char-6'),
       });
 
       expect(store.setScript).not.toHaveBeenCalled();
     });
 
-    it('handles spawn failure gracefully', async () => {
+    it('handles spawn failure gracefully (spawnEntity returns no id)', async () => {
       const { result } = await invoke('setup_character', {}, {
-        primaryId: null,
+        spawnEntity: vi.fn(() => null),
       });
 
       expect(result.success).toBe(true);

@@ -87,6 +87,9 @@ struct SpawnEntityPayload {
     entity_type: String,
     name: Option<String>,
     position: Option<[f32; 3]>,
+    /// Optional client-generated id. Lets JS reference the spawned entity
+    /// synchronously instead of waiting for the async SELECTION_CHANGED event.
+    id: Option<String>,
 }
 
 /// Spawn a new entity with the given components.
@@ -101,6 +104,7 @@ fn handle_spawn_entity(payload: serde_json::Value) -> CommandResult {
         entity_type,
         name: data.name,
         position: data.position.map(|p| Vec3::new(p[0], p[1], p[2])),
+        id: data.id,
     };
 
     if queue_spawn_from_bridge(request) {

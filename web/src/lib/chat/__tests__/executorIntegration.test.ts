@@ -67,7 +67,9 @@ describe('Chat executor integration: executeToolCall → handler → store', () 
   });
 
   it('spawn_entity: calls store.spawnEntity with correct type', async () => {
-    const store = makeStore();
+    // spawnEntity returns the new id synchronously (#8748); a spawn with no id
+    // back is a real failure, so the success path must hand back a concrete id.
+    const store = makeStore({ spawnEntity: vi.fn(() => 'sphere-1') });
     const result: ExecutionResult = await executeToolCall(
       'spawn_entity',
       { entityType: 'sphere', name: 'My Sphere' },

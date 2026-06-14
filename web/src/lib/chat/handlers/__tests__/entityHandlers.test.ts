@@ -53,9 +53,12 @@ describe('spawn_entity', () => {
   });
 
   it('spawns cube and calls store.spawnEntity', async () => {
-    const { result, store } = await invokeHandler(transformHandlers, 'spawn_entity', {
-      entityType: 'cube',
-    });
+    const { result, store } = await invokeHandler(
+      transformHandlers,
+      'spawn_entity',
+      { entityType: 'cube' },
+      { spawnEntity: vi.fn(() => 'cube-1') },
+    );
     expect(result.success).toBe(true);
     expect(store.spawnEntity).toHaveBeenCalledWith('cube', undefined);
   });
@@ -68,21 +71,44 @@ describe('spawn_entity', () => {
     expect(store.spawnEntity).toHaveBeenCalledWith('sphere', 'MyBall');
   });
 
-  it('accepts all valid entity types', async () => {
+  it('spawns every engine-spawnable primitive/light type', async () => {
+    // Exactly the types the engine's apply_spawn_requests creates via the
+    // spawn_entity command (SPAWNABLE_ENTITY_TYPES). Non-spawnable EntityTypes
+    // are covered by the rejection test below (#8748).
     const types = [
-      'cube', 'sphere', 'cylinder', 'capsule', 'torus', 'plane', 'cone', 'icosphere',
-      'point_light', 'directional_light', 'spot_light', 'gltf_model', 'empty',
+      'cube', 'sphere', 'cylinder', 'capsule', 'torus', 'plane', 'cone',
+      'point_light', 'directional_light', 'spot_light',
     ];
     for (const entityType of types) {
-      const { result } = await invokeHandler(transformHandlers, 'spawn_entity', { entityType });
+      const { result } = await invokeHandler(
+        transformHandlers,
+        'spawn_entity',
+        { entityType },
+        { spawnEntity: vi.fn(() => `${entityType}-1`) },
+      );
       expect(result.success).toBe(true);
     }
   });
 
+  it('rejects non-spawnable entity types instead of reporting phantom success (#8748)', async () => {
+    // icosphere/gltf_model/empty/sprite/terrain are valid EntityType values but are
+    // NOT created by the engine's spawn_entity path — the schema rejects them before
+    // any dispatch, so the tool returns a real failure rather than an undefined id.
+    const nonSpawnable = ['icosphere', 'gltf_model', 'empty', 'sprite', 'terrain'];
+    for (const entityType of nonSpawnable) {
+      const { result, store } = await invokeHandler(transformHandlers, 'spawn_entity', { entityType });
+      expect(result.success).toBe(false);
+      expect(store.spawnEntity).not.toHaveBeenCalled();
+    }
+  });
+
   it('result message includes entityType', async () => {
-    const { result } = await invokeHandler(transformHandlers, 'spawn_entity', {
-      entityType: 'torus',
-    });
+    const { result } = await invokeHandler(
+      transformHandlers,
+      'spawn_entity',
+      { entityType: 'torus' },
+      { spawnEntity: vi.fn(() => 'torus-1') },
+    );
     const data = result.result as { message: string };
     expect(data.message).toContain('torus');
   });

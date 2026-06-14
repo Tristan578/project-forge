@@ -671,12 +671,13 @@ describe('handlers2d sprite commands', () => {
   describe('create_sprite', () => {
     it('spawns a plane entity and sets default sprite data', async () => {
       const { result, store } = await invoke2d('create_sprite', {}, {
-        primaryId: 'new-ent-1',
-        spawnEntity: vi.fn(),
+        spawnEntity: vi.fn(() => 'new-ent-1'),
         setSpriteData: vi.fn(),
         updateTransform: vi.fn(),
       });
       expect(result.success).toBe(true);
+      // Fresh-scene path: primaryId is null; the handler targets spawnEntity's returned id.
+      expect(store.primaryId).toBeNull();
       expect(store.spawnEntity).toHaveBeenCalledWith('plane', undefined);
       expect(store.setSpriteData).toHaveBeenCalledWith('new-ent-1', expect.objectContaining({
         sortingLayer: 'Default',
@@ -689,7 +690,7 @@ describe('handlers2d sprite commands', () => {
       const { result, store } = await invoke2d(
         'create_sprite',
         { entityType: 'cube', name: 'Hero', sortingLayer: 'Foreground', sortingOrder: 5 },
-        { primaryId: 'ent-hero', spawnEntity: vi.fn(), setSpriteData: vi.fn(), updateTransform: vi.fn() },
+        { spawnEntity: vi.fn(() => 'ent-hero'), setSpriteData: vi.fn(), updateTransform: vi.fn() },
       );
       expect(result.success).toBe(true);
       expect(store.spawnEntity).toHaveBeenCalledWith('cube', 'Hero');
@@ -703,15 +704,14 @@ describe('handlers2d sprite commands', () => {
       const { store } = await invoke2d(
         'create_sprite',
         { position: [1, 2, 3] },
-        { primaryId: 'ent-pos', spawnEntity: vi.fn(), setSpriteData: vi.fn(), updateTransform: vi.fn() },
+        { spawnEntity: vi.fn(() => 'ent-pos'), setSpriteData: vi.fn(), updateTransform: vi.fn() },
       );
       expect(store.updateTransform).toHaveBeenCalledWith('ent-pos', 'position', { x: 1, y: 2, z: 3 });
     });
 
-    it('returns error when entity spawn returns null primaryId', async () => {
+    it('returns error when spawnEntity returns no id (engine spawn failed)', async () => {
       const { result } = await invoke2d('create_sprite', {}, {
-        primaryId: null,
-        spawnEntity: vi.fn(),
+        spawnEntity: vi.fn(() => null),
         setSpriteData: vi.fn(),
         updateTransform: vi.fn(),
       });
@@ -1360,9 +1360,11 @@ describe('handlers2d tilemap commands', () => {
       const { result, store } = await invoke2d(
         'create_tilemap',
         { tilesetAssetId: 'tiles-1' },
-        { primaryId: 'ent-tile', spawnEntity: vi.fn(), setTilemapData: vi.fn() },
+        { spawnEntity: vi.fn(() => 'ent-tile'), setTilemapData: vi.fn() },
       );
       expect(result.success).toBe(true);
+      // Fresh-scene path: primaryId is null; the handler targets spawnEntity's returned id.
+      expect(store.primaryId).toBeNull();
       expect(store.spawnEntity).toHaveBeenCalledWith('plane', 'Tilemap');
       expect(store.setTilemapData).toHaveBeenCalledWith('ent-tile', expect.objectContaining({
         tilesetAssetId: 'tiles-1',
@@ -1376,7 +1378,7 @@ describe('handlers2d tilemap commands', () => {
       const { store } = await invoke2d(
         'create_tilemap',
         { name: 'World', tilesetAssetId: 'tiles-1', tileSize: [16, 16], mapSize: [30, 20], origin: 'Center' },
-        { primaryId: 'ent-tile2', spawnEntity: vi.fn(), setTilemapData: vi.fn() },
+        { spawnEntity: vi.fn(() => 'ent-tile2'), setTilemapData: vi.fn() },
       );
       expect(store.spawnEntity).toHaveBeenCalledWith('plane', 'World');
       expect(store.setTilemapData).toHaveBeenCalledWith('ent-tile2', expect.objectContaining({
@@ -1391,11 +1393,11 @@ describe('handlers2d tilemap commands', () => {
       expect(result.success).toBe(false);
     });
 
-    it('returns error when spawn returns null primaryId', async () => {
+    it('returns error when spawnEntity returns no id (engine spawn failed)', async () => {
       const { result } = await invoke2d(
         'create_tilemap',
         { tilesetAssetId: 'tiles-1' },
-        { primaryId: null, spawnEntity: vi.fn(), setTilemapData: vi.fn() },
+        { spawnEntity: vi.fn(() => null), setTilemapData: vi.fn() },
       );
       expect(result.success).toBe(false);
     });

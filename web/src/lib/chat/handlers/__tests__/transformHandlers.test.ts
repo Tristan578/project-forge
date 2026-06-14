@@ -1,15 +1,59 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { invokeHandler } from './handlerTestUtils';
 import { transformHandlers } from '../transformHandlers';
 
 describe('transformHandlers', () => {
-  it('spawn_entity calls spawnEntity', async () => {
-    const { result, store } = await invokeHandler(transformHandlers, 'spawn_entity', {
-      entityType: 'cube',
-      name: 'MyCube',
-    });
+  it('spawn_entity calls spawnEntity and surfaces the returned id', async () => {
+    const { result, store } = await invokeHandler(
+      transformHandlers,
+      'spawn_entity',
+      { entityType: 'cube', name: 'MyCube' },
+      { spawnEntity: vi.fn(() => 'cube-1') },
+    );
     expect(result.success).toBe(true);
     expect(store.spawnEntity).toHaveBeenCalledWith('cube', 'MyCube');
+    expect((result.result as { entityId?: string }).entityId).toBe('cube-1');
+  });
+
+  it('spawn_entity returns the id from spawnEntity (not the stale primaryId)', async () => {
+    // #8748: the handler must surface the synchronously-returned id so the
+    // caller can target the new entity. With primaryId left at its default
+    // (null on a fresh scene), the only correct source is spawnEntity's return.
+    const { result } = await invokeHandler(
+      transformHandlers,
+      'spawn_entity',
+      { entityType: 'cube', name: 'MyCube' },
+      { spawnEntity: vi.fn(() => 'spawned-uuid'), primaryId: null },
+    );
+    expect(result.success).toBe(true);
+    expect((result.result as { entityId?: string }).entityId).toBe('spawned-uuid');
+  });
+
+  it('spawn_entity rejects a non-spawnable type instead of reporting a phantom success (#8748)', async () => {
+    // icosphere/empty/gltf_model are JS-only union members the engine never spawns via
+    // spawn_entity. The schema (derived from SPAWNABLE_ENTITY_TYPES) must reject them
+    // rather than return success with an undefined entityId that follow-up commands
+    // would target in vain.
+    const { result } = await invokeHandler(
+      transformHandlers,
+      'spawn_entity',
+      { entityType: 'icosphere', name: 'Nope' },
+      { spawnEntity: vi.fn(() => undefined) },
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it('spawn_entity fails (not a phantom success) when the engine returns no id', async () => {
+    // A spawnable type whose dispatch produced no entity (engine not loaded yet) must
+    // not report success with an undefined entityId.
+    const { result } = await invokeHandler(
+      transformHandlers,
+      'spawn_entity',
+      { entityType: 'cube', name: 'MyCube' },
+      { spawnEntity: vi.fn(() => undefined) },
+    );
+    expect(result.success).toBe(false);
+    expect((result.result as { entityId?: string } | undefined)?.entityId).toBeUndefined();
   });
 
   it('despawn_entity calls setSelection and deleteSelectedEntities with entityIds array', async () => {

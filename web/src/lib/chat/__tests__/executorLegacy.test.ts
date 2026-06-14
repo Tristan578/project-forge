@@ -457,10 +457,10 @@ describe('legacy: arrange_entities', () => {
 describe('legacy: create_scene_from_description', () => {
   it('spawns each entity and calls updateTransform for position', async () => {
     let spawnCallCount = 0;
+    // spawnEntity returns the new id synchronously (#8748); the compound handler
+    // targets that returned id for the follow-up updateTransform, not primaryId.
     const store = makeStore({
-      get primaryId() {
-        return `entity-${++spawnCallCount}`;
-      },
+      spawnEntity: vi.fn(() => `entity-${++spawnCallCount}`),
     });
 
     const result = await executeToolCall('create_scene_from_description', {
@@ -528,12 +528,8 @@ describe('legacy: create_scene_from_description', () => {
   });
 
   it('applies physics when entity physics config provided', async () => {
-    let spawned = false;
     const store = makeStore({
-      get primaryId() {
-        if (!spawned) { spawned = true; return 'cube-id'; }
-        return null;
-      },
+      spawnEntity: vi.fn(() => 'cube-id'),
     });
 
     await executeToolCall('create_scene_from_description', {
@@ -553,7 +549,7 @@ describe('legacy: create_scene_from_description', () => {
 
 describe('legacy: setup_character', () => {
   it('spawns character, sets physics, adds character controller, sets input preset', async () => {
-    const store = makeStore({ primaryId: 'char-1' });
+    const store = makeStore({ spawnEntity: vi.fn(() => 'char-1') });
 
     const result = await executeToolCall('setup_character', {
       name: 'Hero',
@@ -568,7 +564,7 @@ describe('legacy: setup_character', () => {
   });
 
   it('attaches camera follow script when cameraFollow is true (default)', async () => {
-    const store = makeStore({ primaryId: 'char-2' });
+    const store = makeStore({ spawnEntity: vi.fn(() => 'char-2') });
 
     await executeToolCall('setup_character', { name: 'Runner' }, store);
 
@@ -580,7 +576,7 @@ describe('legacy: setup_character', () => {
   });
 
   it('skips camera follow script when cameraFollow is false', async () => {
-    const store = makeStore({ primaryId: 'char-3' });
+    const store = makeStore({ spawnEntity: vi.fn(() => 'char-3') });
 
     await executeToolCall('setup_character', { name: 'NoCam', cameraFollow: false }, store);
 
@@ -588,7 +584,7 @@ describe('legacy: setup_character', () => {
   });
 
   it('skips health component when health is explicitly null', async () => {
-    const store = makeStore({ primaryId: 'char-4' });
+    const store = makeStore({ spawnEntity: vi.fn(() => 'char-4') });
 
     await executeToolCall('setup_character', { name: 'NoHealth', health: null }, store);
 
@@ -599,7 +595,7 @@ describe('legacy: setup_character', () => {
   });
 
   it('applies custom entity type when entityType is provided', async () => {
-    const store = makeStore({ primaryId: 'char-5' });
+    const store = makeStore({ spawnEntity: vi.fn(() => 'char-5') });
 
     await executeToolCall('setup_character', { name: 'Bot', entityType: 'sphere' }, store);
 
