@@ -591,6 +591,22 @@ export async function POST(request: NextRequest) {
     // stream fires after the stream completes (success or failure). We check
     // the finish reason to detect errors and issue refunds.
     return result.toUIMessageStreamResponse({
+      // Surface token usage to the client on the terminal `finish` chunk. The
+      // chat client (chatStore.streamOneTurn) reads `messageMetadata.usage` to
+      // drive session token accounting. v6 has no standalone `usage` chunk, so
+      // this callback is the supported channel — it fires on `start` and
+      // `finish`; only `finish` carries resolved `totalUsage`.
+      messageMetadata: ({ part }) => {
+        if (part.type === 'finish') {
+          return {
+            usage: {
+              inputTokens: part.totalUsage.inputTokens ?? 0,
+              outputTokens: part.totalUsage.outputTokens ?? 0,
+            },
+          };
+        }
+        return undefined;
+      },
       onFinish: async ({ finishReason }) => {
         if (finishReason === 'error' && usageId) {
           captureException(new Error('Stream finished with error'), {

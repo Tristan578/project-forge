@@ -967,5 +967,110 @@ describe('chatStore', () => {
         ]),
       );
     });
+
+    it('executes a streamed tool call and continues the agentic loop (#8746)', async () => {
+      // The server agent has NO execute functions — tool calls are forwarded as
+      // `tool-input-available` chunks and the CLIENT must run them, then re-POST
+      // with tool_result blocks. This is the exact path the legacy underscored
+      // parser silently dropped (blank reply, zero tools). Turn 1 streams a tool
+      // call (finishReason 'tool-calls' → stopReason 'tool_use', loop continues);
+      // turn 2 streams plain text (stopReason 'end_turn', loop ends).
+      //
+      // NOTE: the shared beforeEach registers the executor doMock as
+      // '../lib/chat/executor', which resolves relative to THIS test file
+      // (src/stores/__tests__/) and so never matches the store's own
+      // '../lib/chat/executor' (resolved from src/stores/). No prior test drove a
+      // streamed tool call to execution, so that broken path went unnoticed. Use
+      // the correctly-resolved specifier here so client tool execution is mocked.
+      const executeToolCall = vi.fn(() => Promise.resolve({ success: true, result: 'Spawned' }));
+      vi.doMock('../../lib/chat/executor', () => ({ executeToolCall }));
+
+      const turn1 = makeChatSSEEvents({
+        toolCalls: [{ id: 'tc-1', name: 'spawn_entity', input: { type: 'cube', name: 'Box' } }],
+        inputTokens: 40,
+        outputTokens: 8,
+      });
+      const turn2 = makeChatSSEEvents({ text: 'Created your cube.', inputTokens: 12, outputTokens: 6 });
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(mockSSEResponse(turn1))
+        .mockResolvedValue(mockSSEResponse(turn2));
+
+      const { useChatStore: store } = await import('../chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-6',
+        rightPanelTab: 'chat',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('Create a cube');
+
+      // The agentic loop continued past the tool turn (two POSTs: tool turn +
+      // follow-up). This only happens when `tool-input-available` flips
+      // stopReason to 'tool_use' — the exact path the legacy parser dropped.
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+      // The client-side executor actually ran with the parsed tool input — the
+      // coverage gap that let #8746 ship: no test asserted streamed tool calls
+      // reach executeToolCall. The legacy parser never flipped to 'tool_use', so
+      // this call was silently skipped on every real turn.
+      expect(executeToolCall).toHaveBeenCalledTimes(1);
+      expect(executeToolCall).toHaveBeenCalledWith(
+        'spawn_entity',
+        { type: 'cube', name: 'Box' },
+        expect.any(Object),
+      );
+
+      const assistant = store.getState().messages[1];
+      expect(assistant.role).toBe('assistant');
+      // The executed tool call landed on the assistant message as a success.
+      const spawnCall = assistant.toolCalls?.find((t) => t.name === 'spawn_entity');
+      expect(spawnCall?.status).toBe('success');
+      // The full parsed input from `tool-input-available` was recorded verbatim
+      // (this is bulletproof regardless of mock-instance identity).
+      expect(spawnCall?.input).toEqual({ type: 'cube', name: 'Box' });
+      // Final-turn text rendered from `text-delta`/`delta`.
+      expect(assistant.content).toContain('Created your cube.');
+    });
+
+    it('renders assistant text from v6 text-delta chunks (#8746)', async () => {
+      // Guards the single most user-visible symptom: a `text-delta` carrying
+      // `delta` (NOT `text`) must accumulate onto the assistant message.
+      const events = makeChatSSEEvents({ text: 'Hello from the model.' });
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockSSEResponse(events));
+
+      const { useChatStore: store } = await import('../chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-6',
+        rightPanelTab: 'chat',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('Say hello');
+
+      expect(store.getState().messages[1].content).toBe('Hello from the model.');
+    });
   });
 });
