@@ -47,8 +47,20 @@ export async function GET(request: NextRequest) {
 
     // Map Suno status to our format
     let mappedStatus: 'pending' | 'processing' | 'completed' | 'failed';
+    let succeededButEmpty = false;
     if (status.status === 'completed' || status.status === 'succeeded') {
-      mappedStatus = 'completed';
+      // Suno reported success — but only treat it as completed if it produced an
+      // audio URL. A success with no audio must map to `failed`, not `completed`:
+      // useGenerationPolling throws an uncaught "No result URL" on a completed job
+      // with no resultUrl, so the job sticks in `downloading` for the full poll cap
+      // before a generic timeout refund (#8757). Reporting `failed` here routes
+      // through the poller's refund path immediately.
+      if (status.audioUrl) {
+        mappedStatus = 'completed';
+      } else {
+        mappedStatus = 'failed';
+        succeededButEmpty = true;
+      }
     } else if (status.status === 'failed' || status.status === 'error') {
       mappedStatus = 'failed';
     } else if (status.status === 'processing' || status.status === 'generating') {
@@ -61,9 +73,11 @@ export async function GET(request: NextRequest) {
       jobId,
       status: mappedStatus,
       progress: status.progress,
-      resultUrl: status.audioUrl,
+      resultUrl: mappedStatus === 'completed' ? status.audioUrl : undefined,
       durationSeconds: status.durationSeconds,
-      error: mappedStatus === 'failed' ? 'Generation failed' : undefined,
+      error: mappedStatus === 'failed'
+        ? (succeededButEmpty ? 'Music generation produced no audio' : 'Generation failed')
+        : undefined,
     });
   } catch (err) {
     captureException(err, { route: '/api/generate/music/status', jobId });

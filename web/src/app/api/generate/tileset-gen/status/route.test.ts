@@ -109,6 +109,48 @@ describe('GET /api/generate/tileset-gen/status', () => {
     expect(data.status).toBe('failed');
   });
 
+  it('maps succeeded-with-no-output to failed (so the poller refunds, not hangs)', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+    // Replicate reports success but produced no tileset URL. Mapping this to
+    // `completed` hands the client a completed job with no resultUrl, which throws
+    // an uncaught "No result URL" in useGenerationPolling — the job then sticks in
+    // `downloading` for the full 5-minute poll cap before refunding with a generic
+    // timeout (#8757). The route must surface it as `failed` so the poller refunds
+    // immediately with a meaningful error.
+    mockGetReplicateStatus.mockResolvedValue({ status: 'succeeded', output: [] });
+
+    const res = await GET(makeRequest({ jobId: 'pred_tile_abc' }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.status).toBe('failed');
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.progress).toBe(10);
+    expect(data.error).toBe('Tileset generation produced no image');
+  });
+
+  it('does not leak a resultUrl while still processing', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+    // Replicate can populate `output` before status flips to succeeded; the route
+    // must gate resultUrl on completion so the client doesn't import a partial image.
+    mockGetReplicateStatus.mockResolvedValue({
+      status: 'processing',
+      output: ['https://replicate.delivery/partial.png'],
+    });
+
+    const res = await GET(makeRequest({ jobId: 'pred_tile_abc' }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.status).toBe('processing');
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.error).toBeUndefined();
+  });
+
   it('returns processing status for in-progress prediction', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });

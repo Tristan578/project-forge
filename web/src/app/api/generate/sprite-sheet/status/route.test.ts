@@ -107,6 +107,47 @@ describe('GET /api/generate/sprite-sheet/status', () => {
     expect(data.error).toBe('Sprite sheet generation failed');
   });
 
+  it('maps succeeded-with-no-output to failed (so the poller refunds, not hangs)', async () => {
+    vi.mocked(SpriteClient).mockImplementation(
+      function (this: InstanceType<typeof SpriteClient>) {
+        // Replicate reports success but produced no sheet URL. Mapping this to
+        // `completed` hands the client a completed job with no resultUrl, which
+        // throws an uncaught "No result URL" in useGenerationPolling — the job
+        // then sticks in `downloading` for the full 5-minute poll cap before
+        // refunding with a generic timeout (#8757). The route must surface it as
+        // `failed` so the poller refunds immediately with a meaningful error.
+        this.getReplicateStatus = vi.fn().mockResolvedValue({ status: 'succeeded', output: [] });
+      } as unknown as typeof SpriteClient
+    );
+
+    const res = await GET(makeRequest('replicate-pred-123'));
+    const data = await res.json();
+    expect(data.status).toBe('failed');
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.progress).toBe(10);
+    expect(data.error).toBe('Sprite sheet generation produced no image');
+  });
+
+  it('does not leak a resultUrl while still processing', async () => {
+    vi.mocked(SpriteClient).mockImplementation(
+      function (this: InstanceType<typeof SpriteClient>) {
+        // Replicate can populate `output` before status flips to succeeded; the
+        // route must gate resultUrl on completion so the client doesn't import a
+        // partial image.
+        this.getReplicateStatus = vi.fn().mockResolvedValue({
+          status: 'processing',
+          output: ['https://replicate.delivery/partial.png'],
+        });
+      } as unknown as typeof SpriteClient
+    );
+
+    const res = await GET(makeRequest('replicate-pred-123'));
+    const data = await res.json();
+    expect(data.status).toBe('processing');
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.error).toBeUndefined();
+  });
+
   it('returns pending status for starting prediction', async () => {
     vi.mocked(SpriteClient).mockImplementation(
       function (this: InstanceType<typeof SpriteClient>) {

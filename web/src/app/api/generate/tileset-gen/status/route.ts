@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SpriteClient } from '@/lib/generate/spriteClient';
+import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
 
 export async function GET(request: NextRequest) {
@@ -41,8 +42,21 @@ export async function GET(request: NextRequest) {
     const result = await client.getReplicateStatus(jobId);
 
     let mappedStatus: 'pending' | 'processing' | 'completed' | 'failed';
+    let succeededButEmpty = false;
     if (result.status === 'succeeded') {
-      mappedStatus = 'completed';
+      // Replicate reported success — but only treat it as completed if it actually
+      // produced an image. A success with no output URL must map to `failed`, not
+      // `completed`: useGenerationPolling throws an uncaught "No result URL" on a
+      // completed job with no resultUrl, so the job sticks in `downloading` for the
+      // full poll cap before a generic timeout refund (#8757). Reporting `failed`
+      // here routes through the poller's refund path immediately with a meaningful
+      // error instead of a 5-minute hang.
+      if (result.output?.length) {
+        mappedStatus = 'completed';
+      } else {
+        mappedStatus = 'failed';
+        succeededButEmpty = true;
+      }
     } else if (result.status === 'failed' || result.status === 'canceled') {
       mappedStatus = 'failed';
     } else if (result.status === 'processing') {
@@ -60,9 +74,12 @@ export async function GET(request: NextRequest) {
       status: mappedStatus,
       progress: mappedStatus === 'completed' ? 100 : mappedStatus === 'processing' ? 50 : 10,
       resultUrl,
-      error: mappedStatus === 'failed' ? 'Tileset generation failed' : undefined,
+      error: mappedStatus === 'failed'
+        ? (succeededButEmpty ? 'Tileset generation produced no image' : 'Tileset generation failed')
+        : undefined,
     });
   } catch (err) {
+    captureException(err, { route: '/api/generate/tileset-gen/status', jobId });
     const message = err instanceof Error ? err.message : 'Status check failed';
     return NextResponse.json({ error: message }, { status: 500 });
   }

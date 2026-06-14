@@ -84,9 +84,15 @@ describe('GET /api/generate/skybox/status', () => {
     expect(data.error).toBeUndefined();
   });
 
-  it('returns undefined resultUrl when maps is empty', async () => {
+  it('maps SUCCEEDED-with-no-maps to failed (so the poller refunds, not hangs)', async () => {
     vi.mocked(MeshyClient).mockImplementation(
       function (this: InstanceType<typeof MeshyClient>) {
+        // Meshy reports SUCCEEDED but produced no map URLs. Mapping this to
+        // `completed` hands the client a completed job with no resultUrl, which
+        // throws an uncaught "No result URL" in useGenerationPolling — the job then
+        // sticks in `downloading` for the full poll cap before refunding with a
+        // generic timeout (#8757). The route must surface it as `failed` so the
+        // poller refunds immediately with a meaningful error.
         this.getTextureStatus = vi.fn().mockResolvedValue({
           status: 'SUCCEEDED',
           progress: 100,
@@ -97,8 +103,49 @@ describe('GET /api/generate/skybox/status', () => {
 
     const res = await GET(makeRequest('job-123'));
     const data = await res.json();
-    expect(data.status).toBe('completed');
+    expect(data.status).toBe('failed');
     expect(data.resultUrl).toBeUndefined();
+    expect(data.error).toBe('Skybox generation produced no image');
+  });
+
+  it('maps SUCCEEDED-with-empty-maps-object to failed', async () => {
+    vi.mocked(MeshyClient).mockImplementation(
+      function (this: InstanceType<typeof MeshyClient>) {
+        // An empty object is truthy but yields no first value — Object.values({})[0]
+        // is undefined, so this must also surface as `failed`, not `completed`.
+        this.getTextureStatus = vi.fn().mockResolvedValue({
+          status: 'SUCCEEDED',
+          progress: 100,
+          maps: {},
+        });
+      } as unknown as typeof MeshyClient
+    );
+
+    const res = await GET(makeRequest('job-123'));
+    const data = await res.json();
+    expect(data.status).toBe('failed');
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.error).toBe('Skybox generation produced no image');
+  });
+
+  it('does not leak a resultUrl while still processing', async () => {
+    vi.mocked(MeshyClient).mockImplementation(
+      function (this: InstanceType<typeof MeshyClient>) {
+        // Meshy can surface a partial map before completion; the route must gate
+        // resultUrl on completion so the client doesn't import a partial skybox.
+        this.getTextureStatus = vi.fn().mockResolvedValue({
+          status: 'IN_PROGRESS',
+          progress: 40,
+          maps: { baseColor: 'https://cdn.meshy.ai/partial.hdr' },
+        });
+      } as unknown as typeof MeshyClient
+    );
+
+    const res = await GET(makeRequest('job-123'));
+    const data = await res.json();
+    expect(data.status).toBe('processing');
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.error).toBeUndefined();
   });
 
   it('returns failed status for EXPIRED task', async () => {
