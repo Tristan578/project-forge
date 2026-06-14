@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+// PixelArtClient imports 'server-only'; stub it so this node-environment suite can
+// import the client without tripping the Client Component guard.
+vi.mock('server-only', () => ({}));
+
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { SunoClient } from '@/lib/generate/sunoClient';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { SpriteClient } from '@/lib/generate/spriteClient';
+import { PixelArtClient } from '@/lib/generate/pixelArtClient';
 
 describe('generate clients SSRF guards', () => {
   afterEach(() => {
@@ -75,5 +80,36 @@ describe('generate clients SSRF guards', () => {
       expect.objectContaining({ origin: 'https://api.replicate.com', pathname: '/v1/predictions/safe_prediction-id' }),
       expect.any(Object),
     );
+  });
+
+  it('anchors PixelArt Replicate status URLs to api.replicate.com', async () => {
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'succeeded', output: [] }),
+    } as Response);
+
+    const client = new PixelArtClient('key', 'replicate');
+    await client.getReplicateStatus('safe_prediction-id');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: 'https://api.replicate.com', pathname: '/v1/predictions/safe_prediction-id' }),
+      expect.any(Object),
+    );
+  });
+
+  it('rejects a path-traversal jobId before any fetch (PixelArt + Sprite)', async () => {
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'succeeded', output: [] }),
+    } as Response);
+
+    const pixelArt = new PixelArtClient('key', 'replicate');
+    const sprite = new SpriteClient('key', 'sdxl');
+
+    await expect(pixelArt.getReplicateStatus('../models/evil')).rejects.toThrow(/Invalid resource ID/);
+    await expect(sprite.getReplicateStatus('../models/evil')).rejects.toThrow(/Invalid resource ID/);
+
+    // Validation must throw BEFORE the authenticated request leaves the process.
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
