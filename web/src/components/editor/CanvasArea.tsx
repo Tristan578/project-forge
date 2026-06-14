@@ -50,6 +50,7 @@ export function CanvasArea() {
   const { dimensions, isReady } = useViewport(CANVAS_ID);
   const hudElements = useEditorStore((s) => s.hudElements);
   const engineMode = useEditorStore((s) => s.engineMode);
+  const gameWon = useEditorStore((s) => s.gameWon);
   const rightPanelTab = useChatStore((s) => s.rightPanelTab);
 
   // Connect engine events to Zustand store
@@ -130,6 +131,25 @@ export function CanvasArea() {
               </div>
             )
           ))}
+        </div>
+      )}
+
+      {/* Win overlay — the visible "you won" surface for the core journey.
+          Driven by the gameWon store flag, which is flipped by the engine
+          GAME_EVENT ('game_win') handler or forge.game.win() from a script.
+          Reset to false on every play()/stop() so a replay starts clean. */}
+      {engineMode !== 'edit' && gameWon && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none absolute inset-0 flex items-center justify-center"
+        >
+          <div className="rounded-2xl bg-zinc-900/85 px-10 py-6 text-center shadow-2xl ring-1 ring-purple-500/40">
+            <p className="text-4xl font-extrabold tracking-wide text-purple-300">
+              You Win!
+            </p>
+            <p className="mt-1 text-sm text-zinc-400">Press Esc to return to the editor</p>
+          </div>
         </div>
       )}
 

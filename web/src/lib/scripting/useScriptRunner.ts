@@ -66,6 +66,21 @@ export function getScriptCollisionCallback() {
   return _scriptCollisionCallback;
 }
 
+/** A game event forwarded from the engine to the script worker (e.g. `game_win`). */
+export interface ScriptGameEvent {
+  eventName: string;
+  sourceEntityId: string | null;
+  targetEntityId: string | null;
+}
+
+// Module-level game-event callback, mirroring the collision-callback bridge. Set
+// while in Play mode; consumed by the engine GAME_EVENT handler in gameEvents.ts.
+let _scriptGameEventCallback: ((event: ScriptGameEvent) => void) | null = null;
+
+export function getScriptGameEventCallback() {
+  return _scriptGameEventCallback;
+}
+
 interface ScriptRunnerOptions {
   wasmModule: {
     handle_command?: (command: string, payload: unknown) => unknown;
@@ -154,6 +169,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
   const lastTickRef = useRef(0);
   const lastOcclusionCheckRef = useRef(0);
   const collisionEventCallbackRef = useRef<((event: { entityA: string; entityB: string; started: boolean }) => void) | null>(null);
+  const gameEventCallbackRef = useRef<((event: ScriptGameEvent) => void) | null>(null);
   const routerRef = useRef<AsyncChannelRouter | null>(null);
   const entityDeltaRef = useRef<DeltaSerializer | null>(null);
   const entityInfoDeltaRef = useRef<DeltaSerializer | null>(null);
@@ -348,6 +364,26 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
             if (tree) {
               dStore.updateTree(msg.treeId, { variables: { ...tree.variables, [msg.key]: msg.value } });
             }
+            break;
+          }
+          case 'game_win': {
+            // Script-initiated win (forge.game.win()). Set the win state once and
+            // broadcast back to the worker so every script's onWin handler fires.
+            const gStore = useEditorStore.getState();
+            if (!gStore.gameWon) {
+              gStore.setGameWon(true);
+              workerRef.current?.postMessage({
+                type: 'GAME_EVENT',
+                eventName: 'game_win',
+                sourceEntityId: null,
+                targetEntityId: null,
+              });
+            }
+            break;
+          }
+          case 'game_set_score': {
+            const score = typeof msg.score === 'number' ? msg.score : 0;
+            useEditorStore.getState().setGameScore(score);
             break;
           }
           case 'async_request': {
@@ -559,6 +595,16 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         });
       };
 
+      // Set up game event callback (engine win/score events → script worker)
+      gameEventCallbackRef.current = (event: ScriptGameEvent) => {
+        worker.postMessage({
+          type: 'GAME_EVENT',
+          eventName: event.eventName,
+          sourceEntityId: event.sourceEntityId,
+          targetEntityId: event.targetEntityId,
+        });
+      };
+
       workerRef.current = worker;
     }
 
@@ -566,6 +612,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
     if (engineMode === 'edit' && workerRef.current) {
       setPlayTickCallback(null);
       collisionEventCallbackRef.current = null;
+      gameEventCallbackRef.current = null;
       if (watchdogRef.current) {
         clearTimeout(watchdogRef.current);
         watchdogRef.current = null;
@@ -597,6 +644,15 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       _scriptCollisionCallback = collisionEventCallbackRef.current;
     } else {
       _scriptCollisionCallback = null;
+    }
+  }, [engineMode]);
+
+  // Export game-event callback via module-level variable (mirrors collision bridge)
+  useEffect(() => {
+    if (engineMode === 'play' && gameEventCallbackRef.current) {
+      _scriptGameEventCallback = gameEventCallbackRef.current;
+    } else {
+      _scriptGameEventCallback = null;
     }
   }, [engineMode]);
 

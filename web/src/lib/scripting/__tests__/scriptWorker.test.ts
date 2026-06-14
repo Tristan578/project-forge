@@ -1205,6 +1205,119 @@ describe('scriptWorker', () => {
     expect(logs).toHaveLength(0);
   });
 
+  // ─── Game Flow API (win / score) ────────────────────────────────
+
+  it('forge.game.win posts game_win message', async () => {
+    const handler = await setupWorker();
+    const code = 'function onStart() { forge.game.win(); }';
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'game_win' })
+    );
+  });
+
+  it('forge.game.setScore posts game_set_score and getScore reflects it', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.game.setScore(42);
+      forge.log(forge.game.getScore().toString());
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'game_set_score', score: 42 })
+    );
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: '42' })
+    );
+  });
+
+  it('forge.game.getScore defaults to 0 before any setScore', async () => {
+    const handler = await setupWorker();
+    const code = 'function onStart() { forge.log(forge.game.getScore().toString()); }';
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: '0' })
+    );
+  });
+
+  it('forge.game.onWin callback fires on inbound game_win GAME_EVENT', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.game.onWin(function() { forge.log("you won"); });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'GAME_EVENT', eventName: 'game_win', sourceEntityId: 'goal-1', targetEntityId: 'player-1' } });
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'you won' })
+    );
+  });
+
+  it('forge.game.onWin callback does NOT fire on non-win GAME_EVENT', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.game.onWin(function() { forge.log("should not fire"); });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'GAME_EVENT', eventName: 'collectible_collected', sourceEntityId: 'coin-1', targetEntityId: 'player-1' } });
+
+    const logs = mockPostMessage.mock.calls.filter((c) => c[0]?.type === 'log');
+    expect(logs).toHaveLength(0);
+  });
+
+  it('GAME_EVENT handles onWin callback errors gracefully', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.game.onWin(function() { throw new Error("win cb fail"); });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'GAME_EVENT', eventName: 'game_win' } });
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', entityId: 'e1', message: expect.stringContaining('onWin callback error:') })
+    );
+  });
+
+  it('stop clears onWin callbacks and resets score', async () => {
+    const handler = await setupWorker();
+    const code = `
+      function onStart() {
+        forge.game.setScore(99);
+        forge.game.onWin(function() { forge.log("stale win"); });
+      }
+    `;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    await handler({ data: { type: 'stop' } });
+    mockPostMessage.mockClear();
+
+    // After stop, a fresh init's getScore must read 0 (score reset) and the old
+    // onWin callback must not fire on a subsequent win event.
+    await handler(initMsg([{ entityId: 'e2', enabled: true, source: 'function onStart() { forge.log(forge.game.getScore().toString()); }' }]));
+    await handler({ data: { type: 'GAME_EVENT', eventName: 'game_win' } });
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: '0' })
+    );
+    const staleWin = mockPostMessage.mock.calls.filter((c) => c[0]?.type === 'log' && c[0]?.message === 'stale win');
+    expect(staleWin).toHaveLength(0);
+  });
+
   // ─── Command Limiting ──────────────────────────────────────────
 
   it('flushCommands truncates commands exceeding MAX_COMMANDS_PER_FRAME', async () => {

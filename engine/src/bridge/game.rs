@@ -6,7 +6,7 @@ use crate::core::{
     history::{HistoryStack, UndoableAction},
     pending_commands::{PendingCommands, QueryRequest},
     game_camera::{GameCameraData, ActiveGameCamera, FirstPersonState, OrbitalState, GameCameraMode},
-    game_components::{GameComponents, build_game_component},
+    game_components::{GameComponentRuntime, GameComponents, build_game_component},
 };
 use crate::bridge::{events, log, Selection, SelectionChangedEvent};
 
@@ -236,6 +236,32 @@ pub(super) fn process_game_camera_queries(
                 events::emit_event("QUERY_GAME_CAMERA", &data);
             }
         }
+    }
+}
+
+/// Drain per-frame game events (`game_win`, `collectible_collected`, `entity_death`,
+/// `dialogue_trigger`, …) accumulated by the core game-component systems and emit each
+/// to JS as a `GAME_EVENT`.
+///
+/// `GameComponentRuntime` only exists while a game is playing (inserted on Edit→Play,
+/// removed on Play→Edit), so its presence IS the play gate — no `EngineMode` read is
+/// needed, matching the other game-component systems.
+///
+/// Without this drain the runtime's `pending_events` Vec is never consumed: the win
+/// event never reaches scripts/UI AND the Vec grows unbounded for the whole play
+/// session. Not gated by the `runtime` feature — exported games need win events too.
+pub(super) fn emit_game_events_system(
+    runtime: Option<ResMut<GameComponentRuntime>>,
+) {
+    let Some(mut runtime) = runtime else {
+        return;
+    };
+    if runtime.pending_events.is_empty() {
+        return;
+    }
+    // GameEvent serializes camelCase: { eventName, sourceEntityId, targetEntityId }.
+    for event in runtime.pending_events.drain(..) {
+        events::emit_event("GAME_EVENT", &event);
     }
 }
 
