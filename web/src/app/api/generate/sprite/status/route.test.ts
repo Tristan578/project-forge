@@ -92,9 +92,11 @@ describe('GET /api/generate/sprite/status', () => {
     const data = await res.json();
 
     expect(res.status).toBe(200);
+    expect(data.jobId).toBe('pred_abc123');
     expect(data.status).toBe('completed');
     expect(data.resultUrl).toBe('https://replicate.delivery/result.png');
     expect(data.progress).toBe(100);
+    expect(data.error).toBeUndefined();
   });
 
   it('returns failed status when prediction failed', async () => {
@@ -107,8 +109,68 @@ describe('GET /api/generate/sprite/status', () => {
     const data = await res.json();
 
     expect(res.status).toBe(200);
+    expect(data.jobId).toBe('pred_abc123');
     expect(data.status).toBe('failed');
-    expect(data.error).toBeDefined();
+    expect(data.error).toBe('Sprite generation failed');
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.progress).toBe(10);
+  });
+
+  it('maps canceled predictions to failed', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+    mockGetReplicateStatus.mockResolvedValue({ status: 'canceled', output: undefined });
+
+    const res = await GET(makeRequest({ jobId: 'pred_abc123' }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.status).toBe('failed');
+    expect(data.error).toBe('Sprite generation failed');
+    expect(data.progress).toBe(10);
+  });
+
+  it('maps succeeded-with-no-output to failed (so the poller refunds, not hangs)', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+    // Replicate reports success but produced no image URL. Mapping this to
+    // `completed` hands the client a completed job with no resultUrl, which throws
+    // an uncaught "No result URL" in useGenerationPolling — the job then sticks in
+    // `downloading` for the full 5-minute poll cap before refunding with a generic
+    // timeout (#8757). The route must surface it as `failed` so the poller refunds
+    // immediately with a meaningful error.
+    mockGetReplicateStatus.mockResolvedValue({ status: 'succeeded', output: [] });
+
+    const res = await GET(makeRequest({ jobId: 'pred_abc123' }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.status).toBe('failed');
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.progress).toBe(10);
+    expect(data.error).toBe('Sprite generation produced no image');
+  });
+
+  it('does not leak a resultUrl while still processing', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+    // Replicate can populate `output` before status flips to succeeded; the route
+    // must gate resultUrl on completion so the client doesn't import a partial image.
+    mockGetReplicateStatus.mockResolvedValue({
+      status: 'processing',
+      output: ['https://replicate.delivery/partial.png'],
+    });
+
+    const res = await GET(makeRequest({ jobId: 'pred_abc123' }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.status).toBe('processing');
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.error).toBeUndefined();
   });
 
   it('returns processing status for in-progress prediction', async () => {
