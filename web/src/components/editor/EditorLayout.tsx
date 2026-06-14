@@ -49,6 +49,7 @@ import { TokenDepletedModal } from './TokenDepletedModal';
 import { Celebration } from '@/components/ui/Celebration';
 import { useCelebrations } from '@/hooks/useCelebrations';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
+import { e2eHooksEnabled } from '@/lib/e2e/testHooks';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
 import { useGenerationStore } from '@/stores/generationStore';
@@ -531,20 +532,25 @@ export function EditorLayout() {
   }, [handleGlobalKeyDown]);
 
   // Signal that React has hydrated and event handlers are attached (used by E2E tests).
-  // Also expose the Zustand store on window for E2E tests to read/manipulate state.
+  // Also expose the Zustand stores on window for E2E tests to read/manipulate state.
   // This MUST happen here (not as a module-level side effect in editorStore.ts) because
   // Next.js evaluates modules during SSR where `typeof window === 'undefined'`, and
   // client-side module evaluation timing is unreliable relative to React hydration.
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).__REACT_HYDRATED = true;
-    if (process.env.NODE_ENV !== 'production') {
+    // SECURITY: gated behind e2eHooksEnabled() — on in dev/test, and in a prod
+    // build ONLY when NEXT_PUBLIC_E2E_HOOKS=true is baked in at build time (the
+    // strict interactive-journey CI gate). A normal prod deploy never sets that
+    // flag, so these hooks are never attached to window. The flag cannot be
+    // flipped at runtime. A2: TS global declarations are in
+    // web/src/types/forge-globals.d.ts.
+    if (e2eHooksEnabled()) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__EDITOR_STORE = useEditorStore;
-      // Expose command dispatcher for agent viewport integration (E2E/dev only).
-      // SECURITY: This is gated behind NODE_ENV !== 'production' so it is never
-      // accessible in production builds. A2: TypeScript global declaration is in
-      // web/src/types/forge-globals.d.ts.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__CHAT_STORE = useChatStore;
+      // Expose command dispatcher for agent viewport integration.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__FORGE_DISPATCH = (cmd: string, payload: Record<string, unknown>) => {
         const dispatcher = getCommandDispatcher();

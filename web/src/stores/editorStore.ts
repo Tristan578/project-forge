@@ -8,6 +8,7 @@
 import { create } from 'zustand';
 import { trackCommandDispatched } from '@/lib/analytics/events';
 import { addBreadcrumb } from '@/lib/monitoring/sentry-client';
+import { e2eHooksEnabled } from '@/lib/e2e/testHooks';
 // Namespace import so partial test mocks of `@/hooks/useEngine` (which omit
 // the snapshot setter) don't throw at module load. We feature-detect the
 // export at runtime instead of relying on the named binding being present.
@@ -123,10 +124,11 @@ export const useEditorStore = create<EditorState>()((...args) => ({
   ...createOrchestratorSlice(...args),
 }));
 
-// Best-effort store exposure for E2E tests (dev/test only).
-// The primary exposure happens in EditorLayout's useEffect (guaranteed client-side).
-// This module-level fallback may not fire reliably due to Next.js SSR evaluation.
-if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+// Best-effort store exposure for E2E tests (dev/test, or a prod build with
+// NEXT_PUBLIC_E2E_HOOKS=true — see e2eHooksEnabled). The primary exposure happens
+// in EditorLayout's useEffect (guaranteed client-side); this module-level
+// fallback may not fire reliably due to Next.js SSR evaluation.
+if (typeof window !== 'undefined' && e2eHooksEnabled()) {
   (window as unknown as Record<string, unknown>).__EDITOR_STORE = useEditorStore;
 }
 
