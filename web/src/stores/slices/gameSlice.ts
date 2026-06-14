@@ -98,7 +98,12 @@ function surfaceWinnabilityMessage(message: string): void {
     useChatStore.setState((state) => ({
       messages: [...state.messages, entry],
       rightPanelTab: 'chat',
-      hasUnreadMessages: true,
+      // We switch the user TO the chat tab in this same update, so the message
+      // is immediately on-screen — there is nothing "unread". Setting it true
+      // would flag an unread badge on the very tab they're now viewing, and
+      // contradicts chatStore's invariant (tab === 'chat' ⟹ unread false; see
+      // chatStore setRightPanelTab + the rightPanelTab !== 'chat' append rule).
+      hasUnreadMessages: false,
     }));
   }).catch(() => { /* chat surface is best-effort */ });
 }

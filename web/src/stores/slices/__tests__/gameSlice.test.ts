@@ -516,7 +516,10 @@ describe('gameSlice', () => {
       };
       const payload = updater({ messages: [] });
       expect(payload.rightPanelTab).toBe('chat');
-      expect(payload.hasUnreadMessages).toBe(true);
+      // Switching to the chat tab makes the message immediately visible, so it
+      // must NOT be flagged unread — that would badge the tab the user is now
+      // viewing and break chatStore's tab==='chat' ⟹ unread-false invariant.
+      expect(payload.hasUnreadMessages).toBe(false);
       // role:'system' — visible to the user, filtered out of the AI request.
       expect(payload.messages[0].role).toBe('system');
       expect(payload.messages[0].content).toContain("can't be won");
