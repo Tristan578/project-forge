@@ -37,6 +37,7 @@ jobs:
       needs-onboarding: ${{ steps.changes.outputs.onboarding }}
       needs-codex: ${{ steps.changes.outputs.codex }}
       needs-ghaw: ${{ steps.changes.outputs.ghaw }}
+      needs-api: ${{ steps.changes.outputs.api }}
       needs-any-code: ${{ steps.changes.outputs.any-code }}
     steps:
       - uses: actions/checkout@v6
@@ -51,7 +52,7 @@ jobs:
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
-          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false
+          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false
 
           echo "$CHANGED" | grep -q '^web/' && web=true
           echo "$CHANGED" | grep -q '^engine/' && engine=true
@@ -119,6 +120,17 @@ jobs:
           # which is what lets the gate's self-test ride the lockfile-sync-tests job
           # without widening that job's if:.
           echo "$CHANGED" | grep -qE '^\.github/workflows/.*\.md$|^\.github/workflows/.*\.lock\.yml$|^\.github/aw/|^scripts/check-ghaw-lock-sync\.sh$|^scripts/get-ghaw-compiler-version\.sh$|^scripts/__tests__/check-ghaw-lock-sync\.test\.sh$' && ghaw=true
+          # OpenAPI route-drift gate (scripts/check-openapi-route-sync.sh). Fires on
+          # any API route (web/src/app/api/**, which also sets `web`), the published
+          # spec (docs/api/openapi.json — a malformed spec 500s /api/openapi in prod
+          # and breaks Swagger UI at /api-docs), the internal-routes allowlist, or the
+          # gate/its test. The spec + allowlist live under docs/ (also set
+          # `onboarding`) and the gate script under scripts/ (also sets `ci`), so
+          # needs-api ⟹ (needs-web ∨ needs-onboarding ∨ needs-ci) — which lets the
+          # gate's self-test ride the lockfile-sync-tests job (needs-ci) without
+          # widening that job's if:. Kept as its own output so a spec/allowlist-only
+          # PR still runs the gate even when no route.ts changed.
+          echo "$CHANGED" | grep -qE '^web/src/app/api/|^docs/api/openapi\.json$|^docs/api/openapi-internal-routes\.json$|^scripts/check-openapi-route-sync\.sh$|^scripts/__tests__/check-openapi-route-sync\.test\.sh$' && api=true
 
           any_code=false
           if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] || [ "$design" = "true" ]; then
@@ -138,12 +150,13 @@ jobs:
             echo "onboarding=$onboarding"
             echo "codex=$codex"
             echo "ghaw=$ghaw"
+            echo "api=$api"
             echo "any-code=$any_code"
           } >> "$GITHUB_OUTPUT"
 
           echo "Changed paths detected:"
-          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw any-code=$any_code"
-          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ]; then
+          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw api=$api any-code=$any_code"
+          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ] && [ "$api" = "false" ]; then
             echo "No relevant changes — downstream jobs will be skipped"
           fi
 
@@ -368,6 +381,37 @@ jobs:
 
       - name: Check root lockfile is in sync with the manifests
         run: bash scripts/check-lockfile-sync.sh
+
+  # ---- OpenAPI Route Drift ----
+  # Runs when any API route (web/src/app/api/**), the published OpenAPI spec
+  # (docs/api/openapi.json), the internal-routes allowlist, or the gate/its test
+  # changed. Validates the spec is well-formed JSON — a malformed spec (e.g. a
+  # trailing comma) makes web/src/app/api/openapi/route.ts JSON.parse throw, so
+  # /api/openapi 500s in production and Swagger UI at /api-docs breaks (shipped
+  # live on main) — AND asserts every route file is documented in the spec OR
+  # listed in the internal-routes allowlist, so a new undocumented route fails the
+  # PR instead of silently rotting the published contract. A read-only check (it
+  # never edits the spec). Decision logic lives in
+  # scripts/check-openapi-route-sync.sh (unit-tested by the lockfile-sync-tests
+  # job below).
+  #
+  # Gated on its own `api` output (kept ORTHOGONAL so a spec/allowlist-only PR pays
+  # only this ~5s, zero-dep gate, not the heavy quality-gates fan-out) and wired
+  # into ci-success below so it is REQUIRED when it runs yet skips cleanly (result
+  # 'skipped', not a failure) on PRs that touch no API surface.
+  openapi-route-sync:
+    name: OpenAPI Route Sync
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-api == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check OpenAPI spec is valid and in sync with API routes
+        run: bash scripts/check-openapi-route-sync.sh
 
   # ---- Agentic Config Sync ----
   # Runs when the single source of truth (tools/agentic-sync/canonical.json), the
@@ -626,6 +670,7 @@ jobs:
             scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
             scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
+            scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
@@ -654,6 +699,9 @@ jobs:
 
       - name: Run cross-provider DX-audit contract test
         run: bash .claude/tools/__tests__/dx-audit.test.sh
+
+      - name: Run OpenAPI route-sync gate test suite
+        run: bash scripts/__tests__/check-openapi-route-sync.test.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without
@@ -905,6 +953,7 @@ jobs:
       - taskboard-onboarding-guard
       - codex-config-guard
       - ghaw-lock-sync
+      - openapi-route-sync
       - test-e2e-ui
     runs-on: ubuntu-latest
     timeout-minutes: 5

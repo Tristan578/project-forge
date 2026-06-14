@@ -93,6 +93,7 @@ check_triggered "taskboard-onboarding-guard" "needs-onboarding"
 check_triggered "codex-config-guard"        "needs-codex"
 check_triggered "hook-tests"                "needs-hooks"
 check_triggered "ghaw-lock-sync"            "needs-ghaw"
+check_triggered "openapi-route-sync"        "needs-api"
 if [ -n "$tamper" ]; then
   echo "::error::Self-defending gate skipped despite its trigger firing (possible unwiring):"
   echo "$tamper"

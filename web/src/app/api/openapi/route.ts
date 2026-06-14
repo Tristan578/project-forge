@@ -41,8 +41,15 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    // The real error (e.g. a JSON.parse SyntaxError naming a byte offset in the
+    // spec) goes to Sentry, NOT the response body — a malformed spec must not
+    // leak its parse internals to an unauthenticated caller. The
+    // openapi-route-sync CI gate keeps malformed specs out of production, so
+    // this 500 path is a defense-in-depth backstop rather than a live route.
     captureException(err, { route: '/api/openapi' });
-    const message = err instanceof Error ? err.message : 'Failed to load spec';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to load the OpenAPI specification.' },
+      { status: 500 }
+    );
   }
 }
