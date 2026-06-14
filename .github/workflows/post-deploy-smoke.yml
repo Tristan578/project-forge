@@ -40,6 +40,11 @@ jobs:
 
     env:
       # Prefer explicit input (workflow_dispatch / workflow_call); then DEPLOY_URL var; then production.
+      # NOTE: the apex (https://spawnforge.ai) 307-redirects to the canonical host
+      # (https://www.spawnforge.ai). Every curl below MUST pass --location so it
+      # follows that hop to the final 200 — otherwise the smoke test sees the 307
+      # and fails on a healthy deploy, masking real outages. --location is a no-op
+      # for targets that don't redirect (www, Vercel preview URLs, DEPLOY_URL).
       TARGET_URL: ${{ inputs.target_url || vars.DEPLOY_URL || 'https://spawnforge.ai' }}
 
     steps:
@@ -50,7 +55,7 @@ jobs:
       - name: Health check (/api/health)
         id: health
         run: |
-          HTTP_CODE=$(curl --silent --output /tmp/health_body.json \
+          HTTP_CODE=$(curl --silent --location --output /tmp/health_body.json \
             --write-out "%{http_code}" \
             --max-time 10 \
             "$TARGET_URL/api/health")
@@ -75,7 +80,7 @@ jobs:
       - name: Homepage loads (/)
         id: homepage
         run: |
-          HTTP_CODE=$(curl --silent --output /tmp/homepage_body.html \
+          HTTP_CODE=$(curl --silent --location --output /tmp/homepage_body.html \
             --write-out "%{http_code}" \
             --max-time 10 \
             "$TARGET_URL/")
@@ -97,7 +102,7 @@ jobs:
       - name: Static asset (/manifest.json)
         id: manifest
         run: |
-          HTTP_CODE=$(curl --silent --output /tmp/manifest_body.json \
+          HTTP_CODE=$(curl --silent --location --output /tmp/manifest_body.json \
             --write-out "%{http_code}" \
             --max-time 10 \
             "$TARGET_URL/manifest.json")
@@ -124,7 +129,7 @@ jobs:
           fi
           WASM_PATH="$WASM_URL"
           echo "Checking WASM at: $WASM_URL"
-          RESPONSE=$(curl --silent --head --output /dev/null \
+          RESPONSE=$(curl --silent --location --head --output /dev/null \
             --write-out "%{http_code}|%{content_type}" \
             --max-time 10 \
             "$WASM_URL")
