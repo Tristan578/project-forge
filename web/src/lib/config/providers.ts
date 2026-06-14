@@ -122,7 +122,7 @@ export const DIRECT_CAPABILITY_PROVIDER: Record<ProviderCapability, ProviderName
  */
 import type { Provider } from '@/lib/db/schema';
 
-type DbCapability = 'model3d' | 'texture' | 'sfx' | 'voice' | 'music' | 'sprite' | 'bg_removal' | 'image' | 'chat' | 'embedding';
+type DbCapability = 'model3d' | 'texture' | 'sfx' | 'voice' | 'music' | 'sprite' | 'bg_removal' | 'image' | 'chat' | 'embedding' | 'pixel_art';
 
 export const DB_PROVIDER: Record<DbCapability, Provider> = {
   chat: 'anthropic',
@@ -135,6 +135,10 @@ export const DB_PROVIDER: Record<DbCapability, Provider> = {
   image: 'openai',
   sprite: 'replicate',
   bg_removal: 'removebg',
+  // Pixel-art async polling resolves the platform Replicate key the same way
+  // sprite does (SDXL on Replicate). OpenAI pixel-art returns inline base64 and
+  // never polls, so the status route is Replicate-only.
+  pixel_art: 'replicate',
 };
 
 // ---------------------------------------------------------------------------
