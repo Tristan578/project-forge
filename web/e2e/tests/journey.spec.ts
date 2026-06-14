@@ -141,8 +141,18 @@ const READ_WIN_INPUT = `JSON.stringify({
 })`;
 
 test.describe('Interactive Journey Gate @journey', () => {
-  test.beforeEach(async ({ editor }) => {
+  test.beforeEach(async ({ page, editor }) => {
     await editor.loadPage();
+    // Explicit no-redirect invariant for the journey gate: the /dev gate
+    // (e2eHooksEnabled) must have RENDERED the editor in this build, not
+    // redirected to /sign-in. loadPage()'s hydration wait already implies this
+    // — __REACT_HYDRATED is set only once EditorLayout mounts, and it mounts
+    // only when /dev renders — but assert the URL directly so a future gate or
+    // a regression in the NEXT_PUBLIC_E2E_HOOKS build flag fails with a clear
+    // "expected /dev, got /sign-in" instead of an opaque hydration timeout.
+    // Kept in this spec (not the shared loadPage fixture) so it only affects the
+    // journey gate and can't shift console-capture timing for other E2E specs.
+    await expect(page).toHaveURL(/\/dev(?:[/?#]|$)/, { timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   // -------------------------------------------------------------------------

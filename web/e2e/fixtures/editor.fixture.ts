@@ -113,13 +113,6 @@ export class EditorPage {
         { timeout: E2E_TIMEOUT_ENGINE_INIT_MS }
       );
     }
-    // Explicit no-redirect invariant: the /dev gate (e2eHooksEnabled) must have
-    // RENDERED the editor here, not redirected to /sign-in. Hydration above already
-    // implies this — __REACT_HYDRATED is set only once EditorLayout mounts, and it
-    // mounts only when /dev renders — but assert the URL directly so a future gate
-    // or CI-build-flag regression fails with a clear message ("expected /dev, got
-    // /sign-in") instead of an opaque hydration timeout. See PR #8773 / #8601.
-    await expect(this.page).toHaveURL(/\/dev(?:[/?#]|$)/, { timeout: E2E_TIMEOUT_ELEMENT_MS });
   }
 
   /** Wait for a minimum entity count in the scene graph */
