@@ -1,11 +1,16 @@
 /**
  * TypeScript declarations for SpawnForge window globals.
  *
- * These globals are injected by EditorLayout.tsx when E2E hooks are enabled
- * (see `e2eHooksEnabled` in `@/lib/e2e/testHooks`): always in dev/test, and in a
+ * The store-surface globals (`__EDITOR_STORE`, `__CHAT_STORE`, `__FORGE_DISPATCH`)
+ * are injected by EditorLayout.tsx ONLY when E2E hooks are enabled (see
+ * `e2eHooksEnabled` in `@/lib/e2e/testHooks`): always in dev/test, and in a
  * production build ONLY when `NEXT_PUBLIC_E2E_HOOKS=true` is set at build time
  * (the strict interactive-journey CI gate). A normal production deploy never sets
- * that flag, so these globals are never attached to window in shipped builds.
+ * that flag, so those three are never attached to window in shipped builds.
+ *
+ * `__REACT_HYDRATED`, `__FORGE_ENGINE_READY`, and `__SKIP_ENGINE` are NOT gated by
+ * `e2eHooksEnabled()` — they carry no sensitive surface and are set unconditionally
+ * (see the per-field notes below).
  *
  * Security: A2 — explicit declare global prevents accidental usage in
  * production code paths; TypeScript strict mode will catch missing guards.
@@ -15,8 +20,9 @@ declare global {
   interface Window {
     /**
      * Set to `true` by EditorLayout after React hydrates and all event
-     * handlers are attached. Used by E2E tests to know when the editor
-     * is interactive.
+     * handlers are attached. Set UNCONDITIONALLY (not gated by
+     * `e2eHooksEnabled()`) so `loadPage()` can detect interactivity in any
+     * build. Used by E2E tests to know when the editor is interactive.
      */
     __REACT_HYDRATED?: boolean;
 

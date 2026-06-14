@@ -94,6 +94,11 @@ check_triggered "codex-config-guard"        "needs-codex"
 check_triggered "hook-tests"                "needs-hooks"
 check_triggered "ghaw-lock-sync"            "needs-ghaw"
 check_triggered "openapi-route-sync"        "needs-api"
+# The journey gate is the ONLY runtime proof that the E2E store-exposure flag
+# (NEXT_PUBLIC_E2E_HOOKS) gates correctly on a real prod build, and the required
+# proof that the core new-user journey stays winnable + exportable. Protect it
+# from a silent `if: false` skip like the self-defending gates above.
+check_triggered "test-e2e-journey"          "needs-web"
 if [ -n "$tamper" ]; then
   echo "::error::Self-defending gate skipped despite its trigger firing (possible unwiring):"
   echo "$tamper"

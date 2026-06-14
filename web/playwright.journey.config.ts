@@ -28,7 +28,10 @@ const JOURNEY_EXPECT_TIMEOUT_MS = 10_000;
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: '**/*.spec.ts',
+  // Match ONLY the journey spec so a parse error in an unrelated @ui spec can't
+  // break this gate's collection phase. `grep` stays as a belt-and-suspenders
+  // tag filter in case a non-@journey test is ever added to this file.
+  testMatch: '**/journey.spec.ts',
   grep: /@journey/,
   fullyParallel: true,
   forbidOnly: true,

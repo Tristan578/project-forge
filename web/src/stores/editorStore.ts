@@ -8,7 +8,6 @@
 import { create } from 'zustand';
 import { trackCommandDispatched } from '@/lib/analytics/events';
 import { addBreadcrumb } from '@/lib/monitoring/sentry-client';
-import { e2eHooksEnabled } from '@/lib/e2e/testHooks';
 // Namespace import so partial test mocks of `@/hooks/useEngine` (which omit
 // the snapshot setter) don't throw at module load. We feature-detect the
 // export at runtime instead of relying on the named binding being present.
@@ -124,13 +123,11 @@ export const useEditorStore = create<EditorState>()((...args) => ({
   ...createOrchestratorSlice(...args),
 }));
 
-// Best-effort store exposure for E2E tests (dev/test, or a prod build with
-// NEXT_PUBLIC_E2E_HOOKS=true — see e2eHooksEnabled). The primary exposure happens
-// in EditorLayout's useEffect (guaranteed client-side); this module-level
-// fallback may not fire reliably due to Next.js SSR evaluation.
-if (typeof window !== 'undefined' && e2eHooksEnabled()) {
-  (window as unknown as Record<string, unknown>).__EDITOR_STORE = useEditorStore;
-}
+// E2E store exposure (__EDITOR_STORE, __CHAT_STORE, __FORGE_DISPATCH) is done
+// in a SINGLE place — EditorLayout's post-hydration useEffect — so all three
+// globals appear atomically. A module-level fallback here would set only
+// __EDITOR_STORE before hydration, letting waitForEditorStore() return while
+// __CHAT_STORE is still absent and racing the strict-mode readStore() calls.
 
 // Register a synchronous snapshot of editor state with the WASM panic
 // interceptor. The interceptor runs on the panicking caller's stack frame
