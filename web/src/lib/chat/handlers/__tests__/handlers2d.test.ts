@@ -103,6 +103,17 @@ describe('handlers2d sprite edge cases', () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain('Invalid arguments');
     });
+
+    it('rejects non-spawnable entityType "empty" at the schema boundary, not as a phantom spawn failure (#8748)', async () => {
+      // 'empty' is not engine-spawnable (spawnEntity returns undefined for it), so
+      // accepting it in the schema guaranteed a "Failed to get entity ID" runtime
+      // failure for a request the API claimed to accept. It must be rejected up front
+      // like any other unsupported type, and spawnEntity must never be reached.
+      const { result, store } = await invoke('create_sprite', { entityType: 'empty' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid arguments');
+      expect(store.spawnEntity).not.toHaveBeenCalled();
+    });
   });
 
   describe('set_sprite_texture', () => {

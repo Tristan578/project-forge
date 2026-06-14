@@ -147,7 +147,11 @@ const zBone2dDef = z.object({
 // Sprite Commands
 // ---------------------------------------------------------------------------
 
-const ENTITY_TYPES_2D = ['plane', 'cube', 'sphere', 'cylinder', 'capsule', 'empty'] as const;
+// Only engine-spawnable carrier meshes for a 2D sprite. 'empty' was accepted here
+// but is not spawnable (spawnEntity returns undefined for it), so create_sprite with
+// entityType:'empty' was a guaranteed "Failed to get entity ID" failure for a request
+// the schema claimed to accept (#8748). Keep this list a subset of SPAWNABLE_ENTITY_TYPES.
+const ENTITY_TYPES_2D = ['plane', 'cube', 'sphere', 'cylinder', 'capsule'] as const;
 
 const spriteHandlers: Record<string, ToolHandler> = {
   create_sprite: async (args, ctx): Promise<ExecutionResult> => {
