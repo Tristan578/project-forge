@@ -53,7 +53,13 @@ export async function GET(request: NextRequest) {
 
     let mappedStatus: 'pending' | 'processing' | 'completed' | 'failed';
     if (result.status === 'succeeded') {
-      mappedStatus = 'completed';
+      // A "succeeded" prediction with no output URL is an upstream anomaly: the
+      // job reports success but produced no image. Surface it as `failed` so the
+      // poller refunds the user, rather than `completed` — the completed branch in
+      // useGenerationPolling requires a resultUrl and throws an uncaught
+      // "No result URL" when it's missing, which would hang the job to the 5-min
+      // poll cap (the very failure mode #8755 is about).
+      mappedStatus = result.output?.length ? 'completed' : 'failed';
     } else if (result.status === 'failed' || result.status === 'canceled') {
       mappedStatus = 'failed';
     } else if (result.status === 'processing') {
@@ -71,7 +77,11 @@ export async function GET(request: NextRequest) {
       status: mappedStatus,
       progress: mappedStatus === 'completed' ? 100 : mappedStatus === 'processing' ? 50 : 10,
       resultUrl,
-      error: mappedStatus === 'failed' ? 'Pixel art generation failed' : undefined,
+      error: mappedStatus === 'failed'
+        ? (result.status === 'succeeded'
+            ? 'Pixel art generation produced no image'
+            : 'Pixel art generation failed')
+        : undefined,
     });
   } catch (err) {
     captureException(err, { route: '/api/generate/pixel-art/status', jobId });

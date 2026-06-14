@@ -3,6 +3,7 @@
 import 'server-only';
 
 import { REPLICATE_MODEL_SDXL } from '@/lib/ai/models';
+import { validateResourceId } from '@/lib/validation/resourceId';
 export type { PixelArtStyle } from '@/lib/config/providers';
 import type { PixelArtStyle } from '@/lib/config/providers';
 export type PixelArtProvider = 'openai' | 'replicate';
@@ -112,7 +113,14 @@ export class PixelArtClient {
   }
 
   async getReplicateStatus(predictionId: string): Promise<{ status: string; output?: string[] }> {
-    const response = await fetch(`https://api.replicate.com/v1/predictions/${predictionId}`, {
+    // predictionId is interpolated into the Replicate prediction URL. Validate it
+    // against the safe-id allowlist and percent-encode before building the URL so a
+    // crafted jobId (path traversal / SSRF — e.g. `../models/foo`) can't redirect the
+    // authenticated request elsewhere. Mirrors spriteClient.getReplicateStatus.
+    validateResourceId(predictionId);
+    const safePredictionId = encodeURIComponent(predictionId);
+    const url = new URL(`/v1/predictions/${safePredictionId}`, 'https://api.replicate.com');
+    const response = await fetch(url, {
       headers: { 'Authorization': `Bearer ${this.apiKey}` },
       signal: AbortSignal.timeout(15_000),
     });

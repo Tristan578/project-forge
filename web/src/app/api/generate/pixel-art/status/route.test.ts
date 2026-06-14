@@ -93,10 +93,11 @@ describe('GET /api/generate/pixel-art/status', () => {
 
     expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
-    expect(data.error).toBeDefined();
+    expect(data.error).toBe('Pixel art generation failed');
+    expect(data.resultUrl).toBeUndefined();
   });
 
-  it('maps canceled predictions to failed', async () => {
+  it('maps canceled predictions to failed with an error message', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
     vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
@@ -107,6 +108,26 @@ describe('GET /api/generate/pixel-art/status', () => {
 
     expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
+    expect(data.error).toBe('Pixel art generation failed');
+  });
+
+  it('maps succeeded-with-no-output to failed (so the poller refunds, not crashes)', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+    // Replicate reports success but produced no image URL. Mapping this to
+    // `completed` would hand the client a completed job with no resultUrl, which
+    // throws an uncaught "No result URL" in useGenerationPolling and hangs the job
+    // to the 5-minute poll cap (#8755). The route must surface it as `failed`.
+    mockGetReplicateStatus.mockResolvedValue({ status: 'succeeded', output: [] });
+
+    const res = await GET(makeRequest({ jobId: 'pred_abc123' }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.status).toBe('failed');
+    expect(data.resultUrl).toBeUndefined();
+    expect(data.error).toBe('Pixel art generation produced no image');
   });
 
   it('returns processing status for in-progress prediction', async () => {
