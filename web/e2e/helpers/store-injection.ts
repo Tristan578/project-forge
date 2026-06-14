@@ -16,6 +16,10 @@ type StoreName = '__EDITOR_STORE' | '__CHAT_STORE';
  * if the store is unavailable. In local mode, returns false so the caller
  * can skip assertions.
  *
+ * SECURITY: `callback` is passed verbatim to `page.evaluate()` (browser eval).
+ * It MUST be a compile-time string literal — never interpolate test-fixture
+ * data, file contents, or any external input into it.
+ *
  * @returns true if injection succeeded, false if skipped (local-only)
  */
 export async function injectStore(
@@ -46,6 +50,9 @@ export async function injectStore(
 /**
  * Read a value from a store. In strict mode, throws if store is unavailable.
  * In local mode, returns null.
+ *
+ * SECURITY: `selector` is passed verbatim to `page.evaluate()` (browser eval).
+ * It MUST be a compile-time string literal — never interpolate external input.
  */
 export async function readStore<T>(
   page: Page,

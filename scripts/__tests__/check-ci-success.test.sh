@@ -46,15 +46,20 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 #      false so every fixture that does not touch .claude/hooks keeps hook-tests'
 #      success/skip as a legitimate path-filter skip; set true to exercise the
 #      hook-tests anti-tamper arm.
+#   $16 test-e2e-journey.result (default success)
+#   $17 needs-web (default false) — the journey gate's OWN ci-gate trigger.
+#      Defaults false so every fixture that does not touch web keeps the journey
+#      gate's success/skip as a legitimate path-filter skip; set true to exercise
+#      the test-e2e-journey anti-tamper arm.
 mk() {
-  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}"
+  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}"
   jq -nc \
     --arg nci "$nci" --arg ndeps "$ndeps" --arg ls "$ls" --arg lst "$lst" \
     --arg qg "$qg" --arg ht "$ht" --arg nagentic "$nagentic" --arg as "$as" \
     --arg nonboarding "$nonboarding" --arg tog "$tog" --arg ncodex "$ncodex" --arg ccg "$ccg" \
-    --arg nghaw "$nghaw" --arg glr "$glr" --arg nhooks "$nhooks" '
+    --arg nghaw "$nghaw" --arg glr "$glr" --arg nhooks "$nhooks" --arg te2ej "$te2ej" --arg nweb "$nweb" '
     {
-      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-any-code": "true" } },
+      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-any-code": "true" } },
       "quality-gates":        { result: $qg },
       "command-parity":       { result: "success" },
       "build-nextjs":         { result: "success" },
@@ -67,7 +72,8 @@ mk() {
       "taskboard-onboarding-guard": { result: $tog },
       "codex-config-guard":   { result: $ccg },
       "ghaw-lock-sync":       { result: $glr },
-      "test-e2e-ui":          { result: "success" }
+      "test-e2e-ui":          { result: "success" },
+      "test-e2e-journey":     { result: $te2ej }
     }'
 }
 
@@ -364,6 +370,34 @@ res="$(run_verify "$(mk true true success success success failure true success t
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "hook-tests failure fails (exit 1)"; else fail "hook-tests failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "hook-tests"; then pass "the failing hook-tests gate is named"; else fail "failing hook-tests gate not named"; fi
+
+# --- 32. TAMPER: test-e2e-journey skipped while needs-web=true → exit 1 ---------
+# The strict interactive-journey gate is self-defending: it is the only runtime
+# proof that the E2E store-exposure flag (NEXT_PUBLIC_E2E_HOOKS) gates correctly
+# on a real prod build, and the required proof that the core new-user journey
+# stays winnable + exportable. A web-touching PR sets needs-web=true, so the gate
+# SHOULD run; an `if: false` skip is the same single-line unwiring vector guarded
+# for every other self-defending gate. All other gates run+succeed here (final mk
+# args: te2ej=skipped, nweb=true), so the skipped journey gate is the SOLE tamper.
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false skipped true)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "journey gate skipped while needs-web=true fails (exit 1)"; else fail "tamper (journey) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "journey tamper is flagged as a possible unwiring"; else fail "journey tamper message missing"; fi
+if echo "$out" | grep -q "test-e2e-journey ("; then pass "the unwired journey gate is named"; else fail "unwired journey gate not named"; fi
+
+# --- 33. journey gate legit-skips (needs-web=false) → exit 0 -------------------
+# A PR that touches no web surface (needs-web=false) legitimately skips the
+# journey gate; that must NOT trip the anti-tamper check (proves the new needs-web
+# arm does not false-positive on every non-web PR).
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false skipped false)")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "journey gate legit-skip (needs-web=false) passes (exit 0)"; else fail "journey legit skip should exit 0, got $rc"; fi
+
+# --- 34. journey gate FAILED while triggered → exit 1 (hard-failure path) -------
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false failure true)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "journey gate failure fails (exit 1)"; else fail "journey failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-journey"; then pass "the failing journey gate is named"; else fail "failing journey gate not named"; fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then

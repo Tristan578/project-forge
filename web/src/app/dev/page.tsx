@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
+import { e2eHooksEnabled } from '@/lib/e2e/testHooks';
 
 const EditorLayout = dynamic(
   () => import('@/components/editor/EditorLayout').then((m) => m.EditorLayout),
@@ -20,18 +21,21 @@ const EditorLayout = dynamic(
  * Local development editor — bypasses auth and database.
  * Access at: https://spawnforge.localhost/dev (with portless, npm run dev)
  *            http://localhost:3000/dev (npm run dev:raw)
- * Redirects to /sign-in in production builds.
+ * Renders in local dev and the NEXT_PUBLIC_E2E_HOOKS=true journey-gate build;
+ * redirects to /sign-in in normal production builds (flag unset). The gate is
+ * the same one that exposes the editor stores, so render + store exposure stay
+ * in lockstep — see e2eHooksEnabled().
  */
 export default function DevEditorPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (process.env.NODE_ENV !== 'development') {
+    if (!e2eHooksEnabled()) {
       router.replace('/sign-in');
     }
   }, [router]);
 
-  if (process.env.NODE_ENV !== 'development') {
+  if (!e2eHooksEnabled()) {
     return null;
   }
 
