@@ -452,38 +452,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
           currentApprovalMode,
         );
 
-        // In approval mode with deferred tools:
+        // Approval mode: when the turn produced tool calls (which always means
+        // the model returned stop_reason 'tool_use' — a turn with no tools cannot
+        // populate deferredTools), pause the loop. Present every pending call as a
+        // 'preview' and break to wait for the user. There is deliberately no
+        // "auto-execute mid-loop" path: approval mode exists precisely so nothing
+        // runs without an explicit OK. approveToolCalls() executes the previews and
+        // rejectToolCalls() marks them rejected.
         if (currentApprovalMode && deferredTools.length > 0) {
-          if (stopReason === 'end_turn') {
-            // Final turn — set tools to 'preview' for user approval
-            updateAssistant((msg) => ({
-              ...msg,
-              toolCalls: (msg.toolCalls || []).map((t) =>
-                t.status === 'pending' ? { ...t, status: 'preview' as const } : t
-              ),
-            }));
-            break; // Wait for user to approve/reject
-          } else {
-            // Mid-loop — execute deferred tools to continue the loop
-            const { executeToolCall } = await import('../lib/chat/executor');
-            for (const tool of deferredTools) {
-              const currentEditorState = (await import('./editorStore')).useEditorStore.getState();
-              const result = await executeToolCall(tool.name, tool.input, currentEditorState);
-              updateAssistant((msg) => ({
-                ...msg,
-                toolCalls: (msg.toolCalls || []).map((t) =>
-                  t.id === tool.id
-                    ? {
-                        ...t,
-                        status: result.success ? 'success' as const : 'error' as const,
-                        result: result.result,
-                        error: result.error,
-                      }
-                    : t
-                ),
-              }));
-            }
-          }
+          updateAssistant((msg) => ({
+            ...msg,
+            toolCalls: (msg.toolCalls || []).map((t) =>
+              t.status === 'pending' ? { ...t, status: 'preview' as const } : t
+            ),
+          }));
+          break; // Wait for user to approve/reject
         }
 
         // If Claude finished (end_turn) or max iterations, stop
