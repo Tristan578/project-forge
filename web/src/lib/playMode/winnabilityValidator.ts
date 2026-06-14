@@ -52,7 +52,13 @@ export interface WinnabilityIssue {
   code: WinnabilityIssueCode;
   /** Human-readable, AI-actionable explanation of what to fix. */
   message: string;
-  /** The entity carrying the offending win condition, when applicable. */
+  /**
+   * The entity carrying the offending win condition, when applicable. This is
+   * STRUCTURED METADATA for programmatic use (tests, selecting the entity in the
+   * UI) — it is left raw and is the one field NOT run through `safeLabel`. Only
+   * `message` is sanitized for display/AI. Never interpolate `entityId` into any
+   * AI/LLM-bound text without passing it through `safeLabel` first.
+   */
   entityId?: string;
 }
 

@@ -83,14 +83,14 @@ function messageId(): string {
  * the gate's feedback never re-enters the model's context as if the AI said it.
  */
 function surfaceWinnabilityMessage(message: string): void {
+  // Compute the impure id/timestamp once, outside the updater, so the message
+  // is identical no matter how many times the store runs the updater.
+  const entry = { id: messageId(), role: 'system' as const, content: message, timestamp: Date.now() };
   import('@/stores/chatStore').then(({ useChatStore }) => {
     // Updater form: read-modify-write atomically so a concurrent chat write
     // (e.g. a streaming token) can't be clobbered between get and set.
     useChatStore.setState((state) => ({
-      messages: [
-        ...state.messages,
-        { id: messageId(), role: 'system', content: message, timestamp: Date.now() },
-      ],
+      messages: [...state.messages, entry],
       rightPanelTab: 'chat',
       hasUnreadMessages: true,
     }));

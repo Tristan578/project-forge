@@ -451,6 +451,9 @@ describe('gameSlice', () => {
         allGameComponents: {},
       }));
 
+      // play() is synchronous, but surfaceWinnabilityMessage dynamically imports
+      // chatStore (a floating promise), so the chat write lands on a later
+      // microtask — vi.waitFor polls until that async surface completes.
       store.getState().play();
 
       expect(mockDispatch).not.toHaveBeenCalledWith('play', {});
