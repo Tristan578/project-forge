@@ -430,6 +430,20 @@ pub struct GameComponentRuntime {
     pub prev_collisions: std::collections::HashSet<(String, String)>,
 }
 
+impl GameComponentRuntime {
+    /// Drain every queued game event, leaving `pending_events` empty.
+    ///
+    /// This is the native, testable seam for the bridge drain: the bridge's
+    /// `emit_game_events_system` only compiles under `wasm32` (it calls the JS
+    /// `emit_event` callback), so the "take all events and clear the queue"
+    /// behaviour cannot be asserted there. Extracting it here lets a native
+    /// unit test prove the queue is emptied while the bridge stays a thin
+    /// `for event in runtime.take_pending_events() { emit_event(...) }` loop.
+    pub fn take_pending_events(&mut self) -> Vec<GameEvent> {
+        std::mem::take(&mut self.pending_events)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct PlatformState {
     pub current_index: usize,
@@ -1461,7 +1475,7 @@ mod win_condition_tests {
     use super::{
         system_collectible, system_follower, system_projectile, system_spawner,
         system_win_condition, CharacterControllerData, CollectibleData, GameComponentData,
-        GameComponentRuntime, GameComponents, WinConditionData, WinConditionType,
+        GameComponentRuntime, GameComponents, GameEvent, WinConditionData, WinConditionType,
     };
     use crate::core::entity_id::EntityId;
     use bevy::prelude::*;
@@ -1906,5 +1920,39 @@ mod win_condition_tests {
             runtime.pending_events.iter().any(|e| e.event_name == "game_win"),
             "collectAll completion must emit game_win",
         );
+    }
+
+    /// The bridge drain (`emit_game_events_system`, wasm-only) forwards each
+    /// queued event to JS via `take_pending_events`. This proves the seam returns
+    /// every queued event in order AND leaves the queue empty — without it, the
+    /// win event never reaches scripts/UI and `pending_events` grows unbounded
+    /// for the whole play session.
+    #[test]
+    fn take_pending_events_returns_all_and_empties_queue() {
+        let mut runtime = GameComponentRuntime::default();
+        runtime.pending_events.push(GameEvent {
+            event_name: "collectible_collected".into(),
+            source_entity_id: Some("coin".into()),
+            target_entity_id: Some("player".into()),
+        });
+        runtime.pending_events.push(GameEvent {
+            event_name: "game_win".into(),
+            source_entity_id: None,
+            target_entity_id: None,
+        });
+
+        let drained = runtime.take_pending_events();
+
+        assert_eq!(drained.len(), 2, "every queued event must be returned");
+        assert_eq!(drained[0].event_name, "collectible_collected", "order preserved");
+        assert_eq!(drained[1].event_name, "game_win", "order preserved");
+        assert!(
+            runtime.pending_events.is_empty(),
+            "queue must be empty after draining so events are not re-emitted",
+        );
+
+        // Draining an already-empty queue is a safe no-op (matches the bridge's
+        // every-frame call when nothing happened).
+        assert!(runtime.take_pending_events().is_empty());
     }
 }

@@ -67,6 +67,7 @@ function mockEditorStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
     hudElements: [],
     engineMode: 'edit',
+    gameWon: false,
     selectedIds: new Set(['entity-1']),
     primaryId: 'entity-1',
     ...overrides,
@@ -305,5 +306,45 @@ describe('CanvasArea', () => {
     const canvas = container.querySelector('canvas')!;
     fireEvent.keyDown(canvas, { key: 'Escape' });
     expect(mockHandleCommand).toHaveBeenCalledWith('stop', {});
+  });
+
+  // -- Win overlay (#8764) — the visible "you won" surface for the core journey --
+
+  it('shows the "You Win!" overlay in play mode when gameWon is true', () => {
+    mockEditorStore({ engineMode: 'play', gameWon: true });
+    const { container } = render(<CanvasArea />);
+    const overlay = container.querySelector('[role="status"]');
+    expect(overlay).not.toBeNull();
+    // Announced politely (a win is a status update, not an interrupting alert).
+    expect(overlay?.getAttribute('aria-live')).toBe('polite');
+    // Must not capture clicks/keys so Esc-to-return still reaches the canvas.
+    expect(overlay?.className).toContain('pointer-events-none');
+    expect(container.textContent).toContain('You Win!');
+    expect(container.textContent).toContain('Press Esc to return to the editor');
+  });
+
+  it('does not show the win overlay in play mode when gameWon is false', () => {
+    mockEditorStore({ engineMode: 'play', gameWon: false });
+    const { container } = render(<CanvasArea />);
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(container.textContent).not.toContain('You Win!');
+  });
+
+  it('does not show the win overlay in edit mode even if gameWon is true (no flash on edit)', () => {
+    // gameWon is reset to false on play()/stop(), but guard on engineMode too so
+    // a stale flag can never paint the win banner over the editor.
+    mockEditorStore({ engineMode: 'edit', gameWon: true });
+    const { container } = render(<CanvasArea />);
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(container.textContent).not.toContain('You Win!');
+  });
+
+  it('shows the win overlay in paused mode when gameWon is true', () => {
+    // The win can land on the frame play is auto-paused; the overlay gates on
+    // engineMode !== 'edit', so paused must still surface it.
+    mockEditorStore({ engineMode: 'paused', gameWon: true });
+    const { container } = render(<CanvasArea />);
+    expect(container.querySelector('[role="status"]')).not.toBeNull();
+    expect(container.textContent).toContain('You Win!');
   });
 });

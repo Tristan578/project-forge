@@ -256,11 +256,10 @@ pub(super) fn emit_game_events_system(
     let Some(mut runtime) = runtime else {
         return;
     };
-    if runtime.pending_events.is_empty() {
-        return;
-    }
-    // GameEvent serializes camelCase: { eventName, sourceEntityId, targetEntityId }.
-    for event in runtime.pending_events.drain(..) {
+    // `take_pending_events` empties the queue (native-tested in core); an empty
+    // queue is a cheap no-op here. GameEvent serializes camelCase:
+    // { eventName, sourceEntityId, targetEntityId }.
+    for event in runtime.take_pending_events() {
         events::emit_event("GAME_EVENT", &event);
     }
 }

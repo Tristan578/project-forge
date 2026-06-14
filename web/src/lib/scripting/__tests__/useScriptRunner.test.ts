@@ -63,6 +63,10 @@ const mockSetEngineMode = vi.fn();
 const mockSetGameCamera = vi.fn();
 const mockCameraShake = vi.fn();
 const mockStartSceneTransition = vi.fn();
+// Win/score state — `mockGameWon` drives the `!gameWon` loop-prevention guard.
+let mockGameWon = false;
+const mockSetGameWon = vi.fn();
+const mockSetGameScore = vi.fn();
 let mockPlayTickCallback: ((data: unknown) => void) | null = null;
 
 vi.mock('@/stores/editorStore', () => ({
@@ -91,6 +95,9 @@ vi.mock('@/stores/editorStore', () => ({
         setGameCamera: mockSetGameCamera,
         cameraShake: mockCameraShake,
         startSceneTransition: mockStartSceneTransition,
+        gameWon: mockGameWon,
+        setGameWon: mockSetGameWon,
+        setGameScore: mockSetGameScore,
         primaryId: null,
         primaryScript: null,
         allScripts: {},
@@ -138,7 +145,7 @@ vi.mock('@/lib/audio/audioManager', () => ({
   },
 }));
 
-import { useScriptRunner, getScriptCollisionCallback } from '../useScriptRunner';
+import { useScriptRunner, getScriptCollisionCallback, getScriptGameEventCallback } from '../useScriptRunner';
 import { audioManager } from '@/lib/audio/audioManager';
 
 describe('useScriptRunner', () => {
@@ -152,6 +159,7 @@ describe('useScriptRunner', () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     mockEngineMode = 'edit';
+    mockGameWon = false;
     latestWorker = null;
     workerPostMessages = [];
     workerTerminated = false;
@@ -560,6 +568,114 @@ describe('useScriptRunner', () => {
     renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
 
     const cb = getScriptCollisionCallback();
+    expect(cb).toBeNull();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Game win / score (forge.game.*)
+  // ---------------------------------------------------------------------------
+  function gameWinBroadcasts() {
+    return workerPostMessages.filter(
+      (m) =>
+        (m as Record<string, unknown>).type === 'GAME_EVENT' &&
+        (m as Record<string, unknown>).eventName === 'game_win',
+    );
+  }
+
+  it('game_win sets win state once and re-broadcasts to the worker', () => {
+    // forge.game.win() in a script → worker posts {type:'game_win'} → the hook
+    // flips the store flag and re-broadcasts GAME_EVENT so EVERY script's onWin
+    // fires. This is the script-initiated half of the win path.
+    mockEngineMode = 'play';
+    mockGameWon = false;
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    act(() => {
+      latestWorker!.simulateMessage({ type: 'game_win' });
+    });
+
+    expect(mockSetGameWon).toHaveBeenCalledWith(true);
+    const broadcasts = gameWinBroadcasts();
+    expect(broadcasts).toHaveLength(1);
+    expect(broadcasts[0]).toMatchObject({
+      type: 'GAME_EVENT',
+      eventName: 'game_win',
+      sourceEntityId: null,
+      targetEntityId: null,
+    });
+  });
+
+  it('game_win is a no-op when the game is already won (loop-prevention guard)', () => {
+    // The re-broadcast makes the worker fire onWin handlers, which could call
+    // forge.game.win() again → infinite loop. The `!gameWon` guard breaks it:
+    // once won, a second game_win message must NOT re-flip or re-broadcast.
+    mockEngineMode = 'play';
+    mockGameWon = true;
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    act(() => {
+      latestWorker!.simulateMessage({ type: 'game_win' });
+    });
+
+    expect(mockSetGameWon).not.toHaveBeenCalled();
+    expect(gameWinBroadcasts()).toHaveLength(0);
+  });
+
+  it('game_set_score forwards a numeric score to the store', () => {
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    act(() => {
+      latestWorker!.simulateMessage({ type: 'game_set_score', score: 7 });
+    });
+
+    expect(mockSetGameScore).toHaveBeenCalledWith(7);
+  });
+
+  it('game_set_score coerces a non-numeric score to 0', () => {
+    // A malformed worker payload must not push a non-number into the store.
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    act(() => {
+      latestWorker!.simulateMessage({ type: 'game_set_score', score: 'oops' });
+    });
+
+    expect(mockSetGameScore).toHaveBeenCalledWith(0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Game-event callback bridge (engine win/score → script worker)
+  // ---------------------------------------------------------------------------
+  it('exports game-event callback in play mode and forwards events to the worker', () => {
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    const cb = getScriptGameEventCallback();
+    expect(cb).not.toBeNull();
+
+    act(() => {
+      cb!({ eventName: 'game_win', sourceEntityId: 'goal-1', targetEntityId: 'player-1' });
+    });
+
+    const forwarded = workerPostMessages.find(
+      (m) =>
+        (m as Record<string, unknown>).type === 'GAME_EVENT' &&
+        (m as Record<string, unknown>).sourceEntityId === 'goal-1',
+    );
+    expect(forwarded).toMatchObject({
+      type: 'GAME_EVENT',
+      eventName: 'game_win',
+      sourceEntityId: 'goal-1',
+      targetEntityId: 'player-1',
+    });
+  });
+
+  it('clears game-event callback in edit mode', () => {
+    mockEngineMode = 'edit';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    const cb = getScriptGameEventCallback();
     expect(cb).toBeNull();
   });
 
