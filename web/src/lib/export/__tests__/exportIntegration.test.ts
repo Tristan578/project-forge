@@ -587,12 +587,27 @@ describe('Export Pipeline Integration', () => {
     it('merges touch input before the frame script update inside the gameLoop', () => {
       const html = generateGameHTML(makeBaseOptions());
 
-      const mergeIdx = html.indexOf('// Merge touch input');
-      const scriptUpdateIdx = html.indexOf('window.__forgeScriptUpdate(dt)');
+      // Scope the assertions to the gameLoop function BODY, not the whole HTML.
+      // The merge must run every frame inside the loop — a regression that moved
+      // it to a one-time init block (before `function gameLoop`) would still
+      // satisfy a naive whole-document index check while reintroducing the bug,
+      // so bound the search to the body (loop start → its self-scheduling rAF).
+      const loopStart = html.indexOf('function gameLoop()');
+      const loopEnd = html.indexOf('requestAnimationFrame(gameLoop)', loopStart);
+      expect(loopStart).toBeGreaterThanOrEqual(0);
+      expect(loopEnd).toBeGreaterThan(loopStart);
+      const loopBody = html.slice(loopStart, loopEnd);
 
-      expect(mergeIdx).toBeGreaterThanOrEqual(0);
-      expect(scriptUpdateIdx).toBeGreaterThanOrEqual(0);
-      expect(mergeIdx).toBeLessThan(scriptUpdateIdx);
+      // Both operations live inside the per-frame loop body...
+      expect(loopBody).toContain('// Merge touch input');
+      expect(loopBody).toContain('window.__forgeScriptUpdate(dt)');
+      // ...the touch edge state is flushed as part of the merge...
+      expect(loopBody).toContain('__forgeTouchFlush');
+      // ...and the merge runs BEFORE the frame's script read so the engine's
+      // per-frame PLAY_TICK overwrite of __forgeInputState can't drop it (#8754).
+      expect(loopBody.indexOf('// Merge touch input')).toBeLessThan(
+        loopBody.indexOf('window.__forgeScriptUpdate(dt)')
+      );
     });
   });
 });
