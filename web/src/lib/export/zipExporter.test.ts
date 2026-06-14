@@ -306,15 +306,22 @@ describe('zipExporter', () => {
       expect(text).toContain('requestAnimationFrame');
     });
 
-    it('includes event callback setup', async () => {
+    it('wires the event callback to the engine single-arg PLAY_TICK input contract (#8752)', async () => {
       const blob = await exportAsZip(mockSceneData, mockScripts, defaultOptions);
       const buffer = await blob.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       const text = new TextDecoder().decode(bytes);
-      expect(text).toContain('set_event_callback');
-      expect(text).toContain('INPUT_STATE_CHANGED');
+      // Single { type, payload } arg — not two args, not a JSON string. The old
+      // 2-arg signature dropped every event (eventPayload was always undefined).
+      expect(text).toContain('set_event_callback(function(event)');
+      expect(text).not.toContain('function(eventType, eventPayload)');
+      expect(text).not.toContain('JSON.parse(eventPayload)');
+      // Input arrives via PLAY_TICK.inputState, never the un-emitted
+      // INPUT_STATE_CHANGED event.
+      expect(text).toContain("type === 'PLAY_TICK'");
+      expect(text).toContain('window.__forgeInputState = payload.inputState');
+      expect(text).not.toContain('INPUT_STATE_CHANGED');
       expect(text).toContain('TRANSFORM_CHANGED');
-      expect(text).toContain('__forgeInputState');
       expect(text).toContain('__forgeTransforms');
     });
 

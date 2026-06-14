@@ -205,6 +205,30 @@ describe('scriptBundler', () => {
       expect(result.code).toContain('window.__forgeInputState');
     });
 
+    it('reads the field-keyed camelCase input shape the engine actually emits (#8752)', () => {
+      const scripts: Record<string, ScriptData> = {
+        entity1: {
+          source: '',
+          enabled: true,
+          template: null,
+        },
+      };
+      const result = bundleScripts(scripts);
+      // The engine surfaces input as inputState.pressed[action] /
+      // .justPressed[action] / .justReleased[action] / .axes[action] (camelCase,
+      // field-keyed). The old action-keyed snake_case reads
+      // (__forgeInputState[action].just_pressed) never matched, so every input
+      // query returned false in exported games.
+      expect(result.code).toContain('window.__forgeInputState.pressed[action]');
+      expect(result.code).toContain('window.__forgeInputState.justPressed[action]');
+      expect(result.code).toContain('window.__forgeInputState.justReleased[action]');
+      expect(result.code).toContain('window.__forgeInputState.axes[action]');
+      expect(result.code).not.toContain('?.[action]?.pressed');
+      expect(result.code).not.toContain('just_pressed');
+      expect(result.code).not.toContain('just_released');
+      expect(result.code).not.toContain('axis_value');
+    });
+
     it('includes audio control API', () => {
       const scripts: Record<string, ScriptData> = {
         entity1: {

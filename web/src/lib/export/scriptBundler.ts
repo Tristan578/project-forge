@@ -47,11 +47,15 @@ export function bundleScripts(
       get: function(key) { return this._data[key]; },
       set: function(key, value) { this._data[key] = value; },
     },
+    // Input is field-keyed camelCase: inputState.pressed[action] etc. — the
+    // exact shape the engine emits (bridge/events.rs emit_play_tick) and the
+    // editor reads (scriptWorker.ts). The old action-keyed snake_case reads
+    // never matched, so every input query returned false in exports (#8752).
     input: {
-      isPressed: function(action) { return window.__forgeInputState?.[action]?.pressed || false; },
-      justPressed: function(action) { return window.__forgeInputState?.[action]?.just_pressed || false; },
-      justReleased: function(action) { return window.__forgeInputState?.[action]?.just_released || false; },
-      getAxis: function(action) { return window.__forgeInputState?.[action]?.axis_value || 0; },
+      isPressed: function(action) { return !!(window.__forgeInputState && window.__forgeInputState.pressed && window.__forgeInputState.pressed[action]); },
+      justPressed: function(action) { return !!(window.__forgeInputState && window.__forgeInputState.justPressed && window.__forgeInputState.justPressed[action]); },
+      justReleased: function(action) { return !!(window.__forgeInputState && window.__forgeInputState.justReleased && window.__forgeInputState.justReleased[action]); },
+      getAxis: function(action) { return (window.__forgeInputState && window.__forgeInputState.axes && window.__forgeInputState.axes[action]) || 0; },
     },
     audio: {
       play: function(id) { pendingCommands.push({cmd: 'play_audio', entityId: id}); _audioPlaying[id] = true; },

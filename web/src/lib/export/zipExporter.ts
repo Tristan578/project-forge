@@ -352,17 +352,25 @@ function generateZipIndexHtml(options: {
       var wasm = await import(jsUrl);
       await wasm.default(basePath + '/forge_engine_bg.wasm');
 
-      // Set up event callback for script integration
+      // Set up event callback for script integration.
+      // The engine (bridge/events.rs emit_event) invokes this with ONE argument
+      // — a live { type, payload } object (serde-wasm-bindgen), not two args and
+      // not a JSON string. Input arrives every frame inside PLAY_TICK as
+      // payload.inputState (field-keyed: pressed/justPressed/justReleased/axes);
+      // there is no standalone input-changed event. The old 2-arg +
+      // JSON.parse signature dropped every event (#8752).
       if (wasm.set_event_callback) {
-        wasm.set_event_callback(function(eventType, eventPayload) {
+        wasm.set_event_callback(function(event) {
           try {
-            var payload = JSON.parse(eventPayload);
-            if (eventType === 'INPUT_STATE_CHANGED') {
-              window.__forgeInputState = payload;
-            } else if (eventType === 'TRANSFORM_CHANGED') {
+            if (!event || !event.payload) return;
+            var type = event.type;
+            var payload = event.payload;
+            if (type === 'PLAY_TICK' || type === 'PLAY_TICK_DELTA') {
+              window.__forgeInputState = payload.inputState || { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+            } else if (type === 'TRANSFORM_CHANGED') {
               if (!window.__forgeTransforms) window.__forgeTransforms = {};
               window.__forgeTransforms[payload.entityId] = payload;
-            } else if (eventType === 'AUDIO_PLAYBACK') {
+            } else if (type === 'AUDIO_PLAYBACK') {
               if (!window.__forgeAudioState) window.__forgeAudioState = {};
               window.__forgeAudioState[payload.entityId] = (payload.action === 'play' || payload.action === 'resume');
             }
