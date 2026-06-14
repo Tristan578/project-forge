@@ -408,11 +408,34 @@ describe('editorStore', () => {
       expect(updated.engineMode).toBe('play');
     });
 
-    it('play() dispatches play command', () => {
+    it('play() dispatches play command when the scene is winnable', () => {
+      // play() now runs a pre-play winnability gate, so the dispatch only
+      // happens for a scene that can actually be won.
+      useEditorStore.setState({
+        sceneGraph: {
+          nodes: {
+            player: { entityId: 'player', name: 'player', parentId: null, children: [], components: [], visible: true },
+            goal: { entityId: 'goal', name: 'goal', parentId: null, children: [], components: [], visible: true },
+          },
+          rootIds: ['player', 'goal'],
+        },
+        allGameComponents: {
+          player: [{ type: 'characterController', characterController: { speed: 5, jumpHeight: 2, gravityScale: 1, canDoubleJump: false } }],
+          wc: [{ type: 'winCondition', winCondition: { conditionType: 'reachGoal', targetScore: null, targetEntityId: 'goal' } }],
+        },
+      });
       const state = useEditorStore.getState();
       state.play();
 
       expect(mockDispatch).toHaveBeenCalledWith('play', {});
+    });
+
+    it('play() blocks dispatch when the scene is not winnable', () => {
+      // Empty scene from beforeEach → no win condition → gate blocks entry.
+      const state = useEditorStore.getState();
+      state.play();
+
+      expect(mockDispatch).not.toHaveBeenCalledWith('play', {});
     });
 
     it('stop() dispatches stop command', () => {

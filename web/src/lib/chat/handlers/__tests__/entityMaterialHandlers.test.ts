@@ -672,13 +672,35 @@ describe('entityHandlers', () => {
   // play / stop / pause / resume
   // -----------------------------------------------------------------------
   describe('play', () => {
-    it('calls play when in edit mode', async () => {
+    it('calls play when in edit mode and the scene is winnable', async () => {
       const { result, store } = await invokeHandler(entityHandlers, 'play', {}, {
         engineMode: 'edit',
+        // Minimal winnable scene: a player + a reachGoal targeting an existing entity.
+        sceneGraph: {
+          nodes: {
+            player: { entityId: 'player', name: 'player', parentId: null, children: [], components: [], visible: true },
+            goal: { entityId: 'goal', name: 'goal', parentId: null, children: [], components: [], visible: true },
+          },
+          rootIds: ['player', 'goal'],
+        },
+        allGameComponents: {
+          player: [{ type: 'characterController', characterController: { speed: 5, jumpHeight: 2, gravityScale: 1, canDoubleJump: false } }],
+          wc: [{ type: 'winCondition', winCondition: { conditionType: 'reachGoal', targetScore: null, targetEntityId: 'goal' } }],
+        },
       });
       expect(result.success).toBe(true);
       expect(store.play).toHaveBeenCalled();
       expect((result.result as { message: string }).message).toContain('play');
+    });
+
+    it('loops back when in edit mode but the scene is not winnable', async () => {
+      const { result, store } = await invokeHandler(entityHandlers, 'play', {}, {
+        engineMode: 'edit',
+        // Default empty scene → no win condition → blocked with guidance.
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("can't be won");
+      expect(store.play).not.toHaveBeenCalled();
     });
 
     it('returns error when already in play mode', async () => {

@@ -48,6 +48,7 @@ import {
   GameSlice,
   createGameSlice,
   setGameDispatcher,
+  setWinnabilityStateReader,
   SpriteSlice,
   createSpriteSlice,
   setSpriteDispatcher,
@@ -209,6 +210,12 @@ export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
   setParticleDispatcher(tracked);
   setScriptDispatcher(tracked);
   setGameDispatcher(tracked);
+  // Wire the pre-play winnability gate's cross-slice reader. play() lives in
+  // gameSlice but the validator needs the scene graph from another slice.
+  setWinnabilityStateReader(() => {
+    const state = useEditorStore.getState();
+    return { sceneGraph: state.sceneGraph, allGameComponents: state.allGameComponents };
+  });
   setSpriteDispatcher(tracked);
   setHistoryDispatcher(tracked);
   setSceneDispatcher(tracked);

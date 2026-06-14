@@ -655,6 +655,22 @@ describe('get_camera_state', () => {
 // ===========================================================================
 
 describe('play', () => {
+  // A minimal winnable scene: a player (character controller) plus a
+  // reachGoal win condition whose target entity exists in the graph.
+  const winnableStore = {
+    sceneGraph: {
+      nodes: {
+        player: { entityId: 'player', name: 'player', parentId: null, children: [], components: [], visible: true },
+        goal: { entityId: 'goal', name: 'goal', parentId: null, children: [], components: [], visible: true },
+      },
+      rootIds: ['player', 'goal'],
+    },
+    allGameComponents: {
+      player: [{ type: 'characterController', characterController: { speed: 5, jumpHeight: 2, gravityScale: 1, canDoubleJump: false } }],
+      wc: [{ type: 'winCondition', winCondition: { conditionType: 'reachGoal', targetScore: null, targetEntityId: 'goal' } }],
+    },
+  };
+
   it('returns error when not in edit mode', async () => {
     const { result } = await invokeHandler(entityHandlers, 'play', {}, {
       engineMode: 'play',
@@ -663,12 +679,42 @@ describe('play', () => {
     expect(result.error).toContain('play mode');
   });
 
-  it('calls store.play when in edit mode', async () => {
+  it('calls store.play when in edit mode and the scene is winnable', async () => {
     const { result, store } = await invokeHandler(entityHandlers, 'play', {}, {
       engineMode: 'edit',
+      ...winnableStore,
     });
     expect(result.success).toBe(true);
     expect(store.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('loops the AI back without entering play when the scene cannot be won', async () => {
+    const { result, store } = await invokeHandler(entityHandlers, 'play', {}, {
+      engineMode: 'edit',
+      // Default mock: empty scene graph + no game components → no win condition.
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("can't be won");
+    expect(store.play).not.toHaveBeenCalled();
+  });
+
+  it('loops back when a reachGoal target is missing from the scene', async () => {
+    const { result, store } = await invokeHandler(entityHandlers, 'play', {}, {
+      engineMode: 'edit',
+      sceneGraph: {
+        nodes: {
+          player: { entityId: 'player', name: 'player', parentId: null, children: [], components: [], visible: true },
+        },
+        rootIds: ['player'],
+      },
+      allGameComponents: {
+        player: [{ type: 'characterController', characterController: { speed: 5, jumpHeight: 2, gravityScale: 1, canDoubleJump: false } }],
+        wc: [{ type: 'winCondition', winCondition: { conditionType: 'reachGoal', targetScore: null, targetEntityId: 'ghost' } }],
+      },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("can't be won");
+    expect(store.play).not.toHaveBeenCalled();
   });
 });
 

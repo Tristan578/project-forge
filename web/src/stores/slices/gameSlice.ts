@@ -3,11 +3,12 @@
  */
 
 import { StateCreator } from 'zustand';
-import type { GameComponentData, GameCameraData, MobileTouchConfig, HudElement, EngineMode } from './types';
+import type { GameComponentData, GameCameraData, MobileTouchConfig, HudElement, EngineMode, SceneGraph } from './types';
 import type { LoadingScreenConfig } from '@/lib/export/loadingScreen';
 import type { AccessibilityProfile } from '@/lib/ai/accessibilityGenerator';
 import { createDefaultProfile } from '@/lib/ai/accessibilityGenerator';
 import type { ExportPreset } from '@/lib/export/presets';
+import { validateWinnability, formatWinnabilityMessage } from '@/lib/playMode/winnabilityValidator';
 
 export interface GameSlice {
   allGameComponents: Record<string, GameComponentData[]>;
@@ -50,6 +51,35 @@ let dispatchCommand: ((command: string, payload: unknown) => void) | null = null
 
 export function setGameDispatcher(dispatcher: (command: string, payload: unknown) => void): void {
   dispatchCommand = dispatcher;
+}
+
+/**
+ * Cross-slice reader for the pre-play winnability gate. `play()` lives in this
+ * slice but the validator needs the scene graph (a different slice), so the
+ * composition root wires a reader that returns the full state it needs. When
+ * unset (e.g. before the engine mounts, or in slice-only unit tests) the gate
+ * is skipped and `play()` behaves exactly as before.
+ */
+type WinnabilityState = { sceneGraph: SceneGraph; allGameComponents: Record<string, GameComponentData[]> };
+let readWinnabilityState: (() => WinnabilityState) | null = null;
+
+export function setWinnabilityStateReader(reader: (() => WinnabilityState) | null): void {
+  readWinnabilityState = reader;
+}
+
+/** Surface an actionable message into the AI chat panel without coupling slices. */
+function surfaceWinnabilityMessage(message: string): void {
+  import('@/stores/chatStore').then(({ useChatStore }) => {
+    const chat = useChatStore.getState();
+    useChatStore.setState({
+      messages: [
+        ...chat.messages,
+        { id: crypto.randomUUID(), role: 'assistant', content: message, timestamp: Date.now() },
+      ],
+      rightPanelTab: 'chat',
+      hasUnreadMessages: true,
+    });
+  }).catch(() => { /* chat surface is best-effort */ });
 }
 
 export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set, get) => ({
@@ -144,6 +174,16 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   setExportPreset: (presetKey, config) => set({ exportPreset: { presetKey, config } }),
   clearExportPreset: () => set({ exportPreset: null }),
   play: () => {
+    // Pre-play winnability gate: block entry and explain why if the scene
+    // can never be won, so the user isn't dropped into an unwinnable game.
+    if (readWinnabilityState) {
+      const { sceneGraph, allGameComponents } = readWinnabilityState();
+      const report = validateWinnability(sceneGraph, allGameComponents);
+      if (!report.winnable) {
+        surfaceWinnabilityMessage(formatWinnabilityMessage(report));
+        return;
+      }
+    }
     if (dispatchCommand) dispatchCommand('play', {});
     import('@/lib/analytics/events').then(m => m.trackPlayModeStarted()).catch(() => { /* analytics non-critical */ });
   },
