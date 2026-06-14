@@ -146,11 +146,24 @@ describe('gameTemplate', () => {
 
     it('includes event callback setup', () => {
       const html = generateGameHTML(baseOptions);
-      expect(html).toContain('set_event_callback(function(eventType, eventPayload)');
-      expect(html).toContain("if (eventType === 'INPUT_STATE_CHANGED')");
-      expect(html).toContain('window.__forgeInputState = payload');
-      expect(html).toContain("if (eventType === 'TRANSFORM_CHANGED')");
+      // The engine invokes the callback with ONE argument — a live
+      // { type, payload } object (serde-wasm-bindgen) — never two args and never
+      // a JSON string. The old 2-arg signature left eventPayload undefined, so
+      // JSON.parse threw and the empty catch swallowed EVERY event (#8752).
+      expect(html).toContain('set_event_callback(function(event)');
+      expect(html).not.toContain('function(eventType, eventPayload)');
+      expect(html).not.toContain('JSON.parse(eventPayload)');
+      // Input is surfaced every frame inside PLAY_TICK as payload.inputState;
+      // the engine never emits a standalone INPUT_STATE_CHANGED event.
+      expect(html).toContain("type === 'PLAY_TICK'");
+      // The delta-tick variant carries input too, so the branch must accept it.
+      expect(html).toContain("type === 'PLAY_TICK_DELTA'");
+      expect(html).toContain('window.__forgeInputState = payload.inputState');
+      expect(html).not.toContain('INPUT_STATE_CHANGED');
+      // Transform + audio branches stay wired (now off the single payload arg).
+      expect(html).toContain("type === 'TRANSFORM_CHANGED'");
       expect(html).toContain('window.__forgeTransforms');
+      expect(html).toContain("type === 'AUDIO_PLAYBACK'");
     });
 
     it('includes user interaction requirement for autoplay', () => {

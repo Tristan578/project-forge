@@ -233,9 +233,12 @@ export async function exportAsZip(
 }
 
 /**
- * Generate index.html for ZIP export (loads WASM engine and assets from separate files)
+ * Generate index.html for ZIP export (loads WASM engine and assets from separate files).
+ *
+ * Exported for tests that pin the generated game-loop structure — notably that
+ * the touch-input merge runs before `__forgeScriptUpdate` each frame (#8754).
  */
-function generateZipIndexHtml(options: {
+export function generateZipIndexHtml(options: {
   title: string;
   bgColor: string;
   resolution: GameTemplateOptions['resolution'];
@@ -352,17 +355,25 @@ function generateZipIndexHtml(options: {
       var wasm = await import(jsUrl);
       await wasm.default(basePath + '/forge_engine_bg.wasm');
 
-      // Set up event callback for script integration
+      // Set up event callback for script integration.
+      // The engine (bridge/events.rs emit_event) invokes this with ONE argument
+      // — a live { type, payload } object (serde-wasm-bindgen), not two args and
+      // not a JSON string. Input arrives every frame inside PLAY_TICK as
+      // payload.inputState (field-keyed: pressed/justPressed/justReleased/axes);
+      // there is no standalone input-changed event. The old 2-arg +
+      // JSON.parse signature dropped every event (#8752).
       if (wasm.set_event_callback) {
-        wasm.set_event_callback(function(eventType, eventPayload) {
+        wasm.set_event_callback(function(event) {
           try {
-            var payload = JSON.parse(eventPayload);
-            if (eventType === 'INPUT_STATE_CHANGED') {
-              window.__forgeInputState = payload;
-            } else if (eventType === 'TRANSFORM_CHANGED') {
+            if (!event || !event.payload) return;
+            var type = event.type;
+            var payload = event.payload;
+            if (type === 'PLAY_TICK' || type === 'PLAY_TICK_DELTA') {
+              window.__forgeInputState = payload.inputState || { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+            } else if (type === 'TRANSFORM_CHANGED') {
               if (!window.__forgeTransforms) window.__forgeTransforms = {};
               window.__forgeTransforms[payload.entityId] = payload;
-            } else if (eventType === 'AUDIO_PLAYBACK') {
+            } else if (type === 'AUDIO_PLAYBACK') {
               if (!window.__forgeAudioState) window.__forgeAudioState = {};
               window.__forgeAudioState[payload.entityId] = (payload.action === 'play' || payload.action === 'resume');
             }
@@ -396,10 +407,11 @@ function generateZipIndexHtml(options: {
         var dt = (now - lastTime) / 1000;
         lastTime = now;
 
-        // Run script onUpdate hooks
-        if (window.__forgeScriptUpdate) window.__forgeScriptUpdate(dt);
-
-        // Merge touch input
+        // Merge touch input BEFORE the script reads it. The engine's PLAY_TICK
+        // callback overwrites __forgeInputState wholesale with keyboard/gamepad
+        // state only, so the touch layer must be re-merged each frame before
+        // __forgeScriptUpdate runs — otherwise an intervening PLAY_TICK drops
+        // touch state before any script sees it and touch controls go dead (#8754).
         if (window.__forgeTouchInput) {
           if (!window.__forgeInputState) window.__forgeInputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
           var ti = window.__forgeTouchInput;
@@ -409,6 +421,9 @@ function generateZipIndexHtml(options: {
           for (var k4 in ti.axes) { window.__forgeInputState.axes[k4] = ti.axes[k4]; }
           if (window.__forgeTouchFlush) window.__forgeTouchFlush();
         }
+
+        // Run script onUpdate hooks
+        if (window.__forgeScriptUpdate) window.__forgeScriptUpdate(dt);
 
         // Flush script commands to WASM engine
         if (window.__forgeFlushCommands) {

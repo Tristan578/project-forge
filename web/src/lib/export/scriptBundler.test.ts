@@ -205,6 +205,44 @@ describe('scriptBundler', () => {
       expect(result.code).toContain('window.__forgeInputState');
     });
 
+    it('reads the field-keyed camelCase input shape the engine actually emits (#8752)', () => {
+      const scripts: Record<string, ScriptData> = {
+        entity1: {
+          source: '',
+          enabled: true,
+          template: null,
+        },
+      };
+      const result = bundleScripts(scripts);
+      // The engine surfaces input as inputState.pressed[action] /
+      // .justPressed[action] / .justReleased[action] / .axes[action] (camelCase,
+      // field-keyed). The old action-keyed snake_case reads
+      // (__forgeInputState[action].just_pressed) never matched, so every input
+      // query returned false in exported games.
+      expect(result.code).toContain('window.__forgeInputState.pressed[action]');
+      expect(result.code).toContain('window.__forgeInputState.justPressed[action]');
+      expect(result.code).toContain('window.__forgeInputState.justReleased[action]');
+      expect(result.code).toContain('window.__forgeInputState?.axes?.[action]');
+      expect(result.code).not.toContain('?.[action]?.pressed');
+      expect(result.code).not.toContain('just_pressed');
+      expect(result.code).not.toContain('just_released');
+      expect(result.code).not.toContain('axis_value');
+    });
+
+    it('getAxis defaults with ?? 0, matching the editor (a 0 axis is a real value, not falsy)', () => {
+      const scripts: Record<string, ScriptData> = {
+        entity1: { source: '', enabled: true, template: null },
+      };
+      const result = bundleScripts(scripts);
+      // The editor's scriptWorker reads `currentInput.axes[action] ?? 0`. The export
+      // bundle must use the SAME nullish-coalescing default — `|| 0` would route a
+      // legitimate neutral/near-zero axis through the fallback path, diverging the
+      // exported game from the editor (Sentry LOW on #8754, || vs ?? gotcha).
+      expect(result.code).toContain('window.__forgeInputState?.axes?.[action] ?? 0');
+      expect(result.code).not.toContain('axes?.[action]) || 0');
+      expect(result.code).not.toContain('axes[action]) || 0');
+    });
+
     it('includes audio control API', () => {
       const scripts: Record<string, ScriptData> = {
         entity1: {
