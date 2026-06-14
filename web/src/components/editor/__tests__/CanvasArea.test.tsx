@@ -28,6 +28,12 @@ vi.mock('@/hooks/useEngineEvents', () => ({
   useEngineEvents: vi.fn(),
 }));
 
+vi.mock('@/lib/scripting/useScriptRunner', () => ({
+  useScriptRunner: vi.fn(),
+  // Preserve the module's other export so any indirect consumer keeps its shape.
+  getScriptCollisionCallback: vi.fn(),
+}));
+
 vi.mock('@/hooks/usePointerLock', () => ({
   usePointerLock: vi.fn(),
 }));
@@ -55,6 +61,7 @@ vi.mock('../ui-builder/UIRuntimeRenderer', () => ({
 
 import { useEditorStore } from '@/stores/editorStore';
 import { useViewport } from '@/hooks/useViewport';
+import { useScriptRunner } from '@/lib/scripting/useScriptRunner';
 
 function mockEditorStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
@@ -81,6 +88,25 @@ describe('CanvasArea', () => {
     const canvas = container.querySelector('canvas');
     expect(canvas).toBeInTheDocument();
     expect(canvas?.id).toBe('game-canvas');
+  });
+
+  it('mounts useScriptRunner so user entity scripts run in Play mode (#8751)', () => {
+    // The per-frame play-tick callback that drives user entity scripts is
+    // registered only while useScriptRunner is mounted. If CanvasArea never
+    // mounts it, pressing Play renders the scene but executes none of the
+    // user's scripts — the core journey silently breaks at the Play step. The
+    // hook self-gates on engineMode==='play', so an unconditional mount in the
+    // editor canvas is safe (it no-ops in Edit mode).
+    mockEditorStore();
+    render(<CanvasArea />);
+    expect(useScriptRunner).toHaveBeenCalledWith({
+      wasmModule: { handle_command: mockHandleCommand },
+    });
+    // Exactly once — the play-tick callback must be registered a single time.
+    // CanvasArea is rendered once in the editor (mutually-exclusive compact and
+    // desktop layout branches), so a second call would signal an accidental
+    // double-mount and double registration.
+    expect(useScriptRunner).toHaveBeenCalledTimes(1);
   });
 
   it('does not show dimension indicator when not ready', () => {
