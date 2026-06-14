@@ -55,8 +55,20 @@ export async function GET(request: NextRequest) {
     const result = await client.getReplicateStatus(jobId);
 
     let mappedStatus: 'pending' | 'processing' | 'completed' | 'failed';
+    let succeededButEmpty = false;
     if (result.status === 'succeeded') {
-      mappedStatus = 'completed';
+      // Replicate can report `succeeded` with an empty output array. Mapping that
+      // to `completed` hands useGenerationPolling a completed job with no
+      // resultUrl, which throws an uncaught "No result URL" — the job then sticks
+      // in `downloading` for the full 5-minute poll cap before refunding with a
+      // generic timeout (#8757). Surface it as `failed` so the poller refunds
+      // immediately with a meaningful error. Mirrors the pixel-art status route.
+      if (result.output?.length) {
+        mappedStatus = 'completed';
+      } else {
+        mappedStatus = 'failed';
+        succeededButEmpty = true;
+      }
     } else if (result.status === 'failed' || result.status === 'canceled') {
       mappedStatus = 'failed';
     } else if (result.status === 'processing') {
@@ -74,7 +86,9 @@ export async function GET(request: NextRequest) {
       status: mappedStatus,
       progress: mappedStatus === 'completed' ? 100 : mappedStatus === 'processing' ? 50 : 10,
       resultUrl,
-      error: mappedStatus === 'failed' ? 'Sprite generation failed' : undefined,
+      error: mappedStatus === 'failed'
+        ? (succeededButEmpty ? 'Sprite generation produced no image' : 'Sprite generation failed')
+        : undefined,
     });
   } catch (err) {
     captureException(err, { route: '/api/generate/sprite/status', jobId });
