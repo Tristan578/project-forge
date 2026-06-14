@@ -116,11 +116,14 @@ export class PixelArtClient {
     // predictionId is interpolated into the Replicate prediction URL. Validate it
     // against the safe-id allowlist and percent-encode before building the URL so a
     // crafted jobId (path traversal / SSRF — e.g. `../models/foo`) can't redirect the
-    // authenticated request elsewhere. Mirrors spriteClient.getReplicateStatus.
+    // authenticated request elsewhere. Mirrors the validation + anchored-URL
+    // construction in spriteClient.getReplicateStatus (the 15s timeout is the
+    // pre-existing pixel-art value; sprite uses 10s).
     validateResourceId(predictionId);
     const safePredictionId = encodeURIComponent(predictionId);
     const url = new URL(`/v1/predictions/${safePredictionId}`, 'https://api.replicate.com');
     const response = await fetch(url, {
+      method: 'GET',
       headers: { 'Authorization': `Bearer ${this.apiKey}` },
       signal: AbortSignal.timeout(15_000),
     });

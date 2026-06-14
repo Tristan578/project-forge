@@ -77,9 +77,11 @@ describe('GET /api/generate/pixel-art/status', () => {
     const data = await res.json();
 
     expect(res.status).toBe(200);
+    expect(data.jobId).toBe('pred_abc123');
     expect(data.status).toBe('completed');
     expect(data.resultUrl).toBe('https://replicate.delivery/pixel.png');
     expect(data.progress).toBe(100);
+    expect(data.error).toBeUndefined();
   });
 
   it('returns failed status when prediction failed', async () => {
@@ -92,9 +94,11 @@ describe('GET /api/generate/pixel-art/status', () => {
     const data = await res.json();
 
     expect(res.status).toBe(200);
+    expect(data.jobId).toBe('pred_abc123');
     expect(data.status).toBe('failed');
     expect(data.error).toBe('Pixel art generation failed');
     expect(data.resultUrl).toBeUndefined();
+    expect(data.progress).toBe(10);
   });
 
   it('maps canceled predictions to failed with an error message', async () => {
@@ -109,6 +113,7 @@ describe('GET /api/generate/pixel-art/status', () => {
     expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
     expect(data.error).toBe('Pixel art generation failed');
+    expect(data.progress).toBe(10);
   });
 
   it('maps succeeded-with-no-output to failed (so the poller refunds, not crashes)', async () => {
@@ -142,6 +147,7 @@ describe('GET /api/generate/pixel-art/status', () => {
     expect(res.status).toBe(200);
     expect(data.status).toBe('processing');
     expect(data.progress).toBe(50);
+    expect(data.error).toBeUndefined();
   });
 
   it('returns pending status for a freshly-started prediction', async () => {
@@ -154,8 +160,10 @@ describe('GET /api/generate/pixel-art/status', () => {
     const data = await res.json();
 
     expect(res.status).toBe(200);
+    expect(data.jobId).toBe('pred_abc123');
     expect(data.status).toBe('pending');
     expect(data.progress).toBe(10);
+    expect(data.error).toBeUndefined();
   });
 
   it('does not leak a resultUrl while still processing', async () => {
@@ -176,6 +184,7 @@ describe('GET /api/generate/pixel-art/status', () => {
     expect(res.status).toBe(200);
     expect(data.status).toBe('processing');
     expect(data.resultUrl).toBeUndefined();
+    expect(data.error).toBeUndefined();
   });
 
   it('returns 500 if client throws unexpectedly', async () => {
