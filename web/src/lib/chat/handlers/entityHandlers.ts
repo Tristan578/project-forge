@@ -54,7 +54,12 @@ export const entityHandlers: Record<string, ToolHandler> = {
   play: async (_args, ctx): Promise<ExecutionResult> => {
     if (ctx.store.engineMode !== 'edit') return { success: false, error: 'Already in play mode' };
     // Loop the AI back when the scene can't be won, so it fixes the win
-    // condition instead of silently entering an unwinnable game.
+    // condition instead of silently entering an unwinnable game. We validate
+    // here (not just inside store.play()) to return the reason as a tool RESULT,
+    // the AI's actionable feedback channel — and we intentionally do NOT surface
+    // it into chat on this path, so the model isn't fed a duplicate message.
+    // store.play() re-runs the same pure check on the same snapshot for the
+    // human Play-button path; the double check cannot diverge.
     const report = validateWinnability(ctx.store.sceneGraph, ctx.store.allGameComponents);
     if (!report.winnable) {
       return { success: false, error: formatWinnabilityMessage(report) };

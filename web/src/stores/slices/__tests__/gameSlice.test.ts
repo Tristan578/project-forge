@@ -455,14 +455,19 @@ describe('gameSlice', () => {
 
       expect(mockDispatch).not.toHaveBeenCalledWith('play', {});
       await vi.waitFor(() => expect(chatSetState).toHaveBeenCalled());
-      const payload = chatSetState.mock.calls[0][0] as {
+      // surfaceWinnabilityMessage uses the updater form: setState((state) => next)
+      const updater = chatSetState.mock.calls[0][0] as (
+        state: { messages: unknown[] },
+      ) => {
         rightPanelTab: string;
         hasUnreadMessages: boolean;
         messages: Array<{ role: string; content: string }>;
       };
+      const payload = updater({ messages: [] });
       expect(payload.rightPanelTab).toBe('chat');
       expect(payload.hasUnreadMessages).toBe(true);
-      expect(payload.messages[0].role).toBe('assistant');
+      // role:'system' — visible to the user, filtered out of the AI request.
+      expect(payload.messages[0].role).toBe('system');
       expect(payload.messages[0].content).toContain("can't be won");
     });
 

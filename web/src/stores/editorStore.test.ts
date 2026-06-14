@@ -6,8 +6,9 @@
  * script logs, and entity CRUD actions.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { useEditorStore, setCommandDispatcher } from './editorStore';
+import { setWinnabilityStateReader } from './slices/gameSlice';
 import {
   createMockDispatch,
   makeSceneGraph,
@@ -100,6 +101,12 @@ describe('editorStore', () => {
     // Set up mock dispatcher
     mockDispatch = createMockDispatch();
     setCommandDispatcher(mockDispatch as (command: string, payload: unknown) => void);
+  });
+
+  afterEach(() => {
+    // setCommandDispatcher wires the cross-slice winnability reader at the
+    // editorStore singleton; clear it so the gate can't leak across tests.
+    setWinnabilityStateReader(null);
   });
 
   describe('Selection', () => {

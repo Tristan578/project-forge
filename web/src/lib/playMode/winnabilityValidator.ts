@@ -17,9 +17,29 @@
  *   - reachGoal:  a CharacterController touches the goal target entity
  *   - collectAll: every Collectible has been picked up by the player
  *   - score:      the player's score reaches a positive target
+ *
+ * Engine-parity note (reachGoal): a reach-goal scene is structurally winnable
+ * when a player and a live goal entity both exist. The win is *delivered* either
+ * natively by `system_win_condition` (see #8764/#8771, which must land before this
+ * gate's reachGoal pass is satisfied natively) or via the collision-script API
+ * (`forge.physics.onCollisionEnter` -> `forge.game.win()`), which already works
+ * today. We deliberately do NOT mark such scenes unwinnable: that would be a false
+ * negative blocking legitimate scripted games. The structural check is the stable
+ * contract regardless of which delivery path fires.
  */
 
 import type { SceneGraph, GameComponentData, WinConditionData } from '@/stores/slices/types';
+
+/**
+ * Neutralize a scene-supplied identifier before interpolating it into a message
+ * that is fed back to the AI as a tool result. Entity ids/names are user- and
+ * AI-influenced, so a crafted value could otherwise smuggle instructions into the
+ * model's context. Strip everything outside a safe charset and cap the length.
+ */
+function safeLabel(value: string): string {
+  const cleaned = value.replace(/[^\w.\- ]+/g, '').trim().slice(0, 64);
+  return cleaned.length > 0 ? cleaned : 'unknown';
+}
 
 export type WinnabilityIssueCode =
   | 'NO_WIN_CONDITION'
@@ -66,7 +86,7 @@ function evaluateCondition(
           code: 'GOAL_TARGET_MISSING',
           entityId,
           message: target
-            ? `The "reach goal" win condition points at a goal entity ("${target}") that no longer exists. Set its target to an entity the player can reach.`
+            ? `The "reach goal" win condition points at a goal entity ("${safeLabel(target)}") that no longer exists. Set its target to an entity the player can reach.`
             : 'The "reach goal" win condition has no goal entity set. Choose the entity the player must reach to win.',
         });
       }
@@ -98,11 +118,14 @@ function evaluateCondition(
       return issues;
     }
     case 'score': {
-      if (data.targetScore == null || data.targetScore <= 0) {
+      // `<= 0` alone would let NaN/Infinity slip through (NaN comparisons are
+      // always false), so gate on Number.isFinite first — see CLAUDE.md.
+      if (data.targetScore == null || !Number.isFinite(data.targetScore) || data.targetScore <= 0) {
+        const shown = Number.isFinite(data.targetScore) ? data.targetScore : 'unset';
         return [{
           code: 'INVALID_TARGET_SCORE',
           entityId,
-          message: `The "reach score" win condition needs a positive target score (currently ${data.targetScore ?? 'unset'}). Set a target score greater than zero.`,
+          message: `The "reach score" win condition needs a positive target score (currently ${shown}). Set a target score greater than zero.`,
         }];
       }
       return [];

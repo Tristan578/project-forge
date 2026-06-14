@@ -67,18 +67,33 @@ export function setWinnabilityStateReader(reader: (() => WinnabilityState) | nul
   readWinnabilityState = reader;
 }
 
-/** Surface an actionable message into the AI chat panel without coupling slices. */
+/** Best-effort unique id; `crypto.randomUUID` is unavailable in non-secure contexts. */
+function messageId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `wnbl-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
+/**
+ * Surface an actionable message into the chat panel without coupling slices.
+ * Posted as `role: 'system'` so it renders as a notice to the user (ChatMessage)
+ * but is filtered out of the AI request payload (chatStore.buildApiMessages) —
+ * the gate's feedback never re-enters the model's context as if the AI said it.
+ */
 function surfaceWinnabilityMessage(message: string): void {
   import('@/stores/chatStore').then(({ useChatStore }) => {
-    const chat = useChatStore.getState();
-    useChatStore.setState({
+    // Updater form: read-modify-write atomically so a concurrent chat write
+    // (e.g. a streaming token) can't be clobbered between get and set.
+    useChatStore.setState((state) => ({
       messages: [
-        ...chat.messages,
-        { id: crypto.randomUUID(), role: 'assistant', content: message, timestamp: Date.now() },
+        ...state.messages,
+        { id: messageId(), role: 'system', content: message, timestamp: Date.now() },
       ],
       rightPanelTab: 'chat',
       hasUnreadMessages: true,
-    });
+    }));
   }).catch(() => { /* chat surface is best-effort */ });
 }
 
@@ -176,12 +191,19 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   play: () => {
     // Pre-play winnability gate: block entry and explain why if the scene
     // can never be won, so the user isn't dropped into an unwinnable game.
+    // This is a UX safety net, not a security control — if the check itself
+    // throws, fail OPEN (fall through to dispatch) rather than trapping the
+    // user out of Play.
     if (readWinnabilityState) {
-      const { sceneGraph, allGameComponents } = readWinnabilityState();
-      const report = validateWinnability(sceneGraph, allGameComponents);
-      if (!report.winnable) {
-        surfaceWinnabilityMessage(formatWinnabilityMessage(report));
-        return;
+      try {
+        const { sceneGraph, allGameComponents } = readWinnabilityState();
+        const report = validateWinnability(sceneGraph, allGameComponents);
+        if (!report.winnable) {
+          surfaceWinnabilityMessage(formatWinnabilityMessage(report));
+          return;
+        }
+      } catch {
+        /* gate failure must never block Play — proceed as if winnable */
       }
     }
     if (dispatchCommand) dispatchCommand('play', {});
