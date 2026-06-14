@@ -319,6 +319,8 @@ describe('zipExporter', () => {
       // Input arrives via PLAY_TICK.inputState, never the un-emitted
       // INPUT_STATE_CHANGED event.
       expect(text).toContain("type === 'PLAY_TICK'");
+      // The delta-tick variant carries input too, so the branch must accept it.
+      expect(text).toContain("type === 'PLAY_TICK_DELTA'");
       expect(text).toContain('window.__forgeInputState = payload.inputState');
       expect(text).not.toContain('INPUT_STATE_CHANGED');
       expect(text).toContain('TRANSFORM_CHANGED');

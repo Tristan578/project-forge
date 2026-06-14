@@ -156,6 +156,8 @@ describe('gameTemplate', () => {
       // Input is surfaced every frame inside PLAY_TICK as payload.inputState;
       // the engine never emits a standalone INPUT_STATE_CHANGED event.
       expect(html).toContain("type === 'PLAY_TICK'");
+      // The delta-tick variant carries input too, so the branch must accept it.
+      expect(html).toContain("type === 'PLAY_TICK_DELTA'");
       expect(html).toContain('window.__forgeInputState = payload.inputState');
       expect(html).not.toContain('INPUT_STATE_CHANGED');
       // Transform + audio branches stay wired (now off the single payload arg).
