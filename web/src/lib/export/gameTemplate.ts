@@ -172,9 +172,16 @@ export function generateGameHTML(options: GameTemplateOptions): string {
             const dt = (now - lastTime) / 1000;
             lastTime = now;
 
-            if (window.__forgeScriptUpdate) window.__forgeScriptUpdate(dt);
-
-            // Merge touch input
+            // Merge touch input BEFORE the frame's script update. PLAY_TICK
+            // overwrites __forgeInputState wholesale every engine frame with
+            // keyboard/gamepad state only (the engine has no knowledge of JS
+            // touch input), so the touch layer must be re-applied on top within
+            // the same synchronous gameLoop tick that the scripts read — JS is
+            // single-threaded, so no PLAY_TICK can interleave between this merge
+            // and __forgeScriptUpdate below. Merging after the script read (the
+            // prior order) let an intervening PLAY_TICK obliterate touch input
+            // before scripts ever saw it — touch controls were dead in exported
+            // mobile games (#8754).
             if (window.__forgeTouchInput) {
               if (!window.__forgeInputState) window.__forgeInputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
               var ti = window.__forgeTouchInput;
@@ -184,6 +191,8 @@ export function generateGameHTML(options: GameTemplateOptions): string {
               for (var k4 in ti.axes) { window.__forgeInputState.axes[k4] = ti.axes[k4]; }
               if (window.__forgeTouchFlush) window.__forgeTouchFlush();
             }
+
+            if (window.__forgeScriptUpdate) window.__forgeScriptUpdate(dt);
 
             // Flush script commands to engine
             if (window.__forgeFlushCommands) {

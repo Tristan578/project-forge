@@ -571,4 +571,28 @@ describe('Export Pipeline Integration', () => {
       expect(html).toContain('webgl2');
     });
   });
+
+  describe('Touch input survives the PLAY_TICK overwrite (#8754)', () => {
+    // The engine's set_event_callback overwrites window.__forgeInputState
+    // wholesale on every PLAY_TICK/PLAY_TICK_DELTA (engine keyboard/gamepad
+    // state only — the engine knows nothing about JS touch input). The gameLoop
+    // merges __forgeTouchInput on top of __forgeInputState as a separate
+    // additive layer. If that merge runs AFTER __forgeScriptUpdate(dt) reads the
+    // input, an intervening PLAY_TICK obliterates the merged touch state before
+    // the next frame's script read ever sees it — touch controls are dead in
+    // exported mobile games (Sentry HIGH, #8754). The merge MUST run before the
+    // frame's script update so it lands in the same synchronous gameLoop tick
+    // the script reads (JS is single-threaded — no PLAY_TICK can interleave
+    // between the merge and the read).
+    it('merges touch input before the frame script update inside the gameLoop', () => {
+      const html = generateGameHTML(makeBaseOptions());
+
+      const mergeIdx = html.indexOf('// Merge touch input');
+      const scriptUpdateIdx = html.indexOf('window.__forgeScriptUpdate(dt)');
+
+      expect(mergeIdx).toBeGreaterThanOrEqual(0);
+      expect(scriptUpdateIdx).toBeGreaterThanOrEqual(0);
+      expect(mergeIdx).toBeLessThan(scriptUpdateIdx);
+    });
+  });
 });
