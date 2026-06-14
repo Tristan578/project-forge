@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { useViewport } from '@/hooks/useViewport';
 import { useEngineEvents } from '@/hooks/useEngineEvents';
+import { useScriptRunner } from '@/lib/scripting/useScriptRunner';
 import { usePointerLock } from '@/hooks/usePointerLock';
 import { getWasmModule } from '@/hooks/useEngine';
 import { useEditorStore } from '@/stores/editorStore';
@@ -53,6 +54,13 @@ export function CanvasArea() {
 
   // Connect engine events to Zustand store
   useEngineEvents({ wasmModule: getWasmModule() });
+
+  // Drive user entity scripts in Play mode. The hook self-gates on
+  // engineMode==='play' (no worker is spawned in Edit mode), so mounting it
+  // unconditionally here is safe — and it is the ONLY place that registers the
+  // per-frame play-tick callback. Without this mount, pressing Play renders the
+  // scene but runs none of the user's scripts (#8751).
+  useScriptRunner({ wasmModule: getWasmModule() });
 
   // Pointer lock for FirstPerson camera mouse look
   usePointerLock(CANVAS_ID);
