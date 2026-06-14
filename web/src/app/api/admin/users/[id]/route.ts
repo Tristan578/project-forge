@@ -19,6 +19,14 @@ const patchUserSchema = z
     message: 'No valid fields to update',
   });
 
+// `users.id` is a Postgres `uuid` column. A non-UUID `[id]` path segment would be
+// forwarded into the `eq(users.id, id)` query and raise an "invalid input syntax
+// for type uuid" cast error — caught by the generic 500 handler and surfaced to
+// Sentry as avoidable noise. Reject malformed ids early with a 404 (not 400, so
+// we don't confirm the expected id format to an enumerator).
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -34,6 +42,9 @@ export async function GET(
   if (limited) return limited;
 
   const { id } = await params;
+  if (!UUID_RE.test(id)) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  }
 
   try {
     const [user] = await queryWithResilience(() =>
@@ -66,6 +77,23 @@ export async function PATCH(
   if (limited) return limited;
 
   const { id } = await params;
+  if (!UUID_RE.test(id)) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  }
+
+  // An admin must not modify their OWN account through the user-admin endpoint:
+  // self-targeting here is a privilege-escalation vector (an admin could comp
+  // themselves a higher tier + full token allocation, or self-unban). Tier and
+  // ban state for one's own account go through billing/Stripe, never this route.
+  // `mid.userId` is the acting admin's `users.id`; `id` is the target's — both
+  // live in the same id space, so an exact match means self-targeting.
+  if (id === mid.userId) {
+    return NextResponse.json(
+      { error: 'Admins cannot modify their own account here', code: 'SELF_MODIFICATION_FORBIDDEN' },
+      { status: 403 }
+    );
+  }
+
   const body = mid.body as z.infer<typeof patchUserSchema>;
 
   try {
@@ -98,6 +126,15 @@ export async function PATCH(
       const [granted] = await queryWithResilience(() =>
         getDb().select().from(users).where(eq(users.id, id))
       );
+      // The grant committed but the row is gone on re-read (concurrent hard
+      // delete, or a partition between statements) — signal an error rather than
+      // returning { user: undefined } with a 200, matching every other read path.
+      if (!granted) {
+        return NextResponse.json(
+          { error: 'Grant succeeded but user row not found on re-read' },
+          { status: 500 }
+        );
+      }
       return NextResponse.json({ user: granted });
     }
 

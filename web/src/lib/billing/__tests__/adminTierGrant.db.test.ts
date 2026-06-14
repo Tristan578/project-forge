@@ -63,6 +63,21 @@ function bySource(rows: QueryRow[], source: string): QueryRow {
   return matches[0];
 }
 
+/**
+ * Find the single audit row for a source AND assert the two invariants that hold
+ * for EVERY grant code path: the row is an 'adjustment' (the literal lives in the
+ * SQL template, not a bound param, so only a real-DB assertion can reach it), and
+ * its reference_id is non-null (the partial unique idempotency index fires only
+ * WHERE reference_id IS NOT NULL — a null would silently disarm it). Returns the
+ * row for source-specific amount/balance_after assertions.
+ */
+function expectAdjustment(rows: QueryRow[], source: string): QueryRow {
+  const audit = bySource(rows, source);
+  expect(audit.transaction_type).toBe('adjustment');
+  expect(audit.reference_id).not.toBeNull();
+  return audit;
+}
+
 describe('applyAdminTierChange — real Postgres (#8744)', () => {
   beforeAll(async () => {
     harnessRef.current = await createTestHarness();
@@ -103,8 +118,7 @@ describe('applyAdminTierChange — real Postgres (#8744)', () => {
     expect(balance).toBe(TIER_MONTHLY_TOKENS.pro);
 
     const rows = await txns(seeded.id);
-    const audit = bySource(rows, 'admin_tier_change:starter->pro');
-    expect(audit.transaction_type).toBe('adjustment');
+    const audit = expectAdjustment(rows, 'admin_tier_change:starter->pro');
     expect(num(audit.amount)).toBe(TIER_MONTHLY_TOKENS.pro);
     expect(num(audit.balance_after)).toBe(TIER_MONTHLY_TOKENS.pro);
   });
@@ -123,7 +137,7 @@ describe('applyAdminTierChange — real Postgres (#8744)', () => {
     });
 
     const rows = await txns(seeded.id);
-    const audit = bySource(rows, 'admin_tier_change:starter->creator');
+    const audit = expectAdjustment(rows, 'admin_tier_change:starter->creator');
     // allocation + addon + earned = 1000 + 200 + 50
     expect(num(audit.balance_after)).toBe(TIER_MONTHLY_TOKENS.creator + 200 + 50);
 
@@ -149,6 +163,9 @@ describe('applyAdminTierChange — real Postgres (#8744)', () => {
     expect(row!.tier).toBe('creator');
     expect(num(row!.monthly_tokens)).toBe(TIER_MONTHLY_TOKENS.creator); // absolute, not +=
     expect(num(row!.monthly_tokens_used)).toBe(0); // cycle reset
+
+    const audit = expectAdjustment(await txns(seeded.id), 'admin_tier_change:pro->creator');
+    expect(num(audit.amount)).toBe(TIER_MONTHLY_TOKENS.creator);
   });
 
   it('folds banned:true into the same atomic write', async () => {
@@ -164,6 +181,9 @@ describe('applyAdminTierChange — real Postgres (#8744)', () => {
     expect(num(row!.banned)).toBe(1);
     expect(row!.tier).toBe('pro');
     expect(num(row!.monthly_tokens)).toBe(TIER_MONTHLY_TOKENS.pro);
+
+    // The grant + audit row are written even when the ban flag rides along.
+    expectAdjustment(await txns(seeded.id), 'admin_tier_change:starter->pro');
   });
 
   it('preserves the existing banned value when the option is omitted', async () => {
@@ -214,8 +234,16 @@ describe('applyAdminTierChange — real Postgres (#8744)', () => {
 
     const rows = await txns(seeded.id);
     // Two starter->pro grants + one pro->starter grant = three distinct rows.
+    expect(rows).toHaveLength(3);
     expect(rows.filter((r) => r.source === 'admin_tier_change:starter->pro')).toHaveLength(2);
     expect(rows.filter((r) => r.source === 'admin_tier_change:pro->starter')).toHaveLength(1);
+    // Every row is an adjustment with a non-null reference_id — a null would
+    // silently disarm the partial unique idempotency index (WHERE reference_id
+    // IS NOT NULL), so distinct intentional grants must each carry one.
+    rows.forEach((r) => {
+      expect(r.transaction_type).toBe('adjustment');
+      expect(r.reference_id).not.toBeNull();
+    });
 
     const row = await getUserRow(harness().neonSql, seeded.id);
     expect(row!.tier).toBe('pro');

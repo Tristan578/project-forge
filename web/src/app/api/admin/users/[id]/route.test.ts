@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GET, PATCH } from './route';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
+import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { applyAdminTierChange } from '@/lib/billing/admin-tier-grant';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import { NextRequest } from 'next/server';
@@ -11,6 +12,13 @@ import { NextRequest } from 'next/server';
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/db/client');
 vi.mock('@/lib/billing/admin-tier-grant');
+vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
+// The admin route calls rateLimitAdminRoute directly (not via the middleware).
+// Mock it so every test starts from "allowed" (null) — otherwise the REAL
+// in-memory limiter accumulates across the sequentially-run cases that share one
+// userId and the 11th request returns 429 where the test expects another status.
+// Individual tests override with mockResolvedValueOnce to exercise the 429 path.
+vi.mock('@/lib/rateLimit', () => ({ rateLimitAdminRoute: vi.fn().mockResolvedValue(null) }));
 
 /** getDb mock whose select().from().where() resolves each call in sequence. */
 function mockSelectSequence(...resultsPerCall: unknown[][]) {
@@ -20,9 +28,12 @@ function mockSelectSequence(...resultsPerCall: unknown[][]) {
   return { select: vi.fn().mockReturnValue(selectChain) };
 }
 
-const PARAMS = { params: Promise.resolve({ id: 'user-uuid-1' }) };
+// `users.id` is a uuid column, so route params + assertions use a real UUID —
+// the route's UUID_RE guard rejects anything else with a 404 before any DB read.
+const USER_ID = '11111111-1111-4111-8111-111111111111';
+const PARAMS = { params: Promise.resolve({ id: USER_ID }) };
 
-function makeReq(url = 'http://localhost/api/admin/users/user-uuid-1', method = 'GET', body?: unknown): NextRequest {
+function makeReq(url = `http://localhost/api/admin/users/${USER_ID}`, method = 'GET', body?: unknown): NextRequest {
   if (body !== undefined) {
     return new NextRequest(url, {
       method,
@@ -177,7 +188,7 @@ describe('PATCH /api/admin/users/[id]', () => {
     expect(data.user.tier).toBe('pro');
     expect(data.user.monthlyTokens).toBe(3000);
     // The grant ran with the previous tier + the acting admin's clerk id.
-    expect(applyAdminTierChange).toHaveBeenCalledWith('user-uuid-1', 'pro', {
+    expect(applyAdminTierChange).toHaveBeenCalledWith(USER_ID, 'pro', {
       previousTier: 'starter',
       grantedByClerkId: 'admin_123',
       banned: undefined,
@@ -202,7 +213,7 @@ describe('PATCH /api/admin/users/[id]', () => {
       PARAMS,
     );
     expect(res.status).toBe(200);
-    expect(applyAdminTierChange).toHaveBeenCalledWith('user-uuid-1', 'creator', {
+    expect(applyAdminTierChange).toHaveBeenCalledWith(USER_ID, 'creator', {
       previousTier: 'starter',
       grantedByClerkId: 'admin_123',
       banned: true,
@@ -227,6 +238,31 @@ describe('PATCH /api/admin/users/[id]', () => {
 
     const res = await PATCH(makeReq('http://localhost/api/admin/users/user-uuid-1', 'PATCH', { tier: 'starter' }), PARAMS);
     expect(res.status).toBe(200);
+    expect(applyAdminTierChange).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the row vanishes between read and plain update (TOCTOU)', async () => {
+    // The banned-only / same-tier path reads the row, then UPDATEs. If the row is
+    // hard-deleted between those two statements, `.returning()` is empty and the
+    // route must 404 (not 200 with { user: undefined }) — the no-grant analogue of
+    // the post-grant re-read guard.
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
+    vi.mocked(assertAdmin).mockReturnValue(null);
+
+    const selectMock = mockSelectSequence([makeUser({ tier: 'starter' })]);
+    const updateChain = {
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      returning: vi.fn().mockResolvedValue([]), // row gone between read and write
+    };
+    vi.mocked(getDb).mockReturnValue({
+      ...selectMock,
+      update: vi.fn().mockReturnValue(updateChain),
+    } as unknown as ReturnType<typeof getDb>);
+
+    const res = await PATCH(makeReq('http://localhost/api/admin/users/user-uuid-1', 'PATCH', { banned: true }), PARAMS);
+    expect(res.status).toBe(404);
     expect(applyAdminTierChange).not.toHaveBeenCalled();
   });
 
@@ -283,12 +319,85 @@ describe('PATCH /api/admin/users/[id]', () => {
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
     vi.mocked(assertAdmin).mockReturnValue(null);
 
-    const req = new NextRequest('http://localhost/api/admin/users/user-uuid-1', {
+    const req = new NextRequest(`http://localhost/api/admin/users/${USER_ID}`, {
       method: 'PATCH',
       body: 'not-json',
       headers: { 'content-type': 'application/json' },
     });
     const res = await PATCH(req, PARAMS);
     expect(res.status).toBe(400);
+  });
+
+  it('returns 429 when the admin rate limit is exceeded (no grant attempted)', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
+    vi.mocked(assertAdmin).mockReturnValue(null);
+    vi.mocked(rateLimitAdminRoute).mockResolvedValueOnce(
+      mockNextResponse({ error: 'Too many requests' }, { status: 429 }),
+    );
+
+    const res = await PATCH(makeReq(`http://localhost/api/admin/users/${USER_ID}`, 'PATCH', { tier: 'pro' }), PARAMS);
+    expect(res.status).toBe(429);
+    expect(applyAdminTierChange).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the [id] param is not a valid UUID (before any DB read)', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
+    vi.mocked(assertAdmin).mockReturnValue(null);
+
+    const res = await PATCH(
+      makeReq('http://localhost/api/admin/users/not-a-uuid', 'PATCH', { tier: 'pro' }),
+      { params: Promise.resolve({ id: 'not-a-uuid' }) },
+    );
+    expect(res.status).toBe(404);
+    expect(applyAdminTierChange).not.toHaveBeenCalled();
+    expect(getDb).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when an admin targets their own account (self-comp blocked)', async () => {
+    // The acting admin's own users.id equals the target [id] → self-modification.
+    const user = makeUser({ id: USER_ID });
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
+    vi.mocked(assertAdmin).mockReturnValue(null);
+
+    const res = await PATCH(makeReq(`http://localhost/api/admin/users/${USER_ID}`, 'PATCH', { tier: 'pro' }), PARAMS);
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(data.code).toBe('SELF_MODIFICATION_FORBIDDEN');
+    expect(applyAdminTierChange).not.toHaveBeenCalled();
+    expect(getDb).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 when applyAdminTierChange throws (error is captured)', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
+    vi.mocked(assertAdmin).mockReturnValue(null);
+    vi.mocked(applyAdminTierChange).mockRejectedValueOnce(new Error('db error'));
+
+    // current row found → tier changes → grant invoked → rejects → catch → 500.
+    vi.mocked(getDb).mockReturnValue(
+      mockSelectSequence([makeUser({ tier: 'starter' })]) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const res = await PATCH(makeReq(`http://localhost/api/admin/users/${USER_ID}`, 'PATCH', { tier: 'pro' }), PARAMS);
+    expect(res.status).toBe(500);
+  });
+
+  it('returns 500 when the post-grant re-read finds no row', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
+    vi.mocked(assertAdmin).mockReturnValue(null);
+    vi.mocked(applyAdminTierChange).mockResolvedValue(undefined);
+
+    // First select = current row (grant proceeds); second select (re-read) = [].
+    vi.mocked(getDb).mockReturnValue(
+      mockSelectSequence([makeUser({ tier: 'starter' })], []) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const res = await PATCH(makeReq(`http://localhost/api/admin/users/${USER_ID}`, 'PATCH', { tier: 'pro' }), PARAMS);
+    expect(res.status).toBe(500);
+    expect(applyAdminTierChange).toHaveBeenCalled();
   });
 });
