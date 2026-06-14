@@ -1,7 +1,12 @@
 import { redirect } from 'next/navigation';
+import { e2eHooksEnabled } from '@/lib/e2e/testHooks';
 
 export default function DevLayout({ children }: { children: React.ReactNode }) {
-  if (process.env.NODE_ENV !== 'development') {
+  // The /dev auth-bypass editor renders in local development AND in the strict
+  // interactive-journey CI build (NEXT_PUBLIC_E2E_HOOKS=true), which drives the
+  // real editor on a production `next start` server. A normal production deploy
+  // never sets that flag, so /dev still redirects to sign-in there.
+  if (!e2eHooksEnabled()) {
     redirect('/sign-in');
   }
   return <>{children}</>;
