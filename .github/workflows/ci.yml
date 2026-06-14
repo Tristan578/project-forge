@@ -872,7 +872,10 @@ jobs:
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-        run: npx playwright test --grep '@ui' --grep-invert '@dev' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
+        # @journey is excluded here defensively: those specs demand the exposed
+        # store surface (NEXT_PUBLIC_E2E_HOOKS) + E2E_STRICT_STORES, neither of
+        # which this store-less @ui build sets. They run only in test-e2e-journey.
+        run: npx playwright test --grep '@ui' --grep-invert '@dev|@journey' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
 
       - name: Upload blob report
         if: ${{ !cancelled() }}
@@ -881,6 +884,85 @@ jobs:
           name: blob-report-${{ strategy.job-index }}
           path: web/blob-report/
           retention-days: 7
+
+  # Strict interactive-journey gate (#8601 F09 + #8604 F12). Proves the core
+  # new-user journey — idea -> generated scene -> entities spawn -> Play ->
+  # winnable -> export — survives on the SAME production server users hit
+  # (`next build` + `next start`). Unlike test-e2e-ui (@ui, store-less, guarded
+  # assertions), this job:
+  #   - builds with NEXT_PUBLIC_E2E_HOOKS=true so the editor/chat stores are
+  #     exposed on `window` (build-time inline only; a normal deploy never sets
+  #     the flag — see e2eHooksEnabled / cd.yml), and
+  #   - runs with E2E_STRICT_STORES=true so the store-injection helpers THROW
+  #     instead of skipping — a broken journey stage turns the gate RED rather
+  #     than silently passing.
+  # Required via the ci-success needs[] aggregate below.
+  test-e2e-journey:
+    name: E2E Journey Gate
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-web == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          # Same single-root-lockfile key as test-e2e-ui (#8589).
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright OS deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: web
+        run: npx playwright install-deps chromium
+
+      # NEXT_PUBLIC_E2E_HOOKS is build-time only (Next.js inlines NEXT_PUBLIC_*
+      # at build). It exposes the editor/chat stores on window so the strict
+      # journey specs can drive a representative generated game without WASM/AI.
+      # cd.yml never sets this flag, so prod/staging/preview deploys never expose
+      # stores — this is a CI-only build.
+      - name: Build for journey E2E (stores exposed)
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+          NEXT_PUBLIC_E2E_HOOKS: 'true'
+        run: npx next build
+
+      - name: Run strict interactive-journey gate
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+          E2E_STRICT_STORES: 'true'
+        run: npx playwright test --config playwright.journey.config.ts
+
+      - name: Upload journey report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-journey-report
+          path: web/playwright-report/
+          retention-days: 14
 
   # Merge sharded E2E reports into a single HTML report
   merge-e2e-reports:
@@ -955,6 +1037,7 @@ jobs:
       - ghaw-lock-sync
       - openapi-route-sync
       - test-e2e-ui
+      - test-e2e-journey
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
