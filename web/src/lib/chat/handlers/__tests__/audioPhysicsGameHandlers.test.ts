@@ -1479,21 +1479,60 @@ describe('gameplayHandlers', () => {
     });
 
     it('instantiates an existing prefab', async () => {
-      const { result, store } = await invokeHandler(gameplayHandlers, 'instantiate_prefab', {
-        prefabId: 'prefab-1',
-      });
+      const { result, store } = await invokeHandler(
+        gameplayHandlers,
+        'instantiate_prefab',
+        { prefabId: 'prefab-1' },
+        { spawnEntity: vi.fn(() => 'prefab-ent-1') },
+      );
       expect(result.success).toBe(true);
       expect(store.spawnEntity).toHaveBeenCalledWith('cube', 'TestPrefab');
       expect((result.result as { message: string }).message).toContain('TestPrefab');
     });
 
     it('uses custom name when provided', async () => {
-      const { result, store } = await invokeHandler(gameplayHandlers, 'instantiate_prefab', {
-        prefabId: 'prefab-1',
-        name: 'CustomName',
-      });
+      const { result, store } = await invokeHandler(
+        gameplayHandlers,
+        'instantiate_prefab',
+        { prefabId: 'prefab-1', name: 'CustomName' },
+        { spawnEntity: vi.fn(() => 'prefab-ent-1') },
+      );
       expect(result.success).toBe(true);
       expect(store.spawnEntity).toHaveBeenCalledWith('cube', 'CustomName');
+    });
+
+    it('targets spawnEntity\'s returned id for material and transform on a fresh scene', async () => {
+      // Fresh scene: primaryId is null. The prefab\'s material + the requested
+      // position must be applied to the synchronously-returned spawn id, not the
+      // stale selection. Proves the stale-primaryId fix end-to-end (#8748).
+      const { result, store } = await invokeHandler(
+        gameplayHandlers,
+        'instantiate_prefab',
+        { prefabId: 'prefab-1', position: [1, 2, 3] },
+        { spawnEntity: vi.fn(() => 'prefab-ent-1') },
+      );
+      expect(result.success).toBe(true);
+      expect(store.primaryId).toBeNull();
+      expect(store.updateMaterial).toHaveBeenCalledWith('prefab-ent-1', { baseColor: [1, 0, 0, 1] });
+      expect(store.updateTransform).toHaveBeenCalledWith('prefab-ent-1', 'position', [1, 2, 3]);
+      expect((result.result as { entityId: string }).entityId).toBe('prefab-ent-1');
+    });
+
+    it('fails (not a phantom success) and applies nothing when no entity is spawned (#8748)', async () => {
+      // spawnEntity returns undefined when the prefab's unvalidated `entityType: string`
+      // is non-spawnable, or when the engine is not loaded yet. The handler must surface
+      // a real failure rather than claim the prefab was instantiated — and must NOT apply
+      // the prefab's material or the requested position to a non-existent entity.
+      const { result, store } = await invokeHandler(
+        gameplayHandlers,
+        'instantiate_prefab',
+        { prefabId: 'prefab-1', position: [1, 2, 3] },
+        { spawnEntity: vi.fn(() => undefined) },
+      );
+      expect(result.success).toBe(false);
+      expect(store.updateMaterial).not.toHaveBeenCalled();
+      expect(store.updateTransform).not.toHaveBeenCalled();
+      expect((result.result as { entityId?: string } | undefined)?.entityId).toBeUndefined();
     });
   });
 

@@ -39,6 +39,12 @@ pub struct SpawnRequest {
     pub entity_type: super::EntityType,
     pub name: Option<String>,
     pub position: Option<Vec3>,
+    /// Optional caller-supplied entity id. When present and non-blank, the
+    /// spawned entity's `EntityId` is overridden to this value so the JS caller
+    /// can reference the entity synchronously (before the async
+    /// `SELECTION_CHANGED` round-trip). Blank/`None` falls back to the
+    /// engine-generated UUID. See `apply_spawn_requests`.
+    pub id: Option<String>,
 }
 
 #[derive(Debug, Clone)]

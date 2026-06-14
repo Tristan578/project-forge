@@ -53,10 +53,13 @@ async function invoke(
 
 describe('handlers2d sprite edge cases', () => {
   describe('create_sprite', () => {
-    it('creates with default entity type when none specified', async () => {
-      const { result, store } = await invoke('create_sprite', {}, { primaryId: 'ent-1' });
+    it('creates on a fresh scene (primaryId null) using the id returned by spawnEntity', async () => {
+      const { result, store } = await invoke('create_sprite', {}, { spawnEntity: vi.fn(() => 'ent-1') });
       expect(result.success).toBe(true);
       expect(store.spawnEntity).toHaveBeenCalled();
+      // primaryId is NOT consulted — it stays null until the async SELECTION_CHANGED
+      // round-trip. Follow-up writes must target the synchronously-returned id.
+      expect(store.primaryId).toBeNull();
       expect(store.setSpriteData).toHaveBeenCalledWith(
         'ent-1',
         expect.objectContaining({ sortingLayer: 'Default', sortingOrder: 0 }),
@@ -74,7 +77,7 @@ describe('handlers2d sprite edge cases', () => {
           sortingLayer: 'Foreground',
           sortingOrder: 5,
         },
-        { primaryId: 'ent-2' },
+        { spawnEntity: vi.fn(() => 'ent-2') },
       );
       expect(result.success).toBe(true);
       expect(store.spawnEntity).toHaveBeenCalledWith('sphere', 'MySprite');
@@ -89,8 +92,8 @@ describe('handlers2d sprite edge cases', () => {
       );
     });
 
-    it('fails when primaryId is null after spawn', async () => {
-      const { result } = await invoke('create_sprite', {}, { primaryId: null });
+    it('fails when spawnEntity returns no id (engine spawn failed)', async () => {
+      const { result } = await invoke('create_sprite', {}, { spawnEntity: vi.fn(() => undefined) });
       expect(result.success).toBe(false);
       expect(result.error).toContain('Failed to get entity ID');
     });
@@ -296,14 +299,16 @@ describe('handlers2d tilemap edge cases', () => {
   };
 
   describe('create_tilemap', () => {
-    it('creates tilemap with required params', async () => {
+    it('creates tilemap on a fresh scene using the id returned by spawnEntity', async () => {
       const { result, store } = await invoke(
         'create_tilemap',
         { tilesetAssetId: 'ts-1' },
-        { primaryId: 'tm-1' },
+        { spawnEntity: vi.fn(() => 'tm-1') },
       );
       expect(result.success).toBe(true);
       expect(store.spawnEntity).toHaveBeenCalledWith('plane', expect.any(String));
+      // primaryId stays null on a fresh scene — the returned id is what targets the write.
+      expect(store.primaryId).toBeNull();
       expect(store.setTilemapData).toHaveBeenCalledWith(
         'tm-1',
         expect.objectContaining({ tilesetAssetId: 'ts-1' }),
@@ -314,7 +319,7 @@ describe('handlers2d tilemap edge cases', () => {
       const { result, store } = await invoke(
         'create_tilemap',
         { tilesetAssetId: 'ts-1', tileSize: [16, 16], mapSize: [30, 20], name: 'Ground' },
-        { primaryId: 'tm-2' },
+        { spawnEntity: vi.fn(() => 'tm-2') },
       );
       expect(result.success).toBe(true);
       expect(store.setTilemapData).toHaveBeenCalledWith(
@@ -323,11 +328,11 @@ describe('handlers2d tilemap edge cases', () => {
       );
     });
 
-    it('fails when primaryId is null', async () => {
+    it('fails when spawnEntity returns no id (engine spawn failed)', async () => {
       const { result } = await invoke(
         'create_tilemap',
         { tilesetAssetId: 'ts-1' },
-        { primaryId: null },
+        { spawnEntity: vi.fn(() => undefined) },
       );
       expect(result.success).toBe(false);
     });

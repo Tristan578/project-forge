@@ -49,6 +49,24 @@ impl EntityNameCounter {
     }
 }
 
+/// Whether a caller-supplied id may override the engine-generated `EntityId`.
+///
+/// The sole production caller passes `crypto.randomUUID()`, so this is
+/// defense-in-depth against a future or rogue caller, never the normal path. An
+/// id is honored only when it is a plausible identifier: non-empty (the caller
+/// already trims it), at most 64 bytes, and free of control characters. This
+/// rejects the concrete vectors a stricter-than-`trim` check would otherwise
+/// admit — interior NUL bytes (`\0`, not stripped by `str::trim`) and unbounded
+/// blobs — while staying decoupled from any single id format. A rejected id
+/// falls back to the engine-generated UUID, so the spawn still succeeds.
+fn is_valid_override_id(id: &str) -> bool {
+    // `len()` is the UTF-8 byte length on purpose: this is a storage/DoS bound on
+    // the string we copy into the `EntityId`, so bytes (not grapheme count) is the
+    // right unit. Do not swap to `chars().count()`. The control-char check is
+    // per-`char`, which is correct for catching interior NUL/format chars.
+    !id.is_empty() && id.len() <= 64 && !id.chars().any(|c| c.is_control())
+}
+
 /// System that processes pending spawn requests.
 pub fn apply_spawn_requests(
     mut pending: ResMut<PendingCommands>,
@@ -92,6 +110,23 @@ pub fn apply_spawn_requests(
                 // ProceduralMesh entities are created by extrude/lathe/combine systems, not through spawn requests.
                 continue;
             }
+        };
+
+        // If the caller supplied a valid id (see `is_valid_override_id`),
+        // override the engine-generated EntityId so the JS caller can reference
+        // this entity synchronously (before the async SELECTION_CHANGED
+        // round-trip). Bevy's `insert` replaces the EntityId the spawn helper
+        // already attached; a blank/None/malformed id falls back to that
+        // generated UUID, so the spawn still succeeds. `EntityId` is itself a
+        // UUID-v4 String newtype, so a client-supplied id has identical
+        // uniqueness properties. The `continue` arms above never reach here, so
+        // only real spawns are overridden.
+        let entity_id = match request.id.as_deref().map(str::trim) {
+            Some(id) if is_valid_override_id(id) => {
+                commands.entity(entity).insert(EntityId::new(id));
+                id.to_string()
+            }
+            _ => entity_id,
         };
 
         // Material data for mesh entities, light data for light entities
@@ -2191,5 +2226,132 @@ fn execute_redo(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod spawn_id_tests {
+    use super::apply_spawn_requests;
+    use super::HistoryStack;
+    use crate::core::entity_id::EntityId;
+    use crate::core::pending_commands::{EntityType, PendingCommands, SpawnRequest};
+    use bevy::prelude::*;
+
+    /// Build a minimal World with the resources `apply_spawn_requests` reads,
+    /// run the system once through a Schedule (which flushes the deferred
+    /// `Commands`), and return every EntityId string left in the world.
+    fn run_spawn(request: SpawnRequest) -> Vec<String> {
+        let mut world = World::new();
+        let mut pending = PendingCommands::default();
+        pending.spawn_requests.push(request);
+        world.insert_resource(pending);
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        world.insert_resource(HistoryStack::default());
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(apply_spawn_requests);
+        schedule.run(&mut world);
+
+        let mut query = world.query::<&EntityId>();
+        query.iter(&world).map(|id| id.0.clone()).collect()
+    }
+
+    /// The core fix: a supplied non-blank id becomes the spawned entity's
+    /// EntityId. This is what lets the JS caller reference the entity
+    /// synchronously instead of reading a stale `primaryId` that the async
+    /// SELECTION_CHANGED event has not yet updated.
+    #[test]
+    fn supplied_id_overrides_generated_entity_id() {
+        let ids = run_spawn(SpawnRequest {
+            entity_type: EntityType::Cube,
+            name: Some("Hero".into()),
+            position: None,
+            id: Some("client-uuid-123".into()),
+        });
+        assert_eq!(
+            ids,
+            vec!["client-uuid-123".to_string()],
+            "supplied id must override the engine-generated EntityId",
+        );
+    }
+
+    /// Legacy path: a `None` id falls back to the engine-generated UUID-v4
+    /// (36 chars). Spawns that don't supply an id must keep working.
+    #[test]
+    fn none_id_falls_back_to_generated_uuid() {
+        let ids = run_spawn(SpawnRequest {
+            entity_type: EntityType::Sphere,
+            name: Some("Ball".into()),
+            position: None,
+            id: None,
+        });
+        assert_eq!(ids.len(), 1, "exactly one entity should spawn");
+        assert_eq!(
+            ids[0].len(),
+            36,
+            "fallback EntityId should be a UUID-v4 (36 chars), got {:?}",
+            ids[0],
+        );
+    }
+
+    /// A blank / whitespace-only id is treated as absent and falls back to a
+    /// generated UUID — guards against a client sending "" or "   ".
+    #[test]
+    fn blank_id_falls_back_to_generated_uuid() {
+        let ids = run_spawn(SpawnRequest {
+            entity_type: EntityType::Cube,
+            name: Some("Blank".into()),
+            position: None,
+            id: Some("   ".into()),
+        });
+        assert_eq!(ids.len(), 1, "exactly one entity should spawn");
+        assert_eq!(
+            ids[0].len(),
+            36,
+            "blank id must fall back to a UUID-v4, got {:?}",
+            ids[0],
+        );
+    }
+
+    /// An id containing a control / NUL character (which `str::trim` does NOT
+    /// strip from the interior) is rejected by `is_valid_override_id` and falls
+    /// back to a generated UUID. The spawn still succeeds — a malformed client
+    /// id can never produce a malformed EntityId.
+    #[test]
+    fn control_char_id_falls_back_to_generated_uuid() {
+        let ids = run_spawn(SpawnRequest {
+            entity_type: EntityType::Cube,
+            name: Some("Ctrl".into()),
+            position: None,
+            id: Some("ab\u{0}cd".into()),
+        });
+        assert_eq!(ids.len(), 1, "exactly one entity should spawn");
+        assert_eq!(
+            ids[0].len(),
+            36,
+            "control-char id must fall back to a UUID-v4, got {:?}",
+            ids[0],
+        );
+    }
+
+    /// An oversized id (> 64 chars) is rejected and falls back to a generated
+    /// UUID, bounding the EntityId length against an unbounded client blob.
+    #[test]
+    fn oversized_id_falls_back_to_generated_uuid() {
+        let oversized = "a".repeat(65);
+        let ids = run_spawn(SpawnRequest {
+            entity_type: EntityType::Cube,
+            name: Some("Big".into()),
+            position: None,
+            id: Some(oversized),
+        });
+        assert_eq!(ids.len(), 1, "exactly one entity should spawn");
+        assert_eq!(
+            ids[0].len(),
+            36,
+            "oversized id must fall back to a UUID-v4, got {:?}",
+            ids[0],
+        );
     }
 }

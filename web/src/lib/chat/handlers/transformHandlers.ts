@@ -7,22 +7,33 @@ import type { ToolHandler } from './types';
 import { zEntityId, zXYZ, zSelectionMode, zGizmoMode, zCameraPreset, parseArgs } from './types';
 import { parseHandlerArgs } from '@/lib/validation/parseArgs';
 import { entityId, enumValue, boundedString } from '@/lib/validation/validators';
+import { SPAWNABLE_ENTITY_TYPES } from '@/stores/slices/sceneGraphSlice';
 
-const ENTITY_TYPES = [
-  'cube', 'sphere', 'cylinder', 'capsule', 'torus', 'plane', 'cone', 'icosphere',
-  'point_light', 'directional_light', 'spot_light', 'gltf_model', 'empty',
-] as const;
+// The accepted entity types for `spawn_entity` are derived from the single source of
+// truth — SPAWNABLE_ENTITY_TYPES — so this tool's schema can never drift from what the
+// engine's `apply_spawn_requests` actually spawns. JS-only union members like
+// icosphere/empty/gltf_model are created through other pipelines and hit a `continue`
+// arm in the engine, so accepting them here would report a phantom success for an
+// entity that was never created (#8748).
+const SPAWNABLE_TYPES = [...SPAWNABLE_ENTITY_TYPES];
 
 export const transformHandlers: Record<string, ToolHandler> = {
   // Uses shared validation framework (parseHandlerArgs) instead of Zod
   spawn_entity: async (args, { store }) => {
     const p = parseHandlerArgs(args, {
-      entityType: { validate: enumValue(ENTITY_TYPES) },
+      entityType: { validate: enumValue(SPAWNABLE_TYPES) },
       name: { validate: boundedString(1, 128), optional: true },
     });
     if (p.error) return p.error;
-    store.spawnEntity(p.data.entityType, p.data.name);
-    return { success: true, result: { message: `Spawned ${p.data.entityType}` } };
+    const newId = store.spawnEntity(p.data.entityType, p.data.name);
+    if (!newId) {
+      // The schema already rejects non-spawnable types, so a falsy id here means the
+      // engine has not finished loading (no dispatcher yet). Surface a real failure
+      // rather than a phantom success with an undefined entityId that follow-up
+      // commands would target in vain (#8748).
+      return { success: false, error: `Cannot spawn '${p.data.entityType}': the engine is not ready yet` };
+    }
+    return { success: true, result: { message: `Spawned ${p.data.entityType}`, entityId: newId } };
   },
 
   despawn_entity: async (args, { store }) => {

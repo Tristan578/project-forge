@@ -40,7 +40,17 @@ export interface SceneGraphSlice {
 
   toggleVisibility: (entityId: string) => void;
   renameEntity: (entityId: string, newName: string) => void;
-  spawnEntity: (type: EntityType, name?: string) => void;
+  /**
+   * Spawn a new entity. Returns the new entity's id **synchronously** so callers
+   * can immediately target it (transform/material/physics/reparent) without
+   * waiting for the async SELECTION_CHANGED round-trip. Returns `undefined` when
+   * no entity was spawned: the terrain path (handled by `spawnTerrain`), an
+   * entity type the engine does not spawn (see `SPAWNABLE_ENTITY_TYPES`), or when
+   * the engine isn't loaded yet (`dispatchCommand` is null). Callers MUST guard on
+   * the result. Do NOT read `primaryId` after calling this — it is not updated
+   * until the engine emits SELECTION_CHANGED.
+   */
+  spawnEntity: (type: EntityType, name?: string) => string | undefined;
   deleteSelectedEntities: () => void;
   duplicateSelectedEntity: () => void;
   reparentEntity: (
@@ -49,6 +59,30 @@ export interface SceneGraphSlice {
     insertIndex?: number
   ) => void;
 }
+
+/**
+ * Entity types the engine's `apply_spawn_requests` actually spawns in response
+ * to a `spawn_entity` command. Every other `EntityType` (sprite, gltf, csg,
+ * procedural, empty, icosphere, terrain) is created through a different
+ * pipeline and is silently dropped by that system, so dispatching a
+ * `spawn_entity` for one and returning a generated id would yield a phantom
+ * reference. Kept in sync with the spawn arms in
+ * `engine/src/core/entity_factory.rs`. Enforced by
+ * `__tests__/sceneGraphSlice.spawnableParity.test.ts`, which fails the build on
+ * any desync — update both sides together.
+ */
+export const SPAWNABLE_ENTITY_TYPES: ReadonlySet<EntityType> = new Set<EntityType>([
+  'cube',
+  'sphere',
+  'plane',
+  'cylinder',
+  'cone',
+  'torus',
+  'capsule',
+  'point_light',
+  'directional_light',
+  'spot_light',
+]);
 
 // Internal dispatcher reference
 let dispatchCommand: ((command: string, payload: unknown) => void) | null = null;
@@ -226,11 +260,35 @@ export const createSceneGraphSlice: StateCreator<
   spawnEntity: (type, name) => {
     if (type === 'terrain') {
       get().spawnTerrain();
-      return;
+      return undefined;
     }
+    // The engine's `apply_spawn_requests` only spawns the primitive mesh/light
+    // types in SPAWNABLE_ENTITY_TYPES via the spawn_entity command. Every other
+    // EntityType (sprite, gltf, csg, procedural, empty, icosphere) is created
+    // through a different pipeline and hits a `continue` arm there — the command
+    // is silently dropped and no entity is created. Returning a generated id for
+    // one of those would be a phantom reference that follow-up commands target
+    // in vain, so return undefined and let the caller's `if (!entityId)` guard
+    // surface a real failure instead of dispatching against a missing entity.
+    if (!SPAWNABLE_ENTITY_TYPES.has(type)) {
+      return undefined;
+    }
+    // Generate the id client-side and pass it to the engine, which overrides
+    // the spawned entity's EntityId to match. This lets the caller reference
+    // the entity synchronously — `primaryId` is only set later by the async
+    // SELECTION_CHANGED event, so reading it right after spawn is stale.
+    //
+    // Only return the id when we actually dispatched the command. When the
+    // engine isn't loaded yet `dispatchCommand` is null — returning a fresh id
+    // there would be a phantom reference (no entity was created), defeating
+    // every caller's `if (!entityId)` guard. Return undefined so callers treat
+    // it as a real failure, matching the pre-fix `void` contract.
     if (dispatchCommand) {
-      dispatchCommand('spawn_entity', { entityType: type, name });
+      const id = crypto.randomUUID();
+      dispatchCommand('spawn_entity', { entityType: type, name, id });
+      return id;
     }
+    return undefined;
   },
 
   deleteSelectedEntities: () => {

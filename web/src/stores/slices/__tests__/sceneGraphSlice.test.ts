@@ -141,15 +141,52 @@ describe('sceneGraphSlice', () => {
   });
 
   describe('spawnEntity', () => {
-    it('should dispatch spawn_entity for non-terrain types', () => {
-      store.getState().spawnEntity('cube', 'MyCube');
-      expect(mockDispatch).toHaveBeenCalledWith('spawn_entity', { entityType: 'cube', name: 'MyCube' });
+    it('should dispatch spawn_entity with a generated id and return it synchronously', () => {
+      // The fresh-scene stale-primaryId bug (#8748) is fixed by generating the
+      // entity id client-side, passing it into the command, AND returning it so
+      // callers never have to read the async-updated primaryId.
+      const returnedId = store.getState().spawnEntity('cube', 'MyCube');
+      expect(typeof returnedId).toBe('string');
+      // RFC-4122 v4 UUID shape
+      expect(returnedId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      expect(mockDispatch).toHaveBeenCalledWith('spawn_entity', {
+        entityType: 'cube',
+        name: 'MyCube',
+        id: returnedId,
+      });
     });
 
-    it('should call spawnTerrain for terrain type', () => {
-      store.getState().spawnEntity('terrain');
+    it('should call spawnTerrain for terrain type and return undefined', () => {
+      const returnedId = store.getState().spawnEntity('terrain');
       expect(spawnTerrainMock).toHaveBeenCalled();
+      expect(returnedId).toBeUndefined();
       expect(mockDispatch).not.toHaveBeenCalledWith('spawn_entity', expect.anything());
+    });
+
+    // The engine's apply_spawn_requests only spawns primitive mesh/light types
+    // via the spawn_entity command; sprite/gltf/csg/procedural/empty/icosphere
+    // are created through other pipelines and would be silently dropped (a
+    // `continue` arm), leaving a phantom id. spawnEntity must return undefined
+    // for those so a caller's `if (!entityId)` guard surfaces a real failure
+    // instead of dispatching follow-up commands against a non-existent entity.
+    it.each(['sprite', 'gltf_model', 'csg_result', 'procedural_mesh', 'empty', 'icosphere'] as const)(
+      'should NOT dispatch and should return undefined for non-spawnable type %s',
+      (type) => {
+        const returnedId = store.getState().spawnEntity(type);
+        expect(returnedId).toBeUndefined();
+        expect(mockDispatch).not.toHaveBeenCalledWith('spawn_entity', expect.anything());
+      },
+    );
+
+    it('should return undefined (not a phantom id) when the engine dispatcher is not yet set', () => {
+      // During the engine-loading window `dispatchCommand` is null. Returning a
+      // freshly-minted UUID there would be a phantom reference — the command was
+      // never sent, so no entity exists, yet a caller's `if (!entityId)` guard
+      // would see a truthy id and queue follow-up commands against nothing.
+      // spawnEntity must return undefined so callers treat it as a real failure.
+      setSceneGraphDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const returnedId = store.getState().spawnEntity('cube', 'MyCube');
+      expect(returnedId).toBeUndefined();
     });
   });
 

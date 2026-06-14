@@ -664,8 +664,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         const entType = ent.type as string;
         const entName = ent.name as string;
 
-        ctx.store.spawnEntity(entType as EntityType, entName);
-        const entityId = ctx.store.primaryId;
+        const entityId = ctx.store.spawnEntity(entType as EntityType, entName);
         if (!entityId) throw new Error('spawn failed');
         nameToId[entName] = entityId;
 
@@ -730,8 +729,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const results: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
     const nameToId: Record<string, string> = {};
 
-    ctx.store.spawnEntity('cube', levelName);
-    const rootId = ctx.store.primaryId;
+    const rootId = ctx.store.spawnEntity('cube', levelName);
     if (!rootId) return { success: false, error: 'Failed to create level root' };
     nameToId[levelName] = rootId;
     ctx.store.updateTransform(rootId, 'scale', [1, 1, 1]);
@@ -746,15 +744,31 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         if (useTerrain) {
           const terrainConfig = (ground.terrainConfig as Record<string, unknown>) ?? {};
           ctx.store.spawnTerrain(terrainConfig);
+          // KNOWN BUG (#8749): terrain goes through the separate `spawn_terrain`
+          // engine pipeline, not `spawn_entity`/`apply_spawn_requests`, so
+          // `spawnTerrain` does not yet return an id and this `primaryId` read is
+          // the same stale-read defect #8748 fixed for the primitive path — on a
+          // fresh scene `groundId` is null and the terrain ground is silently
+          // dropped. Tracked + scoped in #8749 (extend `spawnTerrain` to return an
+          // id + add the engine-side EntityId override to the terrain path).
           const groundId = ctx.store.primaryId;
           if (groundId) {
             nameToId['Ground'] = groundId;
             ctx.store.reparentEntity(groundId, rootId);
             results.push({ action: 'create terrain ground', success: true, entityId: groundId });
+          } else {
+            // Until #8749 lands, the stale primaryId read above yields null on a
+            // fresh scene. Surface that as an explicit failure instead of
+            // silently omitting the ground op — otherwise the caller sees a
+            // compound result that falsely implies the terrain ground exists.
+            results.push({
+              action: 'create terrain ground',
+              success: false,
+              error: 'terrain spawn id unavailable before #8749 — ground not parented',
+            });
           }
         } else {
-          ctx.store.spawnEntity('plane', 'Ground');
-          const groundId = ctx.store.primaryId;
+          const groundId = ctx.store.spawnEntity('plane', 'Ground');
           if (groundId) {
             nameToId['Ground'] = groundId;
             ctx.store.updateTransform(groundId, 'scale', [width / 2, 1, depth / 2]);
@@ -785,8 +799,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
         const geom = wallFromStartEnd(start, end, height, thickness);
 
-        ctx.store.spawnEntity('cube', name);
-        const wallId = ctx.store.primaryId;
+        const wallId = ctx.store.spawnEntity('cube', name);
         if (wallId) {
           nameToId[name] = wallId;
           ctx.store.updateTransform(wallId, 'position', geom.position);
@@ -817,8 +830,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         const position = obstacle.position as [number, number, number];
         const scale = obstacle.scale as [number, number, number] | undefined;
 
-        ctx.store.spawnEntity(obstType as EntityType, obstName);
-        const obstId = ctx.store.primaryId;
+        const obstId = ctx.store.spawnEntity(obstType as EntityType, obstName);
         if (obstId) {
           nameToId[obstName] = obstId;
           ctx.store.updateTransform(obstId, 'position', position);
@@ -856,8 +868,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         const spName = (sp.name as string) ?? (isPlayerSpawn ? 'PlayerSpawn' : `SpawnPoint_${i}`);
         const position = sp.position as [number, number, number];
 
-        ctx.store.spawnEntity('sphere', spName);
-        const spId = ctx.store.primaryId;
+        const spId = ctx.store.spawnEntity('sphere', spName);
         if (spId) {
           nameToId[spName] = spId;
           ctx.store.updateTransform(spId, 'position', position);
@@ -882,8 +893,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         const position = goal.position as [number, number, number];
         const goalType = (goal.type as string) ?? 'reach';
 
-        ctx.store.spawnEntity('sphere', goalName);
-        const goalId = ctx.store.primaryId;
+        const goalId = ctx.store.spawnEntity('sphere', goalName);
         if (goalId) {
           nameToId[goalName] = goalId;
           ctx.store.updateTransform(goalId, 'position', position);
@@ -938,8 +948,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const nameToId: Record<string, string> = {};
 
     try {
-      ctx.store.spawnEntity(entityType as EntityType, charName);
-      const charId = ctx.store.primaryId;
+      const charId = ctx.store.spawnEntity(entityType as EntityType, charName);
       if (!charId) throw new Error('Character spawn failed');
       nameToId[charName] = charId;
 

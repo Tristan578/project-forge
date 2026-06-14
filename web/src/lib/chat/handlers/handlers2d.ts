@@ -167,9 +167,7 @@ const spriteHandlers: Record<string, ToolHandler> = {
 
       const { entityType = 'plane', name, position, textureAssetId, sortingLayer, sortingOrder } = p.data;
 
-      ctx.store.spawnEntity(entityType as Parameters<typeof ctx.store.spawnEntity>[0], name);
-
-      const entityId = ctx.store.primaryId;
+      const entityId = ctx.store.spawnEntity(entityType as Parameters<typeof ctx.store.spawnEntity>[0], name);
       if (!entityId) {
         return { success: false, error: 'Failed to get entity ID after spawn' };
       }
@@ -657,8 +655,7 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 
       const { name, tilesetAssetId, tileSize, mapSize, origin = 'TopLeft' } = p.data;
 
-      ctx.store.spawnEntity('plane', name ?? 'Tilemap');
-      const entityId = ctx.store.primaryId;
+      const entityId = ctx.store.spawnEntity('plane', name ?? 'Tilemap');
       if (!entityId) {
         return { success: false, error: 'Failed to get entity ID after spawn' };
       }
