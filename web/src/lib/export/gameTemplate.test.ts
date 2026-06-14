@@ -130,18 +130,18 @@ describe('gameTemplate', () => {
       expect(html).toContain('if (window.__forgeScriptStart) window.__forgeScriptStart()');
     });
 
-    it('includes script update loop', () => {
+    // The loop's internal structure + ordering invariant are pinned once in
+    // gameLoopFragment.test.ts. Here we only assert the single-HTML path
+    // CONSUMES the shared fragment and wires it to the GLOBAL handle_command
+    // sink (not wasm.handle_command, which is the ZIP build's).
+    it('consumes the shared game loop wired to the global handle_command sink', () => {
       const html = generateGameHTML(baseOptions);
       expect(html).toContain('function gameLoop()');
       expect(html).toContain('if (window.__forgeScriptUpdate) window.__forgeScriptUpdate(dt)');
       expect(html).toContain('requestAnimationFrame(gameLoop)');
-    });
-
-    it('includes command flush logic', () => {
-      const html = generateGameHTML(baseOptions);
-      expect(html).toContain('if (window.__forgeFlushCommands)');
-      expect(html).toContain('const cmds = window.__forgeFlushCommands()');
-      expect(html).toContain('handle_command(cmd.cmd, JSON.stringify(cmd))');
+      expect(html).toContain('var cmds = window.__forgeFlushCommands()');
+      expect(html).toContain('handle_command(cmds[ci].cmd, JSON.stringify(cmds[ci]))');
+      expect(html).not.toContain('wasm.handle_command(cmds[ci]');
     });
 
     it('includes event callback setup', () => {

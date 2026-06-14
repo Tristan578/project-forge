@@ -296,14 +296,22 @@ describe('zipExporter', () => {
       expect(text).toContain('__forgeScriptUpdate');
     });
 
-    it('includes game loop with command flush', async () => {
+    it('includes game loop with command flush wired to the wasm.handle_command sink', async () => {
       const blob = await exportAsZip(mockSceneData, mockScripts, defaultOptions);
       const buffer = await blob.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       const text = new TextDecoder().decode(bytes);
+      // Structure + ordering invariant live in gameLoopFragment.test.ts; here we
+      // assert the ZIP path CONSUMES the shared fragment with the module-local
+      // wasm.handle_command sink (the ZIP build holds the engine in a `wasm` var).
       expect(text).toContain('gameLoop');
       expect(text).toContain('__forgeFlushCommands');
       expect(text).toContain('requestAnimationFrame');
+      expect(text).toContain('wasm.handle_command(cmds[ci].cmd, JSON.stringify(cmds[ci]))');
+      // ...and NOT the bare global sink (the single-HTML build's). The leading
+      // space disambiguates a bare `handle_command(` from `wasm.handle_command(`,
+      // which is preceded by a dot — symmetric to gameTemplate.test.ts's guard.
+      expect(text).not.toContain(' handle_command(cmds[ci]');
     });
 
     it('wires the event callback to the engine single-arg PLAY_TICK input contract (#8752)', async () => {
