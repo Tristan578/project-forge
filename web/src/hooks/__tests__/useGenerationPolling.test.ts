@@ -365,6 +365,105 @@ describe('useGenerationPolling', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Completion-path failures must still refund (#8757 invariant, client side)
+  // ---------------------------------------------------------------------------
+  it('refunds and fails a completed texture job whose maps are an empty object', async () => {
+    // Defense-in-depth: the status route now maps empty maps to `failed`, but the
+    // poller must also reject a truthy-but-empty `{}` rather than silently completing
+    // with zero textures applied. A `completed` with `maps: {}` must refund.
+    mockJobs['te1'] = makeJob('te1', {
+      type: 'texture',
+      usageId: 'usage-te1',
+      entityId: 'ent-te1',
+      autoPlace: true,
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : (url as Request).url;
+      if (urlStr.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      return {
+        ok: true,
+        json: () => Promise.resolve({
+          jobId: 'job-te1',
+          status: 'completed',
+          progress: 100,
+          maps: {},
+        }),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    // No textures should have been applied from an empty map set
+    expect(mockLoadTexture).not.toHaveBeenCalled();
+    // The job must end failed with the missing-maps error...
+    expect(mockUpdateJob).toHaveBeenCalledWith('te1', {
+      status: 'failed',
+      error: 'No texture maps',
+    });
+    // ...and the user must be refunded (this is the path that used to silently
+    // mark completed with no refund).
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/generate/refund',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('usage-te1'),
+      }),
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('refunds a completed job whose artifact download fails', async () => {
+    // A status route can legitimately report `completed` and the artifact URL can
+    // still 404/500 at download time. Before, handleCompletion's catch marked the job
+    // failed WITHOUT refunding — charging the user for a result they never got. The
+    // catch must now refund regardless of which completion step threw.
+    mockJobs['dl1'] = makeJob('dl1', {
+      type: 'model',
+      usageId: 'usage-dl1',
+      autoPlace: true,
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : (url as Request).url;
+      if (urlStr.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      if (urlStr.includes('/status')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            jobId: 'job-dl1',
+            status: 'completed',
+            progress: 100,
+            resultUrl: 'https://example.com/model.glb',
+          }),
+        } as Response;
+      }
+      // The artifact download itself fails (e.g. expired signed URL).
+      return { ok: false, status: 404 } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    // Failed because the download threw...
+    expect(mockUpdateJob).toHaveBeenCalledWith('dl1', expect.objectContaining({
+      status: 'failed',
+    }));
+    // ...and refunded so the user is not charged for an undeliverable result.
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/generate/refund',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('usage-dl1'),
+      }),
+    );
+    fetchSpy.mockRestore();
+  });
+
+  // ---------------------------------------------------------------------------
   // Timeout (max polls)
   // ---------------------------------------------------------------------------
   it('times out after MAX_POLL_COUNT (100) polls', async () => {

@@ -257,8 +257,11 @@ export function useGenerationPolling() {
           },
         });
       } else if (type === 'texture') {
-        // Download PBR maps and apply to entity
-        if (!data.maps) throw new Error('No texture maps');
+        // Download PBR maps and apply to entity. A truthy-but-empty `{}` is not a
+        // usable result — `Object.entries({})` would iterate zero times and mark the
+        // job `completed` with no textures applied and no error. Treat it as missing
+        // so the catch below refunds, matching the status route's own empty-maps guard.
+        if (!data.maps || Object.keys(data.maps).length === 0) throw new Error('No texture maps');
 
         // Use targetEntityId (from autoPlace) or fall back to legacy entityId
         const entityId = job.targetEntityId ?? job.entityId;
@@ -456,6 +459,13 @@ export function useGenerationPolling() {
       }
     } catch (err) {
       console.error('Completion error:', err);
+      // A job that reached `completed` but failed to download or import a usable
+      // artifact must STILL refund — otherwise the user is charged for a result they
+      // never received (the same charge-with-no-refund hole the status routes close
+      // upstream, #8757). triggerRefund is idempotent server-side (refundTokens uses a
+      // CTE ON CONFLICT keyed on usageId) and polling has already stopped by the time
+      // this branch is reached, so it fires at most once per job.
+      await triggerRefund(id);
       updateJob(id, {
         status: 'failed',
         error: err instanceof Error ? err.message : 'Download failed',
