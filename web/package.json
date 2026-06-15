@@ -67,7 +67,7 @@
     "@vercel/speed-insights": "^2.0.0",
     "@xyflow/react": "^12.10.1",
     "acorn": "^8.16.0",
-    "ai": "^6.0.193",
+    "ai": "^6.0.205",
     "bcryptjs": "^3.0.3",
     "dockview-react": "^6.0.1",
     "dotenv": "^17.3.1",
@@ -76,13 +76,13 @@
     "lucide-react": "^1.0.1",
     "next": "^16.2.6",
     "next-intl": "^4.9.2",
-    "posthog-js": "^1.376.4",
+    "posthog-js": "^1.386.6",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
-    "stripe": "^22.2.0",
+    "stripe": "^22.2.1",
     "svix": "^1.89.0",
     "web-vitals": "^5.1.0",
     "zod": "^4.4.3",
@@ -102,7 +102,7 @@
     "@types/node": "^25",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@vitest/coverage-v8": "^4.1.7",
+    "@vitest/coverage-v8": "^4.1.8",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "drizzle-kit": "^0.31.10",
@@ -112,7 +112,7 @@
     "portless": "^0.14.0",
     "tailwindcss": "^4",
     "typescript": "^6",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.8"
   },
   "optionalDependencies": {
     "@types/trusted-types": "^2.0.7"
