@@ -21,7 +21,23 @@ if (DSN) {
     // (they can hold decrypted BYOK provider keys and prompts) and do NOT send
     // default PII (IPs, cookies, headers, user data). scrubSentryEvent provides
     // defence-in-depth, redacting any residual secrets/PII before transmission.
-    sendDefaultPii: false,
+    //
+    // Migrated off the deprecated `sendDefaultPii: false` (removed in @sentry v11)
+    // to the `dataCollection` framework. This object MUST stay exhaustive: as soon
+    // as ANY `dataCollection` key is present, every OMITTED field falls back to
+    // Sentry's permissive DEFAULTS (cookies/queryParams/headers/genAI all on), so a
+    // partial object would silently re-enable PII. Every field below is opted out —
+    // equivalent-or-stricter than the legacy false path, notably
+    // `stackFrameVariables: false`, which the legacy path resolved to `true`.
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      queryParams: false,
+      httpHeaders: { request: false, response: false },
+      httpBodies: [],
+      genAI: { inputs: false, outputs: false },
+      stackFrameVariables: false,
+    },
     enableLogs: true,
     beforeSend: scrubSentryEvent,
     beforeSendTransaction: scrubSentryEvent,
