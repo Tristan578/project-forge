@@ -59,7 +59,7 @@
     "@google/generative-ai": "^0.24.1",
     "@monaco-editor/react": "^4.7.0",
     "@neondatabase/serverless": "^1.1.0",
-    "@sentry/nextjs": "^10.55.0",
+    "@sentry/nextjs": "^10.57.0",
     "@spawnforge/ui": "*",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",

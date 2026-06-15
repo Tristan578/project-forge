@@ -18,8 +18,20 @@ if (DSN) {
     },
 
     // SECURITY (audit 2026-05-30, F03/F04): no default PII; scrub residual
-    // secrets/PII from every event before transmission.
-    sendDefaultPii: false,
+    // secrets/PII from every event before transmission. Migrated off the
+    // deprecated `sendDefaultPii: false` to the `dataCollection` framework — the
+    // object MUST stay exhaustive (any partial object re-enables PII via Sentry's
+    // permissive defaults). Every field is opted out (see sentry.server.config.ts
+    // for the full rationale).
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      queryParams: false,
+      httpHeaders: { request: false, response: false },
+      httpBodies: [],
+      genAI: { inputs: false, outputs: false },
+      stackFrameVariables: false,
+    },
     enableLogs: true,
     beforeSend: scrubSentryEvent,
     beforeSendTransaction: scrubSentryEvent,

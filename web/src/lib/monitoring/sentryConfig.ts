@@ -153,12 +153,15 @@ function fingerprintEvent(event: Event): Event {
 //
 // Defence-in-depth for two High-severity audit findings (2026-05-30):
 //   - F04: stack-frame local variables can hold decrypted BYOK provider keys and
-//          prompts. We removed `includeLocalVariables` from the server init, and
-//          additionally strip `frame.vars` here in case it is ever re-enabled or
-//          populated by an integration.
-//   - F03: `sendDefaultPii` is now false, but breadcrumbs, exception messages,
-//          request bodies, and structured context can still embed emails, IPs,
-//          cookies, auth headers, and API keys. This hook redacts them.
+//          prompts. We removed `includeLocalVariables` from the server init and
+//          set `dataCollection.stackFrameVariables: false`, and additionally strip
+//          `frame.vars` here in case it is ever re-enabled or populated by an
+//          integration.
+//   - F03: default PII collection is disabled via the exhaustive `dataCollection`
+//          opt-out (migrated from `sendDefaultPii: false`), but breadcrumbs,
+//          exception messages, request bodies, and structured context can still
+//          embed emails, IPs, cookies, auth headers, and API keys. This hook
+//          redacts them.
 //
 // `scrubEvent` is wired as both `beforeSend` and `beforeSendTransaction` in every
 // Sentry.init (server, edge, client). It always returns the (mutated) event — the
