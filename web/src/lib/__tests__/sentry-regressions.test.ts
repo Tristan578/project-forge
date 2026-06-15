@@ -349,3 +349,119 @@ describe('PF-892: Sentry client config must not include server-only AI integrati
     expect(content).toContain('anthropicAIIntegration');
   });
 });
+
+// ---------------------------------------------------------------------------
+// F03/F04 (#8778): Sentry dataCollection opt-out must stay exhaustive
+// ---------------------------------------------------------------------------
+
+describe('F03/F04 (#8778): Sentry dataCollection opt-out must stay exhaustive', () => {
+  /**
+   * The migration off the deprecated `sendDefaultPii: false` to the
+   * `dataCollection` framework introduced a silent footgun: once ANY
+   * `dataCollection` key is set, Sentry resolves every OMITTED field to its
+   * permissive DEFAULT (cookies / queryParams / httpHeaders / genAI /
+   * stackFrameVariables all ON). A future edit that drops a single field — or
+   * flips one to `true` — would re-enable PII capture while still passing tsc
+   * and every existing test. These guards fail on that regression, preserving
+   * the F03/F04 audit posture (no default PII, no stack-frame locals) across all
+   * three Sentry init sites.
+   *
+   * See web/src/lib/monitoring/sentryConfig.ts and the three init configs.
+   */
+  const CONFIG_FILES = [
+    'sentry.server.config.ts',
+    'sentry.edge.config.ts',
+    'instrumentation-client.ts',
+  ] as const;
+
+  // Every privacy-relevant dataCollection field with its required opt-out
+  // literal. Missing any of these → Sentry's permissive default silently
+  // re-enables that data class.
+  const REQUIRED_OPT_OUTS = [
+    'userInfo: false',
+    'cookies: false',
+    'queryParams: false',
+    'httpHeaders: { request: false, response: false }',
+    'httpBodies: []',
+    'genAI: { inputs: false, outputs: false }',
+    'stackFrameVariables: false',
+  ] as const;
+
+  // Any of these literals inside a config means a field was flipped back ON.
+  // (None collide with unrelated config: the AI integration uses
+  // `recordInputs`/`recordOutputs`, not `inputs:`/`outputs:`.)
+  const FORBIDDEN_OPT_INS = [
+    'userInfo: true',
+    'cookies: true',
+    'queryParams: true',
+    'stackFrameVariables: true',
+    'request: true',
+    'response: true',
+    'inputs: true',
+    'outputs: true',
+  ] as const;
+
+  // Strip block + line comments so the guards inspect ACTIVE config only. The
+  // configs intentionally DOCUMENT the migration in prose (e.g. "Migrated off
+  // the deprecated `sendDefaultPii: false`"), so a raw-text scan would conflate
+  // explanatory comments with real Sentry.init options.
+  function stripComments(src: string): string {
+    return src
+      .replace(/\/\*[\s\S]*?\*\//g, '') // block comments (incl. JSDoc)
+      .replace(/\/\/.*$/gm, ''); // line comments
+  }
+
+  async function readConfig(file: string): Promise<string> {
+    const fs = await import('fs');
+    const path = await import('path');
+    const raw = fs.readFileSync(path.resolve(process.cwd(), file), 'utf-8');
+    return stripComments(raw);
+  }
+
+  it.each(CONFIG_FILES)('%s declares a dataCollection block', async (file) => {
+    const content = await readConfig(file);
+    expect(content).toContain('dataCollection: {');
+  });
+
+  it.each(CONFIG_FILES)(
+    '%s opts out of every PII-relevant dataCollection field',
+    async (file) => {
+      const content = await readConfig(file);
+      for (const field of REQUIRED_OPT_OUTS) {
+        expect(
+          content,
+          `${file} is missing an exhaustive opt-out: "${field}" — a dropped field re-enables PII via Sentry defaults`,
+        ).toContain(field);
+      }
+    },
+  );
+
+  it.each(CONFIG_FILES)(
+    '%s never flips a dataCollection field back on',
+    async (file) => {
+      const content = await readConfig(file);
+      for (const optIn of FORBIDDEN_OPT_INS) {
+        expect(
+          content,
+          `${file} re-enables PII via "${optIn}"`,
+        ).not.toContain(optIn);
+      }
+    },
+  );
+
+  it.each(CONFIG_FILES)(
+    '%s no longer uses the deprecated sendDefaultPii flag',
+    async (file) => {
+      const content = await readConfig(file);
+      expect(content).not.toContain('sendDefaultPii');
+    },
+  );
+
+  it.each(CONFIG_FILES)(
+    '%s keeps scrubSentryEvent as defence-in-depth on beforeSend',
+    async (file) => {
+      const content = await readConfig(file);
+      expect(content).toContain('beforeSend: scrubSentryEvent');
+    },
+  );
+});
