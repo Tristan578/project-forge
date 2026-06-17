@@ -3,6 +3,18 @@ vi.mock('server-only', () => ({}));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db/client';
+import { eq } from 'drizzle-orm';
+
+// Spy on drizzle's `eq` so we can assert the route applies the
+// `status = 'published'` visibility filter (the .where() mock is a passthrough).
+vi.mock('drizzle-orm', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('drizzle-orm')>();
+  return {
+    ...actual,
+    eq: vi.fn((col: unknown, val: unknown) => ({ __eq: [col, val] })),
+    and: vi.fn((...conds: unknown[]) => ({ __and: conds })),
+  };
+});
 
 vi.mock('@/lib/db/client');
 vi.mock('@/lib/db/schema', () => ({
@@ -65,6 +77,26 @@ describe('GET /api/community/games/[id]', () => {
     expect(body.game.tags).toEqual(['puzzle', 'casual']);
     expect(body.game.comments).toHaveLength(1);
     expect(body.game.ratingBreakdown).toHaveLength(5);
+
+    // Security: the detail query MUST constrain to published games so
+    // processing/unpublished/removed games are never exposed (#8614, #8638).
+    expect(vi.mocked(eq)).toHaveBeenCalledWith('status', 'published');
+  });
+
+  it('should not leak a non-published (processing/unpublished/removed) game — returns 404', async () => {
+    // With the status filter applied, a processing game matches no row → empty result.
+    const gameChain = mockDbChain([]);
+    const mockDb = { select: vi.fn().mockReturnValue(gameChain) };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { GET } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/community/games/processing-game');
+    const res = await GET(req, { params: Promise.resolve({ id: 'processing-game' }) });
+    const body = await res.json();
+
+    expect(res.status).toBe(404);
+    expect(body.error).toBe('Game not found');
+    expect(vi.mocked(eq)).toHaveBeenCalledWith('status', 'published');
   });
 
   it('should return 404 when game not found', async () => {

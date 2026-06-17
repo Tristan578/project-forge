@@ -3,6 +3,20 @@ vi.mock('server-only', () => ({}));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db/client';
+import { eq } from 'drizzle-orm';
+
+// Spy on drizzle's `eq`/`and` so we can assert the route applies the
+// `status = 'published'` visibility filter (the .where() mock is a passthrough
+// and cannot otherwise observe the predicate).
+vi.mock('drizzle-orm', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('drizzle-orm')>();
+  return {
+    ...actual,
+    eq: vi.fn((col: unknown, val: unknown) => ({ __eq: [col, val] })),
+    and: vi.fn((...conds: unknown[]) => ({ __and: conds })),
+    desc: vi.fn((col: unknown) => ({ __desc: col })),
+  };
+});
 
 vi.mock('@/lib/db/client');
 vi.mock('@/lib/db/schema', () => ({
@@ -11,7 +25,7 @@ vi.mock('@/lib/db/schema', () => ({
     priceTokens: 'priceTokens', license: 'license', previewUrl: 'previewUrl',
     assetFileSize: 'assetFileSize', downloadCount: 'downloadCount', avgRating: 'avgRating',
     ratingCount: 'ratingCount', tags: 'tags', aiGenerated: 'aiGenerated', aiProvider: 'aiProvider',
-    metadataJson: 'metadataJson', createdAt: 'createdAt', sellerId: 'sellerId',
+    metadataJson: 'metadataJson', createdAt: 'createdAt', sellerId: 'sellerId', status: 'status',
   },
   sellerProfiles: { userId: 'userId', displayName: 'displayName', bio: 'bio', portfolioUrl: 'portfolioUrl' },
   assetReviews: { id: 'id', rating: 'rating', content: 'content', createdAt: 'createdAt', assetId: 'assetId', userId: 'userId' },
@@ -88,6 +102,31 @@ describe('GET /api/marketplace/assets/[id]', () => {
     expect(body.asset.aiGenerated).toBe(true);
     expect(body.asset.seller.name).toBe('Seller');
     expect(body.reviews).toHaveLength(1);
+
+    // Security: the detail query MUST constrain to published assets so
+    // draft/pending/rejected/removed assets are never exposed (#8640).
+    expect(vi.mocked(eq)).toHaveBeenCalledWith('status', 'published');
+  });
+
+  it('should not leak a non-published (draft/pending/rejected/removed) asset — returns 404', async () => {
+    // With the status filter applied, a draft asset matches no row → empty result.
+    const assetChain = {
+      from: vi.fn().mockReturnThis(),
+      leftJoin: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([]),
+    };
+    const mockDb = { select: vi.fn().mockReturnValue(assetChain) };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { GET } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/marketplace/assets/draft-asset');
+    const res = await GET(req, { params: Promise.resolve({ id: 'draft-asset' }) });
+    const body = await res.json();
+
+    expect(res.status).toBe(404);
+    expect(body.error).toBe('Asset not found');
+    expect(vi.mocked(eq)).toHaveBeenCalledWith('status', 'published');
   });
 
   it('should return 404 when asset not found', async () => {
