@@ -15,6 +15,16 @@ import {
   feedback,
   providerKeys,
   apiKeys,
+  gameComments,
+  gameRatings,
+  gameLikes,
+  userFollows,
+  gameForks,
+  marketplaceAssets,
+  assetPurchases,
+  assetReviews,
+  sellerProfiles,
+  moderationAppeals,
 } from '@/lib/db/schema';
 
 /**
@@ -45,6 +55,16 @@ export async function GET(req: NextRequest) {
       userFeedback,
       userProviderKeys,
       userApiKeys,
+      userGameComments,
+      userGameRatings,
+      userGameLikes,
+      userFollowing,
+      userGameForks,
+      userMarketplaceAssets,
+      userAssetPurchases,
+      userAssetReviews,
+      userSellerProfile,
+      userModerationAppeals,
     ] = await queryWithResilience(() => {
       // eslint-disable-next-line no-restricted-syntax -- db ref needed for Promise.all inside queryWithResilience
       const db = getDb();
@@ -153,6 +173,96 @@ export async function GET(req: NextRequest) {
         expiresAt: apiKeys.expiresAt,
         createdAt: apiKeys.createdAt,
       }).from(apiKeys).where(eq(apiKeys.userId, userId)),
+
+      // Community: comments the user authored
+      db.select({
+        id: gameComments.id,
+        gameId: gameComments.gameId,
+        content: gameComments.content,
+        parentId: gameComments.parentId,
+        createdAt: gameComments.createdAt,
+      }).from(gameComments).where(eq(gameComments.userId, userId)),
+
+      // Community: ratings the user gave
+      db.select({
+        id: gameRatings.id,
+        gameId: gameRatings.gameId,
+        rating: gameRatings.rating,
+        createdAt: gameRatings.createdAt,
+        updatedAt: gameRatings.updatedAt,
+      }).from(gameRatings).where(eq(gameRatings.userId, userId)),
+
+      // Community: likes the user gave
+      db.select({
+        id: gameLikes.id,
+        gameId: gameLikes.gameId,
+        createdAt: gameLikes.createdAt,
+      }).from(gameLikes).where(eq(gameLikes.userId, userId)),
+
+      // Social graph: accounts the user follows (the user's own action)
+      db.select({
+        id: userFollows.id,
+        followingId: userFollows.followingId,
+        createdAt: userFollows.createdAt,
+      }).from(userFollows).where(eq(userFollows.followerId, userId)),
+
+      // Community: forks the user created
+      db.select({
+        id: gameForks.id,
+        originalGameId: gameForks.originalGameId,
+        forkedProjectId: gameForks.forkedProjectId,
+        createdAt: gameForks.createdAt,
+      }).from(gameForks).where(eq(gameForks.userId, userId)),
+
+      // Marketplace: assets the user listed for sale
+      db.select({
+        id: marketplaceAssets.id,
+        name: marketplaceAssets.name,
+        description: marketplaceAssets.description,
+        priceTokens: marketplaceAssets.priceTokens,
+        downloadCount: marketplaceAssets.downloadCount,
+        createdAt: marketplaceAssets.createdAt,
+        updatedAt: marketplaceAssets.updatedAt,
+      }).from(marketplaceAssets).where(eq(marketplaceAssets.sellerId, userId)),
+
+      // Marketplace: assets the user purchased
+      db.select({
+        id: assetPurchases.id,
+        assetId: assetPurchases.assetId,
+        priceTokens: assetPurchases.priceTokens,
+        createdAt: assetPurchases.createdAt,
+      }).from(assetPurchases).where(eq(assetPurchases.buyerId, userId)),
+
+      // Marketplace: reviews the user wrote
+      db.select({
+        id: assetReviews.id,
+        assetId: assetReviews.assetId,
+        rating: assetReviews.rating,
+        content: assetReviews.content,
+        createdAt: assetReviews.createdAt,
+      }).from(assetReviews).where(eq(assetReviews.userId, userId)),
+
+      // Marketplace: the user's seller profile (no earnings internals beyond totals)
+      db.select({
+        id: sellerProfiles.id,
+        displayName: sellerProfiles.displayName,
+        bio: sellerProfiles.bio,
+        portfolioUrl: sellerProfiles.portfolioUrl,
+        totalEarnings: sellerProfiles.totalEarnings,
+        totalSales: sellerProfiles.totalSales,
+        createdAt: sellerProfiles.createdAt,
+      }).from(sellerProfiles).where(eq(sellerProfiles.userId, userId)),
+
+      // Moderation: appeals the user filed
+      db.select({
+        id: moderationAppeals.id,
+        contentId: moderationAppeals.contentId,
+        contentType: moderationAppeals.contentType,
+        reason: moderationAppeals.reason,
+        status: moderationAppeals.status,
+        createdAt: moderationAppeals.createdAt,
+        reviewedAt: moderationAppeals.reviewedAt,
+      }).from(moderationAppeals).where(eq(moderationAppeals.userId, userId)),
     ]);
     });
 
@@ -169,6 +279,16 @@ export async function GET(req: NextRequest) {
       feedback: userFeedback,
       providerKeys: userProviderKeys,
       apiKeys: userApiKeys,
+      gameComments: userGameComments,
+      gameRatings: userGameRatings,
+      gameLikes: userGameLikes,
+      following: userFollowing,
+      gameForks: userGameForks,
+      marketplaceAssets: userMarketplaceAssets,
+      assetPurchases: userAssetPurchases,
+      assetReviews: userAssetReviews,
+      sellerProfile: userSellerProfile[0] ?? null,
+      moderationAppeals: userModerationAppeals,
     };
 
     return new NextResponse(JSON.stringify(exportData, null, 2), {
