@@ -84,3 +84,13 @@ jobs:
 
           echo "Found changeset(s):"
           echo "$CHANGESETS"
+
+      - name: Validate changeset package names against the workspace
+        if: steps.skip.outputs.skip == 'false'
+        # Guards against a changeset targeting a non-workspace package (e.g. the
+        # root "spawnforge", or typos like "spawnforge-web"/"@spawnforge/web"),
+        # which makes `changeset version` throw during release assembly. The
+        # require-a-changeset step above only checks a file EXISTS — it never
+        # validated the package name, which is how malformed names kept landing
+        # (#8325 → #8396 → #8732). node is preinstalled on the runner.
+        run: bash scripts/check-changeset-packages.sh
