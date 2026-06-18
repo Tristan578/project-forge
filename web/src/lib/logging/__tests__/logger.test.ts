@@ -228,6 +228,124 @@ describe('logger', () => {
     });
   });
 
+  describe('secret redaction (#8642)', () => {
+    /** Run a logger call in production mode and return the parsed JSON entry. */
+    function logProd(fn: () => void): LogEntry {
+      (process.env as Record<string, string>).NODE_ENV = 'production';
+      const cap = captureConsole();
+      try {
+        fn();
+        return JSON.parse(cap.entries[0].args[0] as string) as LogEntry;
+      } finally {
+        cap.restore();
+      }
+    }
+
+    it('masks values under sensitive key names', () => {
+      const entry = logProd(() =>
+        logger.info('resolved key', {
+          apiKey: 'sk-secret-value',
+          token: 'tok_abcdef',
+          password: 'hunter2',
+          authorization: 'Bearer xyz',
+          encryptedKey: 'AAAA==',
+          userId: 'u-1',
+        }),
+      );
+      expect(entry.apiKey).toBe('[REDACTED]');
+      expect(entry.token).toBe('[REDACTED]');
+      expect(entry.password).toBe('[REDACTED]');
+      expect(entry.authorization).toBe('[REDACTED]');
+      expect(entry.encryptedKey).toBe('[REDACTED]');
+      // Non-sensitive fields are preserved
+      expect(entry.userId).toBe('u-1');
+    });
+
+    it('masks camelCase and snake_case key variants', () => {
+      const entry = logProd(() =>
+        logger.info('mixed', {
+          stripe_secret_key: 'sk_live_abc',
+          cacheKey: 'safe-value-but-masked',
+          sessionToken: 'abc',
+        }),
+      );
+      expect(entry.stripe_secret_key).toBe('[REDACTED]');
+      expect(entry.cacheKey).toBe('[REDACTED]');
+      expect(entry.sessionToken).toBe('[REDACTED]');
+    });
+
+    it('does not mask innocuous keys that merely contain a sensitive substring', () => {
+      const entry = logProd(() =>
+        logger.info('innocuous', { monkey: 'banana', keyboard: 'qwerty', donkey: 'kong' }),
+      );
+      expect(entry.monkey).toBe('banana');
+      expect(entry.keyboard).toBe('qwerty');
+      expect(entry.donkey).toBe('kong');
+    });
+
+    it('scrubs secret-shaped substrings from non-sensitive string values', () => {
+      const entry = logProd(() =>
+        logger.error('db failure', {
+          error: 'auth failed for Bearer abc.def.ghi using sk_live_deadbeef0000',
+        }),
+      );
+      expect(entry.error).not.toContain('abc.def.ghi');
+      expect(entry.error).not.toContain('sk_live_deadbeef0000');
+      expect(entry.error).toContain('[REDACTED]');
+    });
+
+    it('scrubs forge_ and JWT patterns inside the log message itself', () => {
+      const entry = logProd(() =>
+        logger.info('user provided forge_abc123def456 and eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'),
+      );
+      expect(entry.message).not.toContain('forge_abc123def456');
+      expect(entry.message).toContain('[REDACTED]');
+    });
+
+    it('redacts sensitive keys nested inside objects and arrays', () => {
+      const entry = logProd(() =>
+        logger.info('nested', {
+          resolved: { provider: 'openai', key: 'sk-nested-secret' },
+          items: [{ token: 'nested-token' }],
+        }),
+      );
+      const resolved = entry.resolved as Record<string, unknown>;
+      expect(resolved.provider).toBe('openai');
+      expect(resolved.key).toBe('[REDACTED]');
+      const items = entry.items as Array<Record<string, unknown>>;
+      expect(items[0].token).toBe('[REDACTED]');
+    });
+
+    it('redacts a bound sensitive field on a child logger', () => {
+      const entry = logProd(() => {
+        const reqLog = logger.child({ apiKey: 'sk-bound-secret', requestId: 'req_1' });
+        reqLog.info('child');
+      });
+      expect(entry.apiKey).toBe('[REDACTED]');
+      expect(entry.requestId).toBe('req_1');
+    });
+
+    it('handles circular references without throwing', () => {
+      const entry = logProd(() => {
+        const circular: Record<string, unknown> = { name: 'root' };
+        circular.self = circular;
+        logger.info('circular', { data: circular });
+      });
+      const data = entry.data as Record<string, unknown>;
+      expect(data.name).toBe('root');
+      expect(data.self).toBe('[Circular]');
+    });
+
+    it('scrubs a credential embedded in an Error object message', () => {
+      const entry = logProd(() =>
+        logger.error('caught', { err: new Error('failed with sk_test_supersecret123') }),
+      );
+      const err = entry.err as Record<string, unknown>;
+      expect(String(err.message)).not.toContain('sk_test_supersecret123');
+      expect(String(err.message)).toContain('[REDACTED]');
+    });
+  });
+
   describe('log level filtering', () => {
     it('suppresses debug when LOG_LEVEL=warn', () => {
       (process.env as Record<string, string>).LOG_LEVEL = 'warn';

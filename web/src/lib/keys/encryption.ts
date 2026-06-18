@@ -8,15 +8,28 @@ const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 
+/** A valid AES-256 master key: exactly 64 hexadecimal characters (32 bytes). */
+export const MASTER_KEY_HEX = /^[0-9a-fA-F]{64}$/;
+
 function getMasterKey(): Buffer {
   const key = process.env.ENCRYPTION_MASTER_KEY;
-  if (!key || key.length !== 64) {
+  // Validate hex charset, not just length: Buffer.from(s, 'hex') silently stops
+  // at the first non-hex character, so a 64-char non-hex string (e.g. all 'z')
+  // yields a 0-byte buffer that only fails at createCipheriv time with a cryptic
+  // 'Invalid key length'. Reject it here with a clear message instead (#8641).
+  if (!key || !MASTER_KEY_HEX.test(key)) {
     throw new Error(
       'ENCRYPTION_MASTER_KEY must be a 64-character hex string (32 bytes). ' +
         'Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
     );
   }
-  return Buffer.from(key, 'hex');
+  const buf = Buffer.from(key, 'hex');
+  // Defense-in-depth: the regex already guarantees 32 bytes, but assert it so a
+  // future regex change can never silently produce a short key.
+  if (buf.length !== 32) {
+    throw new Error('ENCRYPTION_MASTER_KEY must decode to exactly 32 bytes.');
+  }
+  return buf;
 }
 
 /** Encrypt a provider API key for storage at rest */

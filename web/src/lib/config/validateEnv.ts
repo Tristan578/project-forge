@@ -9,6 +9,8 @@
  * Optional vars are documented with their defaults.
  */
 
+import { MASTER_KEY_HEX } from '@/lib/keys/encryption';
+
 /** Descriptor for a required environment variable. */
 interface RequiredVar {
   key: string;
@@ -124,6 +126,17 @@ export function validateEnvironment(): EnvValidationResult {
     const msg = 'CLERK_SECRET_KEY is a TEST key (sk_test_*) in production. Use sk_live_* for production.';
     warnings.push(msg);
     console.warn(`[validateEnvironment] WARNING: ${msg}`);
+  }
+
+  // Encryption key charset validation: a present-but-malformed key (right length,
+  // non-hex chars) passes the missing-var check above, then crashes the first
+  // BYOK encrypt/decrypt with 'Invalid key length' instead of failing at boot.
+  // Catch the misconfiguration here so it surfaces as a clear startup error (#8641).
+  const masterKey = process.env.ENCRYPTION_MASTER_KEY;
+  if (masterKey && !MASTER_KEY_HEX.test(masterKey)) {
+    const msg = 'ENCRYPTION_MASTER_KEY is set but is not a 64-character hex string (32 bytes). BYOK encryption will crash on first use.';
+    if (!missing.includes('ENCRYPTION_MASTER_KEY')) missing.push('ENCRYPTION_MASTER_KEY');
+    console.error(`[validateEnvironment] CRITICAL: ${msg}`);
   }
 
   for (const v of OPTIONAL_VARS) {

@@ -222,14 +222,41 @@ describe('encryption module', () => {
       expect(() => encryptProviderKey('test')).toThrow('64-character hex string');
     });
 
-    it('throws when key is the right length but contains non-hex chars', async () => {
-      // 64 chars but includes 'z' which is not a valid hex digit.
-      // Node's Buffer.from('zzz...', 'hex') returns a zero-length buffer
-      // (it stops at the first invalid nibble), so AES-256-GCM rejects it
-      // immediately with "Invalid key length".
+    it('throws the descriptive error for a 64-char all-non-hex key (#8641)', async () => {
+      // 64 chars but every char is 'z' (not a hex digit). Node's
+      // Buffer.from('zzz...', 'hex') stops at the first invalid nibble and
+      // returns a 0-byte buffer, which historically surfaced only as a cryptic
+      // "Invalid key length" at createCipheriv time. getMasterKey now validates
+      // the hex charset up front, so the clear ENCRYPTION_MASTER_KEY message fires.
       process.env.ENCRYPTION_MASTER_KEY = 'z'.repeat(64);
       const { encryptProviderKey } = await import('../encryption');
-      expect(() => encryptProviderKey('hex-chars-test')).toThrow();
+      expect(() => encryptProviderKey('hex-chars-test')).toThrow('64-character hex string');
+    });
+
+    it('throws for a 64-char key with a single non-hex char in the middle (#8641)', async () => {
+      // 'g' is the first illegal hex char; only the leading hex prefix decodes,
+      // yielding a < 32-byte buffer. Rejected at the charset gate.
+      const key = 'a'.repeat(40) + 'g' + 'a'.repeat(23); // 64 chars, one 'g'
+      expect(key.length).toBe(64);
+      process.env.ENCRYPTION_MASTER_KEY = key;
+      const { encryptProviderKey } = await import('../encryption');
+      expect(() => encryptProviderKey('mid-non-hex')).toThrow('64-character hex string');
+    });
+
+    it('accepts a valid uppercase-hex key (charset regex is case-insensitive) (#8641)', async () => {
+      process.env.ENCRYPTION_MASTER_KEY = freshKey().toUpperCase();
+      const { encryptProviderKey, decryptProviderKey } = await import('../encryption');
+      const { encrypted, iv } = encryptProviderKey('uppercase-hex-key');
+      expect(decryptProviderKey(encrypted, iv)).toBe('uppercase-hex-key');
+    });
+
+    it('MASTER_KEY_HEX regex matches 64 hex chars and rejects bad input (#8641)', async () => {
+      const { MASTER_KEY_HEX } = await import('../encryption');
+      expect(MASTER_KEY_HEX.test('a'.repeat(64))).toBe(true);
+      expect(MASTER_KEY_HEX.test('A'.repeat(64))).toBe(true);
+      expect(MASTER_KEY_HEX.test('z'.repeat(64))).toBe(false);
+      expect(MASTER_KEY_HEX.test('a'.repeat(63))).toBe(false);
+      expect(MASTER_KEY_HEX.test('a'.repeat(65))).toBe(false);
     });
 
     it('throws on decryptProviderKey when master key is missing', async () => {

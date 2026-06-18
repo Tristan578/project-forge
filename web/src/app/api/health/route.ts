@@ -84,8 +84,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const criticalStatus = computeCriticalStatus(report.services);
   const httpStatus = criticalStatus === 'down' ? 503 : 200;
 
+  // Commit SHA prefix is acceptable to expose for build identification, but the
+  // full git branch ref (VERCEL_GIT_COMMIT_REF) leaks internal branch naming and
+  // in-flight feature work to anyone hitting this unauthenticated endpoint, so it
+  // is deliberately omitted from the public payload (#8648).
   const commit = process.env.VERCEL_GIT_COMMIT_SHA ?? 'local';
-  const branch = process.env.VERCEL_GIT_COMMIT_REF ?? 'unknown';
 
   const dbService = report.services.find((s) => s.name === 'Database (Neon)');
   const dbStatus =
@@ -120,7 +123,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     status: criticalStatus === 'down' ? 'error' : 'ok',
     environment: report.environment,
     commit: commit.slice(0, 8),
-    branch,
     database: dbStatus,
     timestamp: report.timestamp,
     overall: report.overall,
