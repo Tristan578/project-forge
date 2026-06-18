@@ -334,4 +334,68 @@ describe('createGenerationHandler', () => {
     await handler(makeRequest({ data: 'binary data' }));
     expect(mockSanitize).not.toHaveBeenCalled();
   });
+
+  // -------------------------------------------------------------------------
+  // #8650 — secondary free-text fields must run through the content-safety
+  // filter, not just the primary promptField.
+  // -------------------------------------------------------------------------
+
+  const secondaryHandler = () =>
+    createGenerationHandler({
+      route: '/api/generate/test',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-test',
+      secondaryPromptFields: ['negativePrompt', 'artStyle'],
+      validate: (body) => ({
+        ok: true,
+        params: {
+          prompt: body.prompt as string,
+          negativePrompt: body.negativePrompt as string | undefined,
+          artStyle: body.artStyle as string | undefined,
+        },
+      }),
+      execute: async () => ({ ok: true }),
+    });
+
+  it('runs content safety on every secondary prompt field (#8650)', async () => {
+    const handler = secondaryHandler();
+    await handler(makeRequest({
+      prompt: 'a friendly robot',
+      negativePrompt: 'blurry, low quality',
+      artStyle: 'realistic',
+    }));
+
+    expect(mockSanitize).toHaveBeenCalledWith('a friendly robot');
+    expect(mockSanitize).toHaveBeenCalledWith('blurry, low quality');
+    expect(mockSanitize).toHaveBeenCalledWith('realistic');
+  });
+
+  it('rejects 422 when a secondary field fails the safety filter (#8650)', async () => {
+    // Primary prompt is clean; the injection lives in negativePrompt.
+    mockSanitize.mockImplementation((p: string) =>
+      p === 'malicious payload'
+        ? { safe: false, reason: 'Unsafe content', filtered: undefined }
+        : { safe: true, filtered: p },
+    );
+
+    const handler = secondaryHandler();
+    const res = await handler(makeRequest({
+      prompt: 'a friendly robot',
+      negativePrompt: 'malicious payload',
+    }));
+
+    expect(res.status).toBe(422);
+    const data = await res.json();
+    expect(data.error).toContain('Unsafe content');
+  });
+
+  it('only screens secondary fields that are present and non-empty (#8650)', async () => {
+    const handler = secondaryHandler();
+    await handler(makeRequest({ prompt: 'a friendly robot' }));
+
+    // Absent secondary fields are not screened.
+    expect(mockSanitize).toHaveBeenCalledWith('a friendly robot');
+    expect(mockSanitize).toHaveBeenCalledTimes(1);
+  });
 });

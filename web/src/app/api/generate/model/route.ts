@@ -35,6 +35,9 @@ export const POST = createGenerationHandler<
       ? 'image_to_3d'
       : (params.quality === 'high' ? '3d_generation_high' : '3d_generation_standard'),
   rateLimitKey: 'gen-model',
+  // negativePrompt + artStyle are user-controlled free-text forwarded to Meshy;
+  // run them through the same content-safety screen as `prompt` (#8650).
+  secondaryPromptFields: ['negativePrompt', 'artStyle'],
   successStatus: 201,
   billingMetadata: (params) => ({
     prompt: params.prompt,
@@ -67,6 +70,17 @@ export const POST = createGenerationHandler<
       if (typeof imageBase64 !== 'string' || imageBase64.length > MAX_BASE64_CHARS) {
         return { ok: false, error: 'imageBase64 exceeds 10 MB limit', status: 413 };
       }
+    }
+
+    // Bound the secondary free-text fields forwarded to Meshy. Without caps these
+    // accept arbitrary-length strings; the content-safety screen still runs on
+    // them via secondaryPromptFields, but length validation belongs here (#8650).
+    if (artStyle !== undefined && (typeof artStyle !== 'string' || artStyle.length > 500)) {
+      return { ok: false, error: 'artStyle must be a string of at most 500 characters' };
+    }
+
+    if (negativePrompt !== undefined && (typeof negativePrompt !== 'string' || negativePrompt.length > 500)) {
+      return { ok: false, error: 'negativePrompt must be a string of at most 500 characters' };
     }
 
     return {

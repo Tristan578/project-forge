@@ -333,31 +333,58 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 4. Validate message length and content
-  for (const msg of messages) {
-    if (typeof msg.content !== 'string') {
-      continue; // Skip non-text messages (tool results)
-    }
+  // 4. Validate message length and content.
+  //
+  // User text arrives either as a plain string or — for the multimodal
+  // image+text format this route supports — as an array of content parts.
+  // BOTH paths must run through the length cap, the prompt-injection screen,
+  // and the sanitizer. Wrapping the same text in
+  // `content: [{ type: 'text', text: '...ignore previous instructions...' }]`
+  // must NOT bypass the documented guard (#8635). Genuinely non-text parts
+  // (images, tool_result blocks) are left untouched.
+  const MAX_MESSAGE_CHARS = 4000;
 
-    if (msg.content.length > 4000) {
+  // Screen one user-controlled text span: enforce the length cap, run the
+  // injection check (user role only), and sanitize (user role only). Returns
+  // the sanitized text, or a 400 Response to short-circuit the request.
+  const screenText = (text: string, role: string): string | Response => {
+    if (text.length > MAX_MESSAGE_CHARS) {
       return Response.json(
         { error: 'Message too long. Maximum 4000 characters per message.' },
         { status: 400 }
       );
     }
-
-    // Detect prompt injection attempts
-    if (msg.role === 'user' && detectPromptInjection(msg.content)) {
+    if (role === 'user' && detectPromptInjection(text)) {
       return Response.json(
         { error: 'Message contains suspicious patterns.' },
         { status: 400 }
       );
     }
+    return role === 'user' ? sanitizeChatInput(text) : text;
+  };
 
-    // Sanitize user messages
-    if (msg.role === 'user') {
-      msg.content = sanitizeChatInput(msg.content);
+  for (const msg of messages) {
+    if (typeof msg.content === 'string') {
+      const screened = screenText(msg.content, msg.role);
+      if (screened instanceof Response) return screened;
+      msg.content = screened;
+      continue;
     }
+
+    // Multimodal array content: screen and mutate every text block in place,
+    // skipping non-text parts (images, tool results).
+    if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (typeof block !== 'object' || block === null) continue;
+        const b = block as Record<string, unknown>;
+        if (b.type === 'text' && typeof b.text === 'string') {
+          const screened = screenText(b.text, msg.role);
+          if (screened instanceof Response) return screened;
+          b.text = screened;
+        }
+      }
+    }
+    // Other shapes (non-string, non-array) carry no user text to screen.
   }
 
   // 5. Resolve API key for billing — determines which key to use and deducts tokens.
