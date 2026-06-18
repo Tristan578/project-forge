@@ -3,10 +3,11 @@ vi.mock('server-only', () => ({}));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db/client';
-import { eq } from 'drizzle-orm';
 
-// Spy on drizzle's `eq` so we can assert the route applies the
-// `status = 'published'` visibility filter (the .where() mock is a passthrough).
+// Mock drizzle's `eq`/`and` to return inspectable plain objects so we can assert
+// on the composed predicate the route passes to `.where()`. We inspect the
+// `.where()` call argument directly (not the `eq` spy identity) so the assertion
+// is robust to `vi.resetModules()` re-running this factory on each dynamic import.
 vi.mock('drizzle-orm', async (importOriginal) => {
   const actual = await importOriginal<typeof import('drizzle-orm')>();
   return {
@@ -80,7 +81,10 @@ describe('GET /api/community/games/[id]', () => {
 
     // Security: the detail query MUST constrain to published games so
     // processing/unpublished/removed games are never exposed (#8614, #8638).
-    expect(vi.mocked(eq)).toHaveBeenCalledWith('status', 'published');
+    // Assert on the WHERE predicate the route actually composed (status filter),
+    // not the drizzle `eq` spy identity — the latter is unreliable across the
+    // `vi.resetModules()` in beforeEach.
+    expect(JSON.stringify(gameChain.where.mock.calls)).toContain('"__eq":["status","published"]');
   });
 
   it('should not leak a non-published (processing/unpublished/removed) game — returns 404', async () => {
@@ -96,7 +100,8 @@ describe('GET /api/community/games/[id]', () => {
 
     expect(res.status).toBe(404);
     expect(body.error).toBe('Game not found');
-    expect(vi.mocked(eq)).toHaveBeenCalledWith('status', 'published');
+    // The status filter is what makes a processing/unpublished game match no row.
+    expect(JSON.stringify(gameChain.where.mock.calls)).toContain('"__eq":["status","published"]');
   });
 
   it('should return 404 when game not found', async () => {
