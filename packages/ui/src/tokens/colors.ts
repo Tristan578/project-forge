@@ -16,7 +16,15 @@ export interface ThemeColorTokens {
   /** Interactive/emphasized element borders: inputs, selects, checkboxes, switches, badges, avatars, button outlines */
   '--sf-border-strong': string;
   '--sf-accent': string;
+  /** Button resting-CTA background (one step from --sf-accent); also the hover for inline accents */
   '--sf-accent-hover': string;
+  /**
+   * Button hover/pressed-CTA background. Chosen per theme so --sf-on-accent meets
+   * WCAG AA (>=4.5:1) against BOTH --sf-accent-hover (resting CTA) and this value.
+   * White-on-accent themes step darker; dark-on-accent themes step brighter — hover
+   * always *increases* text contrast. See #8742.
+   */
+  '--sf-accent-active': string;
   '--sf-on-accent': string;
   '--sf-destructive': string;
   '--sf-success': string;

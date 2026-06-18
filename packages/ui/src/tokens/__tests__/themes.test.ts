@@ -9,7 +9,7 @@ describe('Theme Definitions', () => {
     '--sf-bg-app', '--sf-bg-surface', '--sf-bg-elevated', '--sf-bg-overlay',
     '--sf-text', '--sf-text-secondary', '--sf-text-muted', '--sf-text-disabled',
     '--sf-border', '--sf-border-strong',
-    '--sf-accent', '--sf-accent-hover', '--sf-destructive', '--sf-success', '--sf-warning',
+    '--sf-accent', '--sf-accent-hover', '--sf-accent-active', '--sf-destructive', '--sf-success', '--sf-warning',
     '--sf-radius-sm', '--sf-radius-md', '--sf-radius-lg', '--sf-radius-xl', '--sf-radius-full',
     '--sf-border-width', '--sf-font-ui', '--sf-font-mono', '--sf-transition',
   ];
@@ -34,7 +34,7 @@ describe('Theme Definitions', () => {
       '--sf-bg-app', '--sf-bg-surface', '--sf-bg-elevated', '--sf-bg-overlay',
       '--sf-text', '--sf-text-secondary', '--sf-text-muted', '--sf-text-disabled',
       '--sf-border', '--sf-border-strong',
-      '--sf-accent', '--sf-accent-hover', '--sf-destructive', '--sf-success', '--sf-warning',
+      '--sf-accent', '--sf-accent-hover', '--sf-accent-active', '--sf-destructive', '--sf-success', '--sf-warning',
     ];
     const colorKeys = COLOR_TOKEN_NAMES;
     for (const key of colorKeys) {
@@ -117,6 +117,31 @@ describe('Theme Definitions', () => {
         ratio,
         `${theme}: ${description} — contrast ${ratio.toFixed(2)}:1 (${fgHex} on ${bgHex}), need >= ${minRatio}:1`
       ).toBeGreaterThanOrEqual(minRatio);
+    }
+  });
+
+  // Regression for #8742: the primary <Button variant="default"> CTA renders
+  // --sf-on-accent text on --sf-accent-hover at REST and --sf-accent-active on
+  // HOVER (see packages/ui/src/primitives/Button.tsx). The 16px/500 label is
+  // normal text, so BOTH states must clear the AA 4.5:1 floor — previously the
+  // resting --sf-accent failed in dark/rust and leaf failed at rest AND hover.
+  // Keep this in lockstep with Button.tsx: if the variant's bg tokens change,
+  // update the keys here.
+  const BUTTON_DEFAULT_BACKGROUNDS: Array<[keyof ThemeTokens, string]> = [
+    ['--sf-accent-hover', 'default Button resting CTA'],
+    ['--sf-accent-active', 'default Button hover CTA'],
+  ];
+
+  it.each(THEMES)('%s theme: default Button label meets WCAG AA at rest and hover', (theme) => {
+    const tokens = THEME_DEFINITIONS[theme];
+    const onAccent = tokens['--sf-on-accent'] as string;
+    for (const [bgKey, description] of BUTTON_DEFAULT_BACKGROUNDS) {
+      const bgHex = tokens[bgKey] as string;
+      const ratio = contrastRatio(onAccent, bgHex);
+      expect(
+        ratio,
+        `${theme}: ${description} — --sf-on-accent ${onAccent} on ${bgKey} ${bgHex} = ${ratio.toFixed(2)}:1, need >= 4.5:1`
+      ).toBeGreaterThanOrEqual(4.5);
     }
   });
 });

@@ -197,20 +197,14 @@ export function SignUpClient() {
                 real attribute off; the handler's re-entry guard blocks double
                 submission, and aria-disabled:* variants carry the visual state.
 
-                bg-[var(--sf-accent-hover)] override: the shared Button's
-                `default` variant renders --sf-on-accent on --sf-accent at rest,
-                which is only ~3.68:1 in the default (dark) theme — below the AA
-                4.5:1 floor for this 16px label. Riding the variant's already-
-                shipping hover color (--sf-accent-hover) lifts the resting CTA to
-                AA in the default theme + 5 of 7 themes via a token (no hardcoded
-                color); tailwind-merge keeps this last-wins over the variant's bg.
-                The app-wide primitive fix (incl. leaf, which fails even at hover)
-                is tracked in #8742; remove this override once that lands. */}
+                (The interim bg-[var(--sf-accent-hover)] AA override is gone: the
+                shared Button `default` variant now meets WCAG AA at rest and hover
+                in all 7 themes via its own tokens — fixed in #8742.) */}
             <Button
               type="submit"
               size="lg"
               aria-disabled={status === 'submitting' ? true : undefined}
-              className="mt-4 w-full bg-[var(--sf-accent-hover)] aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+              className="mt-4 w-full aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
             >
               {status === 'submitting' ? 'Joining…' : 'Join the waitlist'}
             </Button>

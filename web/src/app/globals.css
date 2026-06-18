@@ -21,6 +21,7 @@
   --sf-border-strong: #3f3f46;
   --sf-accent: #3b82f6;
   --sf-accent-hover: #2563eb;
+  --sf-accent-active: #1d4ed8; /* #8742: button hover CTA — mirrors dark theme in themes.ts */
   --sf-on-accent: #ffffff;
   --sf-destructive: #ef4444;
   --sf-success: #22c55e;
