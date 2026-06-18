@@ -2,6 +2,10 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 import withBundleAnalyzer from "@next/bundle-analyzer";
 import createNextIntlPlugin from "next-intl/plugin";
+import {
+  buildContentSecurityPolicy,
+  EVAL_FREE_ROUTE_SOURCES,
+} from "./src/lib/security/csp";
 
 const analyzer = withBundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
@@ -12,22 +16,15 @@ const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 const engineCdn = process.env.NEXT_PUBLIC_ENGINE_CDN_URL || "";
 const cdnDirective = engineCdn ? ` ${engineCdn}` : "";
 
-const cspDirectives = [
-  "default-src 'self'",
-  // 'unsafe-inline' is required for Clerk's sign-in/sign-up inline scripts in production.
-  // Since 'unsafe-eval' is already allowed (for WASM), 'unsafe-inline' does not
-  // meaningfully reduce CSP security. The /play/:path* route keeps a strict CSP.
-  `script-src 'self' 'unsafe-eval' 'unsafe-inline' 'wasm-unsafe-eval' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://challenges.cloudflare.com${cdnDirective}`,
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://img.clerk.com https://clerk.spawnforge.ai",
-  "font-src 'self' data:",
-  `connect-src 'self' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
-  "frame-src 'self' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://challenges.cloudflare.com",
-  "worker-src 'self' blob:",
-  "media-src 'self' blob:",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-];
+// Global CSP. 'unsafe-eval' is retained because the in-editor script sandbox
+// compiles user scripts with Function() inside a same-origin worker that inherits
+// this policy (see src/lib/security/csp.ts). It is scoped OUT of script-free public
+// routes via EVAL_FREE_ROUTE_SOURCES below (#8612, #8634).
+const globalCsp = buildContentSecurityPolicy({ allowUnsafeEval: true, engineCdn });
+// Tightened CSP (no 'unsafe-eval') applied to public content routes that never
+// mount the script sandbox. Emitted alongside the global policy; browsers enforce
+// the intersection, so these routes effectively lose 'unsafe-eval'.
+const evalFreeCsp = buildContentSecurityPolicy({ allowUnsafeEval: false, engineCdn });
 
 const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
@@ -40,7 +37,7 @@ const securityHeaders = [
   },
   {
     key: "Content-Security-Policy",
-    value: cspDirectives.join("; "),
+    value: globalCsp,
   },
 ];
 
@@ -102,6 +99,14 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      // Tighten 'unsafe-eval' out of public content routes that never run the
+      // editor script sandbox. Listed BEFORE the global /:path* rule; the
+      // tightened CSP is emitted alongside the global one and browsers enforce
+      // the most-restrictive intersection (#8612, #8634).
+      ...EVAL_FREE_ROUTE_SOURCES.map((source) => ({
+        source,
+        headers: [{ key: "Content-Security-Policy", value: evalFreeCsp }],
+      })),
       {
         source: "/:path*",
         headers: securityHeaders,
