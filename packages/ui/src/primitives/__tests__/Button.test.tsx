@@ -37,6 +37,18 @@ describe('Button', () => {
     expect(btn.className).not.toMatch(/border-\[var\(--sf-border\)\]/);
   });
 
+  it('default variant rests on --sf-accent-hover for WCAG AA contrast, not --sf-accent (regression for #8742)', () => {
+    // The resting CTA background must be --sf-accent-hover so --sf-on-accent meets
+    // >=4.5:1 in every theme; --sf-accent (the lighter inline-link color) fails AA
+    // for white-on-accent themes. Hover then steps to the darker --sf-accent-active.
+    render(<Button variant="default">Primary</Button>);
+    const btn = screen.getByRole('button');
+    expect(btn.className).toContain('bg-[var(--sf-accent-hover)]');
+    // The resting background must NOT be the un-suffixed --sf-accent token.
+    expect(btn.className).not.toMatch(/(?:^|\s)bg-\[var\(--sf-accent\)\]/);
+    expect(btn.className).toContain('hover:bg-[var(--sf-accent-active)]');
+  });
+
   it('forwards ref', () => {
     const ref = vi.fn();
     render(<Button ref={ref}>Ref</Button>);
