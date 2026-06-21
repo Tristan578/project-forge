@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+import { MASTER_KEY_HEX } from './masterKeyFormat';
 
 const ALGORITHM = 'aes-256-gcm';
 // IV_LENGTH = 16 (128-bit). NIST SP 800-38D recommends 96-bit (12-byte) IVs for
@@ -8,8 +9,9 @@ const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 
-/** A valid AES-256 master key: exactly 64 hexadecimal characters (32 bytes). */
-export const MASTER_KEY_HEX = /^[0-9a-fA-F]{64}$/;
+// Re-exported from the crypto-free `masterKeyFormat` module so existing importers
+// (and the encryption test suite) keep resolving `MASTER_KEY_HEX` from here.
+export { MASTER_KEY_HEX };
 
 function getMasterKey(): Buffer {
   const key = process.env.ENCRYPTION_MASTER_KEY;

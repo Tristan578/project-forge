@@ -9,7 +9,10 @@
  * Optional vars are documented with their defaults.
  */
 
-import { MASTER_KEY_HEX } from '@/lib/keys/encryption';
+// Import from the crypto-free format module, NOT from `@/lib/keys/encryption`:
+// validateEnv is loaded via instrumentation.ts `register()`, which runs in the
+// edge runtime too, where node `crypto` (pulled in by encryption.ts) is unavailable.
+import { MASTER_KEY_HEX } from '@/lib/keys/masterKeyFormat';
 
 /** Descriptor for a required environment variable. */
 interface RequiredVar {

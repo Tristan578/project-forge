@@ -294,6 +294,23 @@ describe('logger', () => {
       expect(entry.error).toContain('[REDACTED]');
     });
 
+    it('scrubs hyphenated OpenAI/Anthropic keys embedded in a non-sensitive value (regression for #8642)', () => {
+      // These project/key formats contain internal hyphens that terminated the
+      // old `sk-[A-Za-z0-9]{20,}` class at the first dash, leaving the key in logs.
+      const openaiProj = 'sk-proj-Abc123Def456Ghi789Jkl012Mno345';
+      const anthropic = 'sk-ant-api03-Abc123Def456Ghi789Jkl012Mno345pqr';
+      const entry = logProd(() =>
+        logger.error('provider call failed', {
+          detail: `openai=${openaiProj} anthropic=${anthropic}`,
+        }),
+      );
+      expect(entry.detail).not.toContain(openaiProj);
+      expect(entry.detail).not.toContain(anthropic);
+      expect(entry.detail).not.toContain('sk-proj-');
+      expect(entry.detail).not.toContain('sk-ant-api03-');
+      expect(entry.detail).toContain('[REDACTED]');
+    });
+
     it('scrubs forge_ and JWT patterns inside the log message itself', () => {
       const entry = logProd(() =>
         logger.info('user provided forge_abc123def456 and eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'),

@@ -62,7 +62,10 @@ const SENSITIVE_KEY_TOKENS = new Set([
 const SECRET_VALUE_PATTERNS: RegExp[] = [
   /Bearer\s+[A-Za-z0-9._\-]+/gi,
   /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]+/g,
-  /\bsk-[A-Za-z0-9]{20,}/g,
+  // OpenAI (`sk-...`, `sk-proj-...`) and Anthropic (`sk-ant-api03-...`) keys embed
+  // hyphens in the body, so the character class must include `-` and `_` or the
+  // match terminates at the first hyphen and the key survives unredacted.
+  /\bsk-[A-Za-z0-9_-]{20,}/g,
   /\bwhsec_[A-Za-z0-9]+/g,
   /\bforge_[A-Za-z0-9]+/g,
   /\beyJ[A-Za-z0-9._\-]{20,}/g, // JWT
