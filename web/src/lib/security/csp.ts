@@ -80,13 +80,11 @@ export function buildContentSecurityPolicy({ allowUnsafeEval, engineCdn = '' }: 
 
 /**
  * Public/content route prefixes that never mount the editor script sandbox and
- * therefore receive the eval-free (tightened) CSP. Browsers enforce every CSP
- * header present on a response as an intersection, so emitting the tightened
- * policy alongside the permissive global policy yields the most-restrictive
- * (eval-free) result on these routes — the same mechanism `/play` relies on.
+ * therefore receive the eval-free (tightened) CSP.
  *
  * Editor routes (`/dev`, `/editor/:path*`) are deliberately absent so they keep
- * the global policy's `'unsafe-eval'`.
+ * the global policy's `'unsafe-eval'`, which their `Function()`-based script
+ * sandbox requires.
  */
 export const EVAL_FREE_ROUTE_SOURCES: string[] = [
   '/community/:path*',
@@ -102,3 +100,92 @@ export const EVAL_FREE_ROUTE_SOURCES: string[] = [
   '/docs/:path*',
   '/api-docs/:path*',
 ];
+
+/**
+ * Locked-down policy for published/played games (`/play/:path*`). A played game
+ * runs only first-party code + WASM, so script-src carries neither
+ * `'unsafe-eval'` nor `'unsafe-inline'` (it does not mount Clerk or the editor).
+ * Kept independent of {@link EVAL_FREE_ROUTE_SOURCES} because the game surface
+ * needs a strictly smaller allowlist than the marketing/content routes.
+ */
+export function buildPlayContentSecurityPolicy(engineCdn = ''): string {
+  const cdn = engineCdn ? ` ${engineCdn}` : '';
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'wasm-unsafe-eval'${cdn}`,
+    `connect-src 'self'${cdn}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "frame-ancestors 'none'",
+  ].join('; ');
+}
+
+export interface CspRouteRule {
+  source: string;
+  headers: Array<{ key: 'Content-Security-Policy'; value: string }>;
+}
+
+/**
+ * Build the ORDERED list of Content-Security-Policy route rules consumed by
+ * `next.config.ts#headers()`. This is the single source of truth for CSP route
+ * scoping so the ordering contract below can be unit-tested.
+ *
+ * ## Ordering is load-bearing (#8634, #8612)
+ *
+ * Next.js applies EVERY matching `headers()` rule, and when two matching rules
+ * set the same header key the LAST one in the returned array wins (documented
+ * "Header Overriding Behavior"). It is NOT a browser-style intersection of
+ * multiple CSP headers — Next emits exactly one CSP header, the last writer's.
+ *
+ * Therefore the permissive global (`/:path*`) rule MUST come FIRST and the
+ * tightened per-route overrides (`/play`, the content routes) MUST come AFTER
+ * it, so each override is the last writer for its own paths and actually takes
+ * effect. The previous ordering (overrides before the global rule) was silently
+ * a no-op: the global rule overrode every tightened policy, leaving
+ * `'unsafe-eval'` live on the public content routes AND on `/play`.
+ */
+export function buildCspRouteRules({ engineCdn = '' }: { engineCdn?: string } = {}): CspRouteRule[] {
+  const globalCsp = buildContentSecurityPolicy({ allowUnsafeEval: true, engineCdn });
+  const evalFreeCsp = buildContentSecurityPolicy({ allowUnsafeEval: false, engineCdn });
+  const playCsp = buildPlayContentSecurityPolicy(engineCdn);
+  const csp = (value: string): CspRouteRule['headers'] => [
+    { key: 'Content-Security-Policy', value },
+  ];
+  return [
+    // Global FIRST — see the ordering note above. Last-writer-wins means a rule
+    // listed here can only be overridden by a more-specific rule BELOW it.
+    { source: '/:path*', headers: csp(globalCsp) },
+    // Overrides AFTER the global rule so they are the last writer for their paths.
+    { source: '/play/:path*', headers: csp(playCsp) },
+    ...EVAL_FREE_ROUTE_SOURCES.map((source) => ({ source, headers: csp(evalFreeCsp) })),
+  ];
+}
+
+/**
+ * Convert a Next.js header `source` pattern to a RegExp, mirroring the subset of
+ * path-to-regexp semantics this app uses: `/:name*` wildcard segments and
+ * `:name` single segments. This documents (and lets tests assert) the matching
+ * Next performs at runtime; it is NOT used in the request path (Next compiles
+ * the `source` patterns itself).
+ */
+export function cspSourceToRegExp(source: string): RegExp {
+  const body = source
+    .replace(/\/:[A-Za-z0-9_]+\*/g, '(?:/.*)?') // "/:path*" → optional trailing segments
+    .replace(/:[A-Za-z0-9_]+/g, '[^/]+'); // ":name" → exactly one path segment
+  return new RegExp(`^${body}/?$`);
+}
+
+/**
+ * Resolve the CSP that actually applies to `path`, simulating Next.js
+ * last-writer-wins over the ordered {@link buildCspRouteRules} output. Returns
+ * `undefined` when no rule matches.
+ */
+export function effectiveCspForPath(rules: CspRouteRule[], path: string): string | undefined {
+  let value: string | undefined;
+  for (const rule of rules) {
+    if (!cspSourceToRegExp(rule.source).test(path)) continue;
+    const header = rule.headers.find((h) => h.key === 'Content-Security-Policy');
+    if (header) value = header.value; // last writer wins — mirrors Next.js
+  }
+  return value;
+}
