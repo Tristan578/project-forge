@@ -36,7 +36,7 @@
     "dompurify": ">=3.4.10",
     "esbuild": ">=0.25.0",
     "fast-xml-parser": ">=5.7.2",
-    "hono": "^4.12.14",
+    "hono": "4.12.26",
     "js-cookie": ">=3.0.7",
     "lodash": ">=4.18.1",
     "postcss": ">=8.5.10",
@@ -47,7 +47,9 @@
     "qs": ">=6.15.2",
     "uuid": ">=14.0.0",
     "eslint-plugin-react-hooks": "7.0.1",
-    "ws": ">=8.20.1"
+    "ws": ">=8.20.1",
+    "undici": "^7.28.0",
+    "vite": "^6.4.3"
   },
   "scripts": {
     "changeset": "changeset",

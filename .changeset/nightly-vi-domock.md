@@ -1,5 +1,5 @@
 ---
-"spawnforge": patch
+"web": patch
 ---
 
 Stabilize the nightly quality gate by replacing nested `vi.mock()` calls with `vi.doMock()` in 4 test files. `vi.mock` is statically hoisted to module scope by Vitest, so re-registering inside a function body after `vi.resetModules()` becomes a hard error in newer Vitest versions. The non-hoisted `vi.doMock()` is the correct primitive when re-registering after a module reset.
