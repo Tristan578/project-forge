@@ -1,5 +1,5 @@
 ---
-"spawnforge": minor
+"web": minor
 ---
 
 Add Opus 4.7 as the premium chat model, gated behind the Pro tier. New constants `AI_MODEL_PREMIUM`, `GATEWAY_MODEL_PREMIUM`, and `AI_MODELS.premium` / `AI_MODELS.gatewayPremium` expose the model id and its gateway-format equivalent. A new `isPremiumModel(model)` helper recognises both bare and gateway-format ids without substring matching, so future Opus revisions must be opted in explicitly.
