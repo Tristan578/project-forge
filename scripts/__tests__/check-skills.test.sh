@@ -80,7 +80,7 @@ rc="$(run_lint no-desc)"
 if [ "$rc" = "1" ]; then pass "missing description fails (exit 1)"; else fail "missing description should exit 1, got $rc"; fi
 if grep -q "missing a non-empty 'description:'" "$out"; then pass "missing-description message is emitted"; else fail "missing-description message missing"; fi
 
-# --- 5. too-short description fails (boundary: 19 chars) -----------------------
+# --- 5. too-short description fails (boundary: 18 chars, i.e. < 20) ------------
 reset_tree
 mkskill short short "Nineteen chars now"   # 18 chars, < 20
 rc="$(run_lint short)"
@@ -116,6 +116,15 @@ mkskill codefence codefence "A description that is plenty long enough to satisfy
   "$(printf '%s\n' 'Example:' '```' 'const x = arr[0](nope.md)' '```' 'Done.')"
 rc="$(run_lint codefence)"
 if [ "$rc" = "0" ]; then pass "code-fenced pseudo-link is ignored (exit 0)"; else fail "code-fence false positive, got $rc"; cat "$out"; fi
+
+# --- 9b. inline `backtick` code containing ]( is NOT treated as a link --------
+reset_tree
+# Backticks here are literal markdown inline-code, not shell expansions (SC2016).
+# shellcheck disable=SC2016
+mkskill inlinecode inlinecode "A description that is plenty long enough to satisfy the minimum length." \
+  'Use `arr[0](no-such-file.md)` to index, and `result[key](value)` to look up.'
+rc="$(run_lint inlinecode)"
+if [ "$rc" = "0" ]; then pass "inline-backtick pseudo-link is ignored (exit 0)"; else fail "inline-code false positive, got $rc"; cat "$out"; fi
 
 # --- 10. missing SKILL.md fails -----------------------------------------------
 reset_tree

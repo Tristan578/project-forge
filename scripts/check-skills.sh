@@ -167,8 +167,9 @@ for skill_path in "${targets[@]}"; do
   fi
 
   # 8. relative markdown link integrity
-  # Match proper [text](path) links only, with fenced code blocks stripped first
-  # (so `arr['key'](x)` and other code samples aren't mistaken for links).
+  # Match proper [text](path) links only. First strip fenced code blocks, THEN
+  # strip inline `backtick` spans — so neither a fenced sample nor inline code
+  # like `arr[0](x.md)` or `result[key](v)` is mistaken for a real link.
   # Skip http(s), mailto, and #anchors.
   while IFS= read -r target; do
     [ -z "$target" ] && continue
@@ -183,6 +184,7 @@ for skill_path in "${targets[@]}"; do
     fi
   done < <(
     awk 'BEGIN{f=0} /^[[:space:]]*```/{f=!f; next} f{next} {print}' "$md" \
+      | awk '{gsub(/`[^`]*`/, ""); print}' \
       | grep -oE '\[[^]]*\]\([^)]+\)' 2>/dev/null \
       | sed -E 's/.*\]\(//; s/\)$//'
   )
