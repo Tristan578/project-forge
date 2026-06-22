@@ -1,5 +1,5 @@
 ---
-"spawnforge": minor
+"web": minor
 ---
 
 Enable the Anthropic 1h extended prompt cache TTL on `POST /api/chat`.

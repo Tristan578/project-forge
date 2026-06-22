@@ -1,5 +1,5 @@
 ---
-"spawnforge": patch
+"web": patch
 ---
 
 Bump engine Rust transitives to clear Dependabot alerts:
