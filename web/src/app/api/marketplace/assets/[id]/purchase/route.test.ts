@@ -309,6 +309,45 @@ describe('POST /api/marketplace/assets/[id]/purchase', () => {
     expect(mockDelete).not.toHaveBeenCalled();
   });
 
+  it('deducts marketplace purchases earned_credits → addon_tokens → monthly (regression #8782)', async () => {
+    // The #8636 atomic rewrite accidentally flipped the buyer deduction order to
+    // monthly→addon→earned, the INVERSE of the original route. earned_credits is
+    // a marketplace-local currency, so a buyer must spend it FIRST on purchases
+    // (before paid subscription tokens). Assert the priority encoded in the
+    // buyer-charge SQL so the order can never silently flip again. The neonSql
+    // stub records each statement's text (template strings joined with '?'), so
+    // the first transaction statement IS the buyer charge.
+    mockSelect
+      .mockReturnValueOnce(selectChain([{ id: 'a1', status: 'published', sellerId: 'other', priceTokens: 100, assetFileUrl: 'https://cdn.example.com/f.glb', license: 'standard', downloadCount: 0 }]))
+      .mockReturnValueOnce(selectChain([]))  // no existing purchase
+      .mockReturnValueOnce(selectChain([{ id: 'seller-1', earnedCredits: 200, addonTokens: 0, monthlyTokens: 0, monthlyTokensUsed: 0 }])); // seller found
+    mockTransactionResults = [[[{ id: 'buyer-1' }], [], []]];
+
+    const { POST } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/purchase');
+    const res = await POST(req, { params: Promise.resolve({ id: 'a1' }) });
+    expect(res.status).toBe(200);
+
+    const buyerSql = (mockTransactionCalls[0][0] as { sql: string }).sql;
+    const earnedAt = buyerSql.indexOf('earned_credits = earned_credits');
+    const addonAt = buyerSql.indexOf('addon_tokens = addon_tokens');
+    const monthlyAt = buyerSql.indexOf('monthly_tokens_used = monthly_tokens_used');
+
+    // All three pools are mutated.
+    expect(earnedAt).toBeGreaterThanOrEqual(0);
+    expect(addonAt).toBeGreaterThanOrEqual(0);
+    expect(monthlyAt).toBeGreaterThanOrEqual(0);
+    // Priority order, top to bottom: earned FIRST, then addon, then monthly.
+    expect(earnedAt).toBeLessThan(addonAt);
+    expect(addonAt).toBeLessThan(monthlyAt);
+    // earned_credits takes first dibs on the full price (no leftover gate).
+    expect(buyerSql).toMatch(/earned_credits = earned_credits\s*- LEAST\(\?, earned_credits\)/);
+    // monthly is the LAST resort — gated on the leftover after BOTH earned + addon.
+    expect(buyerSql).toMatch(/\? - earned_credits - addon_tokens/);
+    // The pre-fix monthly-first signature must be gone.
+    expect(buyerSql).not.toMatch(/monthly_tokens_used = monthly_tokens_used\s*\+ LEAST\(\?, GREATEST/);
+  });
+
   it('returns 409 (no partial charge) when the atomic transaction commits nothing', async () => {
     // Buyer balance changed after the pre-check OR the idempotency gate
     // conflicted: the first transaction statement RETURNS no row. Because the

@@ -172,21 +172,32 @@ export async function POST(
           )
           UPDATE users
           SET
-            monthly_tokens_used = monthly_tokens_used
-              + LEAST(${price}, GREATEST(0, monthly_tokens - monthly_tokens_used)),
+            -- MARKETPLACE deduction priority: earned_credits FIRST, then
+            -- addon_tokens, then the monthly allowance (#8782). earned_credits is
+            -- a marketplace-local currency (it is what sellers are paid — see the
+            -- seller UPDATE below); a buyer spends it on marketplace purchases
+            -- BEFORE their paid subscription tokens, keeping the creator economy
+            -- circular and preserving monthly/addon balance for AI generation.
+            -- This is deliberately the INVERSE of the platform AI-spend order in
+            -- lib/tokens/service.ts (monthly→addon, which never touches
+            -- earned_credits) and it restores the pre-atomic-rewrite route's
+            -- earned→addon→monthly behaviour (the #8636 rewrite accidentally
+            -- flipped it to monthly-first). Each pool's deduction reads the
+            -- buyer's ORIGINAL (pre-UPDATE) row values — Postgres evaluates every
+            -- SET right-hand side against the old row — so the references to
+            -- earned_credits / addon_tokens below are the balances BEFORE this
+            -- statement, exactly as the greedy earned→addon→monthly split intends.
+            earned_credits = earned_credits
+              - LEAST(${price}, earned_credits),
             addon_tokens = addon_tokens
               - LEAST(
-                  GREATEST(0, ${price} - GREATEST(0, monthly_tokens - monthly_tokens_used)),
+                  GREATEST(0, ${price} - earned_credits),
                   addon_tokens
                 ),
-            earned_credits = earned_credits
-              - LEAST(
-                  GREATEST(0,
-                    ${price}
-                    - GREATEST(0, monthly_tokens - monthly_tokens_used)
-                    - addon_tokens
-                  ),
-                  earned_credits
+            monthly_tokens_used = monthly_tokens_used
+              + LEAST(
+                  GREATEST(0, ${price} - earned_credits - addon_tokens),
+                  GREATEST(0, monthly_tokens - monthly_tokens_used)
                 ),
             updated_at = NOW()
           WHERE id = ${user.id}
