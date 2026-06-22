@@ -353,6 +353,35 @@ describe('logger', () => {
       expect(data.self).toBe('[Circular]');
     });
 
+    it('does not flag a legitimately shared object reference as [Circular] across sibling keys (regression #8789)', () => {
+      // The same object referenced under two DIFFERENT top-level context keys
+      // is NOT a cycle — each must serialize in full. A WeakSet shared across
+      // sibling keys would mark the second visit [Circular] and drop its data.
+      const entry = logProd(() => {
+        const shared: Record<string, unknown> = { id: 'asset-1', count: 7 };
+        logger.info('shared-ref', { primary: shared, mirror: shared });
+      });
+      const primary = entry.primary as Record<string, unknown>;
+      const mirror = entry.mirror as Record<string, unknown>;
+      expect(primary).toEqual({ id: 'asset-1', count: 7 });
+      // The second sibling must be fully present, not collapsed to '[Circular]'.
+      expect(mirror).toEqual({ id: 'asset-1', count: 7 });
+      expect(mirror).not.toBe('[Circular]');
+    });
+
+    it('still detects a TRUE cycle within a single top-level key (regression #8789)', () => {
+      // The per-key fix must not weaken genuine cycle protection: a self-
+      // referential object under one key must still resolve to '[Circular]'.
+      const entry = logProd(() => {
+        const cyclic: Record<string, unknown> = { name: 'root' };
+        cyclic.self = cyclic;
+        logger.info('still-cyclic', { node: cyclic });
+      });
+      const node = entry.node as Record<string, unknown>;
+      expect(node.name).toBe('root');
+      expect(node.self).toBe('[Circular]');
+    });
+
     it('scrubs a credential embedded in an Error object message', () => {
       const entry = logProd(() =>
         logger.error('caught', { err: new Error('failed with sk_test_supersecret123') }),

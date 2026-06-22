@@ -121,9 +121,15 @@ function redactValue(value: unknown, depth: number, seen: WeakSet<object>): unkn
 
 /** Redact a flat context object's fields prior to serialization. */
 function redactContext(context: LogContext): LogContext {
-  const seen = new WeakSet<object>();
   const out: LogContext = {};
   for (const [k, v] of Object.entries(context)) {
+    // A FRESH cycle-tracking set per top-level key. A WeakSet shared across
+    // sibling keys would wrongly flag a legitimately shared object reference
+    // (the same object appearing under two different top-level keys) as
+    // [Circular] on the second visit and silently drop its data. A cycle is
+    // only meaningful WITHIN a single value's own root-to-descendant traversal,
+    // never across siblings — so the set must not outlive one top-level key.
+    const seen = new WeakSet<object>();
     out[k] = isSensitiveKey(k) && v != null ? REDACTED : redactValue(v, 1, seen);
   }
   return out;
