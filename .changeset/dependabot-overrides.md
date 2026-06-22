@@ -1,5 +1,5 @@
 ---
-"spawnforge": patch
+"web": patch
 ---
 
 Bump npm `overrides` pins to clear 10 medium-severity Dependabot alerts:

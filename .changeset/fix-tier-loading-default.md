@@ -1,5 +1,5 @@
 ---
-"spawnforge": patch
+"web": patch
 ---
 
 Fix Pro model dropdown disabled for Pro users on first paint. The user's tier
