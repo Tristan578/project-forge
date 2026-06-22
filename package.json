@@ -60,7 +60,7 @@
     "@changesets/changelog-github": "^0.6.0",
     "@changesets/cli": "^2.30.0",
     "@storybook/react": "^8.6",
-    "@storybook/react-vite": "^8.6",
+    "@storybook/react-vite": "^10.4",
     "@vitest/coverage-v8": "^4.1.8",
     "storybook": "^8.6",
     "turbo": "^2.9.14",
