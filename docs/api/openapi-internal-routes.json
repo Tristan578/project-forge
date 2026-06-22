@@ -40,6 +40,7 @@
     "/api/generate/localize": "internal-ai",
     "/api/generate/pacing": "internal-ai",
     "/api/generate/pixel-art": "internal-ai",
+    "/api/generate/pixel-art/status": "async-status",
     "/api/generate/sprite-sheet/status": "async-status",
     "/api/generate/tileset-gen/status": "async-status",
     "/api/generate/voice/batch": "internal-ai",

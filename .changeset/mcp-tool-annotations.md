@@ -1,5 +1,5 @@
 ---
-"@spawnforge/mcp-server": patch
+"@project-forge/mcp-server": patch
 ---
 
 Migrate MCP tool registration to non-deprecated registerTool API with ToolAnnotations for better tool discovery
