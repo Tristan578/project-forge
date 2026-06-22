@@ -1,9 +1,14 @@
 version: 2
 
 updates:
-  # npm dependencies (web)
+  # npm dependencies — this is an npm workspaces monorepo with a SINGLE root
+  # package-lock.json (web/ and mcp-server/ have no lockfiles of their own).
+  # Dependabot must target the directory containing the lockfile (root) so it
+  # resolves and relocks the real workspace tree; watching /web or /mcp-server
+  # would edit manifests it cannot relock, producing root-lockfile EUSAGE drift
+  # that breaks `npm ci` on main (the #8655 / #8658 incidents). See #8626.
   - package-ecosystem: npm
-    directory: /web
+    directory: /
     schedule:
       interval: weekly
       day: monday
@@ -15,16 +20,6 @@ updates:
         update-types:
           - minor
           - patch
-
-  # npm dependencies (mcp-server)
-  - package-ecosystem: npm
-    directory: /mcp-server
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 3
-    labels:
-      - dependencies
 
   # Rust/Cargo dependencies (engine)
   - package-ecosystem: cargo
