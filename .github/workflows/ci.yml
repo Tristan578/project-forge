@@ -579,6 +579,37 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/check-ghaw-lock-sync.sh
 
+  # ---- Actions SHA-Pin Guard ----
+  # Fails the PR when a hand-written workflow references a GitHub Action by a
+  # MUTABLE tag (e.g. `actions/checkout@v4`) instead of a 40-char commit SHA —
+  # the supply-chain hole audit finding F35 (#8627) closed by SHA-pinning every
+  # ref. A mutable tag lets a compromised or force-pushed upstream tag run
+  # arbitrary code in CI with our secrets; a SHA pin freezes the exact tree.
+  # Decision logic lives in scripts/check-actions-pinned.sh (the gh-aw generated
+  # *.lock.yml files are excluded there — their pins are owned by the gh-aw Lock
+  # Sync gate above). A read-only check, never a fix.
+  #
+  # Gated on `needs-ci` (any .github/workflows/** or scripts/** change — exactly
+  # this guard's surface; a workflow edit already forces the full fan-out, so a
+  # dedicated orthogonal output would buy nothing). Wired into ci-success below —
+  # and into the anti-tamper map in scripts/check-ci-success.sh — so it is
+  # REQUIRED when it runs, skips cleanly otherwise, and cannot be silently
+  # `if: false`-unwired while its trigger fired (same self-defending pattern as
+  # the gates above).
+  actions-pin-check:
+    name: Actions Pin Check
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Verify all workflow actions are SHA-pinned
+        run: bash scripts/check-actions-pinned.sh
+
   # ---- CI Self-Defense Tests ----
   # Unit-tests the decision logic of the repo's self-defending CI gates via
   # their co-located bash suites:
@@ -1036,6 +1067,7 @@ jobs:
       - codex-config-guard
       - ghaw-lock-sync
       - openapi-route-sync
+      - actions-pin-check
       - test-e2e-ui
       - test-e2e-journey
     runs-on: ubuntu-latest

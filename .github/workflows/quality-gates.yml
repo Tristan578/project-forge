@@ -776,7 +776,7 @@ jobs:
 
       - name: Run Chromatic
         if: steps.check-design.outputs.changed == 'true' && steps.check-token.outputs.available == 'true'
-        uses: chromaui/action@7804f34e4e59c0d9b3c856848f46ad96d7897429 # v17
+        uses: chromaui/action@7804f34e4e59c0d9b3c856848f46ad96d7897429 # v17.5.0
         with:
           projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
           workingDir: apps/design

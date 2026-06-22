@@ -12,5 +12,8 @@ now carries a 40-char SHA plus a `# <version>` comment (Dependabot's
 github-actions updater bumps both forward). The `dtolnay/rust-toolchain` steps
 gained an explicit `toolchain: stable` input so SHA-pinning does not drop the
 channel that the `@stable` ref previously selected. A new
-`scripts/check-actions-pinned.sh` guard, run by the `Actions Pin Check`
-workflow, fails any future PR that reintroduces a mutable tag.
+`scripts/check-actions-pinned.sh` guard runs as the path-gated
+`actions-pin-check` job inside `ci.yml` — wired into the required `CI Success`
+aggregate (and its anti-tamper map) like the other self-defending gates — so
+any future PR that reintroduces a mutable tag fails a required check rather than
+a skippable advisory workflow.
