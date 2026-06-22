@@ -1,0 +1,42 @@
+# Skill-lint ratchet baseline — skill directories allowed to carry KNOWN debt.
+#
+# check-skills.sh enforces the best-practice rules on every skill. A finding in a
+# skill listed here is downgraded to a warning (known debt); a finding in any
+# skill NOT listed here fails the gate. This is the same ratchet the repo uses for
+# openapi-route-sync, and matches the #8676 stance: enforce clean on new/touched
+# skills, track the legacy tail rather than block on it.
+#
+# Rules:
+#  - One skill directory name per line (the dir under .claude/skills/).
+#  - When you fix a skill, REMOVE its line — the linter warns if a baselined skill
+#    now lints clean, so this list cannot silently rot.
+#  - Do NOT add a new skill here to dodge the rules. New skills must lint clean.
+
+# --- First-party skill SCRIPTS with legacy shellcheck findings -----------------
+# Ours; mechanical (SC2164 cd-without-||exit, SC2034 unused var, SC2259, SC2076,
+# SC2010). Boy-Scout sweep tracked separately — same posture as the hook-tree
+# shellcheck debt in #8676. Prune each as its script is cleaned.
+arch-validator
+babysit-prs
+build
+db-migrate
+developer-experience
+infra-services
+kanban
+testing
+troubleshoot
+
+# --- Imported cross-platform skills (generic "Compatible Platforms" template) --
+# Not first-party authored; carry CRLF line endings / dangling sibling-skill links
+# from their source pack. Left as-is to avoid forking imported content.
+game-ui-design
+web-accessibility
+
+# --- Vendored / marketplace skills (externally managed) ------------------------
+# Stub or missing frontmatter descriptions owned by their upstream plugin. Do NOT
+# edit — they are re-synced from the marketplace.
+claimable-postgres
+neon-postgres-egress-optimizer
+rust-best-practices
+vercel-composition-patterns
+vercel-react-native-skills

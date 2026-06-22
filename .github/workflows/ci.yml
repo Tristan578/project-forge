@@ -38,6 +38,7 @@ jobs:
       needs-codex: ${{ steps.changes.outputs.codex }}
       needs-ghaw: ${{ steps.changes.outputs.ghaw }}
       needs-api: ${{ steps.changes.outputs.api }}
+      needs-skills: ${{ steps.changes.outputs.skills }}
       needs-any-code: ${{ steps.changes.outputs.any-code }}
     steps:
       - uses: actions/checkout@v6
@@ -52,7 +53,7 @@ jobs:
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
-          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false
+          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false
 
           echo "$CHANGED" | grep -q '^web/' && web=true
           echo "$CHANGED" | grep -q '^engine/' && engine=true
@@ -110,6 +111,16 @@ jobs:
           # guard reads the COMMITTED blob, so it asserts "is the profile being
           # merged permissive?" rather than inspecting the working tree.
           echo "$CHANGED" | grep -qE '^\.codex/config\.toml$|^scripts/check-codex-config-safety\.sh$|^scripts/__tests__/check-codex-config-safety\.test\.sh$' && codex=true
+          # Claude Code skill best-practices linter (scripts/check-skills.sh). Fires
+          # on ANY skill file (.claude/skills/**, both SKILL.md and scripts/) or the
+          # gate's own files (linter + ratchet baseline). Kept ORTHOGONAL to any-code
+          # (like hooks/deps): a skill-only edit pays only this ~2s, zero-dep linter,
+          # never the heavy quality-gates fan-out. New/touched skills must lint clean;
+          # legacy/imported debt is tracked in scripts/check-skills-baseline.txt.
+          # (A skill SCRIPT change also matches `ci` above — editing a script warrants
+          # the wider run; a SKILL.md-only change matches neither ci nor hooks, so
+          # wiring it here is what makes the linter run on doc-only skill edits.)
+          echo "$CHANGED" | grep -qE '^\.claude/skills/|^scripts/check-skills\.sh$|^scripts/check-skills-baseline\.txt$|^scripts/__tests__/check-skills\.test\.sh$' && skills=true
           # gh-aw lock-drift gate (scripts/check-ghaw-lock-sync.sh). Fires on a
           # gh-aw workflow SOURCE (.github/workflows/*.md), its generated sibling
           # (.github/workflows/*.lock.yml), the SHA-pinned action manifest the
@@ -151,12 +162,13 @@ jobs:
             echo "codex=$codex"
             echo "ghaw=$ghaw"
             echo "api=$api"
+            echo "skills=$skills"
             echo "any-code=$any_code"
           } >> "$GITHUB_OUTPUT"
 
           echo "Changed paths detected:"
-          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw api=$api any-code=$any_code"
-          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ] && [ "$api" = "false" ]; then
+          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw api=$api skills=$skills any-code=$any_code"
+          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ] && [ "$api" = "false" ] && [ "$skills" = "false" ]; then
             echo "No relevant changes — downstream jobs will be skipped"
           fi
 
@@ -348,6 +360,41 @@ jobs:
             .claude/hooks/__tests__/review-quality-gate.test.sh \
             .claude/hooks/__tests__/auto-approve-safe-commands.test.sh \
             .claude/hooks/__tests__/settings-permissions.test.sh
+
+  # ---- Skills Lint ----
+  # Runs when any skill file (.claude/skills/**) or the linter/baseline changed.
+  # check-skills.sh enforces skill best practices — frontmatter on line 1, name↔dir
+  # match, kebab-case name, a meaningful description, a non-empty body, resolvable
+  # relative links, and executable + shellcheck-clean scripts. New or touched skills
+  # must lint clean; pre-existing legacy/imported debt is tracked in
+  # scripts/check-skills-baseline.txt (a ratchet — only NEW drift fails). Gated on
+  # its own `skills` output (NOT any-code) so a skill-only PR pays only this ~2s
+  # gate. Wired into ci-success below so it is REQUIRED when it runs yet skips
+  # cleanly on PRs that touch no skill — the safe path-filter + required pattern.
+  skills-lint:
+    name: Skills Lint
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-skills == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Shellcheck the linter + its test
+        # shellcheck is preinstalled on ubuntu-latest. The linter that enforces
+        # script cleanliness on every skill must itself be clean.
+        run: shellcheck scripts/check-skills.sh scripts/__tests__/check-skills.test.sh
+
+      - name: Unit-test the linter's ratchet logic
+        # The baseline/anti-rot decision logic is non-trivial — test it
+        # hermetically (temp skills tree via the $SKILLS_DIR seam) so a
+        # regression in the ratchet fails here, not silently on a real PR.
+        run: bash scripts/__tests__/check-skills.test.sh
+
+      - name: Lint all skills
+        run: bash scripts/check-skills.sh
 
   # ---- Lockfile Sync ----
   # Runs when any package.json (at any depth) or the root package-lock.json
@@ -1033,6 +1080,7 @@ jobs:
       - docs-internal-gate
       - design-internal-gate
       - hook-tests
+      - skills-lint
       - lockfile-sync
       - lockfile-sync-tests
       - agentic-sync

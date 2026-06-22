@@ -92,6 +92,7 @@ check_triggered "agentic-sync"              "needs-agentic"
 check_triggered "taskboard-onboarding-guard" "needs-onboarding"
 check_triggered "codex-config-guard"        "needs-codex"
 check_triggered "hook-tests"                "needs-hooks"
+check_triggered "skills-lint"               "needs-skills"
 check_triggered "ghaw-lock-sync"            "needs-ghaw"
 check_triggered "openapi-route-sync"        "needs-api"
 # The journey gate is the ONLY runtime proof that the E2E store-exposure flag

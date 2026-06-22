@@ -29,4 +29,6 @@ Check `metadata->>'refundedUsageId'` before crediting. Without this, server + cl
 neon-http driver throws. Use `getNeonSql()` → `neonSql.transaction([...statements])`.
 
 ## References
-- See [references/billing-patterns.md](references/billing-patterns.md) for complete patterns
+- `web/src/app/api/webhooks/stripe/route.ts` — the live webhook handler implementing the patterns above
+- `web/src/lib/tokens/` — `refundTokens()` idempotency + balance deduction
+- Stripe API version is pinned to `2026-05-27.dahlia` in `web/src/lib/stripe/stripe-client.ts` (must match the installed SDK)
