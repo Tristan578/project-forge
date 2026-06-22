@@ -1,5 +1,5 @@
 ---
-"spawnforge": patch
+"web": patch
 ---
 
 ci(cd): add pre-flight production domain attachment check

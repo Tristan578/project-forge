@@ -1,5 +1,5 @@
 ---
-"spawnforge": patch
+"web": patch
 ---
 
 Add `effort: 'low' | 'medium' | 'high'` parameter to `createSpawnforgeAgent` and the `/api/chat` body, mirroring the Anthropic provider's reasoning-effort hint. Non-chat generators (`gameReviewer`, `tutorialGenerator`, `gddGenerator`) now opt in to `effort: 'medium'` instead of passing `thinking: false`, letting the SDK pick a sensible reasoning budget instead of guessing token counts.
