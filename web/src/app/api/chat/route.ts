@@ -371,9 +371,27 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    // Multimodal array content: screen and mutate every text block in place,
-    // skipping non-text parts (images, tool results).
+    // Multimodal array content: first enforce the length cap on the SUM of all
+    // text blocks in THIS message. `screenText` caps each block individually,
+    // but a message carrying N text blocks of (MAX_MESSAGE_CHARS - 1) each
+    // would otherwise smuggle ~N× the documented per-message budget past the
+    // guard (#8783). Then screen and mutate every text block in place, skipping
+    // non-text parts (images, tool results).
     if (Array.isArray(msg.content)) {
+      let messageTextChars = 0;
+      for (const block of msg.content) {
+        if (typeof block !== 'object' || block === null) continue;
+        const b = block as Record<string, unknown>;
+        if (b.type === 'text' && typeof b.text === 'string') {
+          messageTextChars += b.text.length;
+        }
+      }
+      if (messageTextChars > MAX_MESSAGE_CHARS) {
+        return Response.json(
+          { error: 'Message too long. Maximum 4000 characters per message.' },
+          { status: 400 }
+        );
+      }
       for (const block of msg.content) {
         if (typeof block !== 'object' || block === null) continue;
         const b = block as Record<string, unknown>;

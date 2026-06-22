@@ -396,6 +396,44 @@ describe('POST /api/chat', () => {
       expect(body.error).toContain('too long');
     });
 
+    it('rejects an array-typed message whose text blocks SUM past 4000 chars (#8783)', async () => {
+      // Each individual block is under the per-block cap, but together they
+      // exceed the documented per-message budget — the aggregate check must
+      // fire so multiple blocks can't smuggle past a per-block-only guard.
+      const res = await POST(makeRequest({
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: 'x'.repeat(2500) },
+            { type: 'text', text: 'y'.repeat(2500) },
+          ],
+        }],
+        model: 'claude-sonnet-4.6',
+        sceneContext: '',
+      }));
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain('too long');
+    });
+
+    it('allows an array-typed message whose text blocks SUM under 4000 chars (#8783)', async () => {
+      const res = await POST(makeRequest({
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: 'a'.repeat(1500) },
+            { type: 'text', text: 'b'.repeat(1500) },
+          ],
+        }],
+        model: 'claude-sonnet-4.6',
+        sceneContext: '',
+      }));
+
+      // 3000 total < 4000 cap → not rejected for length.
+      expect(res.status).not.toBe(400);
+    });
+
     it('sanitizes array-typed user text but leaves non-text parts untouched (#8635)', async () => {
       vi.mocked(sanitizeChatInput).mockImplementation((s: string) => s.replace(/bad/g, ''));
 
