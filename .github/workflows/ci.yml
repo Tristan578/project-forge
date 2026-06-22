@@ -671,6 +671,7 @@ jobs:
             scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
             scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
+            scripts/check-changeset-packages.sh scripts/__tests__/check-changeset-packages.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
@@ -702,6 +703,9 @@ jobs:
 
       - name: Run OpenAPI route-sync gate test suite
         run: bash scripts/__tests__/check-openapi-route-sync.test.sh
+
+      - name: Run changeset-packages gate test suite
+        run: bash scripts/__tests__/check-changeset-packages.test.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without

@@ -1,5 +1,5 @@
 ---
-"spawnforge": patch
+"web": patch
 ---
 
 fix(seo): filter for status='published' in /play/[userId]/[slug] generateMetadata
