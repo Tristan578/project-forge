@@ -1,5 +1,5 @@
 ---
-"spawnforge": minor
+"web": minor
 ---
 
 Raise the chat conversation size limit from ~150k tokens to ~500k tokens to

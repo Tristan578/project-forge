@@ -1,5 +1,5 @@
 ---
-"spawnforge": patch
+"web": patch
 ---
 
 Bump `stripe` from 22.0.1 to 22.1.0 and pin Stripe API version to `2026-04-22.dahlia` (was `2026-03-25.dahlia`).
