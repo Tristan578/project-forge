@@ -31,7 +31,7 @@ uuid = "1.23"
 bevy = "0.18"
 
 bevy_app = { version = "0.18", default-features = false }
-bevy_core_pipeline = { version = "0.18", default-features = false }
+bevy_core_pipeline = { version = "0.19", default-features = false }
 bevy_reflect = { version = "0.18", default-features = false }
 bevy_math = { version = "0.18", features = ["mint"], default-features = false }
 bevy_mesh = { version = "0.18", default-features = false }
