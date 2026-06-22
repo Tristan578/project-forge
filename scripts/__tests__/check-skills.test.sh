@@ -175,6 +175,77 @@ reset_tree
 rc="$(run_lint)"
 if [ "$rc" = "0" ]; then pass "empty skills tree passes (exit 0, nothing to lint)"; else fail "empty tree should exit 0, got $rc"; fi
 
+# --- 16. missing 'name:' field fails (check #3, name branch) -------------------
+# Valid frontmatter with a description but NO name: line.
+reset_tree
+mkdir -p "$work/no-name"
+printf '%s\n' "---" "description: long enough description for the minimum length check here." "---" "Body." > "$work/no-name/SKILL.md"
+rc="$(run_lint no-name)"
+if [ "$rc" = "1" ]; then pass "missing name fails (exit 1)"; else fail "missing name should exit 1, got $rc"; fi
+if grep -q "missing a non-empty 'name:'" "$out"; then pass "missing-name message is emitted"; else fail "missing-name message missing"; fi
+
+# --- 17. name > 64 chars fails (check #5 upper bound) --------------------------
+# 65 'a's: a valid kebab name that equals its directory, isolating the length check.
+reset_tree
+longname="$(printf 'a%.0s' {1..65})"
+mkskill "$longname" "$longname" "A description that is plenty long enough to satisfy the minimum length."
+rc="$(run_lint "$longname")"
+if [ "$rc" = "1" ]; then pass "name > 64 chars fails (exit 1)"; else fail "long name should exit 1, got $rc"; fi
+if grep -q "must be ≤ 64" "$out"; then pass "name-too-long message is emitted"; else fail "name-too-long message missing"; fi
+
+# --- 18. description > 1024 chars fails (check #6 upper bound) -----------------
+reset_tree
+bigdesc="$(printf 'a%.0s' {1..1025})"
+mkskill bigdesc bigdesc "$bigdesc"
+rc="$(run_lint bigdesc)"
+if [ "$rc" = "1" ]; then pass "description > 1024 chars fails (exit 1)"; else fail "long description should exit 1, got $rc"; fi
+if grep -q "must be ≤ 1024" "$out"; then pass "description-too-long message is emitted"; else fail "description-too-long message missing"; fi
+
+# --- 19. empty body fails (check #7, has_body 'no' path) -----------------------
+# Closing frontmatter fence with nothing after it.
+reset_tree
+mkdir -p "$work/no-body"
+printf '%s\n' "---" "name: no-body" "description: long enough description for the minimum length check here." "---" > "$work/no-body/SKILL.md"
+rc="$(run_lint no-body)"
+if [ "$rc" = "1" ]; then pass "empty body fails (exit 1)"; else fail "empty body should exit 1, got $rc"; fi
+if grep -q "no body content" "$out"; then pass "empty-body message is emitted"; else fail "empty-body message missing"; fi
+
+# --- 20. skill script not executable fails (check #9, exec branch) ------------
+reset_tree
+mkskill withscript withscript "A description that is plenty long enough to satisfy the minimum length."
+mkdir -p "$work/withscript/scripts"
+printf '%s\n' '#!/usr/bin/env bash' 'echo hello' > "$work/withscript/scripts/run.sh"
+chmod -x "$work/withscript/scripts/run.sh" 2>/dev/null
+rc="$(run_lint withscript)"
+if [ "$rc" = "1" ]; then pass "non-executable skill script fails (exit 1)"; else fail "non-exec script should exit 1, got $rc"; fi
+if grep -q "not executable" "$out"; then pass "not-executable message is emitted"; else fail "not-executable message missing"; fi
+
+# --- 21. skill script with shellcheck findings fails (check #9, shellcheck) ----
+# Guarded: shellcheck must be present (it is in CI's self-defense lane). An
+# executable script with a real SC warning (cd without ||exit, unused var).
+if command -v shellcheck >/dev/null 2>&1; then
+  reset_tree
+  mkskill dirtyscript dirtyscript "A description that is plenty long enough to satisfy the minimum length."
+  mkdir -p "$work/dirtyscript/scripts"
+  printf '%s\n' '#!/usr/bin/env bash' 'cd /tmp' 'unused=42' 'echo done' > "$work/dirtyscript/scripts/bad.sh"
+  chmod +x "$work/dirtyscript/scripts/bad.sh"
+  rc="$(run_lint dirtyscript)"
+  if [ "$rc" = "1" ]; then pass "shellcheck-dirty skill script fails (exit 1)"; else fail "dirty script should exit 1, got $rc"; fi
+  if grep -q "shellcheck reported findings" "$out"; then pass "shellcheck-findings message is emitted"; else fail "shellcheck-findings message missing"; fi
+else
+  echo "  SKIP: shellcheck not installed — skipping script-shellcheck case"
+fi
+
+# --- 22. description length boundary: 20 passes, 19 fails (pins -lt 20) --------
+reset_tree
+mkskill desc20 desc20 "12345678901234567890"   # exactly 20 chars → passes
+rc="$(run_lint desc20)"
+if [ "$rc" = "0" ]; then pass "20-char description passes (exit 0, lower boundary)"; else fail "20-char description should exit 0, got $rc"; cat "$out"; fi
+reset_tree
+mkskill desc19 desc19 "1234567890123456789"    # exactly 19 chars → fails (< 20)
+rc="$(run_lint desc19)"
+if [ "$rc" = "1" ]; then pass "19-char description fails (exit 1, just below boundary)"; else fail "19-char description should exit 1, got $rc"; fi
+
 echo ""
 if [ "$FAILED" -eq 0 ]; then
   echo "All check-skills tests passed."

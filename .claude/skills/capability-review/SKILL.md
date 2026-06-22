@@ -87,10 +87,10 @@ Run `date +%F` / `date +%Y` (Step 0 above). Build your dated query strings now.
 Run the adoption-fingerprint helper to see, per provider, the installed version and which capabilities our code actually touches:
 
 ```bash
-bash "/Users/tristannolan/project-forge/.claude/skills/capability-review/scripts/scan-usage.sh"
+bash "${CLAUDE_SKILL_DIR}/scripts/scan-usage.sh"
 ```
 
-It greps the codebase + manifests for SDK feature markers (e.g. `Sentry.cron`, `posthog.capture('$ai_generation')`, `@vercel/speed-insights`, `stripe.billing.meters`) and prints `using` / `NOT FOUND` per capability. `NOT FOUND` for an installed SDK = candidate adoption gap. Treat its output as a **lead**, then confirm in-context before reporting (a feature can be used under a different name).
+It greps the codebase + manifests for SDK feature markers (e.g. `Sentry.cron`, `posthog.capture('$ai_generation')`, `@vercel/speed-insights`, `stripe.billing.meters`) and prints `using` / `GAP` per capability. `GAP` for an installed SDK = candidate adoption gap. Treat its output as a **lead**, then confirm in-context before reporting (a feature can be used under a different name).
 
 ### Step 3 — Fetch provider state by date
 For each provider in scope, `WebSearch`/`WebFetch` the dated queries. Capture, per candidate capability:
@@ -129,7 +129,7 @@ This is what makes the eventual ticket buildable instead of aspirational.
 - <provider>: <feature> (<status>, <date>, <url>)
 
 ### Adoption gaps (available all along, unused)
-- <provider>: <feature> — installed SDK supports it; `scan-usage.sh` shows NOT FOUND
+- <provider>: <feature> — installed SDK supports it; `scan-usage.sh` shows GAP
 
 ### Unverified (excluded from recommendations — could not date a source)
 - <provider>: <feature> — needs a dated confirmation before we rely on it
