@@ -4,9 +4,6 @@
 
 Dependency and changeset hygiene (#8630, #8626, #8732).
 
-- Raise the `hono` override floor to `^4.12.23` so a future relock cannot resolve
-  below the security-fixed version (the root lockfile already pins 4.12.23, so
-  there is no tree change).
 - Point the npm Dependabot updater at the repo root (`directory: /`) — the only
   location with a `package-lock.json` in this single-root-lockfile monorepo —
   replacing the `/web` and `/mcp-server` entries that edited manifests they could

@@ -95,7 +95,7 @@ done
 if [[ "$fail" -ne 0 ]]; then
   echo "" >&2
   echo "One or more changesets target a non-workspace package — 'changeset version' would fail during release assembly (#8732)." >&2
-  echo "Code changes under web/ should use \"web\": patch (the dominant convention)." >&2
+  echo "Target the package whose directory you changed: web/ -> \"web\"; mcp-server/ -> \"@project-forge/mcp-server\"; packages/ui/ -> \"@spawnforge/ui\"; apps/docs/ -> \"@spawnforge/docs\". The root \"spawnforge\" package is NOT versioned." >&2
   exit 1
 fi
 
