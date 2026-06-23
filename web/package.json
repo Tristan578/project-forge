@@ -50,6 +50,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.85",
     "@ai-sdk/gateway": "^3.0.133",
+    "@ai-sdk/mcp": "^1.0.52",
     "@ai-sdk/react": "^3.0.210",
     "@anthropic-ai/sdk": "^0.105.0",
     "@aws-sdk/client-s3": "^3.1075.0",
