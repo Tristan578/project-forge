@@ -35,10 +35,8 @@ web-accessibility
 # --- Vendored / marketplace skills (externally managed) ------------------------
 # Stub/missing frontmatter descriptions or dangling sibling-doc links owned by
 # their upstream plugin. Do NOT edit — they are re-synced from the marketplace.
-# (tdd: its SKILL.md links a sibling refactoring.md the upstream pack doesn't ship.)
 claimable-postgres
 neon-postgres-egress-optimizer
 rust-best-practices
-tdd
 vercel-composition-patterns
 vercel-react-native-skills
