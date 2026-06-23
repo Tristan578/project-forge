@@ -19,23 +19,33 @@ The generate routes' `execute` is a **single deterministic provider HTTP call**
 (ElevenLabs / Meshy / Replicate / Suno), not an LLM tool loop. A literal
 `ToolLoopAgent` from the AI SDK requires a `model` + `tools` and drives an LLM —
 wrapping a deterministic provider call in it would invent a fake model, add LLM
-cost where there is none, and change the response semantics. So we adopted the
-SDK's **termination primitives** instead of its agent class:
+cost where there is none, and change the response semantics. So `runGenerationAgent`
+(`web/src/lib/api/generationAgent.ts`) is an **honest single-step executor**:
 
-- `runGenerationAgent` (`web/src/lib/api/generationAgent.ts`) runs the provider
-  call as a discrete agent step and stops via the AI SDK's own `stepCountIs`
-  stop condition (step cap), terminating deterministically instead of spinning.
-- Each step races against a hard wall-clock deadline using an `AbortSignal` (the
-  SDK's native cancellation primitive). On timeout the step is aborted and the
-  caller's existing refund path runs while the function is still alive.
+- One provider call IS the whole job — there is no second step, no intermediate
+  state, and no LLM to drive — so the runner does not pretend to loop. (An earlier
+  iteration wrapped the call in a `stepCountIs`-bounded loop that provably never
+  iterated; that dead machinery was removed.) If a route ever grows a genuine
+  multi-step LLM loop, that belongs in a real `ToolLoopAgent`, not here.
+- The single step races against a hard wall-clock deadline using an `AbortSignal`
+  (the SDK's native cancellation primitive). On timeout the step is aborted and
+  the caller's existing refund path runs while the function is still alive.
+
+**Per-route enforceable timeout.** The step's wall-clock cap is *derived from each
+route's `maxDuration`* by `deriveGenerationStepTimeoutMs`
+(`web/src/lib/config/timeouts.ts`): `min(base cap, maxDuration*1000 - buffer)`.
+This fixes a bug where the base cap was `150_000` (150s) — larger than the 60s
+`maxDuration` of ~10 of the 13 routes — so the abort could never fire on them
+(Vercel killed the function first). The base cap is now pinned below the standard
+60s route's budget minus a 5s buffer (`55_000`), and heavy routes (model, music =
+180s; localize = 120s) pass their `maxDurationSeconds` so the cap is derived
+against their real budget. The buffer guarantees the abort + refund run before the
+function is killed on every route.
 
 The factory keeps owning auth, rate limiting, billing, `usageId` resolution, and
 refund-on-failure. The runner never reshapes the result, so the response shape,
 `usageId` (for async refunds), and the provider-success-with-no-artifact ->
 `failed` mapping (which lives in each route's `execute`) flow through untouched.
-
-When a route grows a genuine multi-step LLM loop, `maxSteps > 1` and a per-step
-model call slot into the runner without touching callers.
 
 ## Rollout
 

@@ -138,16 +138,15 @@ vi.mock('@/lib/config/providers', () => ({
   PIXEL_ART_STYLES: ['character', 'prop', 'tile', 'icon', 'environment'],
 }));
 
-// AI SDK mocks (pacing/localize + the generation agent's stepCountIs stop condition).
-// stepCountIs(n) returns a StopCondition: ({ steps }) => steps.length >= n. The
-// generation agent uses it to bound the loop, so the mock must mirror that shape.
+// AI SDK mocks for the pacing/localize routes' LLM calls. The generation agent
+// itself takes no AI SDK dependency — it's an honest single-step executor that
+// only races the provider call against an AbortSignal deadline.
 vi.mock('ai', () => ({
   generateText: vi.fn().mockResolvedValue({
     text: '[]',
     output: [{ title: 'Test', description: 'Test suggestion', priority: 'medium', targetSceneIndex: null }],
   }),
   Output: { object: vi.fn().mockReturnValue({}) },
-  stepCountIs: (n: number) => ({ steps }: { steps: unknown[] }) => steps.length >= n,
 }));
 
 vi.mock('@ai-sdk/anthropic', () => ({
@@ -446,7 +445,8 @@ describe('generate route integration (route → factory → provider)', () => {
 // The blast radius of createGenerationHandler demands proof the contract is
 // identical on the agent path: same status codes, same response shape, the
 // usageId still present, and refund-on-failure still fires. We do NOT mock the
-// agent — the real runGenerationAgent loop executes, only the env flag flips.
+// agent — the real runGenerationAgent single-step executor runs, only the env
+// flag flips.
 // ---------------------------------------------------------------------------
 
 describe('generate route integration — generation agent path (USE_GENERATION_AGENT=true)', () => {

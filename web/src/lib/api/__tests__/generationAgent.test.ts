@@ -1,14 +1,16 @@
 /**
  * Unit tests for the generation agent runner (PF-916).
  *
- * The runner adopts the AI SDK's deterministic termination primitives
- * (`stepCountIs` stop condition + `AbortSignal` timeout) around a single
- * provider step. These tests pin:
+ * The runner is an honest single-step executor: it races a single provider
+ * `step` against a wall-clock `AbortSignal` deadline and passes the result
+ * through untouched. There is no multi-step loop — one provider call IS the
+ * whole job — so there is no step ledger, no `stepCountIs`, and no step-cap
+ * error. These tests pin:
  *   - success passes the step result through untouched (contract preservation),
  *   - the step receives a real abort signal,
  *   - the timeout aborts the step deterministically and rejects with a typed error,
  *   - a step error rethrows untouched (so the factory's refund path runs),
- *   - the step cap rejects deterministically (no unbounded loop),
+ *   - an invalid timeout is rejected,
  *   - the feature flag defaults OFF.
  *
  * Timing is driven through the injected `scheduler` seam so there are no real
@@ -20,7 +22,6 @@ import {
   runGenerationAgent,
   isGenerationAgentEnabled,
   GenerationTimeoutError,
-  GenerationStepLimitError,
 } from '../generationAgent';
 
 /**
@@ -61,21 +62,25 @@ describe('runGenerationAgent — success path', () => {
     expect(result).toBe(payload);
   });
 
-  it('provides the step a non-aborted AbortSignal and stepIndex 0', async () => {
+  it('provides the step a non-aborted AbortSignal', async () => {
     const { scheduler } = makeScheduler();
     let seenSignal: AbortSignal | undefined;
-    let seenIndex = -1;
     await runGenerationAgent({
-      step: async ({ signal, stepIndex }) => {
+      step: async ({ signal }) => {
         seenSignal = signal;
-        seenIndex = stepIndex;
         return 'ok';
       },
       scheduler,
     });
     expect(seenSignal).toBeInstanceOf(AbortSignal);
     expect(seenSignal?.aborted).toBe(false);
-    expect(seenIndex).toBe(0);
+  });
+
+  it('runs the provider step exactly once (single-step, no loop)', async () => {
+    const { scheduler } = makeScheduler();
+    const step = vi.fn(async () => 'done');
+    await runGenerationAgent({ step, scheduler });
+    expect(step).toHaveBeenCalledTimes(1);
   });
 
   it('clears the timeout after the step settles (no leaked timer)', async () => {
@@ -113,6 +118,19 @@ describe('runGenerationAgent — timeout cap', () => {
     });
   });
 
+  it('arms the timer with the supplied timeoutMs', async () => {
+    const armedMs: number[] = [];
+    const scheduler = {
+      setTimeout: (_cb: () => void, ms: number) => {
+        armedMs.push(ms);
+        return 1;
+      },
+      clearTimeout: () => {},
+    };
+    await runGenerationAgent({ step: async () => 'ok', timeoutMs: 42_000, scheduler });
+    expect(armedMs).toEqual([42_000]);
+  });
+
   it('an already-aborted external signal aborts the step deterministically', async () => {
     const { scheduler } = makeScheduler();
     const controller = new AbortController();
@@ -147,21 +165,18 @@ describe('runGenerationAgent — failure passthrough', () => {
   });
 });
 
-describe('runGenerationAgent — step cap', () => {
-  it('rejects maxSteps that is not a positive integer', async () => {
+describe('runGenerationAgent — timeout validation', () => {
+  it('rejects a non-positive or non-finite timeoutMs', async () => {
     const { scheduler } = makeScheduler();
     await expect(
-      runGenerationAgent({ step: async () => 'x', maxSteps: 0, scheduler }),
-    ).rejects.toThrow(/positive integer/);
+      runGenerationAgent({ step: async () => 'x', timeoutMs: 0, scheduler }),
+    ).rejects.toThrow(/positive finite/);
     await expect(
-      runGenerationAgent({ step: async () => 'x', maxSteps: 1.5, scheduler }),
-    ).rejects.toThrow(/positive integer/);
-  });
-
-  it('GenerationStepLimitError carries the cap (unreachable in single-step flow, guards the future)', () => {
-    const err = new GenerationStepLimitError(3);
-    expect(err.maxSteps).toBe(3);
-    expect(err.name).toBe('GenerationStepLimitError');
+      runGenerationAgent({ step: async () => 'x', timeoutMs: -1, scheduler }),
+    ).rejects.toThrow(/positive finite/);
+    await expect(
+      runGenerationAgent({ step: async () => 'x', timeoutMs: Number.NaN, scheduler }),
+    ).rejects.toThrow(/positive finite/);
   });
 });
 

@@ -41,6 +41,9 @@ import {
   CIRCUIT_BREAKER_WINDOW_MS,
   CIRCUIT_BREAKER_HALF_OPEN_MS,
   WEBHOOK_RETRY_MAX_DELAY_MS,
+  GENERATION_AGENT_STEP_TIMEOUT_MS,
+  GENERATION_AGENT_TIMEOUT_BUFFER_MS,
+  deriveGenerationStepTimeoutMs,
 } from '../timeouts';
 
 describe('E2E / Playwright timeouts', () => {
@@ -255,5 +258,65 @@ describe('Circuit breaker timing', () => {
 describe('Webhook retry timing', () => {
   it('WEBHOOK_RETRY_MAX_DELAY_MS is 60 seconds', () => {
     expect(WEBHOOK_RETRY_MAX_DELAY_MS).toBe(60_000);
+  });
+});
+
+describe('Generation agent step timeout (PF-916, #8826)', () => {
+  // The maxDuration (seconds) every generate route actually declares today.
+  // 10 of the 13 standard routes run at 60s; localize 120s; model + music 180s.
+  const ALL_ROUTE_MAX_DURATIONS_S = [60, 120, 180];
+
+  it('GENERATION_AGENT_TIMEOUT_BUFFER_MS is a positive margin', () => {
+    expect(GENERATION_AGENT_TIMEOUT_BUFFER_MS).toBeGreaterThan(0);
+  });
+
+  it('base step cap is enforceable on the SHORTEST (60s) route — the old 150s bug', () => {
+    // Regression: the old constant was 150_000, larger than the 60s budget of
+    // ~10 of the 13 routes, so the abort could NEVER fire there. The base cap
+    // must now fit inside the standard 60s route minus the buffer.
+    const standardBudgetMs =
+      API_MAX_DURATION_STANDARD_GEN_S * 1000 - GENERATION_AGENT_TIMEOUT_BUFFER_MS;
+    expect(GENERATION_AGENT_STEP_TIMEOUT_MS).toBeLessThanOrEqual(standardBudgetMs);
+    expect(GENERATION_AGENT_STEP_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(GENERATION_AGENT_STEP_TIMEOUT_MS).toBe(55_000);
+  });
+
+  it('derives a cap that fires before maxDuration on EVERY real route', () => {
+    for (const maxDurationS of ALL_ROUTE_MAX_DURATIONS_S) {
+      const derived = deriveGenerationStepTimeoutMs(maxDurationS);
+      // Strictly less than the function budget so the abort + refund run first.
+      expect(derived).toBeLessThan(maxDurationS * 1000);
+      // And leaves at least the full buffer of headroom.
+      expect(maxDurationS * 1000 - derived).toBeGreaterThanOrEqual(
+        GENERATION_AGENT_TIMEOUT_BUFFER_MS,
+      );
+      expect(derived).toBeGreaterThan(0);
+    }
+  });
+
+  it('clamps a long route to the base cap (a 180s route does not grant an unbounded step)', () => {
+    expect(deriveGenerationStepTimeoutMs(180)).toBe(GENERATION_AGENT_STEP_TIMEOUT_MS);
+  });
+
+  it('clamps a short route to its own budget below the base cap', () => {
+    // A hypothetical 30s route: budget 25s < base 55s, so the route budget wins.
+    expect(deriveGenerationStepTimeoutMs(30)).toBe(
+      30 * 1000 - GENERATION_AGENT_TIMEOUT_BUFFER_MS,
+    );
+  });
+
+  it('honors an explicit configured override, still clamped to the route budget', () => {
+    // Override below the route budget is used as-is.
+    expect(deriveGenerationStepTimeoutMs(180, 10_000)).toBe(10_000);
+    // Override above the route budget is clamped down to the budget.
+    expect(deriveGenerationStepTimeoutMs(60, 999_000)).toBe(
+      60 * 1000 - GENERATION_AGENT_TIMEOUT_BUFFER_MS,
+    );
+  });
+
+  it('never returns a non-positive cap even for a pathologically small maxDuration', () => {
+    // maxDuration smaller than the buffer would yield a negative raw budget;
+    // the derive floors it at 1ms so the timer is always armable.
+    expect(deriveGenerationStepTimeoutMs(1)).toBeGreaterThanOrEqual(1);
   });
 });

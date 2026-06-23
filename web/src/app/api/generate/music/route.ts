@@ -9,6 +9,9 @@ export const POST = createGenerationHandler<
   { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
 >({
   route: '/api/generate/music',
+  // Heavy route: matches `export const maxDuration` above so the generation
+  // agent derives its step-timeout cap against the real 180s budget.
+  maxDurationSeconds: 180,
   provider: DB_PROVIDER.music,
   operation: 'music_generation',
   rateLimitKey: 'gen-music',

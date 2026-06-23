@@ -86,15 +86,56 @@ export const API_MAX_DURATION_SIMPLE_S = 10;
 export const API_MAX_DURATION_CRON_S = 30;
 
 /**
+ * Margin (milliseconds) reserved between a generation step's wall-clock cap and
+ * the function `maxDuration`. The abort must fire this far *before* Vercel kills
+ * the function so the caller's refund-on-failure path still runs while the
+ * function is alive.
+ */
+export const GENERATION_AGENT_TIMEOUT_BUFFER_MS = 5_000;
+
+/**
  * Hard wall-clock cap for a single generation-agent step (milliseconds).
  *
  * The generation agent (PF-916) races each provider `execute` against this
  * deadline and aborts deterministically when exceeded, so a hung provider call
  * can never outlive the function `maxDuration` and strand a token deduction.
- * Set below `API_MAX_DURATION_HEAVY_GEN_S` (180s) so the abort fires and the
- * refund path runs while the function is still alive.
+ *
+ * CRITICAL: this base cap MUST be enforceable on the SHORTEST generate route.
+ * Most generate routes (sprite, texture, sfx, voice, etc.) run with
+ * `maxDuration = API_MAX_DURATION_STANDARD_GEN_S` (60s). A cap larger than
+ * `60s - buffer` could never fire on those routes — Vercel would kill the
+ * function first — which is exactly the bug this value used to carry (it was
+ * 150_000, > every 60s route). So the cap is pinned below the standard route's
+ * budget minus the buffer. Per-route enforceability is computed by
+ * {@link deriveGenerationStepTimeoutMs}, which clamps this cap to each route's
+ * own `maxDuration` — heavy routes (180s) still cap at this base value.
  */
-export const GENERATION_AGENT_STEP_TIMEOUT_MS = 150_000;
+export const GENERATION_AGENT_STEP_TIMEOUT_MS =
+  API_MAX_DURATION_STANDARD_GEN_S * 1000 - GENERATION_AGENT_TIMEOUT_BUFFER_MS; // 55_000
+
+/**
+ * Derive the enforceable per-step wall-clock cap for a generate route from its
+ * Vercel `maxDuration` (seconds). The returned value is guaranteed to be at most
+ * `routeMaxDurationSeconds * 1000 - GENERATION_AGENT_TIMEOUT_BUFFER_MS`, so the
+ * step's abort always fires before the function is killed and the refund path
+ * runs. It is also clamped to the base {@link GENERATION_AGENT_STEP_TIMEOUT_MS}
+ * cap (or an explicit `configuredMs`) so a long route can't grant an unbounded
+ * step.
+ *
+ * @param routeMaxDurationSeconds the route's `export const maxDuration` value
+ * @param configuredMs optional override of the base cap (still clamped to the route budget)
+ */
+export function deriveGenerationStepTimeoutMs(
+  routeMaxDurationSeconds: number,
+  configuredMs: number = GENERATION_AGENT_STEP_TIMEOUT_MS,
+): number {
+  const routeBudgetMs =
+    routeMaxDurationSeconds * 1000 - GENERATION_AGENT_TIMEOUT_BUFFER_MS;
+  // Never return a non-positive cap even for a pathologically small maxDuration:
+  // fall back to the route budget floored at 1ms so the timer is always armable.
+  const cap = Math.min(configuredMs, routeBudgetMs);
+  return Math.max(1, cap);
+}
 
 /** External API call timeout (e.g., OpenAI, Replicate image generation) */
 export const EXTERNAL_API_TIMEOUT_MS = 60_000;

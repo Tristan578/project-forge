@@ -28,6 +28,10 @@ import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 import { cachedGenerate } from './responseCache';
 import { runGenerationAgent, isGenerationAgentEnabled } from './generationAgent';
+import {
+  API_MAX_DURATION_STANDARD_GEN_S,
+  deriveGenerationStepTimeoutMs,
+} from '@/lib/config/timeouts';
 
 /**
  * Client-facing message for every 500. Raw `err.message` can carry server
@@ -132,6 +136,18 @@ export interface GenerationHandlerConfig<TParams, TResult> {
 
   /** Override TTL for cached results (in seconds). Uses operation-based defaults if omitted. */
   cacheTtlSeconds?: number;
+
+  /**
+   * The route's Vercel `maxDuration` (seconds) — i.e. the value of the route's
+   * `export const maxDuration`. The generation agent derives its per-step
+   * wall-clock cap from this so the abort always fires BEFORE Vercel kills the
+   * function (and the refund path runs). Defaults to
+   * `API_MAX_DURATION_STANDARD_GEN_S` (60s) — the value 10 of the 13 generate
+   * routes use — so a route that forgets to set it still gets an enforceable
+   * timeout. Heavy routes (model, music = 180s) MUST set 180 here so the cap is
+   * derived against their real budget.
+   */
+  maxDurationSeconds?: number;
 }
 
 /**
@@ -167,7 +183,13 @@ export function createGenerationHandler<TParams, TResult>(
     execute,
     cacheKeyParams,
     cacheTtlSeconds,
+    maxDurationSeconds = API_MAX_DURATION_STANDARD_GEN_S,
   } = config;
+
+  // Per-route enforceable step timeout: derived from this route's maxDuration so
+  // the agent's abort always fires before Vercel kills the function. A 150s base
+  // cap (the old bug) could never fire on a 60s route — this clamps it.
+  const stepTimeoutMs = deriveGenerationStepTimeoutMs(maxDurationSeconds);
 
   // Run the provider call either inline (legacy default) or through the
   // deterministic generation agent (step + timeout caps) when the
@@ -186,6 +208,7 @@ export function createGenerationHandler<TParams, TResult>(
     }
     return runGenerationAgent<TResult>({
       step: ({ signal }) => execute(params, apiKey, { ...ctx, abortSignal: signal }),
+      timeoutMs: stepTimeoutMs,
     });
   };
 
