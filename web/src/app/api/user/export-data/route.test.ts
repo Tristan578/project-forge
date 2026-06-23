@@ -23,15 +23,29 @@ function makeMockDb(overrides: Record<string, unknown[]> = {}) {
     feedback: [],
     providerKeys: [],
     apiKeys: [],
+    gameComments: [],
+    gameRatings: [],
+    gameLikes: [],
+    userFollows: [],
+    gameForks: [],
+    marketplaceAssets: [],
+    assetPurchases: [],
+    assetReviews: [],
+    sellerProfiles: [],
+    moderationAppeals: [],
   };
 
   const data = { ...defaults, ...overrides };
-  // Track call order to map to the correct data set
+  // Track call order to map to the correct data set — MUST match the order of
+  // the db.select(...) calls inside the route's Promise.all.
   let callIndex = 0;
   const dataOrder = [
     'users', 'projects', 'tokenUsage', 'tokenPurchases',
     'creditTransactions', 'costLog', 'publishedGames',
     'generationJobs', 'feedback', 'providerKeys', 'apiKeys',
+    'gameComments', 'gameRatings', 'gameLikes', 'userFollows',
+    'gameForks', 'marketplaceAssets', 'assetPurchases', 'assetReviews',
+    'sellerProfiles', 'moderationAppeals',
   ];
 
   const mockSelect = vi.fn().mockImplementation(() => {
@@ -93,6 +107,44 @@ describe('/api/user/export-data', () => {
     expect(data.feedback).toEqual([]);
     expect(data.providerKeys).toEqual([]);
     expect(data.apiKeys).toEqual([]);
+    // Community + marketplace + moderation data must be present in the export
+    // (GDPR completeness — these user-owned tables were previously omitted, #8639).
+    expect(data.gameComments).toEqual([]);
+    expect(data.gameRatings).toEqual([]);
+    expect(data.gameLikes).toEqual([]);
+    expect(data.following).toEqual([]);
+    expect(data.gameForks).toEqual([]);
+    expect(data.marketplaceAssets).toEqual([]);
+    expect(data.assetPurchases).toEqual([]);
+    expect(data.assetReviews).toEqual([]);
+    expect(data.sellerProfile).toBeNull();
+    expect(data.moderationAppeals).toEqual([]);
+  });
+
+  it('includes populated community and marketplace rows the user owns', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({
+      ok: true,
+      ctx: { clerkId: 'clerk_abc', user },
+    });
+
+    const mockDb = makeMockDb({
+      gameComments: [{ id: 'gc-1', gameId: 'g-1', content: 'nice', parentId: null }],
+      assetPurchases: [{ id: 'ap-1', assetId: 'a-1', priceTokens: 50 }],
+      sellerProfiles: [{ id: 'sp-1', displayName: 'Seller', totalSales: 3 }],
+      moderationAppeals: [{ id: 'ma-1', contentId: 'c-1', contentType: 'comment', reason: 'context', status: 'pending' }],
+    });
+    vi.mocked(getDb).mockReturnValue(mockDb as unknown as ReturnType<typeof getDb>);
+
+    const res = await GET(new NextRequest('http://localhost/api/user/export-data'));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.gameComments).toEqual([expect.objectContaining({ id: 'gc-1' })]);
+    expect(data.assetPurchases).toEqual([expect.objectContaining({ id: 'ap-1' })]);
+    // sellerProfile is a single object (the user has at most one), not an array.
+    expect(data.sellerProfile).toEqual(expect.objectContaining({ id: 'sp-1' }));
+    expect(data.moderationAppeals).toEqual([expect.objectContaining({ id: 'ma-1' })]);
   });
 
   it('returns 500 when database query fails', async () => {
