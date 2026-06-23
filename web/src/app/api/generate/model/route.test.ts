@@ -168,4 +168,63 @@ describe('POST /api/generate/model', () => {
     expect(data.status).toBe('pending');
     expect(data.usageId).toBeDefined();
   });
+
+  // -------------------------------------------------------------------------
+  // #8650 — secondary free-text fields are bounded and content-safety screened.
+  // -------------------------------------------------------------------------
+
+  it('returns 422 when artStyle exceeds 500 chars (#8650)', async () => {
+    const res = await POST(makeRequest({
+      prompt: 'a red dragon',
+      mode: 'text-to-3d',
+      artStyle: 'x'.repeat(501),
+    }));
+    expect(res.status).toBe(422);
+    const data = await res.json();
+    expect(data.error).toContain('artStyle');
+  });
+
+  it('returns 422 when negativePrompt exceeds 500 chars (#8650)', async () => {
+    const res = await POST(makeRequest({
+      prompt: 'a red dragon',
+      mode: 'text-to-3d',
+      negativePrompt: 'x'.repeat(501),
+    }));
+    expect(res.status).toBe(422);
+    const data = await res.json();
+    expect(data.error).toContain('negativePrompt');
+  });
+
+  it('runs content safety on negativePrompt and artStyle (#8650)', async () => {
+    const { sanitizePrompt } = await import('@/lib/ai/contentSafety');
+    vi.mocked(sanitizePrompt).mockClear();
+
+    await POST(makeRequest({
+      prompt: 'a red dragon',
+      mode: 'text-to-3d',
+      negativePrompt: 'blurry, low quality',
+      artStyle: 'realistic',
+    }));
+
+    expect(vi.mocked(sanitizePrompt)).toHaveBeenCalledWith('blurry, low quality');
+    expect(vi.mocked(sanitizePrompt)).toHaveBeenCalledWith('realistic');
+  });
+
+  it('rejects 422 when negativePrompt fails the safety filter (#8650)', async () => {
+    const { sanitizePrompt } = await import('@/lib/ai/contentSafety');
+    vi.mocked(sanitizePrompt).mockImplementation((p: string) =>
+      p === 'injection payload'
+        ? { safe: false, filtered: '', reason: 'Injection detected' }
+        : { safe: true, filtered: p },
+    );
+
+    const res = await POST(makeRequest({
+      prompt: 'a red dragon',
+      mode: 'text-to-3d',
+      negativePrompt: 'injection payload',
+    }));
+    expect(res.status).toBe(422);
+    const data = await res.json();
+    expect(data.error).toContain('Injection detected');
+  });
 });
