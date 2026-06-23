@@ -12,11 +12,12 @@
  * no Stripe SDK), so it is trivially testable and usable on both the server
  * (webhook persistence) and the client (capability gating in userStore).
  *
- * GUARD: When `active_features` is null/undefined (no entitlement summary has
- * been received yet, or the Entitlements feature is not configured in the Stripe
- * dashboard), callers MUST fall back to the legacy tier-derived defaults. This
- * keeps the change purely additive — missing provisioning never strips a tiered
- * user's existing access.
+ * GUARD: When `active_features` is null/undefined/empty (no entitlement summary
+ * has been received yet, the Entitlements feature is not configured in the
+ * Stripe dashboard, or a transient/out-of-order empty summary arrived), callers
+ * MUST fall back to the legacy tier-derived defaults. This keeps the change
+ * purely additive — missing or empty provisioning never strips a tiered user's
+ * existing access (#8831).
  */
 
 /** The product capabilities gated in the web client. */
@@ -49,11 +50,21 @@ const CAPABILITY_FEATURE: Record<Capability, FeatureKey> = {
  * members (jsonb round-trips, hand-edited rows, malformed webhook payloads)
  * without throwing — returns `null` to signal "no usable feature set", so the
  * caller falls back to tier defaults rather than silently denying access.
+ *
+ * An EMPTY feature set also normalizes to `null` (→ tier fallback), NOT to `[]`
+ * (#8831). Stripe gives no event-ordering guarantee, so a paying customer can
+ * transiently receive an empty `entitlements.active_entitlement_summary.updated`
+ * (or have `active_features` cleared on cancellation) before the authoritative
+ * non-empty summary lands. Treating empty as an authoritative deny would strip
+ * every paid capability with no tier backstop until the next event — exactly the
+ * failure mode the GUARD exists to prevent. A genuinely-downgraded customer is
+ * still correctly restricted because their *tier* (the fallback) is downgraded
+ * in lockstep, so the fallback yields the right answer in both cases.
  */
 export function normalizeFeatures(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
   const features = value.filter((f): f is string => typeof f === 'string' && f.length > 0);
-  return features;
+  return features.length > 0 ? features : null;
 }
 
 /**
@@ -81,9 +92,10 @@ export function hasCapability(
  * The summary object's `entitlements.data[]` is a list of ActiveEntitlements,
  * each carrying a `lookup_key`. We read defensively (the SDK surface for this
  * resource is comparatively new) and dedupe. Returns an empty array when the
- * customer has no active entitlements — distinct from `null`, which we never
- * produce here because receiving the event IS an authoritative "this is the
- * current set" signal (even when empty).
+ * customer has no active entitlements. That `[]` is what gets persisted to
+ * `active_features`; on READ it normalizes back to tier fallback (see
+ * {@link normalizeFeatures} / #8831), so a transient or out-of-order empty
+ * summary cannot strip a paying customer's capabilities.
  */
 export function featuresFromSummary(summary: unknown): string[] {
   if (!summary || typeof summary !== 'object') return [];

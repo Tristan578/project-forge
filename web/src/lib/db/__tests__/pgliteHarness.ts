@@ -277,6 +277,8 @@ export interface SeedUserOverrides {
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
   billingCycleStart?: string | null;
+  /** Stripe-entitlement feature lookup_keys (jsonb `active_features`). */
+  activeFeatures?: string[] | null;
 }
 
 export interface SeededUser {
@@ -302,7 +304,8 @@ export async function seedUser(
     INSERT INTO users (
       id, clerk_id, email, tier,
       monthly_tokens, monthly_tokens_used, addon_tokens, earned_credits,
-      stripe_customer_id, stripe_subscription_id, billing_cycle_start
+      stripe_customer_id, stripe_subscription_id, billing_cycle_start,
+      active_features
     ) VALUES (
       ${id},
       ${over.clerkId ?? `clerk_${id}`},
@@ -314,7 +317,8 @@ export async function seedUser(
       ${over.earnedCredits ?? 0},
       ${over.stripeCustomerId ?? null},
       ${over.stripeSubscriptionId ?? null},
-      ${over.billingCycleStart ?? null}
+      ${over.billingCycleStart ?? null},
+      ${over.activeFeatures === undefined ? null : JSON.stringify(over.activeFeatures)}::jsonb
     )
     RETURNING id, clerk_id, email, tier, monthly_tokens, monthly_tokens_used,
               addon_tokens, earned_credits, stripe_customer_id, stripe_subscription_id

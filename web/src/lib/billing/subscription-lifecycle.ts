@@ -278,6 +278,7 @@ export async function handleSubscriptionDeleted(
       UPDATE users
       SET tier                   = 'starter',
           stripe_subscription_id = NULL,
+          active_features        = NULL,
           monthly_tokens         = ${starterAllocation},
           monthly_tokens_used    = 0,
           updated_at             = ${now}

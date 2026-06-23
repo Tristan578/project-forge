@@ -24,8 +24,10 @@ describe('normalizeFeatures', () => {
     expect(normalizeFeatures(42)).toBeNull();
   });
 
-  it('returns an empty array for [] (authoritative "no features", NOT a fallback)', () => {
-    expect(normalizeFeatures([])).toEqual([]);
+  it('returns null for [] (empty → tier fallback, not an authoritative deny) (#8831)', () => {
+    expect(normalizeFeatures([])).toBeNull();
+    // an array of only junk members normalizes to empty → also null
+    expect(normalizeFeatures([1, null, '', {}])).toBeNull();
   });
 
   it('filters out non-string and empty members without throwing', () => {
@@ -56,10 +58,14 @@ describe('hasCapability', () => {
     expect(hasCapability('canUseMCP', features, true)).toBe(false);
   });
 
-  it('an empty active set denies every capability regardless of fallback', () => {
-    expect(hasCapability('canUseAI', [], true)).toBe(false);
-    expect(hasCapability('canUseMCP', [], true)).toBe(false);
-    expect(hasCapability('canPublish', [], true)).toBe(false);
+  // Regression for #8831: an empty active set must fall back to tier — a
+  // transient / out-of-order empty entitlement summary cannot strip a paying
+  // user's capabilities, and a genuinely-downgraded user is still restricted via
+  // their (downgraded) tier fallback.
+  it('an empty active set falls back to tier, not an authoritative deny (#8831)', () => {
+    expect(hasCapability('canUseAI', [], true)).toBe(true);
+    expect(hasCapability('canUseMCP', [], false)).toBe(false);
+    expect(hasCapability('canPublish', [], true)).toBe(true);
   });
 
   it('maps each capability to its own feature key', () => {
@@ -83,7 +89,7 @@ describe('featuresFromSummary', () => {
     expect(featuresFromSummary(summary).sort()).toEqual(['ai_generation', 'mcp_access']);
   });
 
-  it('returns [] for an empty / missing entitlements list (authoritative empty)', () => {
+  it('returns [] for an empty / missing entitlements list (normalizes to tier fallback on read)', () => {
     expect(featuresFromSummary({ entitlements: { data: [] } })).toEqual([]);
     expect(featuresFromSummary({ customer: 'cus_1' })).toEqual([]);
     expect(featuresFromSummary(null)).toEqual([]);
