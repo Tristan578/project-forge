@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
-import { marketplaceAssets, assetPurchases } from '@/lib/db/schema';
+import { marketplaceAssets, assetPurchases, creditTransactions } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { getSignedDownloadUrl } from '@/lib/storage/r2';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -58,6 +58,33 @@ export async function GET(
 
     if (!purchase && !isOwner) {
       return NextResponse.json({ error: 'Not authorized to download' }, { status: 403 });
+    }
+
+    // A *paid* purchase is only complete once the buyer was actually charged.
+    // The purchase route commits the asset_purchases row as an idempotency gate
+    // BEFORE the balance deduction (purchase/route.ts) — so a crash in that
+    // window (timeout/OOM/cold-start kill) can leave an orphan row with no
+    // deduction credit_transaction. Authorizing download on mere row existence
+    // would hand the buyer the paid asset for free (#8636). Gate paid downloads
+    // on the deduction transaction; free purchases (priceTokens === 0) never
+    // create one, and owners bypass this entirely.
+    if (purchase && !isOwner && purchase.priceTokens > 0) {
+      const [deduction] = await queryWithResilience(() => getDb()
+        .select({ id: creditTransactions.id })
+        .from(creditTransactions)
+        .where(and(
+          eq(creditTransactions.userId, user.id),
+          eq(creditTransactions.source, 'marketplace_purchase'),
+          eq(creditTransactions.referenceId, assetId),
+        ))
+        .limit(1));
+
+      if (!deduction) {
+        return NextResponse.json(
+          { error: 'Purchase incomplete, please retry the purchase' },
+          { status: 403 },
+        );
+      }
     }
 
     if (!asset.assetFileUrl) {

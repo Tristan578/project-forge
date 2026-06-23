@@ -11,10 +11,10 @@ vi.mock('server-only', () => ({}));
 // The implementation uses .returning() which must be in the chain.
 const mockSelectRows: { eventId: string }[] = [];
 
-// Insert chain: insert().values().onConflictDoNothing().returning()
+// Insert chain: insert().values().onConflictDoUpdate().returning()
 const mockInsertReturning = vi.fn().mockResolvedValue([{ eventId: 'evt_new' }]);
-const mockOnConflictDoNothing = vi.fn().mockReturnValue({ returning: mockInsertReturning });
-const mockInsertValues = vi.fn().mockReturnValue({ onConflictDoNothing: mockOnConflictDoNothing });
+const mockOnConflictDoUpdate = vi.fn().mockReturnValue({ returning: mockInsertReturning });
+const mockInsertValues = vi.fn().mockReturnValue({ onConflictDoUpdate: mockOnConflictDoUpdate });
 const mockInsert = vi.fn().mockReturnValue({ values: mockInsertValues });
 
 // Delete chain: delete().where().returning() (for cleanupExpired) or delete().where() (for releaseEvent)
@@ -59,7 +59,7 @@ describe('webhookIdempotency', () => {
     vi.clearAllMocks();
     // Reset mock return values to defaults
     mockInsertReturning.mockResolvedValue([{ eventId: 'evt_default' }]);
-    mockOnConflictDoNothing.mockReturnValue({ returning: mockInsertReturning });
+    mockOnConflictDoUpdate.mockReturnValue({ returning: mockInsertReturning });
     mockDeleteReturning.mockResolvedValue([]);
     mockDeleteWhere.mockReturnValue({ returning: mockDeleteReturning });
     mockSelectLimit.mockResolvedValue([]);
@@ -86,6 +86,47 @@ describe('webhookIdempotency', () => {
       mockInsertReturning.mockResolvedValueOnce([]);
 
       const result = await claimEvent('evt_dup', 'stripe');
+
+      expect(result).toBe(false);
+    });
+
+    it('uses ON CONFLICT DO UPDATE guarded on expiry so crashed claims are re-claimable (#8637)', async () => {
+      mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_reclaim' }]);
+
+      await claimEvent('evt_reclaim', 'stripe');
+
+      // The conflict path must be DO UPDATE (re-stamp expired row), not DO
+      // NOTHING (which would ignore expiry and block redelivery forever).
+      expect(mockOnConflictDoUpdate).toHaveBeenCalledTimes(1);
+      const updateArg = mockOnConflictDoUpdate.mock.calls[0][0] as {
+        set: { source: string; expiresAt: Date };
+        setWhere: unknown;
+      };
+      // Re-stamps the row to this caller with a fresh TTL...
+      expect(updateArg.set).toEqual(
+        expect.objectContaining({ source: 'stripe' })
+      );
+      expect(updateArg.set.expiresAt).toBeInstanceOf(Date);
+      // ...but only when the existing claim has expired (setWhere guard present).
+      expect(updateArg.setWhere).toBeDefined();
+    });
+
+    it('reclaims an expired in-flight row (DB updates expired row → returning has rows → true)', async () => {
+      // When the conflicting row is expired, the DO UPDATE fires and RETURNING
+      // yields the re-stamped row.
+      mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_expired_inflight' }]);
+
+      const result = await claimEvent('evt_expired_inflight', 'stripe');
+
+      expect(result).toBe(true);
+    });
+
+    it('does not reclaim a live in-flight row (setWhere false → no update → returning empty → false)', async () => {
+      // When the conflicting row is still live, the DO UPDATE's WHERE is false,
+      // so nothing is updated and RETURNING is empty.
+      mockInsertReturning.mockResolvedValueOnce([]);
+
+      const result = await claimEvent('evt_live_inflight', 'stripe');
 
       expect(result).toBe(false);
     });
@@ -171,22 +212,32 @@ describe('webhookIdempotency', () => {
   // TTL safety net: expired events are re-claimable
   // ----------------------------------------------------------------
   describe('TTL expiry and re-claim', () => {
-    it('allows re-claiming an event after its row is deleted (simulating TTL expiry)', async () => {
+    it('re-claims an event after its in-flight TTL expires (DO UPDATE re-stamps in place)', async () => {
       // First delivery: INSERT succeeds, claim granted
       mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_expired' }]);
       const firstClaim = await claimEvent('evt_expired', 'stripe');
       expect(firstClaim).toBe(true);
 
-      // Simulate TTL expiry: cleanupExpired deletes the row
-      mockDeleteReturning.mockResolvedValueOnce([{ eventId: 'evt_expired' }]);
-      const deletedCount = await cleanupExpired();
-      expect(deletedCount).toBe(1);
-
-      // Second delivery (Stripe retry after expiry): INSERT succeeds again
-      // because the row was deleted by cleanupExpired
+      // Second delivery (Stripe retry after the row's expiresAt lapses): the
+      // ON CONFLICT DO UPDATE WHERE expiresAt < NOW() fires and re-stamps the
+      // row, so RETURNING is non-empty and the claim is granted again — without
+      // requiring cleanupExpired to have physically removed the row first.
       mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_expired' }]);
       const secondClaim = await claimEvent('evt_expired', 'stripe');
       expect(secondClaim).toBe(true);
+    });
+
+    it('also re-claims after cleanupExpired physically removes the row', async () => {
+      mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_pruned' }]);
+      expect(await claimEvent('evt_pruned', 'stripe')).toBe(true);
+
+      // cleanupExpired prunes it (bounded-growth safety net)
+      mockDeleteReturning.mockResolvedValueOnce([{ eventId: 'evt_pruned' }]);
+      expect(await cleanupExpired()).toBe(1);
+
+      // Fresh INSERT (no conflicting row) succeeds
+      mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_pruned' }]);
+      expect(await claimEvent('evt_pruned', 'stripe')).toBe(true);
     });
 
     it('rejects duplicate claim before TTL expires', async () => {
@@ -195,7 +246,8 @@ describe('webhookIdempotency', () => {
       const firstClaim = await claimEvent('evt_inflight', 'stripe');
       expect(firstClaim).toBe(true);
 
-      // Second delivery while row still exists: ON CONFLICT DO NOTHING returns empty
+      // Second delivery while the claim is still live: ON CONFLICT DO UPDATE's
+      // expiry guard is false, so no row is updated and RETURNING is empty.
       mockInsertReturning.mockResolvedValueOnce([]);
       const secondClaim = await claimEvent('evt_inflight', 'stripe');
       expect(secondClaim).toBe(false);

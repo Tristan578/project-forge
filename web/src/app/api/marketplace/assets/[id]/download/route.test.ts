@@ -10,7 +10,8 @@ vi.mock('@/lib/db/client');
 vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
 vi.mock('@/lib/db/schema', () => ({
   marketplaceAssets: { id: 'id', sellerId: 'sellerId', assetFileUrl: 'assetFileUrl' },
-  assetPurchases: { buyerId: 'buyerId', assetId: 'assetId' },
+  assetPurchases: { buyerId: 'buyerId', assetId: 'assetId', priceTokens: 'priceTokens' },
+  creditTransactions: { id: 'id', userId: 'userId', source: 'source', referenceId: 'referenceId' },
 }));
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn(),
@@ -21,6 +22,16 @@ vi.mock('drizzle-orm', () => ({
 const mockGetSignedDownloadUrl = vi.fn();
 vi.mock('@/lib/storage/r2', () => ({
   getSignedDownloadUrl: (...args: unknown[]) => mockGetSignedDownloadUrl(...args),
+}));
+
+// The route runs the real withApiMiddleware, which applies an in-memory
+// rate limit keyed on the (single) authenticated user. Without stubbing it,
+// running >max requests for user_1 across this suite trips a 429. Always
+// allow so the suite tests the route's own authorization logic, not the limiter.
+vi.mock('@/lib/rateLimit', () => ({
+  rateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 99, resetAt: 0 }),
+  getClientIp: vi.fn().mockReturnValue('127.0.0.1'),
+  rateLimitResponse: vi.fn(),
 }));
 
 describe('GET /api/marketplace/assets/[id]/download', () => {
@@ -176,6 +187,141 @@ describe('GET /api/marketplace/assets/[id]/download', () => {
 
     expect(res.status).toBe(307);
     expect(res.headers.get('location')).toBe('https://cdn.example.com/files/model.glb');
+  });
+
+  it('returns 403 when a paid purchase has no completed deduction transaction (orphan row, #8636)', async () => {
+    // Asset belongs to another seller; buyer holds a paid purchase row but the
+    // balance deduction never landed (crash between INSERT and UPDATE).
+    const assetChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([{ id: 'a1', sellerId: 'other-user', assetFileUrl: 'https://cdn.example.com/file' }]),
+    };
+    const purchaseChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([{ id: 'p1', priceTokens: 500 }]),
+    };
+    const deductionChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([]), // no marketplace_purchase transaction
+    };
+    const mockDb = {
+      select: vi.fn()
+        .mockReturnValueOnce(assetChain)
+        .mockReturnValueOnce(purchaseChain)
+        .mockReturnValueOnce(deductionChain),
+    };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { GET } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/download');
+    const res = await GET(req, { params: Promise.resolve({ id: 'a1' }) });
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.error).toContain('Purchase incomplete');
+  });
+
+  it('allows download when a paid purchase has a completed deduction transaction (#8636)', async () => {
+    const assetChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([{ id: 'a1', sellerId: 'other-user', assetFileUrl: 'https://cdn.example.com/files/model.glb' }]),
+    };
+    const purchaseChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([{ id: 'p1', priceTokens: 500 }]),
+    };
+    const deductionChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([{ id: 'txn-1' }]), // completed charge
+    };
+    const updateChain = {
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue([]),
+    };
+    const mockDb = {
+      select: vi.fn()
+        .mockReturnValueOnce(assetChain)
+        .mockReturnValueOnce(purchaseChain)
+        .mockReturnValueOnce(deductionChain),
+      update: vi.fn().mockReturnValue(updateChain),
+    };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { GET } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/download');
+    const res = await GET(req, { params: Promise.resolve({ id: 'a1' }) });
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('https://cdn.example.com/files/model.glb');
+  });
+
+  it('allows download for a free purchase (priceTokens 0) with no transaction', async () => {
+    const assetChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([{ id: 'a1', sellerId: 'other-user', assetFileUrl: 'https://cdn.example.com/files/free.glb' }]),
+    };
+    const purchaseChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([{ id: 'p1', priceTokens: 0 }]),
+    };
+    const updateChain = {
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue([]),
+    };
+    // Only two selects expected — the deduction gate is skipped for free assets.
+    const mockDb = {
+      select: vi.fn()
+        .mockReturnValueOnce(assetChain)
+        .mockReturnValueOnce(purchaseChain),
+      update: vi.fn().mockReturnValue(updateChain),
+    };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { GET } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/download');
+    const res = await GET(req, { params: Promise.resolve({ id: 'a1' }) });
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('https://cdn.example.com/files/free.glb');
+  });
+
+  it('allows owner download without a purchase or transaction', async () => {
+    const assetChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([{ id: 'a1', sellerId: 'user_1', assetFileUrl: 'https://cdn.example.com/files/owned.glb' }]),
+    };
+    const purchaseChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([]), // owner never purchased
+    };
+    const updateChain = {
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue([]),
+    };
+    const mockDb = {
+      select: vi.fn()
+        .mockReturnValueOnce(assetChain)
+        .mockReturnValueOnce(purchaseChain),
+      update: vi.fn().mockReturnValue(updateChain),
+    };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { GET } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/download');
+    const res = await GET(req, { params: Promise.resolve({ id: 'a1' }) });
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('https://cdn.example.com/files/owned.glb');
   });
 
   it('should return 400 for disallowed hosts', async () => {

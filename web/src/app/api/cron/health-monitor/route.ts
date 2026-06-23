@@ -8,6 +8,7 @@ import {
 } from '@/lib/monitoring/healthChecks';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { logger } from '@/lib/logging/logger';
+import { cleanupExpired } from '@/lib/billing/webhookIdempotency';
 
 /**
  * GET /api/cron/health-monitor
@@ -38,6 +39,31 @@ function isAuthorizedCron(req: NextRequest): boolean {
   return timingSafeEqual(expectedDigest, actualDigest);
 }
 
+/**
+ * Best-effort maintenance: prune expired webhook-idempotency claim rows so
+ * the table does not grow unbounded (#8637). Runs on this existing 5-minute
+ * cron to avoid a dedicated route. Failures are logged but never propagate —
+ * a maintenance hiccup must not register as a cron failure (which would make
+ * Vercel back off the synthetic monitor).
+ */
+async function pruneExpiredWebhookClaims(): Promise<void> {
+  try {
+    const deleted = await cleanupExpired();
+    if (deleted > 0) {
+      logger.info('Pruned expired webhook-idempotency rows', {
+        endpoint: 'GET /api/cron/health-monitor',
+        deleted,
+      });
+    }
+  } catch (error) {
+    captureException(error, { source: 'cron/health-monitor', task: 'webhook-idempotency-cleanup' });
+    logger.warn('Webhook-idempotency cleanup failed', {
+      endpoint: 'GET /api/cron/health-monitor',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 function reportFailuresToSentry(
   failedServices: ServiceHealth[],
   overallStatus: string,
@@ -64,6 +90,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const log = logger.child({ endpoint: 'GET /api/cron/health-monitor' });
   log.info('Synthetic health monitor starting');
+
+  // Opportunistic maintenance — prune expired webhook claims (#8637).
+  await pruneExpiredWebhookClaims();
 
   const report = await runAllHealthChecks();
   const criticalStatus = computeCriticalStatus(report.services);
