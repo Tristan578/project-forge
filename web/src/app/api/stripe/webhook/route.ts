@@ -31,6 +31,12 @@ import {
 } from '@/lib/billing/subscription-lifecycle';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { getStripe } from '@/lib/billing/stripe-client';
+import {
+  isCheckoutHeldForReview,
+  handleReviewOpened,
+  handleReviewClosed,
+  handleDisputeCreated,
+} from '@/lib/billing/radar-review';
 
 // Map Stripe price IDs to tiers
 function tierFromPriceId(priceId: string): Tier | null {
@@ -227,6 +233,33 @@ async function processEvent(event: Stripe.Event): Promise<void> {
     }
 
     // -----------------------------------------------------------
+    // Radar fraud review opened — token grant held pending verdict (PF-913)
+    // -----------------------------------------------------------
+    case 'review.opened': {
+      const review = event.data.object as Stripe.Review;
+      await handleReviewOpened(review);
+      break;
+    }
+
+    // -----------------------------------------------------------
+    // Radar fraud review closed — release the held grant iff approved (PF-913)
+    // -----------------------------------------------------------
+    case 'review.closed': {
+      const review = event.data.object as Stripe.Review;
+      await handleReviewClosed(review, getStripe());
+      break;
+    }
+
+    // -----------------------------------------------------------
+    // Charge disputed — claw back any granted token credit (PF-913)
+    // -----------------------------------------------------------
+    case 'charge.dispute.created': {
+      const dispute = event.data.object as Stripe.Dispute;
+      await handleDisputeCreated(dispute, getStripe());
+      break;
+    }
+
+    // -----------------------------------------------------------
     // One-time payment completed (token add-on purchase)
     // -----------------------------------------------------------
     case 'checkout.session.completed': {
@@ -241,6 +274,18 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           : session.payment_intent?.id;
 
       if (userId && pkg && paymentIntent) {
+        // Radar fraud-review hold (PF-913): when the flag is on and the payment
+        // is flagged for manual review, DEFER the credit. The grant is released
+        // later by `review.closed { approved }`. When the flag is off, or the
+        // payment is not under review, this returns false and we credit now —
+        // identical to the pre-PF-913 behaviour.
+        if (await isCheckoutHeldForReview(paymentIntent, getStripe())) {
+          console.info(
+            `[stripe-webhook] Token-pack credit held for Radar review (pi=${paymentIntent}, user=${userId}).`
+          );
+          break;
+        }
+
         await creditAddonTokens(userId, pkg, paymentIntent);
 
         // Save Stripe customer ID if not already stored

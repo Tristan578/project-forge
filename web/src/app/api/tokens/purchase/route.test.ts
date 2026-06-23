@@ -138,6 +138,11 @@ describe('POST /api/tokens/purchase', () => {
         customer: 'cus_123',
         line_items: [{ price: 'price_spark', quantity: 1 }],
         metadata: expect.objectContaining({ userId: 'user_1', package: 'spark' }),
+        // PF-913: token-pack identity propagated to the PaymentIntent so the
+        // Radar review-closed handler can release a held grant.
+        payment_intent_data: expect.objectContaining({
+          metadata: expect.objectContaining({ userId: 'user_1', package: 'spark' }),
+        }),
       })
     );
   });
