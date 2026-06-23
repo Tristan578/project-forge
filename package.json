@@ -30,7 +30,7 @@
     "node": ">=24 <25"
   },
   "overrides": {
-    "@clerk/nextjs": "^7.4.2",
+    "@clerk/nextjs": "^7.5.7",
     "@clerk/shared": "^4.14.0",
     "@hono/node-server": "^1.19.13",
     "dompurify": ">=3.4.11",
@@ -57,13 +57,14 @@
     "changeset:publish": "changeset publish"
   },
   "devDependencies": {
-    "@changesets/changelog-github": "^0.6.0",
+    "@changesets/changelog-github": "^0.7.0",
     "@changesets/cli": "^2.30.0",
     "@storybook/react": "^8.6",
     "@storybook/react-vite": "^8.6",
-    "@vitest/coverage-v8": "^4.1.8",
+    "@vitest/coverage-v8": "^4.1.9",
+    "jsdom": "^29.1.1",
     "storybook": "^8.6",
-    "turbo": "^2.9.14",
+    "turbo": "^2.9.18",
     "vitest": "^4.1.8"
   }
 }

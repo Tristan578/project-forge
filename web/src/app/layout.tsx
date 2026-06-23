@@ -132,7 +132,7 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         {hasValidClerkKey ? (
-          <ClerkProvider appearance={{ baseTheme: dark }} afterSignOutUrl="/sign-in">
+          <ClerkProvider appearance={{ theme: dark }} afterSignOutUrl="/sign-in">
             {bodyContent}
           </ClerkProvider>
         ) : (
