@@ -53,6 +53,16 @@ export async function POST(req: NextRequest) {
         package: pkg,
         tokens: pkgInfo.tokens.toString(),
       },
+      // Propagate the token-pack identity onto the PaymentIntent so the Radar
+      // fraud-review handler (PF-913) can recover userId + package from
+      // `review.payment_intent` when releasing a held grant — the Review object
+      // does not carry the checkout session's metadata.
+      payment_intent_data: {
+        metadata: {
+          userId: user.id,
+          package: pkg,
+        },
+      },
       success_url: `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'}?purchase=success`,
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'}?purchase=cancelled`,
     });

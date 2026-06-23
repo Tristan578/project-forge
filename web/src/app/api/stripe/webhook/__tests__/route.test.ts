@@ -25,6 +25,10 @@ const {
   mockHandleInvoicePaid,
   mockHandleInvoicePaymentFailed,
   mockHandleChargeRefunded,
+  mockIsCheckoutHeldForReview,
+  mockHandleReviewOpened,
+  mockHandleReviewClosed,
+  mockHandleDisputeCreated,
 } = vi.hoisted(() => ({
   mockConstructEvent: vi.fn(),
   mockClaimEvent: vi.fn(() => Promise.resolve(true)),
@@ -36,6 +40,10 @@ const {
   mockHandleInvoicePaid: vi.fn(() => Promise.resolve()),
   mockHandleInvoicePaymentFailed: vi.fn(() => Promise.resolve()),
   mockHandleChargeRefunded: vi.fn(() => Promise.resolve()),
+  mockIsCheckoutHeldForReview: vi.fn(() => Promise.resolve(false)),
+  mockHandleReviewOpened: vi.fn(() => Promise.resolve()),
+  mockHandleReviewClosed: vi.fn(() => Promise.resolve()),
+  mockHandleDisputeCreated: vi.fn(() => Promise.resolve()),
 }));
 
 // ---------------------------------------------------------------------------
@@ -80,6 +88,13 @@ vi.mock('@/lib/billing/subscription-lifecycle', () => ({
   handleInvoicePaid: mockHandleInvoicePaid,
   handleInvoicePaymentFailed: mockHandleInvoicePaymentFailed,
   handleChargeRefunded: mockHandleChargeRefunded,
+}));
+
+vi.mock('@/lib/billing/radar-review', () => ({
+  isCheckoutHeldForReview: mockIsCheckoutHeldForReview,
+  handleReviewOpened: mockHandleReviewOpened,
+  handleReviewClosed: mockHandleReviewClosed,
+  handleDisputeCreated: mockHandleDisputeCreated,
 }));
 
 vi.mock('stripe', () => {
@@ -151,6 +166,10 @@ describe('POST /api/stripe/webhook', () => {
     mockHandleInvoicePaid.mockResolvedValue(undefined);
     mockHandleInvoicePaymentFailed.mockResolvedValue(undefined);
     mockHandleChargeRefunded.mockResolvedValue(undefined);
+    mockIsCheckoutHeldForReview.mockResolvedValue(false);
+    mockHandleReviewOpened.mockResolvedValue(undefined);
+    mockHandleReviewClosed.mockResolvedValue(undefined);
+    mockHandleDisputeCreated.mockResolvedValue(undefined);
 
     process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test';
     process.env.STRIPE_PRICE_STARTER = 'price_starter';
@@ -380,6 +399,74 @@ describe('POST /api/stripe/webhook', () => {
     await POST(makeRequest('{}'));
 
     expect(creditAddonTokens).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Radar fraud-review hold (PF-913 / #8823)
+  // -------------------------------------------------------------------------
+
+  it('HOLDS the credit when the payment is flagged for Radar review', async () => {
+    const { creditAddonTokens } = await import('@/lib/tokens/service');
+    mockIsCheckoutHeldForReview.mockResolvedValueOnce(true);
+    const session = {
+      mode: 'payment',
+      metadata: { userId: 'user-1', package: 'spark' },
+      payment_intent: 'pi_flagged',
+      customer: null,
+    };
+    mockConstructEvent.mockReturnValue(makeStripeEvent('checkout.session.completed', session));
+
+    const res = await POST(makeRequest('{}'));
+
+    expect(mockIsCheckoutHeldForReview).toHaveBeenCalledWith('pi_flagged', expect.anything());
+    expect(creditAddonTokens).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+  });
+
+  it('credits immediately when the payment is NOT under review', async () => {
+    const { creditAddonTokens } = await import('@/lib/tokens/service');
+    mockIsCheckoutHeldForReview.mockResolvedValueOnce(false);
+    const session = {
+      mode: 'payment',
+      metadata: { userId: 'user-1', package: 'spark' },
+      payment_intent: 'pi_clean',
+      customer: null,
+    };
+    mockConstructEvent.mockReturnValue(makeStripeEvent('checkout.session.completed', session));
+
+    await POST(makeRequest('{}'));
+
+    expect(creditAddonTokens).toHaveBeenCalledWith('user-1', 'spark', 'pi_clean');
+  });
+
+  it('dispatches review.opened to handleReviewOpened', async () => {
+    const review = { id: 'prv_1', object: 'review', open: true, opened_reason: 'rule' };
+    mockConstructEvent.mockReturnValue(makeStripeEvent('review.opened', review));
+
+    const res = await POST(makeRequest('{}'));
+
+    expect(mockHandleReviewOpened).toHaveBeenCalledWith(review);
+    expect(res.status).toBe(200);
+  });
+
+  it('dispatches review.closed to handleReviewClosed', async () => {
+    const review = { id: 'prv_2', object: 'review', open: false, closed_reason: 'approved', payment_intent: 'pi_2' };
+    mockConstructEvent.mockReturnValue(makeStripeEvent('review.closed', review));
+
+    const res = await POST(makeRequest('{}'));
+
+    expect(mockHandleReviewClosed).toHaveBeenCalledWith(review, expect.anything());
+    expect(res.status).toBe(200);
+  });
+
+  it('dispatches charge.dispute.created to handleDisputeCreated', async () => {
+    const dispute = { id: 'dp_1', object: 'dispute', charge: 'ch_1', amount: 4900 };
+    mockConstructEvent.mockReturnValue(makeStripeEvent('charge.dispute.created', dispute));
+
+    const res = await POST(makeRequest('{}'));
+
+    expect(mockHandleDisputeCreated).toHaveBeenCalledWith(dispute, expect.anything());
+    expect(res.status).toBe(200);
   });
 
   // -------------------------------------------------------------------------
