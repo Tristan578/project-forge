@@ -1,0 +1,39 @@
+# SpawnForge generated-asset post-processing Worker (Cloudflare Queue consumer).
+#
+# Consumes R2 event notifications for the `spawnforge-assets` bucket (delivered
+# via the `spawnforge-asset-postprocess` Queue) and validates each uploaded
+# artifact (GLB / image maps / audio). See ./README.md for the deploy + local
+# `wrangler dev` test steps.
+#
+# Cloudflare account: 0b949ff499d179e24dde841f71d6134f (see MEMORY.md service
+# accounts — Vercel/Sentry are separate; this is the same CF account as the
+# engine-cdn worker and the spawnforge-engine / spawnforge-assets R2 buckets).
+
+name = "spawnforge-asset-postprocess"
+main = "worker.mjs"
+compatibility_date = "2026-06-01"
+account_id = "0b949ff499d179e24dde841f71d6134f"
+
+# Observability so failed-validation warnings land in the dashboard logs.
+[observability]
+enabled = true
+
+# --- R2 binding: read the uploaded artifact + write the status sidecar ---
+# The Worker no-ops safely if this binding is absent (see ENV GUARD in worker.mjs),
+# so a misconfigured deploy degrades to inert rather than wedging the queue.
+[[r2_buckets]]
+binding = "ASSET_BUCKET"
+bucket_name = "spawnforge-assets"
+
+# --- Queue consumer: R2 event notifications are delivered to this queue ---
+# The queue + its R2 event-notification source are provisioned at deploy time by
+# the user (see README "Provisioning"). `wrangler deploy` registers this Worker
+# as the consumer.
+[[queues.consumers]]
+queue = "spawnforge-asset-postprocess"
+# Batch a few messages per invocation; validation is cheap (header reads).
+max_batch_size = 10
+max_batch_timeout = 5
+# Redeliver transient failures a few times, then dead-letter for inspection.
+max_retries = 3
+dead_letter_queue = "spawnforge-asset-postprocess-dlq"
