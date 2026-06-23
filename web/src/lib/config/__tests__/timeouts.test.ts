@@ -294,12 +294,29 @@ describe('Generation agent step timeout (PF-916, #8826)', () => {
     }
   });
 
-  it('clamps a long route to the base cap (a 180s route does not grant an unbounded step)', () => {
-    expect(deriveGenerationStepTimeoutMs(180)).toBe(GENERATION_AGENT_STEP_TIMEOUT_MS);
+  it('derives a LONGER cap from a longer route budget — not clamped to the 60s base (#8833)', () => {
+    // Regression: localize (120s) and model/music (180s) declare a longer
+    // maxDuration because their single provider call legitimately runs longer.
+    // The derived cap must be each route's OWN budget, NOT the 55s base — else a
+    // valid long job is aborted early and refunded spuriously.
+    expect(deriveGenerationStepTimeoutMs(120)).toBe(
+      120 * 1000 - GENERATION_AGENT_TIMEOUT_BUFFER_MS,
+    );
+    expect(deriveGenerationStepTimeoutMs(180)).toBe(
+      180 * 1000 - GENERATION_AGENT_TIMEOUT_BUFFER_MS,
+    );
+    // And both exceed the 60s-route base, proving the old clamp is gone.
+    expect(deriveGenerationStepTimeoutMs(120)).toBeGreaterThan(GENERATION_AGENT_STEP_TIMEOUT_MS);
+    expect(deriveGenerationStepTimeoutMs(180)).toBeGreaterThan(GENERATION_AGENT_STEP_TIMEOUT_MS);
   });
 
-  it('clamps a short route to its own budget below the base cap', () => {
-    // A hypothetical 30s route: budget 25s < base 55s, so the route budget wins.
+  it('the 60s standard route derives exactly the base cap', () => {
+    // The base constant IS the 60s route budget, so a 60s route lands on it.
+    expect(deriveGenerationStepTimeoutMs(60)).toBe(GENERATION_AGENT_STEP_TIMEOUT_MS);
+  });
+
+  it('derives a short route to its own (smaller) budget', () => {
+    // A hypothetical 30s route: budget 25s < base 55s.
     expect(deriveGenerationStepTimeoutMs(30)).toBe(
       30 * 1000 - GENERATION_AGENT_TIMEOUT_BUFFER_MS,
     );
