@@ -1,11 +1,15 @@
 /**
  * Regression tests for POST /api/marketplace/assets/[id]/purchase
  *
- * Covers the downloadCount double-increment bug:
- *   - When a purchase INSERT conflicts (retry), downloadCount must NOT increment.
- *   - When a purchase INSERT succeeds (first attempt), downloadCount increments once.
+ * Covers:
+ *   - downloadCount double-increment idempotency on the FREE path (PR #8262).
+ *   - Atomic paid purchase: the deduction credit_transaction, asset_purchases
+ *     idempotency-gate row, and balance mutations all commit inside ONE
+ *     neonSql.transaction([...]) so a crash can never leave a charged buyer
+ *     with no deduction row (the download gate keys off that row) — #8636.
  *
- * @see PR #8262 — Boy Scout Rule fix for downloadCount idempotency
+ * @see PR #8262 — downloadCount idempotency
+ * @see #8636 — non-atomic purchase left buyers charged-but-can-never-download
  */
 vi.mock('server-only', () => ({}));
 
@@ -19,6 +23,23 @@ import { NextRequest } from 'next/server';
 const mockInsert = vi.fn();
 const mockUpdate = vi.fn();
 const mockSelect = vi.fn();
+const mockDelete = vi.fn();
+
+// Atomic transaction recorder (paid path).
+const mockTransactionCalls: unknown[][] = [];
+let mockTransactionResults: unknown[][] = [];
+let mockTransactionIdx = 0;
+
+const mockNeonSql = Object.assign(
+  vi.fn((strings: TemplateStringsArray, ..._vals: unknown[]) => ({ sql: strings.join('?') })),
+  {
+    transaction: vi.fn((statements: unknown[]) => {
+      mockTransactionCalls.push(statements);
+      const result = mockTransactionResults[mockTransactionIdx++] ?? [];
+      return Promise.resolve(result);
+    }),
+  },
+);
 
 vi.mock('@/lib/db/client', () => ({
   queryWithResilience: vi.fn((fn: () => unknown) => fn()),
@@ -26,7 +47,9 @@ vi.mock('@/lib/db/client', () => ({
     insert: mockInsert,
     update: mockUpdate,
     select: mockSelect,
+    delete: mockDelete,
   })),
+  getNeonSql: vi.fn(() => mockNeonSql),
 }));
 
 vi.mock('@/lib/api/middleware', () => ({
@@ -127,10 +150,13 @@ function setupDbChain(calls: Array<{ type: 'select' | 'insert' | 'update'; resul
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('POST /api/marketplace/assets/[id]/purchase — downloadCount idempotency', () => {
+describe('POST /api/marketplace/assets/[id]/purchase — downloadCount idempotency (free path)', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    mockTransactionCalls.length = 0;
+    mockTransactionResults = [];
+    mockTransactionIdx = 0;
   });
 
   it('increments downloadCount on first free purchase (insert succeeds)', async () => {
@@ -165,64 +191,73 @@ describe('POST /api/marketplace/assets/[id]/purchase — downloadCount idempoten
     // update was NOT called — downloadCount should not increment on retry
     expect(mockUpdate).not.toHaveBeenCalled();
   });
+});
 
-  it('increments downloadCount on first paid purchase (insert succeeds)', async () => {
+describe('POST /api/marketplace/assets/[id]/purchase — atomic paid charge (#8636)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    mockTransactionCalls.length = 0;
+    mockTransactionResults = [];
+    mockTransactionIdx = 0;
+  });
+
+  it('runs the deduction, gate insert, and balance update in ONE neonSql.transaction', async () => {
     setupDbChain([
-      { type: 'select', result: [paidAsset] },       // get asset
-      { type: 'select', result: [] },                 // check existing purchase
-      { type: 'insert', result: [{ id: 'purchase-1' }] }, // purchase INSERT succeeds (idempotency gate)
-      { type: 'select', result: [seller] },           // get seller
-      { type: 'update', result: [{ id: 'buyer-1' }] }, // buyer balance deduction
-      { type: 'update', result: [{ earnedCredits: 270 }] }, // seller balance credit
-      { type: 'select', result: [{ earnedCredits: 400, addonTokens: 0, monthlyTokens: 1000, monthlyTokensUsed: 100 }] }, // buyer balance read
-      { type: 'update', result: [paidAsset] },        // downloadCount increment
-      { type: 'insert', result: [{ id: 'txn-1' }] }, // buyer transaction
-      { type: 'insert', result: [{ id: 'txn-2' }] }, // seller transaction
+      { type: 'select', result: [paidAsset] }, // get asset
+      { type: 'select', result: [] },          // check existing purchase
+      { type: 'select', result: [seller] },    // get seller
     ]);
+    // Buyer-charge statement RETURNS the buyer row id → fully committed.
+    mockTransactionResults = [[[{ id: 'buyer-1' }], [], []]];
 
     const { POST } = await import('@/app/api/marketplace/assets/[id]/purchase/route');
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: 'asset-1' }) });
     const body = await res.json();
 
+    expect(res.status).toBe(200);
     expect(body.success).toBe(true);
-    // 3 updates total: buyer balance, seller balance, downloadCount
-    expect(mockUpdate).toHaveBeenCalledTimes(3);
+
+    // The whole charge is atomic — exactly one transaction, no per-statement
+    // getDb() writes that could partially commit on a crash.
+    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
+    expect(mockTransactionCalls[0].length).toBeGreaterThanOrEqual(3);
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockDelete).not.toHaveBeenCalled();
   });
 
-  it('returns 409 on retry paid purchase when credit_transaction exists (fully completed)', async () => {
+  it('returns 409 (Already purchased) when a completed deduction txn already exists', async () => {
     setupDbChain([
-      { type: 'select', result: [paidAsset] },       // get asset
-      { type: 'select', result: [] },                 // check existing purchase (race: not found yet)
-      { type: 'insert', result: [] },                 // purchase INSERT conflicts — idempotency gate
-      { type: 'select', result: [{ id: 'txn-existing' }] }, // credit_transaction EXISTS → fully completed
+      { type: 'select', result: [paidAsset] },              // get asset
+      { type: 'select', result: [{ priceTokens: 100 }] },   // existing purchase row
+      { type: 'select', result: [{ id: 'txn-existing' }] }, // completed deduction → already charged
     ]);
 
     const { POST } = await import('@/app/api/marketplace/assets/[id]/purchase/route');
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: 'asset-1' }) });
 
     expect(res.status).toBe(409);
-    expect(mockUpdate).not.toHaveBeenCalled();
+    // No re-charge attempted.
+    expect(mockNeonSql.transaction).not.toHaveBeenCalled();
   });
 
-  it('returns 409 on orphan purchase row (insert committed but balance never deducted)', async () => {
-    // When the purchase INSERT conflicts but no credit_transaction exists,
-    // the route returns 409 "Purchase in progress, please retry" so the
-    // client retries safely. It does NOT attempt to complete the charge
-    // inline — another request may be in-flight.
+  it('returns 409 with no partial charge when the atomic transaction commits nothing', async () => {
     setupDbChain([
-      { type: 'select', result: [paidAsset] },       // get asset
-      { type: 'select', result: [] },                 // check existing purchase (race: not found yet)
-      { type: 'insert', result: [] },                 // purchase INSERT conflicts — orphan row
-      { type: 'select', result: [] },                 // credit_transaction NOT found → orphan
+      { type: 'select', result: [paidAsset] }, // get asset
+      { type: 'select', result: [] },          // no existing purchase
+      { type: 'select', result: [seller] },    // get seller
+      { type: 'select', result: [] },          // no completed deduction → safe to retry
     ]);
+    mockTransactionResults = [[[], [], []]]; // buyer-charge statement returned no row
 
     const { POST } = await import('@/app/api/marketplace/assets/[id]/purchase/route');
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: 'asset-1' }) });
     const body = await res.json();
 
     expect(res.status).toBe(409);
-    expect(body.error).toBe('Purchase in progress, please retry');
-    // No balance mutations should have happened
-    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(body.error).toBe('Balance changed, please retry');
+    // Atomic transaction is the only write path — no manual rollback DELETE.
+    expect(mockDelete).not.toHaveBeenCalled();
   });
 });

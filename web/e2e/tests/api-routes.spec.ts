@@ -21,7 +21,10 @@ test.describe('API Routes @ui', () => {
       expect(body).toHaveProperty('status', 'ok');
       expect(body).toHaveProperty('environment');
       expect(body).toHaveProperty('commit');
-      expect(body).toHaveProperty('branch');
+      // `branch` is intentionally NOT exposed — the git branch ref leaked
+      // internal/in-flight feature names from the public endpoint (#8648).
+      // Assert its absence so the leak can never silently return.
+      expect(body).not.toHaveProperty('branch');
       expect(body).toHaveProperty('database');
       expect(body).toHaveProperty('timestamp');
     });

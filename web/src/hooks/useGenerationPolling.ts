@@ -19,6 +19,7 @@
 import { useEffect, useRef } from 'react';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useEditorStore } from '@/stores/editorStore';
+import { getStatusEndpoint } from '@/lib/generation/statusEndpoints';
 import { postProcess, inferSfxCategory } from '@/lib/generate/postProcess';
 import { analyzeModelQuality } from '@/lib/generate/modelQuality';
 import { detectGridDimensions, sliceSheet, buildSpriteSheetData } from '@/lib/sprites/sheetImporter';
@@ -156,29 +157,6 @@ export function useGenerationPolling() {
 
     // Immediate first poll
     poll();
-  }
-
-  function getStatusEndpoint(type: string): string {
-    switch (type) {
-      case 'model':
-        return '/api/generate/model/status';
-      case 'texture':
-        return '/api/generate/texture/status';
-      case 'skybox':
-        return '/api/generate/skybox/status';
-      case 'music':
-        return '/api/generate/music/status';
-      case 'sprite':
-        return '/api/generate/sprite/status';
-      case 'sprite_sheet':
-        return '/api/generate/sprite-sheet/status';
-      case 'tileset':
-        return '/api/generate/tileset-gen/status';
-      case 'pixel-art':
-        return '/api/generate/pixel-art/status';
-      default:
-        throw new Error(`Unknown generation type: ${type}`);
-    }
   }
 
   async function handleCompletion(id: string, type: string, data: StatusResponse) {

@@ -46,14 +46,13 @@ describe('GET /api/health', () => {
       expect(body.status).toBe('ok');
     });
 
-    it('includes required fields: status, environment, commit, branch, database, timestamp, services', async () => {
+    it('includes required fields: status, environment, commit, database, timestamp, services', async () => {
       const res = await GET(makeReq());
       const body = await res.json();
 
       expect(body).toHaveProperty('status');
       expect(body).toHaveProperty('environment');
       expect(body).toHaveProperty('commit');
-      expect(body).toHaveProperty('branch');
       expect(body).toHaveProperty('database');
       expect(body).toHaveProperty('timestamp');
       expect(body).toHaveProperty('services');
@@ -126,22 +125,18 @@ describe('GET /api/health', () => {
       expect(typeof body.commit).toBe('string');
     });
 
-    it('branch comes from VERCEL_GIT_COMMIT_REF', async () => {
+    it('never exposes the git branch, even when VERCEL_GIT_COMMIT_REF is set (regression for #8648)', async () => {
+      // The full branch ref leaks internal branch naming. The health payload must
+      // omit `branch` entirely regardless of the deploy env, so a probe cannot
+      // recover the branch name from the public endpoint.
       vi.stubEnv('VERCEL_GIT_COMMIT_REF', 'main');
 
       const mod = await import('../route');
       const res = await mod.GET(makeReq());
       const body = await res.json();
 
-      expect(body.branch).toBe('main');
-    });
-
-    it('branch is a string (from env or defaulting to "unknown")', async () => {
-      const res = await GET(makeReq());
-      const body = await res.json();
-
-      // Branch is always a string
-      expect(typeof body.branch).toBe('string');
+      expect(body).not.toHaveProperty('branch');
+      expect(JSON.stringify(body)).not.toContain('main');
     });
   });
 

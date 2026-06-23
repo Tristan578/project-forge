@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { moderationAppeals, gameComments } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
@@ -78,13 +78,21 @@ export async function POST(
         .where(eq(moderationAppeals.id, id))
     );
 
-    // If approved and the content is a comment, unflag it
+    // If approved and the content is a comment, unflag it. Defense-in-depth:
+    // re-confirm the appellant authored the comment before mutating its flag,
+    // so a stale/forged appeal cannot unflag a comment its filer never owned
+    // (the appeal POST also enforces ownership at submission time) (#8613).
     if (decision === 'approve' && appeal.contentType === 'comment') {
       await queryWithResilience(() =>
         getDb()
           .update(gameComments)
           .set({ flagged: 0 })
-          .where(eq(gameComments.id, appeal.contentId))
+          .where(
+            and(
+              eq(gameComments.id, appeal.contentId),
+              eq(gameComments.userId, appeal.userId)
+            )
+          )
       );
     }
 

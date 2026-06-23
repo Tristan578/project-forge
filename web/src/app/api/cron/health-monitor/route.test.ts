@@ -11,6 +11,14 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
 
+// Opportunistic webhook-claim cleanup runs on this cron (#8637). Default to a
+// clean no-op so it never interferes with the health-check assertions; the
+// dedicated cleanup tests below override the return/throw per-case.
+const mockCleanupExpired = vi.fn().mockResolvedValue(0);
+vi.mock('@/lib/billing/webhookIdempotency', () => ({
+  cleanupExpired: () => mockCleanupExpired(),
+}));
+
 const { mockLoggerError, mockLoggerWarn } = vi.hoisted(() => ({
   mockLoggerError: vi.fn(),
   mockLoggerWarn: vi.fn(),
@@ -186,5 +194,33 @@ describe('GET /api/cron/health-monitor', () => {
 
     expect(mockLoggerError).toHaveBeenCalled();
     expect(mockLoggerWarn).toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // #8637 — opportunistic webhook-idempotency cleanup runs on this cron and
+  // must never fail the cron (which would make Vercel back off the monitor).
+  // -------------------------------------------------------------------------
+
+  it('prunes expired webhook claims on every run (#8637)', async () => {
+    mockCleanupExpired.mockResolvedValueOnce(3);
+
+    const res = await GET(makeReq(`Bearer ${CRON_SECRET}`));
+
+    expect(mockCleanupExpired).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(200);
+  });
+
+  it('still returns 200 and reports to Sentry when webhook cleanup throws (#8637)', async () => {
+    mockCleanupExpired.mockRejectedValueOnce(new Error('db unreachable'));
+
+    const res = await GET(makeReq(`Bearer ${CRON_SECRET}`));
+
+    // The cleanup failure is swallowed (captured to Sentry) and the health
+    // monitor completes normally with a 200.
+    expect(res.status).toBe(200);
+    expect(captureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ task: 'webhook-idempotency-cleanup' }),
+    );
   });
 });

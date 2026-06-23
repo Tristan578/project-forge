@@ -184,7 +184,7 @@ describe('GET /api/health — response shape contract', () => {
     expect(body.timestamp).not.toBe('');
   });
 
-  it('returns environment, commit, branch, and version fields', async () => {
+  it('returns environment, commit, and version fields (but not branch)', async () => {
     const { GET, resetHealthCache } = await import('@/app/api/health/route');
     resetHealthCache();
     const res = await GET(makeGetRequest('http://localhost/api/health'));
@@ -192,8 +192,11 @@ describe('GET /api/health — response shape contract', () => {
 
     expect(typeof body.environment).toBe('string');
     expect(typeof body.commit).toBe('string');
-    expect(typeof body.branch).toBe('string');
     expect(typeof body.version).toBe('string');
+    // The git branch ref (VERCEL_GIT_COMMIT_REF) is intentionally NOT exposed on
+    // the public health endpoint — it leaks internal branch naming / in-flight
+    // feature work (#8648). Keep this contract in lockstep with the route.
+    expect(body).not.toHaveProperty('branch');
   });
 
   it('each service entry has name and status fields', async () => {

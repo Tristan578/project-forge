@@ -95,6 +95,7 @@ check_triggered "hook-tests"                "needs-hooks"
 check_triggered "skills-lint"               "needs-skills"
 check_triggered "ghaw-lock-sync"            "needs-ghaw"
 check_triggered "openapi-route-sync"        "needs-api"
+check_triggered "actions-pin-check"         "needs-ci"
 # The journey gate is the ONLY runtime proof that the E2E store-exposure flag
 # (NEXT_PUBLIC_E2E_HOOKS) gates correctly on a real prod build, and the required
 # proof that the core new-user journey stays winnable + exportable. Protect it

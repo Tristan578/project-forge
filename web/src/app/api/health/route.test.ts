@@ -35,7 +35,10 @@ describe('GET /api/health', () => {
     expect(res.status).toBeLessThan(600); // any valid HTTP status
     expect(body.environment).toBe('test');
     expect(body.commit).toBe('abc12345');
-    expect(body.branch).toBe('main');
+    // Git branch ref must NOT be exposed on the public endpoint — it leaks
+    // internal branch naming / in-flight feature work (#8648).
+    expect(body).not.toHaveProperty('branch');
+    expect(JSON.stringify(body)).not.toContain('main');
     expect(body.timestamp).toBeDefined();
   });
 
@@ -45,7 +48,8 @@ describe('GET /api/health', () => {
     const body = await res.json();
 
     expect(body.commit).toBe('local');
-    expect(body.branch).toBe('unknown');
+    // branch is intentionally omitted from the public payload (#8648)
+    expect(body).not.toHaveProperty('branch');
   });
 
   it('should include services array with 12 entries', async () => {

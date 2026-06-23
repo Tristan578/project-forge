@@ -228,6 +228,170 @@ describe('logger', () => {
     });
   });
 
+  describe('secret redaction (#8642)', () => {
+    /** Run a logger call in production mode and return the parsed JSON entry. */
+    function logProd(fn: () => void): LogEntry {
+      (process.env as Record<string, string>).NODE_ENV = 'production';
+      const cap = captureConsole();
+      try {
+        fn();
+        return JSON.parse(cap.entries[0].args[0] as string) as LogEntry;
+      } finally {
+        cap.restore();
+      }
+    }
+
+    it('masks values under sensitive key names', () => {
+      const entry = logProd(() =>
+        logger.info('resolved key', {
+          apiKey: 'sk-secret-value',
+          token: 'tok_abcdef',
+          password: 'hunter2',
+          authorization: 'Bearer xyz',
+          encryptedKey: 'AAAA==',
+          userId: 'u-1',
+        }),
+      );
+      expect(entry.apiKey).toBe('[REDACTED]');
+      expect(entry.token).toBe('[REDACTED]');
+      expect(entry.password).toBe('[REDACTED]');
+      expect(entry.authorization).toBe('[REDACTED]');
+      expect(entry.encryptedKey).toBe('[REDACTED]');
+      // Non-sensitive fields are preserved
+      expect(entry.userId).toBe('u-1');
+    });
+
+    it('masks camelCase and snake_case key variants', () => {
+      const entry = logProd(() =>
+        logger.info('mixed', {
+          stripe_secret_key: 'sk_live_abc',
+          cacheKey: 'safe-value-but-masked',
+          sessionToken: 'abc',
+        }),
+      );
+      expect(entry.stripe_secret_key).toBe('[REDACTED]');
+      expect(entry.cacheKey).toBe('[REDACTED]');
+      expect(entry.sessionToken).toBe('[REDACTED]');
+    });
+
+    it('does not mask innocuous keys that merely contain a sensitive substring', () => {
+      const entry = logProd(() =>
+        logger.info('innocuous', { monkey: 'banana', keyboard: 'qwerty', donkey: 'kong' }),
+      );
+      expect(entry.monkey).toBe('banana');
+      expect(entry.keyboard).toBe('qwerty');
+      expect(entry.donkey).toBe('kong');
+    });
+
+    it('scrubs secret-shaped substrings from non-sensitive string values', () => {
+      const entry = logProd(() =>
+        logger.error('db failure', {
+          error: 'auth failed for Bearer abc.def.ghi using sk_live_deadbeef0000',
+        }),
+      );
+      expect(entry.error).not.toContain('abc.def.ghi');
+      expect(entry.error).not.toContain('sk_live_deadbeef0000');
+      expect(entry.error).toContain('[REDACTED]');
+    });
+
+    it('scrubs hyphenated OpenAI/Anthropic keys embedded in a non-sensitive value (regression for #8642)', () => {
+      // These project/key formats contain internal hyphens that terminated the
+      // old `sk-[A-Za-z0-9]{20,}` class at the first dash, leaving the key in logs.
+      const openaiProj = 'sk-proj-Abc123Def456Ghi789Jkl012Mno345';
+      const anthropic = 'sk-ant-api03-Abc123Def456Ghi789Jkl012Mno345pqr';
+      const entry = logProd(() =>
+        logger.error('provider call failed', {
+          detail: `openai=${openaiProj} anthropic=${anthropic}`,
+        }),
+      );
+      expect(entry.detail).not.toContain(openaiProj);
+      expect(entry.detail).not.toContain(anthropic);
+      expect(entry.detail).not.toContain('sk-proj-');
+      expect(entry.detail).not.toContain('sk-ant-api03-');
+      expect(entry.detail).toContain('[REDACTED]');
+    });
+
+    it('scrubs forge_ and JWT patterns inside the log message itself', () => {
+      const entry = logProd(() =>
+        logger.info('user provided forge_abc123def456 and eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'),
+      );
+      expect(entry.message).not.toContain('forge_abc123def456');
+      expect(entry.message).toContain('[REDACTED]');
+    });
+
+    it('redacts sensitive keys nested inside objects and arrays', () => {
+      const entry = logProd(() =>
+        logger.info('nested', {
+          resolved: { provider: 'openai', key: 'sk-nested-secret' },
+          items: [{ token: 'nested-token' }],
+        }),
+      );
+      const resolved = entry.resolved as Record<string, unknown>;
+      expect(resolved.provider).toBe('openai');
+      expect(resolved.key).toBe('[REDACTED]');
+      const items = entry.items as Array<Record<string, unknown>>;
+      expect(items[0].token).toBe('[REDACTED]');
+    });
+
+    it('redacts a bound sensitive field on a child logger', () => {
+      const entry = logProd(() => {
+        const reqLog = logger.child({ apiKey: 'sk-bound-secret', requestId: 'req_1' });
+        reqLog.info('child');
+      });
+      expect(entry.apiKey).toBe('[REDACTED]');
+      expect(entry.requestId).toBe('req_1');
+    });
+
+    it('handles circular references without throwing', () => {
+      const entry = logProd(() => {
+        const circular: Record<string, unknown> = { name: 'root' };
+        circular.self = circular;
+        logger.info('circular', { data: circular });
+      });
+      const data = entry.data as Record<string, unknown>;
+      expect(data.name).toBe('root');
+      expect(data.self).toBe('[Circular]');
+    });
+
+    it('does not flag a legitimately shared object reference as [Circular] across sibling keys (regression #8789)', () => {
+      // The same object referenced under two DIFFERENT top-level context keys
+      // is NOT a cycle — each must serialize in full. A WeakSet shared across
+      // sibling keys would mark the second visit [Circular] and drop its data.
+      const entry = logProd(() => {
+        const shared: Record<string, unknown> = { id: 'asset-1', count: 7 };
+        logger.info('shared-ref', { primary: shared, mirror: shared });
+      });
+      const primary = entry.primary as Record<string, unknown>;
+      const mirror = entry.mirror as Record<string, unknown>;
+      expect(primary).toEqual({ id: 'asset-1', count: 7 });
+      // The second sibling must be fully present, not collapsed to '[Circular]'.
+      expect(mirror).toEqual({ id: 'asset-1', count: 7 });
+      expect(mirror).not.toBe('[Circular]');
+    });
+
+    it('still detects a TRUE cycle within a single top-level key (regression #8789)', () => {
+      // The per-key fix must not weaken genuine cycle protection: a self-
+      // referential object under one key must still resolve to '[Circular]'.
+      const entry = logProd(() => {
+        const cyclic: Record<string, unknown> = { name: 'root' };
+        cyclic.self = cyclic;
+        logger.info('still-cyclic', { node: cyclic });
+      });
+      const node = entry.node as Record<string, unknown>;
+      expect(node.name).toBe('root');
+      expect(node.self).toBe('[Circular]');
+    });
+
+    it('scrubs a credential embedded in an Error object message', () => {
+      const entry = logProd(() =>
+        logger.error('caught', { err: new Error('failed with sk_test_supersecret123') }),
+      );
+      const err = entry.err as Record<string, unknown>;
+      expect(String(err.message)).not.toContain('sk_test_supersecret123');
+      expect(String(err.message)).toContain('[REDACTED]');
+    });
+  });
+
   describe('log level filtering', () => {
     it('suppresses debug when LOG_LEVEL=warn', () => {
       (process.env as Record<string, string>).LOG_LEVEL = 'warn';

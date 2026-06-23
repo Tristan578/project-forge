@@ -4,11 +4,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { POST } from './route';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
+import { eq, and } from 'drizzle-orm';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/db/client');
+// Spy on the comparison builders so we can assert the unflag UPDATE is scoped
+// to the appellant's own comment (defense-in-depth, #8613). The .where() mock
+// is a passthrough, so the filter is only observable on eq/and call args.
+vi.mock('drizzle-orm', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('drizzle-orm')>();
+  return { ...actual, eq: vi.fn(actual.eq), and: vi.fn(actual.and) };
+});
 
 function makeReviewRequest(body: Record<string, unknown>) {
   return new NextRequest('http://localhost/api/admin/moderation/appeals/appeal-1/review', {
@@ -82,13 +90,13 @@ describe('/api/admin/moderation/appeals/[id]/review POST', () => {
     expect(res.status).toBe(409);
   });
 
-  it('approves appeal and unflags comment', async () => {
+  it('approves appeal and unflags comment, scoped to the appellant', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_1', user } });
     vi.mocked(assertAdmin).mockReturnValue(null);
 
     vi.mocked(getDb).mockReturnValue(makeMockDb([
-      { id: 'appeal-1', status: 'pending', contentType: 'comment', contentId: 'comment-1' },
+      { id: 'appeal-1', userId: 'author-1', status: 'pending', contentType: 'comment', contentId: 'comment-1' },
     ]) as unknown as ReturnType<typeof getDb>);
 
     const res = await POST(makeReviewRequest({ decision: 'approve', note: 'Content is fine' }), { params: makeParams() });
@@ -97,6 +105,10 @@ describe('/api/admin/moderation/appeals/[id]/review POST', () => {
     expect(res.status).toBe(200);
     expect(data.success).toBe(true);
     expect(data.status).toBe('approved');
+    // The unflag UPDATE must re-confirm the appellant authored the comment, so
+    // a forged/stale appeal cannot unflag a comment its filer never owned.
+    expect(vi.mocked(and)).toHaveBeenCalled();
+    expect(vi.mocked(eq)).toHaveBeenCalledWith(expect.anything(), 'author-1');
   });
 
   it('rejects appeal without unflagging content', async () => {

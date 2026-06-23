@@ -41,7 +41,7 @@ jobs:
       needs-skills: ${{ steps.changes.outputs.skills }}
       needs-any-code: ${{ steps.changes.outputs.any-code }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
@@ -200,7 +200,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Verify all MCP commands have handlers
         working-directory: web
@@ -215,9 +215,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .node-version
           cache: npm
@@ -250,9 +250,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .node-version
           cache: npm
@@ -290,9 +290,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .node-version
           cache: npm
@@ -325,7 +325,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run hook test suites
         run: |
@@ -380,7 +380,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Shellcheck the linter + its test
         # shellcheck is preinstalled on ubuntu-latest. The linter that enforces
@@ -418,9 +418,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .node-version
           cache: npm
@@ -455,7 +455,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Check OpenAPI spec is valid and in sync with API routes
         run: bash scripts/check-openapi-route-sync.sh
@@ -484,9 +484,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .node-version
 
@@ -522,7 +522,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Check for stale taskboard IDs and forbidden --db start commands
         run: bash scripts/check-taskboard-onboarding-hygiene.sh
@@ -556,7 +556,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           # The guard reads `git show HEAD:.codex/config.toml`; a full history is
           # not needed, but the committed blob at the checked-out ref must exist.
@@ -585,7 +585,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 1
 
@@ -625,6 +625,37 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/check-ghaw-lock-sync.sh
+
+  # ---- Actions SHA-Pin Guard ----
+  # Fails the PR when a hand-written workflow references a GitHub Action by a
+  # MUTABLE tag (e.g. `actions/checkout@v4`) instead of a 40-char commit SHA —
+  # the supply-chain hole audit finding F35 (#8627) closed by SHA-pinning every
+  # ref. A mutable tag lets a compromised or force-pushed upstream tag run
+  # arbitrary code in CI with our secrets; a SHA pin freezes the exact tree.
+  # Decision logic lives in scripts/check-actions-pinned.sh (the gh-aw generated
+  # *.lock.yml files are excluded there — their pins are owned by the gh-aw Lock
+  # Sync gate above). A read-only check, never a fix.
+  #
+  # Gated on `needs-ci` (any .github/workflows/** or scripts/** change — exactly
+  # this guard's surface; a workflow edit already forces the full fan-out, so a
+  # dedicated orthogonal output would buy nothing). Wired into ci-success below —
+  # and into the anti-tamper map in scripts/check-ci-success.sh — so it is
+  # REQUIRED when it runs, skips cleanly otherwise, and cannot be silently
+  # `if: false`-unwired while its trigger fired (same self-defending pattern as
+  # the gates above).
+  actions-pin-check:
+    name: Actions Pin Check
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Verify all workflow actions are SHA-pinned
+        run: bash scripts/check-actions-pinned.sh
 
   # ---- CI Self-Defense Tests ----
   # Unit-tests the decision logic of the repo's self-defending CI gates via
@@ -700,9 +731,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .node-version
 
@@ -719,6 +750,7 @@ jobs:
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
             scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
             scripts/check-changeset-packages.sh scripts/__tests__/check-changeset-packages.test.sh \
+            scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
@@ -754,6 +786,9 @@ jobs:
       - name: Run changeset-packages gate test suite
         run: bash scripts/__tests__/check-changeset-packages.test.sh
 
+      - name: Run actions-pinned gate test suite
+        run: bash scripts/__tests__/check-actions-pinned.test.sh
+
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without
   # a local build. Only runs when VERCEL_DEPLOY_ENABLED is set and web/mcp files changed.
@@ -780,9 +815,9 @@ jobs:
       name: preview
       url: ${{ steps.deploy.outputs.url }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .node-version
           cache: npm
@@ -877,9 +912,9 @@ jobs:
       matrix:
         shard: [1/3, 2/3, 3/3]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .node-version
           cache: npm
@@ -892,7 +927,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: ~/.cache/ms-playwright
           # Key on the REAL root lockfile. This is a single-root-lockfile
@@ -930,7 +965,7 @@ jobs:
 
       - name: Upload blob report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: blob-report-${{ strategy.job-index }}
           path: web/blob-report/
@@ -957,9 +992,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .node-version
           cache: npm
@@ -972,7 +1007,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: ~/.cache/ms-playwright
           # Same single-root-lockfile key as test-e2e-ui (#8589).
@@ -1009,7 +1044,7 @@ jobs:
 
       - name: Upload journey report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e2e-journey-report
           path: web/playwright-report/
@@ -1025,9 +1060,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .node-version
           cache: npm
@@ -1038,7 +1073,7 @@ jobs:
       - name: Download blob reports
         # Must match the upload-artifact major version used for blob-report-*
         # above (@v4) — mixing artifact action majors is a documented gotcha.
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: web/all-blob-reports
           pattern: blob-report-*
@@ -1049,7 +1084,7 @@ jobs:
         run: npx playwright merge-reports --reporter=html ./all-blob-reports
 
       - name: Upload merged report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e2e-report
           path: web/playwright-report/
@@ -1088,6 +1123,7 @@ jobs:
       - codex-config-guard
       - ghaw-lock-sync
       - openapi-route-sync
+      - actions-pin-check
       - test-e2e-ui
       - test-e2e-journey
     runs-on: ubuntu-latest
@@ -1095,7 +1131,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       # The verify logic lives in scripts/check-ci-success.sh (unit-tested by the
       # lockfile-sync-tests job) so it can be exercised hermetically and so the

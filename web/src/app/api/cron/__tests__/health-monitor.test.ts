@@ -28,8 +28,16 @@ const mockLoggerInfo = vi.fn();
 const mockLoggerError = vi.fn();
 const mockLoggerWarn = vi.fn();
 const mockLoggerChild = vi.fn();
+// Opportunistic webhook-claim cleanup runs on this cron (#8637) and reports its
+// own failures to Sentry. Mock it to a clean no-op so it never adds a spurious
+// captureException call that would pollute the health-check assertions below.
+const mockCleanupExpired = vi.fn();
 
 vi.mock('server-only', () => ({}));
+
+vi.mock('@/lib/billing/webhookIdempotency', () => ({
+  cleanupExpired: (...args: unknown[]) => mockCleanupExpired(...args),
+}));
 
 vi.mock('@/lib/monitoring/healthChecks', () => ({
   runAllHealthChecks: (...args: unknown[]) => mockRunAllHealthChecks(...args),
@@ -104,6 +112,7 @@ describe('GET /api/cron/health-monitor', () => {
     vi.unstubAllEnvs();
     vi.clearAllMocks();
     vi.stubEnv('CRON_SECRET', 'valid-secret');
+    mockCleanupExpired.mockResolvedValue(0);
     const report = allHealthyReport();
     mockRunAllHealthChecks.mockResolvedValue(report);
     mockComputeCriticalStatus.mockReturnValue('healthy');

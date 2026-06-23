@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createMockStore } from './handlerTestUtils';
 import { generationHandlers } from '../generationHandlers';
+import { STATUS_ENDPOINTS } from '@/lib/generation/statusEndpoints';
 
 // ---------------------------------------------------------------------------
 // Mock generationStore
@@ -666,9 +667,29 @@ describe('generationHandlers', () => {
       expect(result.success).toBe(true);
     });
 
+    it('routes a pixel-art job to its status endpoint (regression for #8762)', async () => {
+      // Before #8762 the chat tool's route map omitted pixel-art, so this
+      // fell through to "Could not find generation job" for a valid in-flight job.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ status: 'processing', progress: 25 }),
+      });
+      const { result } = await invoke('get_generation_status', {
+        jobId: 'px-1',
+        type: 'pixel-art',
+      });
+      expect(result.success).toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/generate/pixel-art/status?jobId=px-1'),
+      );
+    });
+
     it('returns error when job not found anywhere', async () => {
-      // Mock all status endpoints to fail
-      for (let i = 0; i < 5; i++) {
+      // Fail every status endpoint. Count is derived from STATUS_ENDPOINTS (the
+      // shared source of truth) so adding a new generation type does not
+      // re-break this test, and `Once` queueing avoids leaking a default mock
+      // into later tests (clearAllMocks does not clear implementations).
+      for (let i = 0; i < Object.keys(STATUS_ENDPOINTS).length; i++) {
         mockFetch.mockResolvedValueOnce({ ok: false, json: () => Promise.resolve({}) });
       }
       const { result } = await invoke('get_generation_status', { jobId: 'bad-id' });

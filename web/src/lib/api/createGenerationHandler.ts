@@ -66,6 +66,15 @@ export interface GenerationHandlerConfig<TParams, TResult> {
   /** Field in the parsed body to pass through content safety (default: 'prompt') */
   promptField?: string;
 
+  /**
+   * Additional user-controlled free-text fields to run through the same
+   * content-safety filter as `promptField`. Routes that forward secondary text
+   * (e.g. `negativePrompt`, `artStyle`) to a generation provider must list those
+   * fields here so they cannot bypass the blocklist/injection screen (#8650).
+   * Each named field is checked only when present and a non-empty string.
+   */
+  secondaryPromptFields?: string[];
+
   /** Skip content safety check (for routes that don't have a text prompt) */
   skipContentSafety?: boolean;
 
@@ -140,6 +149,7 @@ export function createGenerationHandler<TParams, TResult>(
     rateLimitMax = 10,
     rateLimitWindowSeconds = 300,
     promptField = 'prompt',
+    secondaryPromptFields,
     skipContentSafety = false,
     successStatus = 200,
     tokenCost: tokenCostFn,
@@ -192,19 +202,29 @@ export function createGenerationHandler<TParams, TResult>(
     }
     const params = validation.params;
 
-    // 5. Content safety filter
+    // 5. Content safety filter.
+    //
+    // Screen every user-controlled free-text field — the primary `promptField`
+    // and any `secondaryPromptFields` — so secondary text (negativePrompt,
+    // artStyle, …) cannot bypass the blocklist/injection screen that protects
+    // the primary prompt (#8650). Each field is checked only when present and a
+    // non-empty string; rejected content fails the whole request 422.
     if (!skipContentSafety) {
-      const promptValue = (params as Record<string, unknown>)[promptField];
-      if (typeof promptValue === 'string' && promptValue.length > 0) {
-        const safety = sanitizePrompt(promptValue);
-        if (!safety.safe) {
-          return NextResponse.json(
-            { error: safety.reason ?? 'Content rejected by safety filter' },
-            { status: 422 }
-          );
+      const paramRecord = params as Record<string, unknown>;
+      const fieldsToScreen = [promptField, ...(secondaryPromptFields ?? [])];
+      for (const field of fieldsToScreen) {
+        const value = paramRecord[field];
+        if (typeof value === 'string' && value.length > 0) {
+          const safety = sanitizePrompt(value);
+          if (!safety.safe) {
+            return NextResponse.json(
+              { error: safety.reason ?? 'Content rejected by safety filter' },
+              { status: 422 }
+            );
+          }
+          // Replace with filtered version
+          paramRecord[field] = safety.filtered ?? value;
         }
-        // Replace with filtered version
-        (params as Record<string, unknown>)[promptField] = safety.filtered ?? promptValue;
       }
     }
 

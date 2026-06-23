@@ -30,7 +30,7 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 [ -f "$SCRIPT" ] || { echo "verifier script not found: $SCRIPT"; exit 1; }
 
 # Build a toJSON(needs)-shaped object mirroring the REAL ci-success `needs:` list
-# (all 14 jobs — see ci.yml), so a failure on ANY required gate is exercised, not
+# (all jobs — see ci.yml), so a failure on ANY required gate is exercised, not
 # just the handful that used to be in the fixture. Jobs not parameterised default
 # to success. Args:
 #   $1 needs-ci   $2 needs-deps   $3 lockfile-sync.result
@@ -61,14 +61,20 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 #      openapi-route-sync's success/skip as a legitimate path-filter skip; set true
 #      to exercise the openapi-route-sync anti-tamper arm.
 #   $21 openapi-route-sync.result (default success)
+#   $22 actions-pin-check.result (default success) — the SHA-pin guard. Mapped to
+#      needs-ci in the anti-tamper map (its job `if:`), so every fixture with
+#      needs-ci=true ($1=true) must keep this success or it would (correctly) read
+#      as an unwiring; set skipped with $1=true to exercise the pin-check
+#      anti-tamper arm. ($1=false leaves the trigger unfired, so any result is a
+#      legitimate path-filter skip.)
 mk() {
-  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}"
+  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}"
   jq -nc \
     --arg nci "$nci" --arg ndeps "$ndeps" --arg ls "$ls" --arg lst "$lst" \
     --arg qg "$qg" --arg ht "$ht" --arg nagentic "$nagentic" --arg as "$as" \
     --arg nonboarding "$nonboarding" --arg tog "$tog" --arg ncodex "$ncodex" --arg ccg "$ccg" \
     --arg nghaw "$nghaw" --arg glr "$glr" --arg nhooks "$nhooks" --arg te2ej "$te2ej" --arg nweb "$nweb" \
-    --arg nskills "$nskills" --arg sl "$sl" --arg napi "$napi" --arg ors "$ors" '
+    --arg nskills "$nskills" --arg sl "$sl" --arg napi "$napi" --arg ors "$ors" --arg apc "$apc" '
     {
       "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-skills": $nskills, "needs-api": $napi, "needs-any-code": "true" } },
       "quality-gates":        { result: $qg },
@@ -85,6 +91,7 @@ mk() {
       "ghaw-lock-sync":       { result: $glr },
       "skills-lint":          { result: $sl },
       "openapi-route-sync":   { result: $ors },
+      "actions-pin-check":    { result: $apc },
       "test-e2e-ui":          { result: "success" },
       "test-e2e-journey":     { result: $te2ej }
     }'
@@ -462,6 +469,34 @@ res="$(run_verify "$(mk true true success success success success true success t
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "openapi-route-sync failure fails (exit 1)"; else fail "openapi failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "openapi-route-sync"; then pass "the failing openapi-route-sync gate is named"; else fail "failing openapi gate not named"; fi
+# --- 41. TAMPER: actions-pin-check skipped while needs-ci=true → exit 1 ---------
+# The Actions SHA-pin guard is self-defending: a PR editing any .github/workflows
+# file or scripts/ sets needs-ci=true, so the guard SHOULD run; an `if: false`
+# skip is the same single-line unwiring vector guarded for every other gate —
+# and exactly the gap the ux reviewer flagged when the guard lived in a standalone
+# workflow outside the required CI Success aggregate. lockfile-sync-tests runs too
+# (needs-ci fires it) and succeeds, so the skipped pin-check is the SOLE tamper.
+# Final mk arg (22nd): actions-pin-check=skipped, with needs-ci=true ($1).
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success false false success false success skipped)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "pin-check skipped while needs-ci=true fails (exit 1)"; else fail "tamper (pin-check) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "pin-check tamper is flagged as a possible unwiring"; else fail "pin-check tamper message missing"; fi
+if echo "$out" | grep -q "actions-pin-check ("; then pass "the unwired pin-check gate is named"; else fail "unwired pin-check gate not named"; fi
+
+# --- 42. pin-check legit-skips (needs-ci=false) → exit 0 ----------------------
+# A PR touching no workflow/scripts surface (needs-ci=false) legitimately skips the
+# pin-check; that must NOT trip the anti-tamper check. ALL other triggers are held
+# false here (their gates legit-skip) so the only thing under test is the pin-check
+# needs-ci arm not false-positiving on a non-CI PR.
+res="$(run_verify "$(mk false false skipped skipped success success false skipped false skipped false skipped false skipped false success false false skipped false skipped skipped)")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "pin-check legit-skip (needs-ci=false) passes (exit 0)"; else fail "pin-check legit skip should exit 0, got $rc"; fi
+
+# --- 43. pin-check FAILED while triggered → exit 1 (hard-failure path) ----------
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success false false success false success failure)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "pin-check failure fails (exit 1)"; else fail "pin-check failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "actions-pin-check"; then pass "the failing pin-check gate is named"; else fail "failing pin-check gate not named"; fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then

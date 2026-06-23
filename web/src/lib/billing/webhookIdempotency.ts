@@ -6,7 +6,7 @@
  * delivery of the same Stripe/Clerk webhook event.
  *
  * All operations are idempotent and safe for concurrent invocations:
- * - claimEvent uses INSERT ... ON CONFLICT DO NOTHING + .returning() check
+ * - claimEvent uses INSERT ... ON CONFLICT DO UPDATE (re-claimable on expiry)
  * - releaseEvent deletes the row (allows retry on transient failure)
  * - cleanupExpired runs a DELETE WHERE expiresAt < NOW()
  */
@@ -29,12 +29,26 @@ const IN_FLIGHT_TTL_MINUTES = 5;
  * Atomically claim a webhook event for processing.
  *
  * Returns true if this caller successfully claimed the event (first
- * delivery). Returns false if another request already claimed it, meaning
- * the event is a duplicate and should be skipped.
+ * delivery, or a re-claim of a crashed/expired in-flight row). Returns
+ * false if another request holds a live (non-expired) claim, meaning the
+ * event is a duplicate and should be skipped.
  *
- * Uses INSERT ... ON CONFLICT DO NOTHING — the DB atomically guarantees
- * exactly-once claiming across concurrent function invocations and across
- * cold starts (unlike an in-memory Set which is lost on restart).
+ * Uses INSERT ... ON CONFLICT DO UPDATE with a guard on the conflicting
+ * row's expiry. The DB atomically guarantees exactly-once claiming across
+ * concurrent function invocations and across cold starts (unlike an
+ * in-memory Set which is lost on restart):
+ * - No existing row     → INSERT runs, .returning() yields the row → true.
+ * - Live claim exists    → setWhere (expiresAt < NOW()) is false, so the
+ *                          UPDATE is a no-op, .returning() is empty → false.
+ * - Expired claim exists → setWhere is true, the row is re-stamped with a
+ *                          fresh in-flight TTL and re-assigned to this
+ *                          caller, .returning() yields the row → true.
+ *
+ * This is what makes the documented "crash mid-claim auto-expires so
+ * Stripe can redeliver" guarantee actually hold: a row left behind by a
+ * crash between claimEvent() and finalizeEvent() becomes re-claimable
+ * once its 5-minute in-flight window lapses, instead of permanently
+ * blocking redelivery (a DO NOTHING conflict ignores expiry entirely).
  */
 export async function claimEvent(
   eventId: string,
@@ -44,13 +58,18 @@ export async function claimEvent(
   // the claim auto-expires in IN_FLIGHT_TTL_MINUTES so Stripe can redeliver.
   const expiresAt = new Date(Date.now() + IN_FLIGHT_TTL_MINUTES * 60 * 1000);
 
-  // ON CONFLICT DO NOTHING + .returning() — if the row already exists,
-  // the insert is skipped and the returned array is empty.
+  // ON CONFLICT DO UPDATE ... WHERE expiresAt < NOW() — the update only
+  // fires (and .returning() only yields a row) when the existing claim has
+  // expired, so a live claim still reads as a duplicate.
   const rows = await queryWithResilience(() =>
     getDb()
       .insert(webhookEvents)
       .values({ eventId, source, expiresAt })
-      .onConflictDoNothing({ target: webhookEvents.eventId })
+      .onConflictDoUpdate({
+        target: webhookEvents.eventId,
+        set: { source, expiresAt },
+        setWhere: lt(webhookEvents.expiresAt, sql`NOW()`),
+      })
       .returning({ eventId: webhookEvents.eventId })
   );
 
