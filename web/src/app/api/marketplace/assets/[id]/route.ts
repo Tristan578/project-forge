@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { marketplaceAssets, sellerProfiles, assetReviews, users } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
@@ -40,7 +40,10 @@ export async function GET(
       })
       .from(marketplaceAssets)
       .leftJoin(sellerProfiles, eq(marketplaceAssets.sellerId, sellerProfiles.userId))
-      .where(eq(marketplaceAssets.id, id))
+      // Only published assets are publicly visible. Mirrors the list route's
+      // `status = 'published'` filter so draft/pending/rejected/removed assets
+      // are not leaked via the detail endpoint (404, not their existence).
+      .where(and(eq(marketplaceAssets.id, id), eq(marketplaceAssets.status, 'published')))
       .limit(1));
 
     if (!asset) {

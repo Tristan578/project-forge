@@ -4,6 +4,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db/client';
 
+// Mock drizzle's `eq`/`and` to return inspectable plain objects so we can assert
+// on the composed predicate the route passes to `.where()`. We inspect the
+// `.where()` call argument directly (not the `eq` spy identity) so the assertion
+// is robust to `vi.resetModules()` re-running this factory on each dynamic import.
+vi.mock('drizzle-orm', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('drizzle-orm')>();
+  return {
+    ...actual,
+    eq: vi.fn((col: unknown, val: unknown) => ({ __eq: [col, val] })),
+    and: vi.fn((...conds: unknown[]) => ({ __and: conds })),
+  };
+});
+
 vi.mock('@/lib/db/client');
 vi.mock('@/lib/db/schema', () => ({
   publishedGames: { id: 'id', title: 'title', description: 'description', slug: 'slug', userId: 'userId', playCount: 'playCount', cdnUrl: 'cdnUrl', status: 'status', createdAt: 'createdAt' },
@@ -65,6 +78,30 @@ describe('GET /api/community/games/[id]', () => {
     expect(body.game.tags).toEqual(['puzzle', 'casual']);
     expect(body.game.comments).toHaveLength(1);
     expect(body.game.ratingBreakdown).toHaveLength(5);
+
+    // Security: the detail query MUST constrain to published games so
+    // processing/unpublished/removed games are never exposed (#8614, #8638).
+    // Assert on the WHERE predicate the route actually composed (status filter),
+    // not the drizzle `eq` spy identity — the latter is unreliable across the
+    // `vi.resetModules()` in beforeEach.
+    expect(JSON.stringify(gameChain.where.mock.calls)).toContain('"__eq":["status","published"]');
+  });
+
+  it('should not leak a non-published (processing/unpublished/removed) game — returns 404', async () => {
+    // With the status filter applied, a processing game matches no row → empty result.
+    const gameChain = mockDbChain([]);
+    const mockDb = { select: vi.fn().mockReturnValue(gameChain) };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { GET } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/community/games/processing-game');
+    const res = await GET(req, { params: Promise.resolve({ id: 'processing-game' }) });
+    const body = await res.json();
+
+    expect(res.status).toBe(404);
+    expect(body.error).toBe('Game not found');
+    // The status filter is what makes a processing/unpublished game match no row.
+    expect(JSON.stringify(gameChain.where.mock.calls)).toContain('"__eq":["status","published"]');
   });
 
   it('should return 404 when game not found', async () => {

@@ -37,7 +37,10 @@ export async function GET(
       .leftJoin(users, eq(publishedGames.userId, users.id))
       .leftJoin(gameLikes, eq(publishedGames.id, gameLikes.gameId))
       .leftJoin(gameRatings, eq(publishedGames.id, gameRatings.gameId))
-      .where(eq(publishedGames.id, id))
+      // Only published games are publicly visible. Mirrors the list route's
+      // `status = 'published'` filter so processing/unpublished/removed games
+      // are not leaked via the detail endpoint (404, not their existence).
+      .where(and(eq(publishedGames.id, id), eq(publishedGames.status, 'published')))
       .groupBy(
         publishedGames.id,
         publishedGames.title,
