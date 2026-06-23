@@ -1,5 +1,0 @@
----
-"web": patch
----
-
-fix(observability): rate-limit fail-open/degrade paths are no longer silent. `checkDbRateLimit` previously swallowed every non-`DbRateLimitError` Upstash failure and allowed the query through (fully failing open) with no signal, and `rateLimit()` had an empty catch that silently degraded to per-instance in-memory limiting — so during an Upstash outage both protections vanished or weakened with zero observability. All three fail-open paths (`checkDbRateLimit`, `rateLimit`, and `distributedRateLimit`, which previously used an un-throttled `captureException`) now report the bypass through a new shared `sampledCaptureException` helper that throttles to at most one Sentry event per action per 60s (so a sustained outage can't turn the alert into its own storm) and never lets a Sentry-SDK failure escape and break the fail-open guarantee. The legitimate over-limit path (`DbRateLimitError`) and the healthy Upstash path are unchanged — no new noise on success (PF-840 #8664, PF-842 #8666).
