@@ -29,6 +29,9 @@ export const POST = createGenerationHandler<
   }
 >({
   route: '/api/generate/model',
+  // Heavy route: matches `export const maxDuration` above so the generation
+  // agent derives its step-timeout cap against the real 180s budget.
+  maxDurationSeconds: 180,
   provider: DB_PROVIDER.model3d,
   operation: (params) =>
     params.mode === 'image-to-3d'

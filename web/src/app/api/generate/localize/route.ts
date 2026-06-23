@@ -29,6 +29,9 @@ export const POST = createGenerationHandler<
   { locales: Record<string, LocaleBundle> }
 >({
   route: '/api/generate/localize',
+  // Batch route: matches `export const maxDuration` above so the generation
+  // agent derives its step-timeout cap against the real 120s budget.
+  maxDurationSeconds: 120,
   provider: DB_PROVIDER.chat,
   operation: 'localize_scene',
   rateLimitKey: 'gen-localize',
