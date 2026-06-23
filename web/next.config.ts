@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 import withBundleAnalyzer from "@next/bundle-analyzer";
 import createNextIntlPlugin from "next-intl/plugin";
+import { buildCspRouteRules } from "./src/lib/security/csp";
 
 const analyzer = withBundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
@@ -10,25 +11,19 @@ const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 // CDN origin for WASM engine files (e.g. "https://cdn.spawnforge.ai")
 const engineCdn = process.env.NEXT_PUBLIC_ENGINE_CDN_URL || "";
-const cdnDirective = engineCdn ? ` ${engineCdn}` : "";
 
-const cspDirectives = [
-  "default-src 'self'",
-  // 'unsafe-inline' is required for Clerk's sign-in/sign-up inline scripts in production.
-  // Since 'unsafe-eval' is already allowed (for WASM), 'unsafe-inline' does not
-  // meaningfully reduce CSP security. The /play/:path* route keeps a strict CSP.
-  `script-src 'self' 'unsafe-eval' 'unsafe-inline' 'wasm-unsafe-eval' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://challenges.cloudflare.com${cdnDirective}`,
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://img.clerk.com https://clerk.spawnforge.ai",
-  "font-src 'self' data:",
-  `connect-src 'self' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
-  "frame-src 'self' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://challenges.cloudflare.com",
-  "worker-src 'self' blob:",
-  "media-src 'self' blob:",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-];
+// Per-route Content-Security-Policy rules. ORDER IS LOAD-BEARING: Next.js applies
+// every matching headers() rule and the LAST writer of a duplicate key wins (it
+// is NOT a browser-style intersection). buildCspRouteRules() therefore emits the
+// permissive global /:path* rule FIRST and the tightened /play + content-route
+// overrides AFTER it, so each override is the last writer for its paths and
+// 'unsafe-eval' is actually dropped there (#8612, #8634). Single source of truth
+// + ordering contract live in src/lib/security/csp.ts and are unit-tested.
+const cspRouteRules = buildCspRouteRules({ engineCdn });
 
+// Non-CSP security headers applied to every route. CSP is intentionally NOT here
+// — it comes from cspRouteRules so the last-writer-wins ordering is explicit and
+// testable. These keys never collide with the CSP rules, so their order is moot.
 const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -37,10 +32,6 @@ const securityHeaders = [
   {
     key: "Permissions-Policy",
     value: "camera=(), microphone=(), geolocation=()",
-  },
-  {
-    key: "Content-Security-Policy",
-    value: cspDirectives.join("; "),
   },
 ];
 
@@ -92,20 +83,17 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
-      {
-        // Restrictive CSP for published/played games — no unsafe-eval needed
-        source: "/play/:path*",
-        headers: [
-          {
-            key: "Content-Security-Policy",
-            value: `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${cdnDirective}; connect-src 'self'${cdnDirective}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'`,
-          },
-        ],
-      },
+      // Non-CSP security headers for every route. CSP is supplied separately by
+      // cspRouteRules (below) so the last-writer-wins ordering is explicit.
       {
         source: "/:path*",
         headers: securityHeaders,
       },
+      // Content-Security-Policy rules, already ordered global-first so the
+      // tightened /play + content-route overrides win under Next's
+      // last-writer-wins semantics (#8612, #8634). Do NOT reorder by hand — the
+      // ordering contract is owned and tested in src/lib/security/csp.ts.
+      ...cspRouteRules,
       {
         source: "/engine-pkg-webgl2/:path*",
         headers: [
