@@ -82,6 +82,7 @@ describe('POST /api/billing/checkout', () => {
     process.env.STRIPE_PRICE_CREATOR = 'price_creator_mock';
     process.env.STRIPE_PRICE_STUDIO = 'price_studio_mock';
     process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000';
+    delete process.env.STRIPE_TAX_ENABLED;
 
     const mockDb = {
       update: vi.fn().mockReturnThis(),
@@ -194,6 +195,45 @@ describe('POST /api/billing/checkout', () => {
     await POST(makeReq({ tier: 'hobbyist' }));
 
     expect(capturedStripeOpts.value?.apiVersion).toBe('2026-05-27.dahlia');
+  });
+
+  it('does not enable automatic_tax when STRIPE_TAX_ENABLED is unset (no-op guard)', async () => {
+    delete process.env.STRIPE_TAX_ENABLED;
+    mockMiddlewareSuccess({ stripeCustomerId: 'cus_existing' });
+    mockCheckoutCreate.mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/notax' });
+
+    const { POST } = await import('./route');
+    const res = await POST(makeReq({ tier: 'creator' }));
+
+    expect(res.status).toBe(200);
+    const params = mockCheckoutCreate.mock.calls[0][0];
+    expect(params.automatic_tax).toBeUndefined();
+    expect(params.billing_address_collection).toBeUndefined();
+    expect(params.customer_update).toBeUndefined();
+    expect(params.tax_id_collection).toBeUndefined();
+  });
+
+  it('enables automatic_tax + address collection when STRIPE_TAX_ENABLED=true', async () => {
+    process.env.STRIPE_TAX_ENABLED = 'true';
+    mockMiddlewareSuccess({ stripeCustomerId: 'cus_existing' });
+    mockCheckoutCreate.mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/tax' });
+
+    try {
+      const { POST } = await import('./route');
+      const res = await POST(makeReq({ tier: 'creator' }));
+
+      expect(res.status).toBe(200);
+      expect(mockCheckoutCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          automatic_tax: { enabled: true },
+          billing_address_collection: 'required',
+          customer_update: { address: 'auto' },
+          tax_id_collection: { enabled: true },
+        })
+      );
+    } finally {
+      delete process.env.STRIPE_TAX_ENABLED;
+    }
   });
 
   it('returns 500 when Stripe checkout creation fails', async () => {
