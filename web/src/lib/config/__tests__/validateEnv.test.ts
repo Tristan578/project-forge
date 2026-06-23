@@ -179,6 +179,54 @@ describe('validateEnv', () => {
     });
   });
 
+  describe('Encryption master key format validation (#8641)', () => {
+    it('flags a 64-char non-hex ENCRYPTION_MASTER_KEY as missing/invalid', async () => {
+      stubAllRequired();
+      vi.stubEnv('ENCRYPTION_MASTER_KEY', 'z'.repeat(64)); // right length, non-hex
+
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+
+      expect(result.valid).toBe(false);
+      expect(result.missing).toContain('ENCRYPTION_MASTER_KEY');
+    });
+
+    it('does not double-count an absent key already flagged as missing', async () => {
+      stubAllRequired();
+      vi.stubEnv('ENCRYPTION_MASTER_KEY', '');
+
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+
+      const occurrences = result.missing.filter((k) => k === 'ENCRYPTION_MASTER_KEY');
+      expect(occurrences).toHaveLength(1);
+    });
+
+    it('accepts a valid 64-char hex key (upper and lower case)', async () => {
+      stubAllRequired();
+      vi.stubEnv('ENCRYPTION_MASTER_KEY', 'A1b2'.repeat(16)); // 64 hex chars
+
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+
+      expect(result.missing).not.toContain('ENCRYPTION_MASTER_KEY');
+    });
+
+    it('logs a CRITICAL message for a malformed key', async () => {
+      stubAllRequired();
+      vi.stubEnv('ENCRYPTION_MASTER_KEY', 'g'.repeat(64));
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const { validateEnvironment } = await import('../validateEnv');
+      validateEnvironment();
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('ENCRYPTION_MASTER_KEY is set but is not a 64-character hex string')
+      );
+      consoleSpy.mockRestore();
+    });
+  });
+
   describe('getOptionalEnv', () => {
     it('returns the env value when set', async () => {
       vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://spawnforge.ai');
