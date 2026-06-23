@@ -46,6 +46,7 @@ import {
   findUserByStripeCustomer,
   handleSubscriptionDeleted,
   handleSubscriptionUpdated,
+  handleEntitlementsUpdated,
 } from '../subscription-lifecycle';
 
 const mockUser = {
@@ -228,5 +229,58 @@ describe('reverseAddonTokens (fallback path, no paymentIntentId)', () => {
     });
     await reverseAddonTokens('user_abc', 'ch_dup', 500, 1000);
     expect(mockNeonTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('handleEntitlementsUpdated (PF-911 / #8821)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockNeonSqlCalls.length = 0;
+    mockSelectWhere.mockReturnValue({ limit: vi.fn().mockResolvedValue([mockUser]) });
+  });
+
+  it('does nothing when no user matches the customer', async () => {
+    mockSelectWhere.mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) });
+    await expect(
+      handleEntitlementsUpdated('cus_gone', { entitlements: { data: [] } })
+    ).resolves.toBeUndefined();
+    expect(mockNeonSqlCalls).toHaveLength(0);
+  });
+
+  it('persists the active feature lookup_keys as a jsonb array via a single UPDATE', async () => {
+    const summary = {
+      customer: 'cus_abc',
+      entitlements: {
+        data: [{ lookup_key: 'ai_generation' }, { lookup_key: 'publish_games' }],
+      },
+    };
+    await handleEntitlementsUpdated('cus_abc', summary);
+
+    // Exactly one statement, no transaction array (no audit row needed).
+    expect(mockNeonTransaction).not.toHaveBeenCalled();
+    expect(mockNeonSqlCalls).toHaveLength(1);
+
+    const call = mockNeonSqlCalls[0];
+    // The serialized feature array is bound as the first parameter.
+    expect(call.values[0]).toBe(JSON.stringify(['ai_generation', 'publish_games']));
+    // Bound to the resolved user id, not the raw customer id.
+    expect(call.values).toContain('user_abc');
+    // It's an UPDATE of active_features, cast to jsonb.
+    const sql = call.strings.join('');
+    expect(sql).toContain('UPDATE users');
+    expect(sql).toContain('active_features');
+    expect(sql).toContain('::jsonb');
+  });
+
+  it('persists an empty array (authoritative "no features") for an empty summary', async () => {
+    await handleEntitlementsUpdated('cus_abc', { customer: 'cus_abc', entitlements: { data: [] } });
+    expect(mockNeonSqlCalls).toHaveLength(1);
+    expect(mockNeonSqlCalls[0].values[0]).toBe('[]');
+  });
+
+  it('tolerates a malformed summary without throwing (persists [])', async () => {
+    await expect(handleEntitlementsUpdated('cus_abc', 'garbage')).resolves.toBeUndefined();
+    expect(mockNeonSqlCalls).toHaveLength(1);
+    expect(mockNeonSqlCalls[0].values[0]).toBe('[]');
   });
 });

@@ -1,0 +1,17 @@
+-- Stripe Entitlements: persist the active feature set (PF-911 / #8821).
+--
+-- Adds users.active_features — a jsonb array of Stripe entitlement lookup_keys
+-- synced from the Stripe Entitlements API on the
+-- entitlements.active_entitlement_summary.updated webhook. The web client maps
+-- these feature keys onto canUseAI/canUseMCP/canPublish, replacing the
+-- hand-rolled tier→capability flags with Stripe's source of truth.
+--
+-- Purely additive: NULL means "no entitlement summary received yet", in which
+-- case capability gating falls back to the existing tier-derived defaults, so
+-- this never strips access from an existing user and is a no-op when the
+-- Entitlements feature is not configured in the Stripe dashboard.
+--
+-- Idempotent (IF NOT EXISTS) per the 0006 convention, so re-running against a
+-- DB that already carries the column (e.g. a dev `drizzle-kit push`) is a no-op
+-- and the schema↔migration-chain parity test (#8707) provisions it cleanly.
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "active_features" jsonb;

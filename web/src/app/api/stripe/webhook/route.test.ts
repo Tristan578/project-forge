@@ -139,6 +139,47 @@ describe('POST /api/stripe/webhook', () => {
     expect(lifecycle.handleSubscriptionUpdated).toHaveBeenCalledWith('cus_123', 'sub_123', 'pro', 'active');
   });
 
+  it('processes entitlements.active_entitlement_summary.updated (PF-911 / #8821)', async () => {
+    const summary = {
+      customer: 'cus_ent',
+      entitlements: { data: [{ lookup_key: 'ai_generation' }] },
+    };
+    mockConstructEvent.mockReturnValue({
+      id: 'evt_ent',
+      type: 'entitlements.active_entitlement_summary.updated',
+      data: { object: summary },
+    });
+
+    const req = new Request('http://localhost/api/stripe/webhook', {
+      method: 'POST',
+      headers: { 'stripe-signature': 'valid_sig' },
+      body: 'body',
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(200);
+    expect(lifecycle.handleEntitlementsUpdated).toHaveBeenCalledWith('cus_ent', summary);
+    expect(idempotency.claimEvent).toHaveBeenCalledWith('evt_ent', 'stripe');
+  });
+
+  it('ignores an entitlement summary with no resolvable customer', async () => {
+    mockConstructEvent.mockReturnValue({
+      id: 'evt_ent_nocust',
+      type: 'entitlements.active_entitlement_summary.updated',
+      data: { object: { entitlements: { data: [] } } },
+    });
+
+    const req = new Request('http://localhost/api/stripe/webhook', {
+      method: 'POST',
+      headers: { 'stripe-signature': 'valid_sig' },
+      body: 'body',
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(200);
+    expect(lifecycle.handleEntitlementsUpdated).not.toHaveBeenCalled();
+  });
+
   it('releases claim and logs errors on processing failure', async () => {
     mockConstructEvent.mockReturnValue({
       id: 'evt_err',

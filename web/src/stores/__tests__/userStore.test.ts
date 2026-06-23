@@ -13,6 +13,7 @@ describe('userStore', () => {
     // Reset store to initial state
     useUserStore.setState({
       tier: 'starter',
+      activeFeatures: null,
       tokenBalance: null,
       isLoading: false,
       error: null,
@@ -245,6 +246,37 @@ describe('userStore', () => {
       expect(useUserStore.getState().error).toBe('Network error');
       useUserStore.setState({ error: null });
       expect(useUserStore.getState().error).toBeNull();
+    });
+  });
+
+  describe('Entitlement-based gating (PF-911 / #8821)', () => {
+    it('falls back to tier defaults when activeFeatures is null', () => {
+      useUserStore.setState({ tier: 'pro', activeFeatures: null });
+      const { canUseAI, canUseMCP, canPublish } = useUserStore.getState();
+      expect(canUseAI()).toBe(true);
+      expect(canUseMCP()).toBe(true);
+      expect(canPublish()).toBe(true);
+    });
+
+    it('grants strictly from the active feature set when present, overriding tier', () => {
+      // starter tier would normally deny everything; entitlements grant AI + MCP
+      useUserStore.setState({
+        tier: 'starter',
+        activeFeatures: ['ai_generation', 'mcp_access'],
+      });
+      const { canUseAI, canUseMCP, canPublish } = useUserStore.getState();
+      expect(canUseAI()).toBe(true);
+      expect(canUseMCP()).toBe(true);
+      // publish_games not in the set → denied despite no tier grant
+      expect(canPublish()).toBe(false);
+    });
+
+    it('an empty active feature set revokes capabilities even for a pro tier', () => {
+      useUserStore.setState({ tier: 'pro', activeFeatures: [] });
+      const { canUseAI, canUseMCP, canPublish } = useUserStore.getState();
+      expect(canUseAI()).toBe(false);
+      expect(canUseMCP()).toBe(false);
+      expect(canPublish()).toBe(false);
     });
   });
 });

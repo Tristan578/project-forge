@@ -28,6 +28,10 @@ export async function GET(req: NextRequest) {
     email: user.email,
     tier: user.tier,
     createdAt: user.createdAt.toISOString(),
+    // Stripe Entitlements active feature lookup_keys (PF-911 / #8821). null
+    // until an entitlement summary has been synced; the client then falls back
+    // to tier-derived capability defaults.
+    activeFeatures: user.activeFeatures ?? null,
   });
 }
 

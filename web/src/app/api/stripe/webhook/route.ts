@@ -28,7 +28,9 @@ import {
   handleInvoicePaid,
   handleInvoicePaymentFailed,
   handleChargeRefunded,
+  handleEntitlementsUpdated,
 } from '@/lib/billing/subscription-lifecycle';
+import { customerIdFromSummary } from '@/lib/billing/entitlements';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { getStripe } from '@/lib/billing/stripe-client';
 
@@ -156,6 +158,21 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       if (!customerId) break;
 
       await handleSubscriptionDeleted(customerId, subscription.id);
+      break;
+    }
+
+    // -----------------------------------------------------------
+    // Stripe Entitlements — active feature set changed (PF-911 / #8821).
+    // Persist the customer's active feature lookup_keys so the web client can
+    // gate canUseAI/canUseMCP/canPublish off Stripe entitlements instead of the
+    // hand-rolled tier flags. No-op for unknown customers; safe to replay.
+    // -----------------------------------------------------------
+    case 'entitlements.active_entitlement_summary.updated': {
+      const summary = event.data.object as unknown;
+      const customerId = customerIdFromSummary(summary);
+      if (!customerId) break;
+
+      await handleEntitlementsUpdated(customerId, summary);
       break;
     }
 
