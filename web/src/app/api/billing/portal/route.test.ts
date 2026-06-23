@@ -31,8 +31,8 @@ vi.mock('stripe', () => {
   };
 });
 
-function makeReq() {
-  return new NextRequest('http://localhost:3000/api/billing/portal', { method: 'POST' });
+function makeReq(url = 'http://localhost:3000/api/billing/portal') {
+  return new NextRequest(url, { method: 'POST' });
 }
 
 function mockMiddlewareSuccess(overrides?: Partial<ReturnType<typeof makeUser>>) {
@@ -119,6 +119,49 @@ describe('POST /api/billing/portal', () => {
     await POST(makeReq());
 
     expect(capturedStripeOpts.value?.apiVersion).toBe('2026-05-27.dahlia');
+  });
+
+  it('pins the portal configuration id from STRIPE_PORTAL_CONFIGURATION_ID', async () => {
+    process.env.STRIPE_PORTAL_CONFIGURATION_ID = 'bpc_test_123';
+    mockMiddlewareSuccess({ stripeCustomerId: 'cus_123' });
+    mockPortalCreate.mockResolvedValue({ url: 'https://billing.stripe.com/p/session/mock' });
+
+    const { POST } = await import('./route');
+    await POST(makeReq());
+
+    expect(mockPortalCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: 'cus_123', configuration: 'bpc_test_123' })
+    );
+    delete process.env.STRIPE_PORTAL_CONFIGURATION_ID;
+  });
+
+  it('deep-links into the cancel/retention flow when ?flow=cancel and a subscription exists', async () => {
+    mockMiddlewareSuccess({ stripeCustomerId: 'cus_123', stripeSubscriptionId: 'sub_789' });
+    mockPortalCreate.mockResolvedValue({ url: 'https://billing.stripe.com/p/session/mock' });
+
+    const { POST } = await import('./route');
+    await POST(makeReq('http://localhost:3000/api/billing/portal?flow=cancel'));
+
+    expect(mockPortalCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customer: 'cus_123',
+        flow_data: expect.objectContaining({
+          type: 'subscription_cancel',
+          subscription_cancel: { subscription: 'sub_789' },
+        }),
+      })
+    );
+  });
+
+  it('does not add the cancel flow when the user has no subscription on file', async () => {
+    mockMiddlewareSuccess({ stripeCustomerId: 'cus_123', stripeSubscriptionId: null });
+    mockPortalCreate.mockResolvedValue({ url: 'https://billing.stripe.com/p/session/mock' });
+
+    const { POST } = await import('./route');
+    await POST(makeReq('http://localhost:3000/api/billing/portal?flow=cancel'));
+
+    const callArg = mockPortalCreate.mock.calls[0][0];
+    expect(callArg.flow_data).toBeUndefined();
   });
 
   it('returns 500 when Stripe portal creation fails', async () => {
