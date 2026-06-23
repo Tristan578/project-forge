@@ -111,6 +111,10 @@ export function validateImage(bytes) {
     ) {
       return { valid: true };
     }
+    // A RIFF container that is NOT WebP (e.g. a WAV audio file mislabeled
+    // image/*) must be rejected — do NOT fall through to the unknown-payload
+    // pass-through below, which is reserved for non-RIFF exotic textures.
+    return { valid: false, reason: 'RIFF container is not a WebP image' };
   }
   // Unknown signature but non-trivial payload (KTX2/basis GPU textures, etc.).
   return { valid: true };

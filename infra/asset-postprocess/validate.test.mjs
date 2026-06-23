@@ -102,6 +102,17 @@ describe('validateImage', () => {
     ]);
     expect(validateImage(webp)).toEqual({ valid: true });
   });
+  it('rejects a non-WebP RIFF container, e.g. a WAV mislabeled image/* (regression #8819 / Sentry)', () => {
+    // "RIFF" header + "WAVE" form-type (0x57 0x41 0x56 0x45) — a WAV audio file
+    // is a RIFF container too. It must NOT fall through to the unknown-payload
+    // pass-through and be accepted as a valid image.
+    const wav = bytesOf([
+      0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45, 0, 0, 0, 0,
+    ]);
+    const r = validateImage(wav);
+    expect(r.valid).toBe(false);
+    expect(r.reason).toMatch(/RIFF/);
+  });
   it('rejects empty / too-small image (the empty-artifact failure class)', () => {
     expect(validateImage(new Uint8Array(0)).valid).toBe(false);
     expect(validateImage(new Uint8Array(4)).valid).toBe(false);
