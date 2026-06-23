@@ -164,7 +164,17 @@ export const useUserStore = create<UserState>((set, get) => ({
       const res = await fetch('/api/billing/status');
       if (res.ok) {
         const data = await res.json();
-        set({ billingStatus: data, tier: data.tier, profileLoaded: true });
+        set({
+          billingStatus: data,
+          tier: data.tier,
+          // Sync activeFeatures in lockstep with tier (#8831). On a downgrade the
+          // server returns null/absent active_features; without mirroring it here a
+          // STALE non-empty array would survive and hasCapability would keep paid
+          // capabilities live (it prioritizes a non-empty set over the tier fallback)
+          // until a full profile refresh. Array → keep; anything else → null (tier fallback).
+          activeFeatures: Array.isArray(data.activeFeatures) ? data.activeFeatures : null,
+          profileLoaded: true,
+        });
       }
     } catch {
       // Silently fail

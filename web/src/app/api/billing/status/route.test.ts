@@ -141,6 +141,42 @@ describe('GET /api/billing/status', () => {
     expect(data.subscriptionStatus).toBe('active');
   });
 
+  it('echoes the persisted active entitlement feature array (#8831)', async () => {
+    mockMiddlewareSuccess({
+      tier: 'pro',
+      stripeCustomerId: 'cus_123',
+      stripeSubscriptionId: 'sub_123',
+      activeFeatures: ['ai_generation', 'mcp_access', 'publish_games'],
+    } as never);
+    mockSubscriptionRetrieve.mockResolvedValue({ status: 'active' });
+
+    const { GET } = await import('./route');
+    const res = await GET(makeReq());
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    // The client (fetchBillingStatus) needs this to sync activeFeatures with tier.
+    expect(data.activeFeatures).toEqual(['ai_generation', 'mcp_access', 'publish_games']);
+  });
+
+  it('returns activeFeatures: null when the user has no entitlement set (#8831)', async () => {
+    mockMiddlewareSuccess({
+      tier: 'starter',
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+      activeFeatures: null,
+    } as never);
+
+    const { GET } = await import('./route');
+    const res = await GET(makeReq());
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    // A cleared/absent set must surface as null so the client clears any stale
+    // array on downgrade rather than retaining dead entitlements.
+    expect(data.activeFeatures).toBeNull();
+  });
+
   it('gracefully degrades when Stripe subscription lookup fails', async () => {
     mockMiddlewareSuccess({
       stripeCustomerId: 'cus_123',
