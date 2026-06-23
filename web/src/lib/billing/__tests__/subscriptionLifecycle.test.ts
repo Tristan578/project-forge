@@ -235,6 +235,15 @@ describe('reverseAddonTokens (fallback path, no paymentIntentId)', () => {
 describe('handleEntitlementsUpdated (PF-911 / #8821)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // vi.clearAllMocks() resets call history but NOT the `mockReturnValueOnce`
+    // queue. Earlier describe blocks (e.g. reverseAddonTokens) enqueue one-time
+    // return values that their handler can return early before consuming, so a
+    // stale `[]` (user-not-found) would bleed into this block's first DB read
+    // and make `findUserByStripeCustomer` return null — silently skipping the
+    // UPDATE this block asserts on. mockReset() drains that queue so the suite
+    // is hermetic regardless of describe order; we re-establish the default
+    // user-found return immediately after.
+    mockSelectWhere.mockReset();
     mockNeonSqlCalls.length = 0;
     mockSelectWhere.mockReturnValue({ limit: vi.fn().mockResolvedValue([mockUser]) });
   });
@@ -282,5 +291,32 @@ describe('handleEntitlementsUpdated (PF-911 / #8821)', () => {
     await expect(handleEntitlementsUpdated('cus_abc', 'garbage')).resolves.toBeUndefined();
     expect(mockNeonSqlCalls).toHaveLength(1);
     expect(mockNeonSqlCalls[0].values[0]).toBe('[]');
+  });
+
+  // Regression for the mock-queue leak: a prior describe block could enqueue
+  // an unconsumed `mockReturnValueOnce([])` (user-not-found) that bled into the
+  // first DB read here, skipping the UPDATE (this block passed in isolation but
+  // failed mid-file). vi.clearAllMocks() does NOT drain the once-queue; only
+  // mockReset() does. This test stages exactly that leaked state, then runs the
+  // hermetic-reset logic the beforeEach applies, and proves the next handler
+  // read sees the real user. If someone reverts the beforeEach to clearAllMocks,
+  // this fails.
+  it('is hermetic against a leaked one-time user-not-found from a prior block', async () => {
+    // Simulate the leak: an earlier block queued a stale empty result.
+    mockSelectWhere.mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) });
+
+    // The hermetic boundary the entitlements beforeEach establishes: drain the
+    // once-queue and re-assert the default user-found return.
+    mockSelectWhere.mockReset();
+    mockSelectWhere.mockReturnValue({ limit: vi.fn().mockResolvedValue([mockUser]) });
+
+    await handleEntitlementsUpdated('cus_abc', {
+      customer: 'cus_abc',
+      entitlements: { data: [{ lookup_key: 'ai_generation' }] },
+    });
+
+    // The user was resolved (not skipped), so the UPDATE ran exactly once.
+    expect(mockNeonSqlCalls).toHaveLength(1);
+    expect(mockNeonSqlCalls[0].values[0]).toBe(JSON.stringify(['ai_generation']));
   });
 });
