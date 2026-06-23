@@ -2,7 +2,7 @@
 name: stripe-webhooks
 description: SpawnForge Stripe webhook patterns — idempotent refunds, CTE atomic claims, neonSql transaction ordering, token billing. Auto-loads when editing billing code.
 user-invocable: false
-paths: "web/src/lib/billing/**, web/src/app/api/webhooks/stripe/**"
+paths: "web/src/lib/billing/**, web/src/app/api/stripe/webhook/**"
 ---
 
 # Stripe Webhook Patterns — SpawnForge
@@ -29,4 +29,6 @@ Check `metadata->>'refundedUsageId'` before crediting. Without this, server + cl
 neon-http driver throws. Use `getNeonSql()` → `neonSql.transaction([...statements])`.
 
 ## References
-- See [references/billing-patterns.md](references/billing-patterns.md) for complete patterns
+- `web/src/app/api/stripe/webhook/route.ts` — the live webhook handler implementing the patterns above
+- `web/src/lib/tokens/service.ts` — `refundTokens()` idempotency + balance deduction
+- Stripe API version is pinned to `2026-05-27.dahlia` in `web/src/lib/billing/stripe-client.ts` (must match the installed SDK)

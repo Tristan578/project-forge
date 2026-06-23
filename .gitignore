@@ -104,6 +104,9 @@ nul
 # ----- Session artifacts -----
 PHASE-*.md
 REFACTOR*.md
+# ...but not the vendored tdd skill's refactoring.md (case-insensitive FS makes
+# REFACTOR*.md swallow it, leaving its SKILL.md link dangling on a fresh checkout).
+!.agents/skills/tdd/refactoring.md
 *-SUMMARY.md
 *-PROGRESS.md
 rust_errors.txt
