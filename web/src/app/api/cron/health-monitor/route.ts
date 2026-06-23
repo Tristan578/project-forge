@@ -7,8 +7,14 @@ import {
   type ServiceHealth,
 } from '@/lib/monitoring/healthChecks';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { getCronMonitor, withCronMonitor } from '@/lib/monitoring/cronMonitors';
 import { logger } from '@/lib/logging/logger';
 import { cleanupExpired } from '@/lib/billing/webhookIdempotency';
+
+// Sentry cron check-in monitor for this Vercel-scheduled route (#8818). The
+// non-null assertion is guarded by `cronMonitors.test.ts`, which asserts every
+// vercel.json cron path has a registry entry — a missing entry fails CI.
+const HEALTH_MONITOR = getCronMonitor('/api/cron/health-monitor')!;
 
 /**
  * GET /api/cron/health-monitor
@@ -83,11 +89,14 @@ function reportFailuresToSentry(
   }
 }
 
-export async function GET(req: NextRequest): Promise<NextResponse> {
-  if (!isAuthorizedCron(req)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
+/**
+ * The actual monitored cron work, wrapped by the Sentry check-in monitor.
+ * Returns the response summary; never throws for service failures (those are
+ * reported via Sentry and still resolve 200). A genuine throw here (e.g. a
+ * health-check infra error) propagates so the Sentry check-in is marked
+ * `error` and the missed/failed monitor alert fires.
+ */
+async function runHealthMonitor(): Promise<NextResponse> {
   const log = logger.child({ endpoint: 'GET /api/cron/health-monitor' });
   log.info('Synthetic health monitor starting');
 
@@ -159,6 +168,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // Always return 200 — Vercel cron considers non-200 a failure and backs off.
   // Service failures are communicated exclusively via Sentry.
   return NextResponse.json(summary, { status: 200 });
+}
+
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  if (!isAuthorizedCron(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Wrap the authorized cron run in a Sentry check-in monitor (#8818) so a
+  // missed / errored / long run surfaces as a Sentry alert. No-ops without
+  // SENTRY_DSN, so dev/CI/preview behaviour is unchanged.
+  return withCronMonitor(HEALTH_MONITOR, runHealthMonitor);
 }
 
 export const dynamic = 'force-dynamic';
