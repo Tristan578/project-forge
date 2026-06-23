@@ -214,15 +214,18 @@ export async function handleReviewOpened(review: Stripe.Review): Promise<void> {
  * proportionally (full dispute = full reversal) via the shared
  * `reverseAddonTokens` path, which is idempotent on `(chargeId, amount)`.
  *
- * No-op when the feature flag is off, or when the dispute has no customer /
- * charge we can resolve.
+ * NOT gated on `isRadarReviewHoldEnabled()`. A dispute clawback is a
+ * chargeback-recovery safety net, not part of the review-hold feature: tokens
+ * granted while the flag was ON (or never gated at all) must still be reversed
+ * after the flag is turned OFF, or a disputed purchase leaks tokens forever.
+ * This mirrors `handleChargeRefunded`, which is likewise unconditional.
+ *
+ * No-op only when the dispute has no customer / charge we can resolve.
  */
 export async function handleDisputeCreated(
   dispute: Stripe.Dispute,
   stripe: Stripe
 ): Promise<void> {
-  if (!isRadarReviewHoldEnabled()) return;
-
   const chargeId = refId(dispute.charge);
   if (!chargeId) return;
 

@@ -312,7 +312,10 @@ describe('handleDisputeCreated', () => {
     return { id: 'dp_1', object: 'dispute', charge: over.charge, amount: over.amount } as unknown as Stripe.Dispute;
   }
 
-  it('no-ops when the flag is off', async () => {
+  // Regression for #8832: the clawback is a chargeback-recovery safety net and
+  // must run regardless of the review-hold flag. Tokens granted while the flag
+  // was on (or never gated) would otherwise leak forever once it is turned off.
+  it('still claws back when the flag is off (chargeback recovery is not gated, #8832)', async () => {
     disableFlag();
     const { neonSql } = harness();
     const user = await seedUser(neonSql, { addonTokens: 5000, stripeCustomerId: 'cus_d' });
@@ -324,7 +327,7 @@ describe('handleDisputeCreated', () => {
     await handleDisputeCreated(dispute({ charge: 'ch_d', amount: 4900 }), stripe as unknown as Stripe);
 
     const row = await getUserRow(neonSql, user.id);
-    expect(Number(row?.addon_tokens)).toBe(5000);
+    expect(Number(row?.addon_tokens)).toBe(0);
   });
 
   it('claws back the full granted amount on a full dispute', async () => {
