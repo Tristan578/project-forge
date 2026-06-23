@@ -98,7 +98,11 @@ export async function POST(req: NextRequest) {
       // Stripe also requires customer_update.address so the collected address is
       // persisted back onto the customer (otherwise session.create rejects).
       sessionParams.billing_address_collection = 'required';
-      sessionParams.customer_update = { address: 'auto' };
+      // tax_id_collection (below) also requires customer_update.name: 'auto' for an
+      // existing/saved customer — the business name Stripe collects alongside the tax
+      // ID needs somewhere to be written back. Without name: 'auto', sessions.create
+      // rejects as soon as a user enters a business name / tax ID.
+      sessionParams.customer_update = { address: 'auto', name: 'auto' };
       // Let customers self-report a VAT/GST/tax ID for B2B reverse-charge handling.
       sessionParams.tax_id_collection = { enabled: true };
     }

@@ -227,10 +227,36 @@ describe('POST /api/billing/checkout', () => {
         expect.objectContaining({
           automatic_tax: { enabled: true },
           billing_address_collection: 'required',
-          customer_update: { address: 'auto' },
+          customer_update: { address: 'auto', name: 'auto' },
           tax_id_collection: { enabled: true },
         })
       );
+    } finally {
+      delete process.env.STRIPE_TAX_ENABLED;
+    }
+  });
+
+  // Regression for #8822 (Sentry HIGH): enabling tax_id_collection on an existing
+  // customer requires customer_update.name: 'auto' as well as address: 'auto'. The
+  // business name Stripe collects alongside the tax ID needs somewhere to be written
+  // back — without name: 'auto', checkout.sessions.create rejects the moment a user
+  // enters a business name / tax ID. This test fails on the old code (name missing).
+  it('sets customer_update.name=auto when tax_id_collection is enabled (#8822)', async () => {
+    process.env.STRIPE_TAX_ENABLED = 'true';
+    mockMiddlewareSuccess({ stripeCustomerId: 'cus_existing' });
+    mockCheckoutCreate.mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/taxid' });
+
+    try {
+      const { POST } = await import('./route');
+      const res = await POST(makeReq({ tier: 'creator' }));
+
+      expect(res.status).toBe(200);
+      const params = mockCheckoutCreate.mock.calls[0][0];
+      // tax_id_collection enabled implies customer_update.name MUST be 'auto'
+      // (alongside address: 'auto') or sessions.create throws on tax-ID entry.
+      expect(params.tax_id_collection).toEqual({ enabled: true });
+      expect(params.customer_update.name).toBe('auto');
+      expect(params.customer_update.address).toBe('auto');
     } finally {
       delete process.env.STRIPE_TAX_ENABLED;
     }
