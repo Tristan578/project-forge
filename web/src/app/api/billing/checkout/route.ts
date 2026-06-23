@@ -8,6 +8,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
+import { requireStepUp } from '@/lib/auth/step-up';
+import { STEP_UP_ROUTES } from '@/lib/auth/security-policy';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -43,6 +45,11 @@ export async function POST(req: NextRequest) {
     validate: checkoutSchema,
   });
   if (mid.error) return mid.error;
+
+  // Step-up: starting a paid subscription is a financial action. Require a
+  // recent re-verification so a stale session can't initiate a charge.
+  const stepUp = await requireStepUp(STEP_UP_ROUTES['billing-checkout'].config);
+  if (!stepUp.ok) return stepUp.response;
 
   const user = mid.authContext!.user;
   const reqLog = logger.child({ endpoint: 'POST /api/billing/checkout', userId: user.id });

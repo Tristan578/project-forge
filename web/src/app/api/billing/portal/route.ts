@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
+import { requireStepUp } from '@/lib/auth/step-up';
+import { STEP_UP_ROUTES } from '@/lib/auth/security-policy';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { getStripe } from '@/lib/billing/stripe-client';
 import { buildPortalSessionParams } from '@/lib/billing/portal-config';
@@ -23,6 +25,11 @@ export async function POST(req: NextRequest) {
     rateLimitConfig: { key: (id) => `billing-portal:${id}`, max: 5, windowSeconds: 60 },
   });
   if (mid.error) return mid.error;
+
+  // Step-up: the billing portal can cancel subscriptions and change payment
+  // methods. Require a recent re-verification before opening it.
+  const stepUp = await requireStepUp(STEP_UP_ROUTES['billing-portal'].config);
+  if (!stepUp.ok) return stepUp.response;
 
   const user = mid.authContext!.user;
 

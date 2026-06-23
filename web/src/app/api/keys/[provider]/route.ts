@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { assertTier } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
+import { requireStepUp } from '@/lib/auth/step-up';
+import { STEP_UP_ROUTES } from '@/lib/auth/security-policy';
 import { storeProviderKey, deleteProviderKey } from '@/lib/keys/resolver';
 import type { Provider } from '@/lib/db/schema';
 import { requireOneOf } from '@/lib/apiValidation';
@@ -24,6 +26,11 @@ export async function PUT(
     validate: keySchema,
   });
   if (mid.error) return mid.error;
+
+  // Step-up: storing a BYOK provider key hands the app a long-lived secret.
+  // Require a recent 2FA re-verification so a stale session can't plant a key.
+  const stepUp = await requireStepUp(STEP_UP_ROUTES['keys-write'].config);
+  if (!stepUp.ok) return stepUp.response;
 
   const tierCheck = assertTier(mid.authContext!.user, ['hobbyist', 'creator', 'pro']);
   if (tierCheck) return tierCheck;
@@ -54,6 +61,12 @@ export async function DELETE(
     rateLimitConfig: { key: (id) => `keys:${id}`, max: 10, windowSeconds: 60, distributed: false },
   });
   if (mid.error) return mid.error;
+
+  // Step-up: removing a BYOK key is a security-state change; require a recent
+  // 2FA re-verification (matches the write path) so a stale session can't
+  // silently strip a user's configured credentials.
+  const stepUp = await requireStepUp(STEP_UP_ROUTES['keys-write'].config);
+  if (!stepUp.ok) return stepUp.response;
 
   const { provider } = await params;
   const providerResult = requireOneOf(provider, 'Provider', BYOK_PROVIDERS);
