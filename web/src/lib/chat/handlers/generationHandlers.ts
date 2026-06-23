@@ -11,6 +11,7 @@ import type { GenerationType } from '@/stores/generationStore';
 import { enrichPrompt, enrichSfxPrompt, enrichMusicPrompt, enrichVoiceStyle } from '@/lib/generate/promptEnricher';
 import { inferSfxCategory, getSpatialDefaults } from '@/lib/generate/postProcess';
 import { DIRECT_CAPABILITY_PROVIDER } from '@/lib/config/providers';
+import { STATUS_ENDPOINTS, resolveStatusEndpoint } from '@/lib/generation/statusEndpoints';
 
 /** Generate a unique ID for client-side job tracking. */
 export function makeJobId(): string {
@@ -655,29 +656,27 @@ export const generationHandlers: Record<string, ToolHandler> = {
     }), args);
     if (p.error) return p.error;
 
-    // Route to the correct status endpoint based on generation type
-    const statusRoutes: Record<string, string> = {
-      model: '/api/generate/model/status',
-      texture: '/api/generate/texture/status',
-      skybox: '/api/generate/skybox/status',
-      music: '/api/generate/music/status',
-      sprite: '/api/generate/sprite/status',
-    };
+    // Route to the correct status endpoint. STATUS_ENDPOINTS is the single
+    // source of truth shared with the auto-poller (useGenerationPolling) so the
+    // two maps can never drift (#8762) — every pollable type, including
+    // pixel-art / sprite_sheet / tileset, resolves here.
 
     // If type is specified, use it directly
-    if (p.data.type && statusRoutes[p.data.type]) {
-      return queryStatus(statusRoutes[p.data.type], p.data.jobId);
+    if (p.data.type) {
+      const route = resolveStatusEndpoint(p.data.type);
+      if (route) return queryStatus(route, p.data.jobId);
     }
 
     // Try to find the job in the generation store to determine type
     const genStore = useGenerationStore.getState();
     const storeJob = Object.values(genStore.jobs).find((j) => j.jobId === p.data.jobId);
-    if (storeJob && statusRoutes[storeJob.type]) {
-      return queryStatus(statusRoutes[storeJob.type], p.data.jobId);
+    if (storeJob) {
+      const route = resolveStatusEndpoint(storeJob.type);
+      if (route) return queryStatus(route, p.data.jobId);
     }
 
     // Try all status endpoints
-    for (const route of Object.values(statusRoutes)) {
+    for (const route of Object.values(STATUS_ENDPOINTS)) {
       const result = await queryStatus(route, p.data.jobId);
       if (result.success) return result;
     }
