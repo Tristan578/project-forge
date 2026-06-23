@@ -51,6 +51,13 @@ export async function GET(req: NextRequest) {
       billingCycleStart: user.billingCycleStart?.toISOString() ?? null,
       nextRefillDate,
       subscriptionStatus,
+      // Echo the persisted active entitlement feature set (PF-911 / #8821) so the
+      // client can sync it alongside `tier` in fetchBillingStatus. Without this,
+      // a downgrade (webhook nullifies active_features + drops tier) updates the
+      // store's tier but leaves a STALE non-empty activeFeatures array, which
+      // hasCapability prioritizes over the tier fallback — keeping paid
+      // capabilities live until a full profile refresh (#8831).
+      activeFeatures: user.activeFeatures ?? null,
     });
   } catch (error) {
     captureException(error, { route: '/api/billing/status', method: 'GET' });

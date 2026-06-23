@@ -1,6 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
+import { hasCapability } from '@/lib/billing/entitlements';
 
 export type Tier = 'starter' | 'hobbyist' | 'creator' | 'pro';
 
@@ -22,6 +23,11 @@ interface UserState {
   displayName: string | null;
   email: string | null;
   createdAt: string | null;
+  /** Active Stripe entitlement feature lookup_keys synced from the
+   * entitlements.active_entitlement_summary.updated webhook (PF-911 / #8821).
+   * `null` means no entitlement summary has been received — capability checks
+   * then fall back to the legacy tier-derived defaults. */
+  activeFeatures: string[] | null;
   tokenBalance: TokenBalance | null;
   isLoading: boolean;
   error: string | null;
@@ -52,6 +58,7 @@ export const useUserStore = create<UserState>((set, get) => ({
   displayName: null,
   email: null,
   createdAt: null,
+  activeFeatures: null,
   tokenBalance: null,
   isLoading: false,
   error: null,
@@ -77,19 +84,24 @@ export const useUserStore = create<UserState>((set, get) => ({
 
   setTier: (tier: Tier) => set({ tier }),
 
+  // Capability gating reads Stripe Entitlements when an active feature set has
+  // been synced (PF-911 / #8821), and falls back to the legacy tier-derived
+  // default otherwise. The fallback keeps behavior identical for users whose
+  // entitlement summary hasn't arrived (or when Entitlements isn't configured
+  // in the Stripe dashboard), so this is purely additive.
   canUseAI: () => {
-    const { tier } = get();
-    return tier !== 'starter';
+    const { tier, activeFeatures } = get();
+    return hasCapability('canUseAI', activeFeatures, tier !== 'starter');
   },
 
   canUseMCP: () => {
-    const { tier } = get();
-    return tier === 'creator' || tier === 'pro';
+    const { tier, activeFeatures } = get();
+    return hasCapability('canUseMCP', activeFeatures, tier === 'creator' || tier === 'pro');
   },
 
   canPublish: () => {
-    const { tier } = get();
-    return tier !== 'starter';
+    const { tier, activeFeatures } = get();
+    return hasCapability('canPublish', activeFeatures, tier !== 'starter');
   },
 
   canBuyTokens: () => {
@@ -115,6 +127,8 @@ export const useUserStore = create<UserState>((set, get) => ({
         email: data.email,
         tier: data.tier,
         createdAt: data.createdAt,
+        // Array of feature lookup_keys, or null/absent → fall back to tier.
+        activeFeatures: Array.isArray(data.activeFeatures) ? data.activeFeatures : null,
         profileLoaded: true,
       });
     } catch {
@@ -150,7 +164,17 @@ export const useUserStore = create<UserState>((set, get) => ({
       const res = await fetch('/api/billing/status');
       if (res.ok) {
         const data = await res.json();
-        set({ billingStatus: data, tier: data.tier, profileLoaded: true });
+        set({
+          billingStatus: data,
+          tier: data.tier,
+          // Sync activeFeatures in lockstep with tier (#8831). On a downgrade the
+          // server returns null/absent active_features; without mirroring it here a
+          // STALE non-empty array would survive and hasCapability would keep paid
+          // capabilities live (it prioritizes a non-empty set over the tier fallback)
+          // until a full profile refresh. Array → keep; anything else → null (tier fallback).
+          activeFeatures: Array.isArray(data.activeFeatures) ? data.activeFeatures : null,
+          profileLoaded: true,
+        });
       }
     } catch {
       // Silently fail

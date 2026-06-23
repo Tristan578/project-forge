@@ -5,7 +5,7 @@
  * and tier-based permission checks.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useUserStore, type Tier } from '../userStore';
 
 describe('userStore', () => {
@@ -13,6 +13,7 @@ describe('userStore', () => {
     // Reset store to initial state
     useUserStore.setState({
       tier: 'starter',
+      activeFeatures: null,
       tokenBalance: null,
       isLoading: false,
       error: null,
@@ -245,6 +246,101 @@ describe('userStore', () => {
       expect(useUserStore.getState().error).toBe('Network error');
       useUserStore.setState({ error: null });
       expect(useUserStore.getState().error).toBeNull();
+    });
+  });
+
+  describe('Entitlement-based gating (PF-911 / #8821)', () => {
+    it('falls back to tier defaults when activeFeatures is null', () => {
+      useUserStore.setState({ tier: 'pro', activeFeatures: null });
+      const { canUseAI, canUseMCP, canPublish } = useUserStore.getState();
+      expect(canUseAI()).toBe(true);
+      expect(canUseMCP()).toBe(true);
+      expect(canPublish()).toBe(true);
+    });
+
+    it('grants strictly from the active feature set when present, overriding tier', () => {
+      // starter tier would normally deny everything; entitlements grant AI + MCP
+      useUserStore.setState({
+        tier: 'starter',
+        activeFeatures: ['ai_generation', 'mcp_access'],
+      });
+      const { canUseAI, canUseMCP, canPublish } = useUserStore.getState();
+      expect(canUseAI()).toBe(true);
+      expect(canUseMCP()).toBe(true);
+      // publish_games not in the set → denied despite no tier grant
+      expect(canPublish()).toBe(false);
+    });
+
+    it('treats an empty active feature set as "no summary" and falls back to tier (#8831)', () => {
+      // An empty array normalizes to null (no usable feature set), so capability
+      // checks fall back to the tier default rather than asserting deny-all. This
+      // is the guard against a transient/out-of-order empty summary stripping a
+      // paying customer's access — see normalizeFeatures in entitlements.ts.
+      useUserStore.setState({ tier: 'pro', activeFeatures: [] });
+      const { canUseAI, canUseMCP, canPublish } = useUserStore.getState();
+      expect(canUseAI()).toBe(true);
+      expect(canUseMCP()).toBe(true);
+      expect(canPublish()).toBe(true);
+    });
+  });
+
+  describe('fetchBillingStatus syncs activeFeatures with tier (#8831)', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('clears a stale non-empty activeFeatures array on downgrade so capabilities follow the new tier', async () => {
+      // Seed the store as a paying user whose entitlement set was synced.
+      useUserStore.setState({
+        tier: 'pro',
+        activeFeatures: ['ai_generation', 'mcp_access', 'publish_games'],
+      });
+      // Sanity: stale set currently grants paid capabilities.
+      expect(useUserStore.getState().canUseAI()).toBe(true);
+
+      // Subscription cancelled: webhook nullified active_features and dropped the
+      // tier. The status route now echoes the cleared set as null.
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve({ tier: 'starter', activeFeatures: null }),
+        })
+      );
+
+      await useUserStore.getState().fetchBillingStatus();
+
+      const state = useUserStore.getState();
+      expect(state.tier).toBe('starter');
+      // The stale array must be cleared so hasCapability falls back to the
+      // downgraded tier rather than honoring the dead entitlements.
+      expect(state.activeFeatures).toBeNull();
+      expect(state.canUseAI()).toBe(false);
+      expect(state.canUseMCP()).toBe(false);
+      expect(state.canPublish()).toBe(false);
+    });
+
+    it('syncs an active feature array from the response', async () => {
+      useUserStore.setState({ tier: 'starter', activeFeatures: null });
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: () =>
+            Promise.resolve({ tier: 'creator', activeFeatures: ['ai_generation', 'mcp_access'] }),
+        })
+      );
+
+      await useUserStore.getState().fetchBillingStatus();
+
+      const state = useUserStore.getState();
+      expect(state.tier).toBe('creator');
+      expect(state.activeFeatures).toEqual(['ai_generation', 'mcp_access']);
+      // Granted strictly from the synced set, overriding the tier default.
+      expect(state.canUseAI()).toBe(true);
+      expect(state.canUseMCP()).toBe(true);
+      expect(state.canPublish()).toBe(false);
     });
   });
 });

@@ -63,6 +63,14 @@ export const users = pgTable('users', {
   stripeSubscriptionId: text('stripe_subscription_id'),
   billingCycleStart: timestamp('billing_cycle_start', { withTimezone: true }),
 
+  // Stripe Entitlements (PF-911 / #8821). The active feature lookup_keys synced
+  // from the Stripe Entitlements API via the
+  // entitlements.active_entitlement_summary.updated webhook. NULL means "no
+  // entitlement summary has been received yet" — capability gating then falls
+  // back to the tier-derived defaults, so this column is purely additive and a
+  // missing/empty value never removes access a tiered user already had.
+  activeFeatures: jsonb('active_features').$type<string[]>(),
+
   banned: integer('banned').notNull().default(0),
 
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

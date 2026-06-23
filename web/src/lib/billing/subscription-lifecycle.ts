@@ -17,6 +17,7 @@ import { getDb, getNeonSql, queryWithResilience } from '@/lib/db/client';
 import { users, creditTransactions, tokenPurchases } from '@/lib/db/schema';
 import type { Tier, User } from '@/lib/db/schema';
 import { TIER_MONTHLY_TOKENS } from '@/lib/tokens/pricing';
+import { featuresFromSummary } from '@/lib/billing/entitlements';
 
 /**
  * Helper: look up a user by their Stripe customer ID.
@@ -277,6 +278,7 @@ export async function handleSubscriptionDeleted(
       UPDATE users
       SET tier                   = 'starter',
           stripe_subscription_id = NULL,
+          active_features        = NULL,
           monthly_tokens         = ${starterAllocation},
           monthly_tokens_used    = 0,
           updated_at             = ${now}
@@ -746,6 +748,51 @@ export async function reverseAddonTokens(
           updated_at   = ${now}
       WHERE id = ${userId}
         AND EXISTS (SELECT 1 FROM audit)
+    `
+  );
+}
+
+/**
+ * Handle a Stripe `entitlements.active_entitlement_summary.updated` event
+ * (PF-911 / #8821).
+ *
+ * Stripe is the source of truth for which product features a customer is
+ * entitled to; this replaces the hand-rolled tier→capability flags. The event
+ * payload already carries the customer's full current entitlement set, so we
+ * persist the active feature `lookup_key`s onto `users.active_features` directly
+ * from the summary (no extra Active Entitlements API round-trip needed). The
+ * web client then maps those keys onto canUseAI/canUseMCP/canPublish.
+ *
+ * Persistence is a single idempotent `neonSql` UPDATE keyed on the user's
+ * stripe_customer_id — the event is authoritative and last-write-wins is correct
+ * (every delivery carries the complete set, so re-applying a redelivered event
+ * is a no-op). No credit_transactions audit row is written: this changes feature
+ * gating, not token balances. Returns silently for orphan events (no matching
+ * user) — matching every other lifecycle handler.
+ *
+ * The `summary` argument is the raw `event.data.object`; reading it defensively
+ * lives in `featuresFromSummary`, so an empty/malformed payload persists `[]`
+ * (an authoritative "no active features") rather than throwing.
+ */
+export async function handleEntitlementsUpdated(
+  customerId: string,
+  summary: unknown
+): Promise<void> {
+  const user = await findUserByStripeCustomer(customerId);
+  if (!user) return;
+
+  const features = featuresFromSummary(summary);
+  const neonSql = getNeonSql();
+  const now = new Date().toISOString();
+
+  // jsonb column: serialize the string[] so neon-http stores a JSON array, not
+  // a Postgres text[]. ::jsonb cast makes the parameter binding unambiguous.
+  await queryWithResilience(() =>
+    neonSql`
+      UPDATE users
+      SET active_features = ${JSON.stringify(features)}::jsonb,
+          updated_at      = ${now}
+      WHERE id = ${user.id}
     `
   );
 }

@@ -382,6 +382,7 @@ describe('subscription lifecycle — real Postgres (F19, #8611)', () => {
         addonTokens: 200,
         earnedCredits: 0,
         stripeSubscriptionId: 'sub_1',
+        activeFeatures: ['ai_generation', 'mcp_access', 'publish_games'],
       });
 
       await handleSubscriptionDeleted('cus_a', 'sub_1');
@@ -392,6 +393,10 @@ describe('subscription lifecycle — real Postgres (F19, #8611)', () => {
       expect(num(row.monthly_tokens_used)).toBe(0);
       expect(row.stripe_subscription_id).toBeNull();
       expect(num(row.addon_tokens)).toBe(200); // addon preserved
+      // Stripe entitlements are cleared on cancel so capability gating falls
+      // back to the (now starter) tier instead of granting stale paid features
+      // until the next entitlement event arrives (#8831).
+      expect(row.active_features).toBeNull();
 
       const all = await txns(seeded.id);
       expect(all).toHaveLength(1);

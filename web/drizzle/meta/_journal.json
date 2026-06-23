@@ -57,6 +57,13 @@
       "when": 1781234087417,
       "tag": "0007_waitlist_signups",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781320487417,
+      "tag": "0008_users_active_features",
+      "breakpoints": true
     }
   ]
 }
