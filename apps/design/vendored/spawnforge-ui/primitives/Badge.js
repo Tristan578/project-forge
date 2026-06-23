@@ -1,11 +1,21 @@
 import { jsx as _jsx } from "react/jsx-runtime";
-import { cn } from '../utils/cn';
+import { cn } from "../utils/cn";
 const variantStyles = {
-    default: 'bg-[var(--sf-bg-elevated)] text-[var(--sf-text)]',
-    success: 'bg-[color-mix(in_srgb,var(--sf-success)_20%,transparent)] text-[var(--sf-success)]',
-    warning: 'bg-[color-mix(in_srgb,var(--sf-warning)_20%,transparent)] text-[var(--sf-warning)]',
-    destructive: 'bg-[color-mix(in_srgb,var(--sf-destructive)_20%,transparent)] text-[var(--sf-destructive)]',
+    default: "bg-[color-mix(in_srgb,var(--sf-accent)_8%,var(--sf-bg-elevated))] text-[var(--sf-text-secondary)] border-[color-mix(in_srgb,var(--sf-accent)_20%,var(--sf-border-strong))]",
+    success: [
+        "bg-[color-mix(in_srgb,var(--sf-success)_15%,var(--sf-bg-app))] text-[var(--sf-success)]",
+        "border-[color-mix(in_srgb,var(--sf-success)_30%,transparent)]",
+    ].join(" "),
+    warning: [
+        "bg-[color-mix(in_srgb,var(--sf-warning)_15%,var(--sf-bg-app))] text-[var(--sf-warning)]",
+        "border-[color-mix(in_srgb,var(--sf-warning)_30%,transparent)]",
+    ].join(" "),
+    destructive: [
+        "bg-[color-mix(in_srgb,var(--sf-destructive)_15%,var(--sf-bg-app))] text-[var(--sf-destructive)]",
+        "border-[color-mix(in_srgb,var(--sf-destructive)_30%,transparent)]",
+    ].join(" "),
 };
-export function Badge({ className, variant = 'default', children, ...props }) {
-    return (_jsx("span", { className: cn('inline-flex items-center', 'rounded-[var(--sf-radius-full)]', 'px-2.5 py-0.5 text-xs font-medium', 'border border-[length:var(--sf-border-width)] border-[var(--sf-border)]', 'transition-colors duration-[var(--sf-transition)]', variantStyles[variant], className), ...props, children: children }));
+export function Badge({ className, variant = "default", children, ...props }) {
+    return (_jsx("span", { className: cn("inline-flex items-center", "rounded-[var(--sf-radius-full)]", "px-2.5 py-0.5 text-xs font-medium", "border", "transition-colors duration-[var(--sf-transition)]", variantStyles[variant], className), ...props, children: children }));
 }
+Badge.displayName = "Badge";

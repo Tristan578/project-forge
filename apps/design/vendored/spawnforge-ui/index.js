@@ -29,6 +29,13 @@ export { ThemeAmbient } from './effects/ThemeAmbient';
 // Tier 2 Composites
 export { ThemeImportExport } from './composites/ThemeImportExport';
 export { SettingsPanel } from './composites/SettingsPanel';
+export { Vec3Input } from './composites/Vec3Input';
+export { SliderInput } from './composites/SliderInput';
+export { ColorPicker } from './composites/ColorPicker';
+export { TreeView } from './composites/TreeView';
+export { PropertyGrid } from './composites/PropertyGrid';
+export { CollapsibleSection } from './composites/CollapsibleSection';
+export { KeyboardShortcutsPanel, } from './composites/KeyboardShortcutsPanel';
 // Utilities
 export { validateCustomTheme } from './utils/themeValidator';
 export { applyThemeTokens } from './utils/applyThemeTokens';

@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { type ReactNode } from "react";
 export interface AccordionItem {
     id: string;
     title: string;
@@ -10,3 +10,6 @@ export interface AccordionProps {
     className?: string;
 }
 export declare function Accordion({ items, defaultOpen, className }: AccordionProps): import("react/jsx-runtime").JSX.Element;
+export declare namespace Accordion {
+    var displayName: string;
+}

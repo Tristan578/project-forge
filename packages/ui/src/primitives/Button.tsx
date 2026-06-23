@@ -7,10 +7,14 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantStyles: Record<NonNullable<ButtonProps['variant']>, string> = {
+  // #8742: resting CTA uses --sf-accent-hover (not --sf-accent) so --sf-on-accent
+  // meets WCAG AA in every theme; hover steps to --sf-accent-active (darker for
+  // white-on-accent themes, brighter for dark-on-accent themes) — always raising
+  // text contrast. --sf-accent stays the inline-link/text-accent color.
   default: [
-    'bg-[var(--sf-accent)] text-[var(--sf-on-accent)]',
+    'bg-[var(--sf-accent-hover)] text-[var(--sf-on-accent)]',
     'shadow-[0_1px_3px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.1)]',
-    'hover:bg-[var(--sf-accent-hover)] hover:shadow-[0_2px_8px_color-mix(in_srgb,var(--sf-accent)_35%,transparent),inset_0_1px_0_rgba(255,255,255,0.15)]',
+    'hover:bg-[var(--sf-accent-active)] hover:shadow-[0_2px_8px_color-mix(in_srgb,var(--sf-accent)_35%,transparent),inset_0_1px_0_rgba(255,255,255,0.15)]',
     'active:scale-[0.97] active:shadow-[0_0_0_rgba(0,0,0,0),inset_0_2px_4px_rgba(0,0,0,0.2)]',
   ].join(' '),
   destructive: [

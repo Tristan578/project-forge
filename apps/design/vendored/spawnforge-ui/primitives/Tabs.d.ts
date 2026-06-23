@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { type ReactNode } from "react";
 export interface TabItem {
     id: string;
     label: string;
@@ -11,3 +11,6 @@ export interface TabsProps {
     className?: string;
 }
 export declare function Tabs({ tabs, activeTab, onChange, className }: TabsProps): import("react/jsx-runtime").JSX.Element;
+export declare namespace Tabs {
+    var displayName: string;
+}

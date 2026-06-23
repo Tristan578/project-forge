@@ -10,9 +10,17 @@ cd "$REPO_ROOT/packages/ui" && npm run build
 
 echo "Syncing to vendored directory..."
 VENDOR="$REPO_ROOT/apps/design/vendored/spawnforge-ui"
-rm -rf "$VENDOR/dist"
-cp -r "$REPO_ROOT/packages/ui/dist" "$VENDOR/dist"
-cp "$REPO_ROOT/packages/ui/src/effects/effects.css" "$VENDOR/dist/effects/" 2>/dev/null || true
-cp "$REPO_ROOT/packages/ui/src/tokens/theme.css" "$VENDOR/dist/tokens/" 2>/dev/null || true
+DIST="$REPO_ROOT/packages/ui/dist"
 
-echo "Vendored UI synced successfully."
+# The vendored package is consumed FLAT: package.json `main`/`exports` resolve to
+# ./index.js, ./tokens/index.js, etc. — NOT ./dist/*. So the build output must be
+# mirrored into the vendored ROOT, not a dist/ subdir (the old `cp -r dist dist`
+# wrote a directory nothing imports, so the flat files silently drifted from
+# source until a manual copy — #8742 / Sentry vendored-staleness finding).
+# Mirror every dist entry into VENDOR, preserving the hand-authored package.json.
+# `npm run build` already copies effects.css + theme.css into dist, so they come
+# along with the mirror — no separate cp needed.
+find "$VENDOR" -mindepth 1 -maxdepth 1 ! -name package.json -exec rm -rf {} +
+cp -R "$DIST"/. "$VENDOR"/
+
+echo "Vendored UI synced successfully (flat layout)."
