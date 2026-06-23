@@ -12,7 +12,7 @@
 
 vi.mock('server-only', () => ({}));
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
 // ---------------------------------------------------------------------------
@@ -56,6 +56,20 @@ vi.mock('@/lib/ai/contentSafety', () => ({
 
 vi.mock('@/lib/tokens/service', () => ({
   refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
+}));
+
+// Disable the response cache for these tests. The real cache keeps a
+// module-level memory Map that survives `vi.resetModules()`, so a request
+// identical to one an earlier test already ran returns a cache HIT and never
+// re-invokes resolveApiKey / the provider — masking provider-failure and
+// billing-metadata assertions (pre-existing flake, PF-916). Here we exercise
+// the route↔factory↔provider contract, not the cache, so make cachedGenerate a
+// passthrough that always runs the execute callback.
+vi.mock('@/lib/api/responseCache', () => ({
+  cachedGenerate: vi.fn(async (_op: string, _params: unknown, executeFn: () => Promise<unknown>) => ({
+    result: await executeFn(),
+    cached: false,
+  })),
 }));
 
 vi.mock('@/lib/monitoring/sentry-server', () => ({
@@ -124,13 +138,16 @@ vi.mock('@/lib/config/providers', () => ({
   PIXEL_ART_STYLES: ['character', 'prop', 'tile', 'icon', 'environment'],
 }));
 
-// AI SDK mocks (pacing/localize)
+// AI SDK mocks (pacing/localize + the generation agent's stepCountIs stop condition).
+// stepCountIs(n) returns a StopCondition: ({ steps }) => steps.length >= n. The
+// generation agent uses it to bound the loop, so the mock must mirror that shape.
 vi.mock('ai', () => ({
   generateText: vi.fn().mockResolvedValue({
     text: '[]',
     output: [{ title: 'Test', description: 'Test suggestion', priority: 'medium', targetSceneIndex: null }],
   }),
   Output: { object: vi.fn().mockReturnValue({}) },
+  stepCountIs: (n: number) => ({ steps }: { steps: unknown[] }) => steps.length >= n,
 }));
 
 vi.mock('@ai-sdk/anthropic', () => ({
@@ -420,5 +437,95 @@ describe('generate route integration (route → factory → provider)', () => {
     expect(metadata).not.toHaveProperty('strings');
     expect(metadata.stringCount).toBe(1);
     expect(metadata.localeCount).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PF-916: same routes, run through the generation AGENT (flag ON).
+//
+// The blast radius of createGenerationHandler demands proof the contract is
+// identical on the agent path: same status codes, same response shape, the
+// usageId still present, and refund-on-failure still fires. We do NOT mock the
+// agent — the real runGenerationAgent loop executes, only the env flag flips.
+// ---------------------------------------------------------------------------
+
+describe('generate route integration — generation agent path (USE_GENERATION_AGENT=true)', () => {
+  const originalFlag = process.env.USE_GENERATION_AGENT;
+
+  beforeEach(() => {
+    process.env.USE_GENERATION_AGENT = 'true';
+  });
+
+  afterEach(() => {
+    if (originalFlag === undefined) delete process.env.USE_GENERATION_AGENT;
+    else process.env.USE_GENERATION_AGENT = originalFlag;
+  });
+
+  it('sfx: 200 with audioBase64 (identical to legacy path)', async () => {
+    const { POST } = await import('@/app/api/generate/sfx/route');
+    const res = await POST(makeRequest('http://test/api/generate/sfx', { prompt: 'explosion', durationSeconds: 3 }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.audioBase64).toBe('base64==');
+    expect(data.provider).toBe('elevenlabs');
+  });
+
+  it('music: 201 with jobId AND usageId preserved through the agent', async () => {
+    const { POST } = await import('@/app/api/generate/music/route');
+    const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.jobId).toBe('suno-1');
+    expect(data.usageId).toBe('usage-int');
+  });
+
+  it('model: 201 with jobId AND usageId preserved through the agent', async () => {
+    const { POST } = await import('@/app/api/generate/model/route');
+    const res = await POST(makeRequest('http://test/api/generate/model', { prompt: 'red cube', mode: 'text-to-3d' }));
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.jobId).toBe('meshy-1');
+    expect(data.usageId).toBe('usage-int');
+  });
+
+  it('sprite: 201 with usageId preserved through the agent', async () => {
+    const { POST } = await import('@/app/api/generate/sprite/route');
+    const res = await POST(makeRequest('http://test/api/generate/sprite', {
+      prompt: 'hero character', size: '64x64', removeBackground: true,
+    }));
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.usageId).toBe('usage-int');
+  });
+
+  it('pixel-art: 201 with jobId + usageId through the agent', async () => {
+    const { POST } = await import('@/app/api/generate/pixel-art/route');
+    const res = await POST(makeRequest('http://test/api/generate/pixel-art', {
+      prompt: 'wizard sprite', targetSize: 32, palette: 'nes',
+    }));
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.jobId).toBe('pxart-1');
+    expect(data.usageId).toBe('usage-int');
+  });
+
+  it('agent path: provider failure still triggers refund and returns 500', async () => {
+    const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
+    vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      this.generateSfx = vi.fn().mockRejectedValue(new Error('Provider down'));
+      this.generateVoice = vi.fn();
+    } as never);
+
+    const { refundTokens } = await import('@/lib/tokens/service');
+    const { POST } = await import('@/app/api/generate/sfx/route');
+    const res = await POST(makeRequest('http://test/api/generate/sfx', { prompt: 'explosion', durationSeconds: 3 }));
+    expect(res.status).toBe(500);
+    expect(refundTokens).toHaveBeenCalledWith('user-int', 'usage-int');
+  });
+
+  it('agent path: validation rejection still 422 (never reaches the agent)', async () => {
+    const { POST } = await import('@/app/api/generate/sfx/route');
+    const res = await POST(makeRequest('http://test/api/generate/sfx', { durationSeconds: 3 }));
+    expect(res.status).toBe(422);
   });
 });

@@ -85,6 +85,17 @@ export const API_MAX_DURATION_SIMPLE_S = 10;
 /** Health monitor cron route maxDuration (seconds) */
 export const API_MAX_DURATION_CRON_S = 30;
 
+/**
+ * Hard wall-clock cap for a single generation-agent step (milliseconds).
+ *
+ * The generation agent (PF-916) races each provider `execute` against this
+ * deadline and aborts deterministically when exceeded, so a hung provider call
+ * can never outlive the function `maxDuration` and strand a token deduction.
+ * Set below `API_MAX_DURATION_HEAVY_GEN_S` (180s) so the abort fires and the
+ * refund path runs while the function is still alive.
+ */
+export const GENERATION_AGENT_STEP_TIMEOUT_MS = 150_000;
+
 /** External API call timeout (e.g., OpenAI, Replicate image generation) */
 export const EXTERNAL_API_TIMEOUT_MS = 60_000;
 

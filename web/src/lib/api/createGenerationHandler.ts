@@ -27,6 +27,7 @@ import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLi
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 import { cachedGenerate } from './responseCache';
+import { runGenerationAgent, isGenerationAgentEnabled } from './generationAgent';
 
 /**
  * Client-facing message for every 500. Raw `err.message` can carry server
@@ -110,6 +111,14 @@ export interface GenerationHandlerConfig<TParams, TResult> {
     tier: string;
     usageId: string | undefined;
     tokenCost: number;
+    /**
+     * Abort signal wired to the generation agent's per-step wall-clock deadline.
+     * Only present when the USE_GENERATION_AGENT flag is on (otherwise undefined).
+     * Routes SHOULD forward it to their provider client / `fetch` so a hung call
+     * aborts deterministically before the function `maxDuration`. Optional and
+     * additive: existing routes that ignore it are unaffected.
+     */
+    abortSignal?: AbortSignal;
   }) => Promise<TResult>;
 
   /**
@@ -159,6 +168,26 @@ export function createGenerationHandler<TParams, TResult>(
     cacheKeyParams,
     cacheTtlSeconds,
   } = config;
+
+  // Run the provider call either inline (legacy default) or through the
+  // deterministic generation agent (step + timeout caps) when the
+  // USE_GENERATION_AGENT flag is on. Either way the result — and therefore the
+  // response shape, usageId, and no-artifact→failed mapping the route encodes —
+  // is identical; only the termination guarantees differ. Refund-on-failure
+  // stays in the factory, so the async-refund contract is path-independent.
+  const useAgent = isGenerationAgentEnabled();
+  const runExecute = (
+    params: TParams,
+    apiKey: string,
+    ctx: { userId: string; tier: string; usageId: string | undefined; tokenCost: number },
+  ): Promise<TResult> => {
+    if (!useAgent) {
+      return execute(params, apiKey, ctx);
+    }
+    return runGenerationAgent<TResult>({
+      step: ({ signal }) => execute(params, apiKey, { ...ctx, abortSignal: signal }),
+    });
+  };
 
   return async (request: NextRequest): Promise<NextResponse> => {
     // 1. Authenticate
@@ -262,7 +291,7 @@ export function createGenerationHandler<TParams, TResult>(
             const usageId = resolved.usageId;
 
             try {
-              return await execute(params, apiKey, { userId, tier, usageId, tokenCost });
+              return await runExecute(params, apiKey, { userId, tier, usageId, tokenCost });
             } catch (err) {
               // Refund tokens on provider failure
               if (usageId) {
@@ -313,7 +342,7 @@ export function createGenerationHandler<TParams, TResult>(
     }
 
     try {
-      const result = await execute(params, apiKey, { userId, tier, usageId, tokenCost });
+      const result = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost });
       return NextResponse.json(result, { status: successStatus });
     } catch (err) {
       // Refund tokens on provider failure
