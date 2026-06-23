@@ -1,6 +1,6 @@
 # Capability Map
 
-Per-provider inventory for `capability-review`. For each provider: the **changelog/release URL** to fetch (always with a dated query), the **pricing URL** to fetch for Step 4, and the **grep markers** the fingerprint script keys on to decide `using` vs `NOT FOUND`.
+Per-provider inventory for `capability-review`. For each provider: the **changelog/release URL** to fetch (always with a dated query), the **pricing URL** to fetch for Step 4, and the **grep markers** the fingerprint script keys on to decide `using` vs `GAP`.
 
 > Keep the "We currently wire" column honest — update it when adoption changes. A drifted map produces false "adoption gaps."
 
