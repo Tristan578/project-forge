@@ -212,6 +212,58 @@ describe('handleReviewClosed', () => {
     expect(Number(row?.addon_tokens)).toBe(pkgTokens);
   });
 
+  it('persists stripe_customer_id on the approved path so the clawback can find the user', async () => {
+    // Data-integrity regression (PF-913 / #8823): the held→approved grant must
+    // write the Stripe customer id, otherwise a first-time buyer (no prior
+    // stripe_customer_id) is unreachable by the refund/dispute clawback, which
+    // resolves the user SOLELY via findUserByStripeCustomer.
+    enableFlag();
+    const { neonSql } = harness();
+    const user = await seedUser(neonSql, { addonTokens: 0, stripeCustomerId: null });
+    const stripe = fakeStripe({
+      paymentIntent: { metadata: { userId: user.id, package: 'blaze' }, customer: 'cus_held' },
+    });
+
+    await handleReviewClosed(reviewClosed('approved'), stripe as unknown as Stripe);
+
+    const row = await getUserRow(neonSql, user.id);
+    expect(Number(row?.addon_tokens)).toBe(pkgTokens);
+    expect(row?.stripe_customer_id).toBe('cus_held');
+
+    // End-to-end: the clawback path must now resolve this user by customer id
+    // and reverse the credit (a later dispute on the approved charge). The
+    // approved grant above already created the token_purchases row for
+    // pi_held, so no extra seeding is needed.
+    const disputeStripe = fakeStripe({
+      charge: {
+        customer: 'cus_held',
+        payment_intent: 'pi_held',
+        amount: TOKEN_PACKAGES.blaze.priceCents,
+      } as Stripe.Charge,
+    });
+    await handleDisputeCreated(
+      { id: 'dp_held', object: 'dispute', charge: 'ch_held', amount: TOKEN_PACKAGES.blaze.priceCents } as unknown as Stripe.Dispute,
+      disputeStripe as unknown as Stripe,
+    );
+
+    const afterDispute = await getUserRow(neonSql, user.id);
+    expect(Number(afterDispute?.addon_tokens)).toBe(0);
+  });
+
+  it('does not overwrite an existing stripe_customer_id on the approved path', async () => {
+    enableFlag();
+    const { neonSql } = harness();
+    const user = await seedUser(neonSql, { addonTokens: 0, stripeCustomerId: 'cus_existing' });
+    const stripe = fakeStripe({
+      paymentIntent: { metadata: { userId: user.id, package: 'blaze' }, customer: 'cus_other' },
+    });
+
+    await handleReviewClosed(reviewClosed('approved'), stripe as unknown as Stripe);
+
+    const row = await getUserRow(neonSql, user.id);
+    expect(row?.stripe_customer_id).toBe('cus_existing');
+  });
+
   it('is idempotent across review.closed redelivery (grants exactly once)', async () => {
     enableFlag();
     const { neonSql } = harness();

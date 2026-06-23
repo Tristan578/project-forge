@@ -34,7 +34,11 @@
  */
 
 import type Stripe from 'stripe';
+import { eq } from 'drizzle-orm';
+import { getDb, queryWithResilience } from '@/lib/db/client';
+import { users } from '@/lib/db/schema';
 import { creditAddonTokens } from '@/lib/tokens/service';
+import { updateUserStripe } from '@/lib/auth/user-service';
 import { TOKEN_PACKAGES, type TokenPackage } from '@/lib/tokens/pricing';
 import {
   findUserByStripeCustomer,
@@ -63,6 +67,34 @@ function refId(
 ): string | null {
   if (!ref) return null;
   return typeof ref === 'string' ? ref : ref.id;
+}
+
+/**
+ * Persist the Stripe customer id onto the user record if not already stored.
+ *
+ * The dispute/refund clawback safety net (`handleDisputeCreated` →
+ * `findUserByStripeCustomer`, and `charge.refunded` → `handleChargeRefunded`)
+ * resolves the user SOLELY by `users.stripe_customer_id`. The normal
+ * `checkout.session.completed` credit path saves this id (see the webhook
+ * route), but a HELD purchase skips that path entirely — so without persisting
+ * it here, a first-time buyer whose held purchase is later approved would have
+ * NO `stripe_customer_id`, and a subsequent refund/dispute could not reverse the
+ * credit. Mirror the webhook's "save if not already stored" write.
+ */
+async function persistStripeCustomerId(
+  userId: string,
+  customerId: string
+): Promise<void> {
+  const [user] = await queryWithResilience(() =>
+    getDb()
+      .select({ id: users.id, stripeCustomerId: users.stripeCustomerId })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+  );
+  if (user && !user.stripeCustomerId) {
+    await updateUserStripe(userId, customerId);
+  }
 }
 
 /**
@@ -151,6 +183,15 @@ export async function handleReviewClosed(
   if (!userId || !isTokenPackage(pkg)) return;
 
   await creditAddonTokens(userId, pkg, paymentIntentId);
+
+  // Persist the Stripe customer id so a later refund/dispute can claw this
+  // credit back. The normal credit path (`checkout.session.completed`) saves
+  // it, but a held purchase bypasses that path — without this write, a
+  // first-time buyer approved here would be unreachable by the clawback.
+  const customerId = refId(pi.customer);
+  if (customerId) {
+    await persistStripeCustomerId(userId, customerId);
+  }
 }
 
 /**
