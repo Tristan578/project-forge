@@ -13,7 +13,11 @@ permissions:
 jobs:
   require-work-item:
     name: Require Linked Work Item
-    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    # Exempt automation PRs with no taskboard ticket: dependabot bumps and the
+    # Changesets "Version Packages" PR (github-actions[bot] on changeset-release/main).
+    if: >-
+      github.event.pull_request.user.login != 'dependabot[bot]'
+      && github.head_ref != 'changeset-release/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
