@@ -83,15 +83,18 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
     await expect(page.locator('canvas').first()).toBeVisible();
 
     // Step 5: open the export dialog and confirm it renders export options.
-    const exportBtn = page
-      .locator('button')
-      .filter({ hasText: /export/i })
-      .first();
+    // The toolbar Export button (SceneToolbar.tsx) is icon-only (Download icon,
+    // aria-label="Export game", no text node) so it must be located by its
+    // accessible name, not hasText.
+    const exportBtn = page.getByRole('button', { name: 'Export game' });
     await expect(exportBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     await exportBtn.click();
 
+    // The Export dialog (ExportDialog.tsx) labels itself with
+    // aria-labelledby="export-dialog-title" (settings-dialog-title belongs to a
+    // different panel).
     const dialog = page.locator(
-      '[role="dialog"][aria-labelledby="settings-dialog-title"]'
+      '[role="dialog"][aria-labelledby="export-dialog-title"]'
     );
     await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     const dialogText = await dialog.textContent();
