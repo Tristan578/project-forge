@@ -804,4 +804,181 @@ describe('compoundHandlers', () => {
       expect(data.appliedTo).toBe(0);
     });
   });
+
+  // ===========================================================================
+  // setup_game_from_description
+  // ===========================================================================
+
+  describe('setup_game_from_description', () => {
+    // createMockStore does NOT include setProjectType — every test must supply it
+    // (the handler calls it unconditionally and would throw on undefined).
+    function gameOverrides(extra: Record<string, unknown> = {}) {
+      return {
+        spawnEntity: vi.fn((_t: unknown, n: string) => `id-${n}`),
+        setProjectType: vi.fn(),
+        ...extra,
+      };
+    }
+
+    it('rejects an empty description with an Invalid arguments error', async () => {
+      const { result, store } = await invoke('setup_game_from_description', { description: '' }, gameOverrides());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid arguments');
+      // No scaffolding happened — validation is the very first step.
+      expect(store.spawnEntity).not.toHaveBeenCalled();
+      expect(store.setProjectType).not.toHaveBeenCalled();
+    });
+
+    it('rejects a missing description', async () => {
+      const { result, store } = await invoke('setup_game_from_description', {}, gameOverrides());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid arguments');
+      expect(store.spawnEntity).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid targetTier enum', async () => {
+      const { result } = await invoke(
+        'setup_game_from_description',
+        { description: 'a game', targetTier: 'ultra' },
+        gameOverrides(),
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid arguments');
+    });
+
+    it('scaffolds a playable game in a fixed, ordered sequence', async () => {
+      const { result, store, dispatchCommand } = await invoke(
+        'setup_game_from_description',
+        { description: 'a platformer with 3 enemies and 4 coins' },
+        gameOverrides(),
+      );
+
+      expect(result.success).toBe(true);
+      const spawn = store.spawnEntity as ReturnType<typeof vi.fn>;
+      const spawnedNames = spawn.mock.calls.map((c) => c[1]);
+
+      // Deterministic naming: Ground, Player, Enemy_0..2, Coin_0..3, Goal.
+      expect(spawnedNames).toEqual([
+        'Ground',
+        'Player',
+        'Enemy_0',
+        'Enemy_1',
+        'Enemy_2',
+        'Coin_0',
+        'Coin_1',
+        'Coin_2',
+        'Coin_3',
+        'Goal',
+      ]);
+
+      // Ordering: project type is set BEFORE the first spawn.
+      const setProjectTypeOrder = (store.setProjectType as ReturnType<typeof vi.fn>).mock
+        .invocationCallOrder[0];
+      const firstSpawnOrder = spawn.mock.invocationCallOrder[0];
+      expect(setProjectTypeOrder).toBeLessThan(firstSpawnOrder);
+      expect(store.setProjectType).toHaveBeenCalledWith('3d');
+
+      // Player wiring: controller + health game components, dynamic physics.
+      expect(store.togglePhysics).toHaveBeenCalledWith('id-Player', true);
+      expect(store.addGameComponent).toHaveBeenCalledWith(
+        'id-Player',
+        expect.objectContaining({ type: 'characterController' }),
+      );
+
+      // Coins are collectibles with a trigger zone.
+      expect(store.addGameComponent).toHaveBeenCalledWith(
+        'id-Coin_0',
+        expect.objectContaining({ type: 'collectible' }),
+      );
+
+      // Goal carries exactly one win_condition.
+      expect(store.addGameComponent).toHaveBeenCalledWith(
+        'id-Goal',
+        expect.objectContaining({ type: 'winCondition' }),
+      );
+      const winCalls = (store.addGameComponent as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (c) => (c[1] as { type?: string })?.type === 'winCondition',
+      );
+      expect(winCalls).toHaveLength(1);
+
+      // Input preset + camera-follow script targeting the player by id.
+      expect(store.setInputPreset).toHaveBeenCalledWith('platformer');
+      const scriptCall = (store.setScript as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(scriptCall[0]).toBe('id-Player');
+      expect(scriptCall[1]).toContain('forge.camera.setTarget("id-Player")');
+
+      // No generation requested → no generate_* dispatched.
+      expect(dispatchCommand).not.toHaveBeenCalled();
+      const data = result.result as Record<string, unknown>;
+      expect(data.generationJobs).toBe(0);
+    });
+
+    it('is deterministic — identical descriptions produce identical spawn sequences', async () => {
+      const a = await invoke(
+        'setup_game_from_description',
+        { description: '2 enemies, 3 coins' },
+        gameOverrides(),
+      );
+      const b = await invoke(
+        'setup_game_from_description',
+        { description: '2 enemies, 3 coins' },
+        gameOverrides(),
+      );
+
+      const namesA = (a.store.spawnEntity as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1]);
+      const namesB = (b.store.spawnEntity as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1]);
+      expect(namesA).toEqual(namesB);
+    });
+
+    it('plan-with-no-assets: omits all generate_* dispatch when targetTier is absent', async () => {
+      const { dispatchCommand, result } = await invoke(
+        'setup_game_from_description',
+        { description: 'a simple maze game' },
+        gameOverrides(),
+      );
+
+      expect(dispatchCommand).not.toHaveBeenCalled();
+      const data = result.result as Record<string, unknown>;
+      expect(data.generationJobs).toBe(0);
+    });
+
+    it('dispatches parallel generation jobs with targetEntityId when a targetTier is set', async () => {
+      const { dispatchCommand, result } = await invoke(
+        'setup_game_from_description',
+        { description: 'a shooter game', targetTier: 'high' },
+        gameOverrides(),
+      );
+
+      // generate_3d_model on the player, generate_texture on the goal, generate_music.
+      expect(dispatchCommand).toHaveBeenCalledWith(
+        'generate_3d_model',
+        expect.objectContaining({ targetEntityId: 'id-Player' }),
+      );
+      expect(dispatchCommand).toHaveBeenCalledWith(
+        'generate_texture',
+        expect.objectContaining({ targetEntityId: 'id-Goal' }),
+      );
+      expect(dispatchCommand).toHaveBeenCalledWith('generate_music', expect.any(Object));
+
+      const data = result.result as Record<string, unknown>;
+      expect(data.generationJobs).toBe(3);
+    });
+
+    it('picks the follower behavior for chase-type enemy descriptions', async () => {
+      const { store } = await invoke(
+        'setup_game_from_description',
+        { description: '1 enemy that will chase the player' },
+        gameOverrides(),
+      );
+
+      // The single enemy is a follower targeting the player id.
+      expect(store.addGameComponent).toHaveBeenCalledWith(
+        'id-Enemy_0',
+        expect.objectContaining({ type: 'follower' }),
+      );
+    });
+  });
 });

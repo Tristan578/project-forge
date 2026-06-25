@@ -30,7 +30,7 @@ handlers/
 ├── gameplayHandlers.ts         # Game components, game cameras, input bindings
 ├── assetHandlers.ts            # Asset import, GLTF, textures, prefab instantiation
 ├── pixelArtHandlers.ts         # Pixel art / sprite sheet AI generation
-├── compoundHandlers.ts         # Multi-step compound actions (create_scene, setup_character, etc.)
+├── compoundHandlers.ts         # 9 multi-step compound actions (create_scene, setup_character, setup_game_from_description, etc.)
 ├── leaderboardHandlers.ts      # Leaderboard and score tracking
 ├── ideaHandlers.ts             # Game idea generation and brainstorming
 ├── worldHandlers.ts            # World generation and procedural content
