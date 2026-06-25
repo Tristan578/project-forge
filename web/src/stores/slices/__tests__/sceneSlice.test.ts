@@ -136,14 +136,29 @@ describe('sceneSlice', () => {
   });
 
   describe('terrain', () => {
-    it('should dispatch spawn_terrain', () => {
-      store.getState().spawnTerrain({ resolution: 256 } as never);
-      expect(mockDispatch).toHaveBeenCalledWith('spawn_terrain', { resolution: 256 });
+    it('should dispatch spawn_terrain with a generated id and return it (#8749)', () => {
+      const id = store.getState().spawnTerrain({ resolution: 256 } as never);
+      // The id is generated client-side and passed to the engine so the caller
+      // can reference the entity synchronously (mirrors spawnEntity, #8748).
+      expect(typeof id).toBe('string');
+      expect(id).toBeTruthy();
+      expect(mockDispatch).toHaveBeenCalledWith('spawn_terrain', { id, resolution: 256 });
     });
 
-    it('should dispatch spawn_terrain with empty params', () => {
-      store.getState().spawnTerrain();
-      expect(mockDispatch).toHaveBeenCalledWith('spawn_terrain', {});
+    it('should dispatch spawn_terrain with empty params and still return an id (#8749)', () => {
+      const id = store.getState().spawnTerrain();
+      expect(typeof id).toBe('string');
+      expect(mockDispatch).toHaveBeenCalledWith('spawn_terrain', { id });
+    });
+
+    it('should return undefined and not dispatch when the engine is not loaded (#8749)', () => {
+      // dispatchCommand null = engine not loaded. Returning a fresh id here would
+      // be a phantom reference (no entity created), defeating the caller's guard.
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const freshStore = createSliceStore(createSceneSlice);
+      const id = freshStore.getState().spawnTerrain({ resolution: 256 } as never);
+      expect(id).toBeUndefined();
+      expect(mockDispatch).not.toHaveBeenCalled();
     });
 
     it('should dispatch update_terrain', () => {

@@ -487,31 +487,63 @@ describe('compoundHandlers', () => {
       expect(store.setInputPreset).toHaveBeenCalledWith('platformer');
     });
 
-    it('reports the terrain ground as an explicit failure when its id is unavailable (#8749 boundary)', async () => {
-      // The terrain path still reads the stale `primaryId` (#8749). On a fresh
-      // scene that is null, so the ground cannot be parented. The handler must
-      // surface that as a failed operation — never silently drop it and imply
-      // the ground exists.
+    it('parents the terrain ground to the returned spawnTerrain id, not the stale primaryId (#8749)', async () => {
+      // #8749: spawnTerrain now returns the new entity's id synchronously
+      // (mirroring spawnEntity, #8748). On a fresh scene primaryId stays null,
+      // so the handler MUST use the returned id — not read primaryId — to parent
+      // and record the ground.
       const { result, store } = await invoke('create_level_layout', {
         levelName: 'TerrainLevel',
         ground: { useTerrain: true, terrainConfig: { size: 64 } },
       }, {
         spawnEntity: vi.fn(() => 'root-1'),
-        // primaryId left at its default null; spawnTerrain does not set it (#8749)
+        spawnTerrain: vi.fn(() => 'terrain-1'),
+        // primaryId stays null on a fresh scene — the handler must NOT read it.
+      });
+
+      expect(store.spawnTerrain).toHaveBeenCalledWith({ size: 64 });
+      // primaryId was never the source of the ground id.
+      expect(store.primaryId).toBeNull();
+
+      const data = result.result as {
+        success: boolean;
+        partialSuccess: boolean;
+        entityIds: Record<string, string>;
+        operations: Array<{ action: string; success: boolean; entityId?: string; error?: string }>;
+      };
+      const groundOp = data.operations.find((op) => op.action === 'create terrain ground');
+      expect(groundOp).toBeDefined();
+      expect(groundOp?.success).toBe(true);
+      expect(groundOp?.entityId).toBe('terrain-1');
+      expect(data.entityIds.Ground).toBe('terrain-1');
+      // The terrain ground is parented to the level root via the returned id.
+      expect(store.reparentEntity).toHaveBeenCalledWith('terrain-1', 'root-1');
+      // Root + ground both succeeded → clean success, no partial.
+      expect(data.success).toBe(true);
+      expect(data.partialSuccess).toBe(false);
+    });
+
+    it('reports the terrain ground as a failure when spawnTerrain returns no id (engine not loaded) (#8749)', async () => {
+      // When the engine isn't loaded spawnTerrain returns undefined. The handler
+      // must surface that as a genuine failure, never silently imply a ground.
+      const { result, store } = await invoke('create_level_layout', {
+        levelName: 'TerrainLevel',
+        ground: { useTerrain: true, terrainConfig: { size: 64 } },
+      }, {
+        spawnEntity: vi.fn(() => 'root-1'),
+        spawnTerrain: vi.fn(() => undefined),
       });
 
       expect(store.spawnTerrain).toHaveBeenCalled();
+      expect(store.reparentEntity).not.toHaveBeenCalledWith(undefined, 'root-1');
       const data = result.result as {
         success: boolean;
-        operations: Array<{ action: string; success: boolean; error?: string }>;
         partialSuccess: boolean;
+        operations: Array<{ action: string; success: boolean; error?: string }>;
       };
       const groundOp = data.operations.find((op) => op.action === 'create terrain ground');
       expect(groundOp).toBeDefined();
       expect(groundOp?.success).toBe(false);
-      expect(groundOp?.error).toContain('#8749');
-      // Root succeeded, ground failed → the compound result reports partial
-      // success, not a clean success that would imply the ground exists.
       expect(data.success).toBe(false);
       expect(data.partialSuccess).toBe(true);
     });

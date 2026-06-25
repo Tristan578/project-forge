@@ -36,7 +36,19 @@ export interface SceneSlice {
   setSceneSwitching: (switching: boolean) => void;
   startSceneTransition: (targetScene: string, configOverride?: Partial<SceneTransitionConfig>) => Promise<void>;
   setDefaultTransition: (config: Partial<SceneTransitionConfig>) => void;
-  spawnTerrain: (terrainData?: Partial<TerrainDataState>) => void;
+  /**
+   * Spawn a terrain entity. Returns the new entity's id **synchronously** so
+   * callers (e.g. `create_level_layout`) can immediately parent/record it
+   * without waiting for the async SELECTION_CHANGED round-trip. Mirrors the
+   * `spawnEntity` synchronous-id contract added for the primitive path (#8748).
+   * Returns `undefined` when no command was dispatched (engine not loaded —
+   * `dispatchCommand` is null); returning a fresh id there would be a phantom
+   * reference, so callers MUST guard on the result and never read `primaryId`
+   * after calling this — it is not updated until the engine emits
+   * SELECTION_CHANGED. The generated id is passed to the engine, which overrides
+   * the spawned terrain entity's EntityId to match (#8749).
+   */
+  spawnTerrain: (terrainData?: Partial<TerrainDataState>) => string | undefined;
   updateTerrain: (entityId: string, terrainData: TerrainDataState) => void;
   sculptTerrain: (entityId: string, position: [number, number], radius: number, strength: number) => void;
   setTerrainData: (entityId: string, data: TerrainDataState) => void;
@@ -120,7 +132,23 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
     set({ defaultTransition: { ...state.defaultTransition, ...config } });
   },
   spawnTerrain: (terrainData) => {
-    if (dispatchCommand) dispatchCommand('spawn_terrain', terrainData || {});
+    // Generate the id client-side and pass it to the engine, which overrides
+    // the spawned terrain entity's EntityId to match. This lets the caller
+    // reference the entity synchronously — `primaryId` is only set later by the
+    // async SELECTION_CHANGED event, so reading it right after spawn is stale
+    // (the #8748 defect, here closed for the terrain path by #8749).
+    //
+    // Only return the id when we actually dispatched the command. When the
+    // engine isn't loaded yet `dispatchCommand` is null — returning a fresh id
+    // there would be a phantom reference (no entity created), defeating every
+    // caller's `if (id)` guard. Return undefined so callers treat it as a real
+    // failure, matching the pre-fix `void` contract.
+    if (dispatchCommand) {
+      const id = crypto.randomUUID();
+      dispatchCommand('spawn_terrain', { id, ...(terrainData || {}) });
+      return id;
+    }
+    return undefined;
   },
   updateTerrain: (entityId, terrainData) => {
     if (dispatchCommand) dispatchCommand('update_terrain', { entityId, ...terrainData });

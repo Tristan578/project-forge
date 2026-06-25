@@ -97,7 +97,7 @@ export const createSceneGraphSlice: StateCreator<
     primaryId: string | null;
     primaryName: string | null;
     primaryTransform: unknown | null;
-    spawnTerrain: () => void;
+    spawnTerrain: () => string | undefined;
   },
   [],
   [],
