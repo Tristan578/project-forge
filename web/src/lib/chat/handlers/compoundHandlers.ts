@@ -1398,6 +1398,18 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         ctx.store.updateTransform(id, 'position', [offset, 1, 4]);
         ctx.store.updateTransform(id, 'scale', [0.4, 0.4, 0.4]);
         ctx.store.updateMaterial(id, buildMaterialFromPartial({ baseColor: [1, 0.9, 0, 1], unlit: true }));
+        // Physics is REQUIRED for the collectible/trigger paths to fire. The
+        // engine attaches a Rapier collider + ActiveEvents (and so populates
+        // runtime.active_collisions from CollisionEvents) ONLY to entities with
+        // PhysicsEnabled (engine/src/core/physics.rs). A collider-less coin emits
+        // zero collision events → system_collectible/system_trigger_zone never
+        // run → coins never collect. A static SENSOR body lets the dynamic Player
+        // pass through it while still generating the collision pair. (#8541/#8764)
+        ctx.store.togglePhysics(id, true);
+        ctx.store.updatePhysics(
+          id,
+          buildPhysicsFromPartial({ bodyType: 'fixed', isSensor: true }),
+        );
         const collectible = buildGameComponentFromInput('collectible', { value: 1 });
         if (collectible) ctx.store.addGameComponent(id, collectible);
         const trigger = buildGameComponentFromInput('trigger_zone', { eventName: 'coin_collected' });
@@ -1413,6 +1425,18 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       ctx.store.updateTransform(id, 'position', [0, 1, 12]);
       ctx.store.updateTransform(id, 'scale', [0.6, 0.6, 0.6]);
       ctx.store.updateMaterial(id, buildMaterialFromPartial({ baseColor: [0.2, 1, 0.4, 1], unlit: true }));
+      // Physics is REQUIRED for the win path to fire. system_win_condition reads
+      // runtime.active_collisions, which the engine populates ONLY from Rapier
+      // CollisionEvents — and Rapier colliders + ActiveEvents are attached ONLY
+      // to entities with PhysicsEnabled (engine/src/core/physics.rs). A
+      // collider-less Goal produces zero collision events → reaching it never
+      // wins (the exact #8764 break). A static SENSOR body lets the dynamic
+      // Player overlap it while still generating the collision pair. (#8541)
+      ctx.store.togglePhysics(id, true);
+      ctx.store.updatePhysics(
+        id,
+        buildPhysicsFromPartial({ bodyType: 'fixed', isSensor: true }),
+      );
       const trigger = buildGameComponentFromInput('trigger_zone', {
         eventName: 'goal_reached',
         oneShot: true,

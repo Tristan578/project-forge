@@ -887,12 +887,49 @@ describe('compoundHandlers', () => {
         'id-Player',
         expect.objectContaining({ type: 'characterController' }),
       );
+      // The Player must be a DYNAMIC body — that is what generates the collision
+      // PAIRS with the static sensor coins/goal. A non-dynamic player produces
+      // no relative motion and (with two fixed bodies) no collision events.
+      const playerPhysics = (store.updatePhysics as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c) => c[0] === 'id-Player',
+      );
+      expect(playerPhysics).toBeDefined();
+      expect((playerPhysics?.[1] as { bodyType?: string })?.bodyType).toBe('dynamic');
 
       // Coins are collectibles with a trigger zone.
       expect(store.addGameComponent).toHaveBeenCalledWith(
         'id-Coin_0',
         expect.objectContaining({ type: 'collectible' }),
       );
+
+      // WINNABILITY / INTERACTIVITY GUARD (#8541, #8764) — the regression this
+      // suite exists to catch. The engine's system_win_condition /
+      // system_collectible / system_trigger_zone only fire on entries in
+      // runtime.active_collisions, which is populated ONLY from Rapier
+      // CollisionEvents — and Rapier colliders + ActiveEvents attach ONLY to
+      // entities with PhysicsEnabled (engine/src/core/physics.rs). So EVERY
+      // collision-driven entity (the Goal and every Coin) MUST have physics
+      // enabled as a static SENSOR, or the scaffold is structurally un-winnable
+      // and the coins never collect. Asserting only that the .type strings were
+      // set (collectible/winCondition) does NOT prove this — it passed on the
+      // broken code. We assert the actual togglePhysics + sensor physics calls.
+      for (const coin of ['id-Coin_0', 'id-Coin_1', 'id-Coin_2', 'id-Coin_3']) {
+        expect(store.togglePhysics).toHaveBeenCalledWith(coin, true);
+        const coinPhysics = (store.updatePhysics as ReturnType<typeof vi.fn>).mock.calls.find(
+          (c) => c[0] === coin,
+        );
+        expect(coinPhysics, `${coin} must have physics enabled to ever collect`).toBeDefined();
+        expect((coinPhysics?.[1] as { isSensor?: boolean })?.isSensor).toBe(true);
+      }
+
+      // Goal: physics enabled as a static sensor so reaching it can fire the win.
+      expect(store.togglePhysics).toHaveBeenCalledWith('id-Goal', true);
+      const goalPhysics = (store.updatePhysics as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c) => c[0] === 'id-Goal',
+      );
+      expect(goalPhysics, 'Goal must have physics enabled to ever win').toBeDefined();
+      expect((goalPhysics?.[1] as { isSensor?: boolean })?.isSensor).toBe(true);
+      expect((goalPhysics?.[1] as { bodyType?: string })?.bodyType).toBe('fixed');
 
       // Goal carries exactly one win_condition.
       expect(store.addGameComponent).toHaveBeenCalledWith(
