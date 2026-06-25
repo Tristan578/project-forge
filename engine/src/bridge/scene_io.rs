@@ -434,6 +434,12 @@ pub(super) fn apply_gltf_import(
     mut asset_registry: ResMut<AssetRegistry>,
     asset_server: Res<AssetServer>,
     memory_dir: Res<crate::core::asset_manager::GltfMemoryDir>,
+    // Read-only lookup of childless entities by EntityId — the candidates eligible
+    // for replace-in-place. `Without<Children>` enforces the issue's "entity exists
+    // with no children" scope: a fresh placeholder primitive is a leaf, but an entity
+    // that already holds an imported glTF scene (a ChildOf child) is excluded so we
+    // never stack a second scene under it. Read-only, so no B0001 conflict with Commands.
+    target_candidates: Query<(Entity, &EntityId), Without<Children>>,
 ) {
     use crate::core::asset_manager::{AssetKind, AssetMetadata, AssetSource, GltfSourceHandle};
     use base64::Engine as _;
@@ -489,26 +495,62 @@ pub(super) fn apply_gltf_import(
             source: AssetSource::Upload { filename: request.name.clone() },
         });
 
-        // Spawn a root entity for the model with GltfSourceHandle
-        let pos = request.position.unwrap_or(bevy::math::Vec3::ZERO);
-        let entity_id = crate::core::entity_id::EntityId::default();
-        let eid_str = entity_id.0.clone();
-        commands.spawn((
-            EntityType::GltfModel,
-            entity_id,
-            crate::core::entity_id::EntityName::new(&request.name),
-            crate::core::entity_id::EntityVisible::default(),
-            Transform::from_translation(pos),
-            crate::core::asset_manager::AssetRef {
-                asset_id: asset_id.clone(),
-                asset_name: request.name.clone(),
-                asset_type: AssetKind::GltfModel,
-            },
-            GltfSourceHandle(gltf_handle),
-        ));
+        let asset_ref = crate::core::asset_manager::AssetRef {
+            asset_id: asset_id.clone(),
+            asset_name: request.name.clone(),
+            asset_type: AssetKind::GltfModel,
+        };
 
-        events::emit_asset_imported(&asset_id, &request.name, "gltf_model", file_size);
-        tracing::info!("Imported glTF asset: {} (entity: {})", request.name, eid_str);
+        // Resolve the replace-in-place target, if requested: an existing childless
+        // entity whose EntityId matches `target_entity_id`. Falls back to spawning a
+        // new root entity when the target is absent, not found, or has children.
+        let target_entity = request.target_entity_id.as_ref().and_then(|id| {
+            target_candidates
+                .iter()
+                .find(|(_, eid)| eid.0 == *id)
+                .map(|(entity, _)| entity)
+        });
+
+        if let Some(entity) = target_entity {
+            // Replace-in-place: attach the glTF model to the existing entity,
+            // preserving its EntityId, Transform, name, and selection. Drop any
+            // placeholder primitive mesh so only the loaded glTF scene renders.
+            // `apply_gltf_scene_spawn` will see GltfSourceHandle and attach the
+            // scene as a ChildOf child, inheriting this entity's Transform.
+            commands
+                .entity(entity)
+                .insert((
+                    EntityType::GltfModel,
+                    asset_ref,
+                    GltfSourceHandle(gltf_handle),
+                ))
+                .remove::<Mesh3d>()
+                .remove::<MeshMaterial3d<StandardMaterial>>();
+
+            events::emit_asset_imported(&asset_id, &request.name, "gltf_model", file_size);
+            tracing::info!(
+                "Imported glTF asset in-place: {} (target entity: {})",
+                request.name,
+                request.target_entity_id.as_deref().unwrap_or("")
+            );
+        } else {
+            // Spawn a root entity for the model with GltfSourceHandle
+            let pos = request.position.unwrap_or(bevy::math::Vec3::ZERO);
+            let entity_id = crate::core::entity_id::EntityId::default();
+            let eid_str = entity_id.0.clone();
+            commands.spawn((
+                EntityType::GltfModel,
+                entity_id,
+                crate::core::entity_id::EntityName::new(&request.name),
+                crate::core::entity_id::EntityVisible::default(),
+                Transform::from_translation(pos),
+                asset_ref,
+                GltfSourceHandle(gltf_handle),
+            ));
+
+            events::emit_asset_imported(&asset_id, &request.name, "gltf_model", file_size);
+            tracing::info!("Imported glTF asset: {} (entity: {})", request.name, eid_str);
+        }
     }
 }
 

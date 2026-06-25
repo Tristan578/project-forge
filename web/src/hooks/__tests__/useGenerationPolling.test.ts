@@ -832,9 +832,12 @@ describe('useGenerationPolling', () => {
       renderHook(() => useGenerationPolling());
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 
+      // The job's targetEntityId must be threaded through as the 3rd arg so the
+      // model replaces the placeholder entity in place rather than spawning a sibling.
       expect(mockImportGltf).toHaveBeenCalledWith(
         'data:model/gltf-binary;base64,AAAA',
         'TestAsset',
+        'ent-1',
       );
 
       expect(mockUpdateJob).toHaveBeenCalledWith('ap1', expect.objectContaining({

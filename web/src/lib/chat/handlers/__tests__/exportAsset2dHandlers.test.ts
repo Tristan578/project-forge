@@ -384,8 +384,30 @@ describe('assetHandlers', () => {
         { importGltf: vi.fn() },
       );
       expect(result.success).toBe(true);
-      expect(store.importGltf).toHaveBeenCalledWith('Z2xURg==', 'my-model.glb');
+      // No targetEntityId supplied → forwarded as undefined (no in-place replace).
+      expect(store.importGltf).toHaveBeenCalledWith('Z2xURg==', 'my-model.glb', undefined);
       expect(result.result).toMatchObject({ message: expect.stringContaining('my-model.glb') });
+    });
+
+    it('forwards targetEntityId to store.importGltf (replace-in-place)', async () => {
+      const { result, store } = await invokeHandler(
+        assetHandlers,
+        'import_gltf',
+        { dataBase64: 'Z2xURg==', name: 'my-model.glb', targetEntityId: 'entity-9' },
+        { importGltf: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      expect(store.importGltf).toHaveBeenCalledWith('Z2xURg==', 'my-model.glb', 'entity-9');
+    });
+
+    it('rejects an empty-string targetEntityId', async () => {
+      const { result } = await invokeHandler(
+        assetHandlers,
+        'import_gltf',
+        { dataBase64: 'Z2xURg==', name: 'my-model.glb', targetEntityId: '' },
+        { importGltf: vi.fn() },
+      );
+      expect(result.success).toBe(false);
     });
 
     it('returns error when dataBase64 is missing', async () => {

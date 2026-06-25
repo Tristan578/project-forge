@@ -8,9 +8,14 @@ import { zEntityId, parseArgs } from './types';
 
 export const assetHandlers: Record<string, ToolHandler> = {
   import_gltf: async (args, { store }) => {
-    const p = parseArgs(z.object({ dataBase64: z.string().min(1), name: z.string().min(1) }), args);
+    const p = parseArgs(z.object({
+      dataBase64: z.string().min(1),
+      name: z.string().min(1),
+      // Optional: replace this existing entity's model in place instead of spawning new.
+      targetEntityId: z.string().min(1).optional(),
+    }), args);
     if (p.error) return p.error;
-    store.importGltf(p.data.dataBase64, p.data.name);
+    store.importGltf(p.data.dataBase64, p.data.name, p.data.targetEntityId);
     return { success: true, result: { message: `Importing glTF: ${p.data.name}` } };
   },
 

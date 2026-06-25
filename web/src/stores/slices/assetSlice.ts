@@ -8,7 +8,7 @@ import type { AssetMetadata } from './types';
 export interface AssetSlice {
   assetRegistry: Record<string, AssetMetadata>;
 
-  importGltf: (dataBase64: string, name: string) => void;
+  importGltf: (dataBase64: string, name: string, targetEntityId?: string) => void;
   loadTexture: (dataBase64: string, name: string, entityId: string, slot: string) => void;
   removeTexture: (entityId: string, slot: string) => void;
   importAudio: (dataBase64: string, name: string) => void;
@@ -28,8 +28,18 @@ export function setAssetDispatcher(dispatcher: (command: string, payload: unknow
 export const createAssetSlice: StateCreator<AssetSlice, [], [], AssetSlice> = (set, get) => ({
   assetRegistry: {},
 
-  importGltf: (dataBase64, name) => {
-    if (dispatchCommand) dispatchCommand('import_gltf', { dataBase64, name });
+  importGltf: (dataBase64, name, targetEntityId) => {
+    // Conditional spread: when no target is supplied (or it's an empty string),
+    // the payload is byte-identical to the original { dataBase64, name } so existing
+    // callers and tests are unaffected. When present, the engine replaces that
+    // entity's model/mesh in place instead of spawning a new root.
+    if (dispatchCommand) {
+      dispatchCommand('import_gltf', {
+        dataBase64,
+        name,
+        ...(targetEntityId ? { targetEntityId } : {}),
+      });
+    }
   },
   loadTexture: (dataBase64, name, entityId, slot) => {
     if (dispatchCommand) dispatchCommand('load_texture', { dataBase64, name, entityId, slot });

@@ -10,6 +10,10 @@ pub struct GltfImportRequest {
     pub data_base64: String,
     pub name: String,
     pub position: Option<bevy::math::Vec3>,
+    /// When `Some(id)` and an entity with that EntityId exists with no children,
+    /// the import attaches to that existing entity in place (preserving its
+    /// EntityId / Transform / name) instead of spawning a new root entity.
+    pub target_entity_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]

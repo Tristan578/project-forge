@@ -213,7 +213,11 @@ export function useGenerationPolling() {
         const assetName = (ppResult.metadata.assetName as string) ?? `Generated_${job.prompt.slice(0, 20)}`;
 
         if (shouldPlace) {
-          useEditorStore.getState().importGltf(base64, assetName);
+          // Pass the job's targetEntityId so a placeholder primitive (spawned by the
+          // orchestrator before generation) is replaced in place rather than leaving
+          // the model as a sibling root. Textures/audio already consume this id;
+          // models were the only generated type that dropped it.
+          useEditorStore.getState().importGltf(base64, assetName, job.targetEntityId);
         }
 
         updateJob(id, {

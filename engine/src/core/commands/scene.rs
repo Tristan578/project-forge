@@ -101,6 +101,13 @@ struct ImportGltfPayload {
     data_base64: String,
     name: String,
     position: Option<[f32; 3]>,
+    /// Optional existing entity to replace in-place. When present (and valid),
+    /// the glTF model is attached to that entity instead of spawning a new root,
+    /// preserving its EntityId / Transform / name / selection. The rest of the
+    /// codebase (textures, audio, job records) keys this as `targetEntityId`, so
+    /// the JSON key is pinned explicitly rather than relying on camelCase mapping.
+    #[serde(rename = "targetEntityId")]
+    target_entity_id: Option<String>,
 }
 
 /// Handle import_gltf command.
@@ -112,6 +119,7 @@ fn handle_import_gltf(payload: serde_json::Value) -> super::CommandResult {
         data_base64: data.data_base64,
         name: data.name.clone(),
         position: data.position.map(|p| Vec3::new(p[0], p[1], p[2])),
+        target_entity_id: data.target_entity_id,
     };
 
     if queue_gltf_import_from_bridge(request) {
@@ -429,6 +437,42 @@ mod tests {
             "Expected parse error for missing dataBase64, got: {}",
             err
         );
+    }
+
+    #[test]
+    fn import_gltf_accepts_target_entity_id() {
+        // A payload carrying targetEntityId must still PARSE (replace-in-place path).
+        // Parse success is proven by reaching the queue step, which fails with the
+        // "not initialized" error rather than an "Invalid import_gltf payload" parse error.
+        let result = run("import_gltf", json!({
+            "dataBase64": "SGVsbG8=",
+            "name": "my_model.glb",
+            "targetEntityId": "entity-42"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("not initialized"),
+            "Expected payload with targetEntityId to parse, got: {}",
+            err
+        );
+        assert!(
+            !err.contains("Invalid import_gltf payload"),
+            "targetEntityId must not be rejected as an invalid field, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn import_gltf_omits_target_entity_id_by_default() {
+        // Without targetEntityId, behavior is unchanged: parse succeeds (the field is
+        // optional) and the dispatch reaches the uninitialized-queue branch as before.
+        let result = run("import_gltf", json!({
+            "dataBase64": "SGVsbG8=",
+            "name": "my_model.glb"
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
     }
 
     // === set_script ===
