@@ -15,7 +15,11 @@ import {
  * Clerk) there is NO seeded game, so:
  *   - the data route returns 404 (game not found) or 500 (DB unavailable);
  *   - the page route still renders (200) and the client GamePlayer paints its
- *     "Game Not Found" error state once the fetch 404s.
+ *     error state once the fetch fails. The gates run DB-less (no DATABASE_URL),
+ *     so getDb() throws and the route 500s -> the player shows the "Something
+ *     Went Wrong" heading variant (the 404 path shows "Game Not Found"). The
+ *     @ui assertion targets the elements common to both variants (the ":(" face
+ *     and the "Back to SpawnForge" link) so it is robust to either failure mode.
  *
  * The gate-running coverage (@api + @ui) asserts those deterministic contracts.
  * A true seeded happy path (real published game -> canvas boots -> playable)
@@ -61,14 +65,24 @@ test.describe('Play Published Game — public page @ui', () => {
     expect(response.status()).toBe(200);
   });
 
-  test('renders the "Game Not Found" error state for a missing game', async ({ page }) => {
+  test('renders the player error state for a missing game', async ({ page }) => {
     await page.goto(PAGE_PATH);
     await page.waitForLoadState('domcontentloaded');
 
-    // GamePlayer fetches the data route, gets a 404, and paints its error block.
-    await expect(
-      page.getByRole('heading', { name: 'Game Not Found' })
-    ).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
+    // GamePlayer fetches the data route and paints its error block. The exact
+    // heading depends on WHY the fetch failed, and that differs by env:
+    //   - 404 (game not found / unpublished) -> heading "Game Not Found"
+    //   - 500 (DB unavailable, e.g. the DB-less @ui gate where getDb() throws)
+    //     -> heading "Something Went Wrong"
+    // Both gates (ci.yml test-e2e-ui @ui shard, cd.yml e2e) run with NO
+    // DATABASE_URL, so the 500 variant is what actually renders here. Assert on
+    // the elements the error block renders IDENTICALLY in either case: the ":("
+    // face and the "Back to SpawnForge" recovery link. This still proves the
+    // error state painted (not the loading spinner, not the game chrome) while
+    // staying deterministic across both failure modes.
+    await expect(page.getByText(':(', { exact: true })).toBeVisible({
+      timeout: E2E_TIMEOUT_LOAD_MS,
+    });
 
     // The error state offers a way back to SpawnForge.
     await expect(page.getByRole('link', { name: /Back to SpawnForge/i })).toBeVisible();
