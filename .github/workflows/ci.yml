@@ -1050,6 +1050,119 @@ jobs:
           path: web/playwright-report/
           retention-days: 14
 
+  # Engine smoke gate (#8602 F10). The FIRST per-PR job that actually boots the
+  # WASM engine: it builds ONLY the WebGL2 variant, serves it same-origin, and
+  # runs a curated `@engine-smoke` journey (load -> spawn -> inspect -> play ->
+  # stop -> export) under ANGLE/SwiftShader software WebGL2 — NOT `--disable-gpu`,
+  # which leaves wgpu with no GL context and hangs `init_engine` (the exact reason
+  # every other CI Playwright config can only run store-less @ui/@journey specs).
+  #
+  # Before this gate, NO PR workflow ran @engine at all (the substantive editor
+  # journeys only ran post-merge, and even cd.yml inverts @engine out). It is
+  # gated on needs-web OR needs-engine: an engine-only PR (rendering/ECS changes)
+  # used to run ZERO e2e — the precise regression class F10 calls out.
+  #
+  # DOCUMENTED GAP: SwiftShader is SOFTWARE WebGL2. This validates ECS / picking /
+  # play / export journeys but NOT the WebGPU code path or real-GPU rendering
+  # correctness (e.g. the pink-material / tonemapping_luts class of bugs). Those
+  # remain a known per-PR gap requiring a GPU-capable / nightly runner — see
+  # docs/audits/2026-05-30-security-testing-audit.md (F10).
+  #
+  # Required via the ci-success needs[] aggregate below (and protected from a
+  # silent `if: false` skip by the anti-tamper map in scripts/check-ci-success.sh,
+  # mapped to BOTH needs-web and needs-engine — the two arms of this job's `if:`).
+  test-e2e-engine-smoke:
+    name: E2E Engine Smoke Gate
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-web == 'true' || needs.ci-gate.outputs.needs-engine == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      # --- WASM (WebGL2 only) -------------------------------------------------
+      # SwiftShader cannot drive WebGPU, so we build ONLY the webgl2 variant —
+      # not the 4 variants cd.yml/quality-gates.yml produce — to keep the cargo
+      # cost to one binary. wasm-bindgen MUST be 0.2.108 (pinned per CLAUDE.md),
+      # exactly as quality-gates.yml / cd.yml install it.
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: engine -> target
+
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.108
+
+      - name: Build WebGL2 WASM + wasm-bindgen
+        working-directory: engine
+        run: |
+          cargo build --target wasm32-unknown-unknown --release --features webgl2
+          wasm-bindgen --target web --out-dir pkg-webgl2 target/wasm32-unknown-unknown/release/forge_engine.wasm
+
+      - name: Copy WASM into web/public (same-origin)
+        run: |
+          mkdir -p web/public/engine-pkg-webgl2
+          cp engine/pkg-webgl2/* web/public/engine-pkg-webgl2/
+
+      # --- Playwright ---------------------------------------------------------
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ~/.cache/ms-playwright
+          # Same single-root-lockfile key as test-e2e-ui (#8589).
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright OS deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: web
+        run: npx playwright install-deps chromium
+
+      - name: Build for engine-smoke E2E
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+        run: npx next build
+
+      # Runs ONLY the curated @engine-smoke spec, under SwiftShader software
+      # WebGL2 (launch flags live in playwright.engine.config.ts). The fixture
+      # forces the webgl2 backend so loadWasm never probes WebGPU.
+      - name: Run engine smoke gate
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+        run: npx playwright test --config playwright.engine.config.ts
+
+      - name: Upload engine-smoke report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-engine-smoke-report
+          path: web/playwright-report/
+          retention-days: 14
+
   # Merge sharded E2E reports into a single HTML report
   merge-e2e-reports:
     name: Merge E2E Reports
@@ -1126,6 +1239,7 @@ jobs:
       - actions-pin-check
       - test-e2e-ui
       - test-e2e-journey
+      - test-e2e-engine-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

@@ -198,7 +198,8 @@ E2E tests validate the full application from the browser.
 
 ### Rules
 - **Tag UI-only tests with `@ui`** — these run in CI without a WASM build.
-- **Tag engine tests with `@engine`** — these require WASM binaries.
+- **Tag engine tests with `@engine`** — these require WASM binaries. The broad `@engine` sweep runs only on a GPU-capable / nightly runner.
+- **Tag the ONE curated per-PR engine smoke flow with `@engine-smoke`** — this runs every PR in the `test-e2e-engine-smoke` job (`web/playwright.engine.config.ts`), the only per-PR job that boots the real WASM engine. It uses ANGLE/SwiftShader software WebGL2 (`--use-gl=angle --use-angle=swiftshader-webgl --enable-unsafe-swiftshader`) — NEVER `--disable-gpu`, which leaves wgpu with no GL context and hangs `init_engine()`. Keep the `@engine-smoke` set to a single fast flow (load -> spawn -> play -> export); software rendering is slow, so a large set would blow the job timeout. GAP: software WebGL2 does NOT cover WebGPU or real-GPU rendering correctness — that still needs a GPU runner. See `docs/audits/2026-05-30-security-testing-audit.md` (F10).
 - **Use page objects or fixtures** for shared setup (editor page, dashboard page).
 - **Assert visible outcomes** — text on screen, navigation, element visibility. Not network requests.
 - **Keep E2E tests focused** — one user flow per test. Don't chain unrelated actions.
