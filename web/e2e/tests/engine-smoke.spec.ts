@@ -65,6 +65,37 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
     const positionInputs = page.locator('input[type="text"]');
     expect(await positionInputs.count()).toBeGreaterThan(0);
 
+    // Step 2b: satisfy the pre-play winnability gate (#8542) so Play can actually
+    // enter play mode. play() (gameSlice) runs validateWinnability BEFORE
+    // dispatching to the engine: a scene with no win condition can never be won,
+    // so the gate surfaces a message and RETURNS — leaving engineMode 'edit' and
+    // the Pause/Stop buttons disabled. A bare Cube is exactly that scene, so
+    // without this the Step-3 transition below never fires. Attach a minimal,
+    // genuinely-winnable condition — a `score` target > 0 needs no player or
+    // collectibles (winnabilityValidator.ts evaluateCondition 'score') — via the
+    // SAME store action the Game inspector calls (addGameComponent writes
+    // allGameComponents, which is exactly what the gate's reader inspects). This
+    // makes the gate pass on real state, so Step 3 exercises the genuine
+    // Edit -> Play engine transition rather than being silently short-circuited.
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__EDITOR_STORE;
+      const state = store.getState();
+      const targetId: string | undefined =
+        state.primaryId ?? Object.keys(state.sceneGraph?.nodes ?? {})[0];
+      if (!targetId) {
+        throw new Error('engine-smoke: no entity to attach a win condition to');
+      }
+      state.addGameComponent(targetId, {
+        type: 'winCondition',
+        winCondition: {
+          conditionType: 'score',
+          targetScore: 100,
+          targetEntityId: null,
+        },
+      });
+    });
+
     // Step 3: enter Play mode — the engine snapshots state and inserts the
     // GameComponentRuntime. The Stop button is ALWAYS rendered (PlayControls.tsx
     // only toggles its `disabled` attribute), so its visibility proves nothing
