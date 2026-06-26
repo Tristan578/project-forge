@@ -66,21 +66,18 @@ test.describe('Play Published Game — public page @ui', () => {
   });
 
   test('renders the player error state for a missing game', async ({ page }) => {
-    // Stub the data route at the network boundary so this @ui test
-    // deterministically exercises the CLIENT error-rendering contract — the
-    // GamePlayer painting its error block the moment the fetch reports a missing
-    // game — independent of HOW the real route fails in the gate. (The real
-    // route's status + JSON shape is covered directly by the @api block above.)
+    // Drive the CLIENT error-rendering contract deterministically: stub the data
+    // route so GamePlayer's fetch reports a missing game immediately, then assert
+    // the error block paints. (The real route's status + JSON shape is covered by
+    // the @api block above; here we only care that the client renders its error
+    // UI when the fetch fails.)
     //
-    // Why the stub is load-bearing: the DB-less gate's /api/play wraps getDb()
-    // in queryWithResilience, which RETRIES the DB-config failure with backoff
-    // (~20-30s) before it finally returns its 500. The error face does paint,
-    // but only after those retries settle — so an un-stubbed assertion races the
-    // backoff and catches the player still on "Loading game..." (the actual
-    // observed failure: the page snapshot showed the loading paragraph, never
-    // the error block). Fulfilling the fetch with an immediate 404 removes that
-    // env-specific latency while still driving the exact client code path.
-    await page.route('**/api/play/**', (route) =>
+    // Match on a RegExp, NOT a glob: the earlier `**/api/play/**` URL-glob form
+    // did not intercept the fetch here — the request fell through to the real
+    // route and the page sat on "Loading game..." past the assertion (confirmed
+    // by the failure snapshot). A RegExp is tested directly against the full
+    // request URL and matches reliably.
+    await page.route(/\/api\/play\//, (route) =>
       route.fulfill({
         status: 404,
         contentType: 'application/json',
@@ -92,11 +89,14 @@ test.describe('Play Published Game — public page @ui', () => {
     await page.waitForLoadState('domcontentloaded');
 
     // A 404 from the data route makes GamePlayer set error='Game not found' and
-    // paint its error block: the ":(" face plus the "Back to SpawnForge"
-    // recovery link. Asserting these proves the error state painted (not the
-    // loading spinner, not the game chrome).
+    // paint its error block: the ":(" face plus the "Back to SpawnForge" recovery
+    // link. The WASM-tier timeout is a generous ceiling: with the stub the fetch
+    // resolves instantly, but it also covers the slow real-route fallback (the
+    // DB-less route's queryWithResilience retries its config failure for ~20-30s
+    // before returning a 500 — the @api sibling above confirms it does resolve)
+    // should interception ever be bypassed, all within the 60s test budget.
     await expect(page.getByText(':(', { exact: true })).toBeVisible({
-      timeout: E2E_TIMEOUT_LOAD_MS,
+      timeout: E2E_TIMEOUT_WASM_MS,
     });
 
     // The error state offers a way back to SpawnForge.
