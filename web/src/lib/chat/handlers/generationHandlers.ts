@@ -208,6 +208,11 @@ export const generationHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({
       prompt: z.string().min(1),
       entityId: z.string().min(1).optional(),
+      // `targetEntityId` is the canonical name used by the game-creation system
+      // prompt and the other generate_* tools. Accept it as an alias for
+      // `entityId` (additive, backward-compatible) so skinning is not silently
+      // dropped when the agent follows the prompt. (#8546)
+      targetEntityId: z.string().min(1).optional(),
       resolution: z.string().optional(),
       style: z.string().optional(),
       tiling: z.boolean().optional(),
@@ -226,9 +231,12 @@ export const generationHandlers: Record<string, ToolHandler> = {
     }
     const materialSlot: MaterialSlot | undefined = rawSlot as MaterialSlot | undefined;
 
+    // `targetEntityId` takes precedence; `entityId` kept working for any caller.
+    const effectiveEntityId = p.data.targetEntityId ?? p.data.entityId;
+
     const result = await generateFetch('/api/generate/texture', {
       prompt: enrichPrompt(p.data.prompt, 'texture', ctx.store),
-      entityId: p.data.entityId,
+      entityId: effectiveEntityId,
       resolution: p.data.resolution ?? '1024',
       style: p.data.style ?? 'realistic',
       tiling: p.data.tiling ?? false,
@@ -243,10 +251,10 @@ export const generationHandlers: Record<string, ToolHandler> = {
       type: 'texture',
       prompt: p.data.prompt,
       provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.texture,
-      entityId: p.data.entityId,
+      entityId: effectiveEntityId,
       usageId: data.usageId as string | undefined,
-      autoPlace: p.data.autoPlace ?? !!p.data.entityId,
-      targetEntityId: p.data.entityId,
+      autoPlace: p.data.autoPlace ?? !!effectiveEntityId,
+      targetEntityId: effectiveEntityId,
       materialSlot,
     });
 
@@ -263,13 +271,19 @@ export const generationHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({
       prompt: z.string().min(1),
       entityId: z.string().min(1).optional(),
+      // `targetEntityId` alias — matches the game-creation system prompt and the
+      // other generate_* tools so PBR skinning is not silently dropped. (#8546)
+      targetEntityId: z.string().min(1).optional(),
       maps: z.unknown().optional(),
     }), args);
     if (p.error) return p.error;
 
+    // `targetEntityId` takes precedence; `entityId` kept working for any caller.
+    const effectiveEntityId = p.data.targetEntityId ?? p.data.entityId;
+
     const result = await generateFetch('/api/generate/texture', {
       prompt: enrichPrompt(p.data.prompt, 'texture', ctx.store),
-      entityId: p.data.entityId,
+      entityId: effectiveEntityId,
       maps: p.data.maps,
     });
     if (!result.ok) return { success: false, error: result.error };
@@ -282,8 +296,9 @@ export const generationHandlers: Record<string, ToolHandler> = {
       type: 'texture',
       prompt: p.data.prompt,
       provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.texture,
-      entityId: p.data.entityId,
+      entityId: effectiveEntityId,
       usageId: data.usageId as string | undefined,
+      targetEntityId: effectiveEntityId,
     });
 
     return {
