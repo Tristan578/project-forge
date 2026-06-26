@@ -638,4 +638,82 @@ mod tests {
         let result = dispatch("definitely_not_scene", &json!({}));
         assert!(result.is_none(), "Unknown command should return None");
     }
+
+    // === import_gltf Undeletable guard (security regression) ===
+    //
+    // The replace-in-place logic in bridge::scene_io::apply_gltf_import queries for
+    // target candidates using:
+    //
+    //   Query<(Entity, &EntityId), (Without<Children>, Without<entity_factory::Undeletable>)>
+    //
+    // The `Without<entity_factory::Undeletable>` filter is the security guard that
+    // prevents a client-supplied `targetEntityId` from matching the Main Camera (which
+    // carries EntityId + Undeletable but has no children at rest).  Without it, the
+    // camera's EntityType is overwritten to GltfModel and a glTF scene is attached —
+    // corrupting the renderer.
+    //
+    // bridge::scene_io is wasm32-only and cannot be compiled under native `cargo test`
+    // (lib.rs gates `pub mod bridge` behind `#[cfg(target_arch = "wasm32")]`).  The
+    // test below exercises the exact query-filter semantics using a real Bevy World so
+    // the guard is verified at the ECS level without requiring the bridge module.  If
+    // the Without<Undeletable> guard is removed from the bridge query, the second
+    // assertion ("undeletable entity must be excluded") would pass only because the
+    // bridge is not compiled natively — but then the WASM build behaviour would be
+    // wrong.  The test is therefore a specification test: it proves that the filter
+    // semantics are correct and must be preserved in the bridge query.
+    #[test]
+    fn gltf_import_target_query_excludes_undeletable_entities() {
+        use bevy::prelude::*;
+        use crate::core::entity_id::EntityId;
+        use crate::core::entity_factory::Undeletable;
+
+        let mut world = World::new();
+
+        // Spawn a normal (deletable) entity matching the target id — must be found.
+        let normal_id = "target-entity-normal";
+        world.spawn((EntityId::new(normal_id),));
+
+        // Spawn an Undeletable entity with the same id string pattern — simulates
+        // the Main Camera, which is the entity this guard must protect.
+        let camera_id = "target-entity-camera";
+        world.spawn((EntityId::new(camera_id), Undeletable));
+
+        // === Test 1: without the Undeletable guard ===
+        // A query that only excludes Children (the pre-fix state) would match the
+        // Undeletable entity when asked for camera_id.  We verify this to confirm
+        // the test would FAIL in the unguarded state (adversarial check).
+        {
+            let mut q = world.query_filtered::<(Entity, &EntityId), Without<Children>>();
+            let found_camera = q.iter(&world).any(|(_, eid)| eid.0 == camera_id);
+            assert!(
+                found_camera,
+                "adversarial check: the pre-fix query (Without<Children> only) DOES match the \
+                 Undeletable camera entity — confirming the guard is necessary"
+            );
+        }
+
+        // === Test 2: with the Undeletable guard (post-fix) ===
+        // The corrected query excludes Undeletable entities entirely.
+        {
+            let mut q = world.query_filtered::<(Entity, &EntityId), (Without<Children>, Without<Undeletable>)>();
+            let results: Vec<_> = q.iter(&world).collect();
+
+            // The normal entity is still reachable.
+            let found_normal = results.iter().any(|(_, eid)| eid.0 == normal_id);
+            assert!(
+                found_normal,
+                "guarded query must still return the normal (deletable) entity"
+            );
+
+            // The Undeletable entity is excluded — a targetEntityId pointing at the
+            // camera must NOT produce a match, triggering the new-root-spawn fallback.
+            let found_camera = results.iter().any(|(_, eid)| eid.0 == camera_id);
+            assert!(
+                !found_camera,
+                "guarded query must NOT return the Undeletable camera entity; \
+                 a client-supplied targetEntityId matching the camera must fall through \
+                 to new-root spawn, not corrupt the camera"
+            );
+        }
+    }
 }

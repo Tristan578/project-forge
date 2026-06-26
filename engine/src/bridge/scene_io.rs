@@ -434,12 +434,24 @@ pub(super) fn apply_gltf_import(
     mut asset_registry: ResMut<AssetRegistry>,
     asset_server: Res<AssetServer>,
     memory_dir: Res<crate::core::asset_manager::GltfMemoryDir>,
-    // Read-only lookup of childless entities by EntityId — the candidates eligible
-    // for replace-in-place. `Without<Children>` enforces the issue's "entity exists
-    // with no children" scope: a fresh placeholder primitive is a leaf, but an entity
-    // that already holds an imported glTF scene (a ChildOf child) is excluded so we
-    // never stack a second scene under it. Read-only, so no B0001 conflict with Commands.
-    target_candidates: Query<(Entity, &EntityId), Without<Children>>,
+    // Read-only lookup of childless, deletable entities by EntityId — the candidates
+    // eligible for replace-in-place. Two guards:
+    //   Without<Children>          — a fresh placeholder primitive is a leaf; an entity
+    //                                that already holds an imported glTF scene (a ChildOf
+    //                                child) is excluded so we never stack a second scene.
+    //   Without<entity_factory::Undeletable> — the Main Camera carries EntityId and is
+    //                                exposed to the React client via the scene graph, but
+    //                                MUST NOT be treated as a valid replace-in-place
+    //                                target. Without this guard a caller passing the
+    //                                camera's EntityId as targetEntityId would corrupt the
+    //                                camera entity (overwrite EntityType to GltfModel,
+    //                                attach a GltfSourceHandle, remove Mesh3d). All other
+    //                                id-addressable mutating queries in this file carry the
+    //                                same Without<Undeletable> guard (apply_scene_export
+    //                                line ~65, apply_scene_load line ~204,
+    //                                apply_new_scene line ~379).
+    // Read-only, so no B0001 conflict with Commands.
+    target_candidates: Query<(Entity, &EntityId), (Without<Children>, Without<entity_factory::Undeletable>)>,
 ) {
     use crate::core::asset_manager::{AssetKind, AssetMetadata, AssetSource, GltfSourceHandle};
     use base64::Engine as _;
