@@ -445,12 +445,30 @@ mod tests {
     /// uninitialized and only proves parsing via the "not initialized" error),
     /// this drives the request all the way into the queue and asserts the
     /// dispatch reported success.
+    /// RAII guard that clears the `PENDING_COMMANDS` thread-local on drop. The
+    /// helper registers a pointer to a stack-local queue; without this guard the
+    /// thread-local would retain that pointer after the local is moved out (or
+    /// after an `expect`/`assert!` unwinds), leaving a dangling pointer that a
+    /// later test on the same reused harness thread would dereference through the
+    /// `unsafe` deref in `with_pending`. `Drop` fires on both the success and the
+    /// panic path, so the thread-local is always returned to "not initialized".
+    struct PendingGuard;
+    impl Drop for PendingGuard {
+        fn drop(&mut self) {
+            crate::core::pending::unregister_pending_commands();
+        }
+    }
+
     fn run_with_queue(
         command: &str,
         payload: serde_json::Value,
     ) -> crate::core::pending::PendingCommands {
         let mut pending = crate::core::pending::PendingCommands::default();
         crate::core::pending::register_pending_commands(&mut pending as *mut _);
+        // Clear the registered pointer before `pending` is moved out below (and
+        // even if the dispatch assertions unwind). Must outlive every use of the
+        // registered pointer, i.e. the `dispatch` call.
+        let _guard = PendingGuard;
         let result = dispatch(command, &payload)
             .expect("scene dispatch returned None for known command");
         // With the queue registered, the command must succeed (no "not initialized").
