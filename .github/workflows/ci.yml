@@ -1144,6 +1144,14 @@ jobs:
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
+          # The @engine-smoke fixture loads /dev, which renders the editor ONLY
+          # when e2eHooksEnabled() is true. NEXT_PUBLIC_E2E_HOOKS is build-time
+          # inlined (Next.js), so a production `next build` without it leaves the
+          # flag off: /dev then redirects to /sign-in, whose <SignIn> calls
+          # useSession with no <ClerkProvider> in this Clerk-less CI env, throws,
+          # and the engine never boots (__FORGE_ENGINE_READY times out). Mirror
+          # the strict @ui journey gate and build with the flag so /dev renders.
+          NEXT_PUBLIC_E2E_HOOKS: 'true'
         run: npx next build
 
       # Runs ONLY the curated @engine-smoke spec, under SwiftShader software
