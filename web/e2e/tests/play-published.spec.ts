@@ -66,20 +66,35 @@ test.describe('Play Published Game — public page @ui', () => {
   });
 
   test('renders the player error state for a missing game', async ({ page }) => {
+    // Stub the data route at the network boundary so this @ui test
+    // deterministically exercises the CLIENT error-rendering contract — the
+    // GamePlayer painting its error block the moment the fetch reports a missing
+    // game — independent of HOW the real route fails in the gate. (The real
+    // route's status + JSON shape is covered directly by the @api block above.)
+    //
+    // Why the stub is load-bearing: the DB-less gate's /api/play wraps getDb()
+    // in queryWithResilience, which RETRIES the DB-config failure with backoff
+    // (~20-30s) before it finally returns its 500. The error face does paint,
+    // but only after those retries settle — so an un-stubbed assertion races the
+    // backoff and catches the player still on "Loading game..." (the actual
+    // observed failure: the page snapshot showed the loading paragraph, never
+    // the error block). Fulfilling the fetch with an immediate 404 removes that
+    // env-specific latency while still driving the exact client code path.
+    await page.route('**/api/play/**', (route) =>
+      route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Game not found' }),
+      })
+    );
+
     await page.goto(PAGE_PATH);
     await page.waitForLoadState('domcontentloaded');
 
-    // GamePlayer fetches the data route and paints its error block. The exact
-    // heading depends on WHY the fetch failed, and that differs by env:
-    //   - 404 (game not found / unpublished) -> heading "Game Not Found"
-    //   - 500 (DB unavailable, e.g. the DB-less @ui gate where getDb() throws)
-    //     -> heading "Something Went Wrong"
-    // Both gates (ci.yml test-e2e-ui @ui shard, cd.yml e2e) run with NO
-    // DATABASE_URL, so the 500 variant is what actually renders here. Assert on
-    // the elements the error block renders IDENTICALLY in either case: the ":("
-    // face and the "Back to SpawnForge" recovery link. This still proves the
-    // error state painted (not the loading spinner, not the game chrome) while
-    // staying deterministic across both failure modes.
+    // A 404 from the data route makes GamePlayer set error='Game not found' and
+    // paint its error block: the ":(" face plus the "Back to SpawnForge"
+    // recovery link. Asserting these proves the error state painted (not the
+    // loading spinner, not the game chrome).
     await expect(page.getByText(':(', { exact: true })).toBeVisible({
       timeout: E2E_TIMEOUT_LOAD_MS,
     });
