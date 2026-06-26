@@ -439,40 +439,91 @@ mod tests {
         );
     }
 
+    /// Initialize a real `PendingCommands`, register it for bridge access, run
+    /// `command`, and return the populated queue so a test can inspect exactly
+    /// what was enqueued. Unlike `run` (which deliberately leaves the queue
+    /// uninitialized and only proves parsing via the "not initialized" error),
+    /// this drives the request all the way into the queue and asserts the
+    /// dispatch reported success.
+    fn run_with_queue(
+        command: &str,
+        payload: serde_json::Value,
+    ) -> crate::core::pending::PendingCommands {
+        let mut pending = crate::core::pending::PendingCommands::default();
+        crate::core::pending::register_pending_commands(&mut pending as *mut _);
+        let result = dispatch(command, &payload)
+            .expect("scene dispatch returned None for known command");
+        // With the queue registered, the command must succeed (no "not initialized").
+        assert!(
+            result.is_ok(),
+            "expected {} to queue successfully, got: {:?}",
+            command,
+            result
+        );
+        pending
+    }
+
     #[test]
-    fn import_gltf_accepts_target_entity_id() {
-        // A payload carrying targetEntityId must still PARSE (replace-in-place path).
-        // Parse success is proven by reaching the queue step, which fails with the
-        // "not initialized" error rather than an "Invalid import_gltf payload" parse error.
-        let result = run("import_gltf", json!({
+    fn import_gltf_queues_target_entity_id() {
+        // The replace-in-place contract: a payload carrying targetEntityId must
+        // queue a GltfImportRequest whose target_entity_id == Some(<provided id>).
+        // Pre-fix code dropped this field on the floor, so this assertion FAILS
+        // pre-fix (target_entity_id would be None) and passes post-fix.
+        let pending = run_with_queue("import_gltf", json!({
             "dataBase64": "SGVsbG8=",
             "name": "my_model.glb",
             "targetEntityId": "entity-42"
         }));
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(
-            err.contains("not initialized"),
-            "Expected payload with targetEntityId to parse, got: {}",
-            err
+
+        assert_eq!(
+            pending.gltf_import_requests.len(),
+            1,
+            "exactly one glTF import should be queued"
         );
-        assert!(
-            !err.contains("Invalid import_gltf payload"),
-            "targetEntityId must not be rejected as an invalid field, got: {}",
-            err
+        let request = &pending.gltf_import_requests[0];
+        assert_eq!(
+            request.target_entity_id.as_deref(),
+            Some("entity-42"),
+            "targetEntityId must be carried through to the queued request"
+        );
+        // Sanity-check the rest of the payload survived too.
+        assert_eq!(request.name, "my_model.glb");
+        assert_eq!(request.data_base64, "SGVsbG8=");
+    }
+
+    #[test]
+    fn import_gltf_target_entity_id_defaults_to_none() {
+        // Negative/normalization case: an absent targetEntityId yields
+        // target_entity_id == None (engine-generated fallback — a new root entity
+        // is spawned rather than replacing an existing one).
+        let pending = run_with_queue("import_gltf", json!({
+            "dataBase64": "SGVsbG8=",
+            "name": "my_model.glb"
+        }));
+
+        assert_eq!(pending.gltf_import_requests.len(), 1);
+        assert_eq!(
+            pending.gltf_import_requests[0].target_entity_id, None,
+            "absent targetEntityId must normalize to None (new-root fallback)"
         );
     }
 
     #[test]
-    fn import_gltf_omits_target_entity_id_by_default() {
-        // Without targetEntityId, behavior is unchanged: parse succeeds (the field is
-        // optional) and the dispatch reaches the uninitialized-queue branch as before.
-        let result = run("import_gltf", json!({
+    fn import_gltf_null_target_entity_id_normalizes_to_none() {
+        // A malformed/explicit-null targetEntityId must also fall back to None
+        // rather than failing the parse, so the replace-in-place validation path
+        // degrades to spawning a new root entity.
+        let pending = run_with_queue("import_gltf", json!({
             "dataBase64": "SGVsbG8=",
-            "name": "my_model.glb"
+            "name": "my_model.glb",
+            "targetEntityId": serde_json::Value::Null
         }));
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("not initialized"));
+
+        assert_eq!(pending.gltf_import_requests.len(), 1);
+        assert_eq!(
+            pending.gltf_import_requests[0].target_entity_id, None,
+            "null targetEntityId must normalize to None, not fail the parse"
+        );
     }
 
     // === set_script ===
