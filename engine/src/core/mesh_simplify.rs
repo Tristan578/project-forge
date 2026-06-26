@@ -1160,13 +1160,26 @@ mod tests {
 
     // ─── Out-of-range / malformed index guard (#8462) ────────────────────────
     //
-    // A malformed index buffer (out-of-range index value, or an index count that
-    // is not a multiple of 3) reaches the QEM core's raw `pos[indices[..]]` /
-    // `vertex_tris[vi]` slice access. Before the public-entry-point guard, that
-    // tripped a Rust bounds-check panic → WASM `unreachable` trap in the per-frame
-    // LOD `regenerate_missing_lod_meshes` path. These tests assert the public
-    // entry points (and the trait impls the bridge actually calls) short-circuit
-    // to the clone-fallback WITHOUT panicking.
+    // The guard rejects two distinct classes of malformed index buffer, for two
+    // distinct reasons:
+    //
+    //   1. OUT-OF-RANGE index value — an index `>= vertex_count` reaches the QEM
+    //      core's raw `pos[indices[..]]` / `vertex_tris[vi]` slice access and trips
+    //      a Rust bounds-check panic → WASM `unreachable` trap in the per-frame
+    //      LOD `regenerate_missing_lod_meshes` path. This is a genuine OOB read.
+    //
+    //   2. NON-MULTIPLE-OF-3 index count — this does NOT cause an OOB read (the
+    //      core uses floor division, `tri_count = indices.len() / 3`, and only ever
+    //      indexes the complete leading triangles). The hazard is correctness: a
+    //      buffer whose length is not a multiple of 3 is structurally malformed,
+    //      and silently simplifying its leading whole-triangle prefix while
+    //      dropping the trailing partial triangle produces a garbage LOD mesh.
+    //      Such a buffer must be rejected and cloned wholesale, never partially
+    //      simplified.
+    //
+    // These tests assert the public entry points (and the trait impls the bridge
+    // actually calls) short-circuit to an unchanged clone-fallback for both
+    // classes, without panicking.
 
     /// Build a valid grid (>4 tris, passes every existing guard) then poison one
     /// index with a value far beyond the vertex count.
@@ -1228,31 +1241,50 @@ mod tests {
         assert_eq!(index_count(&result), index_count(&mesh));
     }
 
-    #[test]
-    fn simplify_mesh_non_multiple_of_three_indices_returns_clone() {
-        // 13 indices (not divisible by 3): the existing `tri_count < 4` guard does
-        // NOT catch this (13/3 = 4), so without the divisibility guard the core
-        // would read `indices[t*3+2]` past the end.
+    /// Build a grid then truncate its index buffer to a NON-multiple-of-3 length
+    /// whose floor-triangle count strictly EXCEEDS the target-tri count for the
+    /// given ratio — so PRE-fix code (which guards only on `tri_count < 4` and
+    /// `target_tris >= tri_count`, both computed by floor division) would proceed
+    /// to actually simplify, mutating the buffer; POST-fix code rejects the
+    /// non-divisible buffer up front and returns an unchanged clone.
+    ///
+    /// 25 indices → `25 / 3 = 8` triangles (floor). At ratio 0.5,
+    /// `target_tris = ceil(8 * 0.5).max(4) = 4`, and `4 < 8`, so neither the
+    /// `tri_count < 4` nor the `target_tris >= tri_count` guard fires pre-fix —
+    /// the QEM core runs and collapses 8 → 4 triangles, yielding an index buffer
+    /// that is NOT 25 entries long. Asserting the result still has exactly the
+    /// input 25 indices therefore FAILS pre-fix and PASSES post-fix.
+    fn make_grid_non_divisible_indices() -> Mesh {
         let mut mesh = make_grid(10);
         let truncated: Vec<u32> = match mesh.indices().unwrap() {
-            Indices::U32(idx) => idx.iter().take(13).copied().collect(),
+            Indices::U32(idx) => idx.iter().take(25).copied().collect(),
             _ => panic!("Expected U32 indices"),
         };
         mesh.insert_indices(Indices::U32(truncated));
-        let result = simplify_mesh(&mesh, 0.5);
-        assert_eq!(index_count(&result), 13, "Expected clone-fallback (13 indices)");
+        mesh
     }
 
     #[test]
-    fn fast_simplify_mesh_non_multiple_of_three_indices_returns_clone() {
-        let mut mesh = make_grid(10);
-        let truncated: Vec<u32> = match mesh.indices().unwrap() {
-            Indices::U32(idx) => idx.iter().take(13).copied().collect(),
-            _ => panic!("Expected U32 indices"),
-        };
-        mesh.insert_indices(Indices::U32(truncated));
+    fn simplify_mesh_non_multiple_of_three_indices_returns_unchanged_clone() {
+        let mesh = make_grid_non_divisible_indices();
+        let result = simplify_mesh(&mesh, 0.5);
+        // Result must equal the INPUT exactly: 25 indices and the same vertex
+        // count. Pre-fix (which would simplify 8 → 4 tris) changes both; the
+        // divisibility guard makes the result an unchanged clone of the input.
+        assert_eq!(index_count(&result), index_count(&mesh),
+            "Expected unchanged clone (25 non-divisible indices), not a simplified buffer");
+        assert_eq!(position_count(&result), position_count(&mesh),
+            "Clone-fallback must leave the vertex array untouched");
+    }
+
+    #[test]
+    fn fast_simplify_mesh_non_multiple_of_three_indices_returns_unchanged_clone() {
+        let mesh = make_grid_non_divisible_indices();
         let result = fast_simplify_mesh(&mesh, 0.5);
-        assert_eq!(index_count(&result), 13, "Expected clone-fallback (13 indices)");
+        assert_eq!(index_count(&result), index_count(&mesh),
+            "Expected unchanged clone (25 non-divisible indices), not a simplified buffer");
+        assert_eq!(position_count(&result), position_count(&mesh),
+            "Clone-fallback must leave the vertex array untouched");
     }
 
     #[test]
