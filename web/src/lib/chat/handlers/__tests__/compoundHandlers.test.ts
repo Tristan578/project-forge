@@ -4,7 +4,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createMockStore } from './handlerTestUtils';
 import { compoundHandlers } from '../compoundHandlers';
+import { generationHandlers } from '../generationHandlers';
 import type { ToolCallContext, ExecutionResult } from '../types';
+
+// Capture jobs registered by the REAL generate_texture handler so the compound
+// flow can be exercised end-to-end against the handler that actually consumes
+// the dispatched payload (rather than asserting only against a vi.fn mock).
+const mockAddJob = vi.fn();
+vi.mock('@/stores/generationStore', () => ({
+  useGenerationStore: { getState: () => ({ addJob: mockAddJob }) },
+}));
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -982,26 +991,62 @@ describe('compoundHandlers', () => {
       expect(data.generationJobs).toBe(0);
     });
 
-    it('dispatches parallel generation jobs with targetEntityId when a targetTier is set', async () => {
-      const { dispatchCommand, result } = await invoke(
+    it('dispatches parallel generation jobs keyed to the param each handler consumes', async () => {
+      const { dispatchCommand, store, result } = await invoke(
         'setup_game_from_description',
         { description: 'a shooter game', targetTier: 'high' },
         gameOverrides(),
       );
 
-      // generate_3d_model on the player, generate_texture on the goal, generate_music.
+      // generate_3d_model on the player (its handler consumes targetEntityId).
       expect(dispatchCommand).toHaveBeenCalledWith(
         'generate_3d_model',
         expect.objectContaining({ targetEntityId: 'id-Player' }),
       );
-      expect(dispatchCommand).toHaveBeenCalledWith(
-        'generate_texture',
-        expect.objectContaining({ targetEntityId: 'id-Goal' }),
-      );
+
+      // generate_texture on the goal. Its handler schema accepts ONLY `entityId`,
+      // so the goal id MUST ride under that key — under `targetEntityId` it is
+      // silently stripped by Zod and the texture never wires onto the goal.
+      const textureCall = dispatchCommand.mock.calls.find((c) => c[0] === 'generate_texture');
+      expect(textureCall, 'generate_texture must be dispatched').toBeDefined();
+      const texturePayload = textureCall![1] as Record<string, unknown>;
+      expect(texturePayload.entityId).toBe('id-Goal');
+      // Guard against regressing to the wrong key (the pre-fix contract).
+      expect(texturePayload).not.toHaveProperty('targetEntityId');
+
       expect(dispatchCommand).toHaveBeenCalledWith('generate_music', expect.any(Object));
 
       const data = result.result as Record<string, unknown>;
       expect(data.generationJobs).toBe(3);
+
+      // End-to-end: feed the EXACT dispatched payload into the REAL
+      // generate_texture handler and assert the goal id survives the handler's
+      // own schema + reaches the tracked job. This fails on the pre-fix payload
+      // ({ targetEntityId }) because Zod strips the unknown key before tracking.
+      mockAddJob.mockClear();
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify({ jobId: 'prov-1', provider: 'p', usageId: 'u-1' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+      try {
+        const handlerCtx: ToolCallContext = {
+          store,
+          dispatchCommand: dispatchCommand as unknown as ToolCallContext['dispatchCommand'],
+        };
+        const handlerResult = await generationHandlers.generate_texture(texturePayload, handlerCtx);
+        expect(handlerResult.success).toBe(true);
+        // The POST body the handler sends carries the goal id under entityId.
+        const sentBody = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string);
+        expect(sentBody.entityId).toBe('id-Goal');
+        // The tracked job records the goal as both entityId and targetEntityId.
+        expect(mockAddJob).toHaveBeenCalledWith(
+          expect.objectContaining({ entityId: 'id-Goal', targetEntityId: 'id-Goal' }),
+        );
+      } finally {
+        fetchSpy.mockRestore();
+      }
     });
 
     it('picks the follower behavior for chase-type enemy descriptions', async () => {

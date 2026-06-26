@@ -1452,8 +1452,8 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       operations.push({ action: 'attach camera-follow script', success: true });
     }
 
-    // (5) Win condition — attached to the goal entity. Score-based fallback so
-    // the game is winnable even before any trigger wiring.
+    // (5) Win condition — a reachGoal win_condition attached to the goal entity,
+    // pointing at the goal as its targetEntityId. Reaching the goal wins the game.
     if (goalId) {
       const winCondition = buildGameComponentFromInput('win_condition', {
         conditionType: 'reachGoal',
@@ -1466,9 +1466,11 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     }
 
     // (6) OPTIONAL asset generation — only when a targetTier is requested.
-    // Dispatch parallel generate_* jobs with targetEntityId so #8540 auto-wires
-    // the completed assets back onto the scaffolded entities. The scaffold is
-    // fully playable before any of these land (deterministic + immediate).
+    // Dispatch parallel generate_* jobs targeting the scaffolded entity by the
+    // key each handler actually consumes (generate_3d_model: targetEntityId;
+    // generate_texture: entityId) so #8540 auto-wires the completed assets back
+    // onto them. The scaffold is fully playable before any of these land
+    // (deterministic + immediate).
     let generationJobs = 0;
     if (targetTier) {
       if (playerId) {
@@ -1479,9 +1481,13 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         generationJobs++;
       }
       if (goalId) {
+        // generate_texture's handler schema accepts `entityId` (NOT
+        // `targetEntityId`, which other generate_* handlers take); Zod strips
+        // the unknown key, so passing targetEntityId here is a silent no-op and
+        // the texture never wires back onto the goal entity.
         ctx.dispatchCommand('generate_texture', {
           prompt: `${description} goal marker texture`,
-          targetEntityId: goalId,
+          entityId: goalId,
         });
         generationJobs++;
       }
