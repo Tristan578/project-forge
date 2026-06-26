@@ -94,7 +94,15 @@ test.describe('Play Published Game — public page @ui', () => {
 
     const breadcrumb = page.locator('nav[aria-label="Breadcrumb"]');
     await expect(breadcrumb).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
-    await expect(breadcrumb.getByRole('link', { name: 'Community' })).toBeVisible();
+
+    // In the DB-less @ui gate getGameData() returns null, so the only non-Home
+    // crumb passed to <Breadcrumbs> is { label: 'Community' } -> 'Community' is
+    // the TERMINAL crumb, rendered as a non-link <span aria-current="page">
+    // (a deeper game-title crumb only appears when the DB resolves the game,
+    // which never happens here). Assert the current-page span, not a link.
+    await expect(breadcrumb.locator('[aria-current="page"]')).toHaveText('Community');
+    // The prepended 'Home' entry is non-terminal, so it IS a real link.
+    await expect(breadcrumb.getByRole('link', { name: 'Home' })).toBeVisible();
   });
 });
 

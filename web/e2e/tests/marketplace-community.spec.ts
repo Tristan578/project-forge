@@ -27,7 +27,13 @@ test.describe('Community Gallery @ui', () => {
 
     const breadcrumb = page.locator('nav[aria-label="Breadcrumb"]');
     await expect(breadcrumb).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
-    await expect(breadcrumb.getByRole('link', { name: 'Community' })).toBeVisible();
+
+    // On /community the items passed to <Breadcrumbs> are [{ label: 'Community' }],
+    // so 'Community' is the TERMINAL crumb -> rendered as a non-link
+    // <span aria-current="page">, NOT a <Link>. Assert the current-page span.
+    await expect(breadcrumb.locator('[aria-current="page"]')).toHaveText('Community');
+    // The prepended 'Home' entry is non-terminal, so it IS a real link.
+    await expect(breadcrumb.getByRole('link', { name: 'Home' })).toBeVisible();
   });
 
   test('Featured section renders when featured games exist (seeded DB only)', async ({ page }) => {
