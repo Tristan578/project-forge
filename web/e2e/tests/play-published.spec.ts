@@ -96,7 +96,8 @@ test.describe('Play Published Game — public page @ui', () => {
     await expect(breadcrumb).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
     // In the DB-less @ui gate getGameData() returns null, so the only non-Home
-    // crumb passed to <Breadcrumbs> is { label: 'Community' } -> 'Community' is
+    // crumb passed to <Breadcrumbs> is { label: 'Community', href: '/community' }
+    // (href is a required BreadcrumbItem field) -> 'Community' is
     // the TERMINAL crumb, rendered as a non-link <span aria-current="page">
     // (a deeper game-title crumb only appears when the DB resolves the game,
     // which never happens here). Assert the current-page span, not a link.

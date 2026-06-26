@@ -28,8 +28,9 @@ test.describe('Community Gallery @ui', () => {
     const breadcrumb = page.locator('nav[aria-label="Breadcrumb"]');
     await expect(breadcrumb).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
-    // On /community the items passed to <Breadcrumbs> are [{ label: 'Community' }],
-    // so 'Community' is the TERMINAL crumb -> rendered as a non-link
+    // On /community the items passed to <Breadcrumbs> are
+    // [{ label: 'Community', href: '/community' }] (href is a required
+    // BreadcrumbItem field), so 'Community' is the TERMINAL crumb -> rendered as a non-link
     // <span aria-current="page">, NOT a <Link>. Assert the current-page span.
     await expect(breadcrumb.locator('[aria-current="page"]')).toHaveText('Community');
     // The prepended 'Home' entry is non-terminal, so it IS a real link.
