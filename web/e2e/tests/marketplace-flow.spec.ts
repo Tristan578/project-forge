@@ -27,8 +27,9 @@ test.describe('Marketplace API @api', () => {
     test('returns {assets,hasMore} JSON (200) or 500 when DB unavailable', async ({ request }) => {
       const response = await request.get('/api/marketplace/assets', { maxRedirects: 0 });
       // Public route: 200 with the listing shape when the DB is reachable,
-      // 500 when it is not. Never an auth redirect.
-      expect([200, 500]).toContain(response.status());
+      // 500 when it is not, or 429 if the per-IP rate limiter trips. Never an
+      // auth redirect. The 429 body is {error} JSON, so the asserts below hold.
+      expect([200, 429, 500]).toContain(response.status());
 
       const contentType = response.headers()['content-type'] ?? '';
       expect(contentType).toContain('application/json');
@@ -55,8 +56,9 @@ test.describe('Marketplace API @api', () => {
         '/api/marketplace/assets?category=sprite&sort=newest&page=1',
         { maxRedirects: 0 }
       );
-      // Same tolerant contract — the listing is public, so no auth redirect.
-      expect([200, 500]).toContain(response.status());
+      // Same tolerant contract — the listing is public, so no auth redirect
+      // (200/500, or 429 if the per-IP rate limiter trips).
+      expect([200, 429, 500]).toContain(response.status());
     });
   });
 

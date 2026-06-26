@@ -34,8 +34,9 @@ test.describe('Leaderboard API @api', () => {
     test('unknown game returns 404 (or 500 when DB unavailable)', async ({ request }) => {
       const response = await request.get(LEADERBOARD_PATH, { maxRedirects: 0 });
       // No seeded game in CI -> resolvePublishedGame returns null (404), or the
-      // DB itself is unavailable (500). Never a 200 with real data.
-      expect([404, 500]).toContain(response.status());
+      // DB itself is unavailable (500), or 429 if the per-IP rate limiter (checked
+      // before game resolution) trips. Never a 200 with real data.
+      expect([404, 429, 500]).toContain(response.status());
       expect(response.status()).not.toBe(200);
     });
 
@@ -131,9 +132,10 @@ test.describe('Leaderboard API @api', () => {
         data: { name: 'default', playerName: 'Ada', score: 100 },
         maxRedirects: 0,
       });
-      // Validation passed; game lookup fails -> 404, or DB down -> 500.
-      // Never a 201 created in a DB-less CI env.
-      expect([404, 500]).toContain(response.status());
+      // Validation passed; game lookup fails -> 404, or DB down -> 500, or 429 if
+      // the per-IP rate limiter (checked first) trips. Never a 201 created in a
+      // DB-less CI env.
+      expect([404, 429, 500]).toContain(response.status());
       expect(response.status()).not.toBe(201);
     });
   });
