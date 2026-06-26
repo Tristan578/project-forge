@@ -11,7 +11,20 @@ describe('assetHandlers', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(store.importGltf).toHaveBeenCalledWith('Z2xURg==', 'character.glb');
+      // No targetEntityId supplied → the optional third arg is forwarded as undefined,
+      // so import_gltf spawns a new root entity rather than replacing in place.
+      expect(store.importGltf).toHaveBeenCalledWith('Z2xURg==', 'character.glb', undefined);
+    });
+
+    it('threads targetEntityId through to store.importGltf for replace-in-place', async () => {
+      const { result, store } = await invokeHandler(assetHandlers, 'import_gltf', {
+        dataBase64: 'Z2xURg==',
+        name: 'character.glb',
+        targetEntityId: 'ent_42',
+      });
+
+      expect(result.success).toBe(true);
+      expect(store.importGltf).toHaveBeenCalledWith('Z2xURg==', 'character.glb', 'ent_42');
     });
 
     it('rejects empty dataBase64', async () => {
