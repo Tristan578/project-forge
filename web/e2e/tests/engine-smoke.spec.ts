@@ -2,6 +2,7 @@ import { test, expect } from '../fixtures/editor.fixture';
 import {
   E2E_TIMEOUT_SHORT_MS,
   E2E_TIMEOUT_ELEMENT_MS,
+  E2E_TIMEOUT_INTERACTION_MS,
   E2E_TIMEOUT_LOAD_MS,
 } from '../constants';
 
@@ -120,14 +121,17 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
     await playBtn.click();
 
     // The 'Playing' indicator span becoming visible is true ONLY in play mode.
-    await expect(playStatus).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    // Use the interaction timeout (not the element one): entering Play is a full
+    // JS->WASM->engine-snapshot->event->store->React round-trip, which under
+    // SwiftShader CI can exceed the 5s element budget and flake.
+    await expect(playStatus).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
     await page.waitForFunction(
       () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const store = (window as any).__EDITOR_STORE;
         return store?.getState().engineMode === 'play';
       },
-      { timeout: E2E_TIMEOUT_ELEMENT_MS }
+      { timeout: E2E_TIMEOUT_INTERACTION_MS }
     );
 
     // Step 4: stop — the engine restores the edit snapshot and PlayControls drops
@@ -144,7 +148,9 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
         const store = (window as any).__EDITOR_STORE;
         return store?.getState().engineMode === 'edit';
       },
-      { timeout: E2E_TIMEOUT_ELEMENT_MS }
+      // Stop is the reverse engine round-trip (restore snapshot); same generous
+      // interaction budget as the Play transition above.
+      { timeout: E2E_TIMEOUT_INTERACTION_MS }
     );
     await expect(page.locator('canvas').first()).toBeVisible();
 
