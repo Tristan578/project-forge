@@ -66,20 +66,55 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
     expect(await positionInputs.count()).toBeGreaterThan(0);
 
     // Step 3: enter Play mode — the engine snapshots state and inserts the
-    // GameComponentRuntime. The Stop control appearing confirms play is active.
+    // GameComponentRuntime. The Stop button is ALWAYS rendered (PlayControls.tsx
+    // only toggles its `disabled` attribute), so its visibility proves nothing
+    // about the mode. The mode-SENSITIVE signal is the `role="status"` indicator
+    // span, which PlayControls renders ONLY when `!isEdit` with the text
+    // 'Playing'/'Paused'. Assert it is absent in edit mode and appears after Play,
+    // and cross-check the store's `engineMode` transitions 'edit' -> 'play'.
+    const playStatus = page.getByRole('status').filter({ hasText: 'Playing' });
+    await expect(playStatus).toHaveCount(0);
+    expect(
+      await page.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__EDITOR_STORE;
+        return store?.getState().engineMode;
+      })
+    ).toBe('edit');
+
     const playBtn = page
       .locator('button[title*="Play"], button[title*="play"]')
       .first();
     await expect(playBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     await playBtn.click();
 
+    // The 'Playing' indicator span becoming visible is true ONLY in play mode.
+    await expect(playStatus).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    await page.waitForFunction(
+      () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__EDITOR_STORE;
+        return store?.getState().engineMode === 'play';
+      },
+      { timeout: E2E_TIMEOUT_ELEMENT_MS }
+    );
+
+    // Step 4: stop — the engine restores the edit snapshot and PlayControls drops
+    // the indicator span (back to edit mode). Editor stays live.
     const stopBtn = page
       .locator('button[title*="Stop"], button[title*="stop"]')
       .first();
     await expect(stopBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
-
-    // Step 4: stop — the engine restores the edit snapshot. Editor stays live.
     await stopBtn.click();
+    await expect(playStatus).toHaveCount(0);
+    await page.waitForFunction(
+      () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__EDITOR_STORE;
+        return store?.getState().engineMode === 'edit';
+      },
+      { timeout: E2E_TIMEOUT_ELEMENT_MS }
+    );
     await expect(page.locator('canvas').first()).toBeVisible();
 
     // Step 5: open the export dialog and confirm it renders export options.
@@ -97,8 +132,20 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
       '[role="dialog"][aria-labelledby="export-dialog-title"]'
     );
     await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
-    const dialogText = await dialog.textContent();
-    expect(dialogText).toBeTruthy();
+    // Assert on REAL, known export options rendered by ExportDialog.tsx — not a
+    // shape-only "non-empty" check. The "Export Mode" section lists concrete
+    // format labels; "Single HTML File" is the default-selected radio and
+    // "ZIP Bundle" / "Embed (iframe)" are sibling format options. Their presence
+    // proves the export options actually rendered.
+    await expect(
+      dialog.getByText('Export Mode', { exact: false })
+    ).toBeVisible();
+    await expect(
+      dialog.getByText('Single HTML File', { exact: true })
+    ).toBeVisible();
+    await expect(
+      dialog.getByText('Embed (iframe)', { exact: true })
+    ).toBeVisible();
 
     // Close the dialog; editor remains responsive.
     await page.keyboard.press('Escape');
