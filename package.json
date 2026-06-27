@@ -53,7 +53,7 @@
   },
   "scripts": {
     "changeset": "changeset",
-    "changeset:version": "changeset version && npm install --package-lock-only",
+    "changeset:version": "bash scripts/changeset-version.sh",
     "changeset:publish": "changeset publish"
   },
   "devDependencies": {
