@@ -310,6 +310,32 @@ describe('generationHandlers', () => {
         autoPlace: false,
       }));
     });
+
+    // #8546 — the game-creation system prompt calls generate_texture with
+    // `targetEntityId`. The handler must treat it as an alias for `entityId`
+    // (these assertions fail on pre-fix code where targetEntityId was ignored).
+    it('resolves targetEntityId to the same dispatch as entityId', async () => {
+      mockFetchSuccess();
+      await invoke('generate_texture', { prompt: 'grass', targetEntityId: 'e1' });
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.entityId).toBe('e1');
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        entityId: 'e1',
+        targetEntityId: 'e1',
+        autoPlace: true,
+      }));
+    });
+
+    it('targetEntityId takes precedence over entityId when both present', async () => {
+      mockFetchSuccess();
+      await invoke('generate_texture', { prompt: 'grass', entityId: 'old', targetEntityId: 'e1' });
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.entityId).toBe('e1');
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        entityId: 'e1',
+        targetEntityId: 'e1',
+      }));
+    });
   });
 
   // =========================================================================
@@ -331,6 +357,30 @@ describe('generationHandlers', () => {
     it('fails without prompt', async () => {
       const { result } = await invoke('generate_pbr_maps', {});
       expect(result.success).toBe(false);
+    });
+
+    // #8546 — generate_pbr_maps must accept `targetEntityId` (the name the
+    // system prompt uses) as an alias for `entityId`. Fails on pre-fix code.
+    it('resolves targetEntityId to the same dispatch as entityId', async () => {
+      mockFetchSuccess();
+      await invoke('generate_pbr_maps', { prompt: 'metal surface', targetEntityId: 'e1' });
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.entityId).toBe('e1');
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        entityId: 'e1',
+        targetEntityId: 'e1',
+      }));
+    });
+
+    it('targetEntityId takes precedence over entityId when both present', async () => {
+      mockFetchSuccess();
+      await invoke('generate_pbr_maps', { prompt: 'metal', entityId: 'old', targetEntityId: 'e1' });
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.entityId).toBe('e1');
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        entityId: 'e1',
+        targetEntityId: 'e1',
+      }));
     });
   });
 

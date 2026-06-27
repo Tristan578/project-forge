@@ -764,6 +764,44 @@ describe('POST /api/chat', () => {
       expect(blocks[1]?.text).toContain('## Scene\nEmpty');
     });
 
+    it('steers the agent to orchestrate generate_* tools in the game-creation workflow (#8546)', async () => {
+      // The base system prompt must teach the agent to drive the asset-generation
+      // pipeline (idea → generated assets → spawn → script → win condition →
+      // playtest) so a request like "make a 3D platformer about a frog" queues a
+      // generate_3d_model job instead of dropping a bare cube.
+      const res = await POST(makeRequest(validBody()));
+      await res.text(); // drain stream
+      const call = vi.mocked(createSpawnforgeAgent).mock.calls.at(-1)?.[0];
+      const blocks = (call?.instructions ?? []) as Array<{ text: string; tier?: string }>;
+      const basePrompt = blocks[0]?.text ?? '';
+
+      // Generation tools are named so the model knows to call them.
+      expect(basePrompt).toContain('generate_3d_model');
+      expect(basePrompt).toContain('generate_texture');
+      expect(basePrompt).toContain('generate_music');
+      expect(basePrompt).toContain('generate_skybox');
+      // The entity-id pattern that wires a generated asset onto a placeholder.
+      expect(basePrompt).toContain('targetEntityId');
+      // The win condition + playtest steps that make the game completable.
+      expect(basePrompt).toContain('win_condition');
+      expect(basePrompt).toMatch(/playtest|press Play/i);
+
+      // Ordering: the asset-generation guidance precedes the win-condition step,
+      // which precedes the playtest step (idea → assets → … → win → playtest).
+      const genIdx = basePrompt.indexOf('generate_3d_model');
+      const winIdx = basePrompt.indexOf('win_condition');
+      const playtestIdx = basePrompt.search(/playtest|press Play/i);
+      expect(genIdx).toBeGreaterThanOrEqual(0);
+      expect(winIdx).toBeGreaterThan(genIdx);
+      expect(playtestIdx).toBeGreaterThan(winIdx);
+
+      // Prompt-cache invariant: the base block stays static and long-tier with no
+      // per-user nonce — adding nondeterminism here would blow the cache for every
+      // user and leak the per-session marker into the cached prefix.
+      expect(blocks[0]?.tier).toBe('long');
+      expect(basePrompt).not.toContain('<!-- session:');
+    });
+
     it('counts sceneContext.length toward the MAX_INPUT_CHARS budget', async () => {
       // sceneContext alone is well under 2M, but combined with messages
       // the total exceeds the 2M MAX_INPUT_CHARS guard. Without summing
