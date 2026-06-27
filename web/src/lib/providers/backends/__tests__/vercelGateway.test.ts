@@ -101,10 +101,10 @@ describe('vercelGatewayBackend', () => {
     it('maps premium and fast Anthropic models so they do not silently downgrade', async () => {
       // Regression for PR #8508 Sentry CRITICAL: missing entries here would
       // cause the gateway to fall back to DEFAULT_MODELS.chat (Sonnet) for
-      // Pro users requesting the premium model — billed for Opus 4.7 but
+      // Pro users requesting the premium model — billed for Opus 4.8 but
       // routed to Sonnet 4.6.
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
-      expect(vercelGatewayBackend.resolveModelId('claude-opus-4-7')).toBe('anthropic/claude-opus-4-7');
+      expect(vercelGatewayBackend.resolveModelId('claude-opus-4-8')).toBe('anthropic/claude-opus-4-8');
       expect(vercelGatewayBackend.resolveModelId('claude-haiku-4-5')).toBe('anthropic/claude-haiku-4-5');
       expect(vercelGatewayBackend.resolveModelId('claude-haiku-4-5-20251001')).toBe('anthropic/claude-haiku-4-5');
     });

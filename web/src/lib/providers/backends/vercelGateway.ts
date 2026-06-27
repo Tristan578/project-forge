@@ -25,7 +25,7 @@ const MODEL_MAP: Record<string, string> = {
   // tier by the time we reach the agent factory.
   'claude-sonnet-4-6': 'anthropic/claude-sonnet-4-6',
   'claude-opus-4': 'anthropic/claude-opus-4',
-  'claude-opus-4-7': 'anthropic/claude-opus-4-7',
+  'claude-opus-4-8': 'anthropic/claude-opus-4-8',
   'claude-haiku-3-5': 'anthropic/claude-haiku-3-5',
   'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',
   'claude-haiku-4-5-20251001': 'anthropic/claude-haiku-4-5',
