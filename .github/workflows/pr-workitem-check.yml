@@ -13,7 +13,15 @@ permissions:
 jobs:
   require-work-item:
     name: Require Linked Work Item
-    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    # Exempt automation PRs with no taskboard ticket: dependabot bumps and the
+    # Changesets "Version Packages" PR. The release exemption requires BOTH the
+    # github-actions[bot] author AND the changeset-release/main branch — keying on
+    # the branch name alone would let any contributor bypass the gate by naming
+    # their branch changeset-release/main (the PR author login is set by GitHub
+    # and is not contributor-controllable, so the conjunction is safe).
+    if: >-
+      github.event.pull_request.user.login != 'dependabot[bot]'
+      && !(github.event.pull_request.user.login == 'github-actions[bot]' && github.head_ref == 'changeset-release/main')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
