@@ -325,6 +325,17 @@ pub fn simplify_mesh(mesh: &Mesh, target_ratio: f32) -> Mesh {
         None => (0..positions.len() as u32).collect(),
     };
 
+    // Reject malformed index buffers BEFORE the QEM core indexes `pos[indices[..]]`
+    // / `vertex_tris[vi]` with raw, unchecked slice access. An out-of-range index
+    // value (common from imported/partially-loaded GLTF meshes) or an index count
+    // that is not a multiple of 3 would otherwise trip a Rust bounds-check panic,
+    // which LLVM lowers to a WASM `unreachable` trap (#8462). Short-circuit to the
+    // existing clone-fallback, matching the other malformed-mesh early returns above.
+    let vert_count = positions.len() as u32;
+    if indices.len() % 3 != 0 || indices.iter().any(|&i| i >= vert_count) {
+        return mesh.clone();
+    }
+
     let tri_count = indices.len() / 3;
     if tri_count < 4 {
         return mesh.clone();
@@ -368,6 +379,15 @@ pub fn fast_simplify_mesh(mesh: &Mesh, target_ratio: f32) -> Mesh {
         Some(Indices::U16(idx)) => idx.iter().map(|&i| i as u32).collect(),
         None => (0..positions.len() as u32).collect(),
     };
+
+    // Reject malformed index buffers BEFORE the QEM core indexes `pos[indices[..]]`
+    // / `vertex_tris[vi]` with raw, unchecked slice access. See `simplify_mesh`
+    // for the full rationale (#8462) — an out-of-range index or a non-multiple-of-3
+    // index count would otherwise panic → WASM `unreachable`.
+    let vert_count = positions.len() as u32;
+    if indices.len() % 3 != 0 || indices.iter().any(|&i| i >= vert_count) {
+        return mesh.clone();
+    }
 
     let tri_count = indices.len() / 3;
     if tri_count < 4 {
@@ -1136,5 +1156,146 @@ mod tests {
         assert_eq!(second.cost, 1.0);
         let third = heap.pop().unwrap().0;
         assert!(third.cost.is_nan());
+    }
+
+    // ─── Out-of-range / malformed index guard (#8462) ────────────────────────
+    //
+    // The guard rejects two distinct classes of malformed index buffer, for two
+    // distinct reasons:
+    //
+    //   1. OUT-OF-RANGE index value — an index `>= vertex_count` reaches the QEM
+    //      core's raw `pos[indices[..]]` / `vertex_tris[vi]` slice access and trips
+    //      a Rust bounds-check panic → WASM `unreachable` trap in the per-frame
+    //      LOD `regenerate_missing_lod_meshes` path. This is a genuine OOB read.
+    //
+    //   2. NON-MULTIPLE-OF-3 index count — this does NOT cause an OOB read (the
+    //      core uses floor division, `tri_count = indices.len() / 3`, and only ever
+    //      indexes the complete leading triangles). The hazard is correctness: a
+    //      buffer whose length is not a multiple of 3 is structurally malformed,
+    //      and silently simplifying its leading whole-triangle prefix while
+    //      dropping the trailing partial triangle produces a garbage LOD mesh.
+    //      Such a buffer must be rejected and cloned wholesale, never partially
+    //      simplified.
+    //
+    // These tests assert the public entry points (and the trait impls the bridge
+    // actually calls) short-circuit to an unchanged clone-fallback for both
+    // classes, without panicking.
+
+    /// Build a valid grid (>4 tris, passes every existing guard) then poison one
+    /// index with a value far beyond the vertex count.
+    fn make_grid_with_oob_index() -> Mesh {
+        let mut mesh = make_grid(10);
+        let poisoned = match mesh.indices().unwrap() {
+            Indices::U32(idx) => {
+                let mut v = idx.clone();
+                v[0] = 999; // grid(10) has 121 vertices — 999 is far out of range
+                v
+            }
+            _ => panic!("Expected U32 indices"),
+        };
+        mesh.insert_indices(Indices::U32(poisoned));
+        mesh
+    }
+
+    fn index_count(mesh: &Mesh) -> usize {
+        mesh.indices().map(|i| i.len()).unwrap_or(0)
+    }
+
+    fn position_count(mesh: &Mesh) -> usize {
+        match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+            Some(VertexAttributeValues::Float32x3(p)) => p.len(),
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn simplify_mesh_oob_index_returns_clone_without_panic() {
+        let mesh = make_grid_with_oob_index();
+        let result = simplify_mesh(&mesh, 0.5);
+        // Safe early-return fired: identical index/vertex counts (clone), not a
+        // partial/empty simplification result.
+        assert_eq!(index_count(&result), index_count(&mesh));
+        assert_eq!(position_count(&result), position_count(&mesh));
+    }
+
+    #[test]
+    fn fast_simplify_mesh_oob_index_returns_clone_without_panic() {
+        let mesh = make_grid_with_oob_index();
+        let result = fast_simplify_mesh(&mesh, 0.5);
+        assert_eq!(index_count(&result), index_count(&mesh));
+        assert_eq!(position_count(&result), position_count(&mesh));
+    }
+
+    #[test]
+    fn qem_simplifier_trait_oob_index_no_panic() {
+        // The exact path the bridge calls: backend.simplify(&mesh, ratio).
+        let mesh = make_grid_with_oob_index();
+        let result = QemSimplifier.simplify(&mesh, 0.5);
+        assert_eq!(index_count(&result), index_count(&mesh));
+    }
+
+    #[test]
+    fn fast_simplifier_trait_oob_index_no_panic() {
+        let mesh = make_grid_with_oob_index();
+        let result = FastSimplifier.simplify(&mesh, 0.5);
+        assert_eq!(index_count(&result), index_count(&mesh));
+    }
+
+    /// Build a grid then truncate its index buffer to a NON-multiple-of-3 length
+    /// whose floor-triangle count strictly EXCEEDS the target-tri count for the
+    /// given ratio — so PRE-fix code (which guards only on `tri_count < 4` and
+    /// `target_tris >= tri_count`, both computed by floor division) would proceed
+    /// to actually simplify, mutating the buffer; POST-fix code rejects the
+    /// non-divisible buffer up front and returns an unchanged clone.
+    ///
+    /// 25 indices → `25 / 3 = 8` triangles (floor). At ratio 0.5,
+    /// `target_tris = ceil(8 * 0.5).max(4) = 4`, and `4 < 8`, so neither the
+    /// `tri_count < 4` nor the `target_tris >= tri_count` guard fires pre-fix —
+    /// the QEM core runs and collapses 8 → 4 triangles, yielding an index buffer
+    /// that is NOT 25 entries long. Asserting the result still has exactly the
+    /// input 25 indices therefore FAILS pre-fix and PASSES post-fix.
+    fn make_grid_non_divisible_indices() -> Mesh {
+        let mut mesh = make_grid(10);
+        let truncated: Vec<u32> = match mesh.indices().unwrap() {
+            Indices::U32(idx) => idx.iter().take(25).copied().collect(),
+            _ => panic!("Expected U32 indices"),
+        };
+        mesh.insert_indices(Indices::U32(truncated));
+        mesh
+    }
+
+    #[test]
+    fn simplify_mesh_non_multiple_of_three_indices_returns_unchanged_clone() {
+        let mesh = make_grid_non_divisible_indices();
+        let result = simplify_mesh(&mesh, 0.5);
+        // Result must equal the INPUT exactly: 25 indices and the same vertex
+        // count. Pre-fix (which would simplify 8 → 4 tris) changes both; the
+        // divisibility guard makes the result an unchanged clone of the input.
+        assert_eq!(index_count(&result), index_count(&mesh),
+            "Expected unchanged clone (25 non-divisible indices), not a simplified buffer");
+        assert_eq!(position_count(&result), position_count(&mesh),
+            "Clone-fallback must leave the vertex array untouched");
+    }
+
+    #[test]
+    fn fast_simplify_mesh_non_multiple_of_three_indices_returns_unchanged_clone() {
+        let mesh = make_grid_non_divisible_indices();
+        let result = fast_simplify_mesh(&mesh, 0.5);
+        assert_eq!(index_count(&result), index_count(&mesh),
+            "Expected unchanged clone (25 non-divisible indices), not a simplified buffer");
+        assert_eq!(position_count(&result), position_count(&mesh),
+            "Clone-fallback must leave the vertex array untouched");
+    }
+
+    #[test]
+    fn simplify_mesh_guard_does_not_regress_valid_mesh() {
+        // Sanity: a valid grid still simplifies (the new guard only short-circuits
+        // genuinely malformed meshes).
+        let mesh = make_grid(10);
+        let orig = index_count(&mesh) / 3;
+        let result = simplify_mesh(&mesh, 0.5);
+        assert!(index_count(&result) / 3 < orig, "Valid mesh should still reduce");
+        let fast = fast_simplify_mesh(&mesh, 0.5);
+        assert!(index_count(&fast) / 3 < orig, "Valid mesh should still reduce (fast)");
     }
 }
