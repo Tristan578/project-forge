@@ -20,7 +20,16 @@
 #
 # This keeps the GitHub changelog links (vs. dropping changelog-github for the
 # network-free default) while making the step resilient to the flake.
+#
+# ESCAPE HATCH: set CHANGESET_VERSION_ATTEMPTS=N to override the default 4
+# attempts — e.g. `CHANGESET_VERSION_ATTEMPTS=1 npm run changeset:version` to
+# fail fast when reproducing a non-transient changeset error locally.
 set -euo pipefail
+
+# Resolve to the repo root so `./node_modules/.bin/changeset` and the relock
+# work regardless of the caller's cwd (npm already runs us from root; this makes
+# a manual `bash scripts/changeset-version.sh` from a subdir behave too).
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
 attempts="${CHANGESET_VERSION_ATTEMPTS:-4}"
 changeset_bin="./node_modules/.bin/changeset"
@@ -30,7 +39,7 @@ for attempt in $(seq 1 "$attempts"); do
     break
   fi
   if [ "$attempt" -eq "$attempts" ]; then
-    echo "::error::changeset version failed after ${attempts} attempts" >&2
+    echo "::error::changeset version failed after ${attempts} attempts (see the changesets output above for the underlying error)" >&2
     exit 1
   fi
   delay=$((attempt * 5))
