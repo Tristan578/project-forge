@@ -785,6 +785,36 @@ describe('editorStore', () => {
       });
     });
 
+    it('importGltf omits targetEntityId when not provided', () => {
+      const state = useEditorStore.getState();
+      state.importGltf('base64data==', 'model.glb');
+
+      // Payload must be byte-identical to the original — no `targetEntityId` key.
+      const call = mockDispatch.mock.calls.find((c) => c[0] === 'import_gltf');
+      expect(call?.[1]).not.toHaveProperty('targetEntityId');
+    });
+
+    it('importGltf includes targetEntityId when provided (replace-in-place)', () => {
+      const state = useEditorStore.getState();
+      state.importGltf('base64data==', 'model.glb', 'entity-7');
+
+      expect(mockDispatch).toHaveBeenCalledWith('import_gltf', {
+        dataBase64: 'base64data==',
+        name: 'model.glb',
+        targetEntityId: 'entity-7',
+      });
+    });
+
+    it('importGltf omits targetEntityId for an empty-string id', () => {
+      const state = useEditorStore.getState();
+      state.importGltf('base64data==', 'model.glb', '');
+
+      const call = mockDispatch.mock.calls
+        .filter((c) => c[0] === 'import_gltf')
+        .at(-1);
+      expect(call?.[1]).not.toHaveProperty('targetEntityId');
+    });
+
     it('loadTexture dispatches load_texture command', () => {
       const state = useEditorStore.getState();
       state.loadTexture('base64image==', 'texture.png', 'entity-1', 'baseColorTexture');

@@ -302,6 +302,18 @@ pub fn register_pending_commands(commands: *mut PendingCommands) {
     });
 }
 
+/// Clear the registered `PendingCommands` pointer, returning the thread-local to
+/// its "not initialized" state. Callers that register a pointer to a stack-local
+/// `PendingCommands` MUST call this before that local is dropped/moved — otherwise
+/// the thread-local retains a dangling pointer that a later `with_pending` on the
+/// same (reused) thread would dereference. See `PendingGuard` in the scene-command
+/// tests for the panic-safe RAII usage.
+pub fn unregister_pending_commands() {
+    PENDING_COMMANDS.with(|pc| {
+        *pc.borrow_mut() = None;
+    });
+}
+
 /// Helper for bridge functions: access PendingCommands via thread-local.
 /// Returns None if the resource isn't registered yet.
 pub(crate) fn with_pending<F, R>(f: F) -> Option<R>

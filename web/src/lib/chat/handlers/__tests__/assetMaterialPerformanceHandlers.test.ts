@@ -84,7 +84,8 @@ describe('assetHandlers — import_gltf', () => {
       name: 'mymodel.glb',
     });
     expect(result.success).toBe(true);
-    expect(vi.mocked(store.importGltf)).toHaveBeenCalledWith('abc123base64data', 'mymodel.glb');
+    // Optional targetEntityId omitted → forwarded as undefined (new-root spawn path).
+    expect(vi.mocked(store.importGltf)).toHaveBeenCalledWith('abc123base64data', 'mymodel.glb', undefined);
   });
 
   it('returns success message containing the asset name', async () => {

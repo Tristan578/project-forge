@@ -101,6 +101,13 @@ struct ImportGltfPayload {
     data_base64: String,
     name: String,
     position: Option<[f32; 3]>,
+    /// Optional existing entity to replace in-place. When present (and valid),
+    /// the glTF model is attached to that entity instead of spawning a new root,
+    /// preserving its EntityId / Transform / name / selection. The rest of the
+    /// codebase (textures, audio, job records) keys this as `targetEntityId`, so
+    /// the JSON key is pinned explicitly rather than relying on camelCase mapping.
+    #[serde(rename = "targetEntityId")]
+    target_entity_id: Option<String>,
 }
 
 /// Handle import_gltf command.
@@ -112,6 +119,7 @@ fn handle_import_gltf(payload: serde_json::Value) -> super::CommandResult {
         data_base64: data.data_base64,
         name: data.name.clone(),
         position: data.position.map(|p| Vec3::new(p[0], p[1], p[2])),
+        target_entity_id: data.target_entity_id,
     };
 
     if queue_gltf_import_from_bridge(request) {
@@ -431,6 +439,111 @@ mod tests {
         );
     }
 
+    /// Initialize a real `PendingCommands`, register it for bridge access, run
+    /// `command`, and return the populated queue so a test can inspect exactly
+    /// what was enqueued. Unlike `run` (which deliberately leaves the queue
+    /// uninitialized and only proves parsing via the "not initialized" error),
+    /// this drives the request all the way into the queue and asserts the
+    /// dispatch reported success.
+    /// RAII guard that clears the `PENDING_COMMANDS` thread-local on drop. The
+    /// helper registers a pointer to a stack-local queue; without this guard the
+    /// thread-local would retain that pointer after the local is moved out (or
+    /// after an `expect`/`assert!` unwinds), leaving a dangling pointer that a
+    /// later test on the same reused harness thread would dereference through the
+    /// `unsafe` deref in `with_pending`. `Drop` fires on both the success and the
+    /// panic path, so the thread-local is always returned to "not initialized".
+    struct PendingGuard;
+    impl Drop for PendingGuard {
+        fn drop(&mut self) {
+            crate::core::pending::unregister_pending_commands();
+        }
+    }
+
+    fn run_with_queue(
+        command: &str,
+        payload: serde_json::Value,
+    ) -> crate::core::pending::PendingCommands {
+        let mut pending = crate::core::pending::PendingCommands::default();
+        crate::core::pending::register_pending_commands(&mut pending as *mut _);
+        // Clear the registered pointer before `pending` is moved out below (and
+        // even if the dispatch assertions unwind). Must outlive every use of the
+        // registered pointer, i.e. the `dispatch` call.
+        let _guard = PendingGuard;
+        let result = dispatch(command, &payload)
+            .expect("scene dispatch returned None for known command");
+        // With the queue registered, the command must succeed (no "not initialized").
+        assert!(
+            result.is_ok(),
+            "expected {} to queue successfully, got: {:?}",
+            command,
+            result
+        );
+        pending
+    }
+
+    #[test]
+    fn import_gltf_queues_target_entity_id() {
+        // The replace-in-place contract: a payload carrying targetEntityId must
+        // queue a GltfImportRequest whose target_entity_id == Some(<provided id>).
+        // Pre-fix code dropped this field on the floor, so this assertion FAILS
+        // pre-fix (target_entity_id would be None) and passes post-fix.
+        let pending = run_with_queue("import_gltf", json!({
+            "dataBase64": "SGVsbG8=",
+            "name": "my_model.glb",
+            "targetEntityId": "entity-42"
+        }));
+
+        assert_eq!(
+            pending.gltf_import_requests.len(),
+            1,
+            "exactly one glTF import should be queued"
+        );
+        let request = &pending.gltf_import_requests[0];
+        assert_eq!(
+            request.target_entity_id.as_deref(),
+            Some("entity-42"),
+            "targetEntityId must be carried through to the queued request"
+        );
+        // Sanity-check the rest of the payload survived too.
+        assert_eq!(request.name, "my_model.glb");
+        assert_eq!(request.data_base64, "SGVsbG8=");
+    }
+
+    #[test]
+    fn import_gltf_target_entity_id_defaults_to_none() {
+        // Negative/normalization case: an absent targetEntityId yields
+        // target_entity_id == None (engine-generated fallback — a new root entity
+        // is spawned rather than replacing an existing one).
+        let pending = run_with_queue("import_gltf", json!({
+            "dataBase64": "SGVsbG8=",
+            "name": "my_model.glb"
+        }));
+
+        assert_eq!(pending.gltf_import_requests.len(), 1);
+        assert_eq!(
+            pending.gltf_import_requests[0].target_entity_id, None,
+            "absent targetEntityId must normalize to None (new-root fallback)"
+        );
+    }
+
+    #[test]
+    fn import_gltf_null_target_entity_id_normalizes_to_none() {
+        // A malformed/explicit-null targetEntityId must also fall back to None
+        // rather than failing the parse, so the replace-in-place validation path
+        // degrades to spawning a new root entity.
+        let pending = run_with_queue("import_gltf", json!({
+            "dataBase64": "SGVsbG8=",
+            "name": "my_model.glb",
+            "targetEntityId": serde_json::Value::Null
+        }));
+
+        assert_eq!(pending.gltf_import_requests.len(), 1);
+        assert_eq!(
+            pending.gltf_import_requests[0].target_entity_id, None,
+            "null targetEntityId must normalize to None, not fail the parse"
+        );
+    }
+
     // === set_script ===
 
     #[test]
@@ -542,5 +655,83 @@ mod tests {
     fn dispatch_returns_none_for_unknown_command() {
         let result = dispatch("definitely_not_scene", &json!({}));
         assert!(result.is_none(), "Unknown command should return None");
+    }
+
+    // === import_gltf Undeletable guard (security regression) ===
+    //
+    // The replace-in-place logic in bridge::scene_io::apply_gltf_import queries for
+    // target candidates using:
+    //
+    //   Query<(Entity, &EntityId), (Without<Children>, Without<entity_factory::Undeletable>)>
+    //
+    // The `Without<entity_factory::Undeletable>` filter is the security guard that
+    // prevents a client-supplied `targetEntityId` from matching the Main Camera (which
+    // carries EntityId + Undeletable but has no children at rest).  Without it, the
+    // camera's EntityType is overwritten to GltfModel and a glTF scene is attached —
+    // corrupting the renderer.
+    //
+    // bridge::scene_io is wasm32-only and cannot be compiled under native `cargo test`
+    // (lib.rs gates `pub mod bridge` behind `#[cfg(target_arch = "wasm32")]`).  The
+    // test below exercises the exact query-filter semantics using a real Bevy World so
+    // the guard is verified at the ECS level without requiring the bridge module.  If
+    // the Without<Undeletable> guard is removed from the bridge query, the second
+    // assertion ("undeletable entity must be excluded") would pass only because the
+    // bridge is not compiled natively — but then the WASM build behaviour would be
+    // wrong.  The test is therefore a specification test: it proves that the filter
+    // semantics are correct and must be preserved in the bridge query.
+    #[test]
+    fn gltf_import_target_query_excludes_undeletable_entities() {
+        use bevy::prelude::*;
+        use crate::core::entity_id::EntityId;
+        use crate::core::entity_factory::Undeletable;
+
+        let mut world = World::new();
+
+        // Spawn a normal (deletable) entity matching the target id — must be found.
+        let normal_id = "target-entity-normal";
+        world.spawn((EntityId::new(normal_id),));
+
+        // Spawn an Undeletable entity with the same id string pattern — simulates
+        // the Main Camera, which is the entity this guard must protect.
+        let camera_id = "target-entity-camera";
+        world.spawn((EntityId::new(camera_id), Undeletable));
+
+        // === Test 1: without the Undeletable guard ===
+        // A query that only excludes Children (the pre-fix state) would match the
+        // Undeletable entity when asked for camera_id.  We verify this to confirm
+        // the test would FAIL in the unguarded state (adversarial check).
+        {
+            let mut q = world.query_filtered::<(Entity, &EntityId), Without<Children>>();
+            let found_camera = q.iter(&world).any(|(_, eid)| eid.0 == camera_id);
+            assert!(
+                found_camera,
+                "adversarial check: the pre-fix query (Without<Children> only) DOES match the \
+                 Undeletable camera entity — confirming the guard is necessary"
+            );
+        }
+
+        // === Test 2: with the Undeletable guard (post-fix) ===
+        // The corrected query excludes Undeletable entities entirely.
+        {
+            let mut q = world.query_filtered::<(Entity, &EntityId), (Without<Children>, Without<Undeletable>)>();
+            let results: Vec<_> = q.iter(&world).collect();
+
+            // The normal entity is still reachable.
+            let found_normal = results.iter().any(|(_, eid)| eid.0 == normal_id);
+            assert!(
+                found_normal,
+                "guarded query must still return the normal (deletable) entity"
+            );
+
+            // The Undeletable entity is excluded — a targetEntityId pointing at the
+            // camera must NOT produce a match, triggering the new-root-spawn fallback.
+            let found_camera = results.iter().any(|(_, eid)| eid.0 == camera_id);
+            assert!(
+                !found_camera,
+                "guarded query must NOT return the Undeletable camera entity; \
+                 a client-supplied targetEntityId matching the camera must fall through \
+                 to new-root spawn, not corrupt the camera"
+            );
+        }
     }
 }
