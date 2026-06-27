@@ -67,16 +67,25 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 #      as an unwiring; set skipped with $1=true to exercise the pin-check
 #      anti-tamper arm. ($1=false leaves the trigger unfired, so any result is a
 #      legitimate path-filter skip.)
+#   $23 test-e2e-engine-smoke.result (default success) — the WASM engine-smoke
+#      gate (#8602). Mapped to needs-web AND needs-engine in the anti-tamper map
+#      (the two arms of its job `if:`); set skipped while either trigger is true to
+#      exercise its anti-tamper arms.
+#   $24 needs-engine (default false) — engine-smoke's OTHER ci-gate trigger.
+#      Defaults false so every fixture that does not touch engine/ keeps the
+#      engine-smoke gate's success/skip as a legitimate path-filter skip; set true
+#      to exercise the engine-smoke anti-tamper arm via the engine surface.
 mk() {
-  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}"
+  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}"
   jq -nc \
     --arg nci "$nci" --arg ndeps "$ndeps" --arg ls "$ls" --arg lst "$lst" \
     --arg qg "$qg" --arg ht "$ht" --arg nagentic "$nagentic" --arg as "$as" \
     --arg nonboarding "$nonboarding" --arg tog "$tog" --arg ncodex "$ncodex" --arg ccg "$ccg" \
     --arg nghaw "$nghaw" --arg glr "$glr" --arg nhooks "$nhooks" --arg te2ej "$te2ej" --arg nweb "$nweb" \
-    --arg nskills "$nskills" --arg sl "$sl" --arg napi "$napi" --arg ors "$ors" --arg apc "$apc" '
+    --arg nskills "$nskills" --arg sl "$sl" --arg napi "$napi" --arg ors "$ors" --arg apc "$apc" \
+    --arg te2es "$te2es" --arg nengine "$nengine" '
     {
-      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-skills": $nskills, "needs-api": $napi, "needs-any-code": "true" } },
+      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-any-code": "true" } },
       "quality-gates":        { result: $qg },
       "command-parity":       { result: "success" },
       "build-nextjs":         { result: "success" },
@@ -93,7 +102,8 @@ mk() {
       "openapi-route-sync":   { result: $ors },
       "actions-pin-check":    { result: $apc },
       "test-e2e-ui":          { result: "success" },
-      "test-e2e-journey":     { result: $te2ej }
+      "test-e2e-journey":     { result: $te2ej },
+      "test-e2e-engine-smoke": { result: $te2es }
     }'
 }
 
@@ -497,6 +507,48 @@ res="$(run_verify "$(mk true true success success success success true success t
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "pin-check failure fails (exit 1)"; else fail "pin-check failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "actions-pin-check"; then pass "the failing pin-check gate is named"; else fail "failing pin-check gate not named"; fi
+
+# --- 44. TAMPER: test-e2e-engine-smoke skipped while needs-web=true → exit 1 ----
+# The engine-smoke gate (#8602) is self-defending: it is the ONLY per-PR job that
+# boots the real WASM engine (load -> spawn -> play -> export under SwiftShader
+# software WebGL2), closing the F10 gap. A web-touching PR sets needs-web=true, so
+# the gate SHOULD run; an `if: false` skip is the same single-line unwiring vector
+# guarded for every other self-defending gate. All other gates run+succeed here
+# (te2es=skipped at $23, nweb=true at $17, nengine=false at $24), so the skipped
+# engine-smoke job is the SOLE tamper.
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success true false success false success success skipped false)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-smoke skipped while needs-web=true fails (exit 1)"; else fail "tamper (engine-smoke via web arm) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "engine-smoke tamper is flagged as a possible unwiring"; else fail "engine-smoke tamper message missing"; fi
+if echo "$out" | grep -q "test-e2e-engine-smoke ("; then pass "the unwired engine-smoke gate is named (web arm)"; else fail "unwired engine-smoke gate not named (web arm)"; fi
+
+# --- 45. TAMPER via the needs-engine arm in ISOLATION: engine-smoke skipped -----
+#        while ONLY needs-engine=true (needs-web=false, all other triggers false)
+#        → exit 1, naming the engine-smoke job.
+# The engine-smoke gate fires on `needs-web || needs-engine`: an engine-ONLY PR
+# (rendering/ECS change, needs-web=false, needs-engine=true) that slips
+# `if: false` onto it would skip it while needs-web is false — the EXACT regression
+# class F10 calls out (engine-only PRs ran ZERO e2e). So the needs-engine arm must
+# be independently load-bearing. Every other trigger is held false and its gate
+# legit-skips, so engine-smoke is the SOLE tamper.
+res="$(run_verify "$(mk false false skipped skipped success skipped false skipped false skipped false skipped false skipped false skipped false false skipped false skipped skipped skipped true)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-smoke skipped while ONLY needs-engine=true fails (exit 1)"; else fail "tamper (engine-smoke via engine arm) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-engine-smoke ("; then pass "the unwired engine-smoke gate is named (engine arm)"; else fail "unwired engine-smoke gate not named (engine arm)"; fi
+
+# --- 46. engine-smoke legit-skips (needs-web=false AND needs-engine=false) → 0 --
+# A PR that touches neither web nor engine legitimately skips engine-smoke; that
+# must NOT trip the anti-tamper check (proves neither needs-web nor needs-engine
+# arm false-positives on an unrelated PR).
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success false false success false success success skipped false)")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "engine-smoke legit-skip (web+engine false) passes (exit 0)"; else fail "engine-smoke legit skip should exit 0, got $rc"; fi
+
+# --- 47. engine-smoke FAILED while triggered → exit 1 (hard-failure path) -------
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success true false success false success success failure false)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-smoke failure fails (exit 1)"; else fail "engine-smoke failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-engine-smoke"; then pass "the failing engine-smoke gate is named"; else fail "failing engine-smoke gate not named"; fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then

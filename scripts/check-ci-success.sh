@@ -101,6 +101,13 @@ check_triggered "actions-pin-check"         "needs-ci"
 # proof that the core new-user journey stays winnable + exportable. Protect it
 # from a silent `if: false` skip like the self-defending gates above.
 check_triggered "test-e2e-journey"          "needs-web"
+# The engine-smoke gate is the ONLY per-PR job that boots the real WASM engine
+# (load -> spawn -> play -> export under SwiftShader software WebGL2), closing the
+# F10 gap where rendering/ECS journeys ran only post-merge. It fires on
+# `needs-web || needs-engine` (an engine-only PR must still run it), so BOTH arms
+# are mapped — guarding only one would leave the other as a silent `if: false`
+# skip vector. Protect it from unwiring like the other self-defending gates.
+check_triggered "test-e2e-engine-smoke"     "needs-web" "needs-engine"
 if [ -n "$tamper" ]; then
   echo "::error::Self-defending gate skipped despite its trigger firing (possible unwiring):"
   echo "$tamper"
