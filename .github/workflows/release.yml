@@ -8,14 +8,26 @@ permissions:
   contents: write
   pull-requests: write
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+# Concurrency is scoped per-job rather than workflow-wide:
+#   • Version Packages is idempotent — it only recreates changeset-release/main
+#     from the current state of main — so a rapid batch-merge needs just the
+#     LATEST run; earlier ones cancel (cancel-in-progress: true). This collapses
+#     a pile-up of pushes into one run and avoids the transient failure
+#     notifications ("No commits between main and changeset-release/main" when a
+#     version PR merges with no newer changesets queued, and GraphQL flakes in
+#     @changesets/get-github-info) that fire when many Release runs stack up.
+#   • Tag and Release must NEVER be cancelled mid-publish, or a version's git tag
+#     / GitHub Release could be silently skipped, so it serializes WITHOUT
+#     cancellation (cancel-in-progress: false). It is also idempotent (it checks
+#     for an existing tag/release first), so serializing is purely a safety net.
 
 jobs:
   release:
     name: Version Packages
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-version-packages-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -39,6 +51,9 @@ jobs:
   tag-release:
     name: Tag and Release
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-tag-release-${{ github.ref }}
+      cancel-in-progress: false
     # Detect the Version Packages commit. Uses startsWith to handle squash merges
     # that append the PR number (e.g. "chore: version packages (#123)").
     # head_commit.message is safe here — used in an `if:` expression, not a shell command.
