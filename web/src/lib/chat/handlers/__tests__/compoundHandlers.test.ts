@@ -4,7 +4,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createMockStore } from './handlerTestUtils';
 import { compoundHandlers } from '../compoundHandlers';
+import { generationHandlers } from '../generationHandlers';
 import type { ToolCallContext, ExecutionResult } from '../types';
+
+// Capture jobs registered by the REAL generate_texture handler so the compound
+// flow can be exercised end-to-end against the handler that actually consumes
+// the dispatched payload (rather than asserting only against a vi.fn mock).
+const mockAddJob = vi.fn();
+vi.mock('@/stores/generationStore', () => ({
+  useGenerationStore: { getState: () => ({ addJob: mockAddJob }) },
+}));
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -802,6 +811,281 @@ describe('compoundHandlers', () => {
       expect(result.success).toBe(true);
       const data = result.result as Record<string, unknown>;
       expect(data.appliedTo).toBe(0);
+    });
+  });
+
+  // ===========================================================================
+  // setup_game_from_description
+  // ===========================================================================
+
+  describe('setup_game_from_description', () => {
+    // createMockStore does NOT include setProjectType — every test must supply it
+    // (the handler calls it unconditionally and would throw on undefined).
+    function gameOverrides(extra: Record<string, unknown> = {}) {
+      return {
+        spawnEntity: vi.fn((_t: unknown, n: string) => `id-${n}`),
+        setProjectType: vi.fn(),
+        ...extra,
+      };
+    }
+
+    it('rejects an empty description with an Invalid arguments error', async () => {
+      const { result, store } = await invoke('setup_game_from_description', { description: '' }, gameOverrides());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid arguments');
+      // No scaffolding happened — validation is the very first step.
+      expect(store.spawnEntity).not.toHaveBeenCalled();
+      expect(store.setProjectType).not.toHaveBeenCalled();
+    });
+
+    it('rejects a missing description', async () => {
+      const { result, store } = await invoke('setup_game_from_description', {}, gameOverrides());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid arguments');
+      expect(store.spawnEntity).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid targetTier enum', async () => {
+      const { result } = await invoke(
+        'setup_game_from_description',
+        { description: 'a game', targetTier: 'ultra' },
+        gameOverrides(),
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid arguments');
+    });
+
+    it('scaffolds a playable game in a fixed, ordered sequence', async () => {
+      const { result, store, dispatchCommand } = await invoke(
+        'setup_game_from_description',
+        { description: 'a platformer with 3 enemies and 4 coins' },
+        gameOverrides(),
+      );
+
+      expect(result.success).toBe(true);
+      const spawn = store.spawnEntity as ReturnType<typeof vi.fn>;
+      const spawnedNames = spawn.mock.calls.map((c) => c[1]);
+
+      // Deterministic naming: Ground, Player, Enemy_0..2, Coin_0..3, Goal.
+      expect(spawnedNames).toEqual([
+        'Ground',
+        'Player',
+        'Enemy_0',
+        'Enemy_1',
+        'Enemy_2',
+        'Coin_0',
+        'Coin_1',
+        'Coin_2',
+        'Coin_3',
+        'Goal',
+      ]);
+
+      // Ordering: project type is set BEFORE the first spawn.
+      const setProjectTypeOrder = (store.setProjectType as ReturnType<typeof vi.fn>).mock
+        .invocationCallOrder[0];
+      const firstSpawnOrder = spawn.mock.invocationCallOrder[0];
+      expect(setProjectTypeOrder).toBeLessThan(firstSpawnOrder);
+      expect(store.setProjectType).toHaveBeenCalledWith('3d');
+
+      // Player wiring: controller + health game components, dynamic physics.
+      expect(store.togglePhysics).toHaveBeenCalledWith('id-Player', true);
+      expect(store.addGameComponent).toHaveBeenCalledWith(
+        'id-Player',
+        expect.objectContaining({ type: 'characterController' }),
+      );
+      // The Player must be a DYNAMIC body — that is what generates the collision
+      // PAIRS with the static sensor coins/goal. A non-dynamic player produces
+      // no relative motion and (with two fixed bodies) no collision events.
+      const playerPhysics = (store.updatePhysics as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c) => c[0] === 'id-Player',
+      );
+      expect(playerPhysics).toBeDefined();
+      expect((playerPhysics?.[1] as { bodyType?: string })?.bodyType).toBe('dynamic');
+
+      // Coins are collectibles with a trigger zone.
+      expect(store.addGameComponent).toHaveBeenCalledWith(
+        'id-Coin_0',
+        expect.objectContaining({ type: 'collectible' }),
+      );
+
+      // WINNABILITY / INTERACTIVITY GUARD (#8541, #8764) — the regression this
+      // suite exists to catch. The engine's system_win_condition /
+      // system_collectible / system_trigger_zone only fire on entries in
+      // runtime.active_collisions, which is populated ONLY from Rapier
+      // CollisionEvents — and Rapier colliders + ActiveEvents attach ONLY to
+      // entities with PhysicsEnabled (engine/src/core/physics.rs). So EVERY
+      // collision-driven entity (the Goal and every Coin) MUST have physics
+      // enabled as a static SENSOR, or the scaffold is structurally un-winnable
+      // and the coins never collect. Asserting only that the .type strings were
+      // set (collectible/winCondition) does NOT prove this — it passed on the
+      // broken code. We assert the actual togglePhysics + sensor physics calls.
+      for (const coin of ['id-Coin_0', 'id-Coin_1', 'id-Coin_2', 'id-Coin_3']) {
+        expect(store.togglePhysics).toHaveBeenCalledWith(coin, true);
+        const coinPhysics = (store.updatePhysics as ReturnType<typeof vi.fn>).mock.calls.find(
+          (c) => c[0] === coin,
+        );
+        expect(coinPhysics, `${coin} must have physics enabled to ever collect`).toBeDefined();
+        expect((coinPhysics?.[1] as { isSensor?: boolean })?.isSensor).toBe(true);
+      }
+
+      // Goal: physics enabled as a static sensor so reaching it can fire the win.
+      expect(store.togglePhysics).toHaveBeenCalledWith('id-Goal', true);
+      const goalPhysics = (store.updatePhysics as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c) => c[0] === 'id-Goal',
+      );
+      expect(goalPhysics, 'Goal must have physics enabled to ever win').toBeDefined();
+      expect((goalPhysics?.[1] as { isSensor?: boolean })?.isSensor).toBe(true);
+      expect((goalPhysics?.[1] as { bodyType?: string })?.bodyType).toBe('fixed');
+
+      // Goal carries exactly one win_condition.
+      expect(store.addGameComponent).toHaveBeenCalledWith(
+        'id-Goal',
+        expect.objectContaining({ type: 'winCondition' }),
+      );
+      const winCalls = (store.addGameComponent as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (c) => (c[1] as { type?: string })?.type === 'winCondition',
+      );
+      expect(winCalls).toHaveLength(1);
+
+      // Input preset + camera-follow script targeting the player by id.
+      expect(store.setInputPreset).toHaveBeenCalledWith('platformer');
+      const scriptCall = (store.setScript as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(scriptCall[0]).toBe('id-Player');
+      expect(scriptCall[1]).toContain('forge.camera.setTarget("id-Player")');
+
+      // No generation requested → no generate_* dispatched.
+      expect(dispatchCommand).not.toHaveBeenCalled();
+      const data = result.result as Record<string, unknown>;
+      expect(data.generationJobs).toBe(0);
+    });
+
+    it('is deterministic — identical descriptions produce identical spawn sequences', async () => {
+      const a = await invoke(
+        'setup_game_from_description',
+        { description: '2 enemies, 3 coins' },
+        gameOverrides(),
+      );
+      const b = await invoke(
+        'setup_game_from_description',
+        { description: '2 enemies, 3 coins' },
+        gameOverrides(),
+      );
+
+      const namesA = (a.store.spawnEntity as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1]);
+      const namesB = (b.store.spawnEntity as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1]);
+      expect(namesA).toEqual(namesB);
+    });
+
+    it('plan-with-no-assets: omits all generate_* dispatch when targetTier is absent', async () => {
+      const { dispatchCommand, result } = await invoke(
+        'setup_game_from_description',
+        { description: 'a simple maze game' },
+        gameOverrides(),
+      );
+
+      expect(dispatchCommand).not.toHaveBeenCalled();
+      const data = result.result as Record<string, unknown>;
+      expect(data.generationJobs).toBe(0);
+    });
+
+    it('dispatches parallel generation jobs keyed to the param each handler consumes', async () => {
+      const { dispatchCommand, store, result } = await invoke(
+        'setup_game_from_description',
+        { description: 'a shooter game', targetTier: 'high' },
+        gameOverrides(),
+      );
+
+      // generate_3d_model on the player (its handler consumes targetEntityId).
+      expect(dispatchCommand).toHaveBeenCalledWith(
+        'generate_3d_model',
+        expect.objectContaining({ targetEntityId: 'id-Player' }),
+      );
+
+      // generate_texture on the goal. Its handler schema accepts ONLY `entityId`,
+      // so the goal id MUST ride under that key — under `targetEntityId` it is
+      // silently stripped by Zod and the texture never wires onto the goal.
+      const textureCall = dispatchCommand.mock.calls.find((c) => c[0] === 'generate_texture');
+      expect(textureCall, 'generate_texture must be dispatched').toBeDefined();
+      const texturePayload = textureCall![1] as Record<string, unknown>;
+      expect(texturePayload.entityId).toBe('id-Goal');
+      // Guard against regressing to the wrong key (the pre-fix contract).
+      expect(texturePayload).not.toHaveProperty('targetEntityId');
+
+      expect(dispatchCommand).toHaveBeenCalledWith('generate_music', expect.any(Object));
+
+      const data = result.result as Record<string, unknown>;
+      expect(data.generationJobs).toBe(3);
+
+      // End-to-end: feed the EXACT dispatched payload into the REAL
+      // generate_texture handler and assert the goal id survives the handler's
+      // own schema + reaches the tracked job. This fails on the pre-fix payload
+      // ({ targetEntityId }) because Zod strips the unknown key before tracking.
+      mockAddJob.mockClear();
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify({ jobId: 'prov-1', provider: 'p', usageId: 'u-1' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+      try {
+        const handlerCtx: ToolCallContext = {
+          store,
+          dispatchCommand: dispatchCommand as unknown as ToolCallContext['dispatchCommand'],
+        };
+        const handlerResult = await generationHandlers.generate_texture(texturePayload, handlerCtx);
+        expect(handlerResult.success).toBe(true);
+        // The POST body the handler sends carries the goal id under entityId.
+        const sentBody = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string);
+        expect(sentBody.entityId).toBe('id-Goal');
+        // The tracked job records the goal as both entityId and targetEntityId.
+        expect(mockAddJob).toHaveBeenCalledWith(
+          expect.objectContaining({ entityId: 'id-Goal', targetEntityId: 'id-Goal' }),
+        );
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it('picks the follower behavior for chase-type enemy descriptions', async () => {
+      const { store } = await invoke(
+        'setup_game_from_description',
+        { description: '1 enemy that will chase the player' },
+        gameOverrides(),
+      );
+
+      // The single enemy is a follower targeting the player id.
+      expect(store.addGameComponent).toHaveBeenCalledWith(
+        'id-Enemy_0',
+        expect.objectContaining({ type: 'follower' }),
+      );
+    });
+
+    it('falls back to patrol (never a null-target follower) when the player spawn fails', async () => {
+      // Regression: a 'follower' enemy was built with targetEntityId: playerId
+      // unconditionally. If the player spawn returns null, the follower would
+      // chase nothing. Spawn everything normally EXCEPT the Player, which fails.
+      const { store } = await invoke(
+        'setup_game_from_description',
+        { description: '1 enemy that will chase the player' },
+        gameOverrides({
+          spawnEntity: vi.fn((_t: unknown, n: string) => (n === 'Player' ? null : `id-${n}`)),
+        }),
+      );
+
+      const componentTypes = (store.addGameComponent as ReturnType<typeof vi.fn>).mock.calls.map(
+        ([, component]) => (component as { type?: string }).type,
+      );
+      // No follower was created (it would have a null target) ...
+      expect(componentTypes).not.toContain('follower');
+      // ... the enemy patrols instead, keeping it functional. The patrol input
+      // key 'moving_platform' builds a component with the camelCase discriminant.
+      expect(store.addGameComponent).toHaveBeenCalledWith(
+        'id-Enemy_0',
+        expect.objectContaining({ type: 'movingPlatform' }),
+      );
     });
   });
 });

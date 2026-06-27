@@ -7651,6 +7651,40 @@
       "visibility": "public"
     },
     {
+      "name": "setup_game_from_description",
+      "description": "Scaffold a complete, immediately-playable game from a plain-text description in one call. Deterministically sets the project type, environment, and input preset, then spawns a player (with character controller + health), enemies, collectible coins, a goal carrying a win condition, and a ground plane, and attaches a camera-follow script. Optionally dispatches parallel asset-generation jobs that auto-wire back onto the scaffolded entities.",
+      "category": "compound",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Plain-text description of the game to scaffold (e.g. 'a platformer with 3 enemies and 5 coins')."
+          },
+          "genre": {
+            "type": "string",
+            "description": "Optional genre hint (e.g. 'fps', 'platformer', 'topdown', 'racing') that nudges the input preset."
+          },
+          "targetTier": {
+            "type": "string",
+            "enum": [
+              "low",
+              "mid",
+              "high"
+            ],
+            "description": "Optional asset-fidelity tier. When set, parallel generate_* jobs are dispatched to replace the placeholder primitives; the scaffold is fully playable before they land."
+          }
+        },
+        "required": [
+          "description"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "visibility": "public"
+    },
+    {
       "name": "arrange_entities",
       "description": "Arrange existing entities in spatial patterns. Provide entity IDs and a pattern type. This repositions entities without changing their other properties.",
       "category": "compound",

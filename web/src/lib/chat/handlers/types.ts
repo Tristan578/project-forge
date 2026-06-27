@@ -53,6 +53,19 @@ export const zGizmoMode = z.enum(['translate', 'rotate', 'scale']);
 export const zCameraPreset = z.enum(['top', 'front', 'right', 'perspective']);
 
 /**
+ * Args for the `setup_game_from_description` compound tool. A plain-text
+ * description deterministically scaffolds a playable game (player + enemies +
+ * coins + goal + ground + lighting + input + win condition). `genre` is an
+ * optional hint; `targetTier` opts into parallel `generate_*` asset jobs that
+ * auto-wire back onto the scaffolded entities (#8540).
+ */
+export const zSetupGameFromDescription = z.object({
+  description: z.string().min(1),
+  genre: z.string().optional(),
+  targetTier: z.enum(['low', 'mid', 'high']).optional(),
+});
+
+/**
  * Validate handler args with a Zod schema. Returns parsed data or an error result.
  */
 export function parseArgs<T>(

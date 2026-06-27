@@ -1,5 +1,5 @@
 /**
- * Compound action handlers — 8 multi-step AI compound tools that orchestrate
+ * Compound action handlers — 9 multi-step AI compound tools that orchestrate
  * multiple store mutations.
  *
  *   1. describe_scene
@@ -10,6 +10,7 @@
  *   6. setup_character
  *   7. configure_game_mechanics
  *   8. apply_style
+ *   9. setup_game_from_description
  */
 
 import type { ToolHandler, ExecutionResult } from './types';
@@ -21,6 +22,7 @@ import type {
   InputBinding,
   SceneNode,
 } from './types';
+import { parseArgs, zSetupGameFromDescription } from './types';
 import type { GameComponentData, PlatformLoopMode, WinConditionType } from '@/stores/editorStore';
 import { getPresetById } from '@/lib/materialPresets';
 import { buildEntityIndex, findEntityByName } from '@/lib/engine/entityIndex';
@@ -339,6 +341,92 @@ function buildGameComponentFromInput(
     default:
       return null;
   }
+}
+
+// ===== setup_game_from_description planner =====
+
+/**
+ * Deterministic, rule-based decomposition of a free-text game description into a
+ * fixed scene plan. This is intentionally NOT an LLM call: the acceptance
+ * criteria for setup_game_from_description require the scaffold to be
+ * reproducible and idempotent (the same description always yields the same
+ * entity counts/names/layout), and immediately playable before any generated
+ * asset lands. An LLM planner would add non-determinism, a network round-trip,
+ * cost, and a failure surface — so we parse counts/intent from the string and
+ * clamp to a playable layout instead.
+ *
+ * Counts are extracted via `<number> <noun>` matches (e.g. "5 coins", "3
+ * enemies") and clamped to a small range so a pathological description can't
+ * spawn thousands of entities. Genre is a soft hint that only nudges the input
+ * preset; the scaffold shape is identical regardless.
+ */
+type ProjectType = '2d' | '3d';
+
+interface GamePlan {
+  projectType: ProjectType;
+  inputPreset: 'fps' | 'platformer' | 'topdown' | 'racing';
+  enemyCount: number;
+  coinCount: number;
+  enemyBehavior: 'follower' | 'moving_platform';
+}
+
+function clampCount(n: number, min: number, max: number): number {
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+/**
+ * Pluralize a base noun for matching: regular `+s`, and the `y→ies` case
+ * (enemy→enemies). Returns a regex alternation fragment.
+ */
+function nounPattern(noun: string): string {
+  if (noun.endsWith('y')) {
+    const stem = noun.slice(0, -1);
+    return `(?:${noun}|${stem}ies)`;
+  }
+  return `${noun}s?`;
+}
+
+/** Extract the count for the first matching noun, or a default. Deterministic. */
+function extractCount(text: string, nouns: string[], fallback: number): number {
+  for (const noun of nouns) {
+    // `<number> <noun>` — singular or plural. Word-boundary anchored.
+    const re = new RegExp(`(\\d{1,3})\\s+${nounPattern(noun)}\\b`, 'i');
+    const m = text.match(re);
+    if (m) return Number(m[1]);
+  }
+  return fallback;
+}
+
+function planGameFromDescription(
+  description: string,
+  genre: string | undefined,
+): GamePlan {
+  const text = `${description} ${genre ?? ''}`.toLowerCase();
+
+  // Input preset from genre/keywords. Defaults to platformer (the most broadly
+  // playable WASD+jump layout for the scaffolded primitives).
+  let inputPreset: GamePlan['inputPreset'] = 'platformer';
+  if (/\b(fps|shooter|first[- ]person)\b/.test(text)) inputPreset = 'fps';
+  else if (/\b(top[- ]?down|twin[- ]?stick|rogue)/.test(text)) inputPreset = 'topdown';
+  else if (/\b(racing|racer|kart|driving)\b/.test(text)) inputPreset = 'racing';
+  else if (/\b(platformer|jump|side[- ]?scroll)/.test(text)) inputPreset = 'platformer';
+
+  const projectType: ProjectType = /\b2d\b|side[- ]?scroll|pixel/.test(text) ? '2d' : '3d';
+
+  // Enemies that "chase/follow/hunt" the player use the follower component;
+  // everything else patrols via a moving_platform waypoint loop.
+  const enemyBehavior: GamePlan['enemyBehavior'] = /\b(chase|follow|hunt|seek|pursue)/.test(text)
+    ? 'follower'
+    : 'moving_platform';
+
+  return {
+    projectType,
+    inputPreset,
+    enemyCount: clampCount(extractCount(text, ['enemy', 'monster', 'foe'], 2), 0, 20),
+    coinCount: clampCount(extractCount(text, ['coin', 'gem', 'collectible', 'pickup', 'star'], 5), 0, 50),
+    enemyBehavior,
+  };
 }
 
 // ===== Handler Registry =====
@@ -1205,6 +1293,221 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         appliedTo: targets.length,
         operations: results,
         summary: `Applied style to ${targets.length} entities with ${successCount} operations.`,
+      },
+    };
+  },
+
+  setup_game_from_description: async (args, ctx): Promise<ExecutionResult> => {
+    const parsed = parseArgs(zSetupGameFromDescription, args);
+    if (parsed.error) return parsed.error;
+    const { description, genre, targetTier } = parsed.data;
+
+    const plan = planGameFromDescription(description, genre);
+    const operations: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
+    const nameToId: Record<string, string> = {};
+
+    // Deterministic spawn helper: spawn by type/name, capture the returned id
+    // (the #8748 fix — never read ctx.store.primaryId after a spawn), record the
+    // op, and run an optional configuration callback. Returns the id or null.
+    const spawn = (
+      type: EntityType,
+      name: string,
+      configure?: (id: string) => void,
+    ): string | null => {
+      try {
+        const id = ctx.store.spawnEntity(type, name);
+        if (!id) {
+          operations.push({ action: `spawn "${name}"`, success: false, error: 'spawn failed' });
+          return null;
+        }
+        nameToId[name] = id;
+        configure?.(id);
+        operations.push({ action: `spawn "${name}"`, success: true, entityId: id });
+        return id;
+      } catch (err) {
+        operations.push({
+          action: `spawn "${name}"`,
+          success: false,
+          error: err instanceof Error ? err.message : 'spawn failed',
+        });
+        return null;
+      }
+    };
+
+    // (1) Project type (2d vs 3d) — drives camera/rendering defaults.
+    ctx.store.setProjectType(plan.projectType);
+    operations.push({ action: `set project type "${plan.projectType}"`, success: true });
+
+    // (2) Environment: a directional skybox + ambient light so the scaffold is
+    // visible immediately. Deterministic — no randomness.
+    ctx.store.setSkybox('day');
+    ctx.store.updateAmbientLight({ color: [1, 1, 1], brightness: 1 });
+    operations.push({ action: 'set environment (skybox + ambient)', success: true });
+
+    // (3) Ground plane — fixed body so the player has something to stand on.
+    spawn('plane', 'Ground', (id) => {
+      ctx.store.updateTransform(id, 'scale', [10, 1, 10]);
+      ctx.store.togglePhysics(id, true);
+      ctx.store.updatePhysics(id, buildPhysicsFromPartial({ bodyType: 'fixed' }));
+    });
+
+    // (3) Player — capsule with dynamic physics, character controller, health.
+    const playerId = spawn('capsule', 'Player', (id) => {
+      ctx.store.updateTransform(id, 'position', [0, 1, 0]);
+      ctx.store.togglePhysics(id, true);
+      ctx.store.updatePhysics(
+        id,
+        buildPhysicsFromPartial({
+          bodyType: 'dynamic',
+          colliderShape: 'capsule',
+          lockRotationX: true,
+          lockRotationZ: true,
+        }),
+      );
+      const controller = buildGameComponentFromInput('character_controller', {});
+      if (controller) ctx.store.addGameComponent(id, controller);
+      const health = buildGameComponentFromInput('health', {});
+      if (health) ctx.store.addGameComponent(id, health);
+    });
+
+    // (3) Enemies — deterministic line layout. Chase-type enemies follow the
+    // player (needs the player id, hence player spawns first); otherwise patrol
+    // via a moving_platform waypoint loop. If the player spawn failed (playerId
+    // is null), a 'follower' would get targetEntityId: null and chase nothing —
+    // so fall back to patrol, keeping enemies functional rather than inert.
+    for (let i = 0; i < plan.enemyCount; i++) {
+      const offset = (i - (plan.enemyCount - 1) / 2) * 3;
+      spawn('cube', `Enemy_${i}`, (id) => {
+        ctx.store.updateTransform(id, 'position', [offset, 1, 8]);
+        ctx.store.updateMaterial(id, buildMaterialFromPartial({ baseColor: [1, 0.2, 0.2, 1] }));
+        const behavior =
+          plan.enemyBehavior === 'follower' && playerId
+            ? buildGameComponentFromInput('follower', { targetEntityId: playerId })
+            : buildGameComponentFromInput('moving_platform', {
+                waypoints: [
+                  [offset, 1, 8],
+                  [offset, 1, 4],
+                ],
+              });
+        if (behavior) ctx.store.addGameComponent(id, behavior);
+      });
+    }
+
+    // (3) Coins — deterministic line layout, each a collectible trigger zone.
+    for (let i = 0; i < plan.coinCount; i++) {
+      const offset = (i - (plan.coinCount - 1) / 2) * 2;
+      spawn('sphere', `Coin_${i}`, (id) => {
+        ctx.store.updateTransform(id, 'position', [offset, 1, 4]);
+        ctx.store.updateTransform(id, 'scale', [0.4, 0.4, 0.4]);
+        ctx.store.updateMaterial(id, buildMaterialFromPartial({ baseColor: [1, 0.9, 0, 1], unlit: true }));
+        // Physics is REQUIRED for the collectible/trigger paths to fire. The
+        // engine attaches a Rapier collider + ActiveEvents (and so populates
+        // runtime.active_collisions from CollisionEvents) ONLY to entities with
+        // PhysicsEnabled (engine/src/core/physics.rs). A collider-less coin emits
+        // zero collision events → system_collectible/system_trigger_zone never
+        // run → coins never collect. A static SENSOR body lets the dynamic Player
+        // pass through it while still generating the collision pair. (#8541/#8764)
+        ctx.store.togglePhysics(id, true);
+        ctx.store.updatePhysics(
+          id,
+          buildPhysicsFromPartial({ bodyType: 'fixed', isSensor: true }),
+        );
+        const collectible = buildGameComponentFromInput('collectible', { value: 1 });
+        if (collectible) ctx.store.addGameComponent(id, collectible);
+        const trigger = buildGameComponentFromInput('trigger_zone', { eventName: 'coin_collected' });
+        if (trigger) ctx.store.addGameComponent(id, trigger);
+      });
+    }
+
+    // (3) Goal — the win marker. Carries the win_condition component itself so
+    // the engine-side once-guard (runtime.game_won) owns win firing. We attach
+    // exactly ONE win_condition and emit NO script-side forge.game.win() — that
+    // would double-fire the win event (see win-event gotcha).
+    const goalId = spawn('sphere', 'Goal', (id) => {
+      ctx.store.updateTransform(id, 'position', [0, 1, 12]);
+      ctx.store.updateTransform(id, 'scale', [0.6, 0.6, 0.6]);
+      ctx.store.updateMaterial(id, buildMaterialFromPartial({ baseColor: [0.2, 1, 0.4, 1], unlit: true }));
+      // Physics is REQUIRED for the win path to fire. system_win_condition reads
+      // runtime.active_collisions, which the engine populates ONLY from Rapier
+      // CollisionEvents — and Rapier colliders + ActiveEvents are attached ONLY
+      // to entities with PhysicsEnabled (engine/src/core/physics.rs). A
+      // collider-less Goal produces zero collision events → reaching it never
+      // wins (the exact #8764 break). A static SENSOR body lets the dynamic
+      // Player overlap it while still generating the collision pair. (#8541)
+      ctx.store.togglePhysics(id, true);
+      ctx.store.updatePhysics(
+        id,
+        buildPhysicsFromPartial({ bodyType: 'fixed', isSensor: true }),
+      );
+      const trigger = buildGameComponentFromInput('trigger_zone', {
+        eventName: 'goal_reached',
+        oneShot: true,
+      });
+      if (trigger) ctx.store.addGameComponent(id, trigger);
+    });
+
+    // (4) Input preset + camera-follow script targeting the player by id.
+    ctx.store.setInputPreset(plan.inputPreset);
+    operations.push({ action: `set input preset "${plan.inputPreset}"`, success: true });
+    if (playerId) {
+      ctx.store.setScript(playerId, `forge.camera.setTarget("${playerId}");`, true);
+      operations.push({ action: 'attach camera-follow script', success: true });
+    }
+
+    // (5) Win condition — a reachGoal win_condition attached to the goal entity,
+    // pointing at the goal as its targetEntityId. Reaching the goal wins the game.
+    if (goalId) {
+      const winCondition = buildGameComponentFromInput('win_condition', {
+        conditionType: 'reachGoal',
+        targetEntityId: goalId,
+      });
+      if (winCondition) {
+        ctx.store.addGameComponent(goalId, winCondition);
+        operations.push({ action: 'attach win condition', success: true });
+      }
+    }
+
+    // (6) OPTIONAL asset generation — only when a targetTier is requested.
+    // Dispatch parallel generate_* jobs targeting the scaffolded entity by the
+    // key each handler actually consumes (generate_3d_model: targetEntityId;
+    // generate_texture: entityId) so #8540 auto-wires the completed assets back
+    // onto them. The scaffold is fully playable before any of these land
+    // (deterministic + immediate).
+    let generationJobs = 0;
+    if (targetTier) {
+      if (playerId) {
+        ctx.dispatchCommand('generate_3d_model', {
+          prompt: `${description} player character`,
+          targetEntityId: playerId,
+        });
+        generationJobs++;
+      }
+      if (goalId) {
+        // generate_texture's handler schema accepts `entityId` (NOT
+        // `targetEntityId`, which other generate_* handlers take); Zod strips
+        // the unknown key, so passing targetEntityId here is a silent no-op and
+        // the texture never wires back onto the goal entity.
+        ctx.dispatchCommand('generate_texture', {
+          prompt: `${description} goal marker texture`,
+          entityId: goalId,
+        });
+        generationJobs++;
+      }
+      ctx.dispatchCommand('generate_music', { prompt: `${description} background music` });
+      generationJobs++;
+      operations.push({ action: `dispatch ${generationJobs} generation job(s)`, success: true });
+    }
+
+    const successCount = operations.filter((op) => op.success).length;
+    const allOk = successCount === operations.length;
+    return {
+      success: allOk,
+      result: {
+        ...buildCompoundResult(operations, nameToId),
+        plan,
+        generationJobs,
+        playerId,
+        goalId,
       },
     };
   },
