@@ -1372,14 +1372,16 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
     // (3) Enemies — deterministic line layout. Chase-type enemies follow the
     // player (needs the player id, hence player spawns first); otherwise patrol
-    // via a moving_platform waypoint loop.
+    // via a moving_platform waypoint loop. If the player spawn failed (playerId
+    // is null), a 'follower' would get targetEntityId: null and chase nothing —
+    // so fall back to patrol, keeping enemies functional rather than inert.
     for (let i = 0; i < plan.enemyCount; i++) {
       const offset = (i - (plan.enemyCount - 1) / 2) * 3;
       spawn('cube', `Enemy_${i}`, (id) => {
         ctx.store.updateTransform(id, 'position', [offset, 1, 8]);
         ctx.store.updateMaterial(id, buildMaterialFromPartial({ baseColor: [1, 0.2, 0.2, 1] }));
         const behavior =
-          plan.enemyBehavior === 'follower'
+          plan.enemyBehavior === 'follower' && playerId
             ? buildGameComponentFromInput('follower', { targetEntityId: playerId })
             : buildGameComponentFromInput('moving_platform', {
                 waypoints: [

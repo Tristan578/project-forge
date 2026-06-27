@@ -1062,5 +1062,30 @@ describe('compoundHandlers', () => {
         expect.objectContaining({ type: 'follower' }),
       );
     });
+
+    it('falls back to patrol (never a null-target follower) when the player spawn fails', async () => {
+      // Regression: a 'follower' enemy was built with targetEntityId: playerId
+      // unconditionally. If the player spawn returns null, the follower would
+      // chase nothing. Spawn everything normally EXCEPT the Player, which fails.
+      const { store } = await invoke(
+        'setup_game_from_description',
+        { description: '1 enemy that will chase the player' },
+        gameOverrides({
+          spawnEntity: vi.fn((_t: unknown, n: string) => (n === 'Player' ? null : `id-${n}`)),
+        }),
+      );
+
+      const componentTypes = (store.addGameComponent as ReturnType<typeof vi.fn>).mock.calls.map(
+        ([, component]) => (component as { type?: string }).type,
+      );
+      // No follower was created (it would have a null target) ...
+      expect(componentTypes).not.toContain('follower');
+      // ... the enemy patrols instead, keeping it functional. The patrol input
+      // key 'moving_platform' builds a component with the camelCase discriminant.
+      expect(store.addGameComponent).toHaveBeenCalledWith(
+        'id-Enemy_0',
+        expect.objectContaining({ type: 'movingPlatform' }),
+      );
+    });
   });
 });
