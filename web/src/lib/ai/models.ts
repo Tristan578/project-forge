@@ -30,14 +30,14 @@ export const AI_MODEL_FAST = 'claude-haiku-4-5-20251001';
  * in the chat body). The chat route enforces the gate at request time so
  * lower tiers cannot self-promote by passing this string.
  */
-export const AI_MODEL_PREMIUM = 'claude-opus-4-7';
+export const AI_MODEL_PREMIUM = 'claude-opus-4-8';
 
 /**
  * Deep model for highest-quality single-shot generations where latency
  * is secondary to output fidelity (GDD authoring, world building, cutscenes).
  * Routed via the feature flag helper in `deepTier.ts`. Falls back to
  * AI_MODEL_PRIMARY when the flag is off. Aliases AI_MODEL_PREMIUM — same
- * Opus 4.7 model, separate semantic role (deep generators vs. user request).
+ * Opus 4.8 model, separate semantic role (deep generators vs. user request).
  */
 export const AI_MODEL_DEEP = AI_MODEL_PREMIUM;
 
@@ -52,7 +52,7 @@ export const GATEWAY_MODEL_CHAT = 'anthropic/claude-sonnet-4-6' as const;
 export const GATEWAY_MODEL_FAST = 'anthropic/claude-haiku-4-5' as const;
 
 /** Premium chat model via Vercel AI Gateway (Pro tier only) */
-export const GATEWAY_MODEL_PREMIUM = 'anthropic/claude-opus-4-7' as const;
+export const GATEWAY_MODEL_PREMIUM = 'anthropic/claude-opus-4-8' as const;
 
 /** Deep chat model via Vercel AI Gateway — alias of GATEWAY_MODEL_PREMIUM */
 export const GATEWAY_MODEL_DEEP = GATEWAY_MODEL_PREMIUM;
@@ -72,7 +72,7 @@ export const AI_MODELS = {
   chat: AI_MODEL_PRIMARY,
   /** Fast/cheap model — reviews, quick analysis, behavior trees */
   fast: AI_MODEL_FAST,
-  /** Premium model — Pro tier only, highest quality (Opus 4.7) */
+  /** Premium model — Pro tier only, highest quality (Opus 4.8) */
   premium: AI_MODEL_PREMIUM,
   /** Deep model — highest-quality generation for GDD, world building, cutscenes */
   deep: AI_MODEL_DEEP,
@@ -97,8 +97,8 @@ export type AiModelKey = keyof typeof AI_MODELS;
 /**
  * True when the model identifier names a premium-tier (Pro-only) model.
  *
- * Accepts both bare canonical IDs (`claude-opus-4-7`) and gateway-format
- * IDs (`anthropic/claude-opus-4-7`). Compares against a known set rather
+ * Accepts both bare canonical IDs (`claude-opus-4-8`) and gateway-format
+ * IDs (`anthropic/claude-opus-4-8`). Compares against a known set rather
  * than a substring so future Opus minor revisions must be opted in
  * explicitly — prevents accidental routing of new models that might be
  * priced differently.

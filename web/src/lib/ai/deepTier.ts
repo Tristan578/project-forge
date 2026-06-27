@@ -1,7 +1,7 @@
 /**
  * Deep-generation tier helpers.
  *
- * Gate the Opus 4.7 quality tier behind a feature flag so rollout can be
+ * Gate the Opus 4.8 quality tier behind a feature flag so rollout can be
  * canaried without a deploy. When `NEXT_PUBLIC_USE_DEEP_GENERATION=true`,
  * deep-generation surfaces (GDD, world builder, cutscenes) route to
  * AI_MODEL_DEEP. Otherwise they fall back to AI_MODEL_PRIMARY.

@@ -18,7 +18,7 @@ interface ModelOption {
 const MODEL_OPTIONS: ModelOption[] = [
   { value: AI_MODEL_PRIMARY, label: 'Sonnet 4.5' },
   { value: AI_MODEL_FAST, label: 'Haiku 4.5' },
-  { value: AI_MODEL_PREMIUM, label: 'Opus 4.7 (Pro)', requiresPro: true },
+  { value: AI_MODEL_PREMIUM, label: 'Opus 4.8 (Pro)', requiresPro: true },
 ];
 
 export function ChatInput() {

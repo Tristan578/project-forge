@@ -62,14 +62,14 @@ vi.mock('@/lib/chat/docContext', () => ({
 vi.mock('@/lib/ai/models', () => ({
   AI_MODEL_PRIMARY: 'claude-sonnet-4-6',
   AI_MODEL_FAST: 'claude-haiku-4-5-20251001',
-  AI_MODEL_PREMIUM: 'claude-opus-4-7',
+  AI_MODEL_PREMIUM: 'claude-opus-4-8',
   GATEWAY_MODEL_CHAT: 'anthropic/claude-sonnet-4-6',
   GATEWAY_MODEL_FAST: 'anthropic/claude-haiku-4-5',
-  GATEWAY_MODEL_PREMIUM: 'anthropic/claude-opus-4-7',
+  GATEWAY_MODEL_PREMIUM: 'anthropic/claude-opus-4-8',
   isPremiumModel: vi.fn((model: string | undefined | null) => {
     if (!model) return false;
     const bare = model.includes('/') ? model.split('/').slice(1).join('/') : model;
-    return bare === 'claude-opus-4-7';
+    return bare === 'claude-opus-4-8';
   }),
 }));
 
@@ -878,7 +878,7 @@ describe('POST /api/chat', () => {
       } as never);
 
       const res = await POST(
-        makeRequest({ ...validBody(), model: 'claude-opus-4-7' }),
+        makeRequest({ ...validBody(), model: 'claude-opus-4-8' }),
       );
       expect(res.status).toBe(403);
       const body = await res.json();
@@ -897,7 +897,7 @@ describe('POST /api/chat', () => {
       } as never);
 
       const res = await POST(
-        makeRequest({ ...validBody(), model: 'anthropic/claude-opus-4-7' }),
+        makeRequest({ ...validBody(), model: 'anthropic/claude-opus-4-8' }),
       );
       expect(res.status).toBe(403);
       expect(createSpawnforgeAgent).not.toHaveBeenCalled();
@@ -911,11 +911,11 @@ describe('POST /api/chat', () => {
       } as never);
 
       const res = await POST(
-        makeRequest({ ...validBody(), model: 'claude-opus-4-7' }),
+        makeRequest({ ...validBody(), model: 'claude-opus-4-8' }),
       );
       await res.text();
       expect(createSpawnforgeAgent).toHaveBeenCalledWith(
-        expect.objectContaining({ model: 'claude-opus-4-7' }),
+        expect.objectContaining({ model: 'claude-opus-4-8' }),
       );
     });
 

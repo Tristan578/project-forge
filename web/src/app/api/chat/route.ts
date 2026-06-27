@@ -336,13 +336,13 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'messages array required' }, { status: 400 });
   }
 
-  // Premium model gate: claude-opus-4-7 is restricted to Pro tier. Reject
+  // Premium model gate: claude-opus-4-8 is restricted to Pro tier. Reject
   // before billing so non-Pro users requesting premium are not charged the
   // estimated cost. The gate only blocks the model — it does not silently
   // downgrade, so the client gets an explicit signal to update its UI.
   if (isPremiumModel(model) && auth.ctx.user.tier !== 'pro') {
     return Response.json(
-      { error: 'The premium model (Opus 4.7) requires a Pro subscription.' },
+      { error: 'The premium model (Opus 4.8) requires a Pro subscription.' },
       { status: 403 },
     );
   }
@@ -568,7 +568,7 @@ export async function POST(request: NextRequest) {
   // Tier gate: thinking mode (10k extra tokens per step) restricted to creator/pro,
   // consistent with the systemOverride gate. Prevents amplified token burn on free tiers.
   const canUseThinking = auth.ctx.user.tier === 'creator' || auth.ctx.user.tier === 'pro';
-  // Use the route's translated modelId (e.g. 'anthropic/claude-opus-4-7' for
+  // Use the route's translated modelId (e.g. 'anthropic/claude-opus-4-8' for
   // the gateway) when available, falling back to the bare canonical model.
   // Without this, the gateway path silently downgrades unmapped premium IDs to
   // Sonnet inside createSpawnforgeAgent — but billing already deducted at the

@@ -33,9 +33,9 @@ vi.mock('@/lib/ai/models', () => ({
   AI_MODELS: {
     chat: 'claude-sonnet-4.5',
     fast: 'claude-haiku-4-5',
-    deep: 'claude-opus-4-7',
+    deep: 'claude-opus-4-8',
     gatewayChat: 'anthropic/claude-sonnet-4.6',
-    gatewayDeep: 'anthropic/claude-opus-4-7',
+    gatewayDeep: 'anthropic/claude-opus-4-8',
   },
 }));
 
@@ -454,12 +454,12 @@ describe('streamViaSdk — provider selection', () => {
     expect(anthropic).not.toHaveBeenCalled();
   });
 
-  it('routes Opus deep-tier model through gateway as anthropic/claude-opus-4-7', async () => {
+  it('routes Opus deep-tier model through gateway as anthropic/claude-opus-4-8', async () => {
     await collectEvents(
-      streamViaSdk(gatewayRoute, simpleMessages, { model: 'claude-opus-4-7' }),
+      streamViaSdk(gatewayRoute, simpleMessages, { model: 'claude-opus-4-8' }),
     );
 
-    expect(gateway).toHaveBeenCalledWith('anthropic/claude-opus-4-7');
+    expect(gateway).toHaveBeenCalledWith('anthropic/claude-opus-4-8');
     expect(anthropic).not.toHaveBeenCalled();
   });
 
