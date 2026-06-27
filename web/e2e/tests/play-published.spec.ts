@@ -46,8 +46,9 @@ const PAGE_PATH = `/play/${FAKE_USER}/${FAKE_SLUG}`;
 test.describe('Play Published Game — data route @api', () => {
   test('unknown user/slug returns 404 (or 500 when DB unavailable)', async ({ request }) => {
     const response = await request.get(DATA_PATH, { maxRedirects: 0 });
-    // DB-less CI: resolve fails (404) or the DB is down (500). Never a 200.
-    expect([404, 500]).toContain(response.status());
+    // DB-less CI: resolve fails (404) or the DB is down (500), or 429 if the
+    // per-IP rate limiter (checked before resolution) trips. Never a 200.
+    expect([404, 429, 500]).toContain(response.status());
     expect(response.status()).not.toBe(200);
   });
 
