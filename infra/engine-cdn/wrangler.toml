@@ -1,0 +1,24 @@
+# engine-cdn — Cloudflare Worker that serves the SpawnForge WASM engine from the
+# `spawnforge-engine` R2 bucket at https://engine.spawnforge.ai/*.
+#
+# Security scoping (see worker.js header): this worker binds ONLY the
+# `spawnforge-engine` bucket and is GET/HEAD-only. The `spawnforge-assets`
+# bucket is signed-URL/server-side only and is deliberately NOT bound here, so it
+# is never reachable through this public edge.
+name = "engine-cdn"
+account_id = "0b949ff499d179e24dde841f71d6134f"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+# Route the engine CDN custom domain to this worker. The zone owns
+# spawnforge.ai; the worker handles every path under engine.spawnforge.ai.
+[[routes]]
+pattern = "engine.spawnforge.ai/*"
+zone_name = "spawnforge.ai"
+
+# Read-only binding to the engine bucket. The binding name MUST match
+# `env.ENGINE_BUCKET` in worker.js — a mismatch makes the binding undefined at
+# runtime with no compile error.
+[[r2_buckets]]
+binding = "ENGINE_BUCKET"
+bucket_name = "spawnforge-engine"
