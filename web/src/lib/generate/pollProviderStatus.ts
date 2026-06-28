@@ -5,9 +5,16 @@
  * `pollProviderStatus` replicates the EXACT status mapping each
  * `/api/generate/<type>/status` route performs — including the
  * `succeededButEmpty → failed` guard from #8757 — so the durable QStash
- * callback and the client poller agree on terminal state. The status-route
- * tests are the source of truth; the parity test in
- * `__tests__/pollProviderStatus.test.ts` pins these mappings against them.
+ * callback and the client poller agree on terminal state.
+ *
+ * MAINTENANCE CONTRACT: this file MUST be kept in sync with each
+ * `/api/generate/<type>/status` route BY HAND. There is NO automated
+ * cross-test that diffs this poller against the live routes — the suite in
+ * `__tests__/pollProviderStatus.test.ts` pins THIS file's normalized output
+ * against mocked provider clients, not against the route handlers. So if you
+ * change a status-route mapping, you MUST also update the matching
+ * `poll<Type>` function below (and its test), or the durable callback will
+ * silently disagree with the client poller on terminal state.
  */
 
 import { MeshyClient } from '@/lib/generate/meshyClient';

@@ -145,6 +145,28 @@ describe('publishGenerationCallback', () => {
     expect(publishJSON).not.toHaveBeenCalled();
     expect(mockCaptureMessage).toHaveBeenCalledWith(expect.stringContaining('unreachable'), 'warning');
   });
+
+  it('skips the publish for a 127.0.0.1 callback host (IPv4 loopback)', async () => {
+    process.env.QSTASH_TOKEN = 'tok';
+    process.env.NEXT_PUBLIC_APP_URL = 'http://127.0.0.1:3000';
+
+    await publishGenerationCallback(PAYLOAD, { delaySeconds: 30 });
+
+    expect(mockClient).not.toHaveBeenCalled();
+    expect(publishJSON).not.toHaveBeenCalled();
+    expect(mockCaptureMessage).toHaveBeenCalledWith(expect.stringContaining('unreachable'), 'warning');
+  });
+
+  it('skips the publish for an IPv6 loopback ([::1]) callback host', async () => {
+    process.env.QSTASH_TOKEN = 'tok';
+    // new URL('http://[::1]:3000').hostname === '[::1]' (bracketed), matching the guard.
+    process.env.NEXT_PUBLIC_APP_URL = 'http://[::1]:3000';
+
+    await publishGenerationCallback(PAYLOAD, { delaySeconds: 30 });
+
+    expect(publishJSON).not.toHaveBeenCalled();
+    expect(mockCaptureMessage).toHaveBeenCalledWith(expect.stringContaining('unreachable'), 'warning');
+  });
 });
 
 describe('verifyQstashSignature', () => {

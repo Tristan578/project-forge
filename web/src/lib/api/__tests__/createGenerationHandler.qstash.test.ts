@@ -43,6 +43,9 @@ vi.mock('@/lib/qstash/client', () => ({
   isQstashConfigured: vi.fn(() => true),
   publishGenerationCallback: vi.fn(async () => {}),
 }));
+// Mocked only to drive the cache HIT/MISS branches that gate the second after()
+// publish site. Inert for the no-cacheKeyParams tests (they never call it).
+vi.mock('@/lib/api/responseCache', () => ({ cachedGenerate: vi.fn() }));
 
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey } from '@/lib/keys/resolver';
@@ -50,6 +53,7 @@ import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLi
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { isQstashConfigured, publishGenerationCallback } from '@/lib/qstash/client';
+import { cachedGenerate } from '@/lib/api/responseCache';
 import { createGenerationHandler } from '../createGenerationHandler';
 
 const mockAuth = vi.mocked(authenticateRequest);
@@ -60,6 +64,7 @@ const mockSanitize = vi.mocked(sanitizePrompt);
 const mockCapture = vi.mocked(captureException);
 const mockConfigured = vi.mocked(isQstashConfigured);
 const mockPublish = vi.mocked(publishGenerationCallback);
+const mockCachedGenerate = vi.mocked(cachedGenerate);
 
 function makeRequest(body: Record<string, unknown>): NextRequest {
   return new NextRequest('http://localhost:3000/api/generate/model', {
@@ -89,6 +94,22 @@ function makeAsyncHandler(over: Partial<{
       providerJobId: over.providerJobId ?? ((r) => r.jobId),
       estimatedSeconds: over.estimatedSeconds,
     },
+  });
+}
+
+// Same as makeAsyncHandler but with cacheKeyParams, so the handler takes the
+// cached path (step 6b) — where the SECOND after() publish site lives, gated on
+// a cache MISS.
+function makeCachedAsyncHandler() {
+  return createGenerationHandler<{ prompt: string }, ModelResult>({
+    route: '/api/generate/model',
+    provider: 'elevenlabs',
+    operation: 'model_generation',
+    rateLimitKey: 'gen-model',
+    validate: (body) => ({ ok: true, params: { prompt: String(body.prompt ?? '') } }),
+    execute: async () => ({ jobId: 'task-123', provider: 'sdxl', status: 'pending' }),
+    cacheKeyParams: (p) => ({ prompt: p.prompt }),
+    asyncJob: { type: 'model', providerJobId: (r) => r.jobId },
   });
 }
 
@@ -188,6 +209,39 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     });
     const res = await plain(makeRequest({ prompt: 'a sound' }));
     expect(res.status).toBe(200);
+    await flushAfter();
+    expect(mockPublish).not.toHaveBeenCalled();
+  });
+
+  it('publishes on a cache MISS (durable callback armed for the new provider job)', async () => {
+    // A MISS runs the real executeFn (which sets the handler's cacheMiss marker)
+    // and reports cached: false → the second after() publish site fires.
+    mockCachedGenerate.mockImplementation(async (_op, _params, factory) => {
+      const result = await (factory as () => Promise<ModelResult>)();
+      return { cached: false, result };
+    });
+    const res = await makeCachedAsyncHandler()(makeRequest({ prompt: 'a castle' }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-Cache')).toBe('MISS');
+    // Runs post-response via after(), exactly like the non-cached path.
+    expect(mockPublish).not.toHaveBeenCalled();
+    await flushAfter();
+    expect(mockPublish).toHaveBeenCalledWith(
+      { userId: 'user-1', providerJobId: 'task-123', type: 'model', tokenUsageId: 'usage-1', attempt: 0 },
+      { delaySeconds: 30 },
+    );
+  });
+
+  it('does NOT publish on a cache HIT (re-served result — no new job to poll)', async () => {
+    // A HIT never runs executeFn, so cacheMiss stays undefined and the publish
+    // gate (`!cached && cacheMiss && …`) is false — nothing to poll.
+    mockCachedGenerate.mockResolvedValue({
+      cached: true,
+      result: { jobId: 'task-123', provider: 'sdxl', status: 'pending' },
+    });
+    const res = await makeCachedAsyncHandler()(makeRequest({ prompt: 'a castle' }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-Cache')).toBe('HIT');
     await flushAfter();
     expect(mockPublish).not.toHaveBeenCalled();
   });

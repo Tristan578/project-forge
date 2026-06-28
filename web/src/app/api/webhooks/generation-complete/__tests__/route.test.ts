@@ -108,6 +108,15 @@ describe('POST /api/webhooks/generation-complete — gating', () => {
     expect(mockResolve).not.toHaveBeenCalled();
   });
 
+  it('400s on a prototype-pollution type ("constructor" is not an own key)', async () => {
+    // isAsyncType uses a Set of Object.keys(...), so an inherited prototype key
+    // never validates — a forged 'constructor' type can't reach key resolution
+    // and mark a real in-flight job failed.
+    const res = await POST(makeReq(payload({ type: 'constructor' })));
+    expect(res.status).toBe(400);
+    expect(mockResolve).not.toHaveBeenCalled();
+  });
+
   it('400s when providerJobId is missing', async () => {
     const res = await POST(makeReq(payload({ providerJobId: '' })));
     expect(res.status).toBe(400);
@@ -138,6 +147,16 @@ describe('POST /api/webhooks/generation-complete — key resolution', () => {
     expect(res.status).toBe(200);
     expect(mockCapture).toHaveBeenCalled();
     expect(mockRefund).toHaveBeenCalledWith('user-1', 'usage-1');
+  });
+
+  it('finalizes a key-unavailable BYOK job WITHOUT a refund (tokenUsageId null)', async () => {
+    mockResolve.mockRejectedValue(new ApiKeyError('NO_KEY_CONFIGURED', 'gone'));
+    const res = await POST(makeReq(payload({ tokenUsageId: null })));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ finalized: 'failed', reason: 'key_unavailable' });
+    expect(mockUpdate).toHaveBeenCalledWith('job-1', 'user-1', expect.objectContaining({ status: 'failed' }));
+    // finalizeFailedAndRefund's `if (tokenUsageId)` guard skips the refund for a BYOK job.
+    expect(mockRefund).not.toHaveBeenCalled();
   });
 });
 
