@@ -1,5 +1,25 @@
 # web
 
+## 0.3.0
+
+### Minor Changes
+
+- [#8862](https://github.com/Tristan578/project-forge/pull/8862) [`c35c8c2`](https://github.com/Tristan578/project-forge/commit/c35c8c2769e3ffc1b6217deb5a9e028dbc40a250) Thanks [@Tristan578](https://github.com/Tristan578)! - ai: bump the premium/deep model tier from Opus 4.7 to Opus 4.8.
+
+  `AI_MODEL_PREMIUM` / `GATEWAY_MODEL_PREMIUM` (and the `AI_MODEL_DEEP` / `GATEWAY_MODEL_DEEP` aliases that follow them) now resolve to `claude-opus-4-8`, so the premium chat path and the deep-generation tier (GDD, world builder, cutscene — gated behind `NEXT_PUBLIC_USE_DEEP_GENERATION`) route to Opus 4.8. Same `$5/$25` per-1M pricing and 1M context as 4.7; no API or env changes.
+
+  Also updates the Vercel AI Gateway `MODEL_MAP` key so the gateway premium lookup resolves the new id (a stale key would have silently downgraded the premium path to Sonnet _after_ billing at the premium tier).
+
+### Patch Changes
+
+- [#8850](https://github.com/Tristan578/project-forge/pull/8850) [`3a09639`](https://github.com/Tristan578/project-forge/commit/3a096391230e07aef59532510e7c8bacb6ba65da) Thanks [@Tristan578](https://github.com/Tristan578)! - ci: retry `changeset version` in the Release workflow so a transient GitHub GraphQL flake no longer fires a spurious "Run Failed" notification.
+
+  The changelog generator (`@changesets/changelog-github`) fetches PR/author info from the GitHub GraphQL API per changeset; under load that request intermittently fails with `Invalid response body ... Premature close`, aborting the Version Packages job even though the release itself is unaffected. The `changeset:version` npm script now runs `scripts/changeset-version.sh`, which retries `changeset version` (changesets applies no files on that error, so a re-run is idempotent) before relocking — keeping the changelog's PR links while making the step resilient to the flake. Complements the per-job concurrency fix in [#8849](https://github.com/Tristan578/project-forge/issues/8849).
+
+- [#8849](https://github.com/Tristan578/project-forge/pull/8849) [`f710a53`](https://github.com/Tristan578/project-forge/commit/f710a5328e606c84daf68f39b0c3334c69a584d9) Thanks [@Tristan578](https://github.com/Tristan578)! - ci: scope the Release workflow's concurrency per-job so a rapid batch-merge no longer fires transient "Run Failed" notifications.
+
+  The `Version Packages` job now uses `cancel-in-progress: true` (it is idempotent — it only recreates `changeset-release/main` from current main — so only the latest run is needed), while `Tag and Release` keeps `cancel-in-progress: false` so a version's git tag / GitHub Release is never cancelled mid-publish. Previously a single workflow-level `cancel-in-progress: false` ran every push in a batch to completion, multiplying the chance of the benign "No commits between main and changeset-release/main" error (when a version PR merges with no newer changesets) and `@changesets/get-github-info` GraphQL flakes.
+
 ## 0.2.1
 
 ### Patch Changes
