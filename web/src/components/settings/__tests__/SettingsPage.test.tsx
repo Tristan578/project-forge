@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { UserProfile } from '@clerk/nextjs';
 import { SettingsPage } from '../SettingsPage';
 
 // ── Router & navigation mocks ──────────────────────────────────────────────
@@ -51,9 +52,16 @@ vi.mock('../AccountTab', () => ({
 
 // Clerk's prebuilt <UserProfile> (Security tab) is mocked because CI/E2E run in
 // Clerk passthrough mode (no keys → <ClerkProvider> is not mounted). Mirrors how
-// DashboardLayout/EditorLayout tests stub <UserButton>.
+// DashboardLayout/EditorLayout tests stub <UserButton>. The mock is a vi.fn that
+// reflects the `routing` prop onto data-routing so a test can assert the
+// routing="hash" guard (which keeps Clerk's internal nav from hijacking the
+// page's own ?tab= routing) actually reaches the component.
 vi.mock('@clerk/nextjs', () => ({
-  UserProfile: () => <div data-testid="clerk-user-profile">Clerk Security</div>,
+  UserProfile: vi.fn(({ routing }: { routing?: string }) => (
+    <div data-testid="clerk-user-profile" data-routing={routing}>
+      Clerk Security
+    </div>
+  )),
 }));
 
 describe('SettingsPage', () => {
@@ -120,7 +128,14 @@ describe('SettingsPage', () => {
   it('shows Clerk <UserProfile> when URL param is "security"', () => {
     mockSearchParamsGet.mockReturnValue('security');
     render(<SettingsPage />);
-    expect(screen.getAllByTestId('clerk-user-profile').length).toBeGreaterThan(0);
+    const profiles = screen.getAllByTestId('clerk-user-profile');
+    expect(profiles.length).toBeGreaterThan(0);
+    // routing="hash" is the critical guard: it scopes Clerk's internal navigation
+    // to the URL hash so it cannot hijack the page's own ?tab= query routing.
+    // Assert it actually reaches <UserProfile> (rendered attr + the real prop on
+    // the mock call) so a future edit that drops the prop fails here.
+    expect(profiles[0].getAttribute('data-routing')).toBe('hash');
+    expect(vi.mocked(UserProfile).mock.calls[0]?.[0]).toMatchObject({ routing: 'hash' });
   });
 
   it('falls back to profile tab for invalid URL param', () => {
