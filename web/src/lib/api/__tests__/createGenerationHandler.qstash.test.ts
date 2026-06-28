@@ -3,6 +3,21 @@ import { NextRequest } from 'next/server';
 
 vi.mock('server-only', () => ({}));
 
+// The handler defers the durable publish to Next.js `after()` so it never adds
+// latency to the user response. In a unit test the framework's after-queue
+// doesn't drain on its own, so we capture the scheduled callbacks and flush them
+// explicitly — which also lets us assert the publish is deferred, not inline.
+const { afterCallbacks } = vi.hoisted(() => ({ afterCallbacks: [] as Array<() => unknown> }));
+vi.mock('next/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('next/server')>();
+  return { ...actual, after: (cb: () => unknown) => { afterCallbacks.push(cb); } };
+});
+
+async function flushAfter(): Promise<void> {
+  const pending = afterCallbacks.splice(0);
+  for (const cb of pending) await cb();
+}
+
 // Same dependency doubles as createGenerationHandler.test.ts, plus the QStash
 // wrapper — this file isolates the PF-906 durable-callback wiring.
 vi.mock('@/lib/auth/api-auth', () => ({ authenticateRequest: vi.fn() }));
@@ -80,6 +95,7 @@ function makeAsyncHandler(over: Partial<{
 describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    afterCallbacks.length = 0;
     mockConfigured.mockReturnValue(true);
     mockAuth.mockResolvedValue({
       ok: true,
@@ -96,6 +112,10 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     const res = await makeAsyncHandler({ estimatedSeconds: 45 })(makeRequest({ prompt: 'a castle' }));
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({ jobId: 'task-123' });
+    // Runs post-response via after(): the response is fully formed before the
+    // publish executes, so it never blocks the user submit.
+    expect(mockPublish).not.toHaveBeenCalled();
+    await flushAfter();
     expect(mockPublish).toHaveBeenCalledWith(
       { userId: 'user-1', providerJobId: 'task-123', type: 'model', tokenUsageId: 'usage-1', attempt: 0 },
       { delaySeconds: 45 },
@@ -104,6 +124,7 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
 
   it('defaults the delay to 30s when estimatedSeconds is omitted', async () => {
     await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
+    await flushAfter();
     expect(mockPublish).toHaveBeenCalledWith(expect.anything(), { delaySeconds: 30 });
   });
 
@@ -114,6 +135,7 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     mockResolve.mockResolvedValue({ type: 'byok', key: 'user-key', metered: false, usageId: undefined });
     const res = await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
     expect(res.status).toBe(200);
+    await flushAfter();
     expect(mockPublish).toHaveBeenCalledWith(
       expect.objectContaining({ providerJobId: 'task-123', tokenUsageId: null }),
       expect.anything(),
@@ -124,6 +146,7 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     mockConfigured.mockReturnValue(false);
     const res = await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
     expect(res.status).toBe(200);
+    await flushAfter();
     expect(mockPublish).not.toHaveBeenCalled();
   });
 
@@ -131,7 +154,9 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     const handler = makeAsyncHandler({ provider: 'dalle3', providerJobId: (r) => (r.provider === 'sdxl' ? r.jobId : null) });
     const res = await handler(makeRequest({ prompt: 'a hero' }));
     expect(res.status).toBe(200);
+    await flushAfter();
     expect(mockPublish).not.toHaveBeenCalled();
+    expect(mockCapture).not.toHaveBeenCalled();
   });
 
   it('never fails the request when publishing throws (logs to Sentry)', async () => {
@@ -139,6 +164,7 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     const res = await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({ jobId: 'task-123' });
+    await flushAfter();
     expect(mockCapture).toHaveBeenCalled();
   });
 
@@ -146,6 +172,7 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     const handler = makeAsyncHandler({ providerJobId: () => { throw new Error('bad result shape'); } });
     const res = await handler(makeRequest({ prompt: 'a castle' }));
     expect(res.status).toBe(200);
+    await flushAfter();
     expect(mockPublish).not.toHaveBeenCalled();
     expect(mockCapture).toHaveBeenCalled();
   });
@@ -161,6 +188,7 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     });
     const res = await plain(makeRequest({ prompt: 'a sound' }));
     expect(res.status).toBe(200);
+    await flushAfter();
     expect(mockPublish).not.toHaveBeenCalled();
   });
 });

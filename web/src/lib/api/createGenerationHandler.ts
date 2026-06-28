@@ -16,7 +16,7 @@
  *   });
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import type { Provider } from '@/lib/db/schema';
@@ -405,8 +405,15 @@ export function createGenerationHandler<TParams, TResult>(
           { ttlSeconds: cacheTtlSeconds, userId }
         );
 
-        if (!cacheResult.cached && cacheMiss) {
-          await maybePublishAsyncCallback(cacheMiss.result, userId, cacheMiss.usageId);
+        if (!cacheResult.cached && cacheMiss && asyncJob && isQstashConfigured()) {
+          // Run the durable publish post-response: `after()` keeps the Vercel
+          // function alive so the publish never adds latency to — or can fail —
+          // the submit. maybePublishAsyncCallback is self-guarded (never throws),
+          // safe to fire-and-forget. Gated on asyncJob + QStash so the dormant
+          // path (and every non-async route) never touches `after()` at all —
+          // `after()` requires a request scope, which only exists at runtime.
+          const { result: missResult, usageId: missUsageId } = cacheMiss;
+          after(() => maybePublishAsyncCallback(missResult, userId, missUsageId));
         }
 
         const headers: Record<string, string> = {
@@ -445,7 +452,11 @@ export function createGenerationHandler<TParams, TResult>(
 
     try {
       const result = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost });
-      await maybePublishAsyncCallback(result, userId, usageId);
+      // Run the durable publish post-response (see cached path). Same asyncJob +
+      // QStash gate so the dormant/non-async path never touches `after()`.
+      if (asyncJob && isQstashConfigured()) {
+        after(() => maybePublishAsyncCallback(result, userId, usageId));
+      }
       return NextResponse.json(result, { status: successStatus });
     } catch (err) {
       // Refund tokens on provider failure

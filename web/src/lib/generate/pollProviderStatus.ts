@@ -14,7 +14,17 @@ import { MeshyClient } from '@/lib/generate/meshyClient';
 import { SunoClient } from '@/lib/generate/sunoClient';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 
-/** Async generation types that have a status route and a generation_jobs row. */
+/**
+ * Async generation types that have a status route and a `generation_jobs` row.
+ *
+ * `pixel-art` is intentionally EXCLUDED: it has no member in the
+ * `generation_type` DB enum (its route asserts `type: 'pixel-art'` → 400), so
+ * there is no `generation_jobs` row for a durable callback to finalize. Adding
+ * it here would force an enum migration for zero benefit — pixel-art stays on
+ * the client-poll path. Any new value added to this union MUST also (1) have a
+ * `generation_type` enum member, (2) map in `ASYNC_TYPE_TO_DB_CAPABILITY`
+ * below, and (3) be exercised by the parity test.
+ */
 export type AsyncGenerationType =
   | 'model'
   | 'texture'

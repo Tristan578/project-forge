@@ -40,6 +40,12 @@ import { DB_PROVIDER } from '@/lib/config/providers';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
+// This callback makes the same outbound provider-status HTTP calls the generate
+// routes make, so it gets the same execution budget (the generate routes export
+// maxDuration 60/180). Without it the route would inherit the framework default
+// and a slow provider poll could be killed mid-flight before it can re-arm.
+export const maxDuration = 60;
+
 const ROUTE = '/api/webhooks/generation-complete';
 /** Max times the callback re-arms itself before giving up and refunding. */
 const MAX_ATTEMPTS = 60;

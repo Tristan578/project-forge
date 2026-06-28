@@ -16,7 +16,12 @@ vi.mock('@/lib/config/validateEnv', () => ({
   getOptionalEnv: (key: string) => process.env[key] ?? 'http://localhost:3000',
 }));
 
+// captureMessage is a no-op when SENTRY_DSN is unset; we assert it's called on
+// the unreachable-URL guard path.
+vi.mock('@/lib/monitoring/sentry-server', () => ({ captureMessage: vi.fn() }));
+
 import { Client, Receiver } from '@upstash/qstash';
+import { captureMessage } from '@/lib/monitoring/sentry-server';
 import {
   isQstashConfigured,
   publishGenerationCallback,
@@ -27,6 +32,7 @@ import {
 
 const mockClient = vi.mocked(Client);
 const mockReceiver = vi.mocked(Receiver);
+const mockCaptureMessage = vi.mocked(captureMessage);
 
 const PAYLOAD: GenerationCallbackPayload = {
   userId: 'user-1',
@@ -84,7 +90,7 @@ describe('publishGenerationCallback', () => {
 
     await publishGenerationCallback(PAYLOAD, { delaySeconds: 30 });
 
-    expect(mockClient).toHaveBeenCalledWith({ token: 'tok' });
+    expect(mockClient).toHaveBeenCalledWith({ token: 'tok', retry: { retries: 2 } });
     expect(publishJSON).toHaveBeenCalledWith({
       url: `https://app.spawnforge.ai${GENERATION_CALLBACK_PATH}`,
       body: PAYLOAD,
@@ -105,12 +111,39 @@ describe('publishGenerationCallback', () => {
 
   it('rounds fractional delays and clamps negatives to 0', async () => {
     process.env.QSTASH_TOKEN = 'tok';
+    process.env.NEXT_PUBLIC_APP_URL = 'https://app.spawnforge.ai';
 
     await publishGenerationCallback(PAYLOAD, { delaySeconds: 14.6 });
     expect(publishJSON).toHaveBeenLastCalledWith(expect.objectContaining({ delay: 15 }));
 
     await publishGenerationCallback(PAYLOAD, { delaySeconds: -5 });
     expect(publishJSON).toHaveBeenLastCalledWith(expect.objectContaining({ delay: 0 }));
+  });
+
+  it('skips the publish with a Sentry warning when configured but the callback URL is unreachable', async () => {
+    process.env.QSTASH_TOKEN = 'tok';
+    // NEXT_PUBLIC_APP_URL is unset (cleared in beforeEach) → getOptionalEnv
+    // resolves to the localhost default → a loopback host QStash could never
+    // deliver to. The publish must be skipped (no message burned) and the
+    // mis-set env surfaced, NOT silently black-holed.
+    await publishGenerationCallback(PAYLOAD, { delaySeconds: 30 });
+
+    expect(mockClient).not.toHaveBeenCalled();
+    expect(publishJSON).not.toHaveBeenCalled();
+    expect(mockCaptureMessage).toHaveBeenCalledWith(
+      expect.stringContaining('unreachable'),
+      'warning',
+    );
+  });
+
+  it('skips the publish for a *.localhost callback host (Portless dev origin)', async () => {
+    process.env.QSTASH_TOKEN = 'tok';
+    process.env.NEXT_PUBLIC_APP_URL = 'http://spawnforge.localhost:1355';
+
+    await publishGenerationCallback(PAYLOAD, { delaySeconds: 30 });
+
+    expect(publishJSON).not.toHaveBeenCalled();
+    expect(mockCaptureMessage).toHaveBeenCalledWith(expect.stringContaining('unreachable'), 'warning');
   });
 });
 
@@ -134,7 +167,13 @@ describe('verifyQstashSignature', () => {
 
     expect(await verifyQstashSignature('{"a":1}', 'sig')).toBe(true);
     expect(mockReceiver).toHaveBeenCalledWith({ currentSigningKey: 'cur', nextSigningKey: 'next' });
-    expect(verify).toHaveBeenCalledWith({ body: '{"a":1}', signature: 'sig' });
+    // The destination-URL claim is verified too: NEXT_PUBLIC_APP_URL is unset in
+    // this test, so getCallbackUrl() resolves to the localhost default.
+    expect(verify).toHaveBeenCalledWith({
+      body: '{"a":1}',
+      signature: 'sig',
+      url: `http://localhost:3000${GENERATION_CALLBACK_PATH}`,
+    });
   });
 
   it('fails closed (returns false) when the receiver throws on a bad signature', async () => {
