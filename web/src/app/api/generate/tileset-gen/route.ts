@@ -61,4 +61,10 @@ export const POST = createGenerationHandler<
       estimatedSeconds: 60,
     };
   },
+  // Durable server-side completion + refund (PF-906). Dormant unless QStash set.
+  asyncJob: {
+    type: 'tileset',
+    providerJobId: (result) => result.jobId,
+    estimatedSeconds: 60,
+  },
 });

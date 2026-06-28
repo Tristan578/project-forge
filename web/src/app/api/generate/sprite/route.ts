@@ -108,4 +108,12 @@ export const POST = createGenerationHandler<
       usageId: ctx.usageId,
     };
   },
+  // Durable server-side completion + refund (PF-906). Dormant unless QStash set.
+  // DALL-E sprites complete synchronously (inline image) and need no polling —
+  // only SDXL (Replicate) returns a pollable prediction id.
+  asyncJob: {
+    type: 'sprite',
+    providerJobId: (result) => (result.provider === 'sdxl' ? result.jobId : null),
+    estimatedSeconds: SPRITE_ESTIMATED_SECONDS.sdxl,
+  },
 });
