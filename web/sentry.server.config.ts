@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/nextjs';
-import { configureSentryFingerprinting, scrubSentryEvent } from '@/lib/monitoring/sentryConfig';
+import { configureSentryFingerprinting, scrubSentryEvent, scrubSentryLog } from '@/lib/monitoring/sentryConfig';
 
 const DSN = process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -39,8 +39,19 @@ if (DSN) {
       stackFrameVariables: false,
     },
     enableLogs: true,
+    // 10.61 flipped `streamGenAiSpans` ON by default (gen_ai prompt/completion spans
+    // streamed as separate untruncated v2 envelope items). Pin it OFF to preserve the
+    // pre-bump behavior and keep span volume/cost flat — opting in is a deliberate
+    // observability decision to make alongside the dedicated LLM-observability work,
+    // not a silently-inherited upstream default.
+    streamGenAiSpans: false,
     beforeSend: scrubSentryEvent,
     beforeSendTransaction: scrubSentryEvent,
+    // `enableLogs` routes Sentry.logger.* through a SEPARATE pipeline that
+    // beforeSend/beforeSendTransaction (and thus scrubSentryEvent) never touch.
+    // scrubSentryLog closes that channel so a stray log call can't ship a
+    // prompt/BYOK key/PII unredacted. Keep this wired wherever enableLogs is on.
+    beforeSendLog: scrubSentryLog,
 
     integrations: [
       // Captures AI token usage, model IDs, latency, and errors for every
@@ -49,11 +60,14 @@ if (DSN) {
       Sentry.anthropicAIIntegration({
         recordInputs: !IS_PROD,
         recordOutputs: !IS_PROD,
+        // 10.61 flipped the truncation default OFF; restore it so the dev/preview
+        // spans (where recordInputs/Outputs are on) stay size-capped as before.
+        enableTruncation: true,
       }),
       // Captures AI SDK (Vercel AI) spans: model name, token usage, latency,
       // and tool call traces for every streamText/generateText call.
       // Requires experimental_telemetry: { isEnabled: true } on each call.
-      Sentry.vercelAIIntegration(),
+      Sentry.vercelAIIntegration({ enableTruncation: true }),
       // Auto-collects runtime health metrics: RSS, heap, CPU, event loop.
       // Enabled on Vercel production + preview only.
       ...(process.env.VERCEL_ENV === 'production' || process.env.VERCEL_ENV === 'preview'

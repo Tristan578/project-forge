@@ -60,7 +60,7 @@
     "@google/generative-ai": "^0.24.1",
     "@monaco-editor/react": "^4.7.0",
     "@neondatabase/serverless": "^1.1.0",
-    "@sentry/nextjs": "^10.59.0",
+    "@sentry/nextjs": "^10.62.0",
     "@spawnforge/ui": "*",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
@@ -77,13 +77,13 @@
     "lucide-react": "^1.0.1",
     "next": "^16.2.9",
     "next-intl": "^4.13.0",
-    "posthog-js": "^1.392.0",
+    "posthog-js": "^1.395.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
-    "stripe": "^22.2.3",
+    "stripe": "^22.3.0",
     "svix": "^1.96.0",
     "web-vitals": "^5.1.0",
     "zod": "^4.4.3",
@@ -93,7 +93,7 @@
     "@axe-core/playwright": "^4.11.3",
     "@electric-sql/pglite": "^0.5.3",
     "@next/bundle-analyzer": "^16.2.9",
-    "@playwright/test": "^1.61.0",
+    "@playwright/test": "^1.61.1",
     "@swc/helpers": "^0.5.23",
     "@tailwindcss/postcss": "^4.3.1",
     "@testing-library/dom": "^10.4.1",
@@ -113,7 +113,7 @@
     "portless": "^0.14.0",
     "tailwindcss": "^4",
     "typescript": "^6",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   },
   "optionalDependencies": {
     "@types/trusted-types": "^2.0.7"
