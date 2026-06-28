@@ -2,24 +2,43 @@
 
 import { useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { User, Coins, Key, CreditCard, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { User, Coins, Key, CreditCard, Shield, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { UserProfile } from '@clerk/nextjs';
 import { ProfileTab } from './ProfileTab';
 import { TokenDashboard } from './TokenDashboard';
 import { ApiKeyManager } from './ApiKeyManager';
 import { BillingTab } from './BillingTab';
 import { AccountTab } from './AccountTab';
 
-type Tab = 'profile' | 'tokens' | 'keys' | 'billing' | 'account';
+type Tab = 'profile' | 'tokens' | 'keys' | 'billing' | 'security' | 'account';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'profile', label: 'Profile', icon: <User size={16} /> },
   { id: 'tokens', label: 'Tokens', icon: <Coins size={16} /> },
   { id: 'keys', label: 'API Keys', icon: <Key size={16} /> },
   { id: 'billing', label: 'Billing', icon: <CreditCard size={16} /> },
+  { id: 'security', label: 'Security', icon: <Shield size={16} /> },
   { id: 'account', label: 'Account', icon: <AlertTriangle size={16} /> },
 ];
 
 const VALID_TABS = new Set<string>(TABS.map((t) => t.id));
+
+/**
+ * Surfaces Clerk's prebuilt account-management UI — its Security section covers
+ * Two-step verification (TOTP authenticator + backup codes) and Passkeys once the
+ * matching Clerk Dashboard toggles are enabled. `routing="hash"` keeps Clerk's
+ * internal navigation in the URL hash so it does not collide with this page's own
+ * `?tab=` query-param routing. The dark theme is inherited from the app-level
+ * <ClerkProvider appearance={{ theme: dark }}> (do NOT reintroduce baseTheme —
+ * removed in Clerk 7.5).
+ */
+function SecurityTab() {
+  return (
+    <div className="p-4 sm:p-6">
+      <UserProfile routing="hash" />
+    </div>
+  );
+}
 
 export function SettingsPage() {
   const router = useRouter();
@@ -49,6 +68,7 @@ export function SettingsPage() {
       case 'tokens': return <TokenDashboard />;
       case 'keys': return <ApiKeyManager />;
       case 'billing': return <BillingTab />;
+      case 'security': return <SecurityTab />;
       case 'account': return <AccountTab />;
     }
   };
