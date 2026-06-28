@@ -7,14 +7,17 @@
  * `succeededButEmpty → failed` guard from #8757 — so the durable QStash
  * callback and the client poller agree on terminal state.
  *
- * MAINTENANCE CONTRACT: this file MUST be kept in sync with each
- * `/api/generate/<type>/status` route BY HAND. There is NO automated
- * cross-test that diffs this poller against the live routes — the suite in
- * `__tests__/pollProviderStatus.test.ts` pins THIS file's normalized output
- * against mocked provider clients, not against the route handlers. So if you
- * change a status-route mapping, you MUST also update the matching
- * `poll<Type>` function below (and its test), or the durable callback will
- * silently disagree with the client poller on terminal state.
+ * MAINTENANCE CONTRACT: this file MUST stay in sync with each
+ * `/api/generate/<type>/status` route. That invariant is enforced
+ * automatically by `__tests__/pollProviderStatus.parity.test.ts`, which feeds
+ * the SAME mocked provider response to both this poller and the matching route
+ * `GET` handler and asserts they agree on the terminal `status` and the
+ * failure message for every case. So if you change a status-route mapping you
+ * MUST also update the matching `poll<Type>` function below — otherwise the
+ * parity suite fails CI rather than letting the durable callback silently
+ * disagree with the client poller. (The companion
+ * `__tests__/pollProviderStatus.test.ts` additionally pins this file's
+ * normalized output branch by branch against mocked provider clients.)
  */
 
 import { MeshyClient } from '@/lib/generate/meshyClient';

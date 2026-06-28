@@ -73,9 +73,12 @@ path does, guarded against clobbering a terminal status).
 
 ## Maintenance note
 
-`web/src/lib/generate/pollProviderStatus.ts` hand-mirrors each
-`/api/generate/<type>/status` route's terminal-state mapping. There is **no**
-automated cross-test between the poller and the live routes, so if you change a
-status-route mapping you must update the matching `poll<Type>` function (and its
-test) or the durable callback will disagree with the client poller. See the
-maintenance-contract comment at the top of that file.
+`web/src/lib/generate/pollProviderStatus.ts` mirrors each
+`/api/generate/<type>/status` route's terminal-state mapping. A parity suite
+(`web/src/lib/generate/__tests__/pollProviderStatus.parity.test.ts`) enforces
+this: it feeds the same mocked provider response to both the poller and the
+matching route `GET` handler and asserts they agree on the mapped status and
+failure message for every terminal case. If you change a status-route mapping,
+update the matching `poll<Type>` function (and its unit test) or the parity
+suite fails CI — the durable callback can no longer silently disagree with the
+client poller. See the maintenance-contract comment at the top of that file.
