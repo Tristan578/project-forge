@@ -62,6 +62,7 @@
     "@neondatabase/serverless": "^1.1.0",
     "@sentry/nextjs": "^10.62.0",
     "@spawnforge/ui": "*",
+    "@upstash/qstash": "^2.11.1",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
     "@vercel/analytics": "^2.0.1",
