@@ -372,6 +372,63 @@ export function configureSentryFingerprinting(): void {
  */
 export const scrubSentryEvent = scrubEvent;
 
+/**
+ * `beforeSendLog` hook for every Sentry.init that sets `enableLogs: true`.
+ *
+ * Sentry Logs (`Sentry.logger.*`) travel through a SEPARATE delivery pipeline
+ * from events — `beforeSend` / `beforeSendTransaction` (and therefore
+ * {@link scrubEvent}) never see a log. Without this hook a stray
+ * `Sentry.logger.info(prompt)` / `logger.error('key=' + apiKey)` would ship the
+ * value unredacted, bypassing the F03/F04 scrubbing posture. Scrub the log body
+ * and structured attributes here, reusing the same {@link scrubString} value
+ * patterns and {@link deepScrub} key/value redaction as the event path.
+ *
+ * Two SDK-specific traps are handled explicitly:
+ *   - `Sentry.logger.fmt`…`` returns a boxed `String` object (`typeof 'object'`),
+ *     NOT a primitive; the SDK renders `String(message)` into the transmitted log
+ *     body AFTER this hook runs, so a plain `typeof === 'string'` guard would let
+ *     the interpolated value (PII / a key) through. Coerce + scrub the rendered
+ *     form for any non-string message.
+ *   - the active scope's `username` is flattened by the SDK into a `user.name`
+ *     attribute, which {@link deepScrub}'s key regex does not match (it catches
+ *     `user.email`, not `name`) — redacted here for PII parity with
+ *     {@link scrubEvent}'s `delete user.username`. `user.id` is kept for
+ *     correlation, as in {@link scrubEvent}.
+ *
+ * Mutates in place and returns the same log (generic so it stays a drop-in for
+ * Sentry's `beforeSendLog`, which is typed `(log: Log) => Log | null`, without
+ * importing the non-exported `Log` type).
+ */
+function scrubLog<T extends { message?: unknown; attributes?: Record<string, unknown> }>(log: T): T {
+  if (typeof log.message === 'string') {
+    // `scrubString` returns a plain `string`; the cast restores the caller's
+    // (possibly branded `ParameterizedString`) message type — required, not
+    // redundant.
+    log.message = scrubString(log.message) as T['message'];
+  } else if (log.message != null) {
+    // `logger.fmt`…`` messages are boxed `String` objects; the SDK ships
+    // `String(message)` as the body after this hook, so scrub the rendered form.
+    // (The template values are also copied to `sentry.message.parameter.N`
+    // attributes, scrubbed by deepScrub below — this closes the rendered-body path.)
+    log.message = scrubString(String(log.message)) as T['message'];
+  }
+  if (log.attributes) {
+    const attrs = deepScrub(log.attributes) as Record<string, unknown>;
+    for (const key of ['user.name', 'user.username']) {
+      if (key in attrs) attrs[key] = REDACTED;
+    }
+    log.attributes = attrs as T['attributes'];
+  }
+  return log;
+}
+
+/**
+ * `beforeSendLog` hook for every Sentry.init with logs enabled. Re-exported
+ * under a stable name so the init files import a single symbol (mirrors
+ * {@link scrubSentryEvent}).
+ */
+export const scrubSentryLog = scrubLog;
+
 // Export helpers for unit testing
 export {
   fingerprintEvent,
@@ -385,6 +442,7 @@ export {
   isWasmError,
   isGenerationError,
   scrubEvent,
+  scrubLog,
   scrubString,
   deepScrub,
 };

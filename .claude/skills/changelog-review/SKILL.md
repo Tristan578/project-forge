@@ -21,8 +21,8 @@ You are reviewing changelogs and release notes for SpawnForge's dependency stack
 | System | Changelog Source | Current Version |
 |--------|-----------------|-----------------|
 | Vercel Platform | https://vercel.com/changelog | N/A (platform) |
-| Sentry | https://github.com/getsentry/sentry-javascript/releases | @sentry/nextjs ^10.48.0 |
-| PostHog | https://github.com/PostHog/posthog-js/releases | posthog-js ^1.367.0 |
+| Sentry | https://github.com/getsentry/sentry-javascript/releases | @sentry/nextjs ^10.62.0 |
+| PostHog | https://github.com/PostHog/posthog-js/releases | posthog-js ^1.395.0 |
 | Anthropic (Claude API) | https://docs.anthropic.com/en/docs/about-claude/models | AI SDK provider |
 | Cloudflare | https://developers.cloudflare.com/changelog/ | R2 + Workers |
 | Upstash | https://github.com/upstash/redis-js/releases | @upstash/redis ^1.37.0 |
@@ -36,7 +36,7 @@ You are reviewing changelogs and release notes for SpawnForge's dependency stack
 |---------|-----------------|-----------------|
 | Next.js | https://github.com/vercel/next.js/releases | ^16.2.3 |
 | Clerk | https://github.com/clerk/javascript/releases | @clerk/nextjs ^7.0.12 |
-| Stripe | https://github.com/stripe/stripe-node/releases | stripe ^22.0.1 |
+| Stripe | https://github.com/stripe/stripe-node/releases | stripe ^22.3.0 |
 | AI SDK | https://github.com/vercel/ai/releases | ai ^6.0.158 |
 | Drizzle ORM | https://github.com/drizzle-team/drizzle-orm/releases | drizzle-orm 0.45.2 |
 | Neon Serverless | https://github.com/neondatabase/serverless/releases | @neondatabase/serverless ^1.0.2 |
@@ -48,8 +48,8 @@ You are reviewing changelogs and release notes for SpawnForge's dependency stack
 | Library | Changelog Source | Current Version |
 |---------|-----------------|-----------------|
 | TypeScript | https://github.com/microsoft/TypeScript/releases | typescript ^6 |
-| Vitest | https://github.com/vitest-dev/vitest/releases | vitest ^4.1.4 |
-| Playwright | https://github.com/microsoft/playwright/releases | @playwright/test ^1.59.1 |
+| Vitest | https://github.com/vitest-dev/vitest/releases | vitest ^4.1.9 |
+| Playwright | https://github.com/microsoft/playwright/releases | @playwright/test ^1.61.1 |
 | ESLint | https://github.com/eslint/eslint/releases | eslint ^9 |
 | Tailwind CSS | https://github.com/tailwindlabs/tailwindcss/releases | tailwindcss ^4 |
 | Turborepo | https://github.com/vercel/turborepo/releases | turbo ^2.5.4 |
@@ -186,4 +186,4 @@ GitHub is a primary dependency (CI/CD, issue tracking, PR workflows, CLI). Check
 
 ## References
 
-- See [version-pins.md](references/version-pins.md) — Documents all version pins with the upgrade blockers: stripe ^20.4.1, wasm-bindgen =0.2.108, Next.js 16.x, Bevy 0.18, upload/download-artifact v4. Includes an upgrade decision matrix and pre-upgrade audit checklists for each pinned dependency
+- See [version-pins.md](references/version-pins.md) — Documents all version pins with the upgrade blockers: stripe ^22.3.0, wasm-bindgen =0.2.108, Next.js 16.x, Bevy 0.18, upload/download-artifact v4. Includes an upgrade decision matrix and pre-upgrade audit checklists for each pinned dependency

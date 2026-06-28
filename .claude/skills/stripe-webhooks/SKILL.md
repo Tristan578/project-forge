@@ -31,4 +31,4 @@ neon-http driver throws. Use `getNeonSql()` → `neonSql.transaction([...stateme
 ## References
 - `web/src/app/api/stripe/webhook/route.ts` — the live webhook handler implementing the patterns above
 - `web/src/lib/tokens/service.ts` — `refundTokens()` idempotency + balance deduction
-- Stripe API version is pinned to `2026-05-27.dahlia` in `web/src/lib/billing/stripe-client.ts` (must match the installed SDK)
+- Stripe API version is pinned to `2026-06-24.dahlia` in `web/src/lib/billing/stripe-client.ts` (must match the installed SDK)

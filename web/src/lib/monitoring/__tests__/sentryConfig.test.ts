@@ -21,6 +21,7 @@ import {
   isWasmError,
   isGenerationError,
   scrubEvent,
+  scrubSentryLog,
   scrubString,
   deepScrub,
 } from '../sentryConfig';
@@ -647,5 +648,95 @@ describe('scrubString — false-positive & linearity guards (audit review)', () 
     // unbounded quantifier; the RFC-bounded patterns return promptly and unchanged.
     const long = 'a'.repeat(100_000);
     expect(scrubString(long)).toBe(long);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// scrubSentryLog — beforeSendLog hook
+// Sentry Logs (enableLogs) bypass beforeSend / scrubEvent entirely, so the log
+// body + structured attributes must be scrubbed on their own pipeline.
+// ---------------------------------------------------------------------------
+
+describe('scrubSentryLog', () => {
+  it('redacts secret-looking values in the log message', () => {
+    const log = scrubSentryLog({
+      level: 'error',
+      message: 'generation failed for key=sk-ant-api03-AbCdEf0123456789xyz',
+    });
+    expect(log.message).toBe('generation failed for key=[REDACTED_API_KEY]');
+  });
+
+  it('redacts PII (email + IP) in the log message', () => {
+    const log = scrubSentryLog({
+      level: 'info',
+      message: 'user nolantj@live.com from 192.168.1.42',
+    });
+    expect(log.message).toBe('user [REDACTED_EMAIL] from [REDACTED_IP]');
+  });
+
+  it('redacts sensitive keys and secret values in structured attributes', () => {
+    const log = scrubSentryLog({
+      level: 'warning',
+      message: 'request rejected',
+      attributes: {
+        apiKey: 'sk-ant-api03-anything',
+        note: 'retry from 10.0.0.1',
+        prompt: 'contact nolantj@live.com',
+      },
+    });
+    const attrs = log.attributes as Record<string, string>;
+    expect(attrs.apiKey).toBe('[REDACTED]'); // sensitive key → value redacted wholesale
+    expect(attrs.note).toBe('retry from [REDACTED_IP]'); // innocuous key → value scrubbed
+    expect(attrs.prompt).toBe('contact [REDACTED_EMAIL]');
+  });
+
+  it('leaves a clean log untouched and returns the same object (mutates in place)', () => {
+    const input = { level: 'info', message: 'spawn_entity ok at frame 12' };
+    const out = scrubSentryLog(input);
+    expect(out).toBe(input); // same reference — drop-in for Sentry's beforeSendLog
+    expect(out.message).toBe('spawn_entity ok at frame 12');
+  });
+
+  it('tolerates a log with no attributes', () => {
+    const input: { level: string; message: string; attributes?: Record<string, unknown> } = {
+      level: 'debug',
+      message: 'tick',
+    };
+    const log = scrubSentryLog(input);
+    expect(log.attributes).toBeUndefined();
+  });
+
+  it('redacts a parameterized (boxed String) fmt message — the rendered body the SDK ships', () => {
+    // `Sentry.logger.fmt`…`` returns a boxed String object (typeof 'object'), not
+    // a primitive, and the SDK ships `String(message)` as the body AFTER
+    // beforeSendLog. A plain `typeof === 'string'` guard would skip it and leak
+    // the interpolated PII. Mirror the real shape (boxed String + template props).
+    const boxed = Object.assign(new String('gen failed for nolantj@live.com from 192.168.1.42'), {
+      __sentry_template_string__: 'gen failed for %s from %s',
+      __sentry_template_values__: ['nolantj@live.com', '192.168.1.42'],
+    });
+    const out = scrubSentryLog({ level: 'error', message: boxed as unknown as string });
+    expect(String(out.message)).toBe('gen failed for [REDACTED_EMAIL] from [REDACTED_IP]');
+  });
+
+  it('redacts user.name / user.username attributes the SDK flattens from scope (PII parity with scrubEvent)', () => {
+    // The SDK copies the active scope's `username` into a `user.name` log
+    // attribute; deepScrub's key regex catches `user.email` but not `user.name`,
+    // so it must be redacted explicitly — matching scrubEvent's `delete username`.
+    const out = scrubSentryLog({
+      level: 'info',
+      message: 'authenticated',
+      attributes: {
+        'user.id': 'u_123',
+        'user.email': 'nolantj@live.com',
+        'user.name': 'tristan_nolan',
+        'user.username': 'tristan_nolan',
+      },
+    });
+    const attrs = out.attributes as Record<string, string>;
+    expect(attrs['user.name']).toBe('[REDACTED]');
+    expect(attrs['user.username']).toBe('[REDACTED]');
+    expect(attrs['user.email']).toBe('[REDACTED]'); // sensitive key → redacted by deepScrub
+    expect(attrs['user.id']).toBe('u_123'); // kept for correlation, as in scrubEvent
   });
 });

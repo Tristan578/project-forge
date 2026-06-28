@@ -81,7 +81,7 @@ Per-provider inventory for `capability-review`. For each provider: the **changel
 ### Stripe — `stripe`
 - Releases: https://github.com/stripe/stripe-node/releases · API changelog: https://docs.stripe.com/changelog
 - Pricing: https://stripe.com/pricing (+ Tax, Radar, Billing as separate line items)
-- We currently wire: Checkout, subscriptions (4 tiers), webhooks, atomic-CTE refunds, customer portal. SDK `22.x`, API `2026-05-27.dahlia` (pinned literal in `stripe-client.ts`).
+- We currently wire: Checkout, subscriptions (4 tiers), webhooks, atomic-CTE refunds, customer portal. SDK `22.x`, API `2026-06-24.dahlia` (pinned literal in `stripe-client.ts`).
 - Opportunity surface: **Billing meters / usage-based** (token overage billing), Tax, Radar (fraud), entitlements API, adaptive pricing, portal config.
 - Grep markers: `stripe.checkout`, `stripe.subscriptions`, `stripe.billing.meters` / `billing/meters`, `stripe.tax` / `automatic_tax`, `radar`, `entitlements`.
 

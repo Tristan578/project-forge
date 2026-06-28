@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/nextjs';
-import { configureSentryFingerprinting, scrubSentryEvent } from '@/lib/monitoring/sentryConfig';
+import { configureSentryFingerprinting, scrubSentryEvent, scrubSentryLog } from '@/lib/monitoring/sentryConfig';
 
 const DSN = process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -35,6 +35,10 @@ if (DSN) {
     enableLogs: true,
     beforeSend: scrubSentryEvent,
     beforeSendTransaction: scrubSentryEvent,
+    // Sentry Logs bypass beforeSend/scrubSentryEvent — scrub them on their own
+    // pipeline so a stray Sentry.logger.* call can't leak secrets/PII (see
+    // sentry.server.config.ts for the full rationale).
+    beforeSendLog: scrubSentryLog,
   });
 
   configureSentryFingerprinting();

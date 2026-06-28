@@ -465,3 +465,55 @@ describe('F03/F04 (#8778): Sentry dataCollection opt-out must stay exhaustive', 
     },
   );
 });
+
+describe('Sentry Logs scrubber gap: enableLogs requires beforeSendLog: scrubSentryLog', () => {
+  /**
+   * `enableLogs: true` routes `Sentry.logger.*` calls through a SEPARATE
+   * delivery pipeline (`beforeSendLog`) that `beforeSend` / `beforeSendTransaction`
+   * — and therefore `scrubSentryEvent` — never touch. Without a `beforeSendLog`
+   * scrubber, a stray log call could ship a prompt, BYOK key, or PII unredacted,
+   * bypassing the F03/F04 posture. This guard ties the requirement to its trigger:
+   * ANY init config that turns logs on must also wire the log scrubber. All three
+   * configs currently enable logs, so all three must carry it.
+   */
+  const CONFIG_FILES = [
+    'sentry.server.config.ts',
+    'sentry.edge.config.ts',
+    'instrumentation-client.ts',
+  ] as const;
+
+  function stripComments(src: string): string {
+    return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  }
+
+  async function readConfig(file: string): Promise<string> {
+    const fs = await import('fs');
+    const path = await import('path');
+    const raw = fs.readFileSync(path.resolve(process.cwd(), file), 'utf-8');
+    return stripComments(raw);
+  }
+
+  it.each(CONFIG_FILES)(
+    '%s wires beforeSendLog: scrubSentryLog whenever it enables logs',
+    async (file) => {
+      const content = await readConfig(file);
+      if (content.includes('enableLogs: true')) {
+        expect(
+          content,
+          `${file} enables Sentry Logs but does not route them through scrubSentryLog — Sentry.logger.* would bypass scrubSentryEvent`,
+        ).toContain('beforeSendLog: scrubSentryLog');
+      }
+    },
+  );
+
+  it('keeps the conditional guard non-vacuous (at least one config still enables logs)', async () => {
+    // If a future edit turned logs OFF in every config, the conditional guard
+    // above would pass vacuously and silently stop protecting anything. Assert
+    // the trigger is still live so the guard keeps biting; today all three enable
+    // logs.
+    const enabled = await Promise.all(
+      CONFIG_FILES.map(async (f) => (await readConfig(f)).includes('enableLogs: true')),
+    );
+    expect(enabled.filter(Boolean).length).toBeGreaterThan(0);
+  });
+});
