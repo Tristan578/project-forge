@@ -28,11 +28,14 @@ vi.mock('@/lib/db/schema', () => ({
 }));
 
 vi.mock('drizzle-orm', () => ({
-  eq: vi.fn((col: string, val: string) => ({ col, val })),
+  eq: vi.fn((col: string, val: unknown) => ({ op: 'eq', col, val })),
+  and: vi.fn((...clauses: unknown[]) => ({ op: 'and', clauses })),
+  notInArray: vi.fn((col: string, vals: unknown[]) => ({ op: 'notInArray', col, vals })),
 }));
 
-import { createJobRecord, updateJobStatus } from '../jobRecord';
+import { createJobRecord, updateJobStatus, updateJobStatusByProviderJob } from '../jobRecord';
 import { getDb } from '@/lib/db/client';
+import { and, eq, notInArray } from 'drizzle-orm';
 
 const mockInsert = vi.fn();
 const mockValues = vi.fn();
@@ -167,5 +170,47 @@ describe('updateJobStatus', () => {
 
     const setArg = mockSet.mock.calls[0][0];
     expect(setArg.resultMeta).toEqual({ vertices: 5000, format: 'glb' });
+  });
+});
+
+describe('updateJobStatusByProviderJob', () => {
+  it('guards the WHERE on owner + provider job id + non-terminal status', async () => {
+    await updateJobStatusByProviderJob('meshy-abc', 'user-1', {
+      status: 'completed',
+      resultUrl: 'https://example.com/model.glb',
+    });
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockWhere).toHaveBeenCalledTimes(1);
+
+    // Cross-tenant guard: BOTH the provider job id AND the owner must match,
+    // so a forged callback cannot finalize another user's row.
+    expect(vi.mocked(eq)).toHaveBeenCalledWith('providerJobId', 'meshy-abc');
+    expect(vi.mocked(eq)).toHaveBeenCalledWith('userId', 'user-1');
+
+    // Idempotency guard: the update must NEVER clobber an already-terminal row
+    // (a live client may have imported the result first). The excluded set must
+    // be exactly the three terminal states — note 'cancelled' (two l's).
+    expect(vi.mocked(notInArray)).toHaveBeenCalledWith('status', ['completed', 'failed', 'cancelled']);
+
+    // All three predicates are AND-ed into a single WHERE.
+    expect(vi.mocked(and)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(and).mock.calls[0]).toHaveLength(3);
+  });
+
+  it('sets completedAt for a terminal (failed) finalize', async () => {
+    await updateJobStatusByProviderJob('job', 'user-1', { status: 'failed', errorMessage: 'boom' });
+    const setArg = mockSet.mock.calls[0][0];
+    expect(setArg.status).toBe('failed');
+    expect(setArg.errorMessage).toBe('boom');
+    expect(setArg.completedAt).toBeInstanceOf(Date);
+  });
+
+  it('does NOT set completedAt for a non-terminal (processing) re-arm update', async () => {
+    await updateJobStatusByProviderJob('job', 'user-1', { status: 'processing', progress: 50 });
+    const setArg = mockSet.mock.calls[0][0];
+    expect(setArg.status).toBe('processing');
+    expect(setArg.progress).toBe(50);
+    expect(setArg.completedAt).toBeUndefined();
   });
 });

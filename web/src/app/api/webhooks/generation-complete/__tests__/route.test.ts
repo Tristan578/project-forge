@@ -112,6 +112,12 @@ describe('POST /api/webhooks/generation-complete — gating', () => {
     const res = await POST(makeReq(payload({ providerJobId: '' })));
     expect(res.status).toBe(400);
   });
+
+  it('400s when userId is missing (no key resolution attempted)', async () => {
+    const res = await POST(makeReq(payload({ userId: '' })));
+    expect(res.status).toBe(400);
+    expect(mockResolve).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST /api/webhooks/generation-complete — key resolution', () => {
@@ -146,6 +152,19 @@ describe('POST /api/webhooks/generation-complete — terminal polling', () => {
     expect(mockPublish).not.toHaveBeenCalled();
   });
 
+  it('captures a DB error from the row update to Sentry but still returns 200', async () => {
+    mockPoll.mockResolvedValue({ status: 'completed', progress: 100, resultUrl: 'https://x/m.glb', succeededButEmpty: false });
+    mockUpdate.mockRejectedValueOnce(new Error('db fail'));
+    const res = await POST(makeReq(payload()));
+    // safeUpdateJob swallows the DB error so the QStash retry is not wedged.
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ finalized: 'completed' });
+    expect(mockCapture).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ action: 'update_job', providerJobId: 'job-1' }),
+    );
+  });
+
   it('finalizes failed + refunds on a failed poll', async () => {
     mockPoll.mockResolvedValue({ status: 'failed', progress: 0, succeededButEmpty: false, errorMessage: 'Model generation failed' });
     const res = await POST(makeReq(payload()));
@@ -172,7 +191,7 @@ describe('POST /api/webhooks/generation-complete — re-arming', () => {
     expect(mockUpdate).toHaveBeenCalledWith('job-1', 'user-1', expect.objectContaining({ status: 'processing' }));
     expect(mockPublish).toHaveBeenCalledWith(
       expect.objectContaining({ attempt: 4, providerJobId: 'job-1' }),
-      expect.objectContaining({ delaySeconds: expect.any(Number) }),
+      { delaySeconds: 15 },
     );
     expect(mockRefund).not.toHaveBeenCalled();
   });

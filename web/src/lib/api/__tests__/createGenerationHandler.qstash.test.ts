@@ -107,6 +107,19 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     expect(mockPublish).toHaveBeenCalledWith(expect.anything(), { delaySeconds: 30 });
   });
 
+  it('publishes tokenUsageId: null for a BYOK/unmetered job (usageId undefined)', async () => {
+    // BYOK / non-metered path: resolveApiKey returns no usageId. The payload
+    // must coalesce to null so the webhook's `if (tokenUsageId)` refund guard
+    // correctly skips (no platform tokens were ever deducted to refund).
+    mockResolve.mockResolvedValue({ type: 'byok', key: 'user-key', metered: false, usageId: undefined });
+    const res = await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
+    expect(res.status).toBe(200);
+    expect(mockPublish).toHaveBeenCalledWith(
+      expect.objectContaining({ providerJobId: 'task-123', tokenUsageId: null }),
+      expect.anything(),
+    );
+  });
+
   it('does not publish when QStash is unconfigured (dormant)', async () => {
     mockConfigured.mockReturnValue(false);
     const res = await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));

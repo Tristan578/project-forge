@@ -94,6 +94,19 @@ describe('pollProviderStatus — texture (Meshy)', () => {
     getTextureStatus.mockResolvedValueOnce({ status: 'SUCCEEDED', progress: 100 });
     expect(await pollProviderStatus('texture', 'job', KEY)).toMatchObject({ status: 'failed', succeededButEmpty: true });
   });
+
+  it('FAILED/EXPIRED map to failed (not empty); IN_PROGRESS to processing; else pending', async () => {
+    for (const s of ['FAILED', 'EXPIRED']) {
+      getTextureStatus.mockResolvedValueOnce({ status: s, progress: 0 });
+      expect(await pollProviderStatus('texture', 'job', KEY)).toMatchObject({
+        status: 'failed', succeededButEmpty: false, errorMessage: 'Texture generation failed',
+      });
+    }
+    getTextureStatus.mockResolvedValueOnce({ status: 'IN_PROGRESS', progress: 60 });
+    expect((await pollProviderStatus('texture', 'job', KEY)).status).toBe('processing');
+    getTextureStatus.mockResolvedValueOnce({ status: 'PENDING', progress: 0 });
+    expect((await pollProviderStatus('texture', 'job', KEY)).status).toBe('pending');
+  });
 });
 
 describe('pollProviderStatus — skybox (Meshy single image)', () => {
@@ -108,6 +121,19 @@ describe('pollProviderStatus — skybox (Meshy single image)', () => {
     expect(await pollProviderStatus('skybox', 'job', KEY)).toMatchObject({
       status: 'failed', succeededButEmpty: true, errorMessage: 'Skybox generation produced no image',
     });
+  });
+
+  it('FAILED/EXPIRED map to failed (not empty); IN_PROGRESS to processing; else pending', async () => {
+    for (const s of ['FAILED', 'EXPIRED']) {
+      getTextureStatus.mockResolvedValueOnce({ status: s, progress: 0 });
+      expect(await pollProviderStatus('skybox', 'job', KEY)).toMatchObject({
+        status: 'failed', succeededButEmpty: false, errorMessage: 'Skybox generation failed',
+      });
+    }
+    getTextureStatus.mockResolvedValueOnce({ status: 'IN_PROGRESS', progress: 60 });
+    expect((await pollProviderStatus('skybox', 'job', KEY)).status).toBe('processing');
+    getTextureStatus.mockResolvedValueOnce({ status: 'QUEUED', progress: 0 });
+    expect((await pollProviderStatus('skybox', 'job', KEY)).status).toBe('pending');
   });
 });
 
@@ -128,9 +154,15 @@ describe('pollProviderStatus — music (Suno)', () => {
     });
   });
 
-  it('failed/error map to failed; processing/generating to processing', async () => {
-    getStatus.mockResolvedValueOnce({ status: 'error', progress: 0 });
-    expect((await pollProviderStatus('music', 'job', KEY)).status).toBe('failed');
+  it('both "failed" and "error" provider statuses map to failed; processing/generating to processing', async () => {
+    for (const s of ['failed', 'error']) {
+      getStatus.mockResolvedValueOnce({ status: s, progress: 0 });
+      expect(await pollProviderStatus('music', 'job', KEY)).toMatchObject({
+        status: 'failed', succeededButEmpty: false, errorMessage: 'Music generation failed',
+      });
+    }
+    getStatus.mockResolvedValueOnce({ status: 'processing', progress: 10 });
+    expect((await pollProviderStatus('music', 'job', KEY)).status).toBe('processing');
     getStatus.mockResolvedValueOnce({ status: 'generating', progress: 20 });
     expect((await pollProviderStatus('music', 'job', KEY)).status).toBe('processing');
   });
@@ -160,6 +192,29 @@ describe('pollProviderStatus — sprite / sprite_sheet / tileset (Replicate SDXL
     expect(await pollProviderStatus('tileset', 'p', KEY)).toMatchObject({
       status: 'failed', succeededButEmpty: false, errorMessage: 'Tileset generation failed',
     });
+  });
+
+  it('every Replicate type carries its own empty + failed message', async () => {
+    const empty: Record<string, string> = {
+      sprite: 'Sprite generation produced no image',
+      sprite_sheet: 'Sprite sheet generation produced no image',
+      tileset: 'Tileset generation produced no image',
+    };
+    const failed: Record<string, string> = {
+      sprite: 'Sprite generation failed',
+      sprite_sheet: 'Sprite sheet generation failed',
+      tileset: 'Tileset generation failed',
+    };
+    for (const type of ['sprite', 'sprite_sheet', 'tileset'] as const) {
+      getReplicateStatus.mockResolvedValueOnce({ status: 'succeeded', output: [] });
+      expect(await pollProviderStatus(type, 'p', KEY)).toMatchObject({
+        status: 'failed', succeededButEmpty: true, errorMessage: empty[type],
+      });
+      getReplicateStatus.mockResolvedValueOnce({ status: 'failed' });
+      expect(await pollProviderStatus(type, 'p', KEY)).toMatchObject({
+        status: 'failed', succeededButEmpty: false, errorMessage: failed[type],
+      });
+    }
   });
 
   it('processing maps to processing (50); unknown to pending (10)', async () => {

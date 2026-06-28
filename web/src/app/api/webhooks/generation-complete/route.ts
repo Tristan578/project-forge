@@ -46,8 +46,14 @@ const MAX_ATTEMPTS = 60;
 /** Delay before each re-poll while the provider job is still in flight (s). */
 const REPUBLISH_DELAY_SECONDS = 15;
 
+// Own keys only — `value in obj` would also accept inherited Object.prototype
+// keys ('constructor', 'toString', …), which then index to `undefined` and
+// poison the key-resolution path (a forged 'constructor' type would mark a real
+// in-flight job failed). A Set of own keys narrows to exactly the real types.
+const VALID_ASYNC_TYPES = new Set<string>(Object.keys(ASYNC_TYPE_TO_DB_CAPABILITY));
+
 function isAsyncType(value: unknown): value is AsyncGenerationType {
-  return typeof value === 'string' && value in ASYNC_TYPE_TO_DB_CAPABILITY;
+  return typeof value === 'string' && VALID_ASYNC_TYPES.has(value);
 }
 
 /**
