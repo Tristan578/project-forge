@@ -48,6 +48,8 @@ vi.mock('@/lib/analytics/posthog-server', () => ({
 }));
 
 import '../route';
+// Real constant the route forwards as the model — asserting it catches a blank model.
+import { AI_MODEL_FAST } from '@/lib/ai/models';
 
 const PARAMS = {
   strings: [{ id: 'greeting', text: 'Hello', context: 'menu' }],
@@ -76,6 +78,7 @@ describe('POST /api/generate/localize — $ai_generation capture (PF-907)', () =
         distinctId: 'user-1',
         consented: true,
         traceId: 'usage-1',
+        model: AI_MODEL_FAST,
         provider: 'anthropic',
         inputTokens: 200,
         outputTokens: 80,

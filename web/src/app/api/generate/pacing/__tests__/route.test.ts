@@ -43,6 +43,8 @@ vi.mock('@/lib/analytics/posthog-server', () => ({
 
 // Importing the route runs createGenerationHandler(config) → captures execute.
 import '../route';
+// Real constant the route forwards as the model — asserting it catches a blank model.
+import { AI_MODEL_FAST } from '@/lib/ai/models';
 
 const REPORT = {
   score: 70,
@@ -69,6 +71,7 @@ describe('POST /api/generate/pacing — $ai_generation capture (PF-907)', () => 
       distinctId: 'user-1',
       consented: true,
       traceId: 'usage-1',
+      model: AI_MODEL_FAST,
       provider: 'anthropic',
       inputTokens: 500,
       outputTokens: 120,

@@ -220,6 +220,9 @@ describe('captureAiGeneration', () => {
     const [url, init] = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toBe('https://us.i.posthog.com/i/v0/e/');
     expect(init.method).toBe('POST');
+    // A timeout signal bounds each POST so a SLOW PostHog can't pin serverless
+    // compute open until maxDuration (localize can schedule ~100 of these).
+    expect(init.signal).toBeInstanceOf(AbortSignal);
     const body = JSON.parse(init.body as string);
     expect(body.event).toBe('$ai_generation');
     expect(body.distinct_id).toBe('user-123');

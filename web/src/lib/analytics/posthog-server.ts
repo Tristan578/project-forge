@@ -28,6 +28,14 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 /** PostHog public capture endpoint (US cloud). Project-token authenticated. */
 const CAPTURE_URL = 'https://us.i.posthog.com/i/v0/e/';
 
+/**
+ * Hard ceiling on each capture POST. A single localize request can schedule up
+ * to ~100 `after()` callbacks (per-chunk × per-locale); without a timeout a
+ * SLOW (not down) PostHog would hold each callback's serverless compute open
+ * until the route's maxDuration. The cap bounds that to 5s per event.
+ */
+const CAPTURE_TIMEOUT_MS = 5000;
+
 /** Server-readable mirror of the client consent choice (set by CookieConsent). */
 const CONSENT_COOKIE = 'forge-cookie-consent';
 
@@ -142,6 +150,7 @@ export function captureAiGeneration(input: AiGenerationInput): void {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(CAPTURE_TIMEOUT_MS),
         });
       } catch (err) {
         captureException(err, { route: 'posthog_ai_capture', phase: 'fetch' });

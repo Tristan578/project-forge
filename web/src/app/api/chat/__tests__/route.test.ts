@@ -151,7 +151,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { logCost } from '@/lib/costs/costLogger';
 import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
 import { trackAiCacheHitRate } from '@/lib/analytics/events.server';
-import { captureAiGeneration } from '@/lib/analytics/posthog-server';
+import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -622,6 +622,10 @@ describe('POST /api/chat', () => {
       expect(arg).toMatchObject({
         distinctId: 'user-1',
         consented: true,
+        // traceId is the usageId from resolveApiKey — groups the whole turn under one trace.
+        traceId: 'usage-1',
+        // model must be the resolved model, never blank (a blank model breaks PostHog dashboards).
+        model: 'claude-sonnet-4.6',
         provider: 'anthropic',
         inputTokens: 1200,
         outputTokens: 300,
@@ -635,6 +639,26 @@ describe('POST /api/chat', () => {
       expect(arg).not.toHaveProperty('$ai_input');
       expect(arg).not.toHaveProperty('messages');
       expect(arg).not.toHaveProperty('prompt');
+    });
+
+    it('forwards consented=false to capture when the user has not consented (PF-30)', async () => {
+      // Symmetric with the localize/pacing route tests: the consent value resolved
+      // pre-stream must flow through to captureAiGeneration so the helper can no-op.
+      vi.mocked(hasAnalyticsConsent).mockResolvedValueOnce(false);
+      type StepEvent = { usage: { inputTokens?: number; outputTokens?: number } };
+      let capturedOnStepFinish: ((event: StepEvent) => Promise<void>) | undefined;
+      mockStream.mockImplementation(async (opts: Record<string, unknown>) => {
+        capturedOnStepFinish = opts.onStepFinish as typeof capturedOnStepFinish;
+        return mockStreamResult;
+      });
+
+      const res = await POST(makeRequest(validBody()));
+      await res.text();
+
+      await capturedOnStepFinish!({ usage: { inputTokens: 1200, outputTokens: 300 } });
+
+      expect(captureAiGeneration).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(captureAiGeneration).mock.calls[0][0].consented).toBe(false);
     });
 
     it('does NOT capture $ai_generation when the step reports no usage', async () => {
