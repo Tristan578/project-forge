@@ -48,7 +48,7 @@
     "check:bundle-size": "node scripts/check-bundle-size.js"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.85",
+    "@ai-sdk/anthropic": "^4.0.2",
     "@ai-sdk/gateway": "^3.0.133",
     "@ai-sdk/mcp": "^1.0.52",
     "@ai-sdk/react": "^3.0.210",
