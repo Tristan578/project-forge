@@ -7,6 +7,7 @@ import { DB_PROVIDER } from '@/lib/config/providers';
 import { generateText, Output } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
+import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { z } from 'zod';
 
 interface PacingSegment {
@@ -83,8 +84,9 @@ export const POST = createGenerationHandler<
 
     return { ok: true, params: { report: r } };
   },
-  execute: async (params, apiKey) => {
+  execute: async (params, apiKey, { userId, usageId }) => {
     const { report } = params;
+    const consented = await hasAnalyticsConsent();
 
     const segmentSummary = report.curve.segments
       .map((s) => `Scene ${s.sceneIndex} "${s.sceneName}": intensity=${s.intensity.toFixed(2)}, emotion=${s.emotion}`)
@@ -109,6 +111,7 @@ ${existingSuggestions || 'None yet.'}
 Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
 
     const anthropicClient = createAnthropic({ apiKey });
+    const startedAt = Date.now();
     const aiResult = await generateText({
       model: anthropicClient(AI_MODEL_FAST),
       system: SYSTEM_PROMPT,
@@ -117,6 +120,20 @@ Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
       temperature: 0.4,
       output: Output.object({ schema: PacingSuggestionSchema }),
       experimental_telemetry: { isEnabled: true },
+    });
+
+    captureAiGeneration({
+      distinctId: userId,
+      consented,
+      traceId: usageId ?? crypto.randomUUID(),
+      model: AI_MODEL_FAST,
+      provider: 'anthropic',
+      inputTokens: aiResult.usage?.inputTokens,
+      outputTokens: aiResult.usage?.outputTokens,
+      latencySeconds: (Date.now() - startedAt) / 1000,
+      stream: false,
+      isError: false,
+      route: '/api/generate/pacing',
     });
 
     const aiSuggestions: PacingSuggestion[] = (aiResult.output ?? []).map((s) => ({

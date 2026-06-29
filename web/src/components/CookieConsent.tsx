@@ -5,6 +5,18 @@ import { initPostHog } from '@/lib/analytics/posthog';
 
 const STORAGE_KEY = 'forge-cookie-consent';
 
+/**
+ * Mirror the consent choice into a server-readable cookie so server-side
+ * analytics (e.g. LLM observability, PF-907) can honor it — `localStorage` is
+ * client-only and invisible to route handlers. Non-`HttpOnly` so the client
+ * keeps managing it; site-wide; ~1 year; `Lax` to allow top-level navigations;
+ * `Secure` only over https (so it still works on the local http dev origin).
+ */
+function setConsentCookie(consented: boolean) {
+  const secure = typeof location !== 'undefined' && location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${STORAGE_KEY}=${consented ? 'true' : 'false'}; path=/; max-age=31536000; SameSite=Lax${secure}`;
+}
+
 function subscribeToStorage(callback: () => void) {
   window.addEventListener('storage', callback);
   return () => window.removeEventListener('storage', callback);
@@ -31,6 +43,7 @@ export function CookieConsent() {
 
   const handleAccept = useCallback(() => {
     localStorage.setItem(STORAGE_KEY, 'true');
+    setConsentCookie(true);
     initPostHog();
     // Force re-render via storage event won't fire in same tab — trigger
     // by dispatching a synthetic event so useSyncExternalStore picks it up.
@@ -39,6 +52,7 @@ export function CookieConsent() {
 
   const handleDecline = useCallback(() => {
     localStorage.setItem(STORAGE_KEY, 'false');
+    setConsentCookie(false);
     window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY }));
   }, []);
 

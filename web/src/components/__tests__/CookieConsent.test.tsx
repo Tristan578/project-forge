@@ -10,11 +10,14 @@ const STORAGE_KEY = 'forge-cookie-consent';
 describe('CookieConsent', () => {
   beforeEach(() => {
     localStorage.removeItem(STORAGE_KEY);
+    // Clear the server-readable consent cookie between cases.
+    document.cookie = `${STORAGE_KEY}=; path=/; max-age=0`;
   });
 
   afterEach(() => {
     cleanup();
     localStorage.removeItem(STORAGE_KEY);
+    document.cookie = `${STORAGE_KEY}=; path=/; max-age=0`;
   });
 
   it('shows banner when no consent is stored', () => {
@@ -43,11 +46,24 @@ describe('CookieConsent', () => {
     expect(container.querySelector('[role="region"]')).toBeNull();
   });
 
+  it('writes the server-readable consent cookie =true on Accept (PF-907)', () => {
+    render(<CookieConsent />);
+    fireEvent.click(screen.getByText('Accept'));
+    // The server reads this cookie via next/headers to consent-gate $ai_generation.
+    expect(document.cookie).toContain(`${STORAGE_KEY}=true`);
+  });
+
   it('stores decline and hides banner on Decline click', () => {
     const { container } = render(<CookieConsent />);
     fireEvent.click(screen.getByText('Decline'));
     expect(localStorage.getItem(STORAGE_KEY)).toBe('false');
     expect(container.querySelector('[role="region"]')).toBeNull();
+  });
+
+  it('writes the server-readable consent cookie =false on Decline (PF-907)', () => {
+    render(<CookieConsent />);
+    fireEvent.click(screen.getByText('Decline'));
+    expect(document.cookie).toContain(`${STORAGE_KEY}=false`);
   });
 
   it('has correct ARIA attributes', () => {
