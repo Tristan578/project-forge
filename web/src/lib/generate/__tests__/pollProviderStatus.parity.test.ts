@@ -103,7 +103,9 @@ const TEXTURE_CASES = [
 const SKYBOX_CASES = [
   { label: 'SUCCEEDED with an image → completed', resp: { status: 'SUCCEEDED', progress: 100, maps: { sky: 'https://x/sky.png' } } },
   { label: 'SUCCEEDED with empty maps → failed (#8757)', resp: { status: 'SUCCEEDED', progress: 100, maps: {} } },
+  { label: 'SUCCEEDED with no maps field → failed', resp: { status: 'SUCCEEDED', progress: 100 } },
   { label: 'FAILED → failed', resp: { status: 'FAILED', progress: 0 } },
+  { label: 'EXPIRED → failed', resp: { status: 'EXPIRED', progress: 0 } },
   { label: 'IN_PROGRESS → processing', resp: { status: 'IN_PROGRESS', progress: 60 } },
   { label: 'QUEUED → pending', resp: { status: 'QUEUED', progress: 0 } },
 ];
