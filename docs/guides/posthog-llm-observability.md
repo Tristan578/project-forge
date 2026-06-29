@@ -82,8 +82,11 @@ the cookie store throws, it returns `false`.
 
 - With consent accepted, send a chat message (or run a localize/pacing
   generation), then open **PostHog → LLM observability**. A new `$ai_generation`
-  event should appear within a minute, carrying token/latency/model/cost but no
-  prompt or response text.
+  event should appear within a minute, carrying token/model/cost but no prompt or
+  response text. The `localize` and `pacing` events also carry `$ai_latency`
+  (wall-clock around the `generateText` call); the `/api/chat` events do **not**
+  — latency is not meaningful per `onStepFinish` step of a streamed turn, so it
+  is intentionally omitted there.
 - Filter insights by the custom `route` property
   (`/api/chat`, `/api/generate/localize`, `/api/generate/pacing`) to attribute
   spend per surface.

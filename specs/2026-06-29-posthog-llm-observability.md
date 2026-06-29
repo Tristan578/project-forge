@@ -87,9 +87,11 @@ manual path is orthogonal to Sentry's spans.
 - **No content, ever.** We never send `$ai_input` or `$ai_output_choices` (the only
   `$ai_*` props that carry prompt/response text). We send only: `$ai_trace_id`,
   `$ai_model`, `$ai_provider`, `$ai_input_tokens`, `$ai_output_tokens`,
-  `$ai_latency` (seconds), `$ai_stream`, `$ai_is_error`, plus non-content custom
-  props (`route`, optional `$ai_cache_read_input_tokens` /
-  `$ai_cache_creation_input_tokens` from the chat path where we already read them).
+  `$ai_latency` (seconds — `localize`/`pacing` only; omitted on the chat path,
+  where per-`onStepFinish`-step latency is not meaningful), `$ai_stream`,
+  `$ai_is_error`, plus non-content custom props (`route`, optional
+  `$ai_cache_read_input_tokens` / `$ai_cache_creation_input_tokens` from the chat
+  path where we already read them).
   The cost/token/latency/model/error dashboards all render from these; only the
   per-trace conversation drill-down (which shows message text) is intentionally
   blank — an accepted privacy tradeoff.
