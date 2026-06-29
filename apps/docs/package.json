@@ -12,10 +12,10 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@clerk/nextjs": "^7.5.7",
-    "@tailwindcss/postcss": "^4.3.1",
-    "fumadocs-core": "^16.10.5",
-    "fumadocs-ui": "^16.10.5",
+    "@clerk/nextjs": "^7.5.9",
+    "@tailwindcss/postcss": "^4.3.2",
+    "fumadocs-core": "^16.10.7",
+    "fumadocs-ui": "^16.10.7",
     "gray-matter": "^4",
     "next": "^16.2.9",
     "react": "^19.2.7",
