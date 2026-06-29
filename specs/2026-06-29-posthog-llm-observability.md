@@ -207,8 +207,8 @@ Local gate (Node 24): `eslint --max-warnings 0`, `tsc --noEmit`, and targeted
 - **Deep-generation routes** (GDD / world / cutscene via `aiSdkAdapter` /
   `createSpawnforgeAgent`): same helper applies, but wiring requires threading
   `userId` + `consented` through the shared adapter signature (touches multiple
-  callers). Kept out of this PR to bound blast radius; file as a follow-up issue and
-  reference it here. fix-it-or-track-it.
+  callers). Kept out of this PR to bound blast radius; tracked in #8877
+  (fix-it-or-track-it).
 - **OTel `PostHogSpanProcessor`** distributed-trace upgrade: revisit once the
   Sentry-provider-ownership design is done (see Architecture decision).
 

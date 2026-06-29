@@ -105,5 +105,5 @@ v1 instruments the three routes that run a model **directly** (`generateText` /
 streamed chat). The deep generators that go through the `createGenerationHandler`
 agent pipeline (GDD, world builder, cutscene, etc.) are **not** yet instrumented
 — capturing their token usage cleanly needs a small adapter at the agent
-boundary rather than per-route wiring. That follow-up is tracked separately so
+boundary rather than per-route wiring. That follow-up is tracked in #8877 so
 this PR stays scoped to the direct-call routes.
