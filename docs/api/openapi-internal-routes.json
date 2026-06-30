@@ -61,6 +61,7 @@
     "/api/user/export-data": "account",
     "/api/user/profile": "account",
     "/api/vitals": "telemetry",
-    "/api/waitlist": "growth"
+    "/api/waitlist": "growth",
+    "/api/webhooks/generation-complete": "webhook"
   }
 }

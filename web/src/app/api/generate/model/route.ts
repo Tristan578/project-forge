@@ -124,4 +124,10 @@ export const POST = createGenerationHandler<
       usageId: ctx.usageId,
     };
   },
+  // Durable server-side completion + refund (PF-906). Dormant unless QStash set.
+  asyncJob: {
+    type: 'model',
+    providerJobId: (result) => result.jobId,
+    estimatedSeconds: 60,
+  },
 });

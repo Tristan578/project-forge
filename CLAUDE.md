@@ -41,6 +41,7 @@ Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_K
 
 Optional feature flags (all default off):
 - `NEXT_PUBLIC_USE_DEEP_GENERATION=true` — route GDD, world builder, and cutscene generators to Opus 4.8 (`AI_MODEL_DEEP`) instead of Sonnet 4.6. See `docs/decisions/2026-05-01-opus-deep-tier.md`. Any value other than the exact string `"true"` leaves the flag off.
+- `QSTASH_TOKEN` + `QSTASH_CURRENT_SIGNING_KEY` + `QSTASH_NEXT_SIGNING_KEY` — Upstash QStash credentials for durable server-side generation callbacks (PF-906). Set all three in Vercel (Production + Preview), plus `NEXT_PUBLIC_APP_URL` to your public origin, to enable. Leave any unset and the feature is fully dormant — the client-side poller remains the only completion path. Runbook: `docs/guides/qstash-setup.md`.
 
 ## Key Architecture Rules
 

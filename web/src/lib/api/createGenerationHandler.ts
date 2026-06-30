@@ -16,7 +16,7 @@
  *   });
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import type { Provider } from '@/lib/db/schema';
@@ -32,6 +32,11 @@ import {
   API_MAX_DURATION_STANDARD_GEN_S,
   deriveGenerationStepTimeoutMs,
 } from '@/lib/config/timeouts';
+import { isQstashConfigured, publishGenerationCallback } from '@/lib/qstash/client';
+import type { AsyncGenerationType } from '@/lib/generate/pollProviderStatus';
+
+/** Default initial delay before the first durable generation callback (PF-906). */
+const DEFAULT_CALLBACK_DELAY_SECONDS = 30;
 
 /**
  * Client-facing message for every 500. Raw `err.message` can carry server
@@ -148,6 +153,30 @@ export interface GenerationHandlerConfig<TParams, TResult> {
    * derived against their real budget.
    */
   maxDurationSeconds?: number;
+
+  /**
+   * Durable server-side callback config (PF-906, #8816). When set AND QStash is
+   * configured, the factory publishes a self-rescheduling QStash callback after
+   * a successful provider submission, so the `generation_jobs` row is finalized
+   * + refunded server-side even if the user closes the tab.
+   *
+   * Fully additive and DORMANT by default: when `QSTASH_TOKEN` is unset nothing
+   * is published and the response shape is unchanged. The factory cannot know
+   * the opaque `TResult` shape, so the route declares how to extract the
+   * provider job id and which enum type it is. Only async routes (a provider
+   * task id + a status route) should set this.
+   */
+  asyncJob?: {
+    /** generation_type enum member this route produces. */
+    type: AsyncGenerationType;
+    /**
+     * Extract the provider job id from the execute result, or return null for a
+     * synchronously-completed result (e.g. DALL-E inline) that needs no polling.
+     */
+    providerJobId: (result: TResult) => string | null;
+    /** Initial callback delay in seconds (defaults to DEFAULT_CALLBACK_DELAY_SECONDS). */
+    estimatedSeconds?: number;
+  };
 }
 
 /**
@@ -184,7 +213,47 @@ export function createGenerationHandler<TParams, TResult>(
     cacheKeyParams,
     cacheTtlSeconds,
     maxDurationSeconds = API_MAX_DURATION_STANDARD_GEN_S,
+    asyncJob,
   } = config;
+
+  /**
+   * After a successful provider submission, publish the durable QStash callback
+   * (PF-906). No-ops unless QStash is configured, `asyncJob` is declared, and
+   * the result carries a pollable provider job id. A publish failure is logged
+   * to Sentry but NEVER fails the user's request — the client poller still
+   * covers completion, and the response shape is unchanged.
+   */
+  async function maybePublishAsyncCallback(
+    result: TResult,
+    userId: string,
+    usageId: string | undefined,
+  ): Promise<void> {
+    if (!asyncJob || !isQstashConfigured()) return;
+
+    let providerJobId: string | null;
+    try {
+      providerJobId = asyncJob.providerJobId(result);
+    } catch (err) {
+      captureException(err, { route, action: 'qstash_extract_job_id' });
+      return;
+    }
+    if (!providerJobId) return;
+
+    try {
+      await publishGenerationCallback(
+        {
+          userId,
+          providerJobId,
+          type: asyncJob.type,
+          tokenUsageId: usageId ?? null,
+          attempt: 0,
+        },
+        { delaySeconds: asyncJob.estimatedSeconds ?? DEFAULT_CALLBACK_DELAY_SECONDS },
+      );
+    } catch (err) {
+      captureException(err, { route, action: 'qstash_publish' });
+    }
+  }
 
   // Per-route enforceable step timeout: derived from this route's maxDuration so
   // the agent's abort always fires before Vercel kills the function. A 150s base
@@ -301,6 +370,10 @@ export function createGenerationHandler<TParams, TResult>(
     // 6b. Check response cache (before token deduction — cache hits are free)
     if (cacheKeyParams) {
       const cacheParams = cacheKeyParams(params);
+      // Captured on a cache MISS so the durable callback can be published after
+      // cachedGenerate returns (a cache HIT is a re-served prior result — no new
+      // provider job, so nothing to poll).
+      let cacheMiss: { result: TResult; usageId: string | undefined } | undefined;
       try {
         const cacheResult = await cachedGenerate<TResult>(
           resolvedOperation,
@@ -314,7 +387,9 @@ export function createGenerationHandler<TParams, TResult>(
             const usageId = resolved.usageId;
 
             try {
-              return await runExecute(params, apiKey, { userId, tier, usageId, tokenCost });
+              const generated = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost });
+              cacheMiss = { result: generated, usageId };
+              return generated;
             } catch (err) {
               // Refund tokens on provider failure
               if (usageId) {
@@ -329,6 +404,17 @@ export function createGenerationHandler<TParams, TResult>(
           },
           { ttlSeconds: cacheTtlSeconds, userId }
         );
+
+        if (!cacheResult.cached && cacheMiss && asyncJob && isQstashConfigured()) {
+          // Run the durable publish post-response: `after()` keeps the Vercel
+          // function alive so the publish never adds latency to — or can fail —
+          // the submit. maybePublishAsyncCallback is self-guarded (never throws),
+          // safe to fire-and-forget. Gated on asyncJob + QStash so the dormant
+          // path (and every non-async route) never touches `after()` at all —
+          // `after()` requires a request scope, which only exists at runtime.
+          const { result: missResult, usageId: missUsageId } = cacheMiss;
+          after(() => maybePublishAsyncCallback(missResult, userId, missUsageId));
+        }
 
         const headers: Record<string, string> = {
           'X-Cache': cacheResult.cached ? 'HIT' : 'MISS',
@@ -366,6 +452,11 @@ export function createGenerationHandler<TParams, TResult>(
 
     try {
       const result = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost });
+      // Run the durable publish post-response (see cached path). Same asyncJob +
+      // QStash gate so the dormant/non-async path never touches `after()`.
+      if (asyncJob && isQstashConfigured()) {
+        after(() => maybePublishAsyncCallback(result, userId, usageId));
+      }
       return NextResponse.json(result, { status: successStatus });
     } catch (err) {
       // Refund tokens on provider failure

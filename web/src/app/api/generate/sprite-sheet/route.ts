@@ -75,4 +75,10 @@ export const POST = createGenerationHandler<
       estimatedSeconds: params.frameCount * 10,
     };
   },
+  // Durable server-side completion + refund (PF-906). Dormant unless QStash set.
+  asyncJob: {
+    type: 'sprite_sheet',
+    providerJobId: (result) => result.jobId,
+    estimatedSeconds: 40,
+  },
 });
