@@ -14,6 +14,7 @@ import {
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
+import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 
 const CHUNK_SIZE = 200;
@@ -118,9 +119,14 @@ export const POST = createGenerationHandler<
     sourceLocale: params.sourceLocale,
     targetLocales: params.targetLocales,
   }),
-  execute: async (params, apiKey) => {
+  execute: async (params, apiKey, { userId, usageId }) => {
     const anthropicProvider = createAnthropic({ apiKey });
     const result: Record<string, LocaleBundle> = {};
+
+    // Resolve consent + a single trace id once for the whole localize op — every
+    // per-chunk generation below is one generation in the same trace.
+    const consented = await hasAnalyticsConsent();
+    const aiTraceId = usageId ?? crypto.randomUUID();
 
     for (const targetLocale of params.targetLocales) {
       const allTranslations: Record<string, string> = {};
@@ -128,12 +134,27 @@ export const POST = createGenerationHandler<
 
       for (const chunk of chunks) {
         const prompt = buildTranslationPrompt(chunk, params.sourceLocale, targetLocale);
-        const { text: raw } = await generateText({
+        const startedAt = Date.now();
+        const { text: raw, usage } = await generateText({
           model: anthropicProvider(AI_MODEL_FAST),
           system: 'You are a professional video game localizer. Return only valid JSON.',
           prompt,
           maxOutputTokens: 4096,
           experimental_telemetry: { isEnabled: true },
+        });
+
+        captureAiGeneration({
+          distinctId: userId,
+          consented,
+          traceId: aiTraceId,
+          model: AI_MODEL_FAST,
+          provider: 'anthropic',
+          inputTokens: usage?.inputTokens,
+          outputTokens: usage?.outputTokens,
+          latencySeconds: (Date.now() - startedAt) / 1000,
+          stream: false,
+          isError: false,
+          route: '/api/generate/localize',
         });
 
         const { translations } = parseTranslationResponse(raw, chunk);

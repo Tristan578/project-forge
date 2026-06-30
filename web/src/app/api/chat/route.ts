@@ -26,6 +26,7 @@ import { assertTier } from '@/lib/auth/api-auth';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { logCost } from '@/lib/costs/costLogger';
 import { trackAiCacheHitRate } from '@/lib/analytics/events.server';
+import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
 import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
@@ -588,6 +589,13 @@ export async function POST(request: NextRequest) {
   // 8. Convert messages
   const modelMessages = buildModelMessages(messages);
 
+  // Resolve analytics consent + one trace id for this turn, before streaming.
+  // Every step's `$ai_generation` event below shares this trace. Consent is
+  // resolved once (request scope) rather than per step; capture itself is
+  // dormant unless POSTHOG_LLM_CAPTURE is set, so this is a no-op by default.
+  const analyticsConsented = await hasAnalyticsConsent();
+  const aiTraceId = usageId ?? crypto.randomUUID();
+
   // 9. Stream via Agent and return UI message stream response
   try {
     const result = await agent.stream({
@@ -640,6 +648,27 @@ export async function POST(request: NextRequest) {
             cacheWriteTokens,
           }).catch((err: unknown) => {
             captureException(err, { route: '/api/chat', phase: 'track_cache_hit_rate' });
+          });
+        }
+
+        // PostHog LLM observability ($ai_generation) — content-free, consent-gated,
+        // dormant by default. Intentionally a BROADER guard than the billing block
+        // above (no `usageId` requirement) so gateway + BYOK steps are observed too;
+        // the helper resolves token/latency/model breakdowns without prompt content.
+        if (auth.ctx.user.id && usage) {
+          captureAiGeneration({
+            distinctId: auth.ctx.user.id,
+            consented: analyticsConsented,
+            traceId: aiTraceId,
+            model: resolvedModelId || model || '',
+            provider: usingDirect ? 'anthropic' : 'gateway',
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            stream: true,
+            isError: false,
+            route: '/api/chat',
+            cacheReadInputTokens: usage.inputTokenDetails?.cacheReadTokens,
+            cacheCreationInputTokens: usage.inputTokenDetails?.cacheWriteTokens,
           });
         }
       },

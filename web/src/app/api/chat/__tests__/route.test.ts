@@ -92,6 +92,14 @@ vi.mock('@/lib/analytics/events.server', () => ({
   trackAiCacheHitRate: vi.fn().mockResolvedValue(undefined),
 }));
 
+// PostHog LLM observability ($ai_generation). Mocked so the route test can
+// assert the capture is invoked from onStepFinish without touching the network
+// or the dormancy/consent internals (those are unit-tested in posthog-server.test.ts).
+vi.mock('@/lib/analytics/posthog-server', () => ({
+  captureAiGeneration: vi.fn(),
+  hasAnalyticsConsent: vi.fn().mockResolvedValue(true),
+}));
+
 // Mock resolveChatRoute so tests don't depend on any backend being configured
 vi.mock('@/lib/providers/resolveChat', () => ({
   // resolveChat is no longer used by route.ts (migrated to AI SDK streamText)
@@ -143,6 +151,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { logCost } from '@/lib/costs/costLogger';
 import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
 import { trackAiCacheHitRate } from '@/lib/analytics/events.server';
+import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -581,6 +590,91 @@ describe('POST /api/chat', () => {
           usageId: 'usage-1',
         }),
       );
+    });
+
+    it('captures a content-free $ai_generation event from onStepFinish (PF-907)', async () => {
+      type StepEvent = {
+        usage: {
+          inputTokens?: number;
+          outputTokens?: number;
+          inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number };
+        };
+      };
+      let capturedOnStepFinish: ((event: StepEvent) => Promise<void>) | undefined;
+      mockStream.mockImplementation(async (opts: Record<string, unknown>) => {
+        capturedOnStepFinish = opts.onStepFinish as typeof capturedOnStepFinish;
+        return mockStreamResult;
+      });
+
+      const res = await POST(makeRequest(validBody()));
+      await res.text();
+
+      await capturedOnStepFinish!({
+        usage: {
+          inputTokens: 1200,
+          outputTokens: 300,
+          inputTokenDetails: { cacheReadTokens: 800, cacheWriteTokens: 100 },
+        },
+      });
+
+      expect(captureAiGeneration).toHaveBeenCalledTimes(1);
+      const arg = vi.mocked(captureAiGeneration).mock.calls[0][0];
+      expect(arg).toMatchObject({
+        distinctId: 'user-1',
+        consented: true,
+        // traceId is the usageId from resolveApiKey — groups the whole turn under one trace.
+        traceId: 'usage-1',
+        // model must be the resolved model, never blank (a blank model breaks PostHog dashboards).
+        model: 'claude-sonnet-4.6',
+        provider: 'anthropic',
+        inputTokens: 1200,
+        outputTokens: 300,
+        cacheReadInputTokens: 800,
+        cacheCreationInputTokens: 100,
+        stream: true,
+        isError: false,
+        route: '/api/chat',
+      });
+      // The capture input must never carry prompt/response content.
+      expect(arg).not.toHaveProperty('$ai_input');
+      expect(arg).not.toHaveProperty('messages');
+      expect(arg).not.toHaveProperty('prompt');
+    });
+
+    it('forwards consented=false to capture when the user has not consented (PF-30)', async () => {
+      // Symmetric with the localize/pacing route tests: the consent value resolved
+      // pre-stream must flow through to captureAiGeneration so the helper can no-op.
+      vi.mocked(hasAnalyticsConsent).mockResolvedValueOnce(false);
+      type StepEvent = { usage: { inputTokens?: number; outputTokens?: number } };
+      let capturedOnStepFinish: ((event: StepEvent) => Promise<void>) | undefined;
+      mockStream.mockImplementation(async (opts: Record<string, unknown>) => {
+        capturedOnStepFinish = opts.onStepFinish as typeof capturedOnStepFinish;
+        return mockStreamResult;
+      });
+
+      const res = await POST(makeRequest(validBody()));
+      await res.text();
+
+      await capturedOnStepFinish!({ usage: { inputTokens: 1200, outputTokens: 300 } });
+
+      expect(captureAiGeneration).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(captureAiGeneration).mock.calls[0][0].consented).toBe(false);
+    });
+
+    it('does NOT capture $ai_generation when the step reports no usage', async () => {
+      type StepEvent = { usage?: unknown };
+      let capturedOnStepFinish: ((event: StepEvent) => Promise<void>) | undefined;
+      mockStream.mockImplementation(async (opts: Record<string, unknown>) => {
+        capturedOnStepFinish = opts.onStepFinish as typeof capturedOnStepFinish;
+        return mockStreamResult;
+      });
+
+      const res = await POST(makeRequest(validBody()));
+      await res.text();
+
+      await capturedOnStepFinish!({ usage: undefined });
+
+      expect(captureAiGeneration).not.toHaveBeenCalled();
     });
 
     it('forwards cacheReadTokens and cacheWriteTokens from inputTokenDetails to logCost', async () => {
