@@ -11,8 +11,8 @@
   },
   "dependencies": {
     "@spawnforge/ui": "file:./vendored/spawnforge-ui",
-    "@tailwindcss/postcss": "^4.3.1",
-    "@tailwindcss/vite": "^4.3.1",
+    "@tailwindcss/postcss": "^4.3.2",
+    "@tailwindcss/vite": "^4.3.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "tailwindcss": "^4.2.2"
