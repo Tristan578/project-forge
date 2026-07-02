@@ -42,6 +42,17 @@ updates:
     labels:
       - dependencies
       - ci
+    # The generated gh-aw `*.lock.yml` files are NOT hand-authored — `gh aw
+    # compile` regenerates them and injects EVERY action ref (incl.
+    # `actions/checkout`) from the compiler's own bundled pin registry, not from
+    # Dependabot. So a Dependabot bump of a `uses:` inside a lock can never
+    # survive the `gh-aw Lock Sync` gate (recompile re-emits the compiler's pin →
+    # perpetual drift). It churned live on #8872 (checkout v6→v7) and #8880.
+    # Exclude the generated locks from scanning entirely; hand-authored workflows
+    # (ci.yml, cd.yml, quality-gates.yml) are still scanned and DO get bumped.
+    # `exclude-paths` globs are relative to `directory` (root); GA 2025-08-26.
+    exclude-paths:
+      - ".github/workflows/*.lock.yml"
     ignore:
       # gh-aw-actions are managed by `gh aw compile` (version-locked to the gh-aw
       # compiler) — Dependabot must never bump them. Both the bare repo ref AND any
