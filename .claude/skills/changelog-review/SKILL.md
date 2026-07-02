@@ -60,7 +60,7 @@ You are reviewing changelogs and release notes for SpawnForge's dependency stack
 |---------|-----------------|-----------------|
 | Bevy | https://github.com/bevyengine/bevy/releases | 0.18.1 |
 | wasm-bindgen | https://github.com/nickel-mine/nickelmine-pkg/releases | =0.2.108 (pinned) |
-| bevy_rapier | https://github.com/dimforge/bevy_rapier/releases | 0.33 |
+| bevy_rapier | https://github.com/dimforge/bevy_rapier/releases | 0.34 |
 
 ## Procedure
 
