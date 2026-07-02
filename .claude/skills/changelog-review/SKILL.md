@@ -21,8 +21,8 @@ You are reviewing changelogs and release notes for SpawnForge's dependency stack
 | System | Changelog Source | Current Version |
 |--------|-----------------|-----------------|
 | Vercel Platform | https://vercel.com/changelog | N/A (platform) |
-| Sentry | https://github.com/getsentry/sentry-javascript/releases | @sentry/nextjs ^10.62.0 |
-| PostHog | https://github.com/PostHog/posthog-js/releases | posthog-js ^1.395.0 |
+| Sentry | https://github.com/getsentry/sentry-javascript/releases | @sentry/nextjs ^10.63.0 |
+| PostHog | https://github.com/PostHog/posthog-js/releases | posthog-js ^1.396.4 |
 | Anthropic (Claude API) | https://docs.anthropic.com/en/docs/about-claude/models | AI SDK provider |
 | Cloudflare | https://developers.cloudflare.com/changelog/ | R2 + Workers |
 | Upstash | https://github.com/upstash/redis-js/releases | @upstash/redis ^1.37.0 |
@@ -34,8 +34,8 @@ You are reviewing changelogs and release notes for SpawnForge's dependency stack
 
 | Library | Changelog Source | Current Version |
 |---------|-----------------|-----------------|
-| Next.js | https://github.com/vercel/next.js/releases | ^16.2.3 |
-| Clerk | https://github.com/clerk/javascript/releases | @clerk/nextjs ^7.0.12 |
+| Next.js | https://github.com/vercel/next.js/releases | ^16.2.10 |
+| Clerk | https://github.com/clerk/javascript/releases | @clerk/nextjs ^7.5.12 |
 | Stripe | https://github.com/stripe/stripe-node/releases | stripe ^22.3.0 |
 | AI SDK | https://github.com/vercel/ai/releases | ai ^6.0.158 |
 | Drizzle ORM | https://github.com/drizzle-team/drizzle-orm/releases | drizzle-orm 0.45.2 |
