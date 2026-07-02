@@ -17,7 +17,6 @@ if (process.env.INCLUDE_INTERNAL === 'true') {
 const config: StorybookConfig = {
   stories,
   addons: [
-    '@storybook/addon-essentials',
     '@storybook/addon-a11y',
   ],
   framework: {
