@@ -33,9 +33,10 @@ export function mockSSEResponse(events: unknown[], status = 200): Response {
 
 /**
  * Creates a standard sequence of SSE events simulating one chat turn, encoded in
- * the **AI SDK v6 `UIMessageChunk` protocol** that `/api/chat` actually emits via
- * `result.toUIMessageStreamResponse(...)`. Chunk types are HYPHENATED and carry
- * v6 field names (`text-delta` → `delta`, `reasoning-delta` → `delta`,
+ * the **AI SDK v7 `UIMessageChunk` protocol** (wire shape unchanged from v6)
+ * that `/api/chat` actually emits via `result.toUIMessageStreamResponse(...)`.
+ * Chunk types are HYPHENATED and carry the SDK's field names (`text-delta` →
+ * `delta`, `reasoning-delta` → `delta`,
  * `tool-input-available` → full parsed `input`). Usage rides on the `finish`
  * chunk's `messageMetadata`, mirroring the route's `messageMetadata` callback.
  *
@@ -61,7 +62,7 @@ export function makeChatSSEEvents(opts: {
   events.push({ type: 'start' });
   events.push({ type: 'start-step' });
 
-  // Reasoning (thinking) block — hyphenated v6 chunks, delta carries the text.
+  // Reasoning (thinking) block — hyphenated v7 chunks, delta carries the text.
   if (opts.thinking) {
     const id = 'reasoning-0';
     events.push({ type: 'reasoning-start', id });
@@ -78,7 +79,7 @@ export function makeChatSSEEvents(opts: {
   }
 
   // Tool calls — `tool-input-available` carries the full parsed `input`, so the
-  // client executes directly from it (no JSON-string accumulation in v6).
+  // client executes directly from it (no JSON-string accumulation in v7).
   if (opts.toolCalls) {
     for (const tc of opts.toolCalls) {
       events.push({ type: 'tool-input-start', toolCallId: tc.id, toolName: tc.name });

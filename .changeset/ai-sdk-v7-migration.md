@@ -1,5 +1,5 @@
 ---
-"web": patch
+"web": minor
 ---
 
 Upgrade the Vercel AI SDK stack to v7 as a single coordinated major bump: `ai` 6→7, `@ai-sdk/mcp` 1→2, plus an explicit `@ai-sdk/provider-utils` ^5 pin (ending the dual-versioning that previously left it a phantom transitive dep). `@ai-sdk/anthropic`, `@ai-sdk/gateway`, and `@ai-sdk/react` remain on their v4 lines, which are the versions paired with `ai@7`. `@sentry/nextjs` stays on ^10.62.0 (#8855).
