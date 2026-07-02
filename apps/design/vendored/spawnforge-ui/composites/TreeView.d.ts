@@ -13,4 +13,4 @@ export interface TreeViewProps {
     onToggleExpand?: (id: string) => void;
     className?: string;
 }
-export declare function TreeView({ nodes, selectedId, onSelect, expandedIds: controlledExpandedIds, onToggleExpand: controlledOnToggle, className, }: TreeViewProps): import("react/jsx-runtime").JSX.Element;
+export declare function TreeView({ nodes, selectedId, onSelect, expandedIds: controlledExpandedIds, onToggleExpand: controlledOnToggle, className, }: TreeViewProps): import("react").JSX.Element;

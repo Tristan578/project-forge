@@ -10,7 +10,7 @@ export interface TabsProps {
     onChange: (tabId: string) => void;
     className?: string;
 }
-export declare function Tabs({ tabs, activeTab, onChange, className }: TabsProps): import("react/jsx-runtime").JSX.Element;
+export declare function Tabs({ tabs, activeTab, onChange, className }: TabsProps): import("react").JSX.Element;
 export declare namespace Tabs {
     var displayName: string;
 }

@@ -11,4 +11,4 @@ export interface Vec3InputProps {
     disabled?: boolean;
     className?: string;
 }
-export declare function Vec3Input({ label, value, onChange, onReset, defaultValue, step, precision, min, max, disabled, className, }: Vec3InputProps): import("react/jsx-runtime").JSX.Element;
+export declare function Vec3Input({ label, value, onChange, onReset, defaultValue, step, precision, min, max, disabled, className, }: Vec3InputProps): import("react").JSX.Element;

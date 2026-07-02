@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import React, { type ReactNode } from "react";
 export interface PopoverProps {
     trigger: ReactNode;
     content: ReactNode;
@@ -9,7 +9,7 @@ export interface PopoverProps {
     /** When true, the trigger is already an interactive element — skip the wrapper button. */
     asChild?: boolean;
 }
-export declare function Popover({ trigger, content, align, side, className, "aria-label": ariaLabel, asChild, }: PopoverProps): import("react/jsx-runtime").JSX.Element;
+export declare function Popover({ trigger, content, align, side, className, "aria-label": ariaLabel, asChild, }: PopoverProps): React.JSX.Element;
 export declare namespace Popover {
     var displayName: string;
 }

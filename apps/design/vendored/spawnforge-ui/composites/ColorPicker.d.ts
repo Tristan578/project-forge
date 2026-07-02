@@ -5,4 +5,4 @@ export interface ColorPickerProps {
     disabled?: boolean;
     className?: string;
 }
-export declare function ColorPicker({ label, value, onChange, disabled, className, }: ColorPickerProps): import("react/jsx-runtime").JSX.Element;
+export declare function ColorPicker({ label, value, onChange, disabled, className, }: ColorPickerProps): import("react").JSX.Element;

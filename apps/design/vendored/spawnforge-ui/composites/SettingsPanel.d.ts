@@ -11,4 +11,4 @@ export interface SettingsPanelProps {
     onProjectThemeChange?: (theme: ThemeName | null) => void;
     className?: string;
 }
-export declare function SettingsPanel({ currentTheme, onThemeChange, effectsEnabled, onEffectsChange, showPerProjectCheckbox, projectTheme, onProjectThemeChange, className, }: SettingsPanelProps): import("react/jsx-runtime").JSX.Element;
+export declare function SettingsPanel({ currentTheme, onThemeChange, effectsEnabled, onEffectsChange, showPerProjectCheckbox, projectTheme, onProjectThemeChange, className, }: SettingsPanelProps): import("react").JSX.Element;

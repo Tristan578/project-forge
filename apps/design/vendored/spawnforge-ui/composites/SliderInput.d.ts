@@ -9,4 +9,4 @@ export interface SliderInputProps extends Omit<InputHTMLAttributes<HTMLInputElem
     showValue?: boolean;
     formatValue?: (value: number) => string;
 }
-export declare function SliderInput({ label, value, onChange, min, max, step, showValue, formatValue, className, disabled, ...props }: SliderInputProps): import("react/jsx-runtime").JSX.Element;
+export declare function SliderInput({ label, value, onChange, min, max, step, showValue, formatValue, className, disabled, ...props }: SliderInputProps): import("react").JSX.Element;

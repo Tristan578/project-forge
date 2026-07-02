@@ -6,4 +6,4 @@ export interface CollapsibleSectionProps {
     headerRight?: ReactNode;
     className?: string;
 }
-export declare function CollapsibleSection({ title, children, defaultOpen, headerRight, className, }: CollapsibleSectionProps): import("react/jsx-runtime").JSX.Element;
+export declare function CollapsibleSection({ title, children, defaultOpen, headerRight, className, }: CollapsibleSectionProps): import("react").JSX.Element;
