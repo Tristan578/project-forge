@@ -52,6 +52,7 @@ export const POST = createGenerationHandler<
       prompt: params.prompt,
       tileSize: params.tileSize,
       gridSize: params.gridSize,
+      signal: ctx.abortSignal,
     });
 
     return {

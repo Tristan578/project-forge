@@ -552,4 +552,252 @@ describe('generate route integration — generation agent path (USE_GENERATION_A
     const res = await POST(makeRequest('http://test/api/generate/sfx', { durationSeconds: 3 }));
     expect(res.status).toBe(422);
   });
+
+  // -------------------------------------------------------------------------
+  // Test 17: abort forwarding — each route's provider mock receives
+  // ctx.abortSignal (an AbortSignal) on the agent path (PF-916, Design §7).
+  //
+  // The mocks are constructor-shaped (vi.fn(function (this) { ... })), so
+  // method mocks live on instances, not the prototype. Access via
+  // vi.mocked(Ctor).mock.instances.at(-1) — the instance from this request,
+  // since vi.clearAllMocks() runs in beforeEach.
+  // -------------------------------------------------------------------------
+
+  it('test 17 — model route: MeshyClient.createTextTo3D receives ctx.abortSignal', async () => {
+    const { MeshyClient } = await import('@/lib/generate/meshyClient');
+    const { POST } = await import('@/app/api/generate/model/route');
+    const res = await POST(makeRequest('http://test/api/generate/model', { prompt: 'cube', mode: 'text-to-3d' }));
+    expect(res.status).toBe(201);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const instance = vi.mocked(MeshyClient).mock.instances.at(-1) as any;
+    expect(instance.createTextTo3D.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('test 17 — model route (image-to-3d): MeshyClient.createImageTo3D receives ctx.abortSignal', async () => {
+    const { MeshyClient } = await import('@/lib/generate/meshyClient');
+    const { POST } = await import('@/app/api/generate/model/route');
+    const res = await POST(makeRequest('http://test/api/generate/model', {
+      prompt: 'from image', mode: 'image-to-3d', imageBase64: 'abc123',
+    }));
+    expect(res.status).toBe(201);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const instance = vi.mocked(MeshyClient).mock.instances.at(-1) as any;
+    expect(instance.createImageTo3D.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('test 17 — texture route: MeshyClient.createTextToTexture receives ctx.abortSignal', async () => {
+    const { MeshyClient } = await import('@/lib/generate/meshyClient');
+    const { POST } = await import('@/app/api/generate/texture/route');
+    const res = await POST(makeRequest('http://test/api/generate/texture', { prompt: 'brick wall' }));
+    expect(res.status).toBe(201);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const instance = vi.mocked(MeshyClient).mock.instances.at(-1) as any;
+    expect(instance.createTextToTexture.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('test 17 — skybox route: MeshyClient.createTextToTexture receives ctx.abortSignal', async () => {
+    const { MeshyClient } = await import('@/lib/generate/meshyClient');
+    const { POST } = await import('@/app/api/generate/skybox/route');
+    const res = await POST(makeRequest('http://test/api/generate/skybox', { prompt: 'sunset clouds' }));
+    expect(res.status).toBe(201);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const instance = vi.mocked(MeshyClient).mock.instances.at(-1) as any;
+    expect(instance.createTextToTexture.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('test 17 — music route: SunoClient.createMusic receives ctx.abortSignal', async () => {
+    const { SunoClient } = await import('@/lib/generate/sunoClient');
+    const { POST } = await import('@/app/api/generate/music/route');
+    const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
+    expect(res.status).toBe(201);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const instance = vi.mocked(SunoClient).mock.instances.at(-1) as any;
+    expect(instance.createMusic.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('test 17 — sfx route: ElevenLabsClient.generateSfx receives ctx.abortSignal', async () => {
+    const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
+    const { POST } = await import('@/app/api/generate/sfx/route');
+    const res = await POST(makeRequest('http://test/api/generate/sfx', { prompt: 'explosion', durationSeconds: 3 }));
+    expect(res.status).toBe(200);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const instance = vi.mocked(ElevenLabsClient).mock.instances.at(-1) as any;
+    expect(instance.generateSfx.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('test 17 — voice route: ElevenLabsClient.generateVoice receives ctx.abortSignal', async () => {
+    const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
+    const { POST } = await import('@/app/api/generate/voice/route');
+    const res = await POST(makeRequest('http://test/api/generate/voice', { text: 'Hello world' }));
+    expect(res.status).toBe(200);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const instance = vi.mocked(ElevenLabsClient).mock.instances.at(-1) as any;
+    expect(instance.generateVoice.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('test 17 — sprite route: SpriteClient.generateSprite receives ctx.abortSignal', async () => {
+    const { SpriteClient } = await import('@/lib/generate/spriteClient');
+    const { POST } = await import('@/app/api/generate/sprite/route');
+    const res = await POST(makeRequest('http://test/api/generate/sprite', {
+      prompt: 'hero character', size: '64x64', removeBackground: true,
+    }));
+    expect(res.status).toBe(201);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const instance = vi.mocked(SpriteClient).mock.instances.at(-1) as any;
+    expect(instance.generateSprite.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('test 17 — sprite-sheet route: SpriteClient.generateSpriteSheet receives ctx.abortSignal', async () => {
+    const { SpriteClient } = await import('@/lib/generate/spriteClient');
+    const { POST } = await import('@/app/api/generate/sprite-sheet/route');
+    const res = await POST(makeRequest('http://test/api/generate/sprite-sheet', {
+      prompt: 'walk cycle', frameCount: 4, size: '64x64',
+    }));
+    expect(res.status).toBe(201);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const instance = vi.mocked(SpriteClient).mock.instances.at(-1) as any;
+    expect(instance.generateSpriteSheet.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('test 17 — pixel-art route: PixelArtClient.generate receives ctx.abortSignal', async () => {
+    const { PixelArtClient } = await import('@/lib/generate/pixelArtClient');
+    const { POST } = await import('@/app/api/generate/pixel-art/route');
+    const res = await POST(makeRequest('http://test/api/generate/pixel-art', {
+      prompt: 'wizard sprite', targetSize: 32, palette: 'nes',
+    }));
+    expect(res.status).toBe(201);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const instance = vi.mocked(PixelArtClient).mock.instances.at(-1) as any;
+    expect(instance.generate.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('test 17 — tileset-gen route: SpriteClient.generateTileset receives ctx.abortSignal', async () => {
+    const { SpriteClient } = await import('@/lib/generate/spriteClient');
+    const { POST } = await import('@/app/api/generate/tileset-gen/route');
+    const res = await POST(makeRequest('http://test/api/generate/tileset-gen', {
+      prompt: 'forest floor', tileSize: 32, gridSize: '8x8',
+    }));
+    expect(res.status).toBe(201);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const instance = vi.mocked(SpriteClient).mock.instances.at(-1) as any;
+    expect(instance.generateTileset.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('test 17 — localize route: generateText receives abortSignal option', async () => {
+    const { generateText } = await import('ai');
+    const { POST } = await import('@/app/api/generate/localize/route');
+    const res = await POST(makeRequest('http://test/api/generate/localize', {
+      strings: [{ id: 'greeting', text: 'Hello', context: 'Menu button' }],
+      sourceLocale: 'en',
+      targetLocales: ['es'],
+    }));
+    expect(res.status).toBe(200);
+    const calls = vi.mocked(generateText).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0][0].abortSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('test 17 — pacing route: generateText receives abortSignal option', async () => {
+    const { generateText } = await import('ai');
+    const { POST } = await import('@/app/api/generate/pacing/route');
+    const res = await POST(makeRequest('http://test/api/generate/pacing', {
+      report: {
+        score: 75,
+        curve: {
+          segments: [{ sceneIndex: 0, sceneName: 'Intro', intensity: 0.3, emotion: 'calm' }],
+          averageIntensity: 0.3,
+          variance: 0.01,
+        },
+        suggestions: [],
+      },
+    }));
+    expect(res.status).toBe(200);
+    const calls = vi.mocked(generateText).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0][0].abortSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 18: maxDuration parity regression pin.
+  //
+  // Pins the exported maxDuration for every route (model/music=180, localize=120,
+  // all others=60). This locks the relationship between each route's Vercel budget
+  // and the maxDurationSeconds config passed to createGenerationHandler, which
+  // drives deriveGenerationStepTimeoutMs. A drift here would make the agent abort
+  // either too late (outliving the function) or too early (spurious refunds).
+  // Passes against current code by design — its job is to prevent future drift.
+  // -------------------------------------------------------------------------
+
+  it('test 18 — all routes export maxDuration that matches factory maxDurationSeconds (regression pin)', async () => {
+    const [
+      model, music, localize,
+      sfx, voice, skybox, texture,
+      sprite, spriteSheet, pixelArt, tilesetGen, pacing,
+    ] = await Promise.all([
+      import('@/app/api/generate/model/route'),
+      import('@/app/api/generate/music/route'),
+      import('@/app/api/generate/localize/route'),
+      import('@/app/api/generate/sfx/route'),
+      import('@/app/api/generate/voice/route'),
+      import('@/app/api/generate/skybox/route'),
+      import('@/app/api/generate/texture/route'),
+      import('@/app/api/generate/sprite/route'),
+      import('@/app/api/generate/sprite-sheet/route'),
+      import('@/app/api/generate/pixel-art/route'),
+      import('@/app/api/generate/tileset-gen/route'),
+      import('@/app/api/generate/pacing/route'),
+    ]);
+
+    // Heavy provider routes: 180s budget (maxDurationSeconds: 180 in factory config)
+    expect(model.maxDuration).toBe(180);
+    expect(music.maxDuration).toBe(180);
+    // LLM batch route: 120s budget (maxDurationSeconds: 120 in factory config)
+    expect(localize.maxDuration).toBe(120);
+    // Standard routes: 60s budget (factory derives 55s step cap from this)
+    expect(sfx.maxDuration).toBe(60);
+    expect(voice.maxDuration).toBe(60);
+    expect(skybox.maxDuration).toBe(60);
+    expect(texture.maxDuration).toBe(60);
+    expect(sprite.maxDuration).toBe(60);
+    expect(spriteSheet.maxDuration).toBe(60);
+    expect(pixelArt.maxDuration).toBe(60);
+    expect(tilesetGen.maxDuration).toBe(60);
+    expect(pacing.maxDuration).toBe(60);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 19: end-to-end timeout → GenerationTimeoutError → refund (regression pin).
+  //
+  // Proves the real factory drives the abort through the agent's timeout when
+  // a provider call never resolves. The agent defaults to globalThis.setTimeout
+  // (generationAgent.ts:143-145) so vi.useFakeTimers() fires the deadline.
+  // stepTimeoutMs for a 60s route = deriveGenerationStepTimeoutMs(60) = 55_000ms.
+  // Passes against current code (path shipped in #8833) — its job is to prove
+  // the composed path through the REAL factory, not the agent unit seam.
+  // -------------------------------------------------------------------------
+
+  it('test 19 — flag-on route timeout fires GenerationTimeoutError → refund → opaque 500 (regression pin)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+        this.generateSfx = vi.fn().mockReturnValue(new Promise<never>(() => {}));
+        this.generateVoice = vi.fn();
+      } as never);
+
+      const { refundTokens } = await import('@/lib/tokens/service');
+      const { POST } = await import('@/app/api/generate/sfx/route');
+
+      const responsePromise = POST(makeRequest('http://test/api/generate/sfx', { prompt: 'explosion', durationSeconds: 3 }));
+
+      // deriveGenerationStepTimeoutMs(60) = 60*1000 - 5000 = 55_000ms
+      await vi.advanceTimersByTimeAsync(55_001);
+
+      const res = await responsePromise;
+      expect(res.status).toBe(500);
+      expect(refundTokens).toHaveBeenCalledWith('user-int', 'usage-int');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -81,6 +81,7 @@ export const POST = createGenerationHandler<
       style: params.style,
       tiling: params.tiling,
       generateMaps: params.generateMaps,
+      signal: ctx.abortSignal,
     });
 
     return {

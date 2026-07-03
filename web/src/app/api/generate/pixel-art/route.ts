@@ -121,6 +121,7 @@ export const POST = createGenerationHandler<
       prompt: params.prompt,
       style: params.style as PixelArtStyle,
       size: providerSize,
+      signal: ctx.abortSignal,
     });
 
     const jobId = result.predictionId ?? `pxart-openai-${Date.now()}`;

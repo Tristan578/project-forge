@@ -66,6 +66,7 @@ export const POST = createGenerationHandler<
       frameCount: params.frameCount,
       style: params.style,
       size: params.size,
+      signal: ctx.abortSignal,
     });
 
     return {

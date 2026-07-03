@@ -119,7 +119,7 @@ export const POST = createGenerationHandler<
     sourceLocale: params.sourceLocale,
     targetLocales: params.targetLocales,
   }),
-  execute: async (params, apiKey, { userId, usageId }) => {
+  execute: async (params, apiKey, { userId, usageId, abortSignal }) => {
     const anthropicProvider = createAnthropic({ apiKey });
     const result: Record<string, LocaleBundle> = {};
 
@@ -141,6 +141,7 @@ export const POST = createGenerationHandler<
           prompt,
           maxOutputTokens: 4096,
           experimental_telemetry: { isEnabled: true },
+          abortSignal,
         });
 
         captureAiGeneration({
