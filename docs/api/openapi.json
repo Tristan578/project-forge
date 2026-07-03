@@ -126,7 +126,8 @@
           "jobId": { "type": "string" },
           "provider": { "type": "string" },
           "status": { "type": "string", "enum": ["pending", "processing", "completed", "failed"] },
-          "estimatedSeconds": { "type": "integer" }
+          "estimatedSeconds": { "type": "integer" },
+          "usageId": { "type": "string", "description": "Usage record ID needed to trigger a client-side refund if the async job fails after queuing. Omitted on BYOK (bring-your-own-key) requests where billing is not metered." }
         }
       },
       "GenerationStatus": {

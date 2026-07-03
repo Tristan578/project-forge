@@ -15,7 +15,7 @@ export const POST = createGenerationHandler<
     style?: SpriteStyle;
     size: SpriteSize;
   },
-  { jobId: string; provider: string; status: string; estimatedSeconds: number }
+  { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
 >({
   route: '/api/generate/sprite-sheet',
   provider: DB_PROVIDER.sprite,
@@ -59,7 +59,7 @@ export const POST = createGenerationHandler<
       },
     };
   },
-  execute: async (params, apiKey) => {
+  execute: async (params, apiKey, ctx) => {
     const client = new SpriteClient(apiKey, 'sdxl');
     const result = await client.generateSpriteSheet({
       prompt: params.prompt,
@@ -73,6 +73,7 @@ export const POST = createGenerationHandler<
       provider: DB_PROVIDER.sprite,
       status: result.status,
       estimatedSeconds: params.frameCount * 10,
+      usageId: ctx.usageId,
     };
   },
   // Durable server-side completion + refund (PF-906). Dormant unless QStash set.
