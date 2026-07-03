@@ -66,6 +66,7 @@ import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLi
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { cachedGenerate } from '@/lib/api/responseCache';
 import { createGenerationHandler } from '../createGenerationHandler';
 
 const mockAuth = vi.mocked(authenticateRequest);
@@ -75,6 +76,7 @@ const mockAggRateLimit = vi.mocked(aggregateGenerationRateLimit);
 const mockSanitize = vi.mocked(sanitizePrompt);
 const mockRefund = vi.mocked(refundTokens);
 const mockCapture = vi.mocked(captureException);
+const mockCachedGenerate = vi.mocked(cachedGenerate);
 
 function makeRequest(body: Record<string, unknown>): NextRequest {
   return new NextRequest('http://localhost:3000/api/generate/test', {
@@ -397,5 +399,169 @@ describe('createGenerationHandler', () => {
     // Absent secondary fields are not screened.
     expect(mockSanitize).toHaveBeenCalledWith('a friendly robot');
     expect(mockSanitize).toHaveBeenCalledTimes(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // PF-916 / #8826 — factory contract pins (regression guards)
+  //
+  // These tests pin EXISTING behavior: they pass against current code by
+  // design. Their job is to lock behavior this PR must not change, not to
+  // fail first. Any RED result is a real bug — fix the code, never the test.
+  // -------------------------------------------------------------------------
+
+  it('passes filtered prompt text to both execute and billingMetadata (primary + secondary fields) (#8826 pin)', async () => {
+    const executeSpy = vi.fn().mockResolvedValue({ ok: true });
+    const billingMetadataSpy = vi.fn().mockImplementation((p: unknown) => p as Record<string, unknown>);
+
+    mockSanitize.mockImplementation((p: string) => ({ safe: true, filtered: `filtered(${p})` }));
+
+    const handler = createGenerationHandler({
+      route: '/api/generate/test',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-test',
+      secondaryPromptFields: ['negativePrompt'],
+      billingMetadata: billingMetadataSpy,
+      validate: (body) => ({
+        ok: true,
+        params: { prompt: body.prompt as string, negativePrompt: body.negativePrompt as string },
+      }),
+      execute: executeSpy,
+    });
+
+    await handler(makeRequest({ prompt: 'raw prompt', negativePrompt: 'raw negative' }));
+
+    // params is mutated in-place by the content-safety loop before execute and
+    // billingMetadata are called, so both receive the filtered versions.
+    expect(executeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'filtered(raw prompt)',
+        negativePrompt: 'filtered(raw negative)',
+      }),
+      expect.any(String),
+      expect.anything(),
+    );
+    expect(billingMetadataSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'filtered(raw prompt)',
+        negativePrompt: 'filtered(raw negative)',
+      }),
+    );
+  });
+
+  it('returns 500 "Internal pricing error" and captures when tokenCost fn returns NaN (#8826 pin)', async () => {
+    const handler = createGenerationHandler({
+      route: '/api/generate/test',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-test',
+      tokenCost: () => NaN,
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: async () => ({ ok: true }),
+    });
+
+    const res = await handler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.error).toBe('Internal pricing error');
+    expect(mockCapture).toHaveBeenCalled();
+  });
+
+  it('returns 500 "Internal pricing error" and captures when tokenCost fn returns a negative value (#8826 pin)', async () => {
+    const handler = createGenerationHandler({
+      route: '/api/generate/test',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-test',
+      tokenCost: () => -5,
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: async () => ({ ok: true }),
+    });
+
+    const res = await handler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.error).toBe('Internal pricing error');
+    expect(mockCapture).toHaveBeenCalled();
+  });
+
+  it('returns 500 "Internal pricing error" via resolve_billing_params branch when tokenCost fn throws (#8826 pin)', async () => {
+    const handler = createGenerationHandler({
+      route: '/api/generate/test',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-test',
+      tokenCost: () => { throw new Error('pricing service unavailable'); },
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: async () => ({ ok: true }),
+    });
+
+    const res = await handler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.error).toBe('Internal pricing error');
+    expect(mockCapture).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ action: 'resolve_billing_params' }),
+    );
+  });
+
+  it('calls refundTokens and returns GENERIC_500 on cached-path execute failure (#8826 pin)', async () => {
+    const handler = createGenerationHandler({
+      route: '/api/generate/test',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-test',
+      cacheKeyParams: (p) => ({ prompt: (p as { prompt: string }).prompt }),
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: async () => { throw new Error('cached provider failure'); },
+    });
+
+    const res = await handler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(500);
+    expect(mockRefund).toHaveBeenCalledWith('user-1', 'usage-1');
+    const data = await res.json();
+    expect(data.error).toBe(GENERIC_500);
+  });
+
+  it('skips resolveApiKey, deductTokens and QStash publish on a cache HIT; sets X-Cache: HIT header (#8826 pin)', async () => {
+    mockCachedGenerate.mockResolvedValueOnce({ result: { ok: true }, cached: true });
+
+    const handler = createGenerationHandler({
+      route: '/api/generate/test',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-test',
+      cacheKeyParams: (p) => ({ prompt: (p as { prompt: string }).prompt }),
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    const res = await handler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-Cache')).toBe('HIT');
+    expect(mockResolve).not.toHaveBeenCalled();
+  });
+
+  it('returns opaque 500 and captures with refund context even when refundTokens itself throws (#8826 pin)', async () => {
+    mockRefund.mockRejectedValue(new Error('refund service unavailable'));
+
+    const handler = createGenerationHandler({
+      route: '/api/generate/test',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-test',
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: async () => { throw new Error('provider failure triggering refund'); },
+    });
+
+    const res = await handler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.error).toBe(GENERIC_500);
+    expect(mockCapture).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ action: 'refund', usageId: 'usage-1' }),
+    );
   });
 });
