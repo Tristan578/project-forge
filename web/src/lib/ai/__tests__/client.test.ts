@@ -281,6 +281,32 @@ describe('streamAI', () => {
     expect(body.model).toBe('claude-haiku-4-5');
     expect(body.messages).toEqual([{ role: 'user', content: 'my prompt' }]);
   });
+
+  it('forwards surface to the chat API body (PF-931 attribution)', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeOkResponse(['data: {"type":"done"}\n']),
+    );
+
+    const { streamAI } = await import('../client');
+    await streamAI('prompt', { surface: 'gdd' });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body.surface).toBe('gdd');
+  });
+
+  it('omits the surface key entirely when not provided', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeOkResponse(['data: {"type":"done"}\n']),
+    );
+
+    const { streamAI } = await import('../client');
+    await streamAI('prompt');
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(body, 'surface')).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

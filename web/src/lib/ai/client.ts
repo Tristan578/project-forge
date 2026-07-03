@@ -223,6 +223,7 @@ export async function streamAI(
     thinking = false,
     signal,
     priority = 1,
+    surface,
   } = options ?? {};
 
   try {
@@ -234,6 +235,7 @@ export async function streamAI(
           sceneContext,
           thinking,
           ...(systemOverride !== undefined ? { systemOverride } : {}),
+          ...(surface !== undefined ? { surface } : {}),
           callbacks,
           // Note: streamChat does not yet accept signal — callers can cancel via
           // the shared AbortController and the stream reader will throw on abort.

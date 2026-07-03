@@ -21,6 +21,8 @@
  *   Finish events: { type: 'finish', ... } (treated as done)
  */
 
+import type { DeepGenSurface } from './surfaces';
+
 // ---------------------------------------------------------------------------
 // Envelope event types
 // ---------------------------------------------------------------------------
@@ -298,6 +300,12 @@ export interface ChatStreamOptions {
   sceneContext?: string;
   thinking?: boolean;
   systemOverride?: string;
+  /**
+   * Deep-generation surface identifier forwarded to /api/chat for PostHog
+   * attribution — the server validates it against DEEP_GEN_SURFACES and
+   * labels the $ai_generation event `route: '/api/chat#<surface>'`.
+   */
+  surface?: DeepGenSurface;
   callbacks?: StreamCallbacks;
 }
 
@@ -315,12 +323,19 @@ export interface ChatStreamOptions {
  * behaviour across all modules.
  */
 export async function streamChat(options: ChatStreamOptions): Promise<string> {
-  const { messages, model, sceneContext = '', thinking = false, systemOverride, callbacks } = options;
+  const { messages, model, sceneContext = '', thinking = false, systemOverride, surface, callbacks } = options;
 
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, model, sceneContext, thinking, systemOverride }),
+    body: JSON.stringify({
+      messages,
+      model,
+      sceneContext,
+      thinking,
+      systemOverride,
+      ...(surface !== undefined ? { surface } : {}),
+    }),
   });
 
   if (!response.ok) {
