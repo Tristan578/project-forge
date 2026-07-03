@@ -443,6 +443,40 @@ describe('generateWorld', () => {
     expect(result.name).toBe('The Scarred Earth');
   });
 
+  it('passes surface: world_builder in POST body to /api/chat (PF-931)', async () => {
+    const mockWorld: GameWorld = {
+      name: 'Surface Test World',
+      description: 'A test',
+      genre: 'custom',
+      era: 'Now',
+      factions: [{ name: 'F', description: 'D', alignment: 'neutral', territory: 'T', leader: 'L', traits: [], relationships: {} }],
+      regions: [{ name: 'R', description: 'D', biome: 'b', dangerLevel: 3, resources: [], landmarks: [], connectedTo: [] }],
+      timeline: [],
+      lore: [],
+      rules: [],
+    };
+
+    const encoder = new TextEncoder();
+    const sseData = `data: {"type":"text_delta","text":"${JSON.stringify(mockWorld).replace(/"/g, '\\"')}"}\ndata: [DONE]\n`;
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(sseData));
+          controller.close();
+        },
+      }),
+    } as Response);
+
+    await generateWorld('A unique surface-test world');
+
+    expect(fetch).toHaveBeenCalledOnce();
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body.surface).toBe('world_builder');
+  });
+
   // "handles response in choices format" removed — the JSON/choices code path
   // was deleted in favor of SSE-only streaming. The /api/chat endpoint always
   // returns text/event-stream.

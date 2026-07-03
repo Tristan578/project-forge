@@ -175,6 +175,32 @@ describe('fetchAI', () => {
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(Object.prototype.hasOwnProperty.call(body, 'systemOverride')).toBe(false);
   });
+
+  it('includes surface in POST body when provided', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeOkResponse(['data: {"type":"done"}\n']),
+    );
+
+    const { fetchAI } = await import('../client');
+    await fetchAI('prompt', { surface: 'gdd' });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body.surface).toBe('gdd');
+  });
+
+  it('does not include surface in POST body when not provided', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeOkResponse(['data: {"type":"done"}\n']),
+    );
+
+    const { fetchAI } = await import('../client');
+    await fetchAI('prompt');
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(body, 'surface')).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -399,6 +425,56 @@ describe('fetchAI response caching', () => {
     expect(withThinking).toBe('thinking answer');
     // Both must hit the network — thinking=true must not reuse the thinking=false cache entry
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not serve cached response when surface differs', async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        makeOkResponse([
+          'data: {"type":"text_delta","text":"gdd answer"}\n',
+          'data: {"type":"done"}\n',
+        ]),
+      )
+      .mockResolvedValueOnce(
+        makeOkResponse([
+          'data: {"type":"text_delta","text":"world answer"}\n',
+          'data: {"type":"done"}\n',
+        ]),
+      );
+
+    vi.resetModules();
+    const { fetchAI } = await import('../client');
+
+    const a = await fetchAI('same prompt', { model: 'claude-sonnet-4-6', surface: 'gdd' });
+    const b = await fetchAI('same prompt', { model: 'claude-sonnet-4-6', surface: 'world_builder' });
+
+    expect(a).toBe('gdd answer');
+    expect(b).toBe('world answer');
+    // Different surfaces → different cache keys → both hit the network
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('serves cached response when surface is the same', async () => {
+    mockFetch.mockImplementation(() =>
+      Promise.resolve(
+        makeOkResponse([
+          'data: {"type":"text_delta","text":"surface cached"}\n',
+          'data: {"type":"done"}\n',
+        ]),
+      ),
+    );
+
+    vi.resetModules();
+    const { fetchAI } = await import('../client');
+
+    const first = await fetchAI('same prompt', { model: 'claude-sonnet-4-6', surface: 'cutscene' });
+    expect(first).toBe('surface cached');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    const second = await fetchAI('same prompt', { model: 'claude-sonnet-4-6', surface: 'cutscene' });
+    expect(second).toBe('surface cached');
+    // Same surface + same prompt → cache hit, no second network call
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('deduplicates concurrent in-flight requests for the same prompt', async () => {

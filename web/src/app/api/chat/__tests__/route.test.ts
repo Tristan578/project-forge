@@ -1104,4 +1104,63 @@ describe('POST /api/chat', () => {
       expect(refundTokens).not.toHaveBeenCalled();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Surface attribution (PF-931 / #8877)
+  // -------------------------------------------------------------------------
+  describe('surface attribution', () => {
+    type StepEvent = {
+      usage: {
+        inputTokens?: number;
+        outputTokens?: number;
+      };
+    };
+
+    async function captureForSurface(surface: string | undefined) {
+      let capturedOnStepFinish: ((event: StepEvent) => Promise<void>) | undefined;
+      mockStream.mockImplementation(async (opts: Record<string, unknown>) => {
+        capturedOnStepFinish = opts.onStepFinish as typeof capturedOnStepFinish;
+        return mockStreamResult;
+      });
+
+      const bodyWithSurface = surface !== undefined
+        ? { ...validBody(), surface }
+        : validBody();
+
+      const res = await POST(makeRequest(bodyWithSurface));
+      await res.text();
+
+      await capturedOnStepFinish!({ usage: { inputTokens: 100, outputTokens: 50 } });
+
+      return vi.mocked(captureAiGeneration).mock.calls[0]?.[0];
+    }
+
+    it.each(['gdd', 'world_builder', 'cutscene'] as const)(
+      'qualifies route label with surface=%s',
+      async (surface) => {
+        const arg = await captureForSurface(surface);
+        expect(arg?.route).toBe(`/api/chat#${surface}`);
+      },
+    );
+
+    it('drops unknown surface and uses plain /api/chat route', async () => {
+      const arg = await captureForSurface('evil<script>');
+      expect(arg?.route).toBe('/api/chat');
+      // The raw unknown value must not appear anywhere in the capture payload
+      expect(JSON.stringify(arg)).not.toContain('evil<script>');
+    });
+
+    it('uses plain /api/chat route when surface is absent (regression)', async () => {
+      const arg = await captureForSurface(undefined);
+      expect(arg?.route).toBe('/api/chat');
+    });
+
+    it('capture arg carries no prompt/response content fields (PF-931 privacy guard)', async () => {
+      const arg = await captureForSurface('gdd');
+      expect(arg).not.toHaveProperty('$ai_input');
+      expect(arg).not.toHaveProperty('$ai_output_choices');
+      expect(arg).not.toHaveProperty('messages');
+      expect(arg).not.toHaveProperty('prompt');
+    });
+  });
 });
