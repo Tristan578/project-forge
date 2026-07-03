@@ -4,6 +4,7 @@ import 'server-only';
 
 import { REPLICATE_MODEL_SDXL } from '@/lib/ai/models';
 import { validateResourceId } from '@/lib/validation/resourceId';
+import { composeAbortSignal } from '@/lib/generate/abortComposition';
 export type { PixelArtStyle } from '@/lib/config/providers';
 import type { PixelArtStyle } from '@/lib/config/providers';
 export type PixelArtProvider = 'openai' | 'replicate';
@@ -13,6 +14,7 @@ interface GenerateParams {
   style: PixelArtStyle;
   size: 512 | 1024;
   referenceImage?: string; // base64
+  signal?: AbortSignal;
 }
 
 interface OpenAIResult {
@@ -50,12 +52,12 @@ export class PixelArtClient {
     const enhancedPrompt = buildPixelArtPrompt(params.prompt, params.style);
 
     if (this.provider === 'openai') {
-      return this.generateDalle(enhancedPrompt, params.size);
+      return this.generateDalle(enhancedPrompt, params.size, params.signal);
     }
-    return this.generateReplicate(enhancedPrompt, params.size);
+    return this.generateReplicate(enhancedPrompt, params.size, params.signal);
   }
 
-  private async generateDalle(prompt: string, _size: 512 | 1024): Promise<OpenAIResult> {
+  private async generateDalle(prompt: string, _size: 512 | 1024, signal?: AbortSignal): Promise<OpenAIResult> {
     // DALL-E 3 only supports 1024x1024, 1024x1792, and 1792x1024.
     // Always request 1024x1024 and let the caller downscale if needed.
     const response = await fetch('https://api.openai.com/v1/images/generations', {
@@ -71,7 +73,7 @@ export class PixelArtClient {
         size: '1024x1024',
         response_format: 'b64_json',
       }),
-      signal: AbortSignal.timeout(60_000),
+      signal: composeAbortSignal(signal, 60_000),
     });
 
     if (!response.ok) {
@@ -83,7 +85,7 @@ export class PixelArtClient {
     return { base64: data.data[0].b64_json };
   }
 
-  private async generateReplicate(prompt: string, _size: 512 | 1024): Promise<ReplicateResult> {
+  private async generateReplicate(prompt: string, _size: 512 | 1024, signal?: AbortSignal): Promise<ReplicateResult> {
     const response = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
@@ -100,7 +102,7 @@ export class PixelArtClient {
           height: 1024,
         },
       }),
-      signal: AbortSignal.timeout(30_000),
+      signal: composeAbortSignal(signal, 30_000),
     });
 
     if (!response.ok) {
@@ -112,7 +114,7 @@ export class PixelArtClient {
     return { predictionId: data.id, status: data.status };
   }
 
-  async getReplicateStatus(predictionId: string): Promise<{ status: string; output?: string[] }> {
+  async getReplicateStatus(predictionId: string, opts?: { signal?: AbortSignal }): Promise<{ status: string; output?: string[] }> {
     // predictionId is interpolated into the Replicate prediction URL. Validate it
     // against the safe-id allowlist and percent-encode before building the URL so a
     // crafted jobId (path traversal / SSRF — e.g. `../models/foo`) can't redirect the
@@ -125,7 +127,7 @@ export class PixelArtClient {
     const response = await fetch(url, {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${this.apiKey}` },
-      signal: AbortSignal.timeout(15_000),
+      signal: composeAbortSignal(opts?.signal, 15_000),
     });
     if (!response.ok) throw new Error(`Replicate status error ${response.status}`);
     const data = await response.json();

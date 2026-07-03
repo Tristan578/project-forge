@@ -6,6 +6,7 @@
 
 import { validateResourceId } from '@/lib/validation/resourceId';
 import { REPLICATE_MODEL_SDXL } from '@/lib/ai/models';
+import { composeAbortSignal } from '@/lib/generate/abortComposition';
 
 export interface SpriteGenerateParams {
   prompt: string;
@@ -13,6 +14,7 @@ export interface SpriteGenerateParams {
   size: '32x32' | '64x64' | '128x128' | '256x256' | '512x512' | '1024x1024';
   provider?: 'auto' | 'dalle3' | 'sdxl';
   removeBackground?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface SpriteSheetParams {
@@ -20,12 +22,14 @@ export interface SpriteSheetParams {
   frameCount: number;
   style?: 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
   size: '32x32' | '64x64' | '128x128' | '256x256';
+  signal?: AbortSignal;
 }
 
 export interface TilesetParams {
   prompt: string;
   tileSize: 16 | 32 | 48 | 64;
   gridSize: '4x4' | '8x8' | '16x16';
+  signal?: AbortSignal;
 }
 
 export interface GenerationResult {
@@ -65,7 +69,7 @@ export class SpriteClient {
           : params.size,
         quality: 'standard',
       }),
-      signal: AbortSignal.timeout(60000),
+      signal: composeAbortSignal(params.signal, 60000),
     });
 
     if (!response.ok) {
@@ -101,7 +105,7 @@ export class SpriteClient {
           guidance_scale: 7.5,
         },
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: composeAbortSignal(params.signal, 30000),
     });
 
     if (!response.ok) {
@@ -152,7 +156,7 @@ export class SpriteClient {
           guidance_scale: 8,
         },
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: composeAbortSignal(params.signal, 30000),
     });
 
     if (!response.ok) {
@@ -186,7 +190,7 @@ export class SpriteClient {
           guidance_scale: 9,
         },
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: composeAbortSignal(params.signal, 30000),
     });
 
     if (!response.ok) {
@@ -201,7 +205,7 @@ export class SpriteClient {
     };
   }
 
-  async removeBackground(imageUrl: string): Promise<{ resultUrl: string }> {
+  async removeBackground(imageUrl: string, opts?: { signal?: AbortSignal }): Promise<{ resultUrl: string }> {
     const response = await fetch('https://api.remove.bg/v1.0/removebg', {
       method: 'POST',
       headers: {
@@ -211,7 +215,7 @@ export class SpriteClient {
         image_url: imageUrl,
         size: 'auto',
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: composeAbortSignal(opts?.signal, 30000),
     });
 
     if (!response.ok) {
@@ -274,7 +278,7 @@ export class SpriteClient {
     });
   }
 
-  async getReplicateStatus(predictionId: string): Promise<{ status: string; output?: string[] }> {
+  async getReplicateStatus(predictionId: string, opts?: { signal?: AbortSignal }): Promise<{ status: string; output?: string[] }> {
     validateResourceId(predictionId);
     const safePredictionId = encodeURIComponent(predictionId);
     const url = new URL(`/v1/predictions/${safePredictionId}`, 'https://api.replicate.com');
@@ -283,7 +287,7 @@ export class SpriteClient {
       headers: {
         'Authorization': `Bearer ${this.apiKey}`,
       },
-      signal: AbortSignal.timeout(10000),
+      signal: composeAbortSignal(opts?.signal, 10000),
     });
 
     if (!response.ok) {

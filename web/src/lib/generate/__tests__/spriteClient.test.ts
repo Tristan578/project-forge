@@ -305,4 +305,162 @@ describe('SpriteClient', () => {
         .rejects.toThrow('Replicate API error (500)');
     });
   });
+
+  describe('abort signal composition', () => {
+    it('passes a composed (pre-aborted) signal to fetch when signal param is provided (generateSprite DALL-E)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ url: 'https://image.url' }] }),
+      } as Response);
+
+      const controller = new AbortController();
+      controller.abort(new Error('deadline exceeded'));
+
+      const client = new SpriteClient(mockApiKey, 'dalle3');
+      await client.generateSprite({ prompt: 'cat', size: '512x512', signal: controller.signal });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(true);
+    });
+
+    it('passes a timeout signal to fetch when no signal param is provided (generateSprite DALL-E)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ url: 'https://image.url' }] }),
+      } as Response);
+
+      const client = new SpriteClient(mockApiKey, 'dalle3');
+      await client.generateSprite({ prompt: 'cat', size: '512x512' });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(false);
+    });
+
+    it('passes a composed (pre-aborted) signal to fetch when signal param is provided (generateSpriteSheet)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: 'sheet_sig', status: 'starting' }),
+      } as Response);
+
+      const controller = new AbortController();
+      controller.abort(new Error('deadline exceeded'));
+
+      const client = new SpriteClient(mockApiKey, 'sdxl');
+      await client.generateSpriteSheet({
+        prompt: 'walk', frameCount: 4, size: '64x64', signal: controller.signal,
+      });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(true);
+    });
+
+    it('passes a composed (pre-aborted) signal to fetch when signal param is provided (generateTileset)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: 'tile_sig', status: 'starting' }),
+      } as Response);
+
+      const controller = new AbortController();
+      controller.abort(new Error('deadline exceeded'));
+
+      const client = new SpriteClient(mockApiKey, 'sdxl');
+      await client.generateTileset({
+        prompt: 'grass', tileSize: 32, gridSize: '8x8', signal: controller.signal,
+      });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(true);
+    });
+
+    it('passes a composed (pre-aborted) signal to fetch when signal param is provided (removeBackground)', async () => {
+      const mockBlob = new Blob(['png-data'], { type: 'image/png' });
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        blob: () => Promise.resolve(mockBlob),
+      } as Response);
+
+      const controller = new AbortController();
+      controller.abort(new Error('deadline exceeded'));
+
+      const client = new SpriteClient(mockApiKey, 'removebg');
+      await client.removeBackground('https://example.com/image.png', { signal: controller.signal });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(true);
+    });
+
+    it('passes a composed (pre-aborted) signal to fetch when signal param is provided (getReplicateStatus)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ status: 'succeeded', output: [] }),
+      } as Response);
+
+      const controller = new AbortController();
+      controller.abort(new Error('deadline exceeded'));
+
+      const client = new SpriteClient(mockApiKey, 'sdxl');
+      await client.getReplicateStatus('pred-sig', { signal: controller.signal });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(true);
+    });
+
+    it('passes a timeout signal to fetch when no signal param is provided (getReplicateStatus)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ status: 'starting' }),
+      } as Response);
+
+      const client = new SpriteClient(mockApiKey, 'sdxl');
+      await client.getReplicateStatus('pred-no-sig');
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(false);
+    });
+
+    it('poll loop: aborting during getReplicateStatus stops further poll fetches', async () => {
+      const controller = new AbortController();
+      const client = new SpriteClient(mockApiKey, 'sdxl');
+
+      // Simulate real fetch behavior: throw AbortError when signal is already aborted
+      vi.mocked(fetch).mockImplementation(async (_url, init) => {
+        if (init?.signal?.aborted) {
+          throw Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' });
+        }
+        return {
+          ok: true,
+          json: () => Promise.resolve({ status: 'processing' }),
+        } as Response;
+      });
+
+      const MAX_POLLS = 5;
+      let successfulPolls = 0;
+
+      for (let i = 0; i < MAX_POLLS; i++) {
+        try {
+          await client.getReplicateStatus('pred-loop', { signal: controller.signal });
+          successfulPolls++;
+          // Abort after the first successful poll
+          if (successfulPolls === 1) {
+            controller.abort();
+          }
+        } catch {
+          // AbortError thrown by the second poll stops the loop
+          break;
+        }
+      }
+
+      // Only one poll completed before abort interrupted the loop
+      expect(successfulPolls).toBe(1);
+      // Fetch-call count stopped growing well before MAX_POLLS
+      expect(vi.mocked(fetch).mock.calls.length).toBeLessThan(MAX_POLLS);
+    });
+  });
 });
