@@ -48,7 +48,7 @@ vi.mock('@/lib/db/client', () => ({
 // Drive the cached path deterministically: run the miss factory and surface any
 // thrown error to the handler's cached-path catch site (so its 500 behaviour,
 // including the #8597 message-leak guard, is exercised without real Redis).
-vi.mock('../responseCache', () => ({
+vi.mock('@/lib/api/responseCache', () => ({
   cachedGenerate: vi.fn(async (_op: string, _params: unknown, factory: () => Promise<unknown>) => ({
     result: await factory(),
     cached: false,
