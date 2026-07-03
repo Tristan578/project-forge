@@ -269,7 +269,7 @@ describe('generate route integration (route → factory → provider)', () => {
     expect(data.usageId).toBe('usage-int');
   });
 
-  it('sprite-sheet: valid request → 201', async () => {
+  it('sprite-sheet: valid request → 201 with jobId and usageId', async () => {
     const { POST } = await import('@/app/api/generate/sprite-sheet/route');
     const res = await POST(makeRequest('http://test/api/generate/sprite-sheet', {
       prompt: 'walk cycle', frameCount: 4, size: '64x64',
@@ -277,9 +277,10 @@ describe('generate route integration (route → factory → provider)', () => {
     expect(res.status).toBe(201);
     const data = await res.json();
     expect(data.jobId).toBe('sheet-1');
+    expect(data.usageId).toBe('usage-int');
   });
 
-  it('tileset-gen: valid request → 201', async () => {
+  it('tileset-gen: valid request → 201 with jobId and usageId', async () => {
     const { POST } = await import('@/app/api/generate/tileset-gen/route');
     const res = await POST(makeRequest('http://test/api/generate/tileset-gen', {
       prompt: 'forest floor', tileSize: 32, gridSize: '8x8',
@@ -287,6 +288,7 @@ describe('generate route integration (route → factory → provider)', () => {
     expect(res.status).toBe(201);
     const data = await res.json();
     expect(data.jobId).toBe('tile-1');
+    expect(data.usageId).toBe('usage-int');
   });
 
   it('pixel-art: valid request → 201', async () => {
@@ -506,6 +508,28 @@ describe('generate route integration — generation agent path (USE_GENERATION_A
     expect(res.status).toBe(201);
     const data = await res.json();
     expect(data.jobId).toBe('pxart-1');
+    expect(data.usageId).toBe('usage-int');
+  });
+
+  it('sprite-sheet: 201 with jobId AND usageId preserved through the agent', async () => {
+    const { POST } = await import('@/app/api/generate/sprite-sheet/route');
+    const res = await POST(makeRequest('http://test/api/generate/sprite-sheet', {
+      prompt: 'walk cycle', frameCount: 4, size: '64x64',
+    }));
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.jobId).toBe('sheet-1');
+    expect(data.usageId).toBe('usage-int');
+  });
+
+  it('tileset-gen: 201 with jobId AND usageId preserved through the agent', async () => {
+    const { POST } = await import('@/app/api/generate/tileset-gen/route');
+    const res = await POST(makeRequest('http://test/api/generate/tileset-gen', {
+      prompt: 'forest floor', tileSize: 32, gridSize: '8x8',
+    }));
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.jobId).toBe('tile-1');
     expect(data.usageId).toBe('usage-int');
   });
 
