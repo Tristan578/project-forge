@@ -590,6 +590,7 @@ export async function generateWorld(description: string, preset?: string): Promi
   const content = await fetchAI(prompt, {
     model: getDeepGenerationModel('world_builder'),
     priority: 2,
+    surface: 'world_builder',
   });
 
   try {

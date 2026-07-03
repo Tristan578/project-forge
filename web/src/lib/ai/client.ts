@@ -10,6 +10,7 @@ import { streamChat, type StreamCallbacks } from './streaming';
 import { aiQueue, type Priority } from './requestQueue';
 import { aiResponseCache } from './promptCache';
 import { AI_MODEL_PRIMARY } from './models';
+import type { DeepGenSurface } from './surfaces';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,6 +40,13 @@ export interface AIClientOptions {
    * Lower number = dispatched first.
    */
   priority?: Priority;
+  /**
+   * Deep-generation surface identifier forwarded to /api/chat for PostHog
+   * attribution. When present, the server labels the $ai_generation event
+   * `route: '/api/chat#<surface>'` so costs can be broken out per feature.
+   * Callers that omit this produce byte-identical request bodies to today.
+   */
+  surface?: DeepGenSurface;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,8 +124,9 @@ export async function fetchAI(prompt: string, options?: AIClientOptions): Promis
   if (!signal) {
     const thinking = options?.thinking ?? false;
     const effort = options?.effort ?? 'none';
+    const surface = options?.surface;
     const cacheKey = await aiResponseCache.computeKey(
-      `${model}:${thinking ? 'thinking' : 'standard'}:effort=${effort}`,
+      `${model}:${thinking ? 'thinking' : 'standard'}:effort=${effort}${surface !== undefined ? `:surface=${surface}` : ''}`,
       systemOverride ?? '',
       `${sceneContext}\x00${prompt}`,
     );
@@ -136,6 +145,7 @@ async function fetchAIUncached(prompt: string, options?: AIClientOptions): Promi
     effort,
     signal,
     priority = 1,
+    surface,
   } = options ?? {};
 
   return aiQueue.enqueue(async () => {
@@ -153,6 +163,7 @@ async function fetchAIUncached(prompt: string, options?: AIClientOptions): Promi
           thinking,
           ...(effort !== undefined ? { effort } : {}),
           ...(systemOverride !== undefined ? { systemOverride } : {}),
+          ...(surface !== undefined ? { surface } : {}),
         }),
         ...fetchOptions,
       });

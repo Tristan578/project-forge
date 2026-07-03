@@ -27,6 +27,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { logCost } from '@/lib/costs/costLogger';
 import { trackAiCacheHitRate } from '@/lib/analytics/events.server';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
+import { DEEP_GEN_SURFACES, type DeepGenSurface } from '@/lib/ai/surfaces';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
 import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
@@ -316,6 +317,7 @@ export async function POST(request: NextRequest) {
     thinking?: boolean;
     effort?: 'low' | 'medium' | 'high';
     systemOverride?: string;
+    surface?: string;
   };
 
   try {
@@ -333,6 +335,14 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+
+  // Validate surface — unknown values are silently dropped (additive, non-breaking).
+  // Never reject the request over this field and never echo the raw value back.
+  const surface: DeepGenSurface | undefined =
+    typeof body.surface === 'string' &&
+    (DEEP_GEN_SURFACES as readonly string[]).includes(body.surface)
+      ? (body.surface as DeepGenSurface)
+      : undefined;
   if (!messages || !Array.isArray(messages)) {
     return Response.json({ error: 'messages array required' }, { status: 400 });
   }
@@ -666,7 +676,7 @@ export async function POST(request: NextRequest) {
             outputTokens: usage.outputTokens,
             stream: true,
             isError: false,
-            route: '/api/chat',
+            route: surface ? `/api/chat#${surface}` : '/api/chat',
             cacheReadInputTokens: usage.inputTokenDetails?.cacheReadTokens,
             cacheCreationInputTokens: usage.inputTokenDetails?.cacheWriteTokens,
           });
