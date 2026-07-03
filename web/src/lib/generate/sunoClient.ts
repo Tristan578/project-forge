@@ -7,6 +7,7 @@
  */
 
 import { validateResourceId } from '@/lib/validation/resourceId';
+import { composeAbortSignal } from '@/lib/generate/abortComposition';
 
 export interface SunoConfig {
   apiKey: string;
@@ -16,6 +17,7 @@ export interface CreateMusicParams {
   prompt: string;
   durationSeconds?: number;
   instrumental?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface MusicStatus {
@@ -42,7 +44,7 @@ export class SunoClient {
         duration_seconds: params.durationSeconds || 30,
         instrumental: params.instrumental ?? true,
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: composeAbortSignal(params.signal, 30000),
     });
 
     if (!response.ok) {
@@ -54,7 +56,7 @@ export class SunoClient {
     return { taskId: data.task_id || data.id };
   }
 
-  async getStatus(taskId: string): Promise<MusicStatus> {
+  async getStatus(taskId: string, opts?: { signal?: AbortSignal }): Promise<MusicStatus> {
     validateResourceId(taskId);
     const safeTaskId = encodeURIComponent(taskId);
     const url = new URL(`/v1/generation/${safeTaskId}`, 'https://api.suno.ai');
@@ -63,7 +65,7 @@ export class SunoClient {
       headers: {
         'Authorization': `Bearer ${this.config.apiKey}`,
       },
-      signal: AbortSignal.timeout(10000),
+      signal: composeAbortSignal(opts?.signal, 10000),
     });
 
     if (!response.ok) {

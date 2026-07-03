@@ -107,6 +107,70 @@ describe('ElevenLabsClient', () => {
     });
   });
 
+  describe('abort signal composition', () => {
+    it('passes a composed (pre-aborted) signal to fetch when signal param is provided (generateSfx)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new Uint8Array([]).buffer),
+      } as Response);
+
+      const controller = new AbortController();
+      controller.abort(new Error('deadline exceeded'));
+
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      await client.generateSfx({ prompt: 'wind', signal: controller.signal });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(true);
+    });
+
+    it('passes a timeout signal to fetch when no signal param is provided (generateSfx)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new Uint8Array([]).buffer),
+      } as Response);
+
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      await client.generateSfx({ prompt: 'rain' });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(false);
+    });
+
+    it('passes a composed (pre-aborted) signal to fetch when signal param is provided (generateVoice)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new Uint8Array([]).buffer),
+      } as Response);
+
+      const controller = new AbortController();
+      controller.abort(new Error('deadline exceeded'));
+
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      await client.generateVoice({ text: 'Hello', signal: controller.signal });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(true);
+    });
+
+    it('passes a timeout signal to fetch when no signal param is provided (generateVoice)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new Uint8Array([]).buffer),
+      } as Response);
+
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      await client.generateVoice({ text: 'Hello world' });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(false);
+    });
+  });
+
   describe('generateVoice', () => {
     it('sends correct request with default voiceId and returns audio', async () => {
       const fakeBuffer = new Uint8Array([10, 20]).buffer;
