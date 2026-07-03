@@ -1128,35 +1128,40 @@ describe('POST /api/chat', () => {
         : validBody();
 
       const res = await POST(makeRequest(bodyWithSurface));
-      await res.text();
+      const responseText = await res.text(); // drain stream + keep body for echo assertions
 
       await capturedOnStepFinish!({ usage: { inputTokens: 100, outputTokens: 50 } });
 
-      return vi.mocked(captureAiGeneration).mock.calls[0]?.[0];
+      return {
+        arg: vi.mocked(captureAiGeneration).mock.calls[0]?.[0],
+        responseText,
+      };
     }
 
     it.each(['gdd', 'world_builder', 'cutscene'] as const)(
       'qualifies route label with surface=%s',
       async (surface) => {
-        const arg = await captureForSurface(surface);
+        const { arg } = await captureForSurface(surface);
         expect(arg?.route).toBe(`/api/chat#${surface}`);
       },
     );
 
     it('drops unknown surface and uses plain /api/chat route', async () => {
-      const arg = await captureForSurface('evil<script>');
+      const { arg, responseText } = await captureForSurface('evil<script>');
       expect(arg?.route).toBe('/api/chat');
-      // The raw unknown value must not appear anywhere in the capture payload
+      // The raw unknown value must not appear anywhere in the capture payload...
       expect(JSON.stringify(arg)).not.toContain('evil<script>');
+      // ...nor be echoed anywhere in the HTTP response (spec test plan item b)
+      expect(responseText).not.toContain('evil<script>');
     });
 
     it('uses plain /api/chat route when surface is absent (regression)', async () => {
-      const arg = await captureForSurface(undefined);
+      const { arg } = await captureForSurface(undefined);
       expect(arg?.route).toBe('/api/chat');
     });
 
     it('capture arg carries no prompt/response content fields (PF-931 privacy guard)', async () => {
-      const arg = await captureForSurface('gdd');
+      const { arg } = await captureForSurface('gdd');
       expect(arg).not.toHaveProperty('$ai_input');
       expect(arg).not.toHaveProperty('$ai_output_choices');
       expect(arg).not.toHaveProperty('messages');
