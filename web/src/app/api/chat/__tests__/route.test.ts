@@ -152,6 +152,7 @@ import { logCost } from '@/lib/costs/costLogger';
 import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
 import { trackAiCacheHitRate } from '@/lib/analytics/events.server';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
+import { DEEP_GEN_SURFACES } from '@/lib/ai/surfaces';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1138,13 +1139,20 @@ describe('POST /api/chat', () => {
       };
     }
 
-    it.each(['gdd', 'world_builder', 'cutscene'] as const)(
+    // Spread the runtime allowlist (spec §Test plan 1a) so a surface added to
+    // DEEP_GEN_SURFACES is automatically covered here; the exact-contents test
+    // below guards the removal/rename direction the spread alone would miss.
+    it.each([...DEEP_GEN_SURFACES])(
       'qualifies route label with surface=%s',
       async (surface) => {
         const { arg } = await captureForSurface(surface);
         expect(arg?.route).toBe(`/api/chat#${surface}`);
       },
     );
+
+    it('DEEP_GEN_SURFACES contains exactly the three deep-gen surfaces', () => {
+      expect([...DEEP_GEN_SURFACES]).toEqual(['gdd', 'world_builder', 'cutscene']);
+    });
 
     it('drops unknown surface and uses plain /api/chat route', async () => {
       const { arg, responseText } = await captureForSurface('evil<script>');
