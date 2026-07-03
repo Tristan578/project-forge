@@ -12,6 +12,7 @@
 
 import { AI_MODEL_DEEP, AI_MODEL_PRIMARY } from './models';
 import { trackEvent } from '@/lib/analytics/posthog';
+import type { DeepGenSurface } from './surfaces';
 
 export type { DeepGenSurface } from './surfaces';
 
