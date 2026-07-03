@@ -1,6 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 
+// Capture every after() callback so tests can assert the deferred-publish gate
+// is dormant (no callbacks registered) without triggering real Next.js after().
+// Pattern mirrors createGenerationHandler.qstash.test.ts.
+const { afterCallbacks } = vi.hoisted(() => ({ afterCallbacks: [] as Array<() => unknown> }));
+vi.mock('next/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('next/server')>();
+  return { ...actual, after: (cb: () => unknown) => { afterCallbacks.push(cb); } };
+});
+
 vi.mock('server-only', () => ({}));
 
 // Mock all dependencies
@@ -54,6 +63,12 @@ vi.mock('@/lib/api/responseCache', () => ({
     cached: false,
   })),
 }));
+// QStash client: default dormant (isQstashConfigured → false) so existing tests
+// are unaffected. Tests that need it active set mockConfigured.mockReturnValue(true).
+vi.mock('@/lib/qstash/client', () => ({
+  isQstashConfigured: vi.fn(() => false),
+  publishGenerationCallback: vi.fn(async () => {}),
+}));
 
 // Client-facing message for every 500 (#8597). Raw err.message can leak server
 // internals (env var names, DB DSNs, provider request IDs), so the client gets
@@ -67,6 +82,7 @@ import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { cachedGenerate } from '@/lib/api/responseCache';
+import { isQstashConfigured } from '@/lib/qstash/client';
 import { createGenerationHandler } from '../createGenerationHandler';
 
 const mockAuth = vi.mocked(authenticateRequest);
@@ -77,6 +93,7 @@ const mockSanitize = vi.mocked(sanitizePrompt);
 const mockRefund = vi.mocked(refundTokens);
 const mockCapture = vi.mocked(captureException);
 const mockCachedGenerate = vi.mocked(cachedGenerate);
+const mockConfigured = vi.mocked(isQstashConfigured);
 
 function makeRequest(body: Record<string, unknown>): NextRequest {
   return new NextRequest('http://localhost:3000/api/generate/test', {
@@ -107,6 +124,7 @@ describe('createGenerationHandler', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    afterCallbacks.length = 0;
     mockAuth.mockResolvedValue({
       ok: true,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -116,6 +134,9 @@ describe('createGenerationHandler', () => {
     mockRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
     mockResolve.mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
     mockSanitize.mockReturnValue({ safe: true, filtered: 'test prompt' });
+    // QStash dormant by default — handlers in this file that omit asyncJob never
+    // reach isQstashConfigured() (short-circuit), so this is safe for all existing tests.
+    mockConfigured.mockReturnValue(false);
   });
 
   it('returns 401 when unauthenticated', async () => {
@@ -563,5 +584,123 @@ describe('createGenerationHandler', () => {
       expect.any(Error),
       expect.objectContaining({ action: 'refund', usageId: 'usage-1' }),
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // PF-916 / #8826 — Dispatch 2: factory contract pins (tests 6–10)
+  // -------------------------------------------------------------------------
+
+  it('returns 401 without calling either rate limiter (auth before rate limit) (#8826 pin)', async () => {
+    // The factory returns from auth (step 1) before reaching the aggregate or
+    // per-route rate limiters (step 2a/2b). A 401 must consume zero budget.
+    mockAuth.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+    });
+    const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(401);
+    expect(mockAggRateLimit).not.toHaveBeenCalled();
+    expect(mockRateLimit).not.toHaveBeenCalled();
+  });
+
+  it('registers no after() callbacks for a non-async route (dormant after, part 1 of 2) (#8826 pin)', async () => {
+    // testHandler has no asyncJob — the `if (asyncJob && isQstashConfigured())`
+    // gate short-circuits on asyncJob === undefined, so after() is never reached.
+    const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(200);
+    expect(afterCallbacks).toHaveLength(0);
+  });
+
+  it('registers no after() callbacks for an async route when QStash is unconfigured (dormant after, part 2 of 2) (#8826 pin)', async () => {
+    // mockConfigured.mockReturnValue(false) is set by beforeEach: QStash env unset.
+    // Even with asyncJob declared, isQstashConfigured() returning false means the
+    // gate `asyncJob && isQstashConfigured()` evaluates to false → after() is never called.
+    const asyncHandler = createGenerationHandler<{ prompt: string }, { jobId: string; status: string }>({
+      route: '/api/generate/model',
+      provider: 'elevenlabs',
+      operation: 'model_generation',
+      rateLimitKey: 'gen-model',
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: async () => ({ jobId: 'task-1', status: 'pending' }),
+      asyncJob: {
+        type: 'model',
+        providerJobId: (r) => r.jobId,
+      },
+    });
+    const res = await asyncHandler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(200);
+    expect(afterCallbacks).toHaveLength(0);
+  });
+
+  it('passes validated params directly as billingMetadata when billingMetadata config is omitted (#8826 pin)', async () => {
+    // Factory lines 384 and 437: `const metadata = billingMetadataFn
+    //   ? billingMetadataFn(params) : (params as Record<string, unknown>)`.
+    // Omitting billingMetadata → resolveApiKey receives the full params object.
+    const handler = createGenerationHandler({
+      route: '/api/generate/test',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-test',
+      // No billingMetadata — params is passed through unchanged.
+      validate: (body) => ({
+        ok: true,
+        params: { prompt: body.prompt as string, count: body.count as number },
+      }),
+      execute: async () => ({ ok: true }),
+    });
+
+    await handler(makeRequest({ prompt: 'test prompt', count: 3 }));
+
+    // Content safety replaces prompt with the filtered value ('test prompt' → 'test prompt'
+    // per the mock, same value). count is a number; the type guard skips it unchanged.
+    expect(mockResolve).toHaveBeenCalledWith(
+      'user-1',
+      'elevenlabs',
+      10,
+      'test_generation',
+      { prompt: 'test prompt', count: 3 },
+    );
+  });
+
+  it('uses custom status code from validate failure and falls back to 422 (pins status ?? 422) (#8826 pin)', async () => {
+    // Factory line 320: `{ status: validation.status ?? 422 }`.
+    // A validate result carrying status: 418 must produce a 418 response.
+    const handler = createGenerationHandler({
+      route: '/api/generate/test',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-test',
+      validate: () => ({ ok: false as const, error: 'I am a teapot', status: 418 }),
+      execute: async () => ({ ok: true }),
+    });
+
+    const res = await handler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(418);
+    const data = await res.json();
+    expect(data.error).toBe('I am a teapot');
+  });
+
+  it('skips non-string secondaryPromptField values without throwing (pins lenient safety loop) (#8826 pin)', async () => {
+    // Factory line 338: `if (typeof value === 'string' && value.length > 0)`.
+    // A numeric value (e.g. count: 5) in a secondaryPromptFields entry must be
+    // silently skipped — no TypeError, no 422, no call to sanitizePrompt.
+    const handler = createGenerationHandler({
+      route: '/api/generate/test',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-test',
+      secondaryPromptFields: ['count'],
+      validate: (body) => ({
+        ok: true,
+        params: { prompt: body.prompt as string, count: body.count as number },
+      }),
+      execute: async () => ({ ok: true }),
+    });
+
+    const res = await handler(makeRequest({ prompt: 'test prompt', count: 5 }));
+    expect(res.status).toBe(200);
+    // sanitizePrompt called once (primary prompt only); numeric count is bypassed.
+    expect(mockSanitize).toHaveBeenCalledTimes(1);
+    expect(mockSanitize).toHaveBeenCalledWith('test prompt');
   });
 });
