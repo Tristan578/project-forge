@@ -219,7 +219,34 @@ describe('POST /api/generate/voice/batch', () => {
     expect(data.totalGenerated).toBe(1);
     expect(data.totalFailed).toBe(1);
     expect(data.errors[0].nodeId).toBe('node_2');
-    expect(data.errors[0].error).toBe('Voice generation failed');
+    expect(data.errors[0].error).toBe('Voice generation failed for this item');
+  });
+
+  // Test 20: provider error body must reach captureException and NOT the user response.
+  // The old code passed err.message through, leaking raw provider details (status
+  // codes, response bodies). Design §13 replaces it with a constant generic string.
+  it('test 20 — provider error detail reaches captureException only, not user-visible response', async () => {
+    const { captureException } = await import('@/lib/monitoring/sentry-server');
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'el_key', metered: true });
+
+    const sentinel = 'ElevenLabs TTS API error (503): {"error":"upstream_failure","detail":"SENTINEL_xz99"}';
+    mockGenerateVoice.mockRejectedValueOnce(new Error(sentinel));
+
+    const singleItem = [{ nodeId: 'node_t20', text: 'Test sentence', speaker: 'narrator' }];
+    const res = await POST(makeRequest({ items: singleItem, voiceSettings: defaultVoiceSettings }));
+    const data = await res.json();
+
+    // Sentinel must not appear in any user-visible field
+    expect(data.errors[0].error).toBe('Voice generation failed for this item');
+    expect(JSON.stringify(data)).not.toContain('SENTINEL_xz99');
+
+    // Full error detail is captured server-side for debugging
+    expect(captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: sentinel }),
+      expect.anything(),
+    );
   });
 
   it('rethrows non-ApiKeyError during key resolution', async () => {
