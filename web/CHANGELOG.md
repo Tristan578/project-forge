@@ -1,5 +1,27 @@
 # web
 
+## 0.4.1
+
+### Patch Changes
+
+- [#8903](https://github.com/Tristan578/project-forge/pull/8903) [`1f7b929`](https://github.com/Tristan578/project-forge/commit/1f7b9292c464a879b633c8bfbd40df4d5a6b5f2c) Thanks [@dependabot](https://github.com/apps/dependabot)! - chore(deps): bump dockview-react 6.6.1 → 7.0.2 ([#8903](https://github.com/Tristan578/project-forge/issues/8903)) + re-baseline first-load JS budget
+
+  dockview-react 7 ships an accessibility pack (ARIA roles, keyboard navigation, live regions) that adds ~27.5 KB minified and is not tree-shakeable in 7.0.2 (the `dockview-modules` opt-out entry point is unpublished). Our dockview usage is untouched by the v7 breaking changes — we use none of `onDidActivePanelChange`'s changed payload, `rootOverlayModel`, or the renamed types, and `.dv-*` CSS classes plus `SerializedDockview` layout serialization are byte-identical.
+
+  The first-load JS budget is re-baselined to warn 5.3 MB / fail 5.5 MB (was 4.75/5.25) in `performanceTargets.ts` and the `check-bundle-size.js` mirror: main was already at 5.24 MB against the 5.25 MB hard gate, so any dependency growth tripped it. The +720 KB creep since the March baseline is tracked in [#8910](https://github.com/Tristan578/project-forge/issues/8910).
+
+- [#8907](https://github.com/Tristan578/project-forge/pull/8907) [`7fd0562`](https://github.com/Tristan578/project-forge/commit/7fd0562ba7880dfc8764001d6ef56d5dd47a4113) Thanks [@dependabot](https://github.com/apps/dependabot)! - chore(deps): bump npm minor-and-patch group (11 updates, [#8907](https://github.com/Tristan578/project-forge/issues/8907))
+
+  Routine minor/patch dependency group update: `@ai-sdk/anthropic` 4.0.5→4.0.8, `@ai-sdk/gateway` 4.0.8→4.0.12, `@ai-sdk/react` 4.0.12→4.0.16, `@anthropic-ai/sdk` 0.107→0.110, `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` 3.1076→3.1079, `posthog-js` 1.396.4→1.396.6, `@electric-sql/pglite` 0.5.3→0.5.4, `turbo` 2.10.1→2.10.3 (root), and `tsx` 4.22.4→4.23.0 in `apps/docs` + `mcp-server`. Dependabot resolved and relocked the single root lockfile from the repo root, so no manual lockfile intervention was needed.
+
+- [#8915](https://github.com/Tristan578/project-forge/pull/8915) [`3caf4c2`](https://github.com/Tristan578/project-forge/commit/3caf4c26316aed596c2eb67a01c8325222407157) Thanks [@dependabot](https://github.com/apps/dependabot)! - chore(deps-dev): bump @types/node from 25.9.4 to 26.1.0 across the workspace ([#8915](https://github.com/Tristan578/project-forge/issues/8915))
+
+  Dev-toolchain-only update: bumps the `@types/node` devDependency ranges in `web` (`^25` → `^26`), `apps/docs` (`^25` → `^26`), and `mcp-server` (`^25.5.0` → `^26.1.0`). Type definitions only — the runtime remains Node 24 per `engines` and `.node-version`; @types/node 26 requires TypeScript >= 5.6, which every workspace clears on TypeScript 6. No runtime or published-artifact changes. The root lockfile was regenerated on Node 24 (`npm install --package-lock-only`) to fix the manifest-mirror drift Dependabot's updater left in the web workspace blocks.
+
+- [#8904](https://github.com/Tristan578/project-forge/pull/8904) [`5da0dc6`](https://github.com/Tristan578/project-forge/commit/5da0dc609eb0393f50124cea465965e7bf74e597) Thanks [@dependabot](https://github.com/apps/dependabot)! - chore(deps-dev): bump typescript to ^6.0.3 across the workspace ([#8904](https://github.com/Tristan578/project-forge/issues/8904))
+
+  Dev-toolchain-only update: aligns the `typescript` devDependency ranges in `web` (`^6` → `^6.0.3`), `mcp-server` (`^6.0.2` → `^6.0.3`), `apps/docs` (`^5` → `^6`), and `packages/ui` (`^5` → `^6`). All workspaces already type-checked cleanly against TypeScript 6 in CI; no runtime or published-artifact changes. The root lockfile was regenerated on Node 24 (`npm install --package-lock-only`) to fix the manifest-mirror drift Dependabot's updater left in two workspace blocks.
+
 ## 0.4.0
 
 ### Minor Changes
