@@ -72,7 +72,7 @@
     "acorn": "^8.17.0",
     "ai": "^7.0.11",
     "bcryptjs": "^3.0.3",
-    "dockview-react": "^6.0.1",
+    "dockview-react": "^7.0.2",
     "dotenv": "^17.4.2",
     "drizzle-orm": "0.45.2",
     "jsfxr": "^1.4.1",
