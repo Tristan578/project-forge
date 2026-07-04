@@ -464,6 +464,57 @@ describe('useGenerationPolling', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // triggerRefund :460 guard — pins both sides of `if (!job?.usageId) return`
+  // ---------------------------------------------------------------------------
+  it('triggers refund with usageId when a job exhausts MAX_POLL_COUNT', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      return {
+        ok: true,
+        json: () => Promise.resolve({ jobId: 'job-rg1', status: 'processing', progress: 50 }),
+      } as Response;
+    });
+
+    mockJobs['rg1'] = makeJob('rg1', { usageId: 'usage-rg1' });
+    renderHook(() => useGenerationPolling());
+
+    for (let i = 0; i < 101; i++) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    }
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/generate/refund',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('usage-rg1'),
+      }),
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('does not trigger refund when a job without usageId exhausts MAX_POLL_COUNT', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({
+      ok: true,
+      json: () => Promise.resolve({ jobId: 'job-rg2', status: 'processing', progress: 50 }),
+    } as Response));
+
+    mockJobs['rg2'] = makeJob('rg2'); // no usageId
+    renderHook(() => useGenerationPolling());
+
+    for (let i = 0; i < 101; i++) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    }
+
+    const refundCalls = fetchSpy.mock.calls.filter(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('refund'),
+    );
+    expect(refundCalls).toHaveLength(0);
+    fetchSpy.mockRestore();
+  });
+
+  // ---------------------------------------------------------------------------
   // Timeout (max polls)
   // ---------------------------------------------------------------------------
   it('times out after MAX_POLL_COUNT (100) polls', async () => {

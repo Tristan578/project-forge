@@ -61,12 +61,17 @@ refund-on-failure. The runner never reshapes the result, so the response shape,
 3. **Production.** Flip `USE_GENERATION_AGENT=true` in Production once the canary
    is clean. No deploy needed to revert — unset the env var.
 
-## Follow-ups (out of this slice)
+## Follow-ups
 
-- Routes that want the wall-clock abort to cancel the in-flight provider request
-  (not just the function) should forward `ctx.abortSignal` (now contractually
-  available, optional) into their provider client / `fetch`. The provider
-  clients today carry their own shorter `AbortSignal.timeout(...)`; the agent
-  deadline is a longer backstop above those.
-- Pairs with the QStash durable-queue ticket for long jobs — durable agents can
-  survive function timeouts entirely once that lands.
+- **Abort forwarding — DELIVERED** (PF-916 / #8826, this PR): all 12 generate
+  routes now forward `ctx.abortSignal` into their provider-client call.
+  `composeAbortSignal` combines the agent deadline with each client's own
+  per-fetch timeout so the in-flight HTTP request is cancelled when either fires.
+  Client-level tests (Dispatches 4–5) + route-level signal-forwarding tests
+  (Dispatch 6, test 17) verify the signal reaches every provider.
+- **Durable completion path** (replacing `useGenerationPolling` + the 8
+  `*/status` routes) → tracked as **#8892 (PF-938)**. The 2026-06-27 grounding
+  comment re-scoped this to a dedicated spec.
+- **`voice/batch` remaining hardening** (#8597-class migration to the factory
+  pattern) → tracked as **#8893 (PF-939)**. Its provider-error-message leak is
+  **closed by this PR** (Design §13, test 20 — see #8826); #8893 holds the rest.

@@ -7,6 +7,7 @@
  */
 
 import { validateResourceId } from '@/lib/validation/resourceId';
+import { composeAbortSignal } from '@/lib/generate/abortComposition';
 
 export interface MeshyConfig {
   apiKey: string;
@@ -17,11 +18,13 @@ export interface TextTo3DParams {
   artStyle?: string;
   negativePrompt?: string;
   quality?: 'standard' | 'high';
+  signal?: AbortSignal;
 }
 
 export interface ImageTo3DParams {
   imageBase64: string;
   prompt?: string;
+  signal?: AbortSignal;
 }
 
 export interface TextToTextureParams {
@@ -30,6 +33,7 @@ export interface TextToTextureParams {
   style?: string;
   tiling?: boolean;
   generateMaps?: Record<string, boolean>;
+  signal?: AbortSignal;
 }
 
 export interface TaskStatus {
@@ -67,7 +71,7 @@ export class MeshyClient {
         topology: 'triangle',
         should_remesh: true,
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: composeAbortSignal(params.signal, 30000),
     });
 
     if (!response.ok) {
@@ -94,7 +98,7 @@ export class MeshyClient {
         topology: 'triangle',
         should_remesh: true,
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: composeAbortSignal(params.signal, 30000),
     });
 
     if (!response.ok) {
@@ -106,7 +110,7 @@ export class MeshyClient {
     return { taskId: data.result };
   }
 
-  async getTaskStatus(taskId: string): Promise<TaskStatus> {
+  async getTaskStatus(taskId: string, opts?: { signal?: AbortSignal }): Promise<TaskStatus> {
     validateResourceId(taskId);
     const safeTaskId = encodeURIComponent(taskId);
     const url = new URL(`/openapi/v2/text-to-3d/${safeTaskId}`, 'https://api.meshy.ai');
@@ -115,7 +119,7 @@ export class MeshyClient {
       headers: {
         'Authorization': `Bearer ${this.config.apiKey}`,
       },
-      signal: AbortSignal.timeout(10000),
+      signal: composeAbortSignal(opts?.signal, 10000),
     });
 
     if (!response.ok) {
@@ -146,7 +150,7 @@ export class MeshyClient {
         tiling: params.tiling ?? true,
         ...(params.generateMaps && { generate_maps: params.generateMaps }),
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: composeAbortSignal(params.signal, 30000),
     });
 
     if (!response.ok) {
@@ -158,7 +162,7 @@ export class MeshyClient {
     return { taskId: data.result };
   }
 
-  async getTextureStatus(taskId: string): Promise<TextureStatus> {
+  async getTextureStatus(taskId: string, opts?: { signal?: AbortSignal }): Promise<TextureStatus> {
     validateResourceId(taskId);
     const safeTaskId = encodeURIComponent(taskId);
     const url = new URL(`/openapi/v2/text-to-texture/${safeTaskId}`, 'https://api.meshy.ai');
@@ -167,7 +171,7 @@ export class MeshyClient {
       headers: {
         'Authorization': `Bearer ${this.config.apiKey}`,
       },
-      signal: AbortSignal.timeout(10000),
+      signal: composeAbortSignal(opts?.signal, 10000),
     });
 
     if (!response.ok) {

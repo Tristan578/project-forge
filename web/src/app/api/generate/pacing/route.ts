@@ -84,7 +84,7 @@ export const POST = createGenerationHandler<
 
     return { ok: true, params: { report: r } };
   },
-  execute: async (params, apiKey, { userId, usageId }) => {
+  execute: async (params, apiKey, { userId, usageId, abortSignal }) => {
     const { report } = params;
     const consented = await hasAnalyticsConsent();
 
@@ -120,6 +120,7 @@ Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
       temperature: 0.4,
       output: Output.object({ schema: PacingSuggestionSchema }),
       experimental_telemetry: { isEnabled: true },
+      abortSignal,
     });
 
     captureAiGeneration({

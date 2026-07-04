@@ -74,7 +74,7 @@ describe('Regression #2: refund endpoint idempotency', () => {
     // Async generation routes need usageId in success responses because
     // the client polls for job status and triggers refund via
     // useGenerationPolling.ts → triggerRefund() if the job fails after queuing.
-    const ASYNC_ROUTES = ['model', 'music', 'skybox', 'sprite', 'texture', 'pixel-art'];
+    const ASYNC_ROUTES = ['model', 'music', 'skybox', 'sprite', 'texture', 'pixel-art', 'sprite-sheet', 'tileset-gen'];
 
     const missing: string[] = [];
     for (const dir of ASYNC_ROUTES) {

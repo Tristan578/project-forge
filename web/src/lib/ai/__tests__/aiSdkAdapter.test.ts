@@ -1,7 +1,7 @@
 /**
  * Tests for aiSdkAdapter.ts
  *
- * Verifies that streamViaSdk() correctly bridges AI SDK v5 fullStream events
+ * Verifies that streamViaSdk() correctly bridges AI SDK v7 fullStream events
  * to ResolveChatStreamEvent objects. Uses vi.mock to replace streamText with
  * controlled async iterables.
  */

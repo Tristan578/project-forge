@@ -30,7 +30,7 @@
     "node": ">=24 <25"
   },
   "overrides": {
-    "@clerk/nextjs": "^7.5.10",
+    "@clerk/nextjs": "^7.5.12",
     "@clerk/shared": "^4.22.1",
     "@hono/node-server": "^1.19.13",
     "dompurify": ">=3.4.11",

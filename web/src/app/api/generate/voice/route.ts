@@ -94,7 +94,7 @@ export const POST = createGenerationHandler<
     similarityBoost: params.similarityBoost,
     style: params.style,
   }),
-  execute: async (params, apiKey) => {
+  execute: async (params, apiKey, ctx) => {
     const client = new ElevenLabsClient({ apiKey });
     const result = await client.generateVoice({
       text: params.text,
@@ -102,6 +102,7 @@ export const POST = createGenerationHandler<
       stability: params.stability,
       similarityBoost: params.similarityBoost,
       style: params.style,
+      signal: ctx.abortSignal,
     });
 
     return {

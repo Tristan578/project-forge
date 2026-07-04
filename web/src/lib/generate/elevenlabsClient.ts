@@ -7,6 +7,7 @@
  */
 
 import { validateResourceId } from '@/lib/validation/resourceId';
+import { composeAbortSignal } from '@/lib/generate/abortComposition';
 
 export interface ElevenLabsConfig {
   apiKey: string;
@@ -15,6 +16,7 @@ export interface ElevenLabsConfig {
 export interface GenerateSfxParams {
   prompt: string;
   durationSeconds?: number;
+  signal?: AbortSignal;
 }
 
 export interface GenerateVoiceParams {
@@ -23,6 +25,7 @@ export interface GenerateVoiceParams {
   stability?: number;
   similarityBoost?: number;
   style?: number;
+  signal?: AbortSignal;
 }
 
 export interface AudioResult {
@@ -46,7 +49,7 @@ export class ElevenLabsClient {
         text: params.prompt,
         duration_seconds: params.durationSeconds || 5,
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: composeAbortSignal(params.signal, 30000),
     });
 
     if (!response.ok) {
@@ -84,7 +87,7 @@ export class ElevenLabsClient {
           style: params.style ?? 0,
         },
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: composeAbortSignal(params.signal, 30000),
     });
 
     if (!response.ok) {

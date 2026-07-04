@@ -93,6 +93,7 @@ export const POST = createGenerationHandler<
       size: params.size,
       provider: params.provider,
       removeBackground: params.removeBackground,
+      signal: ctx.abortSignal,
     });
 
     let finalJobId = result.taskId;

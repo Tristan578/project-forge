@@ -104,9 +104,21 @@ nothing scheduled. No data migration is involved.
 
 ## Coverage note
 
-v1 instruments the three routes that run a model **directly** (`generateText` /
-streamed chat). The deep generators that go through the `createGenerationHandler`
-agent pipeline (GDD, world builder, cutscene, etc.) are **not** yet instrumented
-— capturing their token usage cleanly needs a small adapter at the agent
-boundary rather than per-route wiring. That follow-up is tracked in #8877 so
-this PR stays scoped to the direct-call routes.
+The three deep generators (GDD, world builder, cutscene) call `/api/chat` from
+client-side modules (`gddGenerator.ts`, `worldBuilder.ts`, `cutsceneGenerator.ts`)
+and are therefore captured by the same `$ai_generation` event as interactive
+chat. Each passes a `surface` field in the request body; the route validates it
+against the `DEEP_GEN_SURFACES` allowlist and labels the event accordingly:
+
+| Generator | PostHog `route` label |
+|---|---|
+| GDD | `/api/chat#gdd` |
+| World builder | `/api/chat#world_builder` |
+| Cutscene | `/api/chat#cutscene` |
+
+Insights that use **exact equality** on `route = '/api/chat'` will **not** match
+deep-generator events — that is intentional; those events are now separately
+addressable. Insights using prefix/contains (`route contains '/api/chat'`) match
+all traffic including deep generators. This change was delivered by #8877; no
+agent-boundary adapter exists or is needed, and `createGenerationHandler` is not
+involved in LLM generation for these features.

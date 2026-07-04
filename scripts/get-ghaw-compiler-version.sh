@@ -42,7 +42,7 @@ shopt -s nullglob
 
 # Single-sourced fallback: the version known-good at authoring time, emitted ONLY
 # when no committed lock records a compiler_version.
-FALLBACK_VERSION='v0.77.5'
+FALLBACK_VERSION='v0.81.6'
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$ROOT" 2>/dev/null || { echo "$FALLBACK_VERSION"; exit 0; }

@@ -172,4 +172,85 @@ describe('pixelArtClient', () => {
         .rejects.toThrow('Replicate status error 404');
     });
   });
+
+  describe('abort signal composition', () => {
+    it('passes a composed (pre-aborted) signal to fetch when signal param is provided (openai provider)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ b64_json: 'base64data' }] }),
+      } as Response);
+
+      const controller = new AbortController();
+      controller.abort(new Error('deadline exceeded'));
+
+      const client = new PixelArtClient('test-key', 'openai');
+      await client.generate({ prompt: 'knight', style: 'character', size: 1024, signal: controller.signal });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(true);
+    });
+
+    it('passes a timeout signal to fetch when no signal param is provided (openai provider)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ b64_json: 'base64data' }] }),
+      } as Response);
+
+      const client = new PixelArtClient('test-key', 'openai');
+      await client.generate({ prompt: 'knight', style: 'character', size: 1024 });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(false);
+    });
+
+    it('passes a composed (pre-aborted) signal to fetch when signal param is provided (replicate provider)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: 'pred-123', status: 'starting' }),
+      } as Response);
+
+      const controller = new AbortController();
+      controller.abort(new Error('deadline exceeded'));
+
+      const client = new PixelArtClient('test-key', 'replicate');
+      await client.generate({ prompt: 'sword', style: 'prop', size: 1024, signal: controller.signal });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(true);
+    });
+
+    it('passes a composed (pre-aborted) signal to fetch when signal param is provided (getReplicateStatus)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ status: 'succeeded', output: [] }),
+      } as Response);
+
+      const controller = new AbortController();
+      controller.abort(new Error('deadline exceeded'));
+
+      const client = new PixelArtClient('test-key', 'replicate');
+      await client.getReplicateStatus('pred-sig', { signal: controller.signal });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(true);
+    });
+
+    it('passes a timeout signal to fetch when no signal param is provided (getReplicateStatus)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ status: 'starting' }),
+      } as Response);
+
+      const client = new PixelArtClient('test-key', 'replicate');
+      await client.getReplicateStatus('pred-no-sig');
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(false);
+    });
+  });
 });

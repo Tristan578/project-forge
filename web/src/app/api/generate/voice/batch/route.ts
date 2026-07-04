@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
       captureException(err, { route: '/api/generate/voice/batch', nodeId: item.nodeId });
       errors.push({
         nodeId: item.nodeId,
-        error: err instanceof Error ? err.message : 'Generation failed',
+        error: 'Voice generation failed for this item',
       });
     }
   }
