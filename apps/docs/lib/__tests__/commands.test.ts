@@ -27,7 +27,7 @@ describe('readCommandsManifest', () => {
 
   function stubManifest(commands: object[]): void {
     const content = makeManifestJson(commands);
-    fsSpy.mockImplementation((filePath, _enc) => {
+    fsSpy.mockImplementation((filePath: unknown, _enc: unknown) => {
       if (String(filePath).endsWith('commands.json')) {
         return content;
       }
@@ -150,7 +150,7 @@ describe('readCommandsManifest', () => {
 
     it('handles missing commands key gracefully via nullish coalescing', async () => {
       // Manifest with no "commands" key — tests the `?? []` guard in the source
-      fsSpy.mockImplementation((filePath, _enc) => {
+      fsSpy.mockImplementation((filePath: unknown, _enc: unknown) => {
         if (String(filePath).endsWith('commands.json')) {
           return JSON.stringify({});
         }
@@ -166,7 +166,7 @@ describe('readCommandsManifest', () => {
 
   describe('error recovery', () => {
     it('returns safe empty result when the manifest file does not exist', async () => {
-      fsSpy.mockImplementation((_filePath, _enc) => {
+      fsSpy.mockImplementation((_filePath: unknown, _enc: unknown) => {
         throw new Error('ENOENT: no such file');
       });
 
@@ -177,7 +177,7 @@ describe('readCommandsManifest', () => {
     });
 
     it('returns safe empty result when the manifest contains invalid JSON', async () => {
-      fsSpy.mockImplementation((filePath, _enc) => {
+      fsSpy.mockImplementation((filePath: unknown, _enc: unknown) => {
         if (String(filePath).endsWith('commands.json')) {
           return '{ not valid json }';
         }

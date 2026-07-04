@@ -83,12 +83,12 @@ describe('CommandFilter', () => {
           categories: expect.any(Set),
         }),
       );
-      const lastCallCategories: Set<string> = onFilterChange.mock.calls.at(-1)[0].categories;
+      const lastCallCategories: Set<string> = onFilterChange.mock.calls.at(-1)![0].categories;
       expect(lastCallCategories.has('transform')).toBe(true);
 
       // Uncheck
       fireEvent.click(checkbox);
-      const uncheckedCategories: Set<string> = onFilterChange.mock.calls.at(-1)[0].categories;
+      const uncheckedCategories: Set<string> = onFilterChange.mock.calls.at(-1)![0].categories;
       expect(uncheckedCategories.has('transform')).toBe(false);
     });
 
@@ -122,7 +122,7 @@ describe('CommandFilter', () => {
       const clearBtn = screen.getByRole('button', { name: /clear all filters/i });
       fireEvent.click(clearBtn);
 
-      const lastCall: CommandFilters = onFilterChange.mock.calls.at(-1)[0];
+      const lastCall: CommandFilters = onFilterChange.mock.calls.at(-1)![0];
       expect(lastCall.categories.size).toBe(0);
       expect(lastCall.scopes.size).toBe(0);
     });
