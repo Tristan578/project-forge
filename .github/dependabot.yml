@@ -44,6 +44,31 @@ updates:
         update-types:
           - "version-update:semver-minor"
           - "version-update:semver-major"
+      # egui-family crates (egui/emath/epaint/ecolor) are pinned as a matched
+      # set by the local transform-gizmo fork (.transform-gizmo-fork/Cargo.toml,
+      # reached via engine's path dependency — Dependabot edits it when relocking
+      # /engine). A piecemeal bump (emath 0.35 alone in #8908; ecolor in #8869)
+      # leaves two versions in engine/Cargo.lock → E0308 `expected epaint::Pos2,
+      # found emath::Pos2` at the fork boundary → WASM Build red. Like bevy*,
+      # they are 0.x crates, so 0.34 → 0.35 is `semver-minor`; patch updates
+      # still flow. The set moves together when the fork moves — as part of the
+      # coordinated Bevy 0.19 migration (#8887). Tracking: #8911 (PF-944).
+      - dependency-name: "egui*"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+      - dependency-name: "emath"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+      - dependency-name: "epaint"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+      - dependency-name: "ecolor"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
 
   # GitHub Actions
   - package-ecosystem: github-actions
