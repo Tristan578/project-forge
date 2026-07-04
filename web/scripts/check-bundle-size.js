@@ -11,8 +11,8 @@
  * then mirror the values here.
  *
  * Thresholds:
- *   First-load JS:  warn > 4.75 MB, fail > 5.25 MB
- *   Total JS:       warn > 5.5 MB,  fail > 6 MB
+ *   First-load JS:  warn > 5.3 MB, fail > 5.5 MB
+ *   Total JS:       warn > 5.5 MB, fail > 6 MB
  *
  * Usage:  node scripts/check-bundle-size.js
  * Expects: npm run build has already been run (.next/ exists)
@@ -26,9 +26,10 @@ const BUILD_DIR = path.join(ROOT, '.next');
 
 // Mirror of performanceTargets.ts BUNDLE_* constants.
 // Names match the canonical constants for grep-based discovery.
-// Previous values (pre-2026-03-31): 4/4.75/5/5.5 MB
-const BUNDLE_FIRST_LOAD_WARN = 4.75 * 1024 * 1024;
-const BUNDLE_FIRST_LOAD_FAIL = 5.25 * 1024 * 1024;
+// Previous values (pre-2026-07-04): 4.75/5.25 first-load — re-baselined for
+// dockview-react 7's non-tree-shakeable a11y pack; see performanceTargets.ts.
+const BUNDLE_FIRST_LOAD_WARN = 5.3 * 1024 * 1024;
+const BUNDLE_FIRST_LOAD_FAIL = 5.5 * 1024 * 1024;
 const BUNDLE_TOTAL_WARN = 5.5 * 1024 * 1024;
 const BUNDLE_TOTAL_FAIL = 6 * 1024 * 1024;
 

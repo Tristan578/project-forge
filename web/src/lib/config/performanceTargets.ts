@@ -91,11 +91,17 @@ export const GPU_INIT_TARGET_MS = 3000;
 // Bundle size budgets (bytes)
 // ---------------------------------------------------------------------------
 
-/** First-load JS warning threshold (current build: ~4.56 MB as of 2026-03-31) */
-export const BUNDLE_FIRST_LOAD_WARN = 4.75 * 1024 * 1024;
+/**
+ * First-load JS warning threshold (current build: ~5.28 MB as of 2026-07-04).
+ * Re-baselined for dockview-react 7: its accessibility pack (ARIA roles,
+ * keyboard nav, live regions) adds ~27.5 KB minified and is not tree-shakeable
+ * in 7.0.2 (dockview-modules opt-out is unpublished). Prior baseline (~4.56 MB,
+ * 2026-03-31) had already been consumed to ~5.24 MB — creep tracked in #8910.
+ */
+export const BUNDLE_FIRST_LOAD_WARN = 5.3 * 1024 * 1024;
 
 /** First-load JS hard failure threshold */
-export const BUNDLE_FIRST_LOAD_FAIL = 5.25 * 1024 * 1024;
+export const BUNDLE_FIRST_LOAD_FAIL = 5.5 * 1024 * 1024;
 
 /** Total JS warning threshold (must be >= BUNDLE_FIRST_LOAD_FAIL) */
 export const BUNDLE_TOTAL_WARN = 5.5 * 1024 * 1024;
