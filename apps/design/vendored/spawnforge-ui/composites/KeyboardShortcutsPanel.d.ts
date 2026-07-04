@@ -12,4 +12,4 @@ export interface KeyboardShortcutsPanelProps {
     onClose?: () => void;
     className?: string;
 }
-export declare function KeyboardShortcutsPanel({ groups, onClose, className, }: KeyboardShortcutsPanelProps): import("react/jsx-runtime").JSX.Element;
+export declare function KeyboardShortcutsPanel({ groups, onClose, className, }: KeyboardShortcutsPanelProps): import("react").JSX.Element;

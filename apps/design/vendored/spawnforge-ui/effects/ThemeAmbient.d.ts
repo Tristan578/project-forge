@@ -20,4 +20,4 @@ import './effects.css';
  *     { ssr: false }
  *   );
  */
-export declare function ThemeAmbient(): import("react/jsx-runtime").JSX.Element | null;
+export declare function ThemeAmbient(): import("react").JSX.Element | null;

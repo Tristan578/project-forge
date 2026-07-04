@@ -1,5 +1,7 @@
 # Plan B: Components + Storybook (Phase 2)
 
+> **STATUS: COMPLETED (historical record — do NOT execute).** This plan was implemented in March 2026. The toolchain has since moved on: Storybook 10.4.6 + Vite 8 + @vitejs/plugin-react 6 (PR #8886), and `@storybook/addon-essentials` / `@storybook/test` were removed (absorbed into Storybook 10 core). The package versions and config templates below reflect the original 8.6 setup and are retained as the record of what was executed. For current setup, `apps/design/` itself is the source of truth.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Build 20 tier 1 primitives in `@spawnforge/ui`, verify Dark + Light with axe-core, deploy Storybook to `design.spawnforge.ai`, connect Chromatic for visual regression.

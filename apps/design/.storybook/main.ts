@@ -17,8 +17,8 @@ if (process.env.INCLUDE_INTERNAL === 'true') {
 const config: StorybookConfig = {
   stories,
   addons: [
-    '@storybook/addon-essentials',
     '@storybook/addon-a11y',
+    '@storybook/addon-docs',
   ],
   framework: {
     name: '@storybook/react-vite',
@@ -27,11 +27,6 @@ const config: StorybookConfig = {
   viteFinal: async (config) => {
     config.build = config.build || {};
     config.build.target = 'es2022';
-    config.optimizeDeps = config.optimizeDeps || {};
-    config.optimizeDeps.esbuildOptions = config.optimizeDeps.esbuildOptions || {};
-    config.optimizeDeps.esbuildOptions.target = 'es2022';
-    config.esbuild = config.esbuild || {};
-    config.esbuild.target = 'es2022';
     return config;
   },
 };

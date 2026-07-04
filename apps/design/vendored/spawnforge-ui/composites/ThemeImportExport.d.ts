@@ -1,1 +1,1 @@
-export declare function ThemeImportExport(): import("react/jsx-runtime").JSX.Element;
+export declare function ThemeImportExport(): import("react").JSX.Element;

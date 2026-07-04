@@ -9,4 +9,4 @@ export interface PropertyGridProps {
     labelWidth?: string;
     className?: string;
 }
-export declare function PropertyGrid({ items, labelWidth, className, }: PropertyGridProps): import("react/jsx-runtime").JSX.Element;
+export declare function PropertyGrid({ items, labelWidth, className, }: PropertyGridProps): import("react").JSX.Element;

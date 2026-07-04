@@ -6,7 +6,7 @@ export interface ToastProps {
     duration?: number;
     className?: string;
 }
-export declare function Toast({ message, variant, onDismiss, duration, className, }: ToastProps): import("react/jsx-runtime").JSX.Element;
+export declare function Toast({ message, variant, onDismiss, duration, className, }: ToastProps): import("react").JSX.Element;
 export declare namespace Toast {
     var displayName: string;
 }
