@@ -329,7 +329,7 @@ rm -rf "$repo"
 # #8698: its literal premise ("sort -V unsupported on macOS") is inaccurate for
 # modern macOS (Apple sort 2.3+ supports -V), but the silent-fallback-on-sort-
 # failure mode it pointed at was real. Simulate by shadowing `sort` with a stub
-# that exits non-zero, in a repo recording v0.99.0 (≠ the v0.77.5 fallback) so a
+# that exits non-zero, in a repo recording v0.99.0 (≠ the v0.81.6 fallback) so a
 # silent fallback is unambiguously the WRONG answer, not a coincidental match.
 repo="$(mktemp -d)"
 ( cd "$repo" && git init -q && git config user.email t@t.t && git config user.name t \
