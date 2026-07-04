@@ -230,4 +230,16 @@ describe('generateCutscene', () => {
       generateCutscene({ prompt: 'Test', sceneEntities: [] }),
     ).rejects.toThrow('Rate limit');
   });
+
+  it('passes surface: cutscene to fetchAI for PostHog attribution (PF-931)', async () => {
+    const { fetchAI } = await import('@/lib/ai/client');
+    (fetchAI as ReturnType<typeof vi.fn>).mockResolvedValue(VALID_RESPONSE);
+
+    await generateCutscene({ prompt: 'Pan from sky', sceneEntities: [], duration: 8 });
+
+    expect(fetchAI).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ surface: 'cutscene' }),
+    );
+  });
 });

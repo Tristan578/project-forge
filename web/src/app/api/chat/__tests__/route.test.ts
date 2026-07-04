@@ -152,6 +152,7 @@ import { logCost } from '@/lib/costs/costLogger';
 import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
 import { trackAiCacheHitRate } from '@/lib/analytics/events.server';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
+import { DEEP_GEN_SURFACES } from '@/lib/ai/surfaces';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1102,6 +1103,77 @@ describe('POST /api/chat', () => {
       const res = await POST(makeRequest(validBody()));
       await res.text(); // drain stream
       expect(refundTokens).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Surface attribution (PF-931 / #8877)
+  // -------------------------------------------------------------------------
+  describe('surface attribution', () => {
+    type StepEvent = {
+      usage: {
+        inputTokens?: number;
+        outputTokens?: number;
+      };
+    };
+
+    async function captureForSurface(surface: string | undefined) {
+      let capturedOnStepFinish: ((event: StepEvent) => Promise<void>) | undefined;
+      mockStream.mockImplementation(async (opts: Record<string, unknown>) => {
+        capturedOnStepFinish = opts.onStepFinish as typeof capturedOnStepFinish;
+        return mockStreamResult;
+      });
+
+      const bodyWithSurface = surface !== undefined
+        ? { ...validBody(), surface }
+        : validBody();
+
+      const res = await POST(makeRequest(bodyWithSurface));
+      const responseText = await res.text(); // drain stream + keep body for echo assertions
+
+      await capturedOnStepFinish!({ usage: { inputTokens: 100, outputTokens: 50 } });
+
+      return {
+        arg: vi.mocked(captureAiGeneration).mock.calls[0]?.[0],
+        responseText,
+      };
+    }
+
+    // Spread the runtime allowlist (spec §Test plan 1a) so a surface added to
+    // DEEP_GEN_SURFACES is automatically covered here; the exact-contents test
+    // below guards the removal/rename direction the spread alone would miss.
+    it.each([...DEEP_GEN_SURFACES])(
+      'qualifies route label with surface=%s',
+      async (surface) => {
+        const { arg } = await captureForSurface(surface);
+        expect(arg?.route).toBe(`/api/chat#${surface}`);
+      },
+    );
+
+    it('DEEP_GEN_SURFACES contains exactly the three deep-gen surfaces', () => {
+      expect([...DEEP_GEN_SURFACES]).toEqual(['gdd', 'world_builder', 'cutscene']);
+    });
+
+    it('drops unknown surface and uses plain /api/chat route', async () => {
+      const { arg, responseText } = await captureForSurface('evil<script>');
+      expect(arg?.route).toBe('/api/chat');
+      // The raw unknown value must not appear anywhere in the capture payload...
+      expect(JSON.stringify(arg)).not.toContain('evil<script>');
+      // ...nor be echoed anywhere in the HTTP response (spec test plan item b)
+      expect(responseText).not.toContain('evil<script>');
+    });
+
+    it('uses plain /api/chat route when surface is absent (regression)', async () => {
+      const { arg } = await captureForSurface(undefined);
+      expect(arg?.route).toBe('/api/chat');
+    });
+
+    it('capture arg carries no prompt/response content fields (PF-931 privacy guard)', async () => {
+      const { arg } = await captureForSurface('gdd');
+      expect(arg).not.toHaveProperty('$ai_input');
+      expect(arg).not.toHaveProperty('$ai_output_choices');
+      expect(arg).not.toHaveProperty('messages');
+      expect(arg).not.toHaveProperty('prompt');
     });
   });
 });

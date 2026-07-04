@@ -211,6 +211,7 @@ export async function generateCutscene(
     model: getDeepGenerationModel('cutscene'),
     systemOverride: 'You are a cinematic director AI for a game engine. Always return valid JSON.',
     priority: 1,
+    surface: 'cutscene',
   });
 
   const partial = parseCutsceneResponse(raw);

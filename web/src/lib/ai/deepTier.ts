@@ -12,9 +12,9 @@
 
 import { AI_MODEL_DEEP, AI_MODEL_PRIMARY } from './models';
 import { trackEvent } from '@/lib/analytics/posthog';
+import type { DeepGenSurface } from './surfaces';
 
-/** Surfaces eligible for the deep-generation tier. */
-export type DeepGenSurface = 'gdd' | 'world_builder' | 'cutscene';
+export type { DeepGenSurface } from './surfaces';
 
 /**
  * True when the deep-generation tier is enabled via

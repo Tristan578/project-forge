@@ -353,6 +353,7 @@ export async function generateGDD(
     effort: 'medium',
     systemOverride: GDD_SYSTEM_PROMPT,
     priority: 2,
+    surface: 'gdd',
   });
 
   if (!content.trim()) {

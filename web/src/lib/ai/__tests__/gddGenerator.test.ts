@@ -466,4 +466,14 @@ describe('generateGDD', () => {
 
     await expect(generateGDD('a game')).rejects.toThrow('Token limit exceeded');
   });
+
+  it('passes surface: gdd to fetchAI for PostHog attribution (PF-931)', async () => {
+    fetchAIMock.mockResolvedValue(JSON.stringify(mockGDD));
+
+    await generateGDD('a platformer');
+
+    expect(fetchAIMock).toHaveBeenCalledOnce();
+    const [, options] = fetchAIMock.mock.calls[0] as [string, Record<string, unknown>];
+    expect(options.surface).toBe('gdd');
+  });
 });
