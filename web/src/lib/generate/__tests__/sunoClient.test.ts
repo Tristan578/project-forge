@@ -137,6 +137,70 @@ describe('SunoClient', () => {
     });
   });
 
+  describe('abort signal composition', () => {
+    it('passes a composed (pre-aborted) signal to fetch when signal param is provided', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ task_id: 'suno-signal-test' }),
+      } as Response);
+
+      const controller = new AbortController();
+      controller.abort(new Error('deadline exceeded'));
+
+      const client = new SunoClient({ apiKey: mockApiKey });
+      await client.createMusic({ prompt: 'ambient', signal: controller.signal });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(true);
+    });
+
+    it('passes a timeout signal to fetch when no signal param is provided', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ task_id: 'suno-no-signal' }),
+      } as Response);
+
+      const client = new SunoClient({ apiKey: mockApiKey });
+      await client.createMusic({ prompt: 'jazz' });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(false);
+    });
+
+    it('passes a composed (pre-aborted) signal to fetch when signal is provided (getStatus)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ status: 'processing', progress: 45 }),
+      } as Response);
+
+      const controller = new AbortController();
+      controller.abort(new Error('deadline exceeded'));
+
+      const client = new SunoClient({ apiKey: mockApiKey });
+      await client.getStatus('valid-task-id', { signal: controller.signal });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(true);
+    });
+
+    it('passes a timeout signal to fetch when no signal is provided (getStatus)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ status: 'processing', progress: 45 }),
+      } as Response);
+
+      const client = new SunoClient({ apiKey: mockApiKey });
+      await client.getStatus('valid-task-id');
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(false);
+    });
+  });
+
   describe('getStatus', () => {
     it('returns completed status with audioUrl', async () => {
       vi.mocked(fetch).mockResolvedValue({

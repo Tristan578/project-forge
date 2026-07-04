@@ -106,6 +106,7 @@ export const POST = createGenerationHandler<
       result = await client.createImageTo3D({
         imageBase64: params.imageBase64!,
         prompt: params.prompt,
+        signal: ctx.abortSignal,
       });
     } else {
       result = await client.createTextTo3D({
@@ -113,6 +114,7 @@ export const POST = createGenerationHandler<
         artStyle: params.artStyle,
         negativePrompt: params.negativePrompt,
         quality: params.quality,
+        signal: ctx.abortSignal,
       });
     }
 

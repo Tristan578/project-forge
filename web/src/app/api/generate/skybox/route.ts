@@ -38,6 +38,7 @@ export const POST = createGenerationHandler<
       resolution: '2048',
       style: params.style,
       tiling: false,
+      signal: ctx.abortSignal,
     });
 
     return {

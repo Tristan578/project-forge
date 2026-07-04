@@ -46,6 +46,7 @@ export const POST = createGenerationHandler<
       prompt: params.prompt,
       durationSeconds: params.durationSeconds,
       instrumental: params.instrumental,
+      signal: ctx.abortSignal,
     });
 
     return {

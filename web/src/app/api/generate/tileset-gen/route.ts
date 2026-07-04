@@ -9,7 +9,7 @@ type GridSize = '4x4' | '8x8' | '16x16';
 
 export const POST = createGenerationHandler<
   { prompt: string; tileSize: TileSize; gridSize: GridSize },
-  { jobId: string; provider: string; status: string; estimatedSeconds: number }
+  { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
 >({
   route: '/api/generate/tileset-gen',
   provider: DB_PROVIDER.sprite,
@@ -46,12 +46,13 @@ export const POST = createGenerationHandler<
       },
     };
   },
-  execute: async (params, apiKey) => {
+  execute: async (params, apiKey, ctx) => {
     const client = new SpriteClient(apiKey, 'sdxl');
     const result = await client.generateTileset({
       prompt: params.prompt,
       tileSize: params.tileSize,
       gridSize: params.gridSize,
+      signal: ctx.abortSignal,
     });
 
     return {
@@ -59,6 +60,7 @@ export const POST = createGenerationHandler<
       provider: DB_PROVIDER.sprite,
       status: result.status,
       estimatedSeconds: 60,
+      usageId: ctx.usageId,
     };
   },
   // Durable server-side completion + refund (PF-906). Dormant unless QStash set.

@@ -32,11 +32,12 @@ export const POST = createGenerationHandler<
     prompt: params.prompt,
     durationSeconds: params.durationSeconds,
   }),
-  execute: async (params, apiKey) => {
+  execute: async (params, apiKey, ctx) => {
     const client = new ElevenLabsClient({ apiKey });
     const result = await client.generateSfx({
       prompt: params.prompt,
       durationSeconds: params.durationSeconds,
+      signal: ctx.abortSignal,
     });
 
     return {
