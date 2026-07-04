@@ -331,7 +331,7 @@ dependencies = [
  "bevy_color",
  "bevy_derive",
  "bevy_ecs",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_mesh",
  "bevy_platform",
  "bevy_reflect",
@@ -377,7 +377,7 @@ dependencies = [
  "bevy_diagnostic",
  "bevy_ecs",
  "bevy_image",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_reflect",
  "bevy_render",
  "bevy_shader",
@@ -474,7 +474,7 @@ dependencies = [
  "bevy_derive",
  "bevy_ecs",
  "bevy_image",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_mesh",
  "bevy_reflect",
  "bevy_transform",
@@ -494,7 +494,7 @@ version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74727302424d7ffc23528a974dbb44a34708662926e1a3bfc5040493f858886e"
 dependencies = [
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_reflect",
  "bytemuck",
  "derive_more",
@@ -518,7 +518,7 @@ dependencies = [
  "bevy_diagnostic",
  "bevy_ecs",
  "bevy_image",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_platform",
  "bevy_reflect",
  "bevy_render",
@@ -559,7 +559,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_image",
  "bevy_input",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_picking",
  "bevy_reflect",
  "bevy_render",
@@ -654,7 +654,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_gizmos_macros",
  "bevy_light",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_reflect",
  "bevy_time",
  "bevy_transform",
@@ -685,7 +685,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_gizmos",
  "bevy_image",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_mesh",
  "bevy_pbr",
  "bevy_render",
@@ -713,7 +713,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_image",
  "bevy_light",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_mesh",
  "bevy_pbr",
  "bevy_platform",
@@ -765,7 +765,7 @@ dependencies = [
  "bevy_asset",
  "bevy_color",
  "bevy_ecs",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_platform",
  "bevy_reflect",
  "bevy_utils",
@@ -792,7 +792,7 @@ checksum = "9c2853993baf27b963a417d3603a73e02e39c5041913cd1ba7211b0a3037b191"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_platform",
  "bevy_reflect",
  "derive_more",
@@ -810,7 +810,7 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bevy_input",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_picking",
  "bevy_reflect",
  "bevy_window",
@@ -845,7 +845,7 @@ dependencies = [
  "bevy_input_focus",
  "bevy_light",
  "bevy_log",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_mesh",
  "bevy_pbr",
  "bevy_picking",
@@ -879,7 +879,7 @@ dependencies = [
  "bevy_color",
  "bevy_ecs",
  "bevy_image",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_mesh",
  "bevy_platform",
  "bevy_reflect",
@@ -920,9 +920,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_math"
-version = "0.18.0"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a815c514b8a6f7b11508cdc8b3a4bf0761e96a14227af40aa93cb1160989ce0"
+checksum = "e931fa969f89c83498b22c97432383afe90e90fd1a5e04fa07be8da4d3bcac84"
 dependencies = [
  "approx",
  "arrayvec",
@@ -939,6 +939,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_math"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c280440d2a5bc07ea393b5346b5712eec73ea30f0133097b8b13dade385beb"
+dependencies = [
+ "arrayvec",
+ "derive_more",
+ "glam 0.32.1",
+ "itertools 0.14.0",
+ "thiserror 2.0.18",
+ "variadics_please",
+]
+
+[[package]]
 name = "bevy_mesh"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -949,7 +963,7 @@ dependencies = [
  "bevy_derive",
  "bevy_ecs",
  "bevy_image",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_mikktspace",
  "bevy_platform",
  "bevy_reflect",
@@ -995,7 +1009,7 @@ dependencies = [
  "bevy_image",
  "bevy_light",
  "bevy_log",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_mesh",
  "bevy_platform",
  "bevy_reflect",
@@ -1027,7 +1041,7 @@ dependencies = [
  "bevy_derive",
  "bevy_ecs",
  "bevy_input",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_mesh",
  "bevy_platform",
  "bevy_reflect",
@@ -1073,7 +1087,7 @@ dependencies = [
  "bevy_derive",
  "bevy_ecs",
  "bevy_image",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_platform",
  "bevy_reflect",
  "bevy_render",
@@ -1180,7 +1194,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_encase_derive",
  "bevy_image",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_mesh",
  "bevy_platform",
  "bevy_reflect",
@@ -1278,7 +1292,7 @@ dependencies = [
  "bevy_derive",
  "bevy_ecs",
  "bevy_image",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_mesh",
  "bevy_reflect",
  "bevy_text",
@@ -1303,7 +1317,7 @@ dependencies = [
  "bevy_derive",
  "bevy_ecs",
  "bevy_image",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_mesh",
  "bevy_platform",
  "bevy_reflect",
@@ -1379,7 +1393,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_image",
  "bevy_log",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_platform",
  "bevy_reflect",
  "bevy_utils",
@@ -1416,7 +1430,7 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bevy_log",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_reflect",
  "bevy_tasks",
  "bevy_utils",
@@ -1442,7 +1456,7 @@ dependencies = [
  "bevy_image",
  "bevy_input",
  "bevy_input_focus",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_platform",
  "bevy_reflect",
  "bevy_sprite",
@@ -1471,7 +1485,7 @@ dependencies = [
  "bevy_derive",
  "bevy_ecs",
  "bevy_image",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_mesh",
  "bevy_platform",
  "bevy_reflect",
@@ -1508,7 +1522,7 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bevy_input",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_platform",
  "bevy_reflect",
  "log",
@@ -1533,7 +1547,7 @@ dependencies = [
  "bevy_input",
  "bevy_input_focus",
  "bevy_log",
- "bevy_math",
+ "bevy_math 0.18.1",
  "bevy_platform",
  "bevy_reflect",
  "bevy_tasks",
@@ -2754,6 +2768,10 @@ name = "glam"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f70749695b063ecbf6b62949ccccde2e733ec3ecbbd71d467dca4e5c6c97cca0"
+dependencies = [
+ "bytemuck",
+ "mint",
+]
 
 [[package]]
 name = "glamx"
@@ -5089,7 +5107,7 @@ dependencies = [
  "bevy_image",
  "bevy_input",
  "bevy_log",
- "bevy_math",
+ "bevy_math 0.19.0",
  "bevy_mesh",
  "bevy_pbr",
  "bevy_picking",
