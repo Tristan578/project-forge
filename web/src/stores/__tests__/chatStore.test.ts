@@ -1044,7 +1044,7 @@ describe('chatStore', () => {
       expect(assistant.content).toContain('Created your cube.');
     });
 
-    it('renders assistant text from v6 text-delta chunks (#8746)', async () => {
+    it('renders assistant text from v7 text-delta chunks (#8746)', async () => {
       // Guards the single most user-visible symptom: a `text-delta` carrying
       // `delta` (NOT `text`) must accumulate onto the assistant message.
       const events = makeChatSSEEvents({ text: 'Hello from the model.' });
@@ -1170,7 +1170,7 @@ describe('chatStore', () => {
     it('surfaces a stream-level error chunk as store error (#8746)', async () => {
       // A top-level `error` chunk (e.g. upstream rate limit) must land in
       // store.error so the UI can show it. The legacy parser read `message`, not
-      // the v6 `errorText` field, and dropped these on the floor.
+      // the v7 `errorText` field, and dropped these on the floor.
       const events = [
         { type: 'start' },
         { type: 'start-step' },

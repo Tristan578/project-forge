@@ -37,7 +37,7 @@ You are reviewing changelogs and release notes for SpawnForge's dependency stack
 | Next.js | https://github.com/vercel/next.js/releases | ^16.2.3 |
 | Clerk | https://github.com/clerk/javascript/releases | @clerk/nextjs ^7.0.12 |
 | Stripe | https://github.com/stripe/stripe-node/releases | stripe ^22.3.0 |
-| AI SDK | https://github.com/vercel/ai/releases | ai ^6.0.158 |
+| AI SDK | https://github.com/vercel/ai/releases | ai ^7.0.11 |
 | Drizzle ORM | https://github.com/drizzle-team/drizzle-orm/releases | drizzle-orm 0.45.2 |
 | Neon Serverless | https://github.com/neondatabase/serverless/releases | @neondatabase/serverless ^1.0.2 |
 | Zod | https://github.com/colinhacks/zod/releases | zod ^4.3.6 |
