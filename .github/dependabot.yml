@@ -20,6 +20,21 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # eslint 10 is un-mergeable until the plugin ecosystem catches up.
+      # eslint-plugin-react 7.37.5 (latest, 2025-04, peer eslint ^3..^9.7) still
+      # calls the removed context.getFilename() and crashes every rule under
+      # ESLint 10 — reproduced on #8914's Lint job (TypeError at
+      # eslint-plugin-react/lib/util/version.js:31). eslint-config-next 16.2.10
+      # hard-depends on eslint-plugin-react ^7.37.0, so no config change on our
+      # side avoids it; eslint-plugin-jsx-a11y 6.10.2 and eslint-plugin-import
+      # 2.32.0 (both latest) also cap peers at eslint ^9. 9.x patch/minor
+      # updates still flow (9.39.4 is npm's `maintenance` dist-tag). Remove
+      # when jsx-eslint/eslint-plugin-react#3977 ships an eslint-10 release AND
+      # eslint-config-next adopts it (vercel/next.js#89764). Tracking: #8917
+      # (PF-945).
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
 
   # Rust/Cargo dependencies (engine)
   - package-ecosystem: cargo
