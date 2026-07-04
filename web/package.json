@@ -72,7 +72,7 @@
     "acorn": "^8.17.0",
     "ai": "^7.0.11",
     "bcryptjs": "^3.0.3",
-    "dockview-react": "^6.0.1",
+    "dockview-react": "^7.0.2",
     "dotenv": "^17.4.2",
     "drizzle-orm": "0.45.2",
     "jsfxr": "^1.4.1",
@@ -114,7 +114,7 @@
     "jsdom": "^29.1.1",
     "portless": "^0.15.0",
     "tailwindcss": "^4",
-    "typescript": "^6",
+    "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   },
   "optionalDependencies": {
