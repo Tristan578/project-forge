@@ -1,5 +1,51 @@
 # web
 
+## 0.4.0
+
+### Minor Changes
+
+- [#8883](https://github.com/Tristan578/project-forge/pull/8883) [`33dc33a`](https://github.com/Tristan578/project-forge/commit/33dc33a5b7d5da53f6283849b9164d5801cb63ca) Thanks [@Tristan578](https://github.com/Tristan578)! - Upgrade the Vercel AI SDK stack to v7 as a single coordinated major bump: `ai` 6→7, `@ai-sdk/mcp` 1→2, plus an explicit `@ai-sdk/provider-utils` ^5 pin (ending the dual-versioning that previously left it a phantom transitive dep). `@ai-sdk/anthropic`, `@ai-sdk/gateway`, and `@ai-sdk/react` remain on their v4 lines, which are the versions paired with `ai@7`. `@sentry/nextjs` stays on ^10.62.0 ([#8855](https://github.com/Tristan578/project-forge/issues/8855)).
+
+  No application code changed — the migration is a version bump plus a root-lockfile relock. The v7 hyphenated `UIMessageChunk` chat SSE protocol is unchanged from v6, so the streaming contract test passes unmodified and no persisted chat data is affected. Sentry AI-generation spans keep emitting: v7 only stopped building OpenTelemetry spans itself, but still publishes to `diagnostics_channel` when `experimental_telemetry.isEnabled` is set, and `@sentry/nextjs@10.62.0` consumes that channel via its version-agnostic vercel-ai subscriber — so `@ai-sdk/otel` is deliberately **not** added and the four `experimental_telemetry` call sites are unchanged. Node 24 (already pinned) satisfies v7's Node 22+/ESM-only requirement.
+
+### Patch Changes
+
+- [#8866](https://github.com/Tristan578/project-forge/pull/8866) [`113a8fe`](https://github.com/Tristan578/project-forge/commit/113a8feccd0a456e0677b6d3e15da07ea7fc9996) Thanks [@Tristan578](https://github.com/Tristan578)! - Add a Security tab to the account settings page that mounts Clerk's prebuilt `<UserProfile routing="hash" />`, giving users self-serve access to MFA (authenticator app + backup codes), passkeys, and connected-account/device management ([#8820](https://github.com/Tristan578/project-forge/issues/8820)). The tab inherits the app-level dark `appearance` and uses `routing="hash"` so Clerk's internal navigation stays scoped to the URL hash and cannot hijack the page's own `?tab=` query routing. Dormant-safe by default: the underlying factors only become enrollable once the owner toggles them in the Clerk Dashboard (no code change, $0 on the current plan), and with no Clerk keys the provider is not mounted so nothing renders. Bot protection is documented for the future real `<SignUp>` (the public route is currently a waitlist form). No dependency or `@clerk/nextjs` version change.
+
+- [#8879](https://github.com/Tristan578/project-forge/pull/8879) [`f8b8d64`](https://github.com/Tristan578/project-forge/commit/f8b8d64d22604aab42917e107d1f0bf389164755) Thanks [@dependabot](https://github.com/apps/dependabot)! - chore(deps): bump npm minor-and-patch group ([#8879](https://github.com/Tristan578/project-forge/issues/8879)) + relock @clerk/shared override
+
+  Routine minor/patch dependency group update: `@anthropic-ai/sdk` 0.105→0.107, `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` 3.1075→3.1076, `@clerk/nextjs` 7.5.7→7.5.10, `lucide-react` 1.0.1→1.22.0, `posthog-js` 1.395→1.396.2, `svix` 1.96.0→1.96.1, `@axe-core/playwright` 4.11.3→4.12.1, `@tailwindcss/postcss` 4.3.1→4.3.2, `portless` 0.14→0.15.
+
+  `@clerk/nextjs` 7.5.10 imports `isAutomatedEnvironment` from `@clerk/shared`, a symbol that only exists in `@clerk/shared` ≥ 4.22.1. The root `overrides` block pinned `@clerk/shared ^4.14.0`, so the build failed with `Export isAutomatedEnvironment doesn't exist in target module`. Bumped the override to `^4.22.1` (and the sibling `@clerk/nextjs` override to `^7.5.10`) and relocked the single root lockfile on Node 24, so the Clerk consumers resolve `@clerk/shared` 4.22.1 (and `@clerk/themes` keeps its compatible 3.47.x) with no invalid nodes.
+
+- [#8864](https://github.com/Tristan578/project-forge/pull/8864) [`82538cf`](https://github.com/Tristan578/project-forge/commit/82538cf48741b704523ddcd15bc1aead4e87ba8c) Thanks [@Tristan578](https://github.com/Tristan578)! - deps: routine dependency wave (2026-06-27 changelog review).
+
+  - `stripe` 22.2.3 → 22.3.0 — the SDK rolls its pinned `ApiVersion` literal to `2026-06-24.dahlia`, so the hardcoded literal in `stripe-client.ts` (and the billing route tests / webhook comment) moves in lockstep. Prevents a silent `tsc` break on the next relock.
+  - `@sentry/nextjs` 10.59 → 10.62 — pins `streamGenAiSpans: false` and `enableTruncation: true` on the AI integrations so the 10.61 default flips don't newly stream untruncated `gen_ai` spans (span-volume/cost stays flat; opting in is a deliberate observability decision).
+  - Security (Boy-Scout, surfaced reviewing the Sentry bump): all three `Sentry.init` configs set `enableLogs: true`, which routes `Sentry.logger.*` through a separate `beforeSendLog` pipeline that the existing `scrubSentryEvent` (wired only to `beforeSend`/`beforeSendTransaction`) never touched — a stray log could ship a prompt / BYOK key / PII unredacted. Added `scrubSentryLog` (reuses the same `scrubString`/`deepScrub` redaction core) and wired `beforeSendLog: scrubSentryLog` in server, edge, and client configs, with a regression guard tying `enableLogs: true` to the scrubber. It also handles two `@sentry/core` quirks: `logger.fmt` messages are boxed `String` objects shipped via `String(message)` after the hook (scrubbed via the rendered body), and the scope `username` is flattened into a `user.name` attribute that the key regex misses (`user.name`/`user.username` redacted explicitly, `user.id` kept for correlation).
+  - `posthog-js` 1.392 → 1.395, `@playwright/test` 1.61.0 → 1.61.1, and the `vitest` floor `^4.1.8 → ^4.1.9` (already resolved at 4.1.9) — routine drop-in bug-fix bumps.
+
+  `@clerk/nextjs` 7.5.9 is intentionally **not** in this wave: it is override-pinned in the root `package.json` alongside `@clerk/shared ^4.14.0`, and 7.5.9 pulls `@clerk/shared 4.22.0`, so bumping clerk without coordinating the shared/backend/react override subtree corrupts lockfile resolution. It needs a dedicated upgrade PR.
+
+- [#8895](https://github.com/Tristan578/project-forge/pull/8895) [`18270c3`](https://github.com/Tristan578/project-forge/commit/18270c3b0673f0336831ef77c14766b4b2afe2d9) Thanks [@Tristan578](https://github.com/Tristan578)! - fix(generate): sprite-sheet and tileset-gen generation responses now include usageId so failed jobs refund from the client
+
+  All 12 generate routes now forward the generation agent's abort signal into their
+  provider HTTP calls, so a per-route wall-clock deadline cancels the in-flight
+  request deterministically rather than only the factory's await. Provider-error
+  details are no longer exposed in voice/batch user-visible error messages.
+
+- [#8891](https://github.com/Tristan578/project-forge/pull/8891) [`6340324`](https://github.com/Tristan578/project-forge/commit/63403249fb073b9bdfec1e57877228cabc698922) Thanks [@Tristan578](https://github.com/Tristan578)! - Add per-surface $ai_generation attribution for GDD, world builder, and cutscene generators so PostHog can distinguish deep-generator token usage from interactive chat traffic.
+
+- [#8878](https://github.com/Tristan578/project-forge/pull/8878) [`242e9b8`](https://github.com/Tristan578/project-forge/commit/242e9b8a19e4fef09b6bac11d6b465c41c5ca9b0) Thanks [@Tristan578](https://github.com/Tristan578)! - feat(analytics): server-side LLM observability via PostHog `$ai_generation` (PF-907, [#8817](https://github.com/Tristan578/project-forge/issues/8817))
+
+  Adds an env-guarded, dormant-by-default, consent-gated server capture of PostHog `$ai_generation` events on the three routes that run a model server-side (`/api/chat`, `/api/generate/localize`, `/api/generate/pacing`), powering PostHog's per-generation cost/token/latency/model/error dashboards. Capture is a dependency-free `fetch` (no `posthog-node`, no OTel span processor) fired via `after()`, and is **private by construction** — it never sends the content fields `$ai_input` / `$ai_output_choices`, only non-content metrics. Fully dormant unless `POSTHOG_LLM_CAPTURE === "true"` AND a project key is set; independently suppressed unless the user consented to analytics (PF-30, via a new server-readable `forge-cookie-consent` cookie). No behavior change when dormant.
+
+- [#8867](https://github.com/Tristan578/project-forge/pull/8867) [`e861146`](https://github.com/Tristan578/project-forge/commit/e861146bb5af8eb1312640d2906ae952048a33a3) Thanks [@Tristan578](https://github.com/Tristan578)! - feat(generation): durable server-side generation callbacks via Upstash QStash (PF-906, [#8816](https://github.com/Tristan578/project-forge/issues/8816))
+
+  Adds an env-guarded, dormant-by-default durable completion path for async asset generation (Meshy/Suno/Replicate). When `QSTASH_TOKEN` is set, each async generate route publishes a self-rescheduling QStash callback that polls the provider and finalizes the `generation_jobs` row + issues the refund-on-failure server-side — so a failed/timed-out/empty job is refunded even if the user closed the tab. When unset, the existing client poller is the only path and behavior is unchanged. Refund stays idempotent, so the durable and client paths never double-credit.
+
+- [#8885](https://github.com/Tristan578/project-forge/pull/8885) [`1d8a7c2`](https://github.com/Tristan578/project-forge/commit/1d8a7c2ea4921d627c30dd93fd33cb0821eae5d2) Thanks [@Tristan578](https://github.com/Tristan578)! - Routine minor/patch dependency bumps: next 16.2.10, @clerk/nextjs 7.5.12, @sentry/nextjs 10.63.0, posthog-js 1.396.4.
+
 ## 0.3.0
 
 ### Minor Changes
