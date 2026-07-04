@@ -31,6 +31,19 @@ updates:
     labels:
       - dependencies
       - rust
+    ignore:
+      # Bevy releases (0.18 → 0.19) must land as ONE coordinated migration across
+      # bevy + every bevy_* ecosystem crate (#8887). A piecemeal per-crate bump
+      # (e.g. bevy_math 0.19.0 alone while the workspace pins bevy 0.18.1) leaves
+      # BOTH versions in engine/Cargo.lock → type mismatches at the
+      # transform-gizmo-fork/engine boundary → Quality Gates / WASM Build fails.
+      # Shipped live as #8897/#8898/#8899 (all red). Bevy is 0.x, so 0.18 → 0.19
+      # is `semver-minor`; patch updates (0.18.1 → 0.18.2) still flow. Remove
+      # this rule as part of the coordinated 0.19 migration (#8887).
+      - dependency-name: "bevy*"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
 
   # GitHub Actions
   - package-ecosystem: github-actions
