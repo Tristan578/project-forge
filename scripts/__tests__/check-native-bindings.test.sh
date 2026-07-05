@@ -130,11 +130,16 @@ if [ "$rc" = "2" ]; then pass "next absent from tree → exit 2 (mis-pointed pat
 #     Comment lines are stripped first (canonical pattern from
 #     check-npm-audit.test.sh) so a doc comment naming the seam does not
 #     false-positive — only an EXECUTABLE reference can no-op the gate.
-if grep -rh "NATIVE_BINDINGS_" "$REPO_ROOT/.github/workflows/" 2>/dev/null \
+#     Composite actions under .github/actions/ are included (guarded — the
+#     dir does not exist today; an existence test keeps pipefail from
+#     poisoning the pipeline exit if grep sees a missing path).
+seam_dirs=("$REPO_ROOT/.github/workflows")
+[ -d "$REPO_ROOT/.github/actions" ] && seam_dirs+=("$REPO_ROOT/.github/actions")
+if grep -rh "NATIVE_BINDINGS_" "${seam_dirs[@]}" 2>/dev/null \
     | grep -v '^[[:space:]]*#' | grep -q "NATIVE_BINDINGS_"; then
-  fail "a workflow references NATIVE_BINDINGS_* in an executable line — the test-only seam must never be wired in CI"
+  fail "a workflow or composite action references NATIVE_BINDINGS_* in an executable line — the test-only seam must never be wired in CI"
 else
-  pass "no workflow wires the NATIVE_BINDINGS_* test seams in an executable line"
+  pass "no workflow or composite action wires the NATIVE_BINDINGS_* test seams in an executable line"
 fi
 
 # 12. Default NM_DIR (no-arg invocation — the exact form the CI steps use):

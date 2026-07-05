@@ -24,10 +24,14 @@ on:
       - 'web/vitest.config.jsdom.ts'
       - 'web/package.json'
 
+# Least privilege: labeling a PR rides the issues REST endpoint, but GitHub's
+# permission engine accepts pull-requests: write when the target is a PR
+# (actions/labeler precedent) — so issues: write is deliberately NOT granted.
+# If labeling ever fails, gh pr create errors and the job goes red (loud, not
+# silent).
 permissions:
   contents: write       # push the auto/coverage-ratchet branch
-  pull-requests: write  # create/update the ratchet PR
-  issues: write         # PR labels ride the issues API ("skip changeset")
+  pull-requests: write  # create/update/label the ratchet PR
 
 concurrency:
   # Stable group key — serializes ratchet runs on main to prevent push conflicts
@@ -97,7 +101,7 @@ jobs:
           git add web/vitest.config.ts
           git commit -m "chore: ratchet coverage thresholds (PF-947)"
           git push --force origin "$BRANCH"
-          OPEN_PR="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')"
+          OPEN_PR="$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[].number')"
           if [ -n "$OPEN_PR" ]; then
             echo "Ratchet PR #${OPEN_PR} already open — branch force-push updated it."
             exit 0
