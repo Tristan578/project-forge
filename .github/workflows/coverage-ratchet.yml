@@ -60,8 +60,11 @@ jobs:
       - name: Run tests with coverage
         working-directory: web
         id: vitest
+        # timeout 600: vitest+coverage can hang in CI (jsdom open handles,
+        # vitest#3077) — fail fast at 10 min instead of burning the 20-min job
+        # timeout. Exit 124 surfaces through the warning step below.
         run: |
-          npx vitest run --coverage --coverage.reporter=json-summary --pool=threads
+          timeout 600 npx vitest run --coverage --coverage.reporter=json-summary --pool=threads
         continue-on-error: true
 
       - name: Check vitest exit
@@ -76,8 +79,9 @@ jobs:
       #     a pull_request CI run or the required "CI Success" check never
       #     reports and the PR is unmergeable.
       #   - PF-947 in the PR body satisfies the Require Linked Work Item gate
-      #     (pr-workitem-check.yml verifies the ticket exists with --state all,
-      #     so it keeps passing after #8920 closes). Deliberately NOT a
+      #     (pr-workitem-check.yml regex-matches PF-[0-9]+ in title/body/branch
+      #     — no ticket-existence lookup — so it keeps passing after #8920
+      #     closes). Deliberately NOT a
       #     "Closes #" reference — this PR recurs and must not re-close the
       #     ticket that tracks the mechanism.
       #   - The "skip changeset" label satisfies the Require Changeset gate
