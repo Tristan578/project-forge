@@ -161,6 +161,23 @@ touch "$nm/@next/swc-linux-x64-gnu/next-swc.linux-x64-gnu.node"
 rc="$(PATH="/nonexistent" /bin/bash "$GATE" "$nm" >/dev/null 2>&1; echo $?)"
 if [ "$rc" = "2" ]; then pass "node absent from PATH → exit 2 (fail closed)"; else fail "node absent from PATH → expected 2, got $rc"; fi
 
+# 17. Multiple .node files in one binding dir (real @next/swc packages can
+#     ship platform variants side by side) → still 0; the scan must not choke
+#     on or require exactly one binary.
+nm="$(mktree multi-node "swc-linux-x64-gnu")"
+touch "$nm/@next/swc-linux-x64-gnu/next-swc.linux-x64-gnu.node" \
+      "$nm/@next/swc-linux-x64-gnu/next-swc.alt.node"
+rc="$(run_gate "$nm" linux x64)"
+if [ "$rc" = "0" ]; then pass "multiple .node files in binding dir → gate 0"; else fail "multiple .node files in binding dir → expected 0, got $rc"; fi
+
+# 18. Spaces in the node_modules path — every expansion in the gate must be
+#     quoted; an unquoted one would split on the space and misreport.
+space_nm="$TMPDIR_T/space dir/node_modules"
+mkdir -p "$space_nm/next" "$space_nm/@next/swc-linux-x64-gnu"
+touch "$space_nm/@next/swc-linux-x64-gnu/next-swc.linux-x64-gnu.node"
+rc="$(run_gate "$space_nm" linux x64)"
+if [ "$rc" = "0" ]; then pass "path with spaces → gate 0 (quoting holds)"; else fail "path with spaces → expected 0, got $rc"; fi
+
 # ── ci.yml structural wiring (self-defense — canonical pattern from
 #    check-npm-audit.test.sh's quality-gates/ci.yml sections). The gate is only
 #    real if CI actually invokes it; a PR that unwires an invocation, adds
