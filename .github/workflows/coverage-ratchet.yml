@@ -1,9 +1,18 @@
 name: Coverage Ratchet
 
-# Standalone workflow for committing bumped coverage thresholds on main.
-# quality-gates.yml cannot push because reusable workflows inherit the
-# caller's permissions (ci.yml → contents: read). This workflow runs
-# independently with contents: write so the ratchet script can commit.
+# Standalone workflow that ratchets coverage thresholds upward when actual
+# coverage on main exceeds them. It runs standalone because quality-gates.yml
+# is a reusable workflow and inherits the caller's permissions (ci.yml →
+# contents: read).
+#
+# The bump ships as a PULL REQUEST, never a direct push: the repo ruleset
+# forbids pushes to main (GH013 — "Changes must be made through a pull
+# request" + the required "CI Success" check, which only reports on
+# pull_request events). The previous direct-push design failed on every main
+# push and the ratchet silently never ratcheted (PF-947 / #8920). The job
+# force-pushes a fixed auto/coverage-ratchet branch and opens a PR if one
+# isn't already open, so successive runs update the same PR instead of
+# stacking new ones.
 
 on:
   push:
@@ -15,8 +24,14 @@ on:
       - 'web/vitest.config.jsdom.ts'
       - 'web/package.json'
 
+# Least privilege: labeling a PR rides the issues REST endpoint, but GitHub's
+# permission engine accepts pull-requests: write when the target is a PR
+# (actions/labeler precedent) — so issues: write is deliberately NOT granted.
+# If labeling ever fails, gh pr create errors and the job goes red (loud, not
+# silent).
 permissions:
-  contents: write
+  contents: write       # push the auto/coverage-ratchet branch
+  pull-requests: write  # create/update/label the ratchet PR
 
 concurrency:
   # Stable group key — serializes ratchet runs on main to prevent push conflicts
@@ -45,8 +60,11 @@ jobs:
       - name: Run tests with coverage
         working-directory: web
         id: vitest
+        # timeout 600: vitest+coverage can hang in CI (jsdom open handles,
+        # vitest#3077) — fail fast at 10 min instead of burning the 20-min job
+        # timeout. Exit 124 surfaces through the warning step below.
         run: |
-          npx vitest run --coverage --coverage.reporter=json-summary --pool=threads
+          timeout 600 npx vitest run --coverage --coverage.reporter=json-summary --pool=threads
         continue-on-error: true
 
       - name: Check vitest exit
@@ -56,14 +74,45 @@ jobs:
       - name: Run ratchet script
         run: bash .claude/skills/testing/scripts/ratchet-coverage.sh web/coverage
 
-      - name: Commit bumped thresholds
+      # Ship the bump as a PR. Notes on the moving parts:
+      #   - The commit message must NOT contain [skip ci] — the ratchet PR needs
+      #     a pull_request CI run or the required "CI Success" check never
+      #     reports and the PR is unmergeable.
+      #   - PF-947 in the PR body satisfies the Require Linked Work Item gate
+      #     (pr-workitem-check.yml regex-matches PF-[0-9]+ in title/body/branch
+      #     — no ticket-existence lookup — so it keeps passing after #8920
+      #     closes). Deliberately NOT a
+      #     "Closes #" reference — this PR recurs and must not re-close the
+      #     ticket that tracks the mechanism.
+      #   - The "skip changeset" label satisfies the Require Changeset gate
+      #     (a threshold bump is CI-config-only, nothing user-facing).
+      #   - Bot-created PRs DO get pull_request runs in this repo: GitHub
+      #     attributes them to the human triggering_actor of the parent push
+      #     (verified on the changesets Version Packages PR), so the
+      #     GITHUB_TOKEN no-retrigger rule does not strand this PR.
+      - name: Open or update ratchet PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if git diff --quiet web/vitest.config.ts; then
+            echo "No threshold changes — thresholds already match measured coverage."
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet web/vitest.config.ts; then
-            echo "No threshold changes to commit."
-          else
-            git add web/vitest.config.ts
-            git commit -m "chore: ratchet coverage thresholds [skip ci]"
-            git push
+          BRANCH="auto/coverage-ratchet"
+          git checkout -B "$BRANCH"
+          git add web/vitest.config.ts
+          git commit -m "chore: ratchet coverage thresholds (PF-947)"
+          git push --force origin "$BRANCH"
+          OPEN_PR="$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[].number')"
+          if [ -n "$OPEN_PR" ]; then
+            echo "Ratchet PR #${OPEN_PR} already open — branch force-push updated it."
+            exit 0
           fi
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: ratchet coverage thresholds" \
+            --label "skip changeset" \
+            --body "$(printf '## Summary\n- Automated coverage-threshold ratchet (PF-947): measured coverage on main now exceeds the recorded thresholds in web/vitest.config.ts, so this bumps them to match and locks in the gain.\n\nGenerated by the Coverage Ratchet workflow. This branch is force-pushed on every ratchet run — do not push manual commits to it.\n\n## Test plan\n- [ ] CI Success green (config-only change; the bumped thresholds apply to every future --coverage run)\n')"

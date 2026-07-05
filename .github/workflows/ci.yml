@@ -225,6 +225,12 @@ jobs:
 
       - run: npm ci
 
+      # npm can drop the platform-native @next/swc optional dep while exiting 0
+      # (npm/cli#4828 class) — fail loudly here, not as an opaque next-build
+      # error two steps later (PF-947).
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
@@ -751,6 +757,7 @@ jobs:
             scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
             scripts/check-changeset-packages.sh scripts/__tests__/check-changeset-packages.test.sh \
             scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
+            scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
@@ -788,6 +795,9 @@ jobs:
 
       - name: Run actions-pinned gate test suite
         run: bash scripts/__tests__/check-actions-pinned.test.sh
+
+      - name: Run native-bindings gate test suite
+        run: bash scripts/__tests__/check-native-bindings.test.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without
@@ -922,6 +932,12 @@ jobs:
 
       - run: npm ci
 
+      # npm can drop the platform-native @next/swc optional dep while exiting 0
+      # (npm/cli#4828 class) — fail loudly here, not as an opaque next-build
+      # error two steps later (PF-947).
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
@@ -1001,6 +1017,10 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - run: npm ci
+
+      # Same silent-drop guard as test-e2e-ui (npm/cli#4828 class, PF-947).
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
 
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
@@ -1089,6 +1109,10 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - run: npm ci
+
+      # Same silent-drop guard as test-e2e-ui (npm/cli#4828 class, PF-947).
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
 
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
