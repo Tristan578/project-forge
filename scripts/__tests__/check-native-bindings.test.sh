@@ -56,7 +56,9 @@ HOST_ARCH="$(node -p process.arch)"
 echo "== check-native-bindings.sh =="
 
 # 1. Happy path, NO seam (default host detection): exact-named package with a
-#    .node binary → 0. This exercises the real `node -p` path the CI run takes.
+#    .node binary → 0. This exercises the real `node -p` platform/arch path the
+#    CI run takes (NM_DIR is still passed explicitly — the no-arg NM_DIR
+#    default is exercised by case 12).
 nm="$(mktree host-ok "swc-${HOST_PLATFORM}-${HOST_ARCH}")"
 touch "$nm/@next/swc-${HOST_PLATFORM}-${HOST_ARCH}/next-swc.${HOST_PLATFORM}-${HOST_ARCH}.node"
 rc="$(run_gate "$nm")"
@@ -125,10 +127,82 @@ if [ "$rc" = "2" ]; then pass "next absent from tree → exit 2 (mis-pointed pat
 # 11. The seams are TEST-ONLY: no workflow may set NATIVE_BINDINGS_PLATFORM or
 #     NATIVE_BINDINGS_ARCH — wiring them in CI would let a config edit no-op
 #     the gate (same self-defense rule as $NPM_AUDIT_CMD / $OPENAPI_API_DIR).
-if grep -rn "NATIVE_BINDINGS_" "$REPO_ROOT/.github/workflows/" >/dev/null 2>&1; then
-  fail "a workflow references NATIVE_BINDINGS_* — the test-only seam must never be wired in CI"
+#     Comment lines are stripped first (canonical pattern from
+#     check-npm-audit.test.sh) so a doc comment naming the seam does not
+#     false-positive — only an EXECUTABLE reference can no-op the gate.
+if grep -rh "NATIVE_BINDINGS_" "$REPO_ROOT/.github/workflows/" 2>/dev/null \
+    | grep -v '^[[:space:]]*#' | grep -q "NATIVE_BINDINGS_"; then
+  fail "a workflow references NATIVE_BINDINGS_* in an executable line — the test-only seam must never be wired in CI"
 else
-  pass "no workflow wires the NATIVE_BINDINGS_* test seams"
+  pass "no workflow wires the NATIVE_BINDINGS_* test seams in an executable line"
+fi
+
+# 12. Default NM_DIR (no-arg invocation — the exact form the CI steps use):
+#     from a non-repo cwd the gate must resolve ./node_modules and pass on a
+#     good tree. The fixture is POSITIVE on purpose: if root-resolution ever
+#     escaped the cwd to the real repo, the linux binding would be absent
+#     there and this case would fail instead of passing for the wrong reason.
+noargs_dir="$TMPDIR_T/noargs"
+mkdir -p "$noargs_dir/node_modules/next" "$noargs_dir/node_modules/@next/swc-linux-x64-gnu"
+touch "$noargs_dir/node_modules/@next/swc-linux-x64-gnu/next-swc.linux-x64-gnu.node"
+rc="$( (cd "$noargs_dir" && NATIVE_BINDINGS_PLATFORM=linux NATIVE_BINDINGS_ARCH=x64 bash "$GATE" >/dev/null 2>&1); echo $? )"
+if [ "$rc" = "0" ]; then pass "no-arg default NM_DIR resolves cwd node_modules → gate 0"; else fail "no-arg default NM_DIR → expected 0, got $rc"; fi
+
+# 13. node missing from PATH → exit 2 (fail closed), never a pass-through.
+#     /bin/bash is invoked by absolute path so only the gate's own `command -v
+#     node` lookup is starved; the suite's own node preamble already ran.
+nm="$(mktree path-no-node "swc-linux-x64-gnu")"
+touch "$nm/@next/swc-linux-x64-gnu/next-swc.linux-x64-gnu.node"
+rc="$(PATH="/nonexistent" /bin/bash "$GATE" "$nm" >/dev/null 2>&1; echo $?)"
+if [ "$rc" = "2" ]; then pass "node absent from PATH → exit 2 (fail closed)"; else fail "node absent from PATH → expected 2, got $rc"; fi
+
+# ── ci.yml structural wiring (self-defense — canonical pattern from
+#    check-npm-audit.test.sh's quality-gates/ci.yml sections). The gate is only
+#    real if CI actually invokes it; a PR that unwires an invocation, adds
+#    continue-on-error, or drops the self-defense registration must fail here.
+CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
+if [ -f "$CI_YML" ]; then
+  ci="$(cat "$CI_YML")"
+
+  # 14. All THREE next-build jobs must invoke the gate. Job blocks are
+  #     extracted individually so an invocation moving to the wrong job (or a
+  #     job losing its invocation while another keeps two) cannot cancel out
+  #     in a whole-file count.
+  for job in test-e2e-ui test-e2e-journey test-e2e-engine-smoke; do
+    job_block="$(awk -v j="  ${job}:" '$0==j{f=1} f{print} f && /^  [a-z][a-z0-9-]*:[[:space:]]*$/ && $0!=j{exit}' <<<"$ci")"
+    if grep -v '^[[:space:]]*#' <<<"$job_block" | grep -qF 'bash scripts/check-native-bindings.sh'; then
+      pass "ci.yml job ${job} invokes the native-bindings gate"
+    else
+      fail "ci.yml job ${job} does not invoke scripts/check-native-bindings.sh — gate unwired"
+    fi
+  done
+
+  # 15. No continue-on-error may shadow any gate invocation — it would swallow
+  #     the non-zero exit and pass the job on a dropped binding. Windowed to
+  #     the invocation lines so legitimate continue-on-error elsewhere in
+  #     ci.yml does not false-positive.
+  if grep -v '^[[:space:]]*#' <<<"$ci" | grep -B3 -A1 'bash scripts/check-native-bindings.sh' | grep -q 'continue-on-error'; then
+    fail "a ci.yml native-bindings gate step has continue-on-error — gate exit code would be ignored"
+  else
+    pass "no continue-on-error shadows any native-bindings gate invocation"
+  fi
+
+  # 16. Self-defense registration: the lockfile-sync-tests (CI Self-Defense
+  #     Tests) job must shellcheck the gate + this suite AND run this suite,
+  #     so a PR that neuters either fails a required check.
+  lst_block="$(awk '/^  lockfile-sync-tests:/{f=1} f{print} f && /^  [a-z][a-z0-9-]*:[[:space:]]*$/ && !/^  lockfile-sync-tests:/{exit}' <<<"$ci")"
+  if grep -qF 'scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh' <<<"$lst_block"; then
+    pass "self-defense job shellchecks the native-bindings gate + its suite"
+  else
+    fail "self-defense job does not shellcheck the native-bindings gate + its suite"
+  fi
+  if grep -qF 'bash scripts/__tests__/check-native-bindings.test.sh' <<<"$lst_block"; then
+    pass "self-defense job runs this suite"
+  else
+    fail "self-defense job does not run scripts/__tests__/check-native-bindings.test.sh"
+  fi
+else
+  fail "ci.yml not found at $CI_YML"
 fi
 
 echo ""
