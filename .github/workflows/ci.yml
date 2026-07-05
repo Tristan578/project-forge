@@ -225,6 +225,12 @@ jobs:
 
       - run: npm ci
 
+      # npm can drop the platform-native @next/swc optional dep while exiting 0
+      # (npm/cli#4828 class) — fail loudly here, not as an opaque next-build
+      # error two steps later (PF-947).
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 

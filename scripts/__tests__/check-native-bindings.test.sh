@@ -164,11 +164,12 @@ CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 if [ -f "$CI_YML" ]; then
   ci="$(cat "$CI_YML")"
 
-  # 14. All THREE next-build jobs must invoke the gate. Job blocks are
-  #     extracted individually so an invocation moving to the wrong job (or a
-  #     job losing its invocation while another keeps two) cannot cancel out
-  #     in a whole-file count.
-  for job in test-e2e-ui test-e2e-journey test-e2e-engine-smoke; do
+  # 14. All FOUR next-build jobs must invoke the gate — build-nextjs (runs
+  #     `npm run build` = `next build` directly) plus the three E2E jobs.
+  #     Job blocks are extracted individually so an invocation moving to the
+  #     wrong job (or a job losing its invocation while another keeps two)
+  #     cannot cancel out in a whole-file count.
+  for job in build-nextjs test-e2e-ui test-e2e-journey test-e2e-engine-smoke; do
     job_block="$(awk -v j="  ${job}:" '$0==j{f=1} f{print} f && /^  [a-z][a-z0-9-]*:[[:space:]]*$/ && $0!=j{exit}' <<<"$ci")"
     if grep -v '^[[:space:]]*#' <<<"$job_block" | grep -qF 'bash scripts/check-native-bindings.sh'; then
       pass "ci.yml job ${job} invokes the native-bindings gate"
