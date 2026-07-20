@@ -201,7 +201,7 @@ LIMIT 5;
 -- generation node's stored attributes at implementation; elided in this sketch.)
 ```
 
-**Chat context grounding** (pattern 2) — recursive CTE neighborhood of the selected entity, then vector-rank the frontier:
+**Chat context grounding** (pattern 2) — recursive CTE neighborhood of the selected entity, then vector-rank the frontier. Traversal is **bidirectional**: edges are directed (`contains` points parent→child, `script_bound_to` points script→entity), so a forward-only walk from a selected entity would never surface its parent scene or the scripts bound to it. The recursion therefore has two branches — one following outgoing edges (`src → dst`) and one following incoming edges (`dst → src`):
 
 ```sql
 WITH RECURSIVE neighborhood AS (
@@ -213,6 +213,11 @@ WITH RECURSIVE neighborhood AS (
   FROM neighborhood nb
   JOIN graph_edges e ON e.src_node_id = nb.id AND e.user_id = $u
   WHERE nb.depth < 2 AND e.type IN ('contains','references','script_bound_to')
+  UNION ALL
+  SELECT e.src_node_id, nb.depth + 1
+  FROM neighborhood nb
+  JOIN graph_edges e ON e.dst_node_id = nb.id AND e.user_id = $u
+  WHERE nb.depth < 2 AND e.type IN ('contains','references','script_bound_to')
 )
 SELECT DISTINCT n.kind, n.ref_id, n.text, n.embedding <=> $selectedEmbedding AS distance
 FROM neighborhood nb
@@ -220,6 +225,8 @@ JOIN graph_nodes n ON n.id = nb.id
 ORDER BY distance ASC
 LIMIT 20;
 ```
+
+The reverse branch makes the walk revisit-prone (A→B then B→A), but the `depth < 2` cap bounds the bounce-back to the two-hop neighborhood and the outer `SELECT DISTINCT` dedupes any node reached by multiple paths, so termination and result-set size are unaffected.
 
 All queries carry `WHERE user_id = $u`. All run over `getNeonSql()` tagged templates (recursive CTEs are a single statement — neon-http compatible).
 
