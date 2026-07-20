@@ -594,6 +594,12 @@ export async function POST(request: NextRequest) {
     instructions: instructionBlocks,
     thinking: canUseThinking && thinking === true,
     ...(resolvedEffort ? { effort: resolvedEffort } : {}),
+    // AI Gateway request tagging (PF-969 / #8954) — dashboard-only cost
+    // attribution, no effect on routing/output; a no-op on the direct
+    // backend (createSpawnforgeAgent only emits `providerOptions.gateway`
+    // when `isDirectBackend` is false).
+    userId: auth.ctx.user.id,
+    tags: ['route:chat', `tier:${auth.ctx.user.tier}`],
   });
 
   // 8. Convert messages

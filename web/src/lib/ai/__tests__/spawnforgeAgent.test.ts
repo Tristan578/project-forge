@@ -209,3 +209,67 @@ describe('createSpawnforgeAgent — providerOptions', () => {
     ).toBe('high');
   });
 });
+
+describe('createSpawnforgeAgent — providerOptions.gateway (PF-969 / #8954)', () => {
+  const gatewayBase = { ...baseOptions, isDirectBackend: false };
+
+  beforeEach(() => {
+    mockToolLoopAgent.mockClear();
+  });
+
+  it('omits providerOptions on the gateway backend when neither userId nor tags is set', () => {
+    createSpawnforgeAgent(gatewayBase);
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
+    expect(args.providerOptions).toBeUndefined();
+  });
+
+  it('emits providerOptions.gateway.user on the gateway backend when userId is set', () => {
+    createSpawnforgeAgent({ ...gatewayBase, userId: 'user_123' });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
+    expect(args.providerOptions).toEqual({ gateway: { user: 'user_123' } });
+  });
+
+  it('emits providerOptions.gateway.tags on the gateway backend when tags is set', () => {
+    createSpawnforgeAgent({ ...gatewayBase, tags: ['route:chat', 'tier:pro'] });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
+    expect(args.providerOptions).toEqual({ gateway: { tags: ['route:chat', 'tier:pro'] } });
+  });
+
+  it('emits both userId and tags together on the gateway backend', () => {
+    createSpawnforgeAgent({ ...gatewayBase, userId: 'user_123', tags: ['route:chat'] });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
+    expect(args.providerOptions).toEqual({
+      gateway: { user: 'user_123', tags: ['route:chat'] },
+    });
+  });
+
+  it('ignores an empty tags array (does not emit an empty gateway.tags field)', () => {
+    createSpawnforgeAgent({ ...gatewayBase, tags: [] });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
+    expect(args.providerOptions).toBeUndefined();
+  });
+
+  it('never emits providerOptions.gateway on the direct backend, even with userId/tags set', () => {
+    createSpawnforgeAgent({
+      ...baseOptions,
+      isDirectBackend: true,
+      userId: 'user_123',
+      tags: ['route:chat'],
+    });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic?: unknown; gateway?: unknown } };
+    expect(args.providerOptions?.gateway).toBeUndefined();
+  });
+
+  it('combines anthropic thinking/effort (direct) is mutually exclusive with gateway tagging — direct backend still omits gateway even when both fields are populated', () => {
+    createSpawnforgeAgent({
+      ...baseOptions,
+      isDirectBackend: true,
+      thinking: true,
+      userId: 'user_123',
+    });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic?: unknown; gateway?: unknown } };
+    expect(args.providerOptions).toEqual({
+      anthropic: { thinking: { type: 'enabled', budgetTokens: 10000 } },
+    });
+  });
+});
