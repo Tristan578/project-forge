@@ -1,8 +1,22 @@
 import * as Sentry from '@sentry/nextjs';
+import { initBotId } from 'botid/client/core';
 import { configureSentryFingerprinting, scrubSentryEvent, scrubSentryLog } from '@/lib/monitoring/sentryConfig';
 
 const DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';
+
+// Vercel BotID (PF-975 / #8948) — attaches an invisible proof-of-work header to
+// matching fetch/XHR calls made from the browser. Dormant by design: without the
+// Vercel dashboard toggle for this project, the server-side checkBotId() call
+// (createGenerationHandler.ts, billing/checkout/route.ts) always resolves
+// isBot: false and every route behaves exactly as before. No env var needed —
+// registration is safe to run unconditionally in every environment.
+initBotId({
+  protect: [
+    { path: '/api/generate/*', method: 'POST' },
+    { path: '/api/billing/checkout', method: 'POST' },
+  ],
+});
 
 if (DSN) {
   Sentry.init({
