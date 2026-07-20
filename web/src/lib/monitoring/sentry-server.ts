@@ -58,3 +58,40 @@ export function startSpan<T>(
 
   return Sentry.startSpan(options, callback);
 }
+
+/**
+ * Structured Sentry log (server-side; PF-967 / #8956).
+ *
+ * Routes through Sentry's Logs pipeline (`Sentry.logger.*`), which is
+ * SEPARATE from event capture (`captureException`/`captureMessage` above) —
+ * it requires `enableLogs: true` in the Sentry init (already set in all
+ * three init files) and is scrubbed by its own `beforeSendLog` hook
+ * (`scrubSentryLog` in sentryConfig.ts), NOT `beforeSend`/`scrubSentryEvent`.
+ * No-ops when SENTRY_DSN is not configured, matching every other export here.
+ *
+ * For general JSON/console log aggregation (Axiom, Datadog, etc.) use
+ * `@/lib/logging/logger` instead — that module never reaches Sentry. Reach
+ * for `sentryLogger` (this export) when you want an entry searchable in
+ * Sentry's Logs UI alongside error/trace context; the two are complementary,
+ * not interchangeable — see `@/lib/logging/logger` module doc for that
+ * logger's own PII redaction layer. Named `sentryLogger` (not `logger`) so
+ * call sites can import both without an alias.
+ *
+ * Attributes are passed through Sentry's Logs pipeline scrubbing, but that
+ * is a defense-in-depth net, not a substitute for care at the call site —
+ * never pass prompt content, full request bodies, or unredacted secrets.
+ */
+export const sentryLogger = {
+  info(message: string, attributes?: Record<string, unknown>): void {
+    if (!DSN) return;
+    Sentry.logger.info(message, attributes);
+  },
+  warn(message: string, attributes?: Record<string, unknown>): void {
+    if (!DSN) return;
+    Sentry.logger.warn(message, attributes);
+  },
+  error(message: string, attributes?: Record<string, unknown>): void {
+    if (!DSN) return;
+    Sentry.logger.error(message, attributes);
+  },
+};

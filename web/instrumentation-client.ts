@@ -61,6 +61,10 @@ if (DSN) {
       // maskAllText: true prevents BYOK API keys and other sensitive input
       // values from being visible in Sentry session replays (#8001).
       Sentry.replayIntegration({ maskAllText: true, blockAllMedia: false }),
+      // User feedback widget (PF-967 / #8956) — floating "Report a Bug" button
+      // that lets users attach a screenshot + description to a Sentry report.
+      // colorScheme: 'system' follows the OS theme rather than forcing light/dark.
+      Sentry.feedbackIntegration({ colorScheme: 'system' }),
     ],
 
     // Replay sampling
