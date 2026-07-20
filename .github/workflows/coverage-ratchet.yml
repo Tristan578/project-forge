@@ -74,6 +74,40 @@ jobs:
       - name: Run ratchet script
         run: bash .claude/skills/testing/scripts/ratchet-coverage.sh web/coverage
 
+      # Keep the agentic-sync source of truth in lockstep: canonical.json feeds
+      # the coverage-threshold figures shown in AGENTS.md / .cursorrules /
+      # copilot-instructions, and the agentic-sync CI gate only diffs targets
+      # against canonical.json — so a ratchet that bumps vitest.config.ts alone
+      # leaves stale numbers advertised as authoritative (found by review on
+      # #8942). Threshold keys are extracted from the thresholds block only.
+      - name: Sync onboarding coverage facts
+        run: |
+          if git diff --quiet web/vitest.config.ts; then
+            echo "No threshold changes — nothing to sync."
+            exit 0
+          fi
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const cfg = readFileSync("web/vitest.config.ts", "utf8");
+            const block = cfg.match(/thresholds:\s*\{[^}]*\}/);
+            if (!block) throw new Error("thresholds block not found in web/vitest.config.ts");
+            const grab = (key) => {
+              const m = block[0].match(new RegExp(key + ":\\s*(\\d+)"));
+              if (!m) throw new Error("threshold key missing: " + key);
+              return Number(m[1]);
+            };
+            const path = "tools/agentic-sync/canonical.json";
+            const canonical = JSON.parse(readFileSync(path, "utf8"));
+            canonical.facts.coverageThresholds = {
+              statements: grab("statements"),
+              branches: grab("branches"),
+              functions: grab("functions"),
+              lines: grab("lines"),
+            };
+            writeFileSync(path, JSON.stringify(canonical, null, 2) + "\n");
+          '
+          node tools/agentic-sync/sync.mjs --write
+
       # Ship the bump as a PR. Notes on the moving parts:
       #   - The commit message must NOT contain [skip ci] — the ratchet PR needs
       #     a pull_request CI run or the required "CI Success" check never
@@ -102,7 +136,8 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           BRANCH="auto/coverage-ratchet"
           git checkout -B "$BRANCH"
-          git add web/vitest.config.ts
+          git add web/vitest.config.ts tools/agentic-sync/canonical.json \
+            AGENTS.md .github/copilot-instructions.md .codex/AGENTS.md .cursorrules
           git commit -m "chore: ratchet coverage thresholds (PF-947)"
           git push --force origin "$BRANCH"
           OPEN_PR="$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[].number')"

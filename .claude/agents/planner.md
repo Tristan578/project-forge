@@ -11,7 +11,7 @@ hooks:
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/spec-completeness-check.sh"
       timeout: 5000
   PreToolUse:
-    - matcher: Read|Grep|Glob|Bash
+    - matcher: Read|Grep|Glob|Bash|Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
       timeout: 5000
       once: true
