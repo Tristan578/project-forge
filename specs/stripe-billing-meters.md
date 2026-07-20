@@ -46,7 +46,7 @@ This is a web/billing feature; the engine "sandwich" and render-backend question
 ### Deduction (the metered path)
 
 - **`web/src/lib/tokens/service.ts` → `deductTokens(userId, operation, tokenCost, provider, metadata)`** — the real-time charge. A single WHERE-guarded `UPDATE … users` folded into one atomic CTE with the `INSERT … token_usage` (PF-839), so a user is never charged without a `token_usage` row. Returns `{ success, usageId, remaining }`. The `usageId` is the `token_usage.id` uuid PK and is the natural upstream idempotency key for metering.
-- **`web/src/lib/keys/resolver.ts` → `resolveApiKey(...)`** — decides BYOK vs platform. Only the platform branch calls `deductTokens` and returns `{ type: 'platform', metered: true, usageId }`. The BYOK branch returns `{ metered: false }` with no `usageId`. Metering must key off `metered === true`. The resolver has already read the full `users` row, so `stripeCustomerId` is available here.
+- **`web/src/lib/keys/resolver.ts` → `resolveApiKey(...)`** — decides BYOK vs platform. Only the platform branch calls `deductTokens` and returns `{ type: 'platform', metered: true, usageId }`. The BYOK branch returns `{ metered: false }` with no `usageId`. Metering must key off `metered === true`. The resolver has already read the full `users` row, so `stripeCustomerId` is in scope here — but the current `ResolvedKey` shape does **not** return it. **Required change:** the platform branch of `ResolvedKey` gains `stripeCustomerId: string | null`, plumbed through `createGenerationHandler` into `reportGenerationUsage`. Without this the `after()` hook has no customer id and every emission dead-ends in the anomaly branch (see slice 3).
 - **`web/src/lib/api/createGenerationHandler.ts`** — the single factory behind all generate routes (a documented single point of failure). It calls `resolveApiKey` → `execute(provider)` → refunds via `refundTokens` on failure, and already uses `after()` to run post-response work (the QStash durable callback, PF-906). This `after()` seam is where net-success metering hooks.
 
 ### Refund
@@ -136,6 +136,8 @@ export async function reportGenerationUsage(args: {
       { action: 'meter_event', usageId: args.usageId });
     return;
   }
+  // Claim-before-emit (section 4 rule 2): set meter_attempted_at first; skip if
+  // already claimed. On a caught failure below, best-effort clear the claim.
   try {
     await getStripe().billing.meterEvents.create({
       event_name: 'generation_tokens',
@@ -182,12 +184,15 @@ Only `ResolvedKey.metered === true` (platform key, paid tier, real deduction wit
 
 1. **`identifier = usageId`.** The `token_usage.id` uuid is globally unique and permanent, so within Stripe's 24h window it perfectly dedupes a same-request retry (e.g. two `after()` fires, a QStash redelivery). Uniqueness beyond 24h is our concern, handled by rule 2.
 
-2. **At-most-once emission at the source — no blind backfill.** Because Stripe only dedupes for 24h, re-emitting an old `usageId` after 24h would double-count. Emission therefore happens exactly once, inline at the finalization lifecycle point. We add a durable "already metered" marker so no path re-emits:
-   - Add **`token_usage.metered_at timestamptz null`** (new nullable column, additive migration). Set it in the same fire-and-forget path after a successful `meterEvents.create`. Any repair/backfill (rule 4) filters `WHERE metered_at IS NULL`, so a row is metered at most once regardless of how many times a repair runs.
+2. **At-most-once emission at the source — claim-before-emit, no blind backfill.** Because Stripe only dedupes for 24h, re-emitting an old `usageId` after 24h would double-count. A naive emit-then-mark ordering has a double-billing race: if `meterEvents.create` succeeds but the marker `UPDATE` fails, the row still looks unmetered, and a repair running after the 24h dedupe window would re-emit and double-charge. The protocol therefore claims first and never re-emits outside the dedupe window:
+   - Add **two nullable columns** (additive migration): `token_usage.meter_attempted_at timestamptz null` (the claim) and `token_usage.metered_at timestamptz null` (confirmed success).
+   - **Emit sequence:** (1) claim — `UPDATE token_usage SET meter_attempted_at = now() WHERE id = $usageId AND meter_attempted_at IS NULL`; zero rows updated means another path already attempted → skip (cross-process at-most-once). (2) `meterEvents.create` with `identifier = usageId`. (3) on success, set `metered_at`. (4) on a **caught emit failure**, best-effort clear `meter_attempted_at` so auto-repair can retry; if the clear also fails, the row stays claimed-but-unmetered (ambiguous).
+   - **Repair rules by state:** `meter_attempted_at IS NULL` → never attempted, safe to emit (rule 4). Claimed-but-unmetered with the claim **younger than 24h** → safe to re-emit (Stripe's `identifier` dedupe still covers a duplicate). Claimed-but-unmetered with the claim **older than 24h** → NEVER blindly re-emit; resolve by checking `listEventSummaries` for the customer/window, or record as manual drift. Double-billing is impossible by construction; the failure direction is always a detectable under-count.
+   - The daily reconciliation (section 6) runs well inside the 24h claim window, so the common transient failure (Stripe 5xx with a successful clear, or a crash between claim and emit) self-heals on the next run.
 
 3. **`timestamp = token_usage.createdAt`, clamped.** Use the deduction time as the event time so the meter reflects when usage occurred, not when we happened to report it. Clamp into the allowed window: never older than 34 days (one-day margin under the 35-day limit) and never more than 4 minutes in the future (margin under 5). A row older than 34 days cannot be reported at its true time — see rule 4.
 
-4. **Backfill / replay rules.** A reconciliation-driven repair (section 6) may emit only for rows with `metered_at IS NULL` and `createdAt` within the last 34 days, using `identifier = usageId` and `timestamp = createdAt`. Rows older than 34 days fall outside Stripe's timestamp rule and must be recorded as permanent drift (logged, surfaced in reconciliation), never force-emitted with a "now" timestamp (that would misattribute usage to the wrong billing period). This bounds the maximum recoverable drift window to 34 days — which is why reconciliation must run daily, well inside that window.
+4. **Backfill / replay rules.** A reconciliation-driven repair (section 6) may emit only for rows that pass the rule-2 state check (`meter_attempted_at IS NULL`, or claimed less than 24h ago) with `createdAt` within the last 34 days, using `identifier = usageId` and `timestamp = createdAt`, and it goes through the same claim-before-emit sequence. Rows older than 34 days fall outside Stripe's timestamp rule and must be recorded as permanent drift (logged, surfaced in reconciliation), never force-emitted with a "now" timestamp (that would misattribute usage to the wrong billing period). This bounds the maximum recoverable drift window to 34 days — which is why reconciliation must run daily, well inside that window.
 
 ---
 
@@ -215,7 +220,7 @@ A scheduled job (Vercel cron or QStash schedule) compares the ledger against Str
 - **Ledger net (source of truth):** `SUM(token_usage.tokens)` over the window for platform deductions minus refund rows (`operation IN ('refund','partial_refund')`, whose `tokens` are negative and already sum in). Grouped by `stripeCustomerId`.
 - **Stripe aggregate:** `stripe.billing.meters.listEventSummaries(meterId, { customer, start_time, end_time, value_grouping_window })` — verified in the installed SDK (`stripe.billing.meters.listEventSummaries`) and live docs. Returns `MeterEventSummary { aggregated_value, start_time, end_time, meter, … }`. Constraint: `start_time`/`end_time` must align to hour or day boundaries per `value_grouping_window` — align the reconciliation window to UTC day boundaries.
 - **Drift check:** if `abs(ledgerNet − aggregatedValue) > max(absoluteFloor, driftRatio × ledgerNet)`, `captureException` a Sentry alert tagged with `stripeCustomerId`, window, both totals, and the count of `metered_at IS NULL` rows in-window (the likely dropped events). Thresholds live in config, not hard-coded.
-- **Self-repair (bounded):** for in-window rows with `metered_at IS NULL` and `createdAt` within 34 days, re-emit per section 4 rule 4 and set `metered_at`. Rows beyond 34 days are logged as permanent drift.
+- **Self-repair (bounded):** for in-window rows with `metered_at IS NULL` and `createdAt` within 34 days, re-emit per section 4 rules 2 and 4 (claim-before-emit; claimed-but-unmetered rows older than 24h are resolved against `listEventSummaries` or surfaced as manual drift, never blindly re-emitted). Rows beyond 34 days are logged as permanent drift.
 
 Cadence: daily, over the trailing UTC day, so drift is always caught inside the 34-day backfill window.
 
@@ -266,7 +271,8 @@ Env flag **`BILLING_METERS_ENABLED`** (or equivalent) gates every emission; unse
 - **Given** a provider failure that triggers `refundTokens`, **When** the request returns, **Then** no positive meter event exists for that `usageId`.
 - **Given** a post-success refund (poller `handleCompletion` catch), **When** the refund lands, **Then** a compensating negative event `${usageId}:refund` nets the original to zero on a `sum` meter (pending the negative-value verification).
 - **Given** two rapid retries of the same emission within 24h, **When** both call `meterEvents.create` with the same `usageId` identifier, **Then** Stripe records the usage once.
-- **Given** `meterEvents.create` throws (Stripe 5xx/timeout), **When** the emit fails, **Then** the user's generation still succeeds, the error is captured to Sentry, and `metered_at` stays null so reconciliation can repair it.
+- **Given** `meterEvents.create` throws (Stripe 5xx/timeout), **When** the emit fails, **Then** the user's generation still succeeds, the error is captured to Sentry, the claim is cleared (best-effort), and `metered_at` stays null so reconciliation can repair it per the rule-2 state check.
+- **Given** a successful `meterEvents.create` whose follow-up `metered_at` write fails, **When** reconciliation later evaluates the row (claim set, `metered_at` null, claim older than 24h), **Then** it is never blindly re-emitted — it is resolved against `listEventSummaries` or surfaced as manual drift, so the customer cannot be double-billed.
 - **Given** a day's ledger net and Stripe `listEventSummaries` for a customer, **When** the reconciliation job runs, **Then** matching totals pass silently and a drift beyond threshold fires a Sentry alert naming the customer and both totals.
 - **Given** `BILLING_METERS_ENABLED` is unset, **When** any generation runs, **Then** no Stripe meter call is made and behavior is byte-identical to today.
 - **Given** a `token_usage` row older than 34 days with `metered_at IS NULL`, **When** reconciliation repair runs, **Then** it is not re-emitted (timestamp window) and is logged as permanent drift.
@@ -287,8 +293,8 @@ Env flag **`BILLING_METERS_ENABLED`** (or equivalent) gates every emission; unse
 ## Follow-up Ticket Slices (titles + one-liners — not created as part of PF-966)
 
 1. **Provision `generation_tokens` meter (test + live) + env flag** — one-time `meters.create` script/runbook; add `BILLING_METERS_ENABLED` gate; dormant by default.
-2. **`meterEvents.ts` reporter + `metered_at` migration** — fire-and-forget `reportGenerationUsage`, additive nullable `token_usage.metered_at` column, unit tests for the skip/emit matrix (BYOK, free, no-customer, disabled).
-3. **Wire net-success metering into sync generate routes** — emit via `after()` in `createGenerationHandler` on `execute` success; integration tests through the factory.
+2. **`meterEvents.ts` reporter + metering-marker migration** — fire-and-forget `reportGenerationUsage` implementing the claim-before-emit protocol (section 4 rule 2), additive nullable `token_usage.meter_attempted_at` + `metered_at` columns, unit tests for the skip/emit matrix (BYOK, free, no-customer, disabled) and the claim-state transitions.
+3. **Wire net-success metering into sync generate routes** — extend `ResolvedKey` (platform branch) with `stripeCustomerId`; emit via `after()` in `createGenerationHandler` on `execute` success; integration tests through the factory.
 4. **Wire metering into async finalization (QStash callback + status routes)** — emit net-kept tokens at true job success; cover partial-refund netting.
 5. **Late-refund compensating events + negative-value spike** — `${usageId}:refund` negative events on post-success refund; test-mode verification that a `sum` meter nets negatives (gate for Phase 2).
 6. **Daily reconciliation job + Sentry drift alert** — cron/QStash schedule comparing ledger net vs `listEventSummaries`; bounded self-repair of `metered_at IS NULL` rows within 34 days.

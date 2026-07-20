@@ -165,23 +165,40 @@ const { embeddings, usage } = await embedMany({
 **Generation dedupe** (pattern 1) — pure ANN over the user's completed generations of a type, graph-aware re-rank:
 
 ```sql
--- $u = current user, $p = current project, $type = generation type, $q = query embedding, $tau = threshold
-SELECT g.ref_id AS job_id,
+-- $u = current user, $p = current project, $q = query embedding, $tau = threshold
+-- still_referenced is CORRELATED to the candidate generation n: it walks the
+-- spawned_from_prompt edge (produced entity/asset -> generation, dst = n.id) to THIS
+-- generation's produced node, then checks that specific node is still live in the
+-- current project — either a produced entity that is itself in $p, or a produced
+-- asset referenced by an entity in $p. An uncorrelated EXISTS would be a per-project
+-- constant and defeat the re-rank.
+SELECT n.ref_id AS job_id,
        n.embedding <=> $q AS distance,
        EXISTS (
-         SELECT 1 FROM graph_edges e
-         JOIN graph_nodes a ON a.id = e.dst_node_id
-         WHERE e.user_id = $u AND e.type = 'references'
-           AND e.src_node_id IN (SELECT id FROM graph_nodes WHERE user_id=$u AND project_id=$p AND kind='entity')
-           AND a.kind = 'asset'
+         SELECT 1
+         FROM graph_edges sp
+         JOIN graph_nodes produced ON produced.id = sp.src_node_id
+         WHERE sp.user_id = $u AND sp.type = 'spawned_from_prompt'
+           AND sp.dst_node_id = n.id
+           AND (
+             (produced.kind = 'entity' AND produced.project_id = $p)
+             OR EXISTS (
+               SELECT 1 FROM graph_edges r
+               JOIN graph_nodes ent ON ent.id = r.src_node_id
+               WHERE r.user_id = $u AND r.type = 'references'
+                 AND r.dst_node_id = produced.id
+                 AND ent.project_id = $p AND ent.kind = 'entity'
+             )
+           )
        ) AS still_referenced
 FROM graph_nodes n
-JOIN graph_nodes g ON g.id = n.id AND g.kind = 'generation'
 WHERE n.user_id = $u AND n.kind = 'generation'
   AND n.embedding IS NOT NULL
   AND (n.embedding <=> $q) < (1 - $tau)
 ORDER BY still_referenced DESC, distance ASC
 LIMIT 5;
+-- (Same-type + completed-job filtering from the pattern-1 prose applies via the
+-- generation node's stored attributes at implementation; elided in this sketch.)
 ```
 
 **Chat context grounding** (pattern 2) — recursive CTE neighborhood of the selected entity, then vector-rank the frontier:
