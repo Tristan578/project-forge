@@ -35,6 +35,7 @@ import {
 } from '@/lib/config/timeouts';
 import { isQstashConfigured, publishGenerationCallback } from '@/lib/qstash/client';
 import type { AsyncGenerationType } from '@/lib/generate/pollProviderStatus';
+import { isProviderKilled } from '@/lib/flags/posthogFlags';
 
 /** Default initial delay before the first durable generation callback (PF-906). */
 const DEFAULT_CALLBACK_DELAY_SECONDS = 30;
@@ -48,6 +49,15 @@ const DEFAULT_CALLBACK_DELAY_SECONDS = 30;
  * exempt: they are deliberately user-facing guidance returned as 402, not 500.
  */
 const GENERIC_500_MESSAGE = 'Generation failed due to a server error. Please try again later.';
+
+/**
+ * Client-facing message when a provider is disabled via the PF-971 kill
+ * switch (`provider-kill-switch-<provider>` PostHog flag). Generic on
+ * purpose — same reasoning as GENERIC_500_MESSAGE, no internal flag/provider
+ * plumbing leaked beyond the provider name already visible to the caller.
+ */
+const PROVIDER_UNAVAILABLE_MESSAGE = (provider: string) =>
+  `Generation via ${provider} is temporarily unavailable. Please try again shortly.`;
 
 /** Validation result: either the parsed params or an error response. */
 type ValidateResult<T> =
@@ -188,10 +198,12 @@ export interface GenerationHandlerConfig<TParams, TResult> {
  *   2. Distributed rate limiting
  *   3. Parse + validate request body
  *   4. Content safety filter on prompt
- *   5. Resolve API key + deduct tokens
- *   6. Execute provider call
- *   7. Refund tokens on provider failure
- *   8. Capture exceptions to Sentry
+ *   5. Resolve provider/operation/token cost, check the PF-971 provider
+ *      kill switch, then check the response cache
+ *   6. Resolve API key + deduct tokens
+ *   7. Execute provider call
+ *   8. Refund tokens on provider failure
+ *   9. Capture exceptions to Sentry
  */
 export function createGenerationHandler<TParams, TResult>(
   config: GenerationHandlerConfig<TParams, TResult>
@@ -373,7 +385,19 @@ export function createGenerationHandler<TParams, TResult>(
       return NextResponse.json({ error: 'Internal pricing error' }, { status: 500 });
     }
 
-    // 6b. Check response cache (before token deduction — cache hits are free)
+    // 6b. Provider kill switch (PF-971 / #8952). Checked immediately after the
+    // provider resolves and BEFORE any cache lookup or token deduction, so a
+    // killed provider costs the caller nothing on either path. Fails open:
+    // dormant unless PostHog flag evaluation is configured, and any
+    // evaluation failure resolves to "not killed" (see posthogFlags.ts).
+    if (isProviderKilled(resolvedProvider)) {
+      return NextResponse.json(
+        { error: PROVIDER_UNAVAILABLE_MESSAGE(resolvedProvider) },
+        { status: 503 }
+      );
+    }
+
+    // 6c. Check response cache (before token deduction — cache hits are free)
     if (cacheKeyParams) {
       const cacheParams = cacheKeyParams(params);
       // Captured on a cache MISS so the durable callback can be published after
@@ -435,7 +459,7 @@ export function createGenerationHandler<TParams, TResult>(
       }
     }
 
-    // 7. No caching — original path: resolve key, deduct, execute
+    // 6d. No caching — original path: resolve key, deduct, execute
     let apiKey: string;
     let usageId: string | undefined;
 

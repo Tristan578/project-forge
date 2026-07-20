@@ -72,6 +72,12 @@ vi.mock('@/lib/qstash/client', () => ({
   isQstashConfigured: vi.fn(() => false),
   publishGenerationCallback: vi.fn(async () => {}),
 }));
+// Provider kill switch (PF-971 / #8952): dormant by default (not killed) so
+// existing tests are unaffected. Tests exercising the switch itself set
+// mockProviderKilled.mockReturnValue(true).
+vi.mock('@/lib/flags/posthogFlags', () => ({
+  isProviderKilled: vi.fn(() => false),
+}));
 
 // Client-facing message for every 500 (#8597). Raw err.message can leak server
 // internals (env var names, DB DSNs, provider request IDs), so the client gets
@@ -87,6 +93,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { checkBotIdGate } from '@/lib/security/botId';
 import { cachedGenerate } from '@/lib/api/responseCache';
 import { isQstashConfigured } from '@/lib/qstash/client';
+import { isProviderKilled } from '@/lib/flags/posthogFlags';
 import { createGenerationHandler } from '../createGenerationHandler';
 
 const mockAuth = vi.mocked(authenticateRequest);
@@ -99,6 +106,7 @@ const mockCapture = vi.mocked(captureException);
 const mockCachedGenerate = vi.mocked(cachedGenerate);
 const mockConfigured = vi.mocked(isQstashConfigured);
 const mockBotIdGate = vi.mocked(checkBotIdGate);
+const mockProviderKilled = vi.mocked(isProviderKilled);
 
 function makeRequest(body: Record<string, unknown>): NextRequest {
   return new NextRequest('http://localhost:3000/api/generate/test', {
@@ -145,6 +153,9 @@ describe('createGenerationHandler', () => {
     // BotID gate pass-through by default (PF-975 / #8948) — all existing tests
     // exercise a human request.
     mockBotIdGate.mockResolvedValue(null);
+    // Provider kill switch dormant by default (PF-971 / #8952) — all existing
+    // tests exercise a live provider.
+    mockProviderKilled.mockReturnValue(false);
   });
 
   it('returns 401 when unauthenticated', async () => {
@@ -163,6 +174,36 @@ describe('createGenerationHandler', () => {
     expect(res.status).toBe(403);
     expect(mockAggRateLimit).not.toHaveBeenCalled();
     expect(mockRateLimit).not.toHaveBeenCalled();
+    expect(mockResolve).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 and skips token deduction when the provider kill switch is on (PF-971 / #8952)', async () => {
+    mockProviderKilled.mockReturnValue(true);
+    const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.error).toContain('elevenlabs');
+    expect(data.error).toContain('temporarily unavailable');
+    expect(mockProviderKilled).toHaveBeenCalledWith('elevenlabs');
+    expect(mockResolve).not.toHaveBeenCalled();
+    expect(mockCachedGenerate).not.toHaveBeenCalled();
+  });
+
+  it('applies the provider kill switch on the cached path too, before any cache lookup (PF-971 / #8952)', async () => {
+    mockProviderKilled.mockReturnValue(true);
+    const cachedHandler = createGenerationHandler({
+      route: '/api/generate/test',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-test',
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      cacheKeyParams: (p) => ({ prompt: (p as { prompt: string }).prompt }),
+      execute: async (params) => ({ result: `Generated from: ${params.prompt}`, provider: 'elevenlabs' as const }),
+    });
+
+    const res = await cachedHandler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(503);
+    expect(mockCachedGenerate).not.toHaveBeenCalled();
     expect(mockResolve).not.toHaveBeenCalled();
   });
 

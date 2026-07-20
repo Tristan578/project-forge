@@ -50,6 +50,13 @@ import { captureException } from '@/lib/monitoring/sentry-server';
  * poll (`primeFlagsCache`) with a tight fetch timeout; a poll failure keeps
  * the last-known-good cache rather than clearing it, and a malformed response
  * fails open (defaults, not a throw).
+ *
+ * `isProviderKilled()` layers a second consumer on the same evaluator: a
+ * per-provider kill switch (`provider-kill-switch-<provider>`, PF-971 /
+ * #8952) that `createGenerationHandler` checks before any cache lookup or
+ * token deduction. Same fail-open contract — dormant unless flag evaluation
+ * is configured, defaults to `false` (not killed) on any unsupported/missing
+ * flag.
  */
 
 const LOCAL_EVALUATION_URL = 'https://us.i.posthog.com/api/feature_flag/local_evaluation';
@@ -220,4 +227,18 @@ export function getBooleanFlag(key: string, fallback: boolean, context?: FlagCon
     return fallback;
   }
   return result;
+}
+
+/** Flag-key prefix for per-provider kill switches. */
+const PROVIDER_KILL_SWITCH_PREFIX = 'provider-kill-switch-';
+
+/**
+ * True when a PostHog flag (`provider-kill-switch-<provider>`) explicitly
+ * disables generation for the given provider. Defaults to `false` (not
+ * killed) whenever flag evaluation is dormant, the flag is unset, or its
+ * targeting falls outside the supported safe subset — a provider is never
+ * killed by omission or by evaluator failure.
+ */
+export function isProviderKilled(provider: string): boolean {
+  return getBooleanFlag(`${PROVIDER_KILL_SWITCH_PREFIX}${provider}`, false);
 }
