@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { makeUser } from '@/test/utils/apiTestUtils';
 import { getDb } from '@/lib/db/client';
+import { checkBotIdGate } from '@/lib/security/botId';
 
 vi.hoisted(() => {
   process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
@@ -21,6 +22,9 @@ vi.mock('@/lib/logging/logger', () => ({
 }));
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
+}));
+vi.mock('@/lib/security/botId', () => ({
+  checkBotIdGate: vi.fn().mockResolvedValue(null),
 }));
 
 // Mock Stripe — capture constructor args to verify apiVersion
@@ -90,6 +94,20 @@ describe('POST /api/billing/checkout', () => {
       where: vi.fn().mockResolvedValue(true),
     };
     vi.mocked(getDb).mockReturnValue(mockDb as unknown as ReturnType<typeof getDb>);
+    vi.mocked(checkBotIdGate).mockResolvedValue(null);
+  });
+
+  // PF-975 / #8948: BotID gate runs before withApiMiddleware (auth/rate-limit),
+  // so a blocked bot never consumes either budget.
+  it('returns the BotID gate response and skips middleware when blocked (PF-975 / #8948)', async () => {
+    const blocked = new Response(JSON.stringify({ error: 'Request blocked' }), { status: 403 });
+    vi.mocked(checkBotIdGate).mockResolvedValue(blocked as never);
+
+    const { POST } = await import('./route');
+    const res = await POST(makeReq({ tier: 'creator' }));
+
+    expect(res.status).toBe(403);
+    expect(withApiMiddleware).not.toHaveBeenCalled();
   });
 
   it('returns 401 if unauthenticated', async () => {
