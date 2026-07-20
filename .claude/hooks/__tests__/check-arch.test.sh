@@ -15,6 +15,7 @@ require() {
 }
 require git
 require grep
+require python3
 
 assert_exit() {
   local desc="$1" expected="$2" actual="$3"
@@ -74,7 +75,54 @@ echo 'use js_sys::Array;' > "$JSSYS_REPO/engine/src/core/bad.rs"
 (cd "$JSSYS_REPO" && bash "$HOOK" >/dev/null 2>&1)
 assert_exit "js_sys outside bridge is a violation" 2 $?
 
-rm -rf "$VIOLATION_REPO" "$CLEAN_REPO" "$EMPTY_REPO" "$NON_REPO"
+# 8. Looks-like-but-isn't: serde_wasm_bindgen is the RECOMMENDED crate for
+#    core/ serialization — a bare 'wasm_bindgen' substring match wrongly
+#    flags it. Must be allowed.
+SERDE_REPO="$(make_fixture_repo)"
+mkdir -p "$SERDE_REPO/engine/src/core"
+printf 'use serde_wasm_bindgen::to_value;\nfn f() { let _ = serde_wasm_bindgen::from_value::<u8>(v); }\n' \
+  > "$SERDE_REPO/engine/src/core/ok.rs"
+(cd "$SERDE_REPO" && bash "$HOOK" >/dev/null 2>&1)
+assert_exit "serde_wasm_bindgen in core/ is allowed" 0 $?
+
+# 9. Comment lines mentioning interop crates are not imports. Must be allowed.
+COMMENT_REPO="$(make_fixture_repo)"
+mkdir -p "$COMMENT_REPO/engine/src/core"
+printf '// Only bridge/ may import web_sys or wasm_bindgen.\n/* js_sys too */\n' \
+  > "$COMMENT_REPO/engine/src/core/ok.rs"
+(cd "$COMMENT_REPO" && bash "$HOOK" >/dev/null 2>&1)
+assert_exit "comment mentions of interop crates are allowed" 0 $?
+
+# 10. platform/ is excluded by the canonical validator; the hook must agree.
+PLATFORM_REPO="$(make_fixture_repo)"
+mkdir -p "$PLATFORM_REPO/engine/src/platform"
+echo 'use web_sys::window;' > "$PLATFORM_REPO/engine/src/platform/shim.rs"
+(cd "$PLATFORM_REPO" && bash "$HOOK" >/dev/null 2>&1)
+assert_exit "web_sys inside platform/ is allowed" 0 $?
+
+# 11. The #[wasm_bindgen] attribute form is a violation, not just 'use' lines.
+ATTR_REPO="$(make_fixture_repo)"
+mkdir -p "$ATTR_REPO/engine/src/core"
+printf '#[wasm_bindgen]\npub fn exported() {}\n' > "$ATTR_REPO/engine/src/core/bad.rs"
+(cd "$ATTR_REPO" && bash "$HOOK" >/dev/null 2>&1)
+assert_exit "#[wasm_bindgen] attribute outside bridge is a violation" 2 $?
+
+# 12. Inline path usage (web_sys::window()) without a 'use' is a violation.
+PATHUSE_REPO="$(make_fixture_repo)"
+mkdir -p "$PATHUSE_REPO/engine/src/core"
+echo 'fn f() { let _ = web_sys::window(); }' > "$PATHUSE_REPO/engine/src/core/bad.rs"
+(cd "$PATHUSE_REPO" && bash "$HOOK" >/dev/null 2>&1)
+assert_exit "inline web_sys:: path usage outside bridge is a violation" 2 $?
+
+# 13. Fail-closed: if the canonical validator cannot be found, the hook must
+#    exit 2, never pass vacuously. CHECK_ARCH_PY is a test-only override.
+MISSING_REPO="$(make_fixture_repo)"
+mkdir -p "$MISSING_REPO/engine/src/core"
+(cd "$MISSING_REPO" && CHECK_ARCH_PY="$MISSING_REPO/nope.py" bash "$HOOK" >/dev/null 2>&1)
+assert_exit "missing canonical validator fails closed" 2 $?
+
+rm -rf "$VIOLATION_REPO" "$CLEAN_REPO" "$EMPTY_REPO" "$NON_REPO" \
+  "$SERDE_REPO" "$COMMENT_REPO" "$PLATFORM_REPO" "$ATTR_REPO" "$PATHUSE_REPO" "$MISSING_REPO"
 
 if [ "$FAILURES" -gt 0 ]; then
   echo "$FAILURES test(s) failed"

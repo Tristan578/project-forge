@@ -169,6 +169,16 @@ def main():
     strict = "--strict" in sys.argv
     output_json = "--json" in sys.argv
 
+    # Scoped mode for the PostToolUse hook (.claude/hooks/check-arch.sh):
+    # run ONLY the bridge-isolation rule so this file stays the single source
+    # of truth for what counts as JS interop, without walking web/src on
+    # every edit. Exit 1 on violations, 0 when clean.
+    if "--js-interop-only" in sys.argv:
+        violations = check_no_js_interop_in_core()
+        for v in violations:
+            print(v)
+        sys.exit(1 if violations else 0)
+
     rules = [
         ("No JS interop in core/", check_no_js_interop_in_core),
         ("Rust file size limit (800 lines)", check_rust_file_sizes),
