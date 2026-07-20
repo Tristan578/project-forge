@@ -14,8 +14,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
  *   5. A malformed JSON response fails open (defaults, never throws).
  */
 
-vi.mock('server-only', () => ({}));
-
 const captureException = vi.fn();
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: (...args: unknown[]) => captureException(...args),

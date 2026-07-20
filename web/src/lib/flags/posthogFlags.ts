@@ -1,8 +1,20 @@
-import 'server-only';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
  * Server-side PostHog feature flags — a SAFE SUBSET local evaluator (PF-971 / #8952).
+ *
+ * Deliberately does NOT `import 'server-only'`. `getBooleanFlag` is called from
+ * `@/lib/ai/deepTier`, which is itself imported into client-bundled code (the
+ * in-editor AI orchestrator chat flow: `OrchestratorPanel.tsx` -> `chat/executor.ts`
+ * -> `worldHandlers.ts` -> `worldBuilder.ts` -> `deepTier.ts`). The `server-only`
+ * sentinel throws at *bundle* time for any module reachable from a Client
+ * Component, which would break that real build target, not just tests. Safety
+ * instead comes from `isFlagEvaluationEnabled()`: `POSTHOG_PERSONAL_API_KEY` is
+ * NOT a `NEXT_PUBLIC_` var, so Next.js statically replaces it with `undefined`
+ * in the client bundle — the check returns false, `getBooleanFlag` returns the
+ * caller's fallback synchronously, and `primeFlagsCache()`'s `fetch` never runs
+ * in the browser. Same reasoning applies to `sentry-server.ts` above, which is
+ * also deliberately `server-only`-free for this reason.
  *
  * We deliberately do NOT install `posthog-node` or reimplement PostHog's full
  * local-evaluation matrix (percentage-rollout hashing, multi-operator property

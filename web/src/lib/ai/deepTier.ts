@@ -6,22 +6,37 @@
  * deep-generation surfaces (GDD, world builder, cutscenes) route to
  * AI_MODEL_DEEP. Otherwise they fall back to AI_MODEL_PRIMARY.
  *
+ * A PostHog flag (`deep-generation-tier`, PF-971 / #8952) can override this
+ * decision when the flags evaluator has a confident cached read — see
+ * `@/lib/flags/posthogFlags`. That evaluator is dormant unless
+ * `POSTHOG_PERSONAL_API_KEY` + `NEXT_PUBLIC_POSTHOG_KEY` are both set, in
+ * which case `getBooleanFlag()` returns the `fallback` argument unchanged
+ * (zero behavior change from the env-only gate below).
+ *
  * Every call emits `ai_deep_generation_eval` to PostHog so we can A/B the
  * tier against retention and publish-rate in a shared dashboard.
  */
 
 import { AI_MODEL_DEEP, AI_MODEL_PRIMARY } from './models';
 import { trackEvent } from '@/lib/analytics/posthog';
+import { getBooleanFlag } from '@/lib/flags/posthogFlags';
 import type { DeepGenSurface } from './surfaces';
 
 export type { DeepGenSurface } from './surfaces';
 
+/** PostHog flag key that can override the env-based deep-tier gate. */
+const DEEP_TIER_FLAG_KEY = 'deep-generation-tier';
+
 /**
- * True when the deep-generation tier is enabled via
- * `NEXT_PUBLIC_USE_DEEP_GENERATION`. Defaults to off.
+ * True when the deep-generation tier is enabled — either via
+ * `NEXT_PUBLIC_USE_DEEP_GENERATION` (the default, always-on gate) or a
+ * PostHog override when local flag evaluation is active and has a
+ * supported decision for `deep-generation-tier`. Synchronous: reads only
+ * the in-memory flags cache, never blocks on network I/O.
  */
 export function isDeepTierEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_USE_DEEP_GENERATION === 'true';
+  const envEnabled = process.env.NEXT_PUBLIC_USE_DEEP_GENERATION === 'true';
+  return getBooleanFlag(DEEP_TIER_FLAG_KEY, envEnabled);
 }
 
 /**
