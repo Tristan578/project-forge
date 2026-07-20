@@ -21,7 +21,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import type { Provider } from '@/lib/db/schema';
 import { getTokenCost } from '@/lib/tokens/pricing';
-import { captureException } from '@/lib/monitoring/sentry-server';
+import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
 import { checkBotIdGate } from '@/lib/security/botId';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
@@ -391,6 +391,11 @@ export function createGenerationHandler<TParams, TResult>(
     // dormant unless PostHog flag evaluation is configured, and any
     // evaluation failure resolves to "not killed" (see posthogFlags.ts).
     if (isProviderKilled(resolvedProvider)) {
+      // Lifecycle signal, not per-request noise: a killed provider is a rare,
+      // operator-driven state change worth a searchable Sentry Logs entry
+      // (PF-967 / #8956), distinct from the exception-tracking captureException
+      // calls elsewhere in this file.
+      sentryLogger.warn('provider kill switch tripped', { route, provider: resolvedProvider });
       return NextResponse.json(
         { error: PROVIDER_UNAVAILABLE_MESSAGE(resolvedProvider) },
         { status: 503 }
@@ -425,6 +430,7 @@ export function createGenerationHandler<TParams, TResult>(
               if (usageId) {
                 try {
                   await refundTokens(userId, usageId);
+                  sentryLogger.info('token refund issued', { route, usageId });
                 } catch (refundErr) {
                   captureException(refundErr, { route, action: 'refund', usageId });
                 }
@@ -493,6 +499,7 @@ export function createGenerationHandler<TParams, TResult>(
       if (usageId) {
         try {
           await refundTokens(userId, usageId);
+          sentryLogger.info('token refund issued', { route, usageId });
         } catch (refundErr) {
           captureException(refundErr, { route, action: 'refund', usageId });
         }

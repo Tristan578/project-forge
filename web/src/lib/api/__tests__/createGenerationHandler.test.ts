@@ -32,6 +32,7 @@ vi.mock('@/lib/tokens/pricing', () => ({
 }));
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
+  sentryLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 vi.mock('@/lib/security/botId', () => ({
   checkBotIdGate: vi.fn().mockResolvedValue(null),
@@ -89,7 +90,7 @@ import { resolveApiKey } from '@/lib/keys/resolver';
 import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
-import { captureException } from '@/lib/monitoring/sentry-server';
+import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
 import { checkBotIdGate } from '@/lib/security/botId';
 import { cachedGenerate } from '@/lib/api/responseCache';
 import { isQstashConfigured } from '@/lib/qstash/client';
@@ -103,6 +104,7 @@ const mockAggRateLimit = vi.mocked(aggregateGenerationRateLimit);
 const mockSanitize = vi.mocked(sanitizePrompt);
 const mockRefund = vi.mocked(refundTokens);
 const mockCapture = vi.mocked(captureException);
+const mockSentryLogger = vi.mocked(sentryLogger);
 const mockCachedGenerate = vi.mocked(cachedGenerate);
 const mockConfigured = vi.mocked(isQstashConfigured);
 const mockBotIdGate = vi.mocked(checkBotIdGate);
@@ -187,6 +189,12 @@ describe('createGenerationHandler', () => {
     expect(mockProviderKilled).toHaveBeenCalledWith('elevenlabs');
     expect(mockResolve).not.toHaveBeenCalled();
     expect(mockCachedGenerate).not.toHaveBeenCalled();
+    // Kill-switch trips are a rare, operator-driven state change worth a
+    // searchable Sentry Logs entry, distinct from exception capture (PF-967 / #8956).
+    expect(mockSentryLogger.warn).toHaveBeenCalledWith(
+      'provider kill switch tripped',
+      { route: '/api/generate/test', provider: 'elevenlabs' },
+    );
   });
 
   it('applies the provider kill switch on the cached path too, before any cache lookup (PF-971 / #8952)', async () => {
@@ -306,6 +314,12 @@ describe('createGenerationHandler', () => {
     expect(data.error).toBe(GENERIC_500);
     expect((mockCapture.mock.calls.at(-1)?.[0] as Error).message).toBe(
       'ElevenLabs internal: request 0xDEADBEEF failed',
+    );
+    // A successful refund is a lifecycle event worth its own Sentry Logs entry,
+    // separate from the exception capture above (PF-967 / #8956).
+    expect(mockSentryLogger.info).toHaveBeenCalledWith(
+      'token refund issued',
+      { route: '/api/generate/test', usageId: 'usage-1' },
     );
   });
 
@@ -602,6 +616,12 @@ describe('createGenerationHandler', () => {
     expect(mockRefund).toHaveBeenCalledWith('user-1', 'usage-1');
     const data = await res.json();
     expect(data.error).toBe(GENERIC_500);
+    // The cached-path catch site refunds via the same code path and must emit
+    // the same lifecycle log as the non-cached path (PF-967 / #8956).
+    expect(mockSentryLogger.info).toHaveBeenCalledWith(
+      'token refund issued',
+      { route: '/api/generate/test', usageId: 'usage-1' },
+    );
   });
 
   it('skips resolveApiKey, deductTokens and QStash publish on a cache HIT; sets X-Cache: HIT header (#8826 pin)', async () => {
@@ -642,6 +662,12 @@ describe('createGenerationHandler', () => {
     expect(mockCapture).toHaveBeenCalledWith(
       expect.any(Error),
       expect.objectContaining({ action: 'refund', usageId: 'usage-1' }),
+    );
+    // The success-path log must not fire when refundTokens itself throws
+    // (PF-967 / #8956) — only the captureException above should fire.
+    expect(mockSentryLogger.info).not.toHaveBeenCalledWith(
+      'token refund issued',
+      expect.anything(),
     );
   });
 
