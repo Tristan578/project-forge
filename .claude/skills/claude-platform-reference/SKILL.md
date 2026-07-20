@@ -5,7 +5,7 @@ description: "Use when you need details about SpawnForge's Claude Code platform 
 
 # Claude Code Platform Reference
 
-## Skills (53 total)
+## Skills (`ls .claude/skills/` for the live count)
 
 **Orchestration:** `/planner`, `/builder`, `/cycle`
 **Engine:** `/rust-engine`, `/build`, `/arch-validator`, `/rust-best-practices`
