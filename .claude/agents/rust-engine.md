@@ -16,6 +16,9 @@ hooks:
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/cargo-check-wasm.sh"
       timeout: 30000
+    - matcher: Edit|Write
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/check-arch.sh"
+      timeout: 10000
 ---
 
 # Identity: The Engine Specialist

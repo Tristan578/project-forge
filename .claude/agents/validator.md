@@ -12,6 +12,9 @@ hooks:
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
       timeout: 5000
+    - matcher: Bash
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/block-writes.sh"
+      timeout: 3000
 ---
 # Identity: The QA Lead
 

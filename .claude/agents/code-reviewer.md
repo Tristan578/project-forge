@@ -55,10 +55,16 @@ is outdated — APIs change without warning.
 9. **Performance** — no O(n^2) in entity counts, no unbounded `.spread()` on large arrays, debounced inputs.
 10. **Test coverage** — every new function/handler needs a test file.
 
+## Taskboard Permissions
+
+You MUST NOT move tickets or edit ticket metadata (priority, labels, team). You MAY create tickets for findings and add subtasks. Report your verdict to the orchestrator — it owns all ticket lifecycle transitions.
+
 ## Verdict Format
 
+Reviews are PASS or FAIL only. Any finding at any severity is a FAIL — there is no "pass with warnings."
+
 ```
-VERDICT: PASS / FAIL / PASS WITH WARNINGS
+VERDICT: PASS / FAIL
 
 Files Reviewed: N
 Findings: N (X BLOCK, Y WARN, Z INFO)

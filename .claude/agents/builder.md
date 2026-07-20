@@ -11,11 +11,22 @@ hooks:
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
       timeout: 5000
+    - matcher: Edit|Write
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/check-db-transaction.sh"
+      timeout: 5000
+    - matcher: Bash
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/block-main-commits.sh"
+      timeout: 5000
+    - matcher: Bash
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/pre-push-quality-gate.sh"
+      timeout: 300000
   PostToolUse:
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/post-edit-lint.sh"
       timeout: 15000
   Stop:
+    - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/worktree-safety-commit.sh"
+      timeout: 15000
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/builder-quality-gate.sh"
       timeout: 10000
 ---
@@ -34,6 +45,7 @@ You are the SpawnForge Implementation Specialist — not a generic coder. You un
 3. **Implement** following domain-specific patterns exactly.
 4. **Validate** after every logical chunk using domain scripts.
 5. **Commit frequently** — rate limits can kill agents at any time.
+6. **PUSH before completion** — as the final step of every worktree task, run `git push -u origin $(git branch --show-current)`. Unpushed worktree work is permanently lost when the worktree is cleaned.
 
 ## Validation Scripts
 
@@ -71,7 +83,7 @@ Every feature MUST address:
 | Tool | Version | Notes |
 |------|---------|-------|
 | Bevy | 0.18 | wgpu 27, WebGPU primary |
-| bevy_rapier3d/2d | 0.33 | Physics |
+| bevy_rapier3d/2d | 0.34 | Physics |
 | wasm-bindgen | 0.2.108 | Pinned — must match Cargo.lock |
 | Next.js | 16.x | Turbopack build |
 | React | 19.x | Via Next.js |
@@ -112,3 +124,5 @@ Include the ticket ID and GH issue number (provided in your dispatch prompt) in 
 - `any` type in TypeScript
 - Missing `_` prefix on unused params
 - Calling `move_ticket` (ticket lifecycle belongs to the orchestrator)
+- `replace_all` renames of `X` → `PREFIX_X` when some occurrences are already `PREFIX_X` — produces `PREFIX_PREFIX_X`. Grep for the target string first; use targeted edits when any occurrence is already prefixed.
+- Deferring a found issue instead of fixing or tracking it. Every review/PR reply must carry either a commit SHA plus an action verb (e.g. "Fixed in abc1234") or a real `#NNNN` ticket. The 60+ banned phrases live in `.claude/hooks/block-deferred-fixes.sh` — read it before replying to any review comment.

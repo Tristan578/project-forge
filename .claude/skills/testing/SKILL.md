@@ -1,6 +1,6 @@
 ---
 name: testing
-description: Write Vitest + RTL + Playwright tests for SpawnForge. Use when adding test coverage, fixing flaky tests, hitting coverage gaps, or running test suites (lint/tsc/vitest/e2e/mcp). Includes Vitest 3.x API reference.
+description: Write Vitest + RTL + Playwright tests for SpawnForge. Use when adding test coverage, fixing flaky tests, hitting coverage gaps, or running test suites (lint/tsc/vitest/e2e/mcp). Includes Vitest 4.x API reference.
 paths: "web/src/**/__tests__/**, web/e2e/tests/**, mcp-server/src/*.test.ts"
 ---
 
@@ -14,12 +14,14 @@ SpawnForge is a game engine. Game engines have exponential state spaces — enti
 
 ## Coverage Targets
 
-| Metric | Current | Target | How |
-|--------|---------|--------|-----|
-| Statements | 50% | 100% | Every function has at least one test exercising its primary path |
-| Branches | 42% | 100% | Every if/else, switch case, ternary, and error path tested |
-| Functions | 42% | 100% | No untested exported functions |
-| Lines | 51% | 100% | Full line coverage |
+| Metric | CI Threshold (enforced) | Target | How |
+|--------|------------------------|--------|-----|
+| Statements | 75% | 100% | Every function has at least one test exercising its primary path |
+| Branches | 65% | 100% | Every if/else, switch case, ternary, and error path tested |
+| Functions | 70% | 100% | No untested exported functions |
+| Lines | 77% | 100% | Full line coverage |
+
+Thresholds live in `web/vitest.config.ts` and ratchet upward automatically (coverage-ratchet workflow) — read the config for the current values rather than trusting any doc snapshot.
 
 **100% coverage does not mean 100% bug-free.** It means every line of code has been proven to execute without crashing. Edge cases, race conditions, and integration failures need additional targeted tests beyond coverage.
 
@@ -33,15 +35,15 @@ engine/src/core/mesh_simplify.rs  # Rust unit tests (cargo test)
 ```
 
 ### Vitest Configuration
-- Config: `web/vitest.config.ts`
-- Environment: `node` (not jsdom — avoids open handle issues)
+- Workspace split: `web/vitest.config.node.ts` (environment: node — lib, stores, API routes) and `web/vitest.config.jsdom.ts` (environment: jsdom — components, hooks)
+- Standalone `web/vitest.config.ts` is what CI uses for coverage thresholds (workspace configs drop thresholds)
 - Coverage: `npx vitest run --coverage`
 - Run specific: `npx vitest run myTestFile`
 
 ### Playwright Configuration
 - Config: `web/playwright.config.ts`
 - 4 CI shards, chromium only
-- Page Object Model: `web/e2e/tests/EditorPage.ts`
+- Page Object Model: `EditorPage` class in `web/e2e/fixtures/editor.fixture.ts` (import `test`, `expect`, `EditorPage` from `../fixtures/editor.fixture`)
 - Requires WASM build + dev server
 
 ## Test Patterns
@@ -283,9 +285,9 @@ Playwright E2E tests require:
 2. Playwright browsers installed — `npx playwright install chromium`
 3. Dev server starts automatically via Playwright's `webServer` config.
 
-## Vitest 3.x API Reference
+## Vitest 4.x API Reference
 
-Vitest is Vite-native with Jest-compatible API, native ESM, TypeScript, and JSX support.
+Vitest is Vite-native with Jest-compatible API, native ESM, TypeScript, and JSX support. Note: Vitest 4 defaults to the forks pool; jest-dom matchers need explicit `expect.extend(matchers)` in vitest.setup.ts.
 
 ### Core API
 
@@ -309,5 +311,5 @@ Vitest is Vite-native with Jest-compatible API, native ESM, TypeScript, and JSX 
 - Workspace config: `web/vitest.workspace.ts` — splits into two environments:
   - `web/vitest.config.node.ts` (environment: node) — lib, stores, API routes
   - `web/vitest.config.jsdom.ts` (environment: jsdom) — components, hooks
-- Standalone config: `web/vitest.config.ts` — used by CI for coverage thresholds (70/60/65/72)
+- Standalone config: `web/vitest.config.ts` — used by CI for coverage thresholds (currently 75/65/70/77; auto-ratcheted, read the config for live values)
 - Coverage report outputs to `web/coverage/`

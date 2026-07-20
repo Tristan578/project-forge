@@ -80,7 +80,7 @@
 
 ### Stores
 - `editorStore.ts` — Composition root: creates store from domain slices (~134 lines)
-- `stores/slices/` — Domain state slices (16 files: selection, sceneGraph, transform, material, lighting, physics, audio, animation, particle, script, game, sprite, history, scene, asset + types)
+- `stores/slices/` — Domain state slices (20 domain slices: selection, sceneGraph, transform, material, lighting, sceneLight, physics, audio, animation, particle, script, game, sprite, history, scene, asset, bridge, editMode, localization, orchestrator + types/index)
 - `chatStore.ts` — `rightPanelTab`, chat messages, token balance
 - `userStore.ts` — Tier, token balance, permissions (`canUseAI`, `canUseMCP`, `canPublish`)
 
@@ -90,7 +90,7 @@ EditorLayout, SceneHierarchy, InspectorPanel, MaterialInspector, LightInspector,
 ### Key Hooks
 - `useEngine.ts` — WASM loading singleton (WebGPU detect, fallback)
 - `useEngineEvents.ts` — Event delegation hub (~85 lines), delegates to `hooks/events/` domain handlers
-- `hooks/events/` — Domain event handlers (8 files: transform, material, physics, audio, animation, game, sprite, particle)
+- `hooks/events/` — Domain event handlers (10 files: transform, material, physics, audio, animation, game, sprite, particle, editMode, performance + index/types)
 - `useResponsiveLayout.ts` — Layout mode from viewport breakpoints (compact/condensed/full)
 - `useViewport.ts` — Canvas dimensions, DPR, breakpoint detection
 - `useVirtualList.ts` — Lightweight virtual scrolling hook

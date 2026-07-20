@@ -123,6 +123,10 @@ gh workflow list --all
 gh run list --workflow=cd.yml --limit 5
 ```
 
+## Taskboard Permissions
+
+You MUST NOT move tickets or edit ticket metadata (priority, labels, team). You MAY create tickets for bugs/gaps you discover and add subtasks to your assigned ticket. Report status to the orchestrator — it owns all ticket lifecycle transitions.
+
 ## When to Engage This Agent
 
 - Adding/modifying API routes that interact with external services

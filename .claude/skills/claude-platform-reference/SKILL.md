@@ -19,7 +19,7 @@ description: "Use when you need details about SpawnForge's Claude Code platform 
 **Features:** `/game-engine`, `/game-ui-design`, `/multiplayer-readiness`, `/viewport`
 **Workflow:** `/design`, `/architect-flow`, `/docs`, `/developer-experience`
 **Review:** `/review-protocol`, `/component-checklist`
-**Vercel:** `/vercel-cli-with-tokens`, `/vercel-react-native-skills`
+**Vercel:** `/vercel-cli-with-tokens`
 
 ## MCP Servers (`.mcp.json` — 7 servers)
 - `context7` — live library documentation for all 30+ dependencies

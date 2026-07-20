@@ -33,8 +33,8 @@ SpawnForge is "Canva for games." Our users range from complete beginners who've 
 ```
 web/src/
 ├── components/editor/     # Editor UI panels and inspectors
-├── stores/slices/         # Zustand domain slices (16 files)
-├── hooks/events/          # Engine event handlers (8 domain files)
+├── stores/slices/         # Zustand domain slices (20 domain slices — `ls` for the live list)
+├── hooks/events/          # Engine event handlers (10 domain files — `ls` for the live list)
 ├── hooks/                 # Custom hooks (useEngine, useResponsiveLayout, etc.)
 ├── lib/chat/handlers/     # AI tool call handlers
 ├── lib/shaders/           # Shader compiler and node types
