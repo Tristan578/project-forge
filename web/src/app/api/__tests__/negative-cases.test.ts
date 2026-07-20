@@ -121,6 +121,14 @@ vi.mock('@/lib/ai/contentSafety', () => ({
   sanitizePrompt: vi.fn().mockReturnValue({ safe: true, filtered: '', reason: '' }),
 }));
 
+// PF-975 / #8948: createGenerationHandler now gates on checkBotIdGate() before
+// rate-limiting. Its real implementation imports 'server-only', which throws
+// under this file's jsdom environment (window is defined) unless mocked here —
+// same pattern as createGenerationHandler.test.ts.
+vi.mock('@/lib/security/botId', () => ({
+  checkBotIdGate: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock('fs/promises', () => ({
   readdir: vi.fn().mockResolvedValue([]),
   readFile: vi.fn().mockResolvedValue(''),
