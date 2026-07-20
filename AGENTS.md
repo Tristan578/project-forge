@@ -48,7 +48,7 @@ The session start hook auto-starts the server if the binary is found. If it fail
 
 **Pinned versions:** Next.js 16.2.0 · React 19.2.4 · wasm-bindgen 0.2.108 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
 
-**Coverage thresholds (CI-enforced):** statements 70 · branches 60 · functions 65 · lines 72
+**Coverage thresholds (CI-enforced):** statements 75 · branches 65 · functions 70 · lines 77
 
 **Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
 <!-- AGENTIC-SYNC:END -->

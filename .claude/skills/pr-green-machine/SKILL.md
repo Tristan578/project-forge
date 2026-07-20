@@ -140,13 +140,13 @@ Before editing ANY file, check if the file type has a known anti-pattern:
 
 ## Execution Order
 
-Process PRs oldest to newest by PR number. The sequence for this run:
+Discover the live PR list at the start of every run — never work from a remembered or hardcoded list:
 
-1. PR #7357 (oldest)
-2. PR #7376
-3. PR #7389
-4. PR #7391
-5. PR #7415
+```bash
+gh pr list --state open --json number,title,createdAt --jq 'sort_by(.createdAt) | .[] | "#\(.number) \(.title)"'
+```
+
+Process PRs oldest to newest by creation date. Skip Dependabot PRs unless explicitly asked (they have their own lockfile-drift protocol — see `.claude/rules/gotchas.md` → Build & CI).
 
 Do NOT parallelize. Each PR must be fully GREEN before starting the next. If a fix on PR N breaks PR N+1 (shared branch), fix N+1 immediately before moving on.
 

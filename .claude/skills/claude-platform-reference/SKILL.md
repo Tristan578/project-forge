@@ -5,7 +5,7 @@ description: "Use when you need details about SpawnForge's Claude Code platform 
 
 # Claude Code Platform Reference
 
-## Skills (53 total)
+## Skills (`ls .claude/skills/` for the live count)
 
 **Orchestration:** `/planner`, `/builder`, `/cycle`
 **Engine:** `/rust-engine`, `/build`, `/arch-validator`, `/rust-best-practices`
@@ -19,7 +19,7 @@ description: "Use when you need details about SpawnForge's Claude Code platform 
 **Features:** `/game-engine`, `/game-ui-design`, `/multiplayer-readiness`, `/viewport`
 **Workflow:** `/design`, `/architect-flow`, `/docs`, `/developer-experience`
 **Review:** `/review-protocol`, `/component-checklist`
-**Vercel:** `/vercel-cli-with-tokens`, `/vercel-react-native-skills`
+**Vercel:** `/vercel-cli-with-tokens`
 
 ## MCP Servers (`.mcp.json` — 7 servers)
 - `context7` — live library documentation for all 30+ dependencies

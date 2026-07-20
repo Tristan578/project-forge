@@ -4,15 +4,14 @@ description: Specialized architect for high-level reasoning and spec generation.
 model: claude-opus-4-7
 effort: high
 memory: user
-tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
+tools: [Read, Grep, Glob, Bash, Write, Edit, WebSearch, WebFetch]
 skills: [architect-flow, kanban, design, docs, next-best-practices]
 hooks:
   Stop:
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/spec-completeness-check.sh"
       timeout: 5000
-hooks:
   PreToolUse:
-    - matcher: Read|Grep|Glob|Bash
+    - matcher: Read|Grep|Glob|Bash|Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
       timeout: 5000
       once: true
@@ -79,7 +78,7 @@ Performance budgets, browser limitations, version constraints.
 
 ## Version Constraints
 
-All designs must use: Bevy 0.18, Rapier 0.33, wasm-bindgen 0.2.108, Next.js 16, React 19, Zustand 5, TypeScript 5, Tailwind 4.
+All designs must use: Bevy 0.18, Rapier 0.34, wasm-bindgen 0.2.108, Next.js 16, React 19, Zustand 5, TypeScript 5, Tailwind 4.
 
 ## Taskboard Permissions
 
