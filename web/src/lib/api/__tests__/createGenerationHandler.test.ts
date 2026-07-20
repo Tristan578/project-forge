@@ -33,6 +33,9 @@ vi.mock('@/lib/tokens/pricing', () => ({
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
+vi.mock('@/lib/security/botId', () => ({
+  checkBotIdGate: vi.fn().mockResolvedValue(null),
+}));
 vi.mock('@/lib/rateLimit', () => ({
   rateLimitResponse: vi.fn().mockReturnValue(
     new Response(JSON.stringify({ error: 'Rate limited' }), { status: 429 })
@@ -81,6 +84,7 @@ import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLi
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { checkBotIdGate } from '@/lib/security/botId';
 import { cachedGenerate } from '@/lib/api/responseCache';
 import { isQstashConfigured } from '@/lib/qstash/client';
 import { createGenerationHandler } from '../createGenerationHandler';
@@ -94,6 +98,7 @@ const mockRefund = vi.mocked(refundTokens);
 const mockCapture = vi.mocked(captureException);
 const mockCachedGenerate = vi.mocked(cachedGenerate);
 const mockConfigured = vi.mocked(isQstashConfigured);
+const mockBotIdGate = vi.mocked(checkBotIdGate);
 
 function makeRequest(body: Record<string, unknown>): NextRequest {
   return new NextRequest('http://localhost:3000/api/generate/test', {
@@ -137,6 +142,9 @@ describe('createGenerationHandler', () => {
     // QStash dormant by default — handlers in this file that omit asyncJob never
     // reach isQstashConfigured() (short-circuit), so this is safe for all existing tests.
     mockConfigured.mockReturnValue(false);
+    // BotID gate pass-through by default (PF-975 / #8948) — all existing tests
+    // exercise a human request.
+    mockBotIdGate.mockResolvedValue(null);
   });
 
   it('returns 401 when unauthenticated', async () => {
@@ -146,6 +154,16 @@ describe('createGenerationHandler', () => {
     });
     const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
     expect(res.status).toBe(401);
+  });
+
+  it('returns the BotID gate response and skips rate-limiting/token deduction when blocked (PF-975 / #8948)', async () => {
+    const blocked = NextResponse.json({ error: 'Request blocked' }, { status: 403 });
+    mockBotIdGate.mockResolvedValue(blocked);
+    const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
+    expect(res.status).toBe(403);
+    expect(mockAggRateLimit).not.toHaveBeenCalled();
+    expect(mockRateLimit).not.toHaveBeenCalled();
+    expect(mockResolve).not.toHaveBeenCalled();
   });
 
   it('returns 429 when aggregate rate limited', async () => {

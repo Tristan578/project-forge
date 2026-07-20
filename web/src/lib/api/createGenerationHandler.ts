@@ -22,6 +22,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import type { Provider } from '@/lib/db/schema';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { checkBotIdGate } from '@/lib/security/botId';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
@@ -288,6 +289,11 @@ export function createGenerationHandler<TParams, TResult>(
 
     const userId = authResult.ctx.user.id;
     const tier = authResult.ctx.user.tier;
+
+    // 1b. BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
+    // token deduction, so a blocked bot never spends either budget.
+    const botIdResponse = await checkBotIdGate();
+    if (botIdResponse) return botIdResponse;
 
     // 2a. Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
     const aggRl = await aggregateGenerationRateLimit(userId);
