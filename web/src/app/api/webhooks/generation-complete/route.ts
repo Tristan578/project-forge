@@ -38,7 +38,7 @@ import { updateJobStatusByProviderJob } from '@/lib/generate/jobRecord';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { refundTokens } from '@/lib/tokens/service';
-import { captureException } from '@/lib/monitoring/sentry-server';
+import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
 
 // This callback makes the same outbound provider-status HTTP calls the generate
 // routes make, so it gets the same execution budget (the generate routes export
@@ -86,6 +86,7 @@ async function finalizeFailedAndRefund(
   errorMessage: string,
 ): Promise<void> {
   await safeUpdateJob(providerJobId, userId, { status: 'failed', errorMessage });
+  sentryLogger.warn('generation finalized as failed', { route: ROUTE, providerJobId, reason: errorMessage });
   if (tokenUsageId) {
     try {
       await refundTokens(userId, tokenUsageId);
@@ -145,6 +146,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         resultUrl: result.resultUrl,
         resultMeta: result.resultMeta,
       });
+      sentryLogger.info('generation completed', { route: ROUTE, providerJobId, type });
       return NextResponse.json({ ok: true, finalized: 'completed' });
     }
 

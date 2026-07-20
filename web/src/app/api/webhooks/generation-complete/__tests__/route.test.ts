@@ -43,6 +43,7 @@ vi.mock('@/lib/tokens/service', () => ({
 
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
+  sentryLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 import { POST } from '../route';
@@ -51,7 +52,7 @@ import { pollProviderStatus } from '@/lib/generate/pollProviderStatus';
 import { updateJobStatusByProviderJob } from '@/lib/generate/jobRecord';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { refundTokens } from '@/lib/tokens/service';
-import { captureException } from '@/lib/monitoring/sentry-server';
+import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
 
 const mockConfigured = vi.mocked(isQstashConfigured);
 const mockVerify = vi.mocked(verifyQstashSignature);
@@ -61,6 +62,7 @@ const mockUpdate = vi.mocked(updateJobStatusByProviderJob);
 const mockResolve = vi.mocked(resolveApiKey);
 const mockRefund = vi.mocked(refundTokens);
 const mockCapture = vi.mocked(captureException);
+const mockSentryLogger = vi.mocked(sentryLogger);
 
 function makeReq(body: string, sig: string | null = 'sig'): NextRequest {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -139,6 +141,10 @@ describe('POST /api/webhooks/generation-complete — key resolution', () => {
     expect(mockRefund).toHaveBeenCalledWith('user-1', 'usage-1');
     // ApiKeyError is an expected condition — not reported to Sentry.
     expect(mockCapture).not.toHaveBeenCalled();
+    expect(mockSentryLogger.warn).toHaveBeenCalledWith(
+      'generation finalized as failed',
+      expect.objectContaining({ providerJobId: 'job-1', reason: 'Provider key unavailable for status check' }),
+    );
   });
 
   it('reports a non-ApiKeyError key failure to Sentry but still finalizes (200)', async () => {
@@ -169,6 +175,10 @@ describe('POST /api/webhooks/generation-complete — terminal polling', () => {
     expect(mockUpdate).toHaveBeenCalledWith('job-1', 'user-1', expect.objectContaining({ status: 'completed', resultUrl: 'https://x/m.glb' }));
     expect(mockRefund).not.toHaveBeenCalled();
     expect(mockPublish).not.toHaveBeenCalled();
+    expect(mockSentryLogger.info).toHaveBeenCalledWith(
+      'generation completed',
+      expect.objectContaining({ providerJobId: 'job-1', type: 'model' }),
+    );
   });
 
   it('captures a DB error from the row update to Sentry but still returns 200', async () => {
@@ -191,6 +201,10 @@ describe('POST /api/webhooks/generation-complete — terminal polling', () => {
     await expect(res.json()).resolves.toMatchObject({ finalized: 'failed' });
     expect(mockUpdate).toHaveBeenCalledWith('job-1', 'user-1', { status: 'failed', errorMessage: 'Model generation failed' });
     expect(mockRefund).toHaveBeenCalledWith('user-1', 'usage-1');
+    expect(mockSentryLogger.warn).toHaveBeenCalledWith(
+      'generation finalized as failed',
+      expect.objectContaining({ providerJobId: 'job-1', reason: 'Model generation failed' }),
+    );
   });
 
   it('does not refund a failed BYOK job (tokenUsageId null)', async () => {
@@ -223,6 +237,10 @@ describe('POST /api/webhooks/generation-complete — re-arming', () => {
     expect(mockPublish).not.toHaveBeenCalled();
     expect(mockUpdate).toHaveBeenCalledWith('job-1', 'user-1', expect.objectContaining({ status: 'failed' }));
     expect(mockRefund).toHaveBeenCalledWith('user-1', 'usage-1');
+    expect(mockSentryLogger.warn).toHaveBeenCalledWith(
+      'generation finalized as failed',
+      expect.objectContaining({ providerJobId: 'job-1', reason: 'model generation timed out' }),
+    );
   });
 });
 
