@@ -3,7 +3,7 @@
 > **Status:** DRAFT — Awaiting Approval
 > **Date:** 2026-07-20
 > **Ticket:** PF-966 / GH #8957
-> **Milestone:** billing / instrumentation
+> **Milestone:** S1: Quality & Reliability (candidate) — confirm at approval
 > **Scope:** Layer Stripe Billing Meters onto the existing Postgres token-credit ledger as an async, non-blocking usage mirror. Deliverable is this approved spec; implementation is sliced into follow-up tickets. No SDK bump, no API-version change.
 
 ---

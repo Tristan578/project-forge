@@ -23,7 +23,7 @@ The spec is grounded in what the codebase persists **today**, not an idealized m
 
 | Source of truth (persisted today) | Location | What it gives the graph |
 |---|---|---|
-| `projects.sceneData` (jsonb) | `web/src/lib/db/schema.ts:164` | The entire `.forge` `SceneFile` per project: entities, assets, hierarchy. Per-user (`userId` FK). |
+| `projects.sceneData` (jsonb) | `web/src/lib/db/schema.ts:172` | The entire `.forge` `SceneFile` per project: entities, assets, hierarchy. Per-user (`userId` FK). |
 | `SceneFile` | `engine/src/core/scene_file.rs` | `entities: Vec<EntitySnapshot>`, `assets: HashMap<String, AssetMetadata>`. `formatVersion: 3`. |
 | `EntitySnapshot` | `engine/src/core/history.rs:68` | `entity_id`, `entity_type`, `name`, `parent_id` (hierarchy), `asset_ref`, `script_data`, `material_data`, `game_components`, `csg_mesh_data`, … |
 | `AssetRef` / `AssetMetadata` / `AssetSource` | `engine/src/core/asset_manager.rs` | Entity→asset reference; asset kind (`GltfModel`/`Texture`/`Audio`); **`AssetSource::Generated { provider, prompt }`** — asset knows its generating prompt. |
@@ -100,7 +100,7 @@ graph_nodes
   kind         enum('project','scene','entity','asset','script','generation')
   ref_id       text  not null   -- entity_id / asset_id / generationJobs.id / …
   content_hash text  not null   -- sha256 of normalized embeddable text
-  embedding    vector(1536)     -- null until embedded (see cost controls)
+  embedding    vector(1536)     -- PROVISIONAL dim: confirm live model output size before migrating (see Embeddings section); null until embedded (see cost controls)
   text         text             -- the embeddable text (for re-embed / debug)
   updated_at   timestamptz
   UNIQUE (user_id, project_id, kind, ref_id)
