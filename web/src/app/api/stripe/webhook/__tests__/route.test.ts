@@ -73,6 +73,7 @@ vi.mock('@/lib/auth/user-service', () => ({
 
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
+  sentryLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock('@/lib/billing/webhookIdempotency', () => ({

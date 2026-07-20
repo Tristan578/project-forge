@@ -56,6 +56,7 @@ vi.mock('@/lib/auth/user-service', () => ({
 
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
+  sentryLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock('@/lib/billing/webhookIdempotency', () => ({
@@ -92,7 +93,9 @@ vi.mock('@/lib/analytics/events.server', () => ({
 // ---------------------------------------------------------------------------
 
 import { POST } from '../route';
-import { captureException } from '@/lib/monitoring/sentry-server';
+import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
+
+const mockSentryLogger = vi.mocked(sentryLogger);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -272,6 +275,12 @@ describe('POST /api/stripe/webhook — negative cases', () => {
       const res = await POST(makeRequest('{}'));
       expect(res.status).toBe(500);
       // Both handler and release failed, but 500 is still returned
+      // The release failure gets a searchable Sentry Logs entry, distinct
+      // from the captureException for the original handler error (PF-967 / #8956).
+      expect(mockSentryLogger.error).toHaveBeenCalledWith(
+        'webhook release failed',
+        { eventId: 'evt_double' },
+      );
     });
 
     it('captures exception but does not release when finalize fails', async () => {
