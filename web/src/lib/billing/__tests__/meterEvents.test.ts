@@ -14,6 +14,8 @@
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { and, eq, isNull } from 'drizzle-orm';
+import { tokenUsage } from '@/lib/db/schema';
 
 type WhereOutcome = { kind: 'resolve' } | { kind: 'reject'; error: unknown };
 
@@ -83,16 +85,11 @@ const baseArgs: ReportGenerationUsageArgs = {
 };
 
 function setEnabled(value: string | undefined) {
-  if (value === undefined) {
-    delete process.env.BILLING_METERS_ENABLED;
-  } else {
-    process.env.BILLING_METERS_ENABLED = value;
-  }
+  vi.stubEnv('BILLING_METERS_ENABLED', value);
 }
 
 describe('isBillingMetersEnabled', () => {
-  const original = process.env.BILLING_METERS_ENABLED;
-  afterEach(() => setEnabled(original));
+  afterEach(() => vi.unstubAllEnvs());
 
   it('is true only for the exact string "true"', () => {
     setEnabled('true');
@@ -111,8 +108,6 @@ describe('isBillingMetersEnabled', () => {
 });
 
 describe('reportGenerationUsage', () => {
-  const originalFlag = process.env.BILLING_METERS_ENABLED;
-
   beforeEach(() => {
     vi.clearAllMocks();
     whereCalls.length = 0;
@@ -124,7 +119,7 @@ describe('reportGenerationUsage', () => {
   });
 
   afterEach(() => {
-    setEnabled(originalFlag);
+    vi.unstubAllEnvs();
     vi.useRealTimers();
   });
 
@@ -179,6 +174,19 @@ describe('reportGenerationUsage', () => {
     expect(mockUpdate).toHaveBeenCalledTimes(1);
     expect(meterEventsCreate).not.toHaveBeenCalled();
     expect(captureException).not.toHaveBeenCalled();
+  });
+
+  it('claims only rows that have never been attempted (WHERE id = usageId AND meterAttemptedAt IS NULL)', async () => {
+    await reportGenerationUsage(baseArgs);
+
+    // Pins the claim-before-emit guard itself, not just its observable
+    // effect: a regression that drops the `isNull(meterAttemptedAt)` arm
+    // (or the `id` match) would still pass every other test here because
+    // the mock `.where()` ignores its argument and returns `claimReturning`
+    // unconditionally — this asserts the actual condition passed in.
+    expect(whereCalls[0]).toEqual(
+      and(eq(tokenUsage.id, baseArgs.usageId as string), isNull(tokenUsage.meterAttemptedAt))
+    );
   });
 
   it('claims, emits to Stripe with the correct shape, then confirms metered_at', async () => {
