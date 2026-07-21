@@ -100,7 +100,7 @@ pending_set() {
   local d="$1" b="$2" i
   for i in "${!PENDING_DIRS[@]}"; do
     if [ "${PENDING_DIRS[$i]}" = "$d" ]; then
-      PENDING_BRANCHES[$i]="$b"
+      PENDING_BRANCHES[i]="$b"
       return 0
     fi
   done

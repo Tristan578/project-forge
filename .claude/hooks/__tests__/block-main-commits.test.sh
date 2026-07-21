@@ -461,6 +461,130 @@ check "dirB switching to main does not clobber dirA's independent pending branch
 run_hook "$FEAT_REPO" "git -C $PEND_DIR_A checkout -b feat/a && git -C $PEND_DIR_B checkout main && git -C $PEND_DIR_B commit -m 'msg'"
 check "dirB's own pending switch to main still blocks a commit targeting dirB (round2 fix 1)" 2
 
+# --- ROUND2 FIX 2: `git branch -M main` / `-m master` renames the CURRENT
+# --- branch with no checkout/switch keyword involved, so it is invisible to
+# --- the checkout|switch detector. A following commit must still be blocked. ---
+run_hook "$FEAT_REPO" "git branch -M main && $GC -m 'msg'"
+check "'git branch -M main' then commit blocked (round2 fix 2, -M)" 2
+
+run_hook "$FEAT_REPO" "git branch -m master && $GC -m 'msg'"
+check "'git branch -m master' then commit blocked (round2 fix 2, -m master)" 2
+
+run_hook "$MAIN_REPO" "git -C $FEAT_REPO branch -M main && git -C $FEAT_REPO commit -m 'msg'"
+check "'git -C <dir> branch -M main' then commit on that dir blocked (round2 fix 2, -C form)" 2
+
+# Renaming to a NON-main/master target must not introduce a false block.
+run_hook "$FEAT_REPO" "git branch -M feat/renamed && $GC -m 'msg'"
+check "'git branch -M <non-main>' then commit still allowed (round2 fix 2, no false block)" 0
+
+# Two-argument `-M <old> <new>` form is intentionally out of scope — must not
+# be misparsed as a single-arg rename to a bogus target and must not block.
+run_hook "$FEAT_REPO" "git branch -M feat/some-work main-ish && $GC -m 'msg'"
+check "'git branch -M <old> <new>' (two-arg form) does not false-block (round2 fix 2, out of scope)" 0
+
+# A quoted 'branch -M main' inside a commit message must not be misclassified
+# as a real rename (quote-aware classification applies here too).
+run_hook "$FEAT_REPO" "$GC -m 'see git branch -M main for details'"
+check "quoted 'git branch -M main' in a commit message does not smuggle a false pending-main rename (round2 fix 2)" 0
+
+# =====================================================================
+# ROUND2 FIX 3: `git revert --no-commit`/`-n` and `git merge --no-commit`
+# create NO commit, exactly analogous to the already-exempted
+# `pull --ff-only`. Must be allowed on main; the SAME commands WITHOUT the
+# flag must still be blocked.
+# =====================================================================
+run_hook "$MAIN_REPO" "git revert --no-commit HEAD"
+check "'git revert --no-commit' on main allowed (round2 fix 3)" 0
+
+run_hook "$MAIN_REPO" "git revert -n HEAD"
+check "'git revert -n' on main allowed (round2 fix 3)" 0
+
+run_hook "$MAIN_REPO" "git revert HEAD"
+check "'git revert' WITHOUT --no-commit/-n on main still blocked (round2 fix 3)" 2
+
+run_hook "$MAIN_REPO" "git merge --no-commit feat/some-work"
+check "'git merge --no-commit' on main allowed (round2 fix 3)" 0
+
+run_hook "$MAIN_REPO" "git merge feat/some-work"
+check "'git merge' WITHOUT --no-commit on main still blocked (round2 fix 3)" 2
+
+# A quoted --no-commit inside a commit message must not smuggle the
+# exemption for an actual mutating merge/revert in the same segment.
+run_hook "$MAIN_REPO" "git revert -m 'faking --no-commit' HEAD"
+check "quoted '--no-commit' text does not smuggle the revert exemption (round2 fix 3)" 2
+
+# =====================================================================
+# ROUND2 FIX 4: the BLOCKED message must name the SPECIFIC git subcommand
+# that triggered the block, not a generic "commit-creating git operation".
+# =====================================================================
+run_hook "$MAIN_REPO" "$GC -m 'msg'"
+case "$HOOK_STDERR" in
+  *"'git commit'"*) PASS=$((PASS + 1)); echo "ok: BLOCKED message names 'git commit' (round2 fix 4)" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: BLOCKED message does not name 'git commit' (round2 fix 4): $HOOK_STDERR" ;;
+esac
+
+run_hook "$MAIN_REPO" "git merge feat/some-work"
+case "$HOOK_STDERR" in
+  *"'git merge'"*) PASS=$((PASS + 1)); echo "ok: BLOCKED message names 'git merge' (round2 fix 4)" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: BLOCKED message does not name 'git merge' (round2 fix 4): $HOOK_STDERR" ;;
+esac
+
+run_hook "$MAIN_REPO" "git cherry-pick abc123"
+case "$HOOK_STDERR" in
+  *"'git cherry-pick'"*) PASS=$((PASS + 1)); echo "ok: BLOCKED message names 'git cherry-pick' (round2 fix 4)" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: BLOCKED message does not name 'git cherry-pick' (round2 fix 4): $HOOK_STDERR" ;;
+esac
+
+run_hook "$MAIN_REPO" "git revert HEAD"
+case "$HOOK_STDERR" in
+  *"'git revert'"*) PASS=$((PASS + 1)); echo "ok: BLOCKED message names 'git revert' (round2 fix 4)" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: BLOCKED message does not name 'git revert' (round2 fix 4): $HOOK_STDERR" ;;
+esac
+
+run_hook "$MAIN_REPO" "git pull"
+case "$HOOK_STDERR" in
+  *"'git pull'"*) PASS=$((PASS + 1)); echo "ok: BLOCKED message names 'git pull' (round2 fix 4)" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: BLOCKED message does not name 'git pull' (round2 fix 4): $HOOK_STDERR" ;;
+esac
+
+run_hook "$MAIN_REPO" "git stash pop"
+case "$HOOK_STDERR" in
+  *"'git stash pop'"*) PASS=$((PASS + 1)); echo "ok: BLOCKED message names 'git stash pop' (round2 fix 4)" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: BLOCKED message does not name 'git stash pop' (round2 fix 4): $HOOK_STDERR" ;;
+esac
+
+# Existing substring-based assertions from earlier rounds must still hold
+# after the message-wording change (BLOCKED / pending branch / $MAIN_REPO
+# resolving-context phrasing is untouched).
+run_hook "$MAIN_REPO" "$GC -m 'msg'"
+case "$HOOK_STDERR" in
+  *BLOCKED*) PASS=$((PASS + 1)); echo "ok: BLOCKED substring still present after fix 4 wording change" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: BLOCKED substring missing after fix 4 wording change" ;;
+esac
+
+run_hook "$FEAT_REPO" "git checkout main && $GC -m 'msg'"
+case "$HOOK_STDERR" in
+  *"pending branch"*) PASS=$((PASS + 1)); echo "ok: 'pending branch' substring still present after fix 4 wording change" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: 'pending branch' substring missing after fix 4 wording change" ;;
+esac
+
+run_hook "$FEAT_REPO" "git -C $MAIN_REPO commit -m 'msg'"
+case "$HOOK_STDERR" in
+  *"$MAIN_REPO"*) PASS=$((PASS + 1)); echo "ok: \$MAIN_REPO substring still present after fix 4 wording change" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: \$MAIN_REPO substring missing after fix 4 wording change" ;;
+esac
+
+# =====================================================================
+# ROUND2 FIX 5: GIT_WORK_TREE=<dir> env-prefix work-tree redirection had
+# ZERO test coverage even though the --work-tree flag forms were tested.
+# The hook's regex already handles this form; this closes the gap.
+# =====================================================================
+run_hook "$FEAT_REPO" "GIT_WORK_TREE=$MAIN_REPO $GC -m 'msg'"
+check "GIT_WORK_TREE=<main checkout> commit blocked (round2 fix 5)" 2
+
+run_hook "$MAIN_REPO" "GIT_WORK_TREE=$FEAT_REPO $GC -m 'msg'"
+check "GIT_WORK_TREE=<feature checkout> commit allowed (round2 fix 5)" 0
+
 echo ""
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
