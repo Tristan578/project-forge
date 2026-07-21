@@ -248,4 +248,9 @@ if [[ "${NODE_CHANGED}" == "true" ]]; then
 fi
 
 echo ""
-echo "::notice::Coverage ratchet bumped thresholds: statements=${NEW_STATEMENTS}, branches=${NEW_BRANCHES}, functions=${NEW_FUNCTIONS}, lines=${NEW_LINES}"
+if [[ "${CHANGED}" == "true" ]]; then
+  echo "::notice::Coverage ratchet bumped ${CONFIG_FILE} thresholds: statements=${NEW_STATEMENTS}, branches=${NEW_BRANCHES}, functions=${NEW_FUNCTIONS}, lines=${NEW_LINES}"
+fi
+if [[ "${NODE_CHANGED}" == "true" ]]; then
+  echo "::notice::Coverage ratchet synced ${NODE_CONFIG_FILE} thresholds: statements=${NODE_NEW_STATEMENTS}, branches=${NODE_NEW_BRANCHES}, functions=${NODE_NEW_FUNCTIONS}, lines=${NODE_NEW_LINES}"
+fi

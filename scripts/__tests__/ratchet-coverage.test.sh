@@ -88,8 +88,13 @@ read_thresholds() {
 
 run_ratchet() {
   # run_ratchet <root> [extra env as k=v ...]
+  # Hermetic: the suite itself runs under GitHub Actions, where the ambient
+  # GITHUB_ACTIONS/GITHUB_REF would flip the script into PR-report mode and
+  # silently skip every rewrite — unset both so only explicit k=v args count.
+  # Output is captured to $root/ratchet.log for the ::notice:: assertions.
   local root="$1"; shift
-  ( cd "$root" && env RATCHET_PROJECT_ROOT="$root" "$@" bash "$SCRIPT" web/coverage >/dev/null 2>&1 )
+  ( cd "$root" && env -u GITHUB_ACTIONS -u GITHUB_REF RATCHET_PROJECT_ROOT="$root" "$@" \
+      bash "$SCRIPT" web/coverage >"$root/ratchet.log" 2>&1 )
 }
 
 # ---------------------------------------------------------------------------
@@ -101,6 +106,12 @@ rc=0; run_ratchet "$ROOT" || rc=$?
 check "ratchet exits 0 on bump" 0 "$rc"
 check "main config bumped to floored actuals" "80/70/74/81" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
 check "node config bumped in lockstep" "80/70/74/81" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+main_notice=0
+grep -q '::notice::.*vitest.config.ts.*statements=80' "$ROOT/ratchet.log" && main_notice=1
+check "bump run emits a main-config notice" 1 "$main_notice"
+node_notice=0
+grep -q '::notice::.*vitest.config.node.ts.*statements=80' "$ROOT/ratchet.log" && node_notice=1
+check "bump run emits a node-config notice" 1 "$node_notice"
 
 # ---------------------------------------------------------------------------
 # 2. REGRESSION (#8934): main config already current, node config lagging →
@@ -112,6 +123,14 @@ rc=0; run_ratchet "$ROOT" || rc=$?
 check "node-drift-only run exits 0" 0 "$rc"
 check "main config unchanged when already current" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
 check "lagging node config synced to main thresholds" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+# Devin review on #8993: the summary notice must not claim a main-config bump
+# when only the node config was synced, and must name the node sync instead.
+false_bump=0
+grep -q '::notice::.*bumped' "$ROOT/ratchet.log" && false_bump=1
+check "node-drift-only run emits no main-config bump notice" 0 "$false_bump"
+sync_notice=0
+grep -q '::notice::.*vitest.config.node.ts.*statements=75' "$ROOT/ratchet.log" && sync_notice=1
+check "node-drift-only run emits a node-sync notice" 1 "$sync_notice"
 
 # ---------------------------------------------------------------------------
 # 3. Everything already in sync and current → no modification
