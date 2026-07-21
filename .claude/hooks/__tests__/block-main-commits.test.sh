@@ -477,10 +477,11 @@ check "'git -C <dir> branch -M main' then commit on that dir blocked (round2 fix
 run_hook "$FEAT_REPO" "git branch -M feat/renamed && $GC -m 'msg'"
 check "'git branch -M <non-main>' then commit still allowed (round2 fix 2, no false block)" 0
 
-# Two-argument `-M <old> <new>` form is intentionally out of scope — must not
-# be misparsed as a single-arg rename to a bogus target and must not block.
+# Two-argument `-M <old> <new>` renaming to a NON-main target (`main-ish`) must
+# not false-block — the two-arg form is now handled (round 3 fix 4), but only a
+# rename whose NEW name is exactly main/master pends.
 run_hook "$FEAT_REPO" "git branch -M feat/some-work main-ish && $GC -m 'msg'"
-check "'git branch -M <old> <new>' (two-arg form) does not false-block (round2 fix 2, out of scope)" 0
+check "'git branch -M <old> <non-main-new>' (two-arg form) does not false-block (round3 fix 4)" 0
 
 # A quoted 'branch -M main' inside a commit message must not be misclassified
 # as a real rename (quote-aware classification applies here too).
@@ -584,6 +585,91 @@ check "GIT_WORK_TREE=<main checkout> commit blocked (round2 fix 5)" 2
 
 run_hook "$MAIN_REPO" "GIT_WORK_TREE=$FEAT_REPO $GC -m 'msg'"
 check "GIT_WORK_TREE=<feature checkout> commit allowed (round2 fix 5)" 0
+
+# =====================================================================
+# ROUND 3 (PF-995 / #8988, review round 3): quote-aware segment SPLITTING
+# (separators inside quotes are inert), `&`/`|` as segment separators,
+# unattributed-commit fallback hardening, and two-arg `branch -M/-m`.
+# =====================================================================
+
+# --- ROUND3 FIX 1/2: the segment SPLITTER (not just the classifier) must be
+# --- quote-aware AND split on a single `&` (background) / `|` (pipe). The
+# --- security repro: a real commit in a feature dir via `git -C`, then a
+# --- background/pipe-separated switch-to-main or branch-rename followed by a
+# --- payload commit that lands on main. Each must BLOCK (exit 2). ---
+
+# (a) `&& ... & git commit` — the payload commit is its own segment after the
+# splitter honours the single `&`, resolves to $PWD (main), and blocks.
+run_hook "$MAIN_REPO" "git -C $FEAT_REPO commit -m ok && git checkout main & git commit -m payload"
+check "background-'&' separated payload commit on main blocked (round3 fix 1/2, security repro a)" 2
+
+# (b) payload commit piped (`|`) — the pipe is now a segment separator, so the
+# payload commit is isolated and resolves to $PWD (main).
+run_hook "$MAIN_REPO" "git -C $FEAT_REPO commit -m ok && git commit -m payload | git switch feat/x"
+check "pipe-'|' separated payload commit on main blocked (round3 fix 1/2, security repro b)" 2
+
+# (c) `& git branch -M main & git commit` — one-arg rename to main pends $PWD,
+# the following payload commit resolves to it and blocks.
+run_hook "$MAIN_REPO" "git -C $FEAT_REPO commit -m ok && git branch -M main & git commit -m payload"
+check "background-'&' branch -M main then payload commit on main blocked (round3 fix 1/2, security repro c)" 2
+
+# The splitter must NOT split on separators INSIDE quotes: a quoted commit
+# message containing `&`, `|`, `;` is inert and must not form a pseudo-segment
+# that flips the verdict. On a feature branch these stay allowed.
+run_hook "$FEAT_REPO" "$GC -m 'fixes a & b | c ; done'"
+check "quoted separators in a commit message are inert; feature-branch commit allowed (round3 fix 1)" 0
+
+# A payload `git commit` buried INSIDE a quoted value can never form its own
+# segment (the whole quoted span is one inert token) — on a feature branch the
+# real outer commit is what counts, and it is allowed.
+run_hook "$FEAT_REPO" "$GC -m 'run git commit && git commit on main'"
+check "'git commit' inside a quoted message is inert, not a pseudo-segment; feature commit allowed (round3 fix 1)" 0
+
+# --- ROUND3 FIX 3: the $PWD fallback must ALSO fire for a commit that rode
+# --- inside a switch/branch segment (hidden in `$(...)`) and was never
+# --- attributed — EVEN WHEN an earlier benign (non-main) target was already
+# --- recorded. A benign target from one segment must not suppress the
+# --- fallback for a later unattributed commit. ---
+run_hook "$MAIN_REPO" "git -C $FEAT_REPO commit -m ok && git checkout feat/existing \$(git commit -m payload)"
+check "unattributed commit in a switch segment still checked despite earlier benign target; blocked on main (round3 fix 3)" 2
+
+# The mirror must NOT over-block: a legitimate switch+commit chain from a
+# feature cwd with NO hidden commit stays allowed (the fallback only fires when
+# a commit actually rides the switch segment).
+run_hook "$FEAT_REPO" "git -C $FEAT_REPO commit -m ok && git checkout feat/existing && $GC -m 'msg'"
+check "benign switch+commit chain on feature branch not over-blocked by fallback hardening (round3 fix 3)" 0
+
+# --- ROUND3 FIX 4: two-argument `git branch -M <old> <new>` / `-m <old> <new>`
+# --- renaming to main/master. Pends ONLY when <old> is the effective dir's
+# --- current branch; renaming some OTHER branch to main does not move HEAD. ---
+
+# Positive: rename the CURRENT branch to main → following commit blocked.
+run_hook "$FEAT_REPO" "git branch -M feat/some-work main && $GC -m 'msg'"
+check "'git branch -M <current> main' (two-arg) then commit blocked (round3 fix 4, -M positive)" 2
+
+run_hook "$FEAT_REPO" "git branch -m feat/some-work master && $GC -m 'msg'"
+check "'git branch -m <current> master' (two-arg) then commit blocked (round3 fix 4, -m positive)" 2
+
+# Positive with a `git -C <dir>` directory flag ahead of the rename.
+run_hook "$MAIN_REPO" "git -C $FEAT_REPO branch -M feat/some-work main && git -C $FEAT_REPO commit -m 'msg'"
+check "'git -C <dir> branch -M <current> main' (two-arg) then commit on that dir blocked (round3 fix 4, -C form)" 2
+
+# Negative: renaming some OTHER (non-current) branch to main does not move HEAD
+# — the following commit stays on the feature branch and is allowed.
+run_hook "$FEAT_REPO" "git branch -M feat/other main && $GC -m 'msg'"
+check "'git branch -M <other-branch> main' (two-arg) does not pend; commit still allowed (round3 fix 4, negative)" 0
+
+# Fail-closed: when the effective directory's current branch cannot be resolved
+# (nonexistent dir / not a repo), a two-arg rename to main is treated as
+# renaming the current branch and pends → the commit on that dir blocks.
+run_hook "$FEAT_REPO" "git -C /nonexistent-dir-xyz-789 branch -M whatever main && git -C /nonexistent-dir-xyz-789 commit -m 'msg'"
+check "two-arg rename to main with unresolvable current branch fails closed; commit blocked (round3 fix 4, fail-closed)" 2
+
+# --- ROUND3 FIX 5: `git switch -` (previous-branch shorthand) to a FEATURE
+# --- branch must be allowed — mirror of the existing `checkout -` allow case.
+# --- PREV_FEAT_REPO has HEAD on main with @{-1} == feat/z. ---
+run_hook "$PREV_FEAT_REPO" "git switch - && $GC -m 'msg'"
+check "'switch -' back to a feature branch then commit allowed (round3 fix 5, mirror of checkout -)" 0
 
 echo ""
 echo "$PASS passed, $FAIL failed"
