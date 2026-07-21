@@ -143,6 +143,31 @@ describe('PricingPage', () => {
       vi.unstubAllEnvs();
     });
 
+    it('posts the internal billing tier names, not the display names', async () => {
+      // The checkout route validates z.enum(['hobbyist', 'creator', 'pro']) —
+      // the "Starter" ($9) card must post 'hobbyist' and the "Studio" card
+      // 'pro', or those subscriptions 422 before ever reaching Stripe.
+      const fetchMock = vi.fn(() =>
+        Promise.resolve(new Response(JSON.stringify({ url: 'about:blank' }), { status: 200 })),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+      await renderSignedIn();
+
+      const subscribeButtons = screen.getAllByText('Subscribe');
+      expect(subscribeButtons).toHaveLength(3);
+      for (const button of subscribeButtons) {
+        fireEvent.click(button);
+      }
+
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+      });
+      const postedTiers = (fetchMock.mock.calls as unknown as [unknown, RequestInit][]).map(
+        ([, init]) => JSON.parse(init.body as string).tier,
+      );
+      expect(postedTiers).toEqual(['hobbyist', 'creator', 'pro']);
+    });
+
     it('toasts the server error message when checkout responds non-ok with an error body', async () => {
       vi.stubGlobal(
         'fetch',

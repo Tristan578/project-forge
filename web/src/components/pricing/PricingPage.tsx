@@ -18,7 +18,10 @@ export function PricingPage() {
   const { isSignedIn } = useAuthSafe();
   const router = useRouter();
 
-  const handleSubscribe = async (tier: string) => {
+  // Internal billing tier names, not display names: the $9 "Starter" card is
+  // the `hobbyist` tier and the "Studio" card is `pro` — these must match the
+  // checkout route's z.enum and PRICE_IDS mapping or the POST 422s.
+  const handleSubscribe = async (tier: 'hobbyist' | 'creator' | 'pro') => {
     if (!isSignedIn) {
       router.push('/sign-in');
       return;
@@ -133,7 +136,7 @@ export function PricingPage() {
               <span className="text-zinc-400">/mo</span>
             </div>
             <button
-              onClick={() => handleSubscribe('starter')}
+              onClick={() => handleSubscribe('hobbyist')}
               className="mb-6 w-full rounded bg-blue-600 py-2 text-sm font-medium hover:bg-blue-700"
             >
               Subscribe
@@ -202,7 +205,7 @@ export function PricingPage() {
               <span className="text-zinc-400">/mo</span>
             </div>
             <button
-              onClick={() => handleSubscribe('studio')}
+              onClick={() => handleSubscribe('pro')}
               className="mb-6 w-full rounded bg-yellow-600 py-2 text-sm font-medium hover:bg-yellow-700"
             >
               Subscribe
