@@ -19,7 +19,7 @@
 
 import { AI_MODEL_DEEP, AI_MODEL_PRIMARY } from './models';
 import { trackEvent } from '@/lib/analytics/posthog';
-import { getBooleanFlag } from '@/lib/flags/posthogFlags';
+import { getBooleanFlag, type FlagContext } from '@/lib/flags/posthogFlags';
 import type { DeepGenSurface } from './surfaces';
 
 export type { DeepGenSurface } from './surfaces';
@@ -33,10 +33,16 @@ const DEEP_TIER_FLAG_KEY = 'deep-generation-tier';
  * PostHog override when local flag evaluation is active and has a
  * supported decision for `deep-generation-tier`. Synchronous: reads only
  * the in-memory flags cache, never blocks on network I/O.
+ *
+ * Pass a `FlagContext` with the caller's subscription tier to activate the
+ * flag's per-tier filter. The authoritative call site is `/api/chat`, which
+ * re-derives the deep-gen model server-side with the authenticated user's
+ * tier — client callers have no evaluator (the personal API key is
+ * server-only) and always get the env fallback.
  */
-export function isDeepTierEnabled(): boolean {
+export function isDeepTierEnabled(context?: FlagContext): boolean {
   const envEnabled = process.env.NEXT_PUBLIC_USE_DEEP_GENERATION === 'true';
-  return getBooleanFlag(DEEP_TIER_FLAG_KEY, envEnabled);
+  return getBooleanFlag(DEEP_TIER_FLAG_KEY, envEnabled, context);
 }
 
 /**
@@ -44,10 +50,16 @@ export function isDeepTierEnabled(): boolean {
  * analytics event tagging which tier handled the request.
  *
  * Call once per generation — the event pairs with downstream
- * `AI_GENERATION_COMPLETED` for token-cost and retention analysis.
+ * `AI_GENERATION_COMPLETED` for token-cost and retention analysis. On the
+ * client this reflects the env-derived decision only; `/api/chat` re-derives
+ * the final model server-side, and actual usage is logged there against
+ * the resolved model id.
  */
-export function getDeepGenerationModel(surface: DeepGenSurface): string {
-  const enabled = isDeepTierEnabled();
+export function getDeepGenerationModel(
+  surface: DeepGenSurface,
+  context?: FlagContext,
+): string {
+  const enabled = isDeepTierEnabled(context);
   const model = enabled ? AI_MODEL_DEEP : AI_MODEL_PRIMARY;
 
   trackEvent('ai_deep_generation_eval', {

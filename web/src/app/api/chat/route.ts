@@ -31,7 +31,8 @@ import { DEEP_GEN_SURFACES, type DeepGenSurface } from '@/lib/ai/surfaces';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
 import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
-import { isPremiumModel } from '@/lib/ai/models';
+import { isPremiumModel, AI_MODEL_DEEP, AI_MODEL_PRIMARY } from '@/lib/ai/models';
+import { isDeepTierEnabled } from '@/lib/ai/deepTier';
 import { resolveChatRoute } from '@/lib/providers/resolveChat';
 import type { UserModelMessage, AssistantModelMessage } from '@ai-sdk/provider-utils';
 
@@ -326,7 +327,8 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { messages, model, sceneContext, thinking, effort, systemOverride } = body;
+  const { messages, sceneContext, thinking, effort, systemOverride } = body;
+  let model = body.model;
   // Validate effort enum — reject unknown values rather than passing them through
   // to the SDK (which would surface as a less helpful runtime error).
   if (effort !== undefined && effort !== 'low' && effort !== 'medium' && effort !== 'high') {
@@ -345,6 +347,19 @@ export async function POST(request: NextRequest) {
       : undefined;
   if (!messages || !Array.isArray(messages)) {
     return Response.json({ error: 'messages array required' }, { status: 400 });
+  }
+
+  // Deep-tier derivation (PF-971): deep-gen surfaces compute their model
+  // client-side, but the PostHog flags evaluator only runs where
+  // POSTHOG_PERSONAL_API_KEY exists — the server. Re-derive the model here
+  // with the authenticated user's tier so the `deep-generation-tier` flag
+  // (including its per-tier filter) actually takes effect. With the evaluator
+  // dormant this resolves to the same env-derived value the client computed,
+  // and the premium gate below applies to the derived model either way.
+  if (surface) {
+    model = isDeepTierEnabled({ tier: auth.ctx.user.tier })
+      ? AI_MODEL_DEEP
+      : AI_MODEL_PRIMARY;
   }
 
   // Premium model gate: claude-opus-4-8 is restricted to Pro tier. Reject

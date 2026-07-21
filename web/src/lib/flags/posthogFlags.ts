@@ -46,10 +46,13 @@ import { captureException } from '@/lib/monitoring/sentry-server';
  * (not per call) so unsupported targeting doesn't spam logs.
  *
  * Evaluation reads ONLY the in-memory cache and is synchronous — it must
- * never sit in the request hot path. The cache is refreshed by an internal
- * poll (`primeFlagsCache`) with a tight fetch timeout; a poll failure keeps
- * the last-known-good cache rather than clearing it, and a malformed response
- * fails open (defaults, not a throw).
+ * never sit in the request hot path. There is no timer or poll loop: the
+ * cache is populated by `primeFlagsCache()` (awaited once per server start
+ * from `instrumentation.ts` `register()`) and kept warm by a fire-and-forget
+ * background refresh that `getBooleanFlag` schedules whenever the cache is
+ * older than `POLL_TTL_MS`. Both use a tight fetch timeout; a refresh failure
+ * keeps the last-known-good cache rather than clearing it, and a malformed
+ * response fails open (defaults, not a throw).
  *
  * `isProviderKilled()` layers a second consumer on the same evaluator: a
  * per-provider kill switch (`provider-kill-switch-<provider>`, PF-971 /
@@ -120,9 +123,11 @@ export function isFlagEvaluationEnabled(): boolean {
  * every failure (network, non-2xx, malformed JSON) is reported to Sentry and
  * leaves the previous cache (if any) untouched, i.e. fails open.
  *
- * Exported so callers can warm the cache eagerly (e.g. a server startup hook)
- * and so tests can await a deterministic refresh instead of relying on the
- * fire-and-forget background scheduling in `getBooleanFlag`.
+ * This is the cache's primary population path: `instrumentation.ts`
+ * `register()` awaits it once per server start, so cold instances hold real
+ * flag state before the first request. Also exported so tests can await a
+ * deterministic refresh instead of relying on the fire-and-forget background
+ * scheduling in `getBooleanFlag`.
  */
 export async function primeFlagsCache(): Promise<void> {
   if (!isFlagEvaluationEnabled()) return;

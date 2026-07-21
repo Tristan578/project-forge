@@ -83,6 +83,15 @@ of `NEXT_PUBLIC_USE_DEEP_GENERATION` — same rollout intent as this ADR, but
 targetable per-tier (via the `tier` property, safe subset only — see the
 evaluator's doc comment) without a redeploy.
 
+The authoritative decision point is SERVER-side: `/api/chat` re-derives the
+model for validated deep-gen surfaces via
+`isDeepTierEnabled({ tier: auth.ctx.user.tier })`, because the evaluator only
+runs where `POSTHOG_PERSONAL_API_KEY` exists. The client-side
+`getDeepGenerationModel()` call in the generators reflects the env gate only
+and serves as the analytics tag + request hint; the server's derivation wins.
+The cache is warmed once per server start from `instrumentation.ts`
+`register()` so cold instances evaluate real flag state.
+
 The evaluator is DORMANT unless both `POSTHOG_PERSONAL_API_KEY` and
 `NEXT_PUBLIC_POSTHOG_KEY` are set (see `CLAUDE.md` "Optional feature flags").
 Absent either, `isDeepTierEnabled()` behaves exactly as this ADR describes —

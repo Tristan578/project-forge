@@ -28,6 +28,12 @@ export async function register() {
     }
   }
 
+  // Warm the PostHog feature-flags cache once per server start so the first
+  // request on a cold instance evaluates real flag state (kill switches,
+  // deep-tier overrides) instead of falling back to env defaults. No-op when
+  // flag evaluation is dormant; never throws; capped by its own fetch timeout.
+  const { primeFlagsCache } = await import('@/lib/flags/posthogFlags');
+  await primeFlagsCache();
 }
 
 // Captures server-side errors from Server Components, middleware, and proxies.

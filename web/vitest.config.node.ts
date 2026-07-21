@@ -21,6 +21,11 @@ export default defineConfig({
       'src/app/api/**/*.test.tsx',
       'src/__integration__/**/*.test.ts',
       'src/__integration__/**/*.test.tsx',
+      // Top-level src/__tests__ (proxy.test.ts, instrumentation.test.ts):
+      // without this glob these suites only ran under the standalone
+      // vitest.config.ts, never in the workspace gate.
+      'src/__tests__/**/*.test.ts',
+      'src/__tests__/**/*.test.tsx',
     ],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
