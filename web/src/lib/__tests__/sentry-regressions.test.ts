@@ -554,6 +554,10 @@ describe('PF-967: Sentry feedback widget config must stay pinned', () => {
       content,
       'feedbackIntegration must set showBranding: false (no vendor attribution in product UI)',
     ).toContain('showBranding: false');
+    expect(
+      content,
+      'feedbackIntegration must set enableScreenshot: false — feedback screenshots are raw page captures with no masking pipeline (unlike replay maskAllText, #8001), so a screenshot taken while ApiKeyManager shows a freshly-generated MCP key would ship the plaintext credential to Sentry',
+    ).toContain('enableScreenshot: false');
   });
 
   it('globals.css carries the #sentry-feedback layering override', async () => {

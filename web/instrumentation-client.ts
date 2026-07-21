@@ -55,15 +55,21 @@ if (DSN) {
       // values from being visible in Sentry session replays (#8001).
       Sentry.replayIntegration({ maskAllText: true, blockAllMedia: false }),
       // User feedback widget (PF-967 / #8956) — floating "Report a Bug" button
-      // that lets users attach a screenshot + description to a Sentry report.
+      // that lets users attach a description to a Sentry report.
       // colorScheme: 'system' follows the OS theme rather than forcing light/dark.
       // `id` is pinned so the #sentry-feedback rules in globals.css (z-index +
       // mobile inset, keeping the trigger clear of MobileToolbar/CookieConsent)
       // keep targeting the widget host element.
+      // enableScreenshot: false — screenshots are a raw capture of the visible
+      // page with no masking pipeline, unlike replays (maskAllText above,
+      // #8001). ApiKeyManager renders a freshly-generated MCP key in plaintext
+      // by design, so an unmasked screenshot could ship a live credential to
+      // Sentry. Do not re-enable without a masking story for secret displays.
       Sentry.feedbackIntegration({
         colorScheme: 'system',
         id: 'sentry-feedback',
         showBranding: false,
+        enableScreenshot: false,
       }),
     ],
 
