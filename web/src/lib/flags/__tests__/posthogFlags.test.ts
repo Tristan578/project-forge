@@ -357,3 +357,75 @@ describe('primeFlagsCache — request shape', () => {
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 });
+
+// KEEP THIS DESCRIBE LAST. It manipulates the module-level cache timestamp via
+// fake timers; every pending refresh is resolved + flushed before each test
+// ends, but ordering it last keeps any residue away from the suites above.
+describe('getBooleanFlag — stale-cache background refresh', () => {
+  beforeEach(() => {
+    enable();
+    // Fakes Date.now too, so cache.fetchedAt staleness is fully controlled.
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Response.json() inside the refresh settles over several microtask ticks;
+  // flush them all so refreshInFlight clears before the test returns.
+  async function flushMicrotasks() {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  }
+
+  it('serves a fresh cache without refetching, then refreshes once the TTL passes', async () => {
+    await primeFlagsCache();
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    // Fresh (age 0 < 30s TTL): no background refresh scheduled.
+    getBooleanFlag('deep-generation-tier', false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(31_000);
+
+    // Stale: the background refresh's async body runs synchronously up to its
+    // first await, so the fetch fires before getBooleanFlag returns — and the
+    // caller still gets an immediate (cached) answer, never a blocked one.
+    getBooleanFlag('deep-generation-tier', false);
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    await flushMicrotasks();
+  });
+
+  it('dedups concurrent stale reads onto one in-flight refresh, then allows the next', async () => {
+    // 120s (not 31s): each useFakeTimers() restarts the fake clock at real
+    // now, so the previous test's advanced fetchedAt can sit up to ~31s in
+    // this clock's "future" — a 31s advance would not reach staleness.
+    let resolveFirst!: (r: Response) => void;
+    let resolveSecond!: (r: Response) => void;
+    const pending = [
+      new Promise<Response>((res) => { resolveFirst = res; }),
+      new Promise<Response>((res) => { resolveSecond = res; }),
+    ];
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(() => pending[call++]));
+
+    vi.advanceTimersByTime(120_000);
+
+    getBooleanFlag('deep-generation-tier', false);
+    getBooleanFlag('deep-generation-tier', false);
+    // Second stale read must ride the in-flight refresh, not stack a request.
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    resolveFirst(new Response(JSON.stringify({ flags: [] }), { status: 200 }));
+    await flushMicrotasks();
+
+    // refreshInFlight cleared: the next staleness triggers a NEW refresh.
+    vi.advanceTimersByTime(120_000);
+    getBooleanFlag('deep-generation-tier', false);
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    resolveSecond(new Response(JSON.stringify({ flags: [] }), { status: 200 }));
+    await flushMicrotasks();
+  });
+});

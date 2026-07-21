@@ -3,6 +3,7 @@
 import { useAuth } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
 import { Check, X } from 'lucide-react';
+import { toast } from 'sonner';
 
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '';
 const hasClerk = clerkKey.startsWith('pk_test_') || clerkKey.startsWith('pk_live_');
@@ -30,12 +31,19 @@ export function PricingPage() {
         body: JSON.stringify({ tier }),
       });
 
-      if (res.ok) {
-        const { url } = await res.json();
-        window.location.href = url;
+      if (!res.ok) {
+        // The checkout route returns actionable `error` strings (rate limit,
+        // bot check, Stripe failures) — surface them rather than failing silently.
+        const body = await res.json().catch(() => null);
+        toast.error(body?.error ?? 'Checkout failed. Please try again in a moment.');
+        return;
       }
+
+      const { url } = await res.json();
+      window.location.href = url;
     } catch (err) {
       console.error('Checkout error:', err);
+      toast.error('Checkout failed. Please check your connection and try again.');
     }
   };
 

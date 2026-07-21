@@ -42,7 +42,14 @@ describe('checkBotIdGate', () => {
     expect(res).not.toBeNull();
     expect(res!.status).toBe(403);
     const body = await res!.json();
-    expect(body).toEqual({ error: expect.any(String) });
+    // The error string is toast'd verbatim to users, so lock in that it tells
+    // them what to do (retry, then contact support) and carries the stable
+    // support-lookup code.
+    expect(body).toEqual({
+      error:
+        'We could not verify this request came from your browser. Please refresh the page and try again — if this keeps happening, contact support and mention code BOT_CHECK.',
+      code: 'BOT_CHECK',
+    });
   });
 
   it('pins checkLevel to basic — code-only mode, independent of the Deep Analysis dashboard toggle', async () => {

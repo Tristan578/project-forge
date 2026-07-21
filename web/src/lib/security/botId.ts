@@ -22,7 +22,17 @@ export async function checkBotIdGate(): Promise<NextResponse | null> {
   try {
     const verdict = await checkBotId({ advancedOptions: { checkLevel: 'basic' } });
     if (verdict.isBot) {
-      return NextResponse.json({ error: 'Request blocked' }, { status: 403 });
+      // The `error` string is surfaced verbatim to users (generation dialogs
+      // toast it via useAIGeneration onError), so it must be actionable, and
+      // `code` gives support a stable identifier to search for.
+      return NextResponse.json(
+        {
+          error:
+            'We could not verify this request came from your browser. Please refresh the page and try again — if this keeps happening, contact support and mention code BOT_CHECK.',
+          code: 'BOT_CHECK',
+        },
+        { status: 403 },
+      );
     }
     return null;
   } catch (err) {

@@ -4,7 +4,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, cleanup, fireEvent, waitFor } from '@/test/utils/componentTestUtils';
 import { PricingPage } from '../PricingPage';
 
 vi.mock('@clerk/nextjs', () => ({
@@ -18,6 +18,13 @@ vi.mock('next/navigation', () => ({
 vi.mock('lucide-react', () => ({
   Check: (props: Record<string, unknown>) => <span data-testid="check-icon" {...props} />,
   X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
+}));
+
+// vi.hoisted so the mock fn exists when the hoisted factory runs during the
+// top-of-file PricingPage import (a plain const would still be in TDZ then).
+const { toastErrorMock } = vi.hoisted(() => ({ toastErrorMock: vi.fn() }));
+vi.mock('sonner', () => ({
+  toast: { error: toastErrorMock },
 }));
 
 describe('PricingPage', () => {
@@ -108,5 +115,87 @@ describe('PricingPage', () => {
     render(<PricingPage />);
     const checks = screen.getAllByTestId('check-icon');
     expect(checks.length).toBeGreaterThan(0);
+  });
+
+  describe('handleSubscribe failure feedback', () => {
+    // Signed-in render via the same stubEnv + resetModules + doMock pattern as
+    // the Dashboard test above — hasClerk is a module-level constant.
+    async function renderSignedIn() {
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_stub');
+      vi.resetModules();
+      vi.doMock('@clerk/nextjs', () => ({
+        useAuth: vi.fn(() => ({ isSignedIn: true })),
+      }));
+      const { render: localRender } = await import('@/test/utils/componentTestUtils');
+      const { PricingPage: FreshPricingPage } = await import('../PricingPage');
+      localRender(<FreshPricingPage />);
+    }
+
+    let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      consoleErrorSpy.mockRestore();
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    });
+
+    it('toasts the server error message when checkout responds non-ok with an error body', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({ error: 'Too many checkout attempts. Try again in a minute.' }),
+              { status: 429 },
+            ),
+          ),
+        ),
+      );
+      await renderSignedIn();
+
+      fireEvent.click(screen.getAllByText('Subscribe')[0]);
+
+      await waitFor(() => {
+        expect(toastErrorMock).toHaveBeenCalledWith(
+          'Too many checkout attempts. Try again in a minute.',
+        );
+      });
+    });
+
+    it('toasts a generic retry message when the failure body is unparseable', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() => Promise.resolve(new Response('internal error', { status: 500 }))),
+      );
+      await renderSignedIn();
+
+      fireEvent.click(screen.getAllByText('Subscribe')[0]);
+
+      await waitFor(() => {
+        expect(toastErrorMock).toHaveBeenCalledWith(
+          'Checkout failed. Please try again in a moment.',
+        );
+      });
+    });
+
+    it('toasts a connection message when fetch itself rejects', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() => Promise.reject(new Error('network down'))),
+      );
+      await renderSignedIn();
+
+      fireEvent.click(screen.getAllByText('Subscribe')[0]);
+
+      await waitFor(() => {
+        expect(toastErrorMock).toHaveBeenCalledWith(
+          'Checkout failed. Please check your connection and try again.',
+        );
+      });
+    });
   });
 });

@@ -57,7 +57,14 @@ if (DSN) {
       // User feedback widget (PF-967 / #8956) — floating "Report a Bug" button
       // that lets users attach a screenshot + description to a Sentry report.
       // colorScheme: 'system' follows the OS theme rather than forcing light/dark.
-      Sentry.feedbackIntegration({ colorScheme: 'system' }),
+      // `id` is pinned so the #sentry-feedback rules in globals.css (z-index +
+      // mobile inset, keeping the trigger clear of MobileToolbar/CookieConsent)
+      // keep targeting the widget host element.
+      Sentry.feedbackIntegration({
+        colorScheme: 'system',
+        id: 'sentry-feedback',
+        showBranding: false,
+      }),
     ],
 
     // Replay sampling

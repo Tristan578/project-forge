@@ -249,3 +249,21 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* Sentry feedback widget (PF-967 / #8956) — Sentry mounts its trigger button at
+   #sentry-feedback (id pinned in instrumentation-client.ts) with a default
+   --z-index of 100000, which would paint over every app surface. Layering:
+   above MobileToolbar / OnboardingChecklist (z-30), below CookieConsent (z-50)
+   and sonner toasts (z-70). Sentry exposes these as CSS custom properties. */
+#sentry-feedback {
+  --z-index: 40;
+  --page-margin: 16px;
+}
+
+/* Lift the trigger above the fixed 48px (h-12) MobileToolbar on small screens
+   so both stay tappable. */
+@media (max-width: 768px) {
+  #sentry-feedback {
+    --inset: auto 0 3rem auto;
+  }
+}
