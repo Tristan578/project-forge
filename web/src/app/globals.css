@@ -249,3 +249,34 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* Sentry feedback widget (PF-967 / #8956) — Sentry mounts its trigger button at
+   #sentry-feedback (id pinned in instrumentation-client.ts) with a default
+   --z-index of 100000, which would paint over every app surface. Layering:
+   above MobileToolbar / OnboardingChecklist (z-30), below CookieConsent and
+   AchievementToast (z-50); sonner toasts use sonner's own stylesheet default
+   (z-index 999999999) and sit above everything regardless. Sentry exposes
+   these as CSS custom properties. */
+#sentry-feedback {
+  --z-index: 40;
+  --page-margin: 16px;
+}
+
+/* Lift the trigger above the fixed 48px (h-12) MobileToolbar on small screens
+   so both stay tappable. */
+@media (max-width: 768px) {
+  #sentry-feedback {
+    --inset: auto 0 3rem auto;
+  }
+}
+
+/* CookieConsent (z-50, bottom-right on >=640px, full-width bottom below that)
+   anchors at the same corner as the trigger and would fully cover it for any
+   visitor who hasn't answered the banner yet. Hide the trigger until consent
+   is handled — the banner's variable height makes an inset offset fragile,
+   and a hidden button beats an invisible unclickable one. Selector is coupled
+   to CookieConsent.tsx's aria-label (pinned in sentry-regressions.test.ts).
+   Browsers without :has() just keep the old layered behavior. */
+body:has([aria-label='Cookie consent']) #sentry-feedback {
+  display: none;
+}

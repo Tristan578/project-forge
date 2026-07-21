@@ -517,3 +517,74 @@ describe('Sentry Logs scrubber gap: enableLogs requires beforeSendLog: scrubSent
     expect(enabled.filter(Boolean).length).toBeGreaterThan(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// PF-967 (#8956): Sentry feedback widget config must stay pinned
+// ---------------------------------------------------------------------------
+
+describe('PF-967: Sentry feedback widget config must stay pinned', () => {
+  /**
+   * The feedback widget's host element id and the #sentry-feedback CSS rules in
+   * globals.css are a coupled pair: the CSS overrides the widget's default
+   * --z-index of 100000 (which would paint over every app surface, including
+   * CookieConsent and toasts) and lifts the trigger above the fixed
+   * MobileToolbar on small screens. Dropping `id` from the integration, or the
+   * CSS block, silently reverts the widget to painting over everything.
+   * `showBranding: false` is the no-vendor-attribution policy applied to the
+   * widget footer.
+   */
+  function stripComments(src: string): string {
+    return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  }
+
+  async function readFile(file: string): Promise<string> {
+    const fs = await import('fs');
+    const path = await import('path');
+    return fs.readFileSync(path.resolve(process.cwd(), file), 'utf-8');
+  }
+
+  it('instrumentation-client.ts registers feedbackIntegration with the pinned id and no branding', async () => {
+    const content = stripComments(await readFile('instrumentation-client.ts'));
+    expect(content).toContain('feedbackIntegration(');
+    expect(
+      content,
+      'feedbackIntegration must pin id: sentry-feedback — the globals.css layering rules target that element id',
+    ).toContain("id: 'sentry-feedback'");
+    expect(
+      content,
+      'feedbackIntegration must set showBranding: false (no vendor attribution in product UI)',
+    ).toContain('showBranding: false');
+    expect(
+      content,
+      'feedbackIntegration must set enableScreenshot: false — feedback screenshots are raw page captures with no masking pipeline (unlike replay maskAllText, #8001), so a screenshot taken while ApiKeyManager shows a freshly-generated MCP key would ship the plaintext credential to Sentry',
+    ).toContain('enableScreenshot: false');
+  });
+
+  it('globals.css carries the #sentry-feedback layering override', async () => {
+    // Raw read — the assertions target CSS declarations, not comments, and the
+    // JS comment-stripping regex would also eat CSS /* */ blocks.
+    const css = await readFile('src/app/globals.css');
+    expect(
+      css,
+      'globals.css must style #sentry-feedback — without it the widget defaults to z-index 100000 over every app surface',
+    ).toContain('#sentry-feedback');
+    expect(
+      css,
+      'the widget must sit above bottom chrome (z-30) but below CookieConsent/AchievementToast (z-50); sonner toasts use their own stylesheet default (999999999) and are above everything regardless',
+    ).toContain('--z-index: 40');
+    expect(
+      css,
+      'globals.css must hide the feedback trigger while the cookie banner is visible — CookieConsent (z-50) anchors at the same bottom-right corner and would fully cover the z-40 trigger for first-time visitors',
+    ).toContain("body:has([aria-label='Cookie consent']) #sentry-feedback");
+  });
+
+  it('CookieConsent keeps the aria-label the feedback-trigger hide rule is coupled to', async () => {
+    // The globals.css :has() selector targets this exact aria-label; renaming
+    // it in the component silently re-breaks the covered-trigger bug.
+    const consent = await readFile('src/components/CookieConsent.tsx');
+    expect(
+      consent,
+      'CookieConsent must keep aria-label="Cookie consent" — the #sentry-feedback hide rule in globals.css selects on it',
+    ).toContain('aria-label="Cookie consent"');
+  });
+});

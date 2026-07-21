@@ -31,7 +31,7 @@ import {
   handleEntitlementsUpdated,
 } from '@/lib/billing/subscription-lifecycle';
 import { customerIdFromSummary } from '@/lib/billing/entitlements';
-import { captureException } from '@/lib/monitoring/sentry-server';
+import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
 import { getStripe } from '@/lib/billing/stripe-client';
 import {
   isCheckoutHeldForReview,
@@ -94,6 +94,11 @@ export async function POST(req: Request) {
       await releaseEvent(event.id, 'stripe');
     } catch (releaseErr) {
       console.error(`[stripe-webhook] Failed to release claim for ${event.id}:`, releaseErr);
+      // Double failure (handler + release) leaves the event claimed until the
+      // 5-min in-flight TTL expires — worth a searchable Sentry Logs entry,
+      // distinct from the captureException below for the original handler
+      // error (PF-967 / #8956).
+      sentryLogger.error('webhook release failed', { eventId: event.id });
     }
     captureException(err, { route: '/api/stripe/webhook', eventType: event.type, eventId: event.id });
     console.error(`[stripe-webhook] Error processing ${event.type} (${event.id}):`, err);

@@ -6,11 +6,26 @@ vi.mock('@/lib/analytics/posthog', () => ({
   trackEvent: (name: string, props?: Record<string, unknown>) => trackEventMock(name, props),
 }));
 
+// Passthrough by default (returns the fallback, matching the dormant
+// evaluator), but recordable/overridable so context forwarding and flag
+// overrides are assertable without standing up the real flags cache.
+const getBooleanFlagMock = vi.fn(
+  (_key: string, fallback: boolean, _ctx?: { tier?: string }) => fallback,
+);
+vi.mock('@/lib/flags/posthogFlags', () => ({
+  getBooleanFlag: (key: string, fallback: boolean, ctx?: { tier?: string }) =>
+    getBooleanFlagMock(key, fallback, ctx),
+}));
+
 describe('deepTier', () => {
   const originalEnv = process.env.NEXT_PUBLIC_USE_DEEP_GENERATION;
 
   beforeEach(() => {
     trackEventMock.mockReset();
+    getBooleanFlagMock.mockReset();
+    getBooleanFlagMock.mockImplementation(
+      (_key: string, fallback: boolean, _ctx?: { tier?: string }) => fallback,
+    );
     vi.resetModules();
   });
 
@@ -47,6 +62,27 @@ describe('deepTier', () => {
       const { isDeepTierEnabled } = await import('../deepTier');
       expect(isDeepTierEnabled()).toBe(false);
     });
+
+    it('forwards the caller context to getBooleanFlag for per-tier targeting', async () => {
+      delete process.env.NEXT_PUBLIC_USE_DEEP_GENERATION;
+      const { isDeepTierEnabled } = await import('../deepTier');
+
+      isDeepTierEnabled({ tier: 'pro' });
+
+      expect(getBooleanFlagMock).toHaveBeenCalledWith(
+        'deep-generation-tier',
+        false,
+        { tier: 'pro' },
+      );
+    });
+
+    it('honors a flag override that differs from the env fallback', async () => {
+      delete process.env.NEXT_PUBLIC_USE_DEEP_GENERATION;
+      getBooleanFlagMock.mockReturnValue(true);
+      const { isDeepTierEnabled } = await import('../deepTier');
+
+      expect(isDeepTierEnabled({ tier: 'pro' })).toBe(true);
+    });
   });
 
   describe('getDeepGenerationModel', () => {
@@ -60,6 +96,19 @@ describe('deepTier', () => {
       process.env.NEXT_PUBLIC_USE_DEEP_GENERATION = 'true';
       const { getDeepGenerationModel } = await import('../deepTier');
       expect(getDeepGenerationModel('gdd')).toBe(AI_MODEL_DEEP);
+    });
+
+    it('forwards the caller context through to the flag evaluation', async () => {
+      delete process.env.NEXT_PUBLIC_USE_DEEP_GENERATION;
+      const { getDeepGenerationModel } = await import('../deepTier');
+
+      getDeepGenerationModel('gdd', { tier: 'starter' });
+
+      expect(getBooleanFlagMock).toHaveBeenCalledWith(
+        'deep-generation-tier',
+        false,
+        { tier: 'starter' },
+      );
     });
 
     it('emits ai_deep_generation_eval with surface and model', async () => {

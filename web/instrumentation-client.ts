@@ -1,8 +1,15 @@
 import * as Sentry from '@sentry/nextjs';
+import { registerBotIdProtection } from '@/lib/security/botIdClient';
 import { configureSentryFingerprinting, scrubSentryEvent, scrubSentryLog } from '@/lib/monitoring/sentryConfig';
 
 const DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';
+
+// Vercel BotID (PF-975 / #8948) — see botIdClient.ts for the dormancy note and
+// why registration lives in its own module: its wildcard path pattern pairs a
+// slash with an asterisk, which trips a naive comment-stripping regex in
+// sentry-regressions.test.ts.
+registerBotIdProtection();
 
 if (DSN) {
   Sentry.init({
@@ -47,6 +54,23 @@ if (DSN) {
       // maskAllText: true prevents BYOK API keys and other sensitive input
       // values from being visible in Sentry session replays (#8001).
       Sentry.replayIntegration({ maskAllText: true, blockAllMedia: false }),
+      // User feedback widget (PF-967 / #8956) — floating "Report a Bug" button
+      // that lets users attach a description to a Sentry report.
+      // colorScheme: 'system' follows the OS theme rather than forcing light/dark.
+      // `id` is pinned so the #sentry-feedback rules in globals.css (z-index +
+      // mobile inset, keeping the trigger clear of MobileToolbar/CookieConsent)
+      // keep targeting the widget host element.
+      // enableScreenshot: false — screenshots are a raw capture of the visible
+      // page with no masking pipeline, unlike replays (maskAllText above,
+      // #8001). ApiKeyManager renders a freshly-generated MCP key in plaintext
+      // by design, so an unmasked screenshot could ship a live credential to
+      // Sentry. Do not re-enable without a masking story for secret displays.
+      Sentry.feedbackIntegration({
+        colorScheme: 'system',
+        id: 'sentry-feedback',
+        showBranding: false,
+        enableScreenshot: false,
+      }),
     ],
 
     // Replay sampling

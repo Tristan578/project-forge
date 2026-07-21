@@ -3,6 +3,7 @@
 import { useAuth } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
 import { Check, X } from 'lucide-react';
+import { toast } from 'sonner';
 
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '';
 const hasClerk = clerkKey.startsWith('pk_test_') || clerkKey.startsWith('pk_live_');
@@ -17,7 +18,10 @@ export function PricingPage() {
   const { isSignedIn } = useAuthSafe();
   const router = useRouter();
 
-  const handleSubscribe = async (tier: string) => {
+  // Internal billing tier names, not display names: the $9 "Starter" card is
+  // the `hobbyist` tier and the "Studio" card is `pro` — these must match the
+  // checkout route's z.enum and PRICE_IDS mapping or the POST 422s.
+  const handleSubscribe = async (tier: 'hobbyist' | 'creator' | 'pro') => {
     if (!isSignedIn) {
       router.push('/sign-in');
       return;
@@ -30,12 +34,19 @@ export function PricingPage() {
         body: JSON.stringify({ tier }),
       });
 
-      if (res.ok) {
-        const { url } = await res.json();
-        window.location.href = url;
+      if (!res.ok) {
+        // The checkout route returns actionable `error` strings (rate limit,
+        // bot check, Stripe failures) — surface them rather than failing silently.
+        const body = await res.json().catch(() => null);
+        toast.error(body?.error ?? 'Checkout failed. Please try again in a moment.');
+        return;
       }
+
+      const { url } = await res.json();
+      window.location.href = url;
     } catch (err) {
       console.error('Checkout error:', err);
+      toast.error('Checkout failed. Please check your connection and try again.');
     }
   };
 
@@ -125,7 +136,7 @@ export function PricingPage() {
               <span className="text-zinc-400">/mo</span>
             </div>
             <button
-              onClick={() => handleSubscribe('starter')}
+              onClick={() => handleSubscribe('hobbyist')}
               className="mb-6 w-full rounded bg-blue-600 py-2 text-sm font-medium hover:bg-blue-700"
             >
               Subscribe
@@ -194,7 +205,7 @@ export function PricingPage() {
               <span className="text-zinc-400">/mo</span>
             </div>
             <button
-              onClick={() => handleSubscribe('studio')}
+              onClick={() => handleSubscribe('pro')}
               className="mb-6 w-full rounded bg-yellow-600 py-2 text-sm font-medium hover:bg-yellow-700"
             >
               Subscribe

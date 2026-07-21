@@ -72,3 +72,30 @@ Opus 4.7 (`claude-opus-4-7`) is Anthropic's deepest-reasoning model. It's not th
 - PF-739 (1h extended cache TTL) — independent optimization
 - PF-740 (MCP Streamable HTTP) — unrelated
 - Hardcoded-model-string cleanup flagged in `HARDCODED_AUDIT.md` — mechanical refactor, not blocking
+
+## Addendum: PostHog override (PF-971 / #8952)
+
+The environment-variable canary above required a Vercel env split between
+preview/canary domains for anything finer than a global on/off. PF-971 adds a
+`deep-generation-tier` PostHog flag (`web/src/lib/flags/posthogFlags.ts`,
+`getBooleanFlag()`) that `isDeepTierEnabled()` consults as an override on top
+of `NEXT_PUBLIC_USE_DEEP_GENERATION` — same rollout intent as this ADR, but
+targetable per-tier (via the `tier` property, safe subset only — see the
+evaluator's doc comment) without a redeploy.
+
+The authoritative decision point is SERVER-side: `/api/chat` re-derives the
+model for validated deep-gen surfaces via
+`isDeepTierEnabled({ tier: auth.ctx.user.tier })`, because the evaluator only
+runs where `POSTHOG_PERSONAL_API_KEY` exists. The client-side
+`getDeepGenerationModel()` call in the generators reflects the env gate only
+and serves as the analytics tag + request hint; the server's derivation wins.
+The cache is warmed once per server start from `instrumentation.ts`
+`register()` so cold instances evaluate real flag state.
+
+The evaluator is DORMANT unless both `POSTHOG_PERSONAL_API_KEY` and
+`NEXT_PUBLIC_POSTHOG_KEY` are set (see `CLAUDE.md` "Optional feature flags").
+Absent either, `isDeepTierEnabled()` behaves exactly as this ADR describes —
+zero change to the rollout mechanics above. The same evaluator also backs a
+per-provider kill switch (`provider-kill-switch-<provider>`) consumed by
+`createGenerationHandler`, unrelated to the deep-tier decision but sharing the
+same fail-open infrastructure.

@@ -5,6 +5,11 @@ vi.mock('@sentry/nextjs', () => ({
   captureException: vi.fn(),
   captureMessage: vi.fn(),
   startSpan: vi.fn((_opts: unknown, cb: () => unknown) => cb()),
+  logger: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
 }));
 
 import * as Sentry from '@sentry/nextjs';
@@ -38,6 +43,18 @@ describe('sentry-server', () => {
       const result = startSpan({ name: 'op' }, () => 42);
       expect(result).toBe(42);
       expect(Sentry.startSpan).not.toHaveBeenCalled();
+      vi.unstubAllEnvs();
+    });
+
+    it('sentryLogger.info/warn/error all no-op (PF-967 / #8956)', async () => {
+      vi.stubEnv('SENTRY_DSN', '');
+      const { sentryLogger } = await import('../sentry-server');
+      sentryLogger.info('job completed', { jobId: '1' });
+      sentryLogger.warn('job timed out', { jobId: '2' });
+      sentryLogger.error('job failed', { jobId: '3' });
+      expect(Sentry.logger.info).not.toHaveBeenCalled();
+      expect(Sentry.logger.warn).not.toHaveBeenCalled();
+      expect(Sentry.logger.error).not.toHaveBeenCalled();
       vi.unstubAllEnvs();
     });
   });
@@ -84,6 +101,38 @@ describe('sentry-server', () => {
       const result = startSpan({ name: 'db.query', op: 'db' }, () => 'result');
       expect(result).toBe('result');
       expect(Sentry.startSpan).toHaveBeenCalled();
+      vi.unstubAllEnvs();
+    });
+
+    it('sentryLogger.info forwards to Sentry.logger.info (PF-967 / #8956)', async () => {
+      vi.stubEnv('SENTRY_DSN', 'https://key@sentry.io/123');
+      const { sentryLogger } = await import('../sentry-server');
+      sentryLogger.info('generation completed', { provider: 'sdxl' });
+      expect(Sentry.logger.info).toHaveBeenCalledWith('generation completed', { provider: 'sdxl' });
+      vi.unstubAllEnvs();
+    });
+
+    it('sentryLogger.warn forwards to Sentry.logger.warn', async () => {
+      vi.stubEnv('SENTRY_DSN', 'https://key@sentry.io/123');
+      const { sentryLogger } = await import('../sentry-server');
+      sentryLogger.warn('generation timed out', { provider: 'meshy' });
+      expect(Sentry.logger.warn).toHaveBeenCalledWith('generation timed out', { provider: 'meshy' });
+      vi.unstubAllEnvs();
+    });
+
+    it('sentryLogger.error forwards to Sentry.logger.error', async () => {
+      vi.stubEnv('SENTRY_DSN', 'https://key@sentry.io/123');
+      const { sentryLogger } = await import('../sentry-server');
+      sentryLogger.error('webhook release failed', { eventId: 'evt_1' });
+      expect(Sentry.logger.error).toHaveBeenCalledWith('webhook release failed', { eventId: 'evt_1' });
+      vi.unstubAllEnvs();
+    });
+
+    it('sentryLogger.info works without attributes', async () => {
+      vi.stubEnv('SENTRY_DSN', 'https://key@sentry.io/123');
+      const { sentryLogger } = await import('../sentry-server');
+      sentryLogger.info('no-attribute log');
+      expect(Sentry.logger.info).toHaveBeenCalledWith('no-attribute log', undefined);
       vi.unstubAllEnvs();
     });
   });

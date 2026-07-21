@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 import withBundleAnalyzer from "@next/bundle-analyzer";
 import createNextIntlPlugin from "next-intl/plugin";
+import { withBotId } from "botid/next/config";
 import { buildCspRouteRules } from "./src/lib/security/csp";
 
 const analyzer = withBundleAnalyzer({
@@ -189,7 +190,7 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withSentryConfig(withNextIntl(analyzer(nextConfig)), {
+export default withSentryConfig(withNextIntl(analyzer(withBotId(nextConfig))), {
   // Show all Sentry build output (source map upload warnings, etc.)
   silent: false,
 

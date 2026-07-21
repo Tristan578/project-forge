@@ -63,6 +63,7 @@ vi.mock('@/lib/ai/models', () => ({
   AI_MODEL_PRIMARY: 'claude-sonnet-4-6',
   AI_MODEL_FAST: 'claude-haiku-4-5-20251001',
   AI_MODEL_PREMIUM: 'claude-opus-4-8',
+  AI_MODEL_DEEP: 'claude-opus-4-8',
   GATEWAY_MODEL_CHAT: 'anthropic/claude-sonnet-4-6',
   GATEWAY_MODEL_FAST: 'anthropic/claude-haiku-4-5',
   GATEWAY_MODEL_PREMIUM: 'anthropic/claude-opus-4-8',
@@ -71,6 +72,14 @@ vi.mock('@/lib/ai/models', () => ({
     const bare = model.includes('/') ? model.split('/').slice(1).join('/') : model;
     return bare === 'claude-opus-4-8';
   }),
+}));
+
+// Deep-tier flag evaluation (PF-971). Mocked so the route test controls the
+// server-side derivation without touching the real flags cache; the evaluator
+// itself is unit-tested in posthogFlags.test.ts / deepTier.test.ts.
+const isDeepTierEnabledMock = vi.fn<(ctx?: { tier?: string }) => boolean>(() => false);
+vi.mock('@/lib/ai/deepTier', () => ({
+  isDeepTierEnabled: (ctx?: { tier?: string }) => isDeepTierEnabledMock(ctx),
 }));
 
 vi.mock('@/lib/chat/sanitizer', () => ({
@@ -220,6 +229,9 @@ describe('POST /api/chat', () => {
 
     // Default: refundTokens returns a Promise (vi.clearAllMocks wipes mockResolvedValue)
     vi.mocked(refundTokens).mockResolvedValue({ refunded: true });
+
+    // Default: deep tier off — surface requests derive AI_MODEL_PRIMARY
+    isDeepTierEnabledMock.mockReturnValue(false);
 
     // Re-import to get fresh module
     const mod = await import('../route');
@@ -1048,6 +1060,94 @@ describe('POST /api/chat', () => {
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: string };
       expect(body.error).toMatch(/effort/);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Deep-tier server-side derivation (PF-971)
+  // -------------------------------------------------------------------------
+  describe('deep-tier server derivation', () => {
+    it('derives the deep model server-side for a valid surface with the user tier', async () => {
+      isDeepTierEnabledMock.mockReturnValue(true);
+
+      const res = await POST(makeRequest({ ...validBody(), surface: 'gdd' }));
+      await res.text();
+
+      expect(isDeepTierEnabledMock).toHaveBeenCalledWith({ tier: 'pro' });
+      expect(createSpawnforgeAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'claude-opus-4-8' }),
+      );
+    });
+
+    it('overrides the client-sent model with the server derivation when flag is off', async () => {
+      isDeepTierEnabledMock.mockReturnValue(false);
+
+      // Client claims the deep model, but the server derivation wins for surfaces.
+      const res = await POST(
+        makeRequest({ ...validBody(), model: 'claude-opus-4-8', surface: 'world_builder' }),
+      );
+      await res.text();
+
+      expect(res.status).toBe(200);
+      expect(createSpawnforgeAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'claude-sonnet-4-6' }),
+      );
+    });
+
+    it('allows the server-derived deep model through the premium gate for non-pro tiers', async () => {
+      // The deep-tier model is SERVER-granted (operator targeted the flag at
+      // this tier), not user-requested — the ADR rollout flips it on for paid
+      // tiers generally, so a Creator user on a deep-gen surface must get the
+      // upgrade, not the premium-gate 403 (which still applies to explicit
+      // user requests for Opus — see the premium gate tests above).
+      isDeepTierEnabledMock.mockReturnValue(true);
+      vi.mocked(withApiMiddleware).mockResolvedValue({
+        error: null,
+        authContext: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'creator' } as never },
+        rateLimit: { allowed: true, remaining: 9, resetAt: Date.now() + 60_000 },
+      } as never);
+
+      const res = await POST(makeRequest({ ...validBody(), surface: 'cutscene' }));
+      await res.text();
+
+      expect(res.status).toBe(200);
+      expect(isDeepTierEnabledMock).toHaveBeenCalledWith({ tier: 'creator' });
+      expect(createSpawnforgeAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'claude-opus-4-8' }),
+      );
+    });
+
+    it('still 403s a non-pro user who explicitly requests premium without a surface', async () => {
+      // Guard the boundary of the deep-tier exemption: with no surface, the
+      // deep-tier derivation never runs, so a hand-crafted premium request
+      // from a non-pro tier hits the gate exactly as before.
+      vi.mocked(withApiMiddleware).mockResolvedValue({
+        error: null,
+        authContext: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'creator' } as never },
+        rateLimit: { allowed: true, remaining: 9, resetAt: Date.now() + 60_000 },
+      } as never);
+
+      const res = await POST(makeRequest({ ...validBody(), model: 'claude-opus-4-8' }));
+      expect(res.status).toBe(403);
+      expect(isDeepTierEnabledMock).not.toHaveBeenCalled();
+      expect(createSpawnforgeAgent).not.toHaveBeenCalled();
+    });
+
+    it('does not evaluate the flag and passes the client model through when surface is absent', async () => {
+      const res = await POST(makeRequest(validBody()));
+      await res.text();
+
+      expect(isDeepTierEnabledMock).not.toHaveBeenCalled();
+      expect(createSpawnforgeAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'claude-sonnet-4.6' }),
+      );
+    });
+
+    it('does not evaluate the flag for an unknown surface (dropped by validation)', async () => {
+      const res = await POST(makeRequest({ ...validBody(), surface: 'not-a-surface' }));
+      await res.text();
+
+      expect(isDeepTierEnabledMock).not.toHaveBeenCalled();
     });
   });
 

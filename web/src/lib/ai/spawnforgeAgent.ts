@@ -109,6 +109,19 @@ export interface SpawnforgeAgentOptions {
   effort?: 'low' | 'medium' | 'high';
   /** Maximum tool-calling steps before stopping. Default: 10. */
   maxSteps?: number;
+  /**
+   * End-user identifier for AI Gateway spend tracking/attribution (gateway
+   * backend only; PF-969 / #8954). Maps to `providerOptions.gateway.user`.
+   * Purely observability — never influences routing or output. Omit for
+   * anonymous/unauthenticated callers.
+   */
+  userId?: string;
+  /**
+   * Request tags for AI Gateway cost-reporting/filtering (gateway backend
+   * only; PF-969 / #8954). Maps to `providerOptions.gateway.tags`. Purely
+   * observability — never influences routing or output.
+   */
+  tags?: string[];
 }
 
 /**
@@ -143,7 +156,7 @@ export function buildAgentInstructions(
  * backend (BYOK direct vs gateway). Tools and step limit are shared.
  */
 export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
-  const { isDirectBackend, model, instructions, thinking, effort, maxSteps = 10 } = options;
+  const { isDirectBackend, model, instructions, thinking, effort, maxSteps = 10, userId, tags } = options;
 
   const canonicalModel = model || AI_MODEL_PRIMARY;
 
@@ -166,8 +179,26 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
       anthropicOptions.effort = effort;
     }
   }
-  const providerOptions =
-    Object.keys(anthropicOptions).length > 0 ? { anthropic: anthropicOptions } : undefined;
+  // Provider options for AI Gateway request tagging (gateway backend only;
+  // PF-969 / #8954). `user`/`tags` are Gateway-dashboard reporting fields —
+  // they identify who/what a request belongs to for cost breakdowns, never
+  // affect model selection or output. Anthropic direct calls bypass the
+  // Gateway entirely, so these fields have no effect there and are omitted.
+  const gatewayOptions: { user?: string; tags?: string[] } = {};
+  if (!isDirectBackend) {
+    if (userId) {
+      gatewayOptions.user = userId;
+    }
+    if (tags && tags.length > 0) {
+      gatewayOptions.tags = tags;
+    }
+  }
+
+  const providerOptions = {
+    ...(Object.keys(anthropicOptions).length > 0 ? { anthropic: anthropicOptions } : {}),
+    ...(Object.keys(gatewayOptions).length > 0 ? { gateway: gatewayOptions } : {}),
+  };
+  const hasProviderOptions = Object.keys(providerOptions).length > 0;
 
   return new ToolLoopAgent({
     id: 'spawnforge',
@@ -175,7 +206,7 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
     instructions: buildAgentInstructions(instructions, isDirectBackend),
     tools: AGENT_TOOLS,
     stopWhen: stepCountIs(maxSteps),
-    ...(providerOptions ? { providerOptions } : {}),
+    ...(hasProviderOptions ? { providerOptions } : {}),
     experimental_telemetry: { isEnabled: true },
   });
 }

@@ -21,7 +21,8 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import type { Provider } from '@/lib/db/schema';
 import { getTokenCost } from '@/lib/tokens/pricing';
-import { captureException } from '@/lib/monitoring/sentry-server';
+import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
+import { checkBotIdGate } from '@/lib/security/botId';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
@@ -34,6 +35,7 @@ import {
 } from '@/lib/config/timeouts';
 import { isQstashConfigured, publishGenerationCallback } from '@/lib/qstash/client';
 import type { AsyncGenerationType } from '@/lib/generate/pollProviderStatus';
+import { isProviderKilled } from '@/lib/flags/posthogFlags';
 
 /** Default initial delay before the first durable generation callback (PF-906). */
 const DEFAULT_CALLBACK_DELAY_SECONDS = 30;
@@ -47,6 +49,15 @@ const DEFAULT_CALLBACK_DELAY_SECONDS = 30;
  * exempt: they are deliberately user-facing guidance returned as 402, not 500.
  */
 const GENERIC_500_MESSAGE = 'Generation failed due to a server error. Please try again later.';
+
+/**
+ * Client-facing message when a provider is disabled via the PF-971 kill
+ * switch (`provider-kill-switch-<provider>` PostHog flag). Generic on
+ * purpose — same reasoning as GENERIC_500_MESSAGE, no internal flag/provider
+ * plumbing leaked beyond the provider name already visible to the caller.
+ */
+const PROVIDER_UNAVAILABLE_MESSAGE = (provider: string) =>
+  `Generation via ${provider} is temporarily unavailable. Please try again shortly.`;
 
 /** Validation result: either the parsed params or an error response. */
 type ValidateResult<T> =
@@ -187,10 +198,12 @@ export interface GenerationHandlerConfig<TParams, TResult> {
  *   2. Distributed rate limiting
  *   3. Parse + validate request body
  *   4. Content safety filter on prompt
- *   5. Resolve API key + deduct tokens
- *   6. Execute provider call
- *   7. Refund tokens on provider failure
- *   8. Capture exceptions to Sentry
+ *   5. Resolve provider/operation/token cost, check the PF-971 provider
+ *      kill switch, then check the response cache
+ *   6. Resolve API key + deduct tokens
+ *   7. Execute provider call
+ *   8. Refund tokens on provider failure
+ *   9. Capture exceptions to Sentry
  */
 export function createGenerationHandler<TParams, TResult>(
   config: GenerationHandlerConfig<TParams, TResult>
@@ -289,6 +302,11 @@ export function createGenerationHandler<TParams, TResult>(
     const userId = authResult.ctx.user.id;
     const tier = authResult.ctx.user.tier;
 
+    // 1b. BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
+    // token deduction, so a blocked bot never spends either budget.
+    const botIdResponse = await checkBotIdGate();
+    if (botIdResponse) return botIdResponse;
+
     // 2a. Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
     const aggRl = await aggregateGenerationRateLimit(userId);
     if (!aggRl.allowed) return rateLimitResponse(aggRl.remaining, aggRl.resetAt);
@@ -367,7 +385,24 @@ export function createGenerationHandler<TParams, TResult>(
       return NextResponse.json({ error: 'Internal pricing error' }, { status: 500 });
     }
 
-    // 6b. Check response cache (before token deduction — cache hits are free)
+    // 6b. Provider kill switch (PF-971 / #8952). Checked immediately after the
+    // provider resolves and BEFORE any cache lookup or token deduction, so a
+    // killed provider costs the caller nothing on either path. Fails open:
+    // dormant unless PostHog flag evaluation is configured, and any
+    // evaluation failure resolves to "not killed" (see posthogFlags.ts).
+    if (isProviderKilled(resolvedProvider)) {
+      // Lifecycle signal, not per-request noise: a killed provider is a rare,
+      // operator-driven state change worth a searchable Sentry Logs entry
+      // (PF-967 / #8956), distinct from the exception-tracking captureException
+      // calls elsewhere in this file.
+      sentryLogger.warn('provider kill switch tripped', { route, provider: resolvedProvider });
+      return NextResponse.json(
+        { error: PROVIDER_UNAVAILABLE_MESSAGE(resolvedProvider) },
+        { status: 503 }
+      );
+    }
+
+    // 6c. Check response cache (before token deduction — cache hits are free)
     if (cacheKeyParams) {
       const cacheParams = cacheKeyParams(params);
       // Captured on a cache MISS so the durable callback can be published after
@@ -395,6 +430,7 @@ export function createGenerationHandler<TParams, TResult>(
               if (usageId) {
                 try {
                   await refundTokens(userId, usageId);
+                  sentryLogger.info('token refund issued', { route, usageId });
                 } catch (refundErr) {
                   captureException(refundErr, { route, action: 'refund', usageId });
                 }
@@ -429,7 +465,7 @@ export function createGenerationHandler<TParams, TResult>(
       }
     }
 
-    // 7. No caching — original path: resolve key, deduct, execute
+    // 6d. No caching — original path: resolve key, deduct, execute
     let apiKey: string;
     let usageId: string | undefined;
 
@@ -463,6 +499,7 @@ export function createGenerationHandler<TParams, TResult>(
       if (usageId) {
         try {
           await refundTokens(userId, usageId);
+          sentryLogger.info('token refund issued', { route, usageId });
         } catch (refundErr) {
           captureException(refundErr, { route, action: 'refund', usageId });
         }
