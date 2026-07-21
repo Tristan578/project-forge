@@ -49,11 +49,20 @@ GIT_OPT='(-C[[:space:]]+('"$Q"')|-c[[:space:]]+('"$Q"')|'"$GIT_VALOPT"'|--[[:aln
 # `bash -c 'git commit'`, `` `git commit` ``) is still recognized (PF-995).
 GIT_CMD='(^|[[:space:]]|[;&|()"`'\''])(GIT_[A-Z_]+=('"$Q"')[[:space:]]+)*git([[:space:]]+'"$GIT_OPT"')*[[:space:]]+'
 
+# Trailing boundary after a mutate subcommand. Mirrors the GIT_CMD leading
+# class (above): besides whitespace / shell separators / end-of-string, it
+# admits the quote and backtick characters, so a subcommand abutting a CLOSING
+# quote or backtick in its BARE form (no trailing args) is not missed —
+# `bash -c "git commit"`, `bash -c 'git commit'`, `` `git commit` ``,
+# `eval "git merge"` (PF-995). Factored into ONE variable used at all three
+# trailing-class sites (here + detect_subcmd's two greps) so they cannot drift.
+# Same bash-3.2-safe bracket quoting as line 50: single-quoted `'\''` for the
+# embedded single quote, backtick literal inside single quotes.
+SUB_END='([[:space:]]|[;&|()"`'\'']|$)'
+
 # Every git subcommand that creates commits (or, for stash pop, restages
-# work for one on the current branch). The trailing boundary admits shell
-# separators too, so a subcommand abutting one (`git commit;`, `git commit&&`,
-# `git commit|cat`, `(git commit)`) is not missed by the prefilter (PF-995).
-MUTATE_SUB='(commit|merge|cherry-pick|revert|pull|stash[[:space:]]+pop)([[:space:]]|[;&|()]|$)'
+# work for one on the current branch), abutting the trailing boundary above.
+MUTATE_SUB='(commit|merge|cherry-pick|revert|pull|stash[[:space:]]+pop)'"$SUB_END"
 GIT_MUTATE_RE="${GIT_CMD}${MUTATE_SUB}"
 
 if ! printf '%s' "$COMMAND" | grep -qE "$GIT_MUTATE_RE"; then
@@ -120,12 +129,12 @@ pending_clear_all() {
 detect_subcmd() {
   local text="$1" sc
   for sc in commit merge cherry-pick revert pull; do
-    if printf '%s' "$text" | grep -qE "${GIT_CMD}${sc}([[:space:]]|[;&|()]|$)"; then
+    if printf '%s' "$text" | grep -qE "${GIT_CMD}${sc}${SUB_END}"; then
       printf '%s' "$sc"
       return 0
     fi
   done
-  if printf '%s' "$text" | grep -qE "${GIT_CMD}stash[[:space:]]+pop([[:space:]]|[;&|()]|$)"; then
+  if printf '%s' "$text" | grep -qE "${GIT_CMD}stash[[:space:]]+pop${SUB_END}"; then
     printf '%s' "stash pop"
     return 0
   fi

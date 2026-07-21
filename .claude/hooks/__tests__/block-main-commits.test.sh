@@ -773,6 +773,75 @@ check "benign printf, git abuts single-quote, no interpreter, allowed on main (r
 run_hook "$MAIN_REPO" "jq -nc --arg c '$GC here' '{}'"
 check "benign jq --arg, git abuts single-quote, no interpreter, allowed on main (round5 finding 2, jq abutting allow)" 0
 
+# =====================================================================
+# ROUND 6 (PF-995 / #8989, review round 6): MUTATE_SUB's TRAILING boundary
+# class ([[:space:]]|[;&|()]|$) omitted the quote and backtick characters —
+# the mirror image of the round-5 LEADING-class gap. When a mutate subcommand
+# is the LAST token before a closing quote/backtick (BARE form, no trailing
+# args), the char after the subcommand is a quote/backtick, MUTATE_SUB fails,
+# GIT_MUTATE_RE fails, and the hook exits 0 (allow) at the very first gate —
+# BEFORE split_segments and the round-4 NESTED_INTERP fail-closed machinery.
+# The round-5 masking pattern repeats on the closing side: every earlier
+# payload pads the subcommand with a trailing " -m x"/args, so the subcommand
+# is NEVER quote-adjacent on the closing side. These BARE forms (NO trailing
+# args) landed real commits on main pre-fix; they must now BLOCK (exit 2).
+# =====================================================================
+run_hook "$MAIN_REPO" "bash -c \"$GC\""
+check "bash -c DOUBLE-quoted BARE git commit (subcmd abuts closing quote) blocked on main (round6 finding 1, bash dq bare)" 2
+
+run_hook "$MAIN_REPO" "bash -c '$GC'"
+check "bash -c SINGLE-quoted BARE git commit blocked on main (round6 finding 1, bash sq bare)" 2
+
+run_hook "$MAIN_REPO" "sh -c \"$GC\""
+check "sh -c DOUBLE-quoted BARE git commit blocked on main (round6 finding 1, sh -c bare)" 2
+
+run_hook "$MAIN_REPO" "zsh -c \"$GC\""
+check "zsh -c DOUBLE-quoted BARE git commit blocked on main (round6 finding 1, zsh -c bare)" 2
+
+run_hook "$MAIN_REPO" "eval \"$GC\""
+check "eval DOUBLE-quoted BARE git commit blocked on main (round6 finding 1, eval bare)" 2
+
+run_hook "$MAIN_REPO" "bash -euo pipefail -c \"$GC\""
+check "option-hop bash -euo pipefail -c BARE git commit blocked on main (round6 finding 1, option hop bare)" 2
+
+run_hook "$MAIN_REPO" "\`$GC\`"
+check "backtick-wrapped BARE git commit (subcmd abuts closing backtick) blocked on main (round6 finding 1, backtick bare)" 2
+
+run_hook "$MAIN_REPO" "sh -c \"git merge\""
+check "sh -c DOUBLE-quoted BARE git merge blocked on main (round6 finding 1, sh merge bare)" 2
+
+run_hook "$MAIN_REPO" "sh -c \"git pull\""
+check "sh -c DOUBLE-quoted BARE git pull blocked on main (round6 finding 1, sh pull bare)" 2
+
+# --- ROUND6 FINDING 1 (detect_subcmd lockstep): the newly-blocked BARE forms
+# --- reach the $PWD fallback, whose BLOCKED message names the subcommand via
+# --- detect_subcmd. Its per-subcommand (line 123) and stash-pop (line 128)
+# --- regexes carry the SAME trailing class and must widen in lockstep, or a
+# --- bare `git merge` blocks with an UNNAMED subcommand (defaults to 'commit')
+# --- — a ux regression. Assert the message names the REAL subcommand. ---
+run_hook "$MAIN_REPO" "sh -c \"git merge\""
+case "$HOOK_STDERR" in
+  *"'git merge'"*) PASS=$((PASS + 1)); echo "ok: BARE 'git merge' BLOCKED message names the real subcommand (round6 finding 1, detect_subcmd lockstep)" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: BARE 'git merge' BLOCKED message does not name 'git merge' (round6 finding 1, detect_subcmd lockstep): $HOOK_STDERR" ;;
+esac
+
+# --- ROUND6 FINDING 2: the widened trailing class also newly matches benign
+# --- quoted mentions where the subcommand abuts the CLOSING quote, but with NO
+# --- nested interpreter the NESTED_INTERP fallback never fires, so these stay
+# --- ALLOWED (exit 0) — mirror of the round-5 opening-side benign allows. ---
+run_hook "$MAIN_REPO" "echo \"remember to $GC\""
+check "benign echo, git commit abuts CLOSING quote, no interpreter, allowed on main (round6 finding 2, echo closing allow)" 0
+
+run_hook "$MAIN_REPO" "printf '%s' 'remember to $GC'"
+check "benign printf, git commit abuts CLOSING single-quote, no interpreter, allowed on main (round6 finding 2, printf closing allow)" 0
+
+# --- ROUND6 FINDING 2 (feature-branch symmetry): the BARE nested-interp form
+# --- must mirror the PADDED form's cwd-resolved verdict — the fail-closed
+# --- $PWD fallback resolves against the feature-branch cwd, so it is allowed
+# --- (exactly as `bash -c "git commit -m x"` from a feature repo is allowed). ---
+run_hook "$FEAT_REPO" "bash -c \"$GC\""
+check "bash -c BARE git commit from a feature-branch cwd allowed (round6 finding 2, feature-branch symmetry)" 0
+
 echo ""
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
