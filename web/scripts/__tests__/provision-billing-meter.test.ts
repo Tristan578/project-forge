@@ -70,7 +70,6 @@ describe('ensureMeterProvisioned', () => {
       stripe: {
         billing: {
           meters: {
-            // eslint-disable-next-line @typescript-eslint/require-await -- async generator, no await needed for a fixed in-memory list
             list: async function* list() {
               for (const meter of existingMeters) yield meter;
             },
