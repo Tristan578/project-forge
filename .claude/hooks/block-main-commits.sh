@@ -41,11 +41,15 @@ GIT_OPT='(-C[[:space:]]+('"$Q"')|-c[[:space:]]+('"$Q"')|'"$GIT_VALOPT"'|--[[:aln
 
 # `git` at a word boundary (so text like "legit commit" does not match),
 # optionally preceded by GIT_* env assignments, followed by global options.
-GIT_CMD='(^|[[:space:]])(GIT_[A-Z_]+=('"$Q"')[[:space:]]+)*git([[:space:]]+'"$GIT_OPT"')*[[:space:]]+'
+# The leading boundary also admits shell separators so a `git` abutting one
+# (`;git commit`, `(git commit)`) is still recognized (PF-995).
+GIT_CMD='(^|[[:space:]]|[;&|()])(GIT_[A-Z_]+=('"$Q"')[[:space:]]+)*git([[:space:]]+'"$GIT_OPT"')*[[:space:]]+'
 
 # Every git subcommand that creates commits (or, for stash pop, restages
-# work for one on the current branch).
-MUTATE_SUB='(commit|merge|cherry-pick|revert|pull|stash[[:space:]]+pop)([[:space:]]|$)'
+# work for one on the current branch). The trailing boundary admits shell
+# separators too, so a subcommand abutting one (`git commit;`, `git commit&&`,
+# `git commit|cat`, `(git commit)`) is not missed by the prefilter (PF-995).
+MUTATE_SUB='(commit|merge|cherry-pick|revert|pull|stash[[:space:]]+pop)([[:space:]]|[;&|()]|$)'
 GIT_MUTATE_RE="${GIT_CMD}${MUTATE_SUB}"
 
 if ! printf '%s' "$COMMAND" | grep -qE "$GIT_MUTATE_RE"; then
@@ -93,6 +97,19 @@ SEGMENTS=$(printf '%s\n' "$COMMAND" | awk '{gsub(/&&|\|\||;/, "\n"); print}')
 while IFS= read -r seg; do
   case "$seg" in *[![:space:]]*) ;; *) continue ;; esac
 
+  # Classification-only copy with each single/double-quoted span collapsed to a
+  # single placeholder token, so a quoted VALUE that happens to contain a git
+  # subcommand or switch keyword (e.g. a commit message `-m "see git checkout
+  # feature"` or `-m "git pull --ff-only"`) is never MISCLASSIFIED as a real
+  # switch/mutation/exemption. A placeholder (not removal) preserves the token's
+  # structural position, so a quoted OPTION VALUE like `--git-dir="path with
+  # space"` or `-C "dir"` still parses as an option-with-value for the
+  # classifiers. Only the yes/no classifiers below scan $seg_class; every
+  # target- and directory-EXTRACTION still uses the original $seg — a genuine
+  # keyword is unquoted there, and quoting is load-bearing for a branch/path
+  # with spaces (PF-995 / #8988).
+  seg_class=$(printf '%s' "$seg" | sed -E 's/"[^"]*"/X/g' | sed -E "s/'[^']*'/X/g")
+
   # `cd <path>` segment: update the tracked directory. A branch switch in
   # one directory says nothing about another, so reset that state too.
   if printf '%s' "$seg" | grep -qE '^[[:space:]]*cd[[:space:]]'; then
@@ -113,7 +130,7 @@ while IFS= read -r seg; do
   # (`git -C dir checkout -b X`, `git -c k=v switch Y`) — otherwise a
   # detected switch would extract no branch and fall through to a live
   # pre-execution lookup that still reports main.
-  if printf '%s' "$seg" | grep -qE "${GIT_CMD}(checkout|switch)([[:space:]]|$)"; then
+  if printf '%s' "$seg_class" | grep -qE "${GIT_CMD}(checkout|switch)([[:space:]]|$)"; then
     # Effective directory of the switch: `git -C <dir>` overrides the cwd.
     head_co=$(printf '%s' "$seg" | sed -E 's/[[:space:]](checkout|switch)[[:space:]].*$//')
     co_cdir=$(printf '%s' "$head_co" | sed -nE 's/.*[[:space:]]-C[[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+).*/\1/p')
@@ -135,15 +152,55 @@ while IFS= read -r seg; do
       # — acceptable under the accident threat model.
       :
     else
-      # Plain `checkout|switch <target>`. Record the target — a switch to a
-      # non-main/master ref is a legitimate feature branch, so a following
+      # Plain `checkout|switch [opts] <target>`. Record the target — a switch
+      # to a non-main/master ref is a legitimate feature branch, so a following
       # commit resolves to it instead of the pre-execution live branch (which
       # from a main checkout is still main → the false-block this fixes). A
       # switch to main/master records "main" and keeps the block.
-      tgt=$(printf '%s' "$co" | sed -nE 's/^(checkout|switch)[[:space:]]+([^-][^[:space:]]*).*/\2/p')
+      #
+      # Skip any option tokens (`-q`, `--quiet`, …) that sit between the
+      # keyword and the branch operand, then take the first operand. The bare
+      # `-`/`--` (previous-branch shorthand / end-of-options) stops the scan
+      # (PF-995 fix 4).
+      rest=$(printf '%s' "$co" | sed -nE 's/^(checkout|switch)[[:space:]]+(.*)$/\2/p')
+      while [ -n "$rest" ]; do
+        first=$(printf '%s' "$rest" | sed -nE 's/^([^[:space:]]+).*/\1/p')
+        case "$first" in
+          -|--) break ;;
+          -*) rest=$(printf '%s' "$rest" | sed -E 's/^[^[:space:]]+[[:space:]]*//') ;;
+          *) break ;;
+        esac
+      done
+      tgt=$(printf '%s' "$rest" | sed -nE 's/^("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+).*/\1/p')
       tgt=$(unquote "$tgt")
-      if [ -n "$tgt" ]; then
+      if [ "$tgt" = "-" ]; then
+        # `checkout -` / `switch -`: return to the previous branch. If an
+        # earlier switch in THIS command already set the pending branch for the
+        # same dir, that in-command switch is the branch we are leaving, so the
+        # previous branch is that dir's live current branch; otherwise it is the
+        # dir's real @{-1}. Fail CLOSED to main if neither resolves (PF-995 fix
+        # 3) — an unresolved return could land back on main and must not slip.
+        prevb=""
+        if [ -n "$PENDING_BRANCH" ] && [ "$PENDING_DIR" = "$sw_dir" ]; then
+          prevb=$(git -C "$sw_dir" branch --show-current 2>/dev/null)
+        elif ! prevb=$(git -C "$sw_dir" rev-parse --abbrev-ref '@{-1}' 2>/dev/null); then
+          prevb=""
+        fi
+        # A repo with no previous branch prints the literal '@{-1}' on stdout
+        # while exiting non-zero; treat that (and an empty result) as
+        # unresolved and fail CLOSED to main.
+        case "$prevb" in ""|'@{-1}') prevb="main" ;; esac
+        PENDING_BRANCH="$prevb"
+        PENDING_DIR="$sw_dir"
+      elif [ -n "$tgt" ]; then
         PENDING_BRANCH="$tgt"
+        PENDING_DIR="$sw_dir"
+      else
+        # A genuine switch keyword was detected but no branch operand parsed
+        # (e.g. options only). Any pending branch from an earlier switch is now
+        # stale — clear it and fail CLOSED to main rather than leave the stale
+        # value to falsely allow a following commit (PF-995 fix 4).
+        PENDING_BRANCH="main"
         PENDING_DIR="$sw_dir"
       fi
     fi
@@ -151,14 +208,16 @@ while IFS= read -r seg; do
   fi
 
   # Only commit-creating segments from here on.
-  if ! printf '%s' "$seg" | grep -qE "$GIT_MUTATE_RE"; then
+  if ! printf '%s' "$seg_class" | grep -qE "$GIT_MUTATE_RE"; then
     continue
   fi
   HANDLED=1
 
-  # `git pull --ff-only` cannot create commits.
-  if printf '%s' "$seg" | grep -qE "${GIT_CMD}pull([[:space:]]|$)" \
-     && printf '%s' "$seg" | grep -qE -- '--ff-only'; then
+  # `git pull --ff-only` cannot create commits. Both the pull detection and
+  # the --ff-only check run on the quote-stripped copy so a quoted message
+  # like `-m "git pull --ff-only"` cannot smuggle the exemption (PF-995).
+  if printf '%s' "$seg_class" | grep -qE "${GIT_CMD}pull([[:space:]]|$)" \
+     && printf '%s' "$seg_class" | grep -qE -- '--ff-only'; then
     continue
   fi
 

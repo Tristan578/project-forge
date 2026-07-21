@@ -322,6 +322,114 @@ check "checkout -b \"<branch with space>\" then commit allowed from main" 0
 run_hook "$FEAT_REPO" "git --git-dir=\"$SPACE_MAIN_REPO/.git\" commit -m 'msg'"
 check "--git-dir=\"<quoted path with space>\" targeting a main repo blocked" 2
 
+# =====================================================================
+# ROUND 2 (PF-995 / #8988): quote-aware classification, separator
+# boundaries in the prefilter, `checkout -`/`switch -` previous-branch
+# shorthand, and option flags between the switch keyword and its target.
+# =====================================================================
+
+# --- FIX 1: quote-aware segment classification. A quoted commit-message
+# --- value that happens to contain "git checkout"/"git switch"/"pull
+# --- --ff-only" must NOT be classified as a real switch or exemption:
+# --- classifiers must scan a quote-stripped copy of each segment. Raw-text
+# --- scanning both FALSELY ALLOWS a commit on main (a bogus pending branch
+# --- clobbers the main context) and FALSELY BLOCKS a feature-branch commit
+# --- (the commit segment is consumed as a switch and the fallback resolves
+# --- against the hook's own main cwd). ---
+
+# (a) FALSE ALLOW repro (double-quoted message): the first message contains
+# "git checkout feature"; both commits actually target main → must block.
+run_hook "$MAIN_REPO" 'git commit -m "see git checkout feature" && git commit -m "real payload"'
+check "quoted 'git checkout' in a commit message does not smuggle an allow; commit on main blocked (fix 1, double-quote)" 2
+
+# Single-quoted message variant (single-quote stripping path).
+run_hook "$MAIN_REPO" "$GC -m 'see git checkout feature' && $GC -m 'real payload'"
+check "quoted 'git checkout' (single quotes) in a message; commit on main blocked (fix 1)" 2
+
+# (b) FALSE BLOCK repro: from a main cwd, cd into a feature worktree and
+# commit with a message mentioning git checkout/switch — must be allowed.
+run_hook "$MAIN_REPO" "cd $FEAT_REPO && $GC -m 'add git checkout helper'"
+check "quoted 'git checkout' in a feature-branch commit message not false-blocked (fix 1, single-quote)" 0
+
+run_hook "$MAIN_REPO" 'cd '"$FEAT_REPO"' && git commit -m "add git switch helper"'
+check "quoted 'git switch' in a feature-branch commit message not false-blocked (fix 1, double-quote)" 0
+
+# (c) A quoted `git pull --ff-only` inside a commit message must not activate
+# the pull --ff-only exemption and smuggle a commit past the gate on main.
+run_hook "$MAIN_REPO" 'git commit -m "sync via git pull --ff-only"'
+check "quoted 'git pull --ff-only' in a commit message does not exempt; commit on main blocked (fix 1)" 2
+
+# --- FIX 2: the whole-command mutating-subcommand prefilter and per-segment
+# --- mutate detector must recognise a subcommand abutting a shell separator
+# --- (`;`, `&&`, `|`, `)`), not only whitespace/end. Otherwise the prefilter
+# --- early-exits 0 (allow) before the per-segment loop ever runs. ---
+run_hook "$MAIN_REPO" "$GC;"
+check "commit abutting ';' (no trailing space) blocked on main (fix 2)" 2
+
+run_hook "$MAIN_REPO" "$GC;git push"
+check "commit abutting ';git push' blocked on main (fix 2)" 2
+
+run_hook "$MAIN_REPO" "$GC&&echo done"
+check "commit abutting '&&echo' blocked on main (fix 2)" 2
+
+run_hook "$MAIN_REPO" "$GC|cat"
+check "commit abutting '|cat' blocked on main (fix 2)" 2
+
+run_hook "$MAIN_REPO" "(git commit)"
+check "commit wrapped in parens blocked on main (fix 2)" 2
+
+run_hook "$MAIN_REPO" "git stash pop;"
+check "stash pop abutting ';' blocked on main (fix 2)" 2
+
+run_hook "$MAIN_REPO" "git add . ; $GC; git push"
+check "commit between separators in a longer chain blocked on main (fix 2)" 2
+
+# --- FIX 3: `git checkout -` / `git switch -` (previous-branch shorthand)
+# --- must be resolved, not silently ignored. Resolution uses the dir's real
+# --- previous branch via `rev-parse --abbrev-ref @{-1}` when no prior
+# --- in-command switch occurred, and fails CLOSED (treat as main) when the
+# --- previous branch cannot be resolved. ---
+
+# Fixture: HEAD on feat/prev, whose @{-1} previous branch is main → '-' → main.
+PREV_MAIN_REPO="$TMP/prev-main"
+git init -q -b main "$PREV_MAIN_REPO"
+git -C "$PREV_MAIN_REPO" -c user.email=t@e.x -c user.name=t commit -q --allow-empty -m init
+git -C "$PREV_MAIN_REPO" checkout -q -b feat/prev
+
+# Fixture: HEAD on main, whose @{-1} previous branch is feat/z → '-' → feat/z.
+PREV_FEAT_REPO="$TMP/prev-feat"
+git init -q -b main "$PREV_FEAT_REPO"
+git -C "$PREV_FEAT_REPO" -c user.email=t@e.x -c user.name=t commit -q --allow-empty -m init
+git -C "$PREV_FEAT_REPO" checkout -q -b feat/z
+git -C "$PREV_FEAT_REPO" checkout -q main
+
+run_hook "$PREV_MAIN_REPO" "git checkout - && $GC -m 'msg'"
+check "'checkout -' back to main then commit blocked (fix 3)" 2
+
+run_hook "$PREV_MAIN_REPO" "git switch - && $GC -m 'msg'"
+check "'switch -' back to main then commit blocked (fix 3)" 2
+
+run_hook "$PREV_FEAT_REPO" "git checkout - && $GC -m 'msg'"
+check "'checkout -' back to a feature branch then commit allowed (fix 3)" 0
+
+# Fail closed: fresh repo has no @{-1} previous branch → treat as main.
+run_hook "$FEAT_REPO" "git checkout - && $GC -m 'msg'"
+check "'checkout -' with unresolvable previous branch fails closed, blocked (fix 3)" 2
+
+# --- FIX 4: option flags between the switch keyword and its target
+# --- (`checkout -q feat`, `switch --quiet feat`) must be skipped during
+# --- target extraction; and a genuine flagged switch that yields no target
+# --- must CLEAR any stale pending branch from an earlier switch (fail
+# --- closed) rather than leave the stale value in place. ---
+run_hook "$MAIN_REPO" "git checkout -q feat/existing && $GC -m 'msg'"
+check "'checkout -q feat/existing' (short flag before target) then commit allowed (fix 4)" 0
+
+run_hook "$MAIN_REPO" "git switch --quiet feat/existing && $GC -m 'msg'"
+check "'switch --quiet feat/existing' (long flag before target) then commit allowed (fix 4)" 0
+
+run_hook "$MAIN_REPO" "git checkout feat/x && git checkout -q main && $GC -m 'msg'"
+check "flagged switch to main clears stale feature pending; commit blocked (fix 4)" 2
+
 echo ""
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
