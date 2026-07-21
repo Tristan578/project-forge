@@ -17,7 +17,7 @@ The project has two Vitest configurations. Use them correctly:
 cd web && npx vitest run --config vitest.config.ts --coverage
 ```
 
-CI thresholds: statements 70, branches 60, functions 65, lines 72.
+CI thresholds are auto-ratcheted upward by the coverage-ratchet workflow, which keeps `web/vitest.config.node.ts` in lockstep (PF-996) — read `web/vitest.config.ts` for the live values; any snapshot written here would go stale.
 
 ## File Naming Conventions
 

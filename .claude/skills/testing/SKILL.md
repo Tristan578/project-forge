@@ -16,10 +16,10 @@ SpawnForge is a game engine. Game engines have exponential state spaces — enti
 
 | Metric | CI Threshold (enforced) | Target | How |
 |--------|------------------------|--------|-----|
-| Statements | 75% | 100% | Every function has at least one test exercising its primary path |
-| Branches | 65% | 100% | Every if/else, switch case, ternary, and error path tested |
-| Functions | 70% | 100% | No untested exported functions |
-| Lines | 77% | 100% | Full line coverage |
+| Statements | see `web/vitest.config.ts` | 100% | Every function has at least one test exercising its primary path |
+| Branches | see `web/vitest.config.ts` | 100% | Every if/else, switch case, ternary, and error path tested |
+| Functions | see `web/vitest.config.ts` | 100% | No untested exported functions |
+| Lines | see `web/vitest.config.ts` | 100% | Full line coverage |
 
 Thresholds live in `web/vitest.config.ts` and ratchet upward automatically (coverage-ratchet workflow), with `web/vitest.config.node.ts` kept in lockstep by the same ratchet (PF-996) — read the config for the current values rather than trusting any doc snapshot.
 
