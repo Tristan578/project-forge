@@ -126,6 +126,14 @@ export const tokenUsage = pgTable(
     provider: text('provider'),
     metadata: jsonb('metadata'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Stripe billing-meters claim-before-emit protocol (PF-978 / #8970, see
+    // specs/stripe-billing-meters.md section 4). Both nullable/additive:
+    // meterAttemptedAt = claim timestamp (set before the meterEvents.create
+    // call), meteredAt = confirmed-success timestamp (set after). NULL/NULL
+    // means "never attempted" — the default state for every existing row and
+    // for all rows until BILLING_METERS_ENABLED=true.
+    meterAttemptedAt: timestamp('meter_attempted_at', { withTimezone: true }),
+    meteredAt: timestamp('metered_at', { withTimezone: true }),
   },
   (table) => [
     index('idx_token_usage_user_date').on(table.userId, table.createdAt),
