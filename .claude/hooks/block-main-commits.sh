@@ -130,7 +130,19 @@ detect_subcmd() {
   return 1
 }
 
-# Split a command string into its shell command segments, one per line.
+# Split a command string into its shell command segments, one per line, each
+# line PREFIXED with a single link-code char and $FS: `A` = this segment is
+# linked to its predecessor by a guaranteed-success `&&` chain (so a recorded
+# branch switch/rename earlier in the chain is TRUSTED to have taken effect
+# before this segment runs); `O` = linked by any OTHER separator (`;`, `||`,
+# `|`, `&`, a literal newline) — or it is the first segment. Only `&&`
+# short-circuits on the predecessor's success, so only `A` may carry pending
+# switch/rename trust forward; every `O` link RESETS that trust in the loop
+# below, so a following commit falls through to the live $PWD lookup (PF-995 /
+# #8988 round 4 finding 1 — the round-3 splitter collapsed EVERY separator to a
+# bare newline, erasing this distinction and letting `git checkout feat/x ;
+# git commit` launder a commit onto main).
+#
 # Separators recognized OUTSIDE single/double quotes: `&&`, `||`, `;`, a
 # single `&` (background), a single `|` (pipe), and a literal newline. A
 # separator INSIDE a quoted span is inert data, never a split point — so a
@@ -152,6 +164,7 @@ split_segments() {
   # loop below never run and every command fall through to the PWD fallback.
   local s="$1"
   local n=${#s} i=0 c nc inq=0 out=""
+  out="A$FS"                                   # first segment: no predecessor
   while [ "$i" -lt "$n" ]; do
     c=${s:i:1}
     if [ "$inq" -eq 1 ]; then                 # inside single quotes
@@ -169,11 +182,14 @@ split_segments() {
       '"') inq=2; out="$out$c"; i=$((i + 1)); continue ;;
     esac
     nc=${s:i+1:1}
-    if { [ "$c" = "&" ] && [ "$nc" = "&" ]; } || { [ "$c" = "|" ] && [ "$nc" = "|" ]; }; then
-      out="$out$NL"; i=$((i + 2)); continue    # `&&` / `||`
+    if [ "$c" = "&" ] && [ "$nc" = "&" ]; then
+      out="$out${NL}A$FS"; i=$((i + 2)); continue    # `&&` — trusted link
+    fi
+    if [ "$c" = "|" ] && [ "$nc" = "|" ]; then
+      out="$out${NL}O$FS"; i=$((i + 2)); continue    # `||` — untrusted link
     fi
     case "$c" in
-      "&"|"|"|";"|"$NL") out="$out$NL"; i=$((i + 1)); continue ;;
+      "&"|"|"|";"|"$NL") out="$out${NL}O$FS"; i=$((i + 1)); continue ;;   # single &, |, ;, newline
     esac
     out="$out$c"; i=$((i + 1))
   done
@@ -204,7 +220,18 @@ NL='
 '
 SEGMENTS=$(split_segments "$COMMAND")
 
-while IFS= read -r seg; do
+# Each SEGMENTS line is `<sepcode>$FS<segment text>` (see split_segments):
+# `A` = linked to its predecessor by a guaranteed-success `&&` chain, `O` = any
+# other link (`;`, `||`, `|`, `&`, newline) or the first segment. On every `O`
+# link we DROP the pending branch-switch/rename trust recorded by earlier
+# segments, because only `&&` guarantees the switch actually succeeded before
+# this segment runs — so `git checkout feat/x ; git commit` (semicolon), `... ||
+# git commit`, `... | git commit`, `... & git commit` all fall through to the
+# live $PWD branch lookup (block on main) instead of trusting a switch that may
+# never have taken effect (PF-995 / #8988 round 4 finding 1). TRACKED_DIR (from
+# `cd`) is intentionally NOT reset — that is orthogonal to switch trust.
+while IFS="$FS" read -r sepcode seg; do
+  if [ "$sepcode" != "A" ]; then pending_clear_all; fi
   case "$seg" in *[![:space:]]*) ;; *) continue ;; esac
 
   # Classification-only copy with each single/double-quoted span collapsed to a
@@ -436,16 +463,39 @@ done <<EOF_SEGMENTS
 $SEGMENTS
 EOF_SEGMENTS
 
+# The whole-command prefilter (top of file) is NOT quote-aware, so a benign
+# command whose ONLY "git commit" text sits inside a quoted string (an `echo`
+# reminder, a `jq --arg` payload) passes it, yet no segment's quote-stripped
+# class resolves a real git target. Blocking such a command on $PWD is a false
+# BLOCK (PF-995 / #8988 round 4 finding 3). To tell it apart from a quoted
+# payload handed to a NESTED shell — `bash -c 'git commit'`, `eval 'git commit'`,
+# where the quoted text really will execute — compute a quote-collapsed skeleton
+# and look for an interpreter-with-inline-code (`bash|sh|zsh|ksh|dash … -c`) or
+# `eval`. Present → keep the fail-CLOSED $PWD fallback; absent → allow.
+COMMAND_CLASS=$(printf '%s' "$COMMAND" | sed -E 's/"[^"]*"/X/g' | sed -E "s/'[^']*'/X/g")
+NESTED_INTERP=0
+# `-[[:alnum:]]*c` matches a `-c` flag possibly bundled with other letters
+# (`-xc`); the `([^[:space:]]+[[:space:]]+)*` hop skips any intervening options
+# (`bash -euo pipefail -c …`) between the interpreter name and its `-c`.
+INTERP_RE='(^|[[:space:]]|[;&|()])(bash|sh|zsh|ksh|dash)[[:space:]]+([^[:space:]]+[[:space:]]+)*-[[:alnum:]]*c([[:space:]]|$)'
+EVAL_RE='(^|[[:space:]]|[;&|()])eval([[:space:]]|$)'
+if printf '%s' "$COMMAND_CLASS" | grep -qE "$INTERP_RE" \
+   || printf '%s' "$COMMAND_CLASS" | grep -qE "$EVAL_RE"; then
+  NESTED_INTERP=1
+fi
+
 # Fall back to the hook cwd so a plain commit is still checked. Two triggers:
-#   1. The whole-command filter matched but NO segment resolved a target (a
-#      quoting edge case). The HANDLED guard keeps an exempted `pull --ff-only`
-#      from re-entering here.
+#   1. The whole-command filter matched but NO segment resolved a target — a
+#      quoting edge case. This now fires ONLY when a nested interpreter is
+#      present (see above): a benign quoted "git commit" mention is allowed,
+#      but a quoted payload fed to `bash -c`/`eval` stays blocked (fail closed).
+#      The HANDLED guard keeps an exempted `pull --ff-only` from re-entering here.
 #   2. A commit rode inside a switch/branch segment and was never attributed
 #      ($UNATTRIBUTED). This fires even when an EARLIER benign target WAS
 #      recorded — a non-main target from one segment must not suppress the
 #      fallback for a later unattributed commit — so the record is APPENDED,
 #      not assigned (PF-995 / #8988 round 3 fix 3).
-if { [ -z "$COMMIT_TARGETS" ] && [ "$HANDLED" -eq 0 ]; } || [ "$UNATTRIBUTED" -eq 1 ]; then
+if { [ -z "$COMMIT_TARGETS" ] && [ "$HANDLED" -eq 0 ] && [ "$NESTED_INTERP" -eq 1 ]; } || [ "$UNATTRIBUTED" -eq 1 ]; then
   fb_subcmd=$(detect_subcmd "$COMMAND")
   [ -z "$fb_subcmd" ] && fb_subcmd="commit"
   COMMIT_TARGETS="${COMMIT_TARGETS}D${FS}${fb_subcmd}${FS}${PWD}${NL}"

@@ -671,6 +671,72 @@ check "two-arg rename to main with unresolvable current branch fails closed; com
 run_hook "$PREV_FEAT_REPO" "git switch - && $GC -m 'msg'"
 check "'switch -' back to a feature branch then commit allowed (round3 fix 5, mirror of checkout -)" 0
 
+# =====================================================================
+# ROUND 4 (PF-995 / #8988, review round 4): the round-3 splitter collapsed
+# EVERY separator to a newline, erasing the success-dependency between
+# segments. A recorded plain `git checkout/switch <feature>` must only be
+# TRUSTED to have taken effect before a following commit across a
+# guaranteed-success `&&` chain; across any other link (`;`, `||`, `|`, `&`,
+# newline) the switch may not have run, may have failed, or is unordered, so
+# the following commit must fall through to the live $PWD lookup (main → block).
+# =====================================================================
+
+# --- ROUND4 FINDING 1/2: separator-type-aware trust. From a MAIN checkout, a
+# --- plain switch to a (nonexistent) feature branch linked to a following
+# --- commit by anything OTHER than `&&` must NOT launder the commit onto that
+# --- pending feature branch — it stays on main and blocks (exit 2). ---
+run_hook "$MAIN_REPO" "git checkout feat/nonexistent-x ; $GC -m 'payload'"
+check "checkout <feature> ';' commit does not inherit switch trust across a non-&& link; blocked on main (round4 finding 1, semicolon)" 2
+
+run_hook "$MAIN_REPO" "git checkout feat/nonexistent-x || $GC -m 'payload'"
+check "checkout <feature> '||' commit runs BECAUSE the switch failed; blocked on main (round4 finding 1, double-pipe)" 2
+
+run_hook "$MAIN_REPO" "git switch feat/nonexistent-x | $GC -m 'payload'"
+check "switch <feature> '|' commit is unordered w.r.t. the switch; blocked on main (round4 finding 1, single-pipe)" 2
+
+run_hook "$MAIN_REPO" "git switch feat/nonexistent-x & $GC -m 'payload'"
+check "switch <feature> '&' background commit has no ordering guarantee; blocked on main (round4 finding 1, single-ampersand)" 2
+
+# --- ROUND4 FINDING 2: the legitimate `&&` allows MUST stay green — trust
+# --- propagates across a guaranteed-success chain, so a new-branch or
+# --- existing-feature switch followed by `&& commit` is allowed on main. ---
+run_hook "$MAIN_REPO" "git checkout -b feat/new-r4 && $GC -m 'msg'"
+check "checkout -b then '&&' commit still allowed on main (round4 finding 2, legit && new branch)" 0
+
+run_hook "$MAIN_REPO" "git checkout feat/existing && $GC -m 'msg'"
+check "checkout <existing feature> then '&&' commit still allowed on main (round4 finding 2, legit && plain switch)" 0
+
+# --- ROUND4 FINDING 3: the whole-command prefilter is not quote-aware, so a
+# --- benign command whose only "git commit" text sits inside a quoted string
+# --- (run from a MAIN checkout) passes the prefilter yet resolves no real
+# --- target. That must ALLOW (exit 0) — EXCEPT fail closed when the
+# --- quote-stripped skeleton hands a payload to a nested shell interpreter. ---
+run_hook "$MAIN_REPO" 'echo "remember to git commit later"'
+check "benign echo with quoted 'git commit' not false-blocked on main (round4 finding 3, allow)" 0
+
+run_hook "$MAIN_REPO" "jq -nc --arg c 'see git commit here' '{}'"
+check "jq --arg with quoted 'git commit' payload, no real git segment, allowed on main (round4 finding 3, allow)" 0
+
+run_hook "$MAIN_REPO" "bash -c 'echo hi && git commit -m x'"
+check "nested interpreter with quoted 'git commit' payload fails closed; blocked on main (round4 finding 3, nested interp)" 2
+
+run_hook "$MAIN_REPO" "eval 'echo hi && git commit -m x'"
+check "eval with quoted 'git commit' payload fails closed; blocked on main (round4 finding 3, eval)" 2
+
+run_hook "$MAIN_REPO" "$GC -m x"
+check "bare unquoted 'git commit' on main still blocked (round4 finding 3, control)" 2
+
+# --- ROUND4 FINDING 4: coverage parity for the branch-rename-segment
+# --- UNATTRIBUTED guard (hook ~362), mirroring the switch-segment pair. A
+# --- commit-creating subcommand hidden in a branch-rename segment (via
+# --- `$(...)`) must force the $PWD fallback (block on main), and the mirror
+# --- must NOT over-block a benign rename+commit chain. ---
+run_hook "$MAIN_REPO" "git -C $FEAT_REPO commit -m ok && git branch -M feat/x \$(git commit -m payload)"
+check "unattributed commit hidden in a branch-rename segment forces \$PWD fallback; blocked on main (round4 finding 4, rename guard)" 2
+
+run_hook "$FEAT_REPO" "git -C $FEAT_REPO commit -m ok && git branch -M feat/renamed && $GC -m 'msg'"
+check "benign branch-rename+commit chain on feature branch not over-blocked by rename guard (round4 finding 4, non-over-block mirror)" 0
+
 echo ""
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
