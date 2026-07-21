@@ -25,6 +25,7 @@
  */
 
 import Stripe from 'stripe';
+import { pathToFileURL } from 'node:url';
 import { getStripe } from '../src/lib/billing/stripe-client';
 
 /**
@@ -94,7 +95,23 @@ export async function main(): Promise<void> {
   );
 }
 
-const isMain = process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`;
+/**
+ * Cross-platform "is this the process entry point" check. A naive
+ * `import.meta.url === \`file://${argv1}\`` comparison breaks on Windows —
+ * argv1 there is a backslash path with a drive letter (e.g.
+ * `C:\Users\me\script.ts`), which never equals the forward-slash
+ * `file:///C:/Users/me/script.ts` form Node uses for import.meta.url — so
+ * the naive check silently never runs `main()` when invoked directly on
+ * Windows. `pathToFileURL` performs the same platform-aware normalization
+ * Node uses internally to compute import.meta.url, so comparing through it
+ * matches on every platform.
+ */
+export function isMainModule(metaUrl: string, argv1: string | undefined): boolean {
+  if (argv1 === undefined) return false;
+  return metaUrl === pathToFileURL(argv1).href;
+}
+
+const isMain = isMainModule(import.meta.url, process.argv[1]);
 if (isMain) {
   main().catch((err: unknown) => {
     console.error('Provisioning failed:', err);

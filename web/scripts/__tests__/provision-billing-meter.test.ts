@@ -21,10 +21,12 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
 }));
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { pathToFileURL } from 'node:url';
 import {
   METER_EVENT_NAME,
   resolveStripeMode,
   ensureMeterProvisioned,
+  isMainModule,
   main,
 } from '../provision-billing-meter';
 import { METER_EVENT_NAME as REPORTER_METER_EVENT_NAME } from '@/lib/billing/meterEvents';
@@ -107,6 +109,54 @@ describe('ensureMeterProvisioned', () => {
       value_settings: { event_payload_key: 'value' },
       customer_mapping: { type: 'by_id', event_payload_key: 'stripe_customer_id' },
     });
+  });
+});
+
+describe('isMainModule', () => {
+  it('is true when metaUrl is the file:// URL for argv1 (POSIX path)', () => {
+    const argv1 = '/home/runner/work/project-forge/web/scripts/provision-billing-meter.ts';
+    const metaUrl = pathToFileURL(argv1).href;
+
+    expect(isMainModule(metaUrl, argv1)).toBe(true);
+  });
+
+  it('is false when metaUrl does not match the file:// URL for argv1', () => {
+    const argv1 = '/home/runner/work/project-forge/web/scripts/provision-billing-meter.ts';
+
+    expect(isMainModule('file:///something/else.ts', argv1)).toBe(false);
+  });
+
+  it('is false when argv1 is undefined (imported as a library, not run directly)', () => {
+    expect(isMainModule('file:///whatever/provision-billing-meter.ts', undefined)).toBe(false);
+  });
+
+  it('matches a Windows-style argv1 (backslashes, drive letter) via pathToFileURL, not naive string concatenation', async () => {
+    vi.resetModules();
+    vi.doMock('node:url', () => ({
+      // Stand-in for Node's real (platform-dependent) pathToFileURL: on an
+      // actual Windows host it normalizes backslashes to forward slashes and
+      // prefixes the drive letter, producing a URL that matches Node's own
+      // import.meta.url for that same file. We can't exercise the real
+      // win32 branch on this (POSIX) test runner, so this fake reproduces
+      // just that normalization to prove isMainModule delegates to
+      // pathToFileURL(argv1).href rather than the old buggy
+      // `file://${argv1}` template (which a raw backslash path would never
+      // match).
+      pathToFileURL: (p: string) =>
+        new URL('file:///' + p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, '$1:')),
+    }));
+
+    const mod = await import('../provision-billing-meter');
+    const argv1 = 'C:\\Users\\dev\\project-forge\\web\\scripts\\provision-billing-meter.ts';
+    const metaUrl = 'file:///C:/Users/dev/project-forge/web/scripts/provision-billing-meter.ts';
+
+    expect(mod.isMainModule(metaUrl, argv1)).toBe(true);
+    // The old naive comparison would never have matched here — pinning that
+    // down directly documents the bug this test guards against.
+    expect(`file://${argv1}`).not.toBe(metaUrl);
+
+    vi.doUnmock('node:url');
+    vi.resetModules();
   });
 });
 
