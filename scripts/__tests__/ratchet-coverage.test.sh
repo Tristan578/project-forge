@@ -172,7 +172,41 @@ check "missing summary exits 0" 0 "$rc"
 check "missing summary modifies nothing" "70/60/65/72" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
 
 # ---------------------------------------------------------------------------
-# 7. Workflow contract: coverage-ratchet.yml must gate AND commit the node
+# 7. Missing node config → warn, skip lockstep, main config still ratchets
+#    (the HAS_NODE_CONFIG=false fallback must not crash or block the ratchet)
+# ---------------------------------------------------------------------------
+fresh_root 75 65 70 77  70 60 65 72
+rm "$ROOT/web/vitest.config.node.ts"
+write_summary "$ROOT/web/coverage" 80.5 70.2 74.9 81.3
+rc=0; run_ratchet "$ROOT" || rc=$?
+check "missing node config exits 0" 0 "$rc"
+check "main config still bumped without node config" "80/70/74/81" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
+skip_warned=0
+grep -q '::warning::.*vitest.config.node.ts.*node-config lockstep skipped' "$ROOT/ratchet.log" && skip_warned=1
+check "missing node config emits a lockstep-skipped warning" 1 "$skip_warned"
+node_recreated=0
+[ -e "$ROOT/web/vitest.config.node.ts" ] && node_recreated=1
+check "missing node config is not recreated" 0 "$node_recreated"
+phantom_sync=0
+grep -q '::notice::.*vitest.config.node.ts' "$ROOT/ratchet.log" && phantom_sync=1
+check "missing node config emits no node-sync notice" 0 "$phantom_sync"
+
+# ---------------------------------------------------------------------------
+# 8. Node config AHEAD of main's new value → never decreased, no sync notice
+#    (node_target keeps the higher current value per metric)
+# ---------------------------------------------------------------------------
+fresh_root 75 65 70 77  90 80 85 92
+write_summary "$ROOT/web/coverage" 80.5 70.2 74.9 81.3
+rc=0; run_ratchet "$ROOT" || rc=$?
+check "node-ahead run exits 0" 0 "$rc"
+check "main config bumped while node is ahead" "80/70/74/81" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
+check "node config ahead of main is never decreased" "90/80/85/92" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+ahead_sync=0
+grep -q '::notice::.*vitest.config.node.ts' "$ROOT/ratchet.log" && ahead_sync=1
+check "node-ahead run emits no node-sync notice" 0 "$ahead_sync"
+
+# ---------------------------------------------------------------------------
+# 9. Workflow contract: coverage-ratchet.yml must gate AND commit the node
 #    config alongside vitest.config.ts, and must never wire the test seam
 # ---------------------------------------------------------------------------
 diff_gates=$(grep -c 'git diff --quiet web/vitest.config.ts web/vitest.config.node.ts' "$WORKFLOW" || true)

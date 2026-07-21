@@ -83,7 +83,7 @@ All work tracked via taskboard. Use `/kanban` skill for full protocol.
 - **`||` vs `??` for defaults** — `||` treats `0` as falsy. `Number(undefined)` is `NaN`. Use `Number.isFinite()`.
 - **`auth()` crashes without Clerk keys** — Use `safeAuth()` from `@/lib/auth/safe-auth.ts`, not `auth()` from `@clerk/nextjs/server`.
 - **neon-http `db.transaction()` throws** — Use `getNeonSql()` -> `neonSql.transaction([...statements])`. INSERT...SELECT before UPDATE.
-- **vitest workspace drops coverage thresholds** — CI must use standalone `vitest.config.ts` (currently 75/65/70/77; auto-ratcheted upward by the coverage-ratchet workflow — read the config for live values, never trust a doc snapshot).
+- **vitest workspace drops coverage thresholds** — CI must use standalone `vitest.config.ts` (auto-ratcheted upward by the coverage-ratchet workflow, which also keeps `vitest.config.node.ts` in lockstep — read the config for live values, never trust a doc snapshot).
 - **Never merge PRs** — Claude creates PRs; user reviews and merges. Run review board first.
 - **Every PR must have `Closes #NNNN` AND `--milestone`** — GitHub issue number (not PF-XXX), plus a milestone (P0/P1/P2/P3). Hook enforces both on `gh pr create`. Run sync-push first.
 - **Every PR needs a changeset** — Run `npx changeset` (from repo root) or create `.changeset/<name>.md`. Use `skip changeset` label for docs/CI-only PRs.

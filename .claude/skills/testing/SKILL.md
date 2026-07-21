@@ -21,7 +21,7 @@ SpawnForge is a game engine. Game engines have exponential state spaces — enti
 | Functions | 70% | 100% | No untested exported functions |
 | Lines | 77% | 100% | Full line coverage |
 
-Thresholds live in `web/vitest.config.ts` and ratchet upward automatically (coverage-ratchet workflow) — read the config for the current values rather than trusting any doc snapshot.
+Thresholds live in `web/vitest.config.ts` and ratchet upward automatically (coverage-ratchet workflow), with `web/vitest.config.node.ts` kept in lockstep by the same ratchet (PF-996) — read the config for the current values rather than trusting any doc snapshot.
 
 **100% coverage does not mean 100% bug-free.** It means every line of code has been proven to execute without crashing. Edge cases, race conditions, and integration failures need additional targeted tests beyond coverage.
 
@@ -311,5 +311,5 @@ Vitest is Vite-native with Jest-compatible API, native ESM, TypeScript, and JSX 
 - Workspace config: `web/vitest.workspace.ts` — splits into two environments:
   - `web/vitest.config.node.ts` (environment: node) — lib, stores, API routes
   - `web/vitest.config.jsdom.ts` (environment: jsdom) — components, hooks
-- Standalone config: `web/vitest.config.ts` — used by CI for coverage thresholds (currently 75/65/70/77; auto-ratcheted, read the config for live values)
+- Standalone config: `web/vitest.config.ts` — used by CI for coverage thresholds (auto-ratcheted, read the config for live values; `vitest.config.node.ts` thresholds are kept in lockstep by the ratchet)
 - Coverage report outputs to `web/coverage/`

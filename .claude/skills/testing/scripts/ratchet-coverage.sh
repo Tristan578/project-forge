@@ -2,7 +2,9 @@
 # ratchet-coverage.sh — Coverage threshold auto-ratchet
 #
 # Reads the coverage-summary.json produced by vitest --coverage and bumps
-# thresholds in web/vitest.config.ts if actual coverage exceeds them.
+# thresholds in web/vitest.config.ts if actual coverage exceeds them, keeping
+# web/vitest.config.node.ts in lockstep (never decreased; skipped with a
+# warning if the node config is missing).
 #
 # Usage:
 #   bash .claude/skills/testing/scripts/ratchet-coverage.sh [coverage-dir]
