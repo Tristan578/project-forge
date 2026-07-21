@@ -362,9 +362,11 @@ jobs:
             .claude/hooks/reject-incomplete-review.sh \
             .claude/hooks/review-quality-gate.sh \
             .claude/hooks/auto-approve-safe-commands.sh \
+            .claude/hooks/block-main-commits.sh \
             .claude/hooks/__tests__/reject-incomplete-review.test.sh \
             .claude/hooks/__tests__/review-quality-gate.test.sh \
             .claude/hooks/__tests__/auto-approve-safe-commands.test.sh \
+            .claude/hooks/__tests__/block-main-commits.test.sh \
             .claude/hooks/__tests__/settings-permissions.test.sh
 
   # ---- Skills Lint ----

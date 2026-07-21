@@ -191,6 +191,68 @@ check "git pull --ff-only on main allowed (cannot create commits)" 0
 run_hook "$FEAT_REPO" "git pull"
 check "git pull on feature branch allowed" 0
 
+# --- FINDING 1: long options with a SPACE-separated value (no `=`) must not
+# --- let the subcommand slip past the detector ---
+run_hook "$FEAT_REPO" "git --git-dir $MAIN_REPO/.git commit -m 'msg'"
+check "--git-dir <space value> commit blocked from feature cwd (finding 1)" 2
+
+run_hook "$MAIN_REPO" "git --git-dir $FEAT_REPO/.git commit -m 'msg'"
+check "--git-dir <space value> commit allowed when target is feature (finding 1)" 0
+
+run_hook "$FEAT_REPO" "git --work-tree $MAIN_REPO commit -m 'msg'"
+check "--work-tree <space value> commit blocked (conservative, finding 1)" 2
+
+# --- FINDING 2: branch-target extraction must tolerate the global-option chain ---
+run_hook "$MAIN_REPO" "git -C $MAIN_REPO checkout -b feat/x && git -C $MAIN_REPO commit -m 'msg'"
+check "git -C <repo> checkout -b feat/x then git -C <repo> commit allowed (finding 2)" 0
+
+run_hook "$MAIN_REPO" "git -c k=v checkout main && $GC -m 'msg'"
+check "git -c k=v checkout main then commit blocked (finding 2)" 2
+
+run_hook "$MAIN_REPO" "git -c k=v switch -c feat/y && $GC -m 'msg'"
+check "git -c k=v switch -c feat/y then commit allowed (finding 2)" 0
+
+# --- FINDING 3: force-create forms (-B / -C) set the pending branch too ---
+run_hook "$MAIN_REPO" "git checkout -B main && $GC -m 'msg'"
+check "checkout -B main then commit blocked (finding 3)" 2
+
+run_hook "$MAIN_REPO" "git checkout -B feat/x && $GC -m 'msg'"
+check "checkout -B feat/x then commit allowed (finding 3)" 0
+
+run_hook "$MAIN_REPO" "git switch -C main && $GC -m 'msg'"
+check "switch -C main then commit blocked (finding 3)" 2
+
+run_hook "$MAIN_REPO" "git switch -C feat/x && $GC -m 'msg'"
+check "switch -C feat/x then commit allowed (finding 3)" 0
+
+# --- FINDING 4: a plain switch to an existing NON-main branch from a main
+# --- checkout must not be false-blocked ---
+run_hook "$MAIN_REPO" "git checkout feat/existing && $GC -m 'msg'"
+check "checkout <existing-feature> then commit allowed from main (finding 4)" 0
+
+run_hook "$MAIN_REPO" "git switch feat/existing && $GC -m 'msg'"
+check "switch <existing-feature> then commit allowed from main (finding 4)" 0
+
+# The pathspec form (checkout <ref> -- <pathspec>) is NOT a branch switch and
+# must leave the branch decided by cwd — a restore on main still blocks.
+run_hook "$MAIN_REPO" "git checkout HEAD -- file.txt && $GC -m 'msg'"
+check "checkout <ref> -- <pathspec> is not a switch; commit on main still blocked (finding 4)" 2
+
+# --- FINDING 5: the block reason must name the resolving context ---
+run_hook "$MAIN_REPO" "cd $FEAT_REPO && $GC -m 'a' && cd $MAIN_REPO && $GC -m 'b'"
+check "chained main-directed commit blocked (finding 5 setup)" 2
+case "$HOOK_STDERR" in
+  *"$MAIN_REPO"*) PASS=$((PASS + 1)); echo "ok: block reason names the resolving directory (finding 5)" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: block reason omits resolving directory context (finding 5)" ;;
+esac
+
+run_hook "$MAIN_REPO" "git checkout main && $GC -m 'msg'"
+check "checkout main then commit blocked (finding 5 pending setup)" 2
+case "$HOOK_STDERR" in
+  *"pending branch"*) PASS=$((PASS + 1)); echo "ok: block reason names the pending branch (finding 5)" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: block reason omits pending-branch context (finding 5)" ;;
+esac
+
 # --- word-boundary near-miss: 'git' as a suffix of another word ---
 run_hook "$MAIN_REPO" "echo 'legit commit'"
 check "'legit commit' text near-miss allowed on main" 0

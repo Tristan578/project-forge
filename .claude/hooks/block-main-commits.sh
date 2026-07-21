@@ -17,6 +17,7 @@
 # Contract: exit 0 = allow, exit 2 = block (stderr carries the reason).
 # Fail-open posture: if the effective target can't be resolved (subshells,
 # variables, interpolation), the hook allows — PR review is the backstop.
+# This is an ACCIDENT gate, not an adversarial one.
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
@@ -29,8 +30,14 @@ fi
 Q='"[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+'
 
 # Global git options that may sit between `git` and its subcommand:
-# -C <dir>, -c <key=val>, --long-flag[=value], single-letter flags.
-GIT_OPT='(-C[[:space:]]+('"$Q"')|-c[[:space:]]+('"$Q"')|--[[:alnum:]-]+(=('"$Q"'))?|-[[:alnum:]])'
+# -C <dir>, -c <key=val>, value-taking long options in their SPACE-separated
+# form (`--git-dir <path>`, not just `--git-dir=<path>`), --long-flag[=value],
+# and single-letter flags. The value-taking long options are enumerated
+# explicitly (git's global set is small and fixed) rather than matched as a
+# generic `--opt <value>` — a generic form would greedily swallow the
+# subcommand token as if it were the option's value and defeat detection.
+GIT_VALOPT='--(git-dir|work-tree|namespace|super-prefix|config-env|attr-source)[[:space:]]+('"$Q"')'
+GIT_OPT='(-C[[:space:]]+('"$Q"')|-c[[:space:]]+('"$Q"')|'"$GIT_VALOPT"'|--[[:alnum:]-]+(=('"$Q"'))?|-[[:alnum:]])'
 
 # `git` at a word boundary (so text like "legit commit" does not match),
 # optionally preceded by GIT_* env assignments, followed by global options.
@@ -55,6 +62,18 @@ unquote() {
   printf '%s' "$s"
 }
 
+# Resolve a (possibly quoted, possibly relative, possibly empty) directory
+# token against the currently tracked cwd, yielding an absolute-ish path.
+resolve_dir() {
+  local d
+  d=$(unquote "$1")
+  case "$d" in
+    /*) printf '%s' "$d" ;;
+    "") printf '%s' "$TRACKED_DIR" ;;
+    *) printf '%s' "$TRACKED_DIR/$d" ;;
+  esac
+}
+
 # Walk the command's `&&`/`||`/`;`-chained segments in order, tracking `cd`
 # so we know the working directory of each git invocation, and tracking
 # branch switches so `git checkout -b tmp && git commit` is allowed while
@@ -63,7 +82,8 @@ unquote() {
 # message); a bogus tracked dir then fails the branch lookup below and the
 # hook fails OPEN — same posture as the malformed-stdin path.
 TRACKED_DIR="$PWD"
-PENDING_BRANCH=""   # non-empty → statically-known branch for TRACKED_DIR
+PENDING_BRANCH=""   # non-empty → statically-known branch for PENDING_DIR
+PENDING_DIR=""      # directory the pending branch switch applies to
 COMMIT_TARGETS=""   # newline-separated: B:<branch> | G:<git-dir> | D:<dir>
 HANDLED=0
 NL='
@@ -84,23 +104,48 @@ while IFS= read -r seg; do
       *) TRACKED_DIR="$TRACKED_DIR/$dir" ;;
     esac
     PENDING_BRANCH=""
+    PENDING_DIR=""
     continue
   fi
 
-  # Branch switches earlier in the chain.
+  # Branch switches earlier in the chain. Detection is opt-aware (GIT_CMD),
+  # so the extraction must tolerate the same global-option chain too
+  # (`git -C dir checkout -b X`, `git -c k=v switch Y`) — otherwise a
+  # detected switch would extract no branch and fall through to a live
+  # pre-execution lookup that still reports main.
   if printf '%s' "$seg" | grep -qE "${GIT_CMD}(checkout|switch)([[:space:]]|$)"; then
-    nb=$(printf '%s' "$seg" | sed -nE 's/.*git[[:space:]]+(checkout[[:space:]]+-b|switch[[:space:]]+-c)[[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+).*/\2/p')
+    # Effective directory of the switch: `git -C <dir>` overrides the cwd.
+    head_co=$(printf '%s' "$seg" | sed -E 's/[[:space:]](checkout|switch)[[:space:]].*$//')
+    co_cdir=$(printf '%s' "$head_co" | sed -nE 's/.*[[:space:]]-C[[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+).*/\1/p')
+    sw_dir=$(resolve_dir "$co_cdir")
+    # Isolate "<sub> <args>" from the switch keyword onward, dropping the
+    # opt chain so the branch extraction below is a simple anchored match.
+    co=$(printf '%s' "$seg" | sed -nE 's/.*[[:space:]](checkout|switch)[[:space:]]+(.*)$/\1 \2/p')
+    # Force-create/reset forms name a brand-new branch: checkout -b / -B and
+    # switch -c / -C all set the pending branch identically.
+    nb=$(printf '%s' "$co" | sed -nE 's/^(checkout[[:space:]]+-[bB]|switch[[:space:]]+-[cC])[[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+).*/\2/p')
     if [ -n "$nb" ]; then
       PENDING_BRANCH=$(unquote "$nb")
+      PENDING_DIR="$sw_dir"
     elif printf '%s' "$seg" | grep -qE '[[:space:]]--([[:space:]]|$)'; then
-      # Pathspec form (`git checkout main -- file`) — no branch change.
+      # Pathspec form (`git checkout main -- file`) — restores files, does
+      # NOT change branch, so leave the pending state untouched. Deliberate
+      # fail-open tradeoff: a pathspec-only checkout of a file whose name
+      # happens to look like a branch would also be treated as "not a switch"
+      # — acceptable under the accident threat model.
       :
     else
-      tgt=$(printf '%s' "$seg" | sed -nE 's/.*git[[:space:]]+(checkout|switch)[[:space:]]+([^-][^[:space:]]*).*/\2/p')
-      case "$tgt" in
-        main|master) PENDING_BRANCH="$tgt" ;;
-        *) PENDING_BRANCH="" ;;  # unknown target — fall back to git lookup
-      esac
+      # Plain `checkout|switch <target>`. Record the target — a switch to a
+      # non-main/master ref is a legitimate feature branch, so a following
+      # commit resolves to it instead of the pre-execution live branch (which
+      # from a main checkout is still main → the false-block this fixes). A
+      # switch to main/master records "main" and keeps the block.
+      tgt=$(printf '%s' "$co" | sed -nE 's/^(checkout|switch)[[:space:]]+([^-][^[:space:]]*).*/\2/p')
+      tgt=$(unquote "$tgt")
+      if [ -n "$tgt" ]; then
+        PENDING_BRANCH="$tgt"
+        PENDING_DIR="$sw_dir"
+      fi
     fi
     continue
   fi
@@ -145,21 +190,16 @@ while IFS= read -r seg; do
     continue
   fi
 
-  # `git -C <dir>` overrides the tracked cd for this invocation.
+  # `git -C <dir>` overrides the tracked cd for this invocation; otherwise
+  # the commit lands in the tracked cwd. A statically-known branch switch for
+  # the SAME effective directory wins over a pre-execution live lookup (the
+  # `git -C dir checkout -b X && git -C dir commit` case).
   c_dir=$(printf '%s' "$head_part" | sed -nE 's/.*[[:space:]]-C[[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+).*/\1/p')
-  if [ -n "$c_dir" ]; then
-    c_dir=$(unquote "$c_dir")
-    case "$c_dir" in
-      /*) COMMIT_TARGETS="${COMMIT_TARGETS}D:${c_dir}${NL}" ;;
-      *) COMMIT_TARGETS="${COMMIT_TARGETS}D:${TRACKED_DIR}/${c_dir}${NL}" ;;
-    esac
-    continue
-  fi
-
-  if [ -n "$PENDING_BRANCH" ]; then
+  effdir=$(resolve_dir "$c_dir")
+  if [ -n "$PENDING_BRANCH" ] && [ "$PENDING_DIR" = "$effdir" ]; then
     COMMIT_TARGETS="${COMMIT_TARGETS}B:${PENDING_BRANCH}${NL}"
   else
-    COMMIT_TARGETS="${COMMIT_TARGETS}D:${TRACKED_DIR}${NL}"
+    COMMIT_TARGETS="${COMMIT_TARGETS}D:${effdir}${NL}"
   fi
 done <<EOF_SEGMENTS
 $SEGMENTS
@@ -175,16 +215,18 @@ fi
 while IFS= read -r target; do
   [ -z "$target" ] && continue
   case "$target" in
-    B:*) CURRENT_BRANCH="${target#B:}" ;;
-    G:*) CURRENT_BRANCH=$(git --git-dir="${target#G:}" branch --show-current 2>/dev/null) ;;
-    D:*) CURRENT_BRANCH=$(git -C "${target#D:}" branch --show-current 2>/dev/null) ;;
-    *) CURRENT_BRANCH="" ;;
+    B:*) CURRENT_BRANCH="${target#B:}"; CONTEXT="pending branch '${CURRENT_BRANCH}'" ;;
+    G:*) CURRENT_BRANCH=$(git --git-dir="${target#G:}" branch --show-current 2>/dev/null); CONTEXT="git-dir '${target#G:}'" ;;
+    D:*) CURRENT_BRANCH=$(git -C "${target#D:}" branch --show-current 2>/dev/null); CONTEXT="directory '${target#D:}'" ;;
+    *) CURRENT_BRANCH=""; CONTEXT="" ;;
   esac
   if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
     # Feedback must go to STDERR — the harness surfaces stderr on exit 2;
-    # stdout is dropped ("No stderr output").
+    # stdout is dropped ("No stderr output"). Name the resolving context so
+    # multi-segment chains are debuggable.
     {
       echo "BLOCKED: commit-creating git operation on '$CURRENT_BRANCH' is not allowed."
+      echo "Resolved from ${CONTEXT}."
       echo "Create a feature branch first: git checkout -b feat/your-feature"
       echo "To sync main from origin, use: git pull --ff-only"
       echo "Direct commits to main bypass CI/CD, Sentry review, and code review."
