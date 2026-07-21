@@ -43,29 +43,51 @@ GIT_OPT='(-C[[:space:]]+('"$Q"')|-c[[:space:]]+('"$Q"')|'"$GIT_VALOPT"'|--[[:aln
 
 # `git` at a word boundary (so text like "legit commit" does not match),
 # optionally preceded by GIT_* env assignments, followed by global options.
-# The leading boundary also admits shell separators AND the quote/backtick
-# characters, so a `git` abutting one (`;git commit`, `(git commit)`, and a
-# nested-interpreter payload whose text begins with git — `bash -c "git commit"`,
-# `bash -c 'git commit'`, `` `git commit` ``) is still recognized (PF-995).
-GIT_CMD='(^|[[:space:]]|[;&|()"`'\''])(GIT_[A-Z_]+=('"$Q"')[[:space:]]+)*git([[:space:]]+'"$GIT_OPT"')*[[:space:]]+'
+# The leading boundary is a NEGATED word-char class: start-of-string OR any
+# single character that is NOT alnum/underscore/dot/hyphen. Rounds 5-6 kept
+# ENUMERATING boundary characters (added quotes, then the backtick) and each
+# re-review found the next missing one (redirects, backslash, slash) — an
+# allowlist of separators ALWAYS has a next gap. Inverting the class closes the
+# whole family at once: quotes, backtick, redirects (`>`,`<`), backslash, `/`,
+# and any future single separator all become boundaries automatically, while
+# `e`/`-`/`.` stay word chars so `legit commit`, `some-git`, `.git` still do
+# NOT match. `/` becoming a boundary means path-invoked `/usr/bin/git commit`
+# newly matches — a bonus catch, safe because the pipeline decides the verdict
+# (PF-995 round 7 Fix A).
+GIT_CMD='(^|[^[:alnum:]_.-])(GIT_[A-Z_]+=('"$Q"')[[:space:]]+)*git([[:space:]]+'"$GIT_OPT"')*[[:space:]]+'
 
-# Trailing boundary after a mutate subcommand. Mirrors the GIT_CMD leading
-# class (above): besides whitespace / shell separators / end-of-string, it
-# admits the quote and backtick characters, so a subcommand abutting a CLOSING
-# quote or backtick in its BARE form (no trailing args) is not missed —
-# `bash -c "git commit"`, `bash -c 'git commit'`, `` `git commit` ``,
-# `eval "git merge"` (PF-995). Factored into ONE variable used at all three
-# trailing-class sites (here + detect_subcmd's two greps) so they cannot drift.
-# Same bash-3.2-safe bracket quoting as line 50: single-quoted `'\''` for the
-# embedded single quote, backtick literal inside single quotes.
-SUB_END='([[:space:]]|[;&|()"`'\'']|$)'
+# Trailing boundary after a mutate subcommand. The SAME negated word-char class
+# as the GIT_CMD leading boundary (above), plus end-of-string: any character
+# that is NOT alnum/underscore/dot/hyphen terminates the subcommand. So a
+# subcommand abutting a closing quote/backtick (`bash -c "git commit"`), a shell
+# separator, OR a redirect with NO intervening space (`git commit>out.txt`,
+# `>>`, `<in.txt`, `>&2`) is caught, while the hyphen staying a word char keeps
+# `git commit-tree` (plumbing) unmatched. Factored into ONE variable used at all
+# three trailing-class sites (here + detect_subcmd's two greps) so they cannot
+# drift (PF-995 round 7 Fix A).
+SUB_END='([^[:alnum:]_.-]|$)'
 
 # Every git subcommand that creates commits (or, for stash pop, restages
 # work for one on the current branch), abutting the trailing boundary above.
 MUTATE_SUB='(commit|merge|cherry-pick|revert|pull|stash[[:space:]]+pop)'"$SUB_END"
 GIT_MUTATE_RE="${GIT_CMD}${MUTATE_SUB}"
 
-if ! printf '%s' "$COMMAND" | grep -qE "$GIT_MUTATE_RE"; then
+# Normalized copy: strip backslashes, double quotes, single quotes, and
+# backticks. The escaped-quote nested forms defeat RAW-text matching even with
+# Fix A's boundary classes — `sh -c "\"git\" commit"` puts an escaped quote
+# immediately after the word `git`, so GIT_CMD's required whitespace-after-git
+# never appears in the raw text. Stripping those four characters collapses the
+# form to `sh -c git commit`, which matches. Enter the pipeline if EITHER the
+# raw command OR the normalized copy matches: over-matching is the SAFE
+# direction — a prefilter match only ROUTES into the pipeline, whose quote-aware
+# segment logic + attribution decide the actual verdict (a benign
+# `echo "git" "commit"` normalizes to a match but its segment collapses to
+# `echo X X` and resolves no target, so it still exits 0). detect_subcmd falls
+# back to $COMMAND_NORM below so a normalized-only block still NAMEs its
+# subcommand (PF-995 round 7 Fix B).
+COMMAND_NORM=$(printf '%s' "$COMMAND" | tr -d '\\"'\''`')
+if ! printf '%s' "$COMMAND" | grep -qE "$GIT_MUTATE_RE" &&
+   ! printf '%s' "$COMMAND_NORM" | grep -qE "$GIT_MUTATE_RE"; then
   exit 0
 fi
 
@@ -495,6 +517,24 @@ if printf '%s' "$COMMAND_CLASS" | grep -qE "$INTERP_RE" \
   NESTED_INTERP=1
 fi
 
+# Command substitution — `$(...)` or backticks — EXECUTES its contents even
+# inside DOUBLE quotes, so `"$(git commit)"` and `` "`git commit`" `` run the
+# inner git exactly like a `bash -c` payload does. COMMAND_CLASS collapses ALL
+# quoted spans (incl. double), wiping the substitution to X, so the interpreter
+# check above never sees it and the round-4 quoted-only gate would allow. Detect
+# it here on a copy with ONLY single-quoted spans collapsed — single-quoted
+# substitution text is INERT (`echo 'see $(git commit)'` must stay allowed, and
+# its `$(` sits inside the collapsed span) — and treat its presence as a nested
+# executor so the fail-CLOSED $PWD fallback fires. Straightforward quoted-
+# substitution forms thus block; oddball benign forms that merely MENTION a
+# substitution and a commit-word in the same double-quoted string stay within
+# the hook's documented fail-open accident-gate posture (PF-995 round 7 Fix C).
+SUBST_SCAN=$(printf '%s' "$COMMAND" | sed -E "s/'[^']*'/X/g")
+if printf '%s' "$SUBST_SCAN" | grep -qE '\$\(' \
+   || printf '%s' "$SUBST_SCAN" | grep -q '`'; then
+  NESTED_INTERP=1
+fi
+
 # Fall back to the hook cwd so a plain commit is still checked. Two triggers:
 #   1. The whole-command filter matched but NO segment resolved a target — a
 #      quoting edge case. This now fires ONLY when a nested interpreter is
@@ -508,6 +548,11 @@ fi
 #      not assigned (PF-995 / #8988 round 3 fix 3).
 if { [ -z "$COMMIT_TARGETS" ] && [ "$HANDLED" -eq 0 ] && [ "$NESTED_INTERP" -eq 1 ]; } || [ "$UNATTRIBUTED" -eq 1 ]; then
   fb_subcmd=$(detect_subcmd "$COMMAND")
+  # Escaped-quote forms (`sh -c "\"git\" merge"`) hide the subcommand from a RAW
+  # detect_subcmd — GIT_CMD's whitespace-after-git never matches — so fall back
+  # to the normalized copy (Fix B) to NAME the real subcommand before the
+  # generic "commit" default (PF-995 round 7 Fix B).
+  [ -z "$fb_subcmd" ] && fb_subcmd=$(detect_subcmd "$COMMAND_NORM")
   [ -z "$fb_subcmd" ] && fb_subcmd="commit"
   COMMIT_TARGETS="${COMMIT_TARGETS}D${FS}${fb_subcmd}${FS}${PWD}${NL}"
 fi

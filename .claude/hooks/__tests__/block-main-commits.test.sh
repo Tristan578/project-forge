@@ -842,6 +842,99 @@ check "benign printf, git commit abuts CLOSING single-quote, no interpreter, all
 run_hook "$FEAT_REPO" "bash -c \"$GC\""
 check "bash -c BARE git commit from a feature-branch cwd allowed (round6 finding 2, feature-branch symmetry)" 0
 
+# =====================================================================
+# ROUND 7 (PF-995 / #8989, review round 6): the enumerated boundary
+# classes at GIT_CMD (leading) and SUB_END (trailing) still omitted whole
+# families of separators — every prior round added one more character and
+# the next review found the next gap. Round 7 INVERTS both classes to
+# NEGATED word-char classes (`[^[:alnum:]_.-]`) and adds a normalized
+# prefilter copy (backslash/quote/backtick-stripped) plus command-
+# substitution-as-executor detection. Redirects (`>`,`<`,`>>`,`>&`),
+# backslash, path-slash, and escaped-quote forms all become boundaries or
+# match the normalized copy automatically. These BARE/redirect/escaped
+# forms landed real commits on main pre-fix; they must now BLOCK (exit 2).
+# =====================================================================
+
+# --- FIX A: redirect operators abutting a mutate subcommand (no space) are
+# --- boundaries under the negated trailing class. TOP-LEVEL, no nesting. ---
+run_hook "$MAIN_REPO" "$GC>out.txt"
+check "commit abutting '>out.txt' redirect blocked on main (round7 fix A, stdout redirect)" 2
+
+run_hook "$MAIN_REPO" "$GC<in.txt"
+check "commit abutting '<in.txt' redirect blocked on main (round7 fix A, stdin redirect)" 2
+
+run_hook "$MAIN_REPO" "$GC>>out.txt"
+check "commit abutting '>>out.txt' append redirect blocked on main (round7 fix A, append)" 2
+
+run_hook "$MAIN_REPO" "$GC>&2"
+check "commit abutting '>&2' fd redirect blocked on main (round7 fix A, fd dup)" 2
+
+# The same redirect form inside a nested-interpreter payload must block too.
+run_hook "$MAIN_REPO" 'bash -c "git commit>out.txt"'
+check "redirect-abutting git commit inside bash -c payload blocked on main (round7 fix A, nested redirect)" 2
+
+# --- FIX A (path-invoked): `/` is a boundary under the negated leading class,
+# --- so an absolute-path-invoked git newly prefilter-matches (bonus catch). ---
+run_hook "$MAIN_REPO" "/usr/bin/git commit"
+check "path-invoked '/usr/bin/git commit' blocked on main (round7 fix A, path slash boundary)" 2
+
+# --- FIX B: escaped-quote forms defeat RAW matching; the normalized copy
+# --- (backslash/quote/backtick-stripped) routes them into the pipeline. ---
+run_hook "$MAIN_REPO" 'bash -c "eval \"git commit\""'
+check "bash -c with escaped-inner-quote eval payload blocked on main (round7 fix B, escaped nested eval)" 2
+
+run_hook "$MAIN_REPO" 'sh -c "\"git\" commit"'
+check "sh -c with escaped-quote-around-git payload blocked on main (round7 fix B, leading escaped quote)" 2
+
+# --- FIX C: command substitution EXECUTES inside double quotes, so a
+# --- double-quoted `$(...)` / backtick around a mutate is a nested executor. ---
+run_hook "$MAIN_REPO" "\"\$(git commit)\""
+check "double-quoted command substitution \"\$(git commit)\" blocked on main (round7 fix C, dollar-paren)" 2
+
+run_hook "$MAIN_REPO" "\"\`git commit\`\""
+check "double-quoted backtick substitution blocked on main (round7 fix C, backtick in quotes)" 2
+
+# --- ROUND7 message quality: a redirect-abutting or normalized-only block
+# --- must still NAME the real subcommand via detect_subcmd's normalized
+# --- fallback. ---
+run_hook "$MAIN_REPO" "$GC>out.txt"
+case "$HOOK_STDERR" in
+  *"'git commit'"*) PASS=$((PASS + 1)); echo "ok: redirect-abutting block names 'git commit' (round7 message quality)" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: redirect-abutting block does not name 'git commit' (round7 message quality): $HOOK_STDERR" ;;
+esac
+
+run_hook "$MAIN_REPO" 'sh -c "\"git\" merge"'
+check "normalized-only sh -c escaped-quote git merge blocked on main (round7 fix B, merge)" 2
+case "$HOOK_STDERR" in
+  *"'git merge'"*) PASS=$((PASS + 1)); echo "ok: normalized-only block names the real subcommand 'git merge' (round7 detect_subcmd normalized fallback)" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: normalized-only block does not name 'git merge' (round7 detect_subcmd normalized fallback): $HOOK_STDERR" ;;
+esac
+
+# --- ROUND7 allow mirrors (over-block guards) ---
+
+# Single-quoted command substitution is INERT — it is collapsed before the
+# `$(` scan, so it must NOT set the nested-executor flag: allowed on main.
+run_hook "$MAIN_REPO" "echo 'see \$(git commit)'"
+check "single-quoted inert \$(git commit) not false-blocked on main (round7 fix C, single-quote inert allow)" 0
+
+# `git commit-tree` is plumbing (does not commit to a branch); the hyphen must
+# stay a word char so the negated trailing class does NOT treat it as a bare
+# `commit` subcommand: allowed on main.
+run_hook "$MAIN_REPO" "git commit-tree"
+check "'git commit-tree' plumbing (hyphen is a word char) not blocked on main (round7 fix A, hyphen word char)" 0
+
+# A redirect-abutting commit on a FEATURE branch must be allowed — attribution,
+# not syntax, decides. The prefilter now matches it, but $PWD resolves to the
+# feature branch.
+run_hook "$FEAT_REPO" "$GC>log.txt"
+check "redirect-abutting git commit on a feature branch allowed (round7 fix A, feature-branch symmetry)" 0
+
+# The nested-executor / command-substitution forms mirror the padded verdict on
+# a feature-branch cwd — the fail-closed $PWD fallback resolves to the feature
+# branch, so allowed.
+run_hook "$FEAT_REPO" "\"\$(git commit)\""
+check "double-quoted command substitution from a feature-branch cwd allowed (round7 fix C, feature-branch symmetry)" 0
+
 echo ""
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
