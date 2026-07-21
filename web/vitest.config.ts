@@ -19,6 +19,8 @@ export default defineConfig({
       'src/**/*.test.tsx',
       // Pure-function unit tests for e2e lib utilities (no browser required)
       'e2e/lib/__tests__/**/*.test.ts',
+      // Unit tests for standalone build/provisioning scripts (not under src/)
+      'scripts/__tests__/**/*.test.ts',
     ],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
