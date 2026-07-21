@@ -118,6 +118,83 @@ git init -q -b master "$MASTER_REPO"
 run_hook "$MASTER_REPO" "$GC -m 'msg'"
 check "commit with cwd on master blocked" 2
 
+# --- BYPASS (a): `-c key=val` between `git` and `commit` dodged the old regex ---
+run_hook "$MAIN_REPO" "git -c user.name=x commit -m 'msg'"
+check "git -c <cfg> commit with cwd on main blocked (bypass a)" 2
+
+run_hook "$FEAT_REPO" "git -c user.name=x commit -m 'msg'"
+check "git -c <cfg> commit on feature branch allowed" 0
+
+run_hook "$MAIN_REPO" "git -c a=b -C $FEAT_REPO commit -m 'msg'"
+check "git -c <cfg> -C <feature-dir> commit allowed from main cwd" 0
+
+# --- BYPASS (b): the checkout -b allowance was whole-command, so a later
+# --- switch BACK to main in the same chain rode through it ---
+run_hook "$MAIN_REPO" "git checkout -b tmp && git checkout main && $GC -m 'msg'"
+check "checkout -b then checkout main then commit blocked (bypass b)" 2
+
+run_hook "$MAIN_REPO" "git switch -c tmp && git switch main && $GC -m 'msg'"
+check "switch -c then switch main then commit blocked (bypass b)" 2
+
+run_hook "$MAIN_REPO" "git checkout -b tmp && cd $MAIN_REPO && $GC -m 'msg'"
+check "cd after checkout -b resets the escape hatch (bypass b)" 2
+
+# --- BYPASS (c): segments were split only on && and ; so || chains slid by ---
+run_hook "$FEAT_REPO" "cd $MAIN_REPO || true; $GC -m 'msg'"
+check "cd <main> || true; commit blocked from feature cwd (bypass c)" 2
+
+run_hook "$MAIN_REPO" "false || $GC -m 'msg'"
+check "|| chain reaching commit on main blocked (bypass c)" 2
+
+run_hook "$MAIN_REPO" "$GC -m 'msg' || echo failed"
+check "commit before || on main blocked" 2
+
+run_hook "$MAIN_REPO" "cd $FEAT_REPO || exit 1 && $GC -m 'msg'"
+check "cd <feature> || exit guard then commit allowed" 0
+
+# --- BYPASS (d): GIT_DIR/--git-dir redirection and non-`commit` subcommands
+# --- that create commits (merge, cherry-pick, revert, pull) or restage work
+# --- for one (stash pop) ---
+run_hook "$FEAT_REPO" "GIT_DIR=$MAIN_REPO/.git $GC -m 'msg'"
+check "GIT_DIR=<main .git> commit blocked from feature cwd (bypass d)" 2
+
+run_hook "$FEAT_REPO" "git --git-dir=$MAIN_REPO/.git commit -m 'msg'"
+check "--git-dir=<main .git> commit blocked from feature cwd (bypass d)" 2
+
+run_hook "$MAIN_REPO" "GIT_DIR=$FEAT_REPO/.git $GC -m 'msg'"
+check "GIT_DIR=<feature .git> commit allowed from main cwd" 0
+
+run_hook "$FEAT_REPO" "git --work-tree=$MAIN_REPO commit -m 'msg'"
+check "--work-tree=<main checkout> commit blocked (conservative)" 2
+
+run_hook "$MAIN_REPO" "git merge feat/other"
+check "git merge on main blocked (bypass d)" 2
+
+run_hook "$FEAT_REPO" "git merge feat/other"
+check "git merge on feature branch allowed" 0
+
+run_hook "$MAIN_REPO" "git cherry-pick abc1234"
+check "git cherry-pick on main blocked (bypass d)" 2
+
+run_hook "$MAIN_REPO" "git revert HEAD"
+check "git revert on main blocked (bypass d)" 2
+
+run_hook "$MAIN_REPO" "git stash pop"
+check "git stash pop on main blocked (bypass d)" 2
+
+run_hook "$MAIN_REPO" "git pull origin main"
+check "git pull (mergeable) on main blocked (bypass d)" 2
+
+run_hook "$MAIN_REPO" "git pull --ff-only origin main"
+check "git pull --ff-only on main allowed (cannot create commits)" 0
+
+run_hook "$FEAT_REPO" "git pull"
+check "git pull on feature branch allowed" 0
+
+# --- word-boundary near-miss: 'git' as a suffix of another word ---
+run_hook "$MAIN_REPO" "echo 'legit commit'"
+check "'legit commit' text near-miss allowed on main" 0
+
 echo ""
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
