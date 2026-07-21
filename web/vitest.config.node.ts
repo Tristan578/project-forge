@@ -26,6 +26,10 @@ export default defineConfig({
       // vitest.config.ts, never in the workspace gate.
       'src/__tests__/**/*.test.ts',
       'src/__tests__/**/*.test.tsx',
+      // Unit tests for standalone build/provisioning scripts (not under
+      // src/) — mirrors the same glob in vitest.config.ts so these run
+      // under the workspace gate too, not just the standalone config.
+      'scripts/__tests__/**/*.test.ts',
     ],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
