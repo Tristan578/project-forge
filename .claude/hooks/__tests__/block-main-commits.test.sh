@@ -257,6 +257,71 @@ esac
 run_hook "$MAIN_REPO" "echo 'legit commit'"
 check "'legit commit' text near-miss allowed on main" 0
 
+# --- PF-995 addendum coverage ---
+
+# A second main-branch fixture whose path contains a space, for the quoted
+# --git-dir test below (SPACE_REPO is a feature branch, not main).
+SPACE_MAIN_REPO="$TMP/space main/main-repo2"
+mkdir -p "$TMP/space main"
+git init -q -b main "$SPACE_MAIN_REPO"
+
+# --- PATH 1: the whole-command filter matches but quoting inside a `-c`
+# --- value (containing a literal `&&`) defeats the awk `&&`/`||`/`;` segment
+# --- split — no split segment re-matches GIT_MUTATE_RE on its own, so
+# --- COMMIT_TARGETS stays empty and HANDLED stays 0. The fallback must still
+# --- resolve the commit against the hook's own tracked $PWD rather than
+# --- silently allowing it.
+QUOTE_DEFEAT_CMD='git -c key="a&&b" commit -m msg'
+run_hook "$MAIN_REPO" "$QUOTE_DEFEAT_CMD"
+check "quote-defeated segment split falls back to \$PWD, blocked on main (fallback safety net)" 2
+case "$HOOK_STDERR" in
+  *"$MAIN_REPO"*) PASS=$((PASS + 1)); echo "ok: fallback block names \$PWD as the resolving directory" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: fallback block did not name \$PWD" ;;
+esac
+
+run_hook "$FEAT_REPO" "$QUOTE_DEFEAT_CMD"
+check "quote-defeated segment split falls back to \$PWD, allowed on feature branch (fallback safety net)" 0
+
+# --- PATH 2: `checkout <branch> -- <pathspec>` in both directions — the
+# --- named ref is a real branch name (not just HEAD), and must never be
+# --- treated as a switch: it restores files only, leaving the effective
+# --- branch exactly where cwd already had it.
+run_hook "$FEAT_REPO" "git checkout main -- file.txt && $GC -m 'msg'"
+check "checkout main -- <pathspec> is not a switch; commit stays on feature branch, allowed" 0
+
+run_hook "$MAIN_REPO" "git checkout feat/existing -- file.txt && $GC -m 'msg'"
+check "checkout <feature-name> -- <pathspec> must not smuggle an allow from main; still blocked" 2
+
+# --- PATH 4: fail-open when the -C target directory cannot be resolved at
+# --- all (not merely a different repo — a path that does not exist). The
+# --- `git -C <dir> branch --show-current` lookup errors, CURRENT_BRANCH is
+# --- empty, and empty is neither "main" nor "master" — so the documented
+# --- fail-open posture allows the commit through.
+run_hook "$MAIN_REPO" "git -C /nonexistent-dir-xyz-123 commit -m 'msg'"
+check "git -C <nonexistent dir> commit fails open (allowed) per documented posture" 0
+
+# --- PATH 5: master-branch parity for the four fixed bypass classes, run
+# --- from a feature-branch cwd so only the redirection/target decides.
+run_hook "$FEAT_REPO" "GIT_DIR=$MASTER_REPO/.git $GC -m 'msg'"
+check "GIT_DIR=<master .git> commit blocked (master parity: env-prefix)" 2
+
+run_hook "$FEAT_REPO" "git -C $MASTER_REPO commit -m 'msg'"
+check "git -C <master checkout> commit blocked (master parity: -C dir)" 2
+
+run_hook "$FEAT_REPO" "cd $MASTER_REPO && $GC -m 'msg'"
+check "cd <master checkout> && commit blocked (master parity: cd-chain)" 2
+
+run_hook "$FEAT_REPO" "git --git-dir=$MASTER_REPO/.git commit -m 'msg'"
+check "--git-dir=<master .git> commit blocked (master parity: --git-dir=)" 2
+
+# --- PATH 6: quoted-argument variants — a new branch name containing a
+# --- space, and a --git-dir value containing a space wrapped in quotes.
+run_hook "$MAIN_REPO" 'git checkout -b "branch with space" && git commit -m msg'
+check "checkout -b \"<branch with space>\" then commit allowed from main" 0
+
+run_hook "$FEAT_REPO" "git --git-dir=\"$SPACE_MAIN_REPO/.git\" commit -m 'msg'"
+check "--git-dir=\"<quoted path with space>\" targeting a main repo blocked" 2
+
 echo ""
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
