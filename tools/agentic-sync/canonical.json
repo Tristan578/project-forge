@@ -22,10 +22,10 @@
     },
     "versionsNote": "wasm-bindgen must match Cargo.lock exactly",
     "coverageThresholds": {
-      "statements": 75,
-      "branches": 65,
-      "functions": 70,
-      "lines": 77
+      "statements": 81,
+      "branches": 71,
+      "functions": 75,
+      "lines": 82
     },
     "quickValidation": "cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run"
   },
