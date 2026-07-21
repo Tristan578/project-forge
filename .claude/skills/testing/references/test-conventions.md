@@ -164,10 +164,6 @@ Link to the PF ticket in the test name so future readers understand why this tes
 
 ## Coverage Thresholds
 
-Current CI thresholds in `web/vitest.config.ts`:
-- Statements: 70%
-- Branches: 60%
-- Functions: 65%
-- Lines: 72%
+CI thresholds live in `web/vitest.config.ts` and are auto-ratcheted upward (with `web/vitest.config.node.ts` kept in lockstep, PF-996) — read the config for the current values.
 
 Target: 100% across all metrics. Every uncovered branch is a bug waiting to happen in production WASM.
