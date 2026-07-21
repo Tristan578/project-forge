@@ -73,7 +73,7 @@ export async function ensureMeterProvisioned(
   return { created: true, meterId: meter.id };
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const mode = resolveStripeMode(process.env.STRIPE_SECRET_KEY);
   if (mode === 'unknown') {
     console.error(

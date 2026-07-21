@@ -20,11 +20,12 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   METER_EVENT_NAME,
   resolveStripeMode,
   ensureMeterProvisioned,
+  main,
 } from '../provision-billing-meter';
 import { METER_EVENT_NAME as REPORTER_METER_EVENT_NAME } from '@/lib/billing/meterEvents';
 
@@ -106,5 +107,47 @@ describe('ensureMeterProvisioned', () => {
       value_settings: { event_payload_key: 'value' },
       customer_mapping: { type: 'by_id', event_payload_key: 'stripe_customer_id' },
     });
+  });
+});
+
+describe('main() safety-abort path', () => {
+  const originalExitCode = process.exitCode;
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    process.exitCode = originalExitCode;
+  });
+
+  it('aborts without provisioning when STRIPE_SECRET_KEY is unset', async () => {
+    vi.stubEnv('STRIPE_SECRET_KEY', undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await main();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Aborting — refusing to guess which Stripe mode to provision.'
+      )
+    );
+    // Refuses to proceed: exitCode is set to a failure code and nothing
+    // past the abort (the "Provisioning..." log line) ever runs.
+    expect(process.exitCode).toBe(1);
+    expect(logSpy).not.toHaveBeenCalled();
+  });
+
+  it('aborts without provisioning when STRIPE_SECRET_KEY is a malformed/unrecognized key', async () => {
+    vi.stubEnv('STRIPE_SECRET_KEY', 'pk_test_not_a_secret_key');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await main();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('not a recognized sk_test_/sk_live_/rk_test_/rk_live_ key')
+    );
+    expect(process.exitCode).toBe(1);
+    expect(logSpy).not.toHaveBeenCalled();
   });
 });
