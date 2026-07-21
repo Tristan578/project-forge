@@ -31,7 +31,7 @@
   },
   "overrides": {
     "@clerk/nextjs": "^7.5.12",
-    "@clerk/shared": "^4.22.1",
+    "@clerk/shared": "^4.25.5",
     "@hono/node-server": "^1.19.13",
     "dompurify": ">=3.4.11",
     "esbuild": ">=0.25.0",
@@ -58,9 +58,9 @@
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.7.0",
-    "@changesets/cli": "^2.30.0",
-    "@storybook/react": "^10.5.0",
-    "@storybook/react-vite": "^10.5.0",
+    "@changesets/cli": "^2.31.1",
+    "@storybook/react": "^10.5.3",
+    "@storybook/react-vite": "^10.5.3",
     "@vitest/coverage-v8": "^4.1.10",
     "jsdom": "^29.1.1",
     "storybook": "^10.4.6",
