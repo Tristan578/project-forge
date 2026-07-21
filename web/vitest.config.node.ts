@@ -39,12 +39,13 @@ export default defineConfig({
         'src/app/**/layout.tsx',
         'src/app/**/page.tsx',
       ],
-      // Ratcheted up per sprint — must match vitest.config.ts thresholds
+      // Kept in lockstep with vitest.config.ts by the coverage ratchet
+      // (PF-996) — do not edit by hand.
       thresholds: {
-        statements: 70,
-        branches: 60,
-        functions: 65,
-        lines: 72,
+        statements: 75,
+        branches: 65,
+        functions: 70,
+        lines: 77,
       },
     },
   },
