@@ -935,6 +935,63 @@ check "redirect-abutting git commit on a feature branch allowed (round7 fix A, f
 run_hook "$FEAT_REPO" "\"\$(git commit)\""
 check "double-quoted command substitution from a feature-branch cwd allowed (round7 fix C, feature-branch symmetry)" 0
 
+# --- ROUND8 fix: empty-quote concatenation bypass (PF-995 / #8988) ---
+# An EMPTY quoted pair ("" or '') contributes nothing to a word in real shell,
+# so `""git commit` executes as a plain `git commit`. The seg_class / classifier
+# collapse turned an empty pair into the placeholder X and GLUED it to the next
+# word (`""git` -> `Xgit`), destroying git's leading word boundary and letting a
+# REAL commit land on main (exit 0). Empirically verified against real bash in
+# the round8-build-fixtures fixture: `""git commit`, `''git commit`,
+# `git ""commit`, `""''git commit`, `''""git commit`, `""git merge` all invoke
+# real git with the subcommand; `git"x"commit` glues to ONE word `gitxcommit`
+# (NOT a git invocation); `git commit -m ""` is a real commit.
+
+# Blocking (exit 2) from a main checkout — the confirmed live bypasses.
+run_hook "$MAIN_REPO" "\"\"$GC -m x"
+check "empty double-quote prefix '\"\"git commit -m x' blocked on main (round8 empty-pair bypass)" 2
+case "$HOOK_STDERR" in
+  *"'git commit'"*) PASS=$((PASS + 1)); echo "ok: empty-pair block names 'git commit' (round8 message quality)" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: empty-pair block does not name 'git commit' (round8 message quality): $HOOK_STDERR" ;;
+esac
+
+run_hook "$MAIN_REPO" "''$GC -m x"
+check "empty single-quote prefix \"''git commit -m x\" blocked on main (round8 empty-pair bypass)" 2
+
+run_hook "$MAIN_REPO" "\"\"$GC"
+check "bare empty double-quote prefix '\"\"git commit' blocked on main (round8 empty-pair bare)" 2
+
+run_hook "$MAIN_REPO" "\"\"''$GC -m x"
+check "interleaved empties '\"\"''git commit -m x' blocked on main (round8 interleaved empty)" 2
+
+run_hook "$MAIN_REPO" "''\"\"$GC"
+check "interleaved empties \"''\"\"git commit\" blocked on main (round8 interleaved empty, other order)" 2
+
+run_hook "$MAIN_REPO" "\"\"git merge"
+check "empty double-quote prefix '\"\"git merge' blocked on main (round8 empty-pair, second subcommand)" 2
+
+run_hook "$MAIN_REPO" "git \"\"commit -m x"
+check "empty pair mid-invocation 'git \"\"commit -m x' blocked on main (round8 empty-pair glues to commit)" 2
+
+run_hook "$MAIN_REPO" "$GC -m \"\""
+check "empty-message 'git commit -m \"\"' still blocked on main (round8 empty arg is a real commit)" 2
+
+# Allow (exit 0) mirrors — empty pairs with no git mutate, and X-gluing preserved.
+run_hook "$MAIN_REPO" "echo \"\""
+check "'echo \"\"' (empty pair, no git) allowed on main (round8 allow mirror)" 0
+
+run_hook "$MAIN_REPO" "echo \"\" git-commit-free text"
+check "'echo \"\" git-commit-free text' (no git<sp>commit) allowed on main (round8 allow mirror)" 0
+
+run_hook "$MAIN_REPO" "git\"x\"commit"
+check "glued non-invocation 'git\"x\"commit' (X-gluing preserved) allowed on main (round8 non-empty stays glued)" 0
+
+run_hook "$MAIN_REPO" "echo \"$GC\""
+check "'echo \"git commit\"' benign quoted inert allowed on main (round8 benign-quoted allow)" 0
+
+# FEATURE-branch mirror: attribution decides, not syntax — empty-pair prefix allows.
+run_hook "$FEAT_REPO" "\"\"$GC -m x"
+check "empty double-quote prefix '\"\"git commit -m x' on a feature branch allowed (round8 attribution)" 0
+
 echo ""
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

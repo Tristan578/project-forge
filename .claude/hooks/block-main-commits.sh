@@ -101,6 +101,29 @@ unquote() {
   printf '%s' "$s"
 }
 
+# Delete adjacent EMPTY quote pairs ("" or '') from a classification copy
+# BEFORE any non-empty quoted span is collapsed to a placeholder. In real
+# shell an empty quoted string contributes nothing to its word, so `""git
+# commit` executes as a plain `git commit` and `git ""commit` as `git commit`
+# (verified against real bash). Collapsing an empty pair to the placeholder X
+# instead would GLUE it to the adjacent word (`""git` -> `Xgit`), destroy
+# git's leading word boundary, and let a REAL commit on main slip the
+# classifier (PF-995 / #8988 round 8 finding 1). Deletion is semantically
+# exact; a NON-empty pair still collapses to X afterwards, so a quoted span
+# mid-word keeps gluing the word together (`git"x"commit` stays the single
+# non-git word `gitxcommit`, not a `git commit` invocation).
+strip_empty_quotes() {
+  printf '%s' "$1" | sed -E 's/""//g' | sed -E "s/''//g"
+}
+
+# Full classification skeleton: empty pairs deleted, then every remaining
+# non-empty single/double-quoted span collapsed to the placeholder X. Every
+# both-quote collapse site feeds a yes/no classifier and must route through
+# this so the empty-pair bypass is closed uniformly.
+collapse_quotes() {
+  strip_empty_quotes "$1" | sed -E 's/"[^"]*"/X/g' | sed -E "s/'[^']*'/X/g"
+}
+
 # Resolve a (possibly quoted, possibly relative, possibly empty) directory
 # token against the currently tracked cwd, yielding an absolute-ish path.
 resolve_dir() {
@@ -278,7 +301,7 @@ while IFS="$FS" read -r sepcode seg; do
   # target- and directory-EXTRACTION still uses the original $seg — a genuine
   # keyword is unquoted there, and quoting is load-bearing for a branch/path
   # with spaces (PF-995 / #8988).
-  seg_class=$(printf '%s' "$seg" | sed -E 's/"[^"]*"/X/g' | sed -E "s/'[^']*'/X/g")
+  seg_class=$(collapse_quotes "$seg")
 
   # `cd <path>` segment: update the tracked directory. A branch switch in
   # one directory says nothing about another, so reset that state too.
@@ -505,7 +528,7 @@ EOF_SEGMENTS
 # where the quoted text really will execute — compute a quote-collapsed skeleton
 # and look for an interpreter-with-inline-code (`bash|sh|zsh|ksh|dash … -c`) or
 # `eval`. Present → keep the fail-CLOSED $PWD fallback; absent → allow.
-COMMAND_CLASS=$(printf '%s' "$COMMAND" | sed -E 's/"[^"]*"/X/g' | sed -E "s/'[^']*'/X/g")
+COMMAND_CLASS=$(collapse_quotes "$COMMAND")
 NESTED_INTERP=0
 # `-[[:alnum:]]*c` matches a `-c` flag possibly bundled with other letters
 # (`-xc`); the `([^[:space:]]+[[:space:]]+)*` hop skips any intervening options
@@ -529,7 +552,10 @@ fi
 # substitution forms thus block; oddball benign forms that merely MENTION a
 # substitution and a commit-word in the same double-quoted string stay within
 # the hook's documented fail-open accident-gate posture (PF-995 round 7 Fix C).
-SUBST_SCAN=$(printf '%s' "$COMMAND" | sed -E "s/'[^']*'/X/g")
+# Empty pairs are deleted first (round 8) so this copy classifies the same
+# post-concatenation text as the others; a NON-empty double-quoted span (where
+# a live `$(...)` could hide) is deliberately NOT collapsed here.
+SUBST_SCAN=$(strip_empty_quotes "$COMMAND" | sed -E "s/'[^']*'/X/g")
 if printf '%s' "$SUBST_SCAN" | grep -qE '\$\(' \
    || printf '%s' "$SUBST_SCAN" | grep -q '`'; then
   NESTED_INTERP=1
