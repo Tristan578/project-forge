@@ -43,9 +43,11 @@ GIT_OPT='(-C[[:space:]]+('"$Q"')|-c[[:space:]]+('"$Q"')|'"$GIT_VALOPT"'|--[[:aln
 
 # `git` at a word boundary (so text like "legit commit" does not match),
 # optionally preceded by GIT_* env assignments, followed by global options.
-# The leading boundary also admits shell separators so a `git` abutting one
-# (`;git commit`, `(git commit)`) is still recognized (PF-995).
-GIT_CMD='(^|[[:space:]]|[;&|()])(GIT_[A-Z_]+=('"$Q"')[[:space:]]+)*git([[:space:]]+'"$GIT_OPT"')*[[:space:]]+'
+# The leading boundary also admits shell separators AND the quote/backtick
+# characters, so a `git` abutting one (`;git commit`, `(git commit)`, and a
+# nested-interpreter payload whose text begins with git — `bash -c "git commit"`,
+# `bash -c 'git commit'`, `` `git commit` ``) is still recognized (PF-995).
+GIT_CMD='(^|[[:space:]]|[;&|()"`'\''])(GIT_[A-Z_]+=('"$Q"')[[:space:]]+)*git([[:space:]]+'"$GIT_OPT"')*[[:space:]]+'
 
 # Every git subcommand that creates commits (or, for stash pop, restages
 # work for one on the current branch). The trailing boundary admits shell

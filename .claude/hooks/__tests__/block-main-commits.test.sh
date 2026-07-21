@@ -737,6 +737,42 @@ check "unattributed commit hidden in a branch-rename segment forces \$PWD fallba
 run_hook "$FEAT_REPO" "git -C $FEAT_REPO commit -m ok && git branch -M feat/renamed && $GC -m 'msg'"
 check "benign branch-rename+commit chain on feature branch not over-blocked by rename guard (round4 finding 4, non-over-block mirror)" 0
 
+# --- ROUND5 FINDING 1: the whole-command prefilter's leading boundary class
+# --- omitted the quote and backtick characters, so a nested-interpreter payload
+# --- whose text BEGINS with `git commit` (git abutting the opening quote) never
+# --- matched the prefilter and the hook exited 0 at the very first gate — BEFORE
+# --- the round-4 NESTED_INTERP fail-closed machinery could ever run. All of the
+# --- following landed commits on main pre-fix; they must now BLOCK (exit 2). ---
+run_hook "$MAIN_REPO" "bash -c \"$GC -m x\""
+check "bash -c with DOUBLE-quoted payload beginning with git commit blocked on main (round5 finding 1, dq abutting)" 2
+
+run_hook "$MAIN_REPO" "bash -c '$GC -m x'"
+check "bash -c with SINGLE-quoted payload beginning with git commit blocked on main (round5 finding 1, sq abutting)" 2
+
+run_hook "$MAIN_REPO" "sh -c \"$GC -m x\""
+check "sh -c with quoted payload beginning with git commit blocked on main (round5 finding 1, sh -c)" 2
+
+run_hook "$MAIN_REPO" "eval \"$GC -m x\""
+check "eval with quoted payload beginning with git commit blocked on main (round5 finding 1, eval abutting)" 2
+
+run_hook "$MAIN_REPO" "bash -euo pipefail -c \"$GC -m x\""
+check "option-hop bash -euo pipefail -c quoted git commit blocked on main (round5 finding 1, option hop)" 2
+
+run_hook "$MAIN_REPO" "\`$GC -m x\`"
+check "backtick command-substitution containing git commit blocked on main (round5 finding 1, backtick abutting)" 2
+
+# --- ROUND5 FINDING 2: the widened prefilter now also matches benign quoted
+# --- mentions where git abuts the quote, but with NO nested interpreter the
+# --- NESTED_INTERP fallback never fires, so these must still ALLOW (exit 0). ---
+run_hook "$MAIN_REPO" "echo \"$GC now\""
+check "benign echo, git abuts quote, no interpreter, allowed on main (round5 finding 2, echo abutting allow)" 0
+
+run_hook "$MAIN_REPO" "printf '%s' '$GC here'"
+check "benign printf, git abuts single-quote, no interpreter, allowed on main (round5 finding 2, printf abutting allow)" 0
+
+run_hook "$MAIN_REPO" "jq -nc --arg c '$GC here' '{}'"
+check "benign jq --arg, git abuts single-quote, no interpreter, allowed on main (round5 finding 2, jq abutting allow)" 0
+
 echo ""
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
