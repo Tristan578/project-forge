@@ -105,13 +105,22 @@ export async function reportGenerationUsage(args: ReportGenerationUsageArgs): Pr
   // Claim: only proceed if this row has never been attempted. Two
   // concurrent callers for the same usageId race here; exactly one wins
   // (non-empty .returning()), the other sees an empty array and skips.
-  const claimedRows = await queryWithResilience(() =>
-    getDb()
-      .update(tokenUsage)
-      .set({ meterAttemptedAt: new Date() })
-      .where(and(eq(tokenUsage.id, usageId), isNull(tokenUsage.meterAttemptedAt)))
-      .returning({ id: tokenUsage.id })
-  );
+  // This is deliberately inside its own try/catch: a DB error here (e.g. a
+  // dropped connection) must never escape this fire-and-forget function
+  // and break the caller's generation flow.
+  let claimedRows: { id: string }[];
+  try {
+    claimedRows = await queryWithResilience(() =>
+      getDb()
+        .update(tokenUsage)
+        .set({ meterAttemptedAt: new Date() })
+        .where(and(eq(tokenUsage.id, usageId), isNull(tokenUsage.meterAttemptedAt)))
+        .returning({ id: tokenUsage.id })
+    );
+  } catch (err) {
+    captureException(err, { action: 'meter_event_claim', usageId });
+    return;
+  }
 
   if (claimedRows.length === 0) {
     // Already attempted (possibly concurrently, possibly a stale claim).

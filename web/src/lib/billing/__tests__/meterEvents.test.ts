@@ -273,6 +273,21 @@ describe('reportGenerationUsage', () => {
     // Never throws out of the fire-and-forget function.
   });
 
+  it('captures the exception and never throws when the claim query itself rejects', async () => {
+    const claimError = new Error('connection terminated unexpectedly');
+    mockReturning.mockRejectedValueOnce(claimError);
+
+    await expect(reportGenerationUsage(baseArgs)).resolves.toBeUndefined();
+
+    expect(captureException).toHaveBeenCalledWith(claimError, {
+      action: 'meter_event_claim',
+      usageId: baseArgs.usageId,
+    });
+    // Never reached Stripe: the claim itself failed before we knew whether
+    // we won the race.
+    expect(meterEventsCreate).not.toHaveBeenCalled();
+  });
+
   it('never throws even when getStripe() itself throws', async () => {
     vi.mocked(getStripe).mockImplementationOnce(() => {
       throw new Error('STRIPE_SECRET_KEY unset');
