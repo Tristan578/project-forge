@@ -170,7 +170,13 @@ describe('primeFlagsCache + getBooleanFlag — simple flags', () => {
     );
     await primeFlagsCache();
     expect(getBooleanFlag('deep-generation-tier', false, { tier: 'pro' })).toBe(true);
-    expect(getBooleanFlag('deep-generation-tier', false, { tier: 'free' })).toBe(false);
+    // fallback=true + expected=false proves the evaluator COMPUTED the
+    // mismatch (expected.includes(tier) === false) rather than taking the
+    // unsupported-targeting fallback branch — with fallback=false the two
+    // are indistinguishable. The fallback path also warns; a computed
+    // mismatch must not.
+    expect(getBooleanFlag('deep-generation-tier', true, { tier: 'free' })).toBe(false);
+    expect(consoleWarnSpy).not.toHaveBeenCalled();
   });
 
   it('falls back to default when a tier property filter has no context supplied', async () => {

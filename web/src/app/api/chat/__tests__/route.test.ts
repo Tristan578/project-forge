@@ -1094,7 +1094,12 @@ describe('POST /api/chat', () => {
       );
     });
 
-    it('still 403s when the derived deep model is premium and the user is not pro', async () => {
+    it('allows the server-derived deep model through the premium gate for non-pro tiers', async () => {
+      // The deep-tier model is SERVER-granted (operator targeted the flag at
+      // this tier), not user-requested — the ADR rollout flips it on for paid
+      // tiers generally, so a Creator user on a deep-gen surface must get the
+      // upgrade, not the premium-gate 403 (which still applies to explicit
+      // user requests for Opus — see the premium gate tests above).
       isDeepTierEnabledMock.mockReturnValue(true);
       vi.mocked(withApiMiddleware).mockResolvedValue({
         error: null,
@@ -1103,8 +1108,28 @@ describe('POST /api/chat', () => {
       } as never);
 
       const res = await POST(makeRequest({ ...validBody(), surface: 'cutscene' }));
-      expect(res.status).toBe(403);
+      await res.text();
+
+      expect(res.status).toBe(200);
       expect(isDeepTierEnabledMock).toHaveBeenCalledWith({ tier: 'creator' });
+      expect(createSpawnforgeAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'claude-opus-4-8' }),
+      );
+    });
+
+    it('still 403s a non-pro user who explicitly requests premium without a surface', async () => {
+      // Guard the boundary of the deep-tier exemption: with no surface, the
+      // deep-tier derivation never runs, so a hand-crafted premium request
+      // from a non-pro tier hits the gate exactly as before.
+      vi.mocked(withApiMiddleware).mockResolvedValue({
+        error: null,
+        authContext: { clerkId: 'clerk-1', user: { id: 'user-1', tier: 'creator' } as never },
+        rateLimit: { allowed: true, remaining: 9, resetAt: Date.now() + 60_000 },
+      } as never);
+
+      const res = await POST(makeRequest({ ...validBody(), model: 'claude-opus-4-8' }));
+      expect(res.status).toBe(403);
+      expect(isDeepTierEnabledMock).not.toHaveBeenCalled();
       expect(createSpawnforgeAgent).not.toHaveBeenCalled();
     });
 

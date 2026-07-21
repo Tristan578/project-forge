@@ -356,17 +356,22 @@ export async function POST(request: NextRequest) {
   // (including its per-tier filter) actually takes effect. With the evaluator
   // dormant this resolves to the same env-derived value the client computed,
   // and the premium gate below applies to the derived model either way.
+  let deepTierGranted = false;
   if (surface) {
-    model = isDeepTierEnabled({ tier: auth.ctx.user.tier })
-      ? AI_MODEL_DEEP
-      : AI_MODEL_PRIMARY;
+    deepTierGranted = isDeepTierEnabled({ tier: auth.ctx.user.tier });
+    model = deepTierGranted ? AI_MODEL_DEEP : AI_MODEL_PRIMARY;
   }
 
   // Premium model gate: claude-opus-4-8 is restricted to Pro tier. Reject
   // before billing so non-Pro users requesting premium are not charged the
   // estimated cost. The gate only blocks the model — it does not silently
   // downgrade, so the client gets an explicit signal to update its UI.
-  if (isPremiumModel(model) && auth.ctx.user.tier !== 'pro') {
+  // Exemption: a deep-tier-derived model is SERVER-granted, not
+  // user-requested — the ADR's rollout targets the flag at paid tiers
+  // generally (docs/decisions/2026-05-01-opus-deep-tier.md), so blocking
+  // non-Pro here would turn the operator enabling the flag for e.g. Creator
+  // into 403s on every deep-gen surface instead of the intended upgrade.
+  if (isPremiumModel(model) && auth.ctx.user.tier !== 'pro' && !deepTierGranted) {
     return Response.json(
       { error: 'The premium model (Opus 4.8) requires a Pro subscription.' },
       { status: 403 },
