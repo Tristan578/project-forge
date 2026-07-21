@@ -430,6 +430,37 @@ check "'switch --quiet feat/existing' (long flag before target) then commit allo
 run_hook "$MAIN_REPO" "git checkout feat/x && git checkout -q main && $GC -m 'msg'"
 check "flagged switch to main clears stale feature pending; commit blocked (fix 4)" 2
 
+# =====================================================================
+# ROUND 3 (PF-995 / #8988, review round 2): per-directory pending-branch
+# state, `branch -M/-m` detection, `revert`/`merge --no-commit` exemptions,
+# subcommand-specific BLOCKED wording, and GIT_WORK_TREE= coverage.
+# =====================================================================
+
+# --- ROUND2 FIX 1: PENDING_BRANCH/PENDING_DIR must be keyed per effective
+# --- directory. Two independent `-C <dirA>`/`-C <dirB>` `checkout -b`
+# --- segments in one compound command must not clobber each other and
+# --- false-block the earlier directory's legitimate new branch. ---
+PEND_DIR_A="$TMP/pend-a"
+PEND_DIR_B="$TMP/pend-b"
+git init -q -b main "$PEND_DIR_A"
+git init -q -b main "$PEND_DIR_B"
+
+run_hook "$FEAT_REPO" "git -C $PEND_DIR_A checkout -b feat/a && git -C $PEND_DIR_B checkout -b feat/b && git -C $PEND_DIR_A commit -m 'msg'"
+check "two -C dirs, each checkout -b: earlier dir's pending branch not clobbered by the later dir (round2 fix 1, dirA)" 0
+
+run_hook "$FEAT_REPO" "git -C $PEND_DIR_A checkout -b feat/a && git -C $PEND_DIR_B checkout -b feat/b && git -C $PEND_DIR_B commit -m 'msg'"
+check "two -C dirs, each checkout -b: later dir's own pending branch resolves independently (round2 fix 1, dirB)" 0
+
+# Strongest form of the regression: dirB's switch is a PLAIN switch to main
+# (not -b), which the single-scalar implementation would let clobber dirA's
+# still-valid pending branch and false-BLOCK a commit that never touches
+# dirB's main state at all.
+run_hook "$FEAT_REPO" "git -C $PEND_DIR_A checkout -b feat/a && git -C $PEND_DIR_B checkout main && git -C $PEND_DIR_A commit -m 'msg'"
+check "dirB switching to main does not clobber dirA's independent pending branch; dirA commit allowed (round2 fix 1)" 0
+
+run_hook "$FEAT_REPO" "git -C $PEND_DIR_A checkout -b feat/a && git -C $PEND_DIR_B checkout main && git -C $PEND_DIR_B commit -m 'msg'"
+check "dirB's own pending switch to main still blocks a commit targeting dirB (round2 fix 1)" 2
+
 echo ""
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
