@@ -570,7 +570,21 @@ describe('PF-967: Sentry feedback widget config must stay pinned', () => {
     ).toContain('#sentry-feedback');
     expect(
       css,
-      'the widget must sit above bottom chrome (z-30) but below CookieConsent (z-50) and toasts (z-70)',
+      'the widget must sit above bottom chrome (z-30) but below CookieConsent/AchievementToast (z-50); sonner toasts use their own stylesheet default (999999999) and are above everything regardless',
     ).toContain('--z-index: 40');
+    expect(
+      css,
+      'globals.css must hide the feedback trigger while the cookie banner is visible — CookieConsent (z-50) anchors at the same bottom-right corner and would fully cover the z-40 trigger for first-time visitors',
+    ).toContain("body:has([aria-label='Cookie consent']) #sentry-feedback");
+  });
+
+  it('CookieConsent keeps the aria-label the feedback-trigger hide rule is coupled to', async () => {
+    // The globals.css :has() selector targets this exact aria-label; renaming
+    // it in the component silently re-breaks the covered-trigger bug.
+    const consent = await readFile('src/components/CookieConsent.tsx');
+    expect(
+      consent,
+      'CookieConsent must keep aria-label="Cookie consent" — the #sentry-feedback hide rule in globals.css selects on it',
+    ).toContain('aria-label="Cookie consent"');
   });
 });
