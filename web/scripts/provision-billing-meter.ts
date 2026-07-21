@@ -16,6 +16,13 @@
  * type-stripping — Node 24+ only. That's why `getStripe` is imported by
  * relative path below instead of the `@/` alias: bare type-stripping does
  * not consult tsconfig.json path mappings, only a bundler/resolver would.
+ * The relative import also carries an explicit `.ts` extension: Node's
+ * native ESM resolver (unlike vitest's bundler-style resolver, or CommonJS)
+ * requires an explicit extension on every relative specifier and does not
+ * try appending `.ts` itself — an extensionless import here fails with
+ * `ERR_MODULE_NOT_FOUND` before any application code runs (`web/tsconfig.json`
+ * sets `allowImportingTsExtensions: true` so `tsc --noEmit` accepts the
+ * `.ts` suffix).
  *
  * See specs/stripe-billing-meters.md section 2 for the meter model
  * rationale (one meter, sum aggregation, customer_mapping by_id) and the
@@ -26,7 +33,7 @@
 
 import Stripe from 'stripe';
 import { pathToFileURL } from 'node:url';
-import { getStripe } from '../src/lib/billing/stripe-client';
+import { getStripe } from '../src/lib/billing/stripe-client.ts';
 
 /**
  * Must match `METER_EVENT_NAME` in web/src/lib/billing/meterEvents.ts.

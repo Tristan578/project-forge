@@ -22,6 +22,9 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { pathToFileURL } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import path from 'node:path';
 import {
   METER_EVENT_NAME,
   resolveStripeMode,
@@ -30,6 +33,11 @@ import {
   main,
 } from '../provision-billing-meter';
 import { METER_EVENT_NAME as REPORTER_METER_EVENT_NAME } from '@/lib/billing/meterEvents';
+
+const execFileAsync = promisify(execFile);
+
+// Repo root (two levels up from web/scripts/__tests__).
+const REPO_ROOT = path.resolve(__dirname, '../../..');
 
 describe('METER_EVENT_NAME parity', () => {
   it('matches the constant used by the usage reporter (meterEvents.ts)', () => {
@@ -158,6 +166,46 @@ describe('isMainModule', () => {
     vi.doUnmock('node:url');
     vi.resetModules();
   });
+});
+
+describe('documented `node web/scripts/provision-billing-meter.ts` invocation', () => {
+  // Regression test for the DX/UX finding on PR #8992: the script's own
+  // header comment, CLAUDE.md, and docs/guides/billing-meters-setup.md all
+  // instruct an operator to run this file directly under plain `node` (no
+  // tsx/ts-node — Node's native TypeScript type-stripping only). Because
+  // web/package.json has no "type" field, Node treats this file as ESM
+  // (import.meta.url + top-level `export` are present) and its native ESM
+  // resolver requires an explicit extension on every relative specifier —
+  // unlike vitest's bundler-style resolver, which tolerates the missing
+  // extension and gave every prior test suite false confidence. Spawning the
+  // EXACT documented command is the only way to catch this: it fails with
+  // `ERR_MODULE_NOT_FOUND` (module resolution never even started) instead of
+  // reaching the script's own STRIPE_SECRET_KEY abort message.
+  it('reaches the script\'s own missing-key abort message, not a module-resolution error', async () => {
+    const env = { ...process.env };
+    delete env.STRIPE_SECRET_KEY;
+
+    let stderr = '';
+    let exitCode: number | null = 0;
+    try {
+      const result = await execFileAsync(
+        'node',
+        ['web/scripts/provision-billing-meter.ts'],
+        { cwd: REPO_ROOT, env, timeout: 15_000 }
+      );
+      stderr = result.stderr;
+    } catch (err) {
+      const execErr = err as { stderr?: string; code?: number | null };
+      stderr = execErr.stderr ?? '';
+      exitCode = execErr.code ?? 1;
+    }
+
+    expect(stderr).not.toContain('ERR_MODULE_NOT_FOUND');
+    expect(stderr).toContain(
+      'Aborting — refusing to guess which Stripe mode to provision.'
+    );
+    expect(exitCode).toBe(1);
+  }, 20_000);
 });
 
 describe('main() safety-abort path', () => {
