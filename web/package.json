@@ -123,7 +123,7 @@
   },
   "overrides": {
     "esbuild": ">=0.25.0",
-    "dompurify": ">=3.4.11",
+    "dompurify": ">=3.4.12",
     "path-to-regexp": ">=8.4.0",
     "fast-xml-parser": ">=5.7.2",
     "uuid": ">=14.0.0",
