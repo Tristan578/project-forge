@@ -991,6 +991,91 @@ check "'echo \"git commit\"' benign quoted inert allowed on main (round8 benign-
 # FEATURE-branch mirror: attribution decides, not syntax — empty-pair prefix allows.
 run_hook "$FEAT_REPO" "\"\"$GC -m x"
 check "empty double-quote prefix '\"\"git commit -m x' on a feature branch allowed (round8 attribution)" 0
+# --- ROUND 9: non-empty quoted / backslash / ANSI-C reduction of the git or
+# --- subcommand token in COMMAND position (PF-995 / #8988 findings 1 & 2).
+# The classifier collapses every NON-EMPTY quoted span to a placeholder X and
+# never strips backslash or `$'...'` ANSI-C quoting, so a command that STATICALLY
+# reduces (pure quote/backslash removal, no runtime var/subshell) to `git <mutate>`
+# in command position slipped the segment classifier while real bash strips the
+# quoting and lands a REAL commit on main. Verified against real bash in the
+# round9-build-fixtures fixture: `"git" commit`, `git "commit"`, `git 'commit'`,
+# `'git' commit`, `"git" "commit"`, `g\it commit`, `\g\i\t commit`, `git \commit`,
+# `$'git' commit`, `git $'commit' -m x`, `"git" \commit`, and `"git" merge` all
+# invoke real git with the subcommand; `git"x"commit` / `g"x"it commit` concatenate
+# adjacent spans into ONE non-git word; `echo "git commit"` / `echo "git" "commit"`
+# / `printf "%s" "git commit"` keep git out of command position (benign mention).
+
+# Blocking (exit 2) from a main checkout — the confirmed live bypasses.
+run_hook "$MAIN_REPO" "\"git\" commit -m x"
+check "quoted git word '\"git\" commit -m x' blocked on main (round9 finding 1)" 2
+case "$HOOK_STDERR" in
+  *"'git commit'"*) PASS=$((PASS + 1)); echo "ok: quoted-git-word block names 'git commit' (round9 message quality)" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: quoted-git-word block does not name 'git commit' (round9): $HOOK_STDERR" ;;
+esac
+
+run_hook "$MAIN_REPO" "git \"commit\" -m x"
+check "quoted subcommand 'git \"commit\" -m x' blocked on main (round9 finding 1)" 2
+
+run_hook "$MAIN_REPO" "git 'commit' -m x"
+check "single-quoted subcommand \"git 'commit' -m x\" blocked on main (round9 finding 1)" 2
+
+run_hook "$MAIN_REPO" "'git' commit"
+check "single-quoted git word \"'git' commit\" blocked on main (round9 finding 1)" 2
+
+run_hook "$MAIN_REPO" "\"git\" \"commit\""
+check "both quoted '\"git\" \"commit\"' blocked on main (round9 finding 1)" 2
+
+run_hook "$MAIN_REPO" "g\it commit -m x"
+check "backslash-escaped git word 'g\\it commit -m x' blocked on main (round9 finding 2)" 2
+
+run_hook "$MAIN_REPO" "\g\i\t commit -m x"
+check "fully backslash-escaped git word '\\g\\i\\t commit -m x' blocked on main (round9 finding 2)" 2
+
+run_hook "$MAIN_REPO" "git \commit -m x"
+check "backslash-escaped subcommand 'git \\commit -m x' blocked on main (round9 finding 2)" 2
+
+run_hook "$MAIN_REPO" "\$'git' commit -m x"
+check "ANSI-C git word \"\$'git' commit -m x\" blocked on main (round9 finding 2)" 2
+
+run_hook "$MAIN_REPO" "git \$'commit' -m x"
+check "ANSI-C subcommand \"git \$'commit' -m x\" blocked on main (round9 finding 2)" 2
+
+run_hook "$MAIN_REPO" "\"git\" \commit -m x"
+check "mixed quote+backslash '\"git\" \\commit -m x' blocked on main (round9 combined)" 2
+
+run_hook "$MAIN_REPO" "\"git\" merge"
+check "quoted git word '\"git\" merge' blocked on main (round9 second subcommand)" 2
+case "$HOOK_STDERR" in
+  *"'git merge'"*) PASS=$((PASS + 1)); echo "ok: quoted-git-word merge block names 'git merge' (round9 message quality)" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: quoted-git-word merge block does not name 'git merge' (round9): $HOOK_STDERR" ;;
+esac
+
+# Allow (exit 0) mirrors — the discriminator: git NOT in command position, or
+# adjacent non-empty spans concatenate into a single non-git word.
+run_hook "$MAIN_REPO" "echo 'git commit'"
+check "\"echo 'git commit'\" benign single-quoted mention allowed on main (round9 discriminator)" 0
+
+run_hook "$MAIN_REPO" "printf \"%s\" \"git commit\""
+check "'printf \"%s\" \"git commit\"' benign quoted arg allowed on main (round9 discriminator)" 0
+
+run_hook "$MAIN_REPO" "g\"x\"it commit"
+check "glued non-invocation 'g\"x\"it commit' (spans concatenate, not git) allowed on main (round9 discriminator)" 0
+
+run_hook "$MAIN_REPO" "echo \"git\" \"commit\""
+check "'echo \"git\" \"commit\"' (echo args, git not command-position) allowed on main (round9 discriminator)" 0
+
+# Runtime indirection stays out of scope (fail-open) — a target assembled from a
+# shell VARIABLE does not reduce statically, so it is allowed by design.
+run_hook "$MAIN_REPO" "x=git; \$x commit"
+check "runtime-indirection 'x=git; \$x commit' allowed on main (round9 documented fail-open)" 0
+
+# FEATURE-branch mirror: attribution decides, not syntax — the same quoted /
+# escaped forms that block on main are allowed on a feature branch.
+run_hook "$FEAT_REPO" "\"git\" commit -m x"
+check "quoted git word '\"git\" commit -m x' on a feature branch allowed (round9 attribution)" 0
+
+run_hook "$FEAT_REPO" "g\it commit -m x"
+check "backslash-escaped git word 'g\\it commit -m x' on a feature branch allowed (round9 attribution)" 0
 
 echo ""
 echo "$PASS passed, $FAIL failed"

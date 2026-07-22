@@ -72,6 +72,19 @@ SUB_END='([^[:alnum:]_.-]|$)'
 MUTATE_SUB='(commit|merge|cherry-pick|revert|pull|stash[[:space:]]+pop)'"$SUB_END"
 GIT_MUTATE_RE="${GIT_CMD}${MUTATE_SUB}"
 
+# COMMAND-POSITION variant of the git prefix. GIT_CMD's leading boundary
+# `(^|[^[:alnum:]_.-])` matches `git` ANYWHERE — correct for the X-collapse copy,
+# where a quoted ARGUMENT's git word is already destroyed to a placeholder. But
+# the WORD-reconstructed copy (reduce_words, below) UN-quotes command-position
+# AND argument git words alike, so `echo "git" "commit"` reconstructs to
+# `echo git commit`; matching git ANYWHERE there would false-block a benign
+# argument. These anchored forms require `git` to be the FIRST word of the
+# reconstructed segment — after leading whitespace and any GIT_* env assignments,
+# with NO preceding command — so only a genuine command-position invocation
+# matches. Used ONLY against reduce_words output (PF-995 / #8988 round 9).
+GIT_CMD_ANCHORED='^[[:space:]]*(GIT_[A-Z_]+=('"$Q"')[[:space:]]+)*git([[:space:]]+'"$GIT_OPT"')*[[:space:]]+'
+GIT_MUTATE_ANCHORED="${GIT_CMD_ANCHORED}${MUTATE_SUB}"
+
 # Normalized copy: strip backslashes, double quotes, single quotes, and
 # backticks. The escaped-quote nested forms defeat RAW-text matching even with
 # Fix A's boundary classes — `sh -c "\"git\" commit"` puts an escaped quote
@@ -85,7 +98,15 @@ GIT_MUTATE_RE="${GIT_CMD}${MUTATE_SUB}"
 # `echo X X` and resolves no target, so it still exits 0). detect_subcmd falls
 # back to $COMMAND_NORM below so a normalized-only block still NAMEs its
 # subcommand (PF-995 round 7 Fix B).
-COMMAND_NORM=$(printf '%s' "$COMMAND" | tr -d '\\"'\''`')
+# The `sed` neutralizes the ANSI-C `$'` introducer to a plain quote FIRST, so
+# `$'commit'` normalizes to `commit` once `tr` strips the quotes — without it the
+# `$` survives (`git $commit`) and this fast-path gate would miss a real
+# `git $'commit'` and exit 0 before the quote-aware pipeline ever runs (PF-995 /
+# #8988 round 9 finding 2). Only `$'` is rewritten; `$x`/`$(` (runtime
+# indirection, deliberately fail-open) are untouched. The precise per-segment
+# reduction (reduce_words, in the loop) is what actually classifies — this is
+# only the router, which over-matches in the SAFE direction.
+COMMAND_NORM=$(printf '%s' "$COMMAND" | sed "s/\$'/'/g" | tr -d '\\"'\''`')
 if ! printf '%s' "$COMMAND" | grep -qE "$GIT_MUTATE_RE" &&
    ! printf '%s' "$COMMAND_NORM" | grep -qE "$GIT_MUTATE_RE"; then
   exit 0
@@ -122,6 +143,78 @@ strip_empty_quotes() {
 # this so the empty-pair bypass is closed uniformly.
 collapse_quotes() {
   strip_empty_quotes "$1" | sed -E 's/"[^"]*"/X/g' | sed -E "s/'[^']*'/X/g"
+}
+
+# Bash-faithful WORD reconstruction of a segment: remove quote characters,
+# process backslash escapes, and treat `$'...'` ANSI-C spans as literal quoted
+# text, EXACTLY as the shell does its static word-splitting before execution.
+# Where collapse_quotes maps every quoted span to the placeholder X (so a quoted
+# git word or subcommand is destroyed), this reconstructs the words the shell
+# would actually run — so a statically quoted/escaped `git <mutate>` in command
+# position resolves the same way real bash would, WITHOUT enumerating every
+# quote/escape sub-case (PF-995 / #8988 round 9 findings 1 & 2).
+#
+# Rules (verified against real bash):
+#   - Adjacent quoted and unquoted spans with NO intervening UNQUOTED whitespace
+#     CONCATENATE into one word (`git"x"commit` -> `gitxcommit`, a non-git word).
+#   - Whitespace INSIDE a quoted span is glued out, so it never splits the word
+#     (`echo "git commit"` -> two words `echo` + `gitcommit`; git is NOT in
+#     command position, correctly benign).
+#   - Whitespace OUTSIDE quotes splits words; runs collapse to one space and
+#     leading/trailing space is dropped.
+#   - A backslash escapes the next char (unquoted and inside double quotes);
+#     `$'...'` is treated as a single-quoted literal (escape decoding inside it is
+#     out of scope — only the far-fetched `$'\x67it'` form, well past the accident
+#     threat model, would differ).
+# Only STATIC reduction is in scope. Runtime indirection (`$x commit`,
+# `$(echo git) commit`) does not reduce statically and stays fail-open.
+reduce_words() {
+  local s="$1"
+  local n=${#s}
+  local i=0 c nc inq=0 out="" pend=0
+  while [ "$i" -lt "$n" ]; do
+    c=${s:i:1}
+    # Single-quote (1) and ANSI-C (3) spans: literal text, whitespace glued out.
+    if [ "$inq" = 1 ] || [ "$inq" = 3 ]; then
+      if [ "$c" = "'" ]; then inq=0; else
+        case "$c" in [[:space:]]) ;; *) out="$out$c" ;; esac
+      fi
+      i=$((i + 1)); continue
+    fi
+    # Double-quote span: backslash escapes ", \, $, `; whitespace glued out.
+    if [ "$inq" = 2 ]; then
+      if [ "$c" = '"' ]; then inq=0; i=$((i + 1)); continue; fi
+      if [ "$c" = "\\" ]; then
+        nc=${s:i+1:1}
+        case "$nc" in
+          '"'|"\\"|'$'|'`') out="$out$nc"; i=$((i + 2)); continue ;;
+        esac
+      fi
+      case "$c" in [[:space:]]) ;; *) out="$out$c" ;; esac
+      i=$((i + 1)); continue
+    fi
+    # Unquoted: whitespace defers a word break (flushed when the next word char
+    # arrives, so a trailing run adds no space).
+    case "$c" in
+      [[:space:]]) [ -n "$out" ] && pend=1; i=$((i + 1)); continue ;;
+    esac
+    if [ "$pend" = 1 ]; then out="$out "; pend=0; fi
+    case "$c" in
+      "'") inq=1; i=$((i + 1)); continue ;;
+      '"') inq=2; i=$((i + 1)); continue ;;
+    esac
+    if [ "$c" = '$' ]; then
+      nc=${s:i+1:1}
+      if [ "$nc" = "'" ]; then inq=3; i=$((i + 2)); continue; fi
+    fi
+    if [ "$c" = "\\" ]; then
+      nc=${s:i+1:1}
+      if [ -n "$nc" ]; then out="$out$nc"; i=$((i + 2)); continue; fi
+      i=$((i + 1)); continue
+    fi
+    out="$out$c"; i=$((i + 1))
+  done
+  printf '%s' "$out"
 }
 
 # Resolve a (possibly quoted, possibly relative, possibly empty) directory
@@ -303,6 +396,14 @@ while IFS="$FS" read -r sepcode seg; do
   # with spaces (PF-995 / #8988).
   seg_class=$(collapse_quotes "$seg")
 
+  # Bash-faithful WORD reconstruction of the SAME segment (quotes/backslashes/
+  # ANSI-C removed within each word, adjacent spans concatenated). Read ONLY by
+  # the command-position mutate check below, so a statically quoted or escaped
+  # `git <mutate>` invocation (`"git" commit`, `g\it commit`, `$'git' commit`)
+  # is classified as a mutation the same way real bash would run it — a case the
+  # X-collapse seg_class destroys to a placeholder (PF-995 / #8988 round 9).
+  seg_reduced=$(reduce_words "$seg")
+
   # `cd <path>` segment: update the tracked directory. A branch switch in
   # one directory says nothing about another, so reset that state too.
   if printf '%s' "$seg" | grep -qE '^[[:space:]]*cd[[:space:]]'; then
@@ -446,12 +547,26 @@ while IFS="$FS" read -r sepcode seg; do
     continue
   fi
 
-  # Only commit-creating segments from here on.
-  if ! printf '%s' "$seg_class" | grep -qE "$GIT_MUTATE_RE"; then
+  # Only commit-creating segments from here on. A segment qualifies if EITHER
+  # the X-collapse copy matches git-mutate ANYWHERE (the established boundary-
+  # anywhere path — preserves every prior case, incl. `FOO=1 git commit` and the
+  # glued-argument allows like `echo "git" "commit"` -> `echo X X`) OR the WORD-
+  # reconstructed copy matches git-mutate in COMMAND position (the round-9
+  # quoted/escaped-token path: `"git" commit`, `g\it commit`, `$'git' commit`).
+  # The OR is purely additive — it only opens new BLOCK routes, never removes an
+  # existing allow, and the anchoring keeps a benign reconstructed argument
+  # (`echo "git" "commit"` -> `echo git commit`) from false-blocking, since git
+  # is not the first word there (PF-995 / #8988 round 9 findings 1 & 2).
+  if ! printf '%s' "$seg_class" | grep -qE "$GIT_MUTATE_RE" \
+     && ! printf '%s' "$seg_reduced" | grep -qE "$GIT_MUTATE_ANCHORED"; then
     continue
   fi
   HANDLED=1
   subcmd=$(detect_subcmd "$seg_class")
+  # Newly-blocked quoted/escaped forms carry no literal subcommand in seg_class
+  # (it is a placeholder there); name it from the reconstruction so the block
+  # message reads `git merge`/`git commit`, not the "commit" default.
+  [ -z "$subcmd" ] && subcmd=$(detect_subcmd "$seg_reduced")
   [ -z "$subcmd" ] && subcmd="commit"
 
   # `git pull --ff-only` cannot create commits. Both the pull detection and
