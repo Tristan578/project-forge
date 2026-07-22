@@ -159,7 +159,8 @@ jobs:
 
       - name: Run tests with coverage
         working-directory: web
-        # Uses vitest.config.ts which enforces coverage thresholds (70/60/65/72).
+        # Uses vitest.config.ts which enforces the coverage thresholds (auto-
+        # ratcheted upward by coverage-ratchet.yml — read the config for live values).
         # NOTE: vitest.workspace.ts exists for local dev (correct node/jsdom
         # environments) but workspace mode does not enforce root-level coverage
         # thresholds — so CI uses the standalone config instead.
