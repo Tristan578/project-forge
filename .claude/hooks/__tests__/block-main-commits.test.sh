@@ -1077,6 +1077,61 @@ check "quoted git word '\"git\" commit -m x' on a feature branch allowed (round9
 run_hook "$FEAT_REPO" "g\it commit -m x"
 check "backslash-escaped git word 'g\\it commit -m x' on a feature branch allowed (round9 attribution)" 0
 
+# --- ROUND 10 finding 1: backslash-newline LINE CONTINUATION between `git` and
+# --- its subcommand. Real bash deletes the `\<NL>` during tokenization and runs
+# --- `git commit` — a REAL commit lands on main (verified by execution). The
+# --- pre-pass must join the physical lines BEFORE segmentation so git+commit
+# --- reconstruct in command position. (split_segments used to treat the literal
+# --- newline as an `O` separator and split `git \` | `commit`, so neither half
+# --- reduced to a mutation and the commit slipped.)
+run_hook "$MAIN_REPO" "$(printf 'git \\\ncommit -m x')"
+check "line-continuation 'git \\<NL>commit -m x' blocked on main (round10 finding 1)" 2
+
+run_hook "$MAIN_REPO" "$(printf 'git \\\n commit -m x')"
+check "line-continuation space-both-sides 'git \\<NL> commit -m x' blocked on main (round10 finding 1)" 2
+
+# Non-regression: a continuation AFTER the subcommand still blocks (git+commit
+# are already command-position adjacent; the pre-pass just joins the tail).
+run_hook "$MAIN_REPO" "$(printf 'git commit \\\n-m x')"
+check "continuation AFTER subcommand 'git commit \\<NL>-m x' still blocked on main (round10 non-regression)" 2
+
+# Boundary: a `\<NL>` INSIDE a single-quoted span is LITERAL (bash does NOT
+# treat it as a continuation there), so the pre-pass must leave it alone — yet a
+# real `git commit` after the `;` still blocks. Verifies the pre-pass respects
+# the single-quote boundary without opening a laundering hole.
+run_hook "$MAIN_REPO" "$(printf "echo 'a\\\nb'; git commit")"
+check "single-quoted '\\<NL>' literal, trailing 'git commit' still blocked on main (round10 squote boundary)" 2
+
+# --- ROUND 10 finding 2: an escaped/quoted WORD-JOINING space. Real bash reads
+# --- `git\ commit` as the SINGLE word `git commit` — a nonexistent command
+# --- (rc 127); git is NEVER invoked (verified by execution). reduce_words must
+# --- NOT emit the joining space as bare whitespace the anchored regex re-splits,
+# --- or the hook over-blocks (a discriminator FAIL).
+run_hook "$MAIN_REPO" "git\ commit -m x"
+check "escaped word-joining space 'git\\ commit -m x' (single word, rc127) allowed on main (round10 finding 2)" 0
+
+run_hook "$MAIN_REPO" "git\ commit"
+check "bare escaped word-joining space 'git\\ commit' (single word, rc127) allowed on main (round10 finding 2)" 0
+
+# The quoted-space forms are also word-joining (single word `git commit`, rc127,
+# git never invoked — verified). These already allow at HEAD; they guard against
+# a finding-2 fix regressing them.
+run_hook "$MAIN_REPO" 'git" "commit'
+check "double-quoted word-joining space 'git\" \"commit' (single word, rc127) allowed on main (round10 finding 2)" 0
+
+run_hook "$MAIN_REPO" "git' 'commit"
+check "single-quoted word-joining space \"git' 'commit\" (single word, rc127) allowed on main (round10 finding 2)" 0
+
+# Do-not-regress: an UNQUOTED space between a reduced git and commit must STILL
+# split and block (finding 2's fix must not reopen finding 1 / the round-9 class).
+run_hook "$MAIN_REPO" "git commit -m x"
+check "plain 'git commit -m x' (unquoted space) still blocked on main (round10 finding 2 guard)" 2
+
+# FEATURE-branch mirror: the line-continuation form is allowed off main —
+# attribution decides, not syntax.
+run_hook "$FEAT_REPO" "$(printf 'git \\\ncommit -m x')"
+check "line-continuation 'git \\<NL>commit -m x' on a feature branch allowed (round10 attribution)" 0
+
 echo ""
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

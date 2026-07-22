@@ -28,6 +28,58 @@ if [ -z "$COMMAND" ]; then
   exit 0
 fi
 
+# Join backslash-newline LINE CONTINUATIONS before anything else classifies the
+# command. Bash deletes a `\<newline>` pair during tokenization (BEFORE word
+# splitting), so `git \<NL>commit` runs `git commit` — a REAL commit on main
+# (verified by execution: HEAD advances). The downstream split_segments treats a
+# literal newline as an `O` separator, so without this pre-pass it splits
+# `git \` | `commit` and neither half reconstructs command-position `git commit`,
+# and the line-oriented prefilter grep never sees `git` and `commit` on one line
+# either — a bypass in the plain-shell static-reduction family (PF-995 / #8988
+# round 10 finding 1).
+#
+# Quoting boundary (verified against real bash): a `\<NL>` INSIDE a single-quoted
+# span is LITERAL (single quotes suppress the continuation) and is preserved;
+# unquoted and double-quoted `\<NL>` ARE removed. The quote-state model mirrors
+# split_segments' (a bare `"`/`'` toggles the span; backslash escapes are NOT
+# otherwise interpreted) so the two always agree on what is "inside quotes". Only
+# the continuation is touched here — the prefilter's ANSI-C neutralization and
+# the per-segment reduction still run afterward on the joined command.
+strip_line_continuations() {
+  local s="$1"
+  local n=${#s}
+  local i=0 c nc inq=0 out=""
+  local nl='
+'
+  while [ "$i" -lt "$n" ]; do
+    c=${s:i:1}
+    if [ "$inq" -eq 1 ]; then                 # single quotes: literal, no continuation
+      [ "$c" = "'" ] && inq=0
+      out="$out$c"; i=$((i + 1)); continue
+    fi
+    if [ "$inq" -eq 2 ]; then                 # double quotes: continuation IS removed
+      if [ "$c" = "\\" ]; then
+        nc=${s:i+1:1}
+        if [ "$nc" = "$nl" ]; then i=$((i + 2)); continue; fi
+      fi
+      [ "$c" = '"' ] && inq=0
+      out="$out$c"; i=$((i + 1)); continue
+    fi
+    case "$c" in
+      "'") inq=1; out="$out$c"; i=$((i + 1)); continue ;;
+      '"') inq=2; out="$out$c"; i=$((i + 1)); continue ;;
+    esac
+    if [ "$c" = "\\" ]; then                  # unquoted: continuation IS removed
+      nc=${s:i+1:1}
+      if [ "$nc" = "$nl" ]; then i=$((i + 2)); continue; fi
+      out="$out$c"; i=$((i + 1)); continue
+    fi
+    out="$out$c"; i=$((i + 1))
+  done
+  printf '%s' "$out"
+}
+COMMAND=$(strip_line_continuations "$COMMAND")
+
 # A single (possibly quoted) argument token.
 Q='"[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+'
 
@@ -168,6 +220,15 @@ collapse_quotes() {
 #     threat model, would differ).
 # Only STATIC reduction is in scope. Runtime indirection (`$x commit`,
 # `$(echo git) commit`) does not reduce statically and stays fail-open.
+#
+# WJOIN is a non-splitting placeholder for a word-JOINING (escaped or quoted)
+# space: a byte the anchored `git[[:space:]]+<mutate>` regex never reads as the
+# whitespace separating git from its subcommand, so `git\ commit` reconstructs
+# to the single word `git<WJOIN>commit` (NOT command-position git) and ALLOWS,
+# matching real bash (a 127 non-command; git never runs). Only UNQUOTED
+# whitespace stays a real space that splits words (PF-995 / #8988 round 10
+# finding 2). \x1d (GS) mirrors the existing FS=\x1f sentinel convention.
+WJOIN=$'\x1d'
 reduce_words() {
   local s="$1"
   local n=${#s}
@@ -209,7 +270,17 @@ reduce_words() {
     fi
     if [ "$c" = "\\" ]; then
       nc=${s:i+1:1}
-      if [ -n "$nc" ]; then out="$out$nc"; i=$((i + 2)); continue; fi
+      if [ -n "$nc" ]; then
+        # The escaped char joins the current word. An escaped WHITESPACE is a
+        # word-JOINING space (`git\ commit` => single word `git commit`, a 127
+        # non-command — git is never invoked), so emit the non-splitting WJOIN
+        # placeholder, never a bare space the anchored regex would re-split on.
+        case "$nc" in
+          [[:space:]]) out="$out$WJOIN" ;;
+          *) out="$out$nc" ;;
+        esac
+        i=$((i + 2)); continue
+      fi
       i=$((i + 1)); continue
     fi
     out="$out$c"; i=$((i + 1))
