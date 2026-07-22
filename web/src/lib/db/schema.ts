@@ -15,7 +15,9 @@ import {
   uniqueIndex,
   index,
   pgEnum,
+  vector,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { DEFAULT_API_KEY_SCOPES } from '@/lib/config/scopes';
 
 // --- Enums ---
@@ -642,6 +644,107 @@ export const waitlistSignups = pgTable(
   (table) => [uniqueIndex('uq_waitlist_signups_email').on(table.email)]
 );
 
+// --- Graph Retrieval (PF-985 / #8977) ---
+//
+// Schema-only phase of specs/graph-rag-retrieval.md. Extraction/ingest,
+// query-time retrieval, and backfill land in follow-up tickets — this file
+// only defines the storage shape.
+
+export const graphNodeKindEnum = pgEnum('graph_node_kind', [
+  'project',
+  'scene',
+  'entity',
+  'asset',
+  'script',
+  'generation',
+]);
+
+export const graphEdgeTypeEnum = pgEnum('graph_edge_type', [
+  'contains',
+  'references',
+  'script_bound_to',
+  'spawned_from_prompt',
+  'derived_from',
+]);
+
+export const graphNodes = pgTable(
+  'graph_nodes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    kind: graphNodeKindEnum('kind').notNull(),
+    // Polymorphic reference (entity_id / asset_id / generationJobs.id / …)
+    // whose meaning depends on `kind`. Not a FK — the referenced table varies.
+    refId: text('ref_id').notNull(),
+    // sha256 of the normalized embeddable text — lets re-ingest skip
+    // unchanged content instead of re-embedding it.
+    contentHash: text('content_hash').notNull(),
+    // PROVISIONAL dimensionality (1536, Matryoshka-truncated). Confirm the
+    // live embedding model's actual output size before the first production
+    // embed run — see specs/graph-rag-retrieval.md "Embeddings". Null until
+    // the node has been embedded (cost-controlled, not every node is
+    // embedded eagerly).
+    embedding: vector('embedding', { dimensions: 1536 }),
+    // The embeddable text itself, kept for re-embed / debugging.
+    text: text('text'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('uq_graph_nodes_user_project_kind_ref').on(
+      table.userId,
+      table.projectId,
+      table.kind,
+      table.refId
+    ),
+    index('idx_graph_nodes_user_project_kind').on(table.userId, table.projectId, table.kind),
+    // pgvector HNSW, cosine distance (`<=>`) — matches vector_cosine_ops
+    // requested in the spec. Requires `CREATE EXTENSION vector` (see the
+    // generated migration's hand-added extension statement). Partial index
+    // (WHERE embedding IS NOT NULL): embedding is nullable (not every node is
+    // embedded eagerly — see the column comment above), and HNSW indexes
+    // built over NULL entries waste index space/build time for rows that can
+    // never match a similarity search.
+    index('idx_graph_nodes_embedding_hnsw')
+      .using('hnsw', table.embedding.op('vector_cosine_ops'))
+      .where(sql`"embedding" is not null`),
+  ]
+);
+
+export const graphEdges = pgTable(
+  'graph_edges',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    type: graphEdgeTypeEnum('type').notNull(),
+    srcNodeId: uuid('src_node_id')
+      .notNull()
+      .references(() => graphNodes.id, { onDelete: 'cascade' }),
+    dstNodeId: uuid('dst_node_id')
+      .notNull()
+      .references(() => graphNodes.id, { onDelete: 'cascade' }),
+  },
+  (table) => [
+    uniqueIndex('uq_graph_edges_user_type_src_dst').on(
+      table.userId,
+      table.type,
+      table.srcNodeId,
+      table.dstNodeId
+    ),
+    index('idx_graph_edges_user_src').on(table.userId, table.srcNodeId),
+    index('idx_graph_edges_user_dst').on(table.userId, table.dstNodeId),
+  ]
+);
+
 // --- Types ---
 
 export type User = typeof users.$inferSelect;
@@ -697,3 +800,10 @@ export type NewLeaderboard = typeof leaderboards.$inferInsert;
 export type LeaderboardEntry = typeof leaderboardEntries.$inferSelect;
 export type NewLeaderboardEntry = typeof leaderboardEntries.$inferInsert;
 export type LeaderboardSortOrder = 'desc' | 'asc';
+
+export type GraphNode = typeof graphNodes.$inferSelect;
+export type NewGraphNode = typeof graphNodes.$inferInsert;
+export type GraphEdge = typeof graphEdges.$inferSelect;
+export type NewGraphEdge = typeof graphEdges.$inferInsert;
+export type GraphNodeKind = 'project' | 'scene' | 'entity' | 'asset' | 'script' | 'generation';
+export type GraphEdgeType = 'contains' | 'references' | 'script_bound_to' | 'spawned_from_prompt' | 'derived_from';

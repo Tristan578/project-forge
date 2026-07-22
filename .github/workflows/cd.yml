@@ -746,6 +746,30 @@ jobs:
       - name: Install dependencies for migrations
         run: npm ci
 
+      - name: Enable pgvector extension
+        # MUST run BEFORE `drizzle-kit push`. drizzle-kit's schema-diff engine
+        # emits `graph_nodes.embedding vector(1536)` + an HNSW index but does NOT
+        # emit `CREATE EXTENSION` for the built-in `vector` type (see the comment
+        # in drizzle/0009_graph_retrieval_nodes_edges.sql). On a production DB that
+        # has never enabled pgvector, push would fail with `type "vector" does not
+        # exist` before the "Apply custom SQL migrations" step below (which also
+        # carries this statement) ever gets a chance to run — that step is ordered
+        # AFTER push, so it cannot self-heal the failure. Enabling the extension in
+        # its own step here guarantees the vector type exists first.
+        # CREATE EXTENSION IF NOT EXISTS is idempotent and Neon-supported.
+        # Gated identically to the push step: only needed when schema files change.
+        if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema')
+        working-directory: web
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          node --input-type=module -e "
+            import { neon } from '@neondatabase/serverless';
+            const sql = neon(process.env.DATABASE_URL);
+            await sql('CREATE EXTENSION IF NOT EXISTS vector');
+            console.log('pgvector extension ensured');
+          "
+
       - name: Run database migrations
         # db:push diffs schema.ts against the live DB and applies only what's
         # needed. This is idempotent — safe to run even if schema was already

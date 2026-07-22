@@ -88,7 +88,15 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await harness.close();
+  // Defensive: if beforeAll threw before assigning harness, afterAll still runs
+  // and must not mask the real beforeAll failure with a TypeError of its own.
+  // (One historical failure mode: PGlite 0.5.x has no pgvector, so the graph
+  // migration's `CREATE EXTENSION vector` / `vector(1536)` / HNSW index threw
+  // during harness build. That is now handled by the pgvector-compat shim in
+  // pgliteHarness.ts buildSchema — PF-985 #8977 — not left as a skip.)
+  if (harness) {
+    await harness.close();
+  }
 });
 
 describe('schema.ts ↔ migration-chain parity (#8707)', () => {
