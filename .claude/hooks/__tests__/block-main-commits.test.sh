@@ -1132,6 +1132,65 @@ check "plain 'git commit -m x' (unquoted space) still blocked on main (round10 f
 run_hook "$FEAT_REPO" "$(printf 'git \\\ncommit -m x')"
 check "line-continuation 'git \\<NL>commit -m x' on a feature branch allowed (round10 attribution)" 0
 
+# --- ROUND 11 finding 1 (CRITICAL under-block): a single-quoted `\<NL>` line
+# --- continuation fed to a NESTED interpreter. Round 10's pre-pass correctly
+# --- PRESERVES a single-quoted `\<NL>` as literal to the OUTER shell (line 81),
+# --- but the INNER shell that re-parses the `-c` payload deletes the continuation
+# --- during ITS OWN tokenization and runs `git commit` — a REAL commit lands on
+# --- main (verified by execution: HEAD advanced). The surviving literal newline
+# --- also splits `git` from `commit` across two physical lines, so the line-based
+# --- prefilter greps miss `git commit` and the hook exits 0 BEFORE the quote-aware
+# --- pipeline (and its NESTED_INTERP fail-closed $PWD fallback) ever runs. The fix
+# --- adds a continuation-stripped inner-shell view to the prefilter OR-chain so
+# --- such a payload ROUTES into the pipeline, where NESTED_INTERP=1 + empty targets
+# --- fail closed. The DOUBLE-quoted analogue already blocked at HEAD (guard below).
+CONT_PAYLOAD="$(printf 'git \\\ncommit -m x')"   # git \<NL>commit -m x (backslash + real 0x0a)
+run_hook "$MAIN_REPO" "sh -c '$CONT_PAYLOAD'"
+check "single-quoted continuation in sh -c payload 'sh -c 'git \\<NL>commit'' blocked on main (round11 finding 1)" 2
+
+run_hook "$MAIN_REPO" "bash -c '$CONT_PAYLOAD'"
+check "single-quoted continuation in bash -c payload 'bash -c 'git \\<NL>commit'' blocked on main (round11 finding 1)" 2
+
+# Non-regression guard: the DOUBLE-quoted nested-interpreter continuation already
+# blocked at HEAD (its `\<NL>` is a live continuation to the OUTER shell too, so
+# strip_line_continuations joined it pre-pipeline). The fix must not break it.
+run_hook "$MAIN_REPO" "bash -c \"$CONT_PAYLOAD\""
+check "double-quoted continuation in bash -c payload 'bash -c \"git \\<NL>commit\"' still blocked on main (round11 non-regression)" 2
+
+# Do-NOT-regress the round-10 single-quote boundary: a BARE single-quoted
+# continuation NOT fed to an interpreter is ONE literal word (`git\<NL>commit -m x`,
+# an rc127 non-command; git never runs), so it must STILL ALLOW even though the new
+# inner-shell prefilter view routes it into the pipeline. There it hits NESTED_INTERP=0
+# (no interpreter/eval/substitution) so the fail-closed fallback never fires and no
+# segment resolves a command-position git target.
+run_hook "$MAIN_REPO" "'$CONT_PAYLOAD'"
+check "bare single-quoted continuation \"'git \\<NL>commit -m x'\" (rc127 non-command) allowed on main (round11 boundary)" 0
+
+# FEATURE-branch mirror: the nested-interpreter continuation form is allowed off
+# main — attribution decides, not syntax.
+run_hook "$FEAT_REPO" "sh -c '$CONT_PAYLOAD'"
+check "single-quoted continuation in sh -c payload on a feature branch allowed (round11 attribution)" 0
+
+# --- ROUND 11: `sh -c 'echo git commit'` — the inner payload MENTIONS git as an
+# --- `echo` argument (git is NOT command-position; it never runs). By the CORRECT
+# --- runtime contract this would ALLOW, but the hook's round-4/7 nested-interpreter
+# --- posture is DELIBERATELY fail-CLOSED (lines 708-770): any `bash|sh -c`/`eval`
+# --- with no statically-resolved git target blocks on $PWD, because distinguishing
+# --- an echo-arg git from a command-position git INSIDE an arbitrary `-c` payload
+# --- requires recursively re-classifying that payload — the same fail-closed rule
+# --- that (correctly) blocks `eval "git commit"` (line 802) and `bash -c 'echo hi &&
+# --- git commit'` (line 720). These block at HEAD and STILL block after the round-11
+# --- prefilter fix (it only ROUTES more payloads into the pipeline; it does not relax
+# --- the fallback). The round-11 finding lists these as ALLOW-desired — a SEPARATE,
+# --- pre-existing, fail-SAFE over-block, surfaced to the reviewer as an open design
+# --- item; fixing it (inner-payload re-classification) is out of scope for this tight
+# --- CRITICAL-under-block hotfix and risks an under-block regression on lines 720/802.
+run_hook "$MAIN_REPO" "sh -c 'echo git commit'"
+check "'sh -c 'echo git commit'' fail-closed nested-interp block on main (round11 pre-existing over-block)" 2
+
+run_hook "$MAIN_REPO" "sh -c 'echo \"git commit\"'"
+check "'sh -c 'echo \"git commit\"'' fail-closed nested-interp block on main (round11 pre-existing over-block)" 2
+
 echo ""
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

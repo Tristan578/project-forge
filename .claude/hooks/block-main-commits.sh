@@ -159,8 +159,26 @@ GIT_MUTATE_ANCHORED="${GIT_CMD_ANCHORED}${MUTATE_SUB}"
 # reduction (reduce_words, in the loop) is what actually classifies — this is
 # only the router, which over-matches in the SAFE direction.
 COMMAND_NORM=$(printf '%s' "$COMMAND" | sed "s/\$'/'/g" | tr -d '\\"'\''`')
+# Inner-shell view (PF-995 / #8988 round 11): a NESTED interpreter (`sh -c '…'`)
+# re-parses its `-c` payload and removes `\<newline>` line continuations during
+# ITS OWN tokenization — regardless of the OUTER shell's single-quote literalness.
+# strip_line_continuations (line 81) correctly PRESERVES a single-quoted `\<NL>`
+# for the outer shell, but that leaves a literal newline that splits `git` from
+# `commit` across two physical lines, so the line-based greps above miss
+# `git commit` and this gate exits 0 — while the inner shell actually runs it (a
+# real commit lands on main). Add a copy with ALL `\<NL>` continuations removed
+# unconditionally so such a payload still ROUTES into the quote-aware pipeline,
+# where NESTED_INTERP + the fail-closed $PWD fallback decide the verdict. As with
+# COMMAND_NORM, over-matching here is the SAFE direction — routing only; the
+# per-segment reduction and attribution below decide the real verdict. NL is not
+# defined until later, so use a local newline.
+cont_nl=$'\n'
+COMMAND_INNER=${COMMAND//\\$cont_nl/}
+COMMAND_INNER_NORM=$(printf '%s' "$COMMAND_INNER" | sed "s/\$'/'/g" | tr -d '\\"'\''`')
 if ! printf '%s' "$COMMAND" | grep -qE "$GIT_MUTATE_RE" &&
-   ! printf '%s' "$COMMAND_NORM" | grep -qE "$GIT_MUTATE_RE"; then
+   ! printf '%s' "$COMMAND_NORM" | grep -qE "$GIT_MUTATE_RE" &&
+   ! printf '%s' "$COMMAND_INNER" | grep -qE "$GIT_MUTATE_RE" &&
+   ! printf '%s' "$COMMAND_INNER_NORM" | grep -qE "$GIT_MUTATE_RE"; then
   exit 0
 fi
 
