@@ -1,0 +1,37 @@
+# Scheduled repo-level security-alert gate (PF-1000).
+#
+# Fails while any open Dependabot or code-scanning alert sits unremediated, so
+# alert debt surfaces as a red run instead of accumulating silently in the
+# Security tab (10 Dependabot + 1 CodeQL alert did exactly that before this
+# existed). Gate logic + the GHSA allowlist live in
+# scripts/check-security-alerts.sh, unit-tested by
+# scripts/__tests__/check-security-alerts.test.sh in the CI Self-Defense job.
+#
+# Deliberately scheduled, NOT a PR gate: repo-level alerts only close after the
+# fixing PR merges, so blocking PRs on them would deadlock the fix itself.
+name: Security Alerts
+
+on:
+  schedule:
+    # Daily, offset from the on-the-hour rush.
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  # security-events: read covers BOTH the Dependabot and code-scanning alert
+  # APIs for the Actions GITHUB_TOKEN. contents: read for checkout only.
+  security-events: read
+  contents: read
+
+jobs:
+  check-alerts:
+    name: Open Security Alerts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check for open security alerts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/check-security-alerts.sh
