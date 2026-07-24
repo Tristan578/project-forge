@@ -785,9 +785,20 @@ jobs:
         run: npx drizzle-kit push
 
       - name: Apply custom SQL migrations
-        # Drizzle can't model partial unique indexes (WHERE predicates).
-        # These migrations are idempotent (CREATE ... IF NOT EXISTS or
-        # CONCURRENTLY which skips if the index already exists).
+        # Drizzle can't model partial unique indexes (WHERE predicates) or
+        # CONCURRENTLY, so these SQL files are applied directly here. They are
+        # idempotent (CREATE ... IF NOT EXISTS / CONCURRENTLY skips an existing
+        # index), and any residual "already exists" is caught below.
+        #
+        # Neon's HTTP driver (`neon()`) sends each call as ONE query over the
+        # extended (prepared-statement) protocol, which permits only a SINGLE
+        # statement — passing a whole multi-statement file throws "cannot insert
+        # multiple commands into a prepared statement". Drizzle SQL files ARE
+        # multi-statement, delimited by the canonical `--> statement-breakpoint`
+        # marker, so split on it and apply each statement on its own. Files with
+        # no marker split to a one-element array (unchanged behavior). We can't
+        # use sql.transaction([...]) here because CREATE INDEX CONCURRENTLY may
+        # not run inside a transaction, and we need per-statement idempotency.
         if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema') || contains(needs.check-changes.outputs.web-changed-files, 'drizzle/')
         working-directory: web
         env:
@@ -801,13 +812,17 @@ jobs:
             for (const f of files) {
               console.log('Applying drizzle/' + f);
               const content = readFileSync('drizzle/' + f, 'utf8');
-              try { await sql(content); console.log('  OK'); }
-              catch(e) {
-                const msg = e.message || '';
-                const isIdempotent = msg.includes('already exists') || msg.includes('duplicate key') || msg.includes('relation') && msg.includes('already');
-                if (isIdempotent) { console.log('  Skipped (idempotent):', msg); }
-                else { console.error('  FAILED:', msg); process.exitCode = 1; }
+              const statements = content.split('--> statement-breakpoint').map(s => s.trim()).filter(Boolean);
+              for (const stmt of statements) {
+                try { await sql(stmt); }
+                catch(e) {
+                  const msg = e.message || '';
+                  const isIdempotent = msg.includes('already exists') || msg.includes('duplicate key') || msg.includes('relation') && msg.includes('already');
+                  if (isIdempotent) { console.log('  Skipped (idempotent):', msg); }
+                  else { console.error('  FAILED:', msg); process.exitCode = 1; }
+                }
               }
+              console.log('  OK (' + statements.length + ' statement(s))');
             }
           "
 
