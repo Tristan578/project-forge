@@ -18,8 +18,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  # security-events: read covers BOTH the Dependabot and code-scanning alert
-  # APIs for the Actions GITHUB_TOKEN. contents: read for checkout only.
+  # security-events: read covers the code-scanning alerts API only. The
+  # Dependabot alerts API is NOT reachable by the Actions GITHUB_TOKEN at all —
+  # the Actions app has no Dependabot-alerts permission and `permissions:` has
+  # no key for it (community discussion #60612) — hence the PAT below.
+  # contents: read for checkout only.
   security-events: read
   contents: read
 
@@ -33,5 +36,12 @@ jobs:
 
       - name: Check for open security alerts
         env:
-          GH_TOKEN: ${{ github.token }}
+          # SECURITY_ALERTS_TOKEN must be a fine-grained PAT scoped to THIS
+          # repo with read-only "Dependabot alerts" + "Code scanning alerts"
+          # permissions — the minimum that can read both alert lists. The
+          # github.token fallback CANNOT read Dependabot alerts (see the
+          # permissions comment above), so without the secret the gate fails
+          # CLOSED (exit 2, red run naming the API error) rather than silently
+          # passing — a missing/expired PAT is loud, never a vacuous green.
+          GH_TOKEN: ${{ secrets.SECURITY_ALERTS_TOKEN || github.token }}
         run: bash scripts/check-security-alerts.sh
