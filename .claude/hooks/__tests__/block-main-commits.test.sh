@@ -265,22 +265,26 @@ SPACE_MAIN_REPO="$TMP/space main/main-repo2"
 mkdir -p "$TMP/space main"
 git init -q -b main "$SPACE_MAIN_REPO"
 
-# --- PATH 1: the whole-command filter matches but quoting inside a `-c`
-# --- value (containing a literal `&&`) defeats the awk `&&`/`||`/`;` segment
-# --- split — no split segment re-matches GIT_MUTATE_RE on its own, so
-# --- COMMIT_TARGETS stays empty and HANDLED stays 0. The fallback must still
-# --- resolve the commit against the hook's own tracked $PWD rather than
-# --- silently allowing it.
+# --- PATH 1: a literal `&&` INSIDE a double-quoted `-c` value must NOT split the
+# --- command into segments — split_segments is quote-aware, so the whole
+# --- `git -c key="a&&b" commit -m msg` stays ONE segment. That single segment
+# --- resolves DIRECTLY to a directory (D) target = the hook's own $PWD (no `-C`,
+# --- no `cd`), so COMMIT_TARGETS is NON-empty and HANDLED=1: it blocks via the
+# --- NORMAL per-segment directory resolution ("Resolved from directory …"), NOT
+# --- the $PWD fallback (which fires only when COMMIT_TARGETS is empty). The
+# --- earlier "fallback safety net" description was inaccurate — verified by
+# --- instrumenting the resolver (PF-995 / #8989 finding F3). The block-on-main /
+# --- allow-on-feature behavior itself is correct and preserved.
 QUOTE_DEFEAT_CMD='git -c key="a&&b" commit -m msg'
 run_hook "$MAIN_REPO" "$QUOTE_DEFEAT_CMD"
-check "quote-defeated segment split falls back to \$PWD, blocked on main (fallback safety net)" 2
+check "quoted-\`&&\` -c value stays one segment; resolves to \$PWD directory, blocked on main" 2
 case "$HOOK_STDERR" in
-  *"$MAIN_REPO"*) PASS=$((PASS + 1)); echo "ok: fallback block names \$PWD as the resolving directory" ;;
-  *) FAIL=$((FAIL + 1)); echo "FAIL: fallback block did not name \$PWD" ;;
+  *"$MAIN_REPO"*) PASS=$((PASS + 1)); echo "ok: directory-resolved block names \$PWD as the resolving directory" ;;
+  *) FAIL=$((FAIL + 1)); echo "FAIL: block did not name \$PWD" ;;
 esac
 
 run_hook "$FEAT_REPO" "$QUOTE_DEFEAT_CMD"
-check "quote-defeated segment split falls back to \$PWD, allowed on feature branch (fallback safety net)" 0
+check "quoted-\`&&\` -c value stays one segment; resolves to \$PWD directory, allowed on feature branch" 0
 
 # --- PATH 2: `checkout <branch> -- <pathspec>` in both directions — the
 # --- named ref is a real branch name (not just HEAD), and must never be
@@ -1190,6 +1194,77 @@ check "'sh -c 'echo git commit'' fail-closed nested-interp block on main (round1
 
 run_hook "$MAIN_REPO" "sh -c 'echo \"git commit\"'"
 check "'sh -c 'echo \"git commit\"'' fail-closed nested-interp block on main (round11 pre-existing over-block)" 2
+
+# =====================================================================
+# ROUND 12 (PF-995 / #8989) — three review-round findings on the round-11 hook.
+# =====================================================================
+
+# --- F1 (HIGH): a benign feature-attributed commit in an EARLIER segment records
+# --- a non-main target (COMMIT_TARGETS non-empty, HANDLED=1). Before the fix that
+# --- SUPPRESSED the global NESTED_INTERP $PWD fallback, so a LATER hidden git-mutate
+# --- inside a nested executor (`bash -c "git commit"`, `eval "git commit"`, or a live
+# --- `"$(git commit)"`) — which runs in the hook's OWN cwd (= main here) — slipped
+# --- through unchecked (exit 0). The fix flags a per-segment nested git-mutate so the
+# --- fail-closed $PWD fallback fires regardless of what earlier segments recorded.
+run_hook "$MAIN_REPO" "git -C $FEAT_REPO commit -m ok && bash -c \"$GC -m x\""
+check "benign git -C <feat> commit does NOT launder a later bash -c \"git commit\"; blocked on main (F1)" 2
+
+run_hook "$MAIN_REPO" "git -C $FEAT_REPO commit -m ok && eval \"$GC\""
+check "benign git -C <feat> commit does NOT launder a later eval \"git commit\"; blocked on main (F1 eval)" 2
+
+run_hook "$MAIN_REPO" "git -C $FEAT_REPO commit -m ok && \"\$($GC)\""
+check "benign git -C <feat> commit does NOT launder a later \"\$(git commit)\"; blocked on main (F1 subst)" 2
+
+# --- F1 attribution mirrors: the per-segment flag resolves attribution via \$PWD, so
+# --- the SAME laundering shapes from a FEATURE cwd stay ALLOWED (no new over-block). ---
+run_hook "$FEAT_REPO" "git -C $FEAT_REPO commit -m ok && bash -c \"$GC -m x\""
+check "git -C <feat> commit + bash -c \"git commit\" from a feature cwd allowed (F1 mirror)" 0
+
+run_hook "$FEAT_REPO" "git -C $FEAT_REPO commit -m ok && \"\$($GC)\""
+check "git -C <feat> commit + \"\$(git commit)\" from a feature cwd allowed (F1 mirror subst)" 0
+
+# --- F1 boundary: an INERT single-quoted \$(...) contributes no executor, so an earlier
+# --- benign feature target must NOT be newly over-blocked on main (only real target: feat).
+run_hook "$MAIN_REPO" "git -C $FEAT_REPO commit -m ok && echo 'see \$($GC)'"
+check "benign git -C <feat> commit + inert single-quoted \$(git commit) not over-blocked on main (F1 boundary)" 0
+
+# --- F2 (MEDIUM): `wc -w` counts whitespace-split words and is quote-UNAWARE, so a
+# --- two-arg rename with a QUOTED spaced <old> — `branch -M "old name" main` — miscounts
+# --- 4 words instead of 3, skips BOTH the one-arg and two-arg branches, and never pends.
+# --- In an UNRESOLVABLE dir (the fail-closed path, line 625) that DEFEATS the fail-closed
+# --- protection: the following `git -C <baddir> commit` is then allowed (exit 0). The
+# --- unquoted control (line 665) blocks correctly; the quoted-spaced variant is the bypass.
+# --- Fixed by count_tokens (quote-aware arity).
+run_hook "$MAIN_REPO" "git -C /nonexistent-dir-f2-790 branch -M \"old name\" main && git -C /nonexistent-dir-f2-790 commit -m x"
+check "two-arg rename to main, QUOTED spaced <old>, unresolvable dir fails closed; blocked (F2)" 2
+
+# --- F2 robustness: a QUOTED spaced <new> that is NOT main/master must still be a
+# --- correctly-classified two-arg rename that does NOT pend (renaming to a non-main
+# --- name never moves HEAD to main) — a following commit on a feature cwd stays allowed.
+run_hook "$FEAT_REPO" "git -C $FEAT_REPO branch -M \"old name\" \"feature two\" && $GC -m x"
+check "two-arg rename to a QUOTED non-main <new> does not pend; feature commit allowed (F2 robustness)" 0
+
+# --- F4 (MEDIUM): the O(n^2) static analysis must not blow the 3s PreToolUse budget.
+# --- A fast O(n) pre-gate exits non-git commands immediately; a size cap FAILS CLOSED
+# --- (blocks) an over-long git command rather than analyzing it. ---
+F4_PAD=$(head -c 60000 /dev/zero | tr '\0' 'a')
+
+t0=$(date +%s)
+run_hook "$MAIN_REPO" "echo $F4_PAD"
+t1=$(date +%s)
+check "60k-char non-git command allowed via fast pre-gate (F4)" 0
+if [ "$((t1 - t0))" -lt 3 ]; then PASS=$((PASS + 1)); echo "ok: 60k-char non-git command analyzed in <3s (F4 perf)"; else FAIL=$((FAIL + 1)); echo "FAIL: 60k-char non-git command took $((t1 - t0))s (F4 perf)"; fi
+
+t0=$(date +%s)
+run_hook "$FEAT_REPO" "$GC -m $F4_PAD"
+t1=$(date +%s)
+check "over-long git command on a feature branch fails closed (blocked) via size cap (F4)" 2
+if [ "$((t1 - t0))" -lt 3 ]; then PASS=$((PASS + 1)); echo "ok: 60k-char git command capped in <3s (F4 perf)"; else FAIL=$((FAIL + 1)); echo "FAIL: 60k-char git command took $((t1 - t0))s (F4 perf)"; fi
+
+# A SHORT git command on a feature branch is still allowed — proves the cap, not the
+# branch, is what blocks the over-long one above.
+run_hook "$FEAT_REPO" "$GC -m ok"
+check "short git commit on a feature branch still allowed (F4 cap is size-gated, not blanket)" 0
 
 echo ""
 echo "$PASS passed, $FAIL failed"

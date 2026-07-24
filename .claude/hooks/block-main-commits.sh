@@ -28,6 +28,41 @@ if [ -z "$COMMAND" ]; then
   exit 0
 fi
 
+# --- Cost guards (PF-995 / #8989 finding F4). The static analysis below is
+# O(n^2) in the command length — strip_line_continuations joins `\<NL>` with a
+# char-by-char scan, and the per-segment word reduction re-scans substrings — so
+# a very long command line could blow the hook's 3s PreToolUse budget. Two O(n)
+# guards run FIRST, before any quadratic work:
+#
+#   1. Fast pre-gate. CHEAP is the MOST-reduced view of the command (newlines,
+#      backslashes, quotes and backticks removed, ANSI-C `$'` neutralized) — a
+#      strict superset of the reductions every downstream prefilter view applies
+#      to expose the word `git`. So if CHEAP contains no `git` substring, NO
+#      downstream view can match a git-mutate and the pipeline would exit 0
+#      anyway; exiting here just skips the quadratic work. This can only ever
+#      SKIP analysis of a non-blockable command — it never early-allows a
+#      blockable one. (`tr -d` strips the backslashes first, so escaped forms
+#      like `g\it`/`\g\i\t` still reduce to `git` and pass the gate.)
+#   2. Size cap. A command that survives the pre-gate (so it CONTAINS `git`) but
+#      exceeds MAX_ANALYZE is refused rather than analyzed. This FAILS CLOSED —
+#      an over-long git command line is blocked, never silently allowed. Large
+#      commit content belongs in a file: `git commit -F <file>`.
+CHEAP=$(printf '%s' "$COMMAND" | tr -d '\n' | sed "s/\$'/'/g" | tr -d '\\"'\''`')
+case "$CHEAP" in
+  *git*) ;;
+  *) exit 0 ;;
+esac
+
+MAX_ANALYZE=4000
+if [ "${#COMMAND}" -gt "$MAX_ANALYZE" ]; then
+  {
+    echo "BLOCKED: command too long to analyze safely (${#COMMAND} > ${MAX_ANALYZE} chars)."
+    echo "Refusing on the side of caution rather than skip the main-branch check."
+    echo "Use a feature branch, and pass large content via a file: git commit -F <file>"
+  } >&2
+  exit 2
+fi
+
 # Join backslash-newline LINE CONTINUATIONS before anything else classifies the
 # command. Bash deletes a `\<newline>` pair during tokenization (BEFORE word
 # splitting), so `git \<NL>commit` runs `git commit` — a REAL commit on main
@@ -78,7 +113,11 @@ strip_line_continuations() {
   done
   printf '%s' "$out"
 }
-COMMAND=$(strip_line_continuations "$COMMAND")
+# Only pay strip_line_continuations' O(n^2) join when a backslash-newline
+# continuation is actually present; otherwise it is a no-op (PF-995 / #8989 F4).
+case "$COMMAND" in
+  *\\$'\n'*) COMMAND=$(strip_line_continuations "$COMMAND") ;;
+esac
 
 # A single (possibly quoted) argument token.
 Q='"[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+'
@@ -213,6 +252,19 @@ strip_empty_quotes() {
 # this so the empty-pair bypass is closed uniformly.
 collapse_quotes() {
   strip_empty_quotes "$1" | sed -E 's/"[^"]*"/X/g' | sed -E "s/'[^']*'/X/g"
+}
+
+# Quote-AWARE word count. `wc -w` splits on raw whitespace and miscounts a quoted
+# argument with internal spaces (`-M "old name" main` -> 4, not 3). Collapsing
+# every quoted span to a single placeholder X first (via collapse_quotes) makes
+# each quoted token count as ONE word, so git-branch rename arity is classified
+# correctly regardless of quoting. git branch names cannot contain spaces, so a
+# quoted spaced name is never a real branch — but the miscount still skips BOTH
+# arity branches and, on the fail-closed (unresolvable-dir) path, DEFEATS the
+# fail-closed pend that would otherwise block a following commit (PF-995 / #8989
+# finding F2).
+count_tokens() {
+  collapse_quotes "$1" | wc -w | tr -d '[:space:]'
 }
 
 # Bash-faithful WORD reconstruction of a segment: remove quote characters,
@@ -454,8 +506,21 @@ HANDLED=0
 # benign target was recorded, so an unattributed commit cannot slip (PF-995 /
 # #8988 round 3 fix 3).
 UNATTRIBUTED=0
+# Set when a segment resolves NO direct git target yet still carries a git-mutate
+# inside a nested executor (`bash -c "git commit"`, `eval "git commit"`) or a live
+# command substitution (`"$(git commit)"`). OR'd into the $PWD fallback below so a
+# benign EARLIER target (COMMIT_TARGETS non-empty, HANDLED=1) cannot suppress the
+# fail-closed check for a later hidden commit (PF-995 / #8989 finding F1).
+NESTED_MUTATE=0
 NL='
 '
+# Nested-interpreter / eval detectors, shared by the per-segment F1 check inside
+# the loop and the global quoted-only fallback after it. Defined once here so both
+# sites use the identical pattern. `-[[:alnum:]]*c` matches a `-c` flag possibly
+# bundled with other letters (`-xc`); the `([^[:space:]]+[[:space:]]+)*` hop skips
+# intervening options (`bash -euo pipefail -c …`) between interpreter and `-c`.
+INTERP_RE='(^|[[:space:]]|[;&|()])(bash|sh|zsh|ksh|dash)[[:space:]]+([^[:space:]]+[[:space:]]+)*-[[:alnum:]]*c([[:space:]]|$)'
+EVAL_RE='(^|[[:space:]]|[;&|()])eval([[:space:]]|$)'
 SEGMENTS=$(split_segments "$COMMAND")
 
 # Each SEGMENTS line is `<sepcode>$FS<segment text>` (see split_segments):
@@ -600,7 +665,7 @@ while IFS="$FS" read -r sepcode seg; do
     br_cdir=$(printf '%s' "$head_br" | sed -nE 's/.*[[:space:]]-C[[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+).*/\1/p')
     br_dir=$(resolve_dir "$br_cdir")
     br_rest=$(printf '%s' "$seg" | sed -nE 's/^.*[[:space:]]branch[[:space:]]+(.*)$/\1/p')
-    br_words=$(printf '%s' "$br_rest" | wc -w | tr -d '[:space:]')
+    br_words=$(count_tokens "$br_rest")
     if printf '%s' "$br_rest" | grep -qE '^-[mM]([[:space:]]|$)'; then
       if [ "$br_words" -eq 2 ]; then
         # One-arg rename: `-M <new>` renames whatever branch is current.
@@ -648,6 +713,37 @@ while IFS="$FS" read -r sepcode seg; do
   # is not the first word there (PF-995 / #8988 round 9 findings 1 & 2).
   if ! printf '%s' "$seg_class" | grep -qE "$GIT_MUTATE_RE" \
      && ! printf '%s' "$seg_reduced" | grep -qE "$GIT_MUTATE_ANCHORED"; then
+    # This segment resolves NO direct command-position git target. But a nested
+    # executor (`bash -c "git commit"`, `eval "git commit"`) or a LIVE command
+    # substitution (`"$(git commit)"`) in THIS segment can still run a git-mutate
+    # the splitter cannot see. When an EARLIER segment already recorded a benign
+    # (non-main) target, COMMIT_TARGETS is non-empty and HANDLED=1, which
+    # suppresses the global NESTED_INTERP fallback below and lets the hidden
+    # commit slip through (`git -C <feat> commit && bash -c "git commit"` — PF-995
+    # / #8989 finding F1). Flag it per-segment so the fail-closed $PWD fallback
+    # fires regardless. Only segments that reach HERE are inspected — a legit
+    # `git -C /feature commit -m "$(date)"` is HANDLED above and never arrives, so
+    # it is not false-flagged.
+    seg_exec=0
+    if printf '%s' "$seg_class" | grep -qE "$INTERP_RE" \
+       || printf '%s' "$seg_class" | grep -qE "$EVAL_RE"; then
+      seg_exec=1
+    else
+      # A `$(...)`/backtick inside SINGLE quotes is inert (`echo 'see $(git
+      # commit)'` must stay allowed) — collapse single-quoted spans first, exactly
+      # as the global SUBST_SCAN does, before looking for a live substitution.
+      seg_subst=$(strip_empty_quotes "$seg" | sed -E "s/'[^']*'/X/g")
+      if printf '%s' "$seg_subst" | grep -qE '\$\(' \
+         || printf '%s' "$seg_subst" | grep -q '`'; then
+        seg_exec=1
+      fi
+    fi
+    if [ "$seg_exec" -eq 1 ]; then
+      seg_norm=$(printf '%s' "$seg" | sed "s/\$'/'/g" | tr -d '\\"'\''`')
+      if printf '%s' "$seg_norm" | grep -qE "$GIT_MUTATE_RE"; then
+        NESTED_MUTATE=1
+      fi
+    fi
     continue
   fi
   HANDLED=1
@@ -734,11 +830,8 @@ EOF_SEGMENTS
 # `eval`. Present → keep the fail-CLOSED $PWD fallback; absent → allow.
 COMMAND_CLASS=$(collapse_quotes "$COMMAND")
 NESTED_INTERP=0
-# `-[[:alnum:]]*c` matches a `-c` flag possibly bundled with other letters
-# (`-xc`); the `([^[:space:]]+[[:space:]]+)*` hop skips any intervening options
-# (`bash -euo pipefail -c …`) between the interpreter name and its `-c`.
-INTERP_RE='(^|[[:space:]]|[;&|()])(bash|sh|zsh|ksh|dash)[[:space:]]+([^[:space:]]+[[:space:]]+)*-[[:alnum:]]*c([[:space:]]|$)'
-EVAL_RE='(^|[[:space:]]|[;&|()])eval([[:space:]]|$)'
+# INTERP_RE / EVAL_RE are defined once above the segment loop (shared with the
+# per-segment F1 nested-mutate check).
 if printf '%s' "$COMMAND_CLASS" | grep -qE "$INTERP_RE" \
    || printf '%s' "$COMMAND_CLASS" | grep -qE "$EVAL_RE"; then
   NESTED_INTERP=1
@@ -776,7 +869,11 @@ fi
 #      recorded — a non-main target from one segment must not suppress the
 #      fallback for a later unattributed commit — so the record is APPENDED,
 #      not assigned (PF-995 / #8988 round 3 fix 3).
-if { [ -z "$COMMIT_TARGETS" ] && [ "$HANDLED" -eq 0 ] && [ "$NESTED_INTERP" -eq 1 ]; } || [ "$UNATTRIBUTED" -eq 1 ]; then
+#   3. A later segment carried a git-mutate inside a nested executor or a live
+#      command substitution ($NESTED_MUTATE). Like trigger 2, this must fire even
+#      when an earlier benign target was recorded, so the fallback is not
+#      suppressed by an unrelated non-main target (PF-995 / #8989 finding F1).
+if { [ -z "$COMMIT_TARGETS" ] && [ "$HANDLED" -eq 0 ] && [ "$NESTED_INTERP" -eq 1 ]; } || [ "$UNATTRIBUTED" -eq 1 ] || [ "$NESTED_MUTATE" -eq 1 ]; then
   fb_subcmd=$(detect_subcmd "$COMMAND")
   # Escaped-quote forms (`sh -c "\"git\" merge"`) hide the subcommand from a RAW
   # detect_subcmd — GIT_CMD's whitespace-after-git never matches — so fall back
