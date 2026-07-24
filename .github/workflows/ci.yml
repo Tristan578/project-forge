@@ -754,6 +754,7 @@ jobs:
             scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
             scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
+            scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
             scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
             scripts/check-changeset-packages.sh scripts/__tests__/check-changeset-packages.test.sh \
             scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
@@ -784,6 +785,9 @@ jobs:
 
       - name: Run npm-audit allowlist gate test suite
         run: bash scripts/__tests__/check-npm-audit.test.sh
+
+      - name: Run security-alerts gate test suite
+        run: bash scripts/__tests__/check-security-alerts.test.sh
 
       - name: Run cross-provider DX-audit contract test
         run: bash .claude/tools/__tests__/dx-audit.test.sh
