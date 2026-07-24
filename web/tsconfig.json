@@ -11,6 +11,12 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    // Lets provision-billing-meter.ts import stripe-client.ts with an
+    // explicit .ts extension (required for the script's documented plain-
+    // `node` invocation to resolve — see that file's header comment). Valid
+    // only because noEmit is true; without it, the emitted output would
+    // request the (nonexistent) '.ts' file at runtime.
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     // TODO(PF-389): Enable noUncheckedIndexedAccess — currently blocked by 2022 errors across the codebase.
     // Dominant error patterns (from tsc --noEmit on 2026-03-14):
@@ -48,6 +54,7 @@
     "src/**/*.tsx",
     "src/**/*.mts",
     "e2e/**/*.ts",
+    "scripts/**/*.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],

@@ -19,6 +19,8 @@ export default defineConfig({
       'src/**/*.test.tsx',
       // Pure-function unit tests for e2e lib utilities (no browser required)
       'e2e/lib/__tests__/**/*.test.ts',
+      // Unit tests for standalone build/provisioning scripts (not under src/)
+      'scripts/__tests__/**/*.test.ts',
     ],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
@@ -35,10 +37,10 @@ export default defineConfig({
       // Ratcheted up per sprint — see docs/coverage-plan.md
       // Tier-3 target: 75/65/70/77 (actual coverage ~76/67/70/78, leaving ~1-2pp headroom)
       thresholds: {
-        statements: 75,
-        branches: 65,
-        functions: 70,
-        lines: 77,
+        statements: 81,
+        branches: 71,
+        functions: 75,
+        lines: 82,
       },
     },
   },

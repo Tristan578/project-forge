@@ -64,6 +64,13 @@
       "when": 1781320487417,
       "tag": "0008_users_active_features",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784550000000,
+      "tag": "0009_token_usage_meter_columns",
+      "breakpoints": true
     }
   ]
 }

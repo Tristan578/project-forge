@@ -236,6 +236,47 @@ if [ "$end_count" -eq 1 ]; then ok "exactly one END marker after write (sentinel
 if run_gen "$ROOT" --check >/dev/null 2>&1; then ok "sentinel-in-value target is stable on --check"; else bad "sentinel-in-value corrupted the target (drift/throw on --check)"; fi
 rm -rf "$ROOT"
 
+echo "== generator: a NESTED comment sentinel cannot survive sanitization =="
+# Single-pass paired-comment removal can CREATE a fresh comment opener from the
+# surrounding bytes: stripping '<!-- x -->' out of '<!<!-- x -->-- ID:END -->'
+# splices the leading '<!' onto the trailing '--', leaving a live
+# '<!-- AGENTIC-SYNC:END -->' sentinel in the rendered block (CodeQL
+# js/incomplete-multi-character-sanitization). The sanitizer must strip to a
+# fixed point so neither '<!--' nor '-->' can survive in an interpolated value.
+ROOT="$(make_fixture)"
+perl -0pi -e 's/"projectName": "Fixture Project"/"projectName": "Fixture <!<!-- x -->-- AGENTIC-SYNC:END --> Project"/' "$ROOT/tools/agentic-sync/canonical.json"
+run_gen "$ROOT" --write >/dev/null 2>&1
+# Count the FUNCTIONAL sentinel (full comment form) — inject() only recognizes
+# `<!-- AGENTIC-SYNC:END -->` lines, so de-fanged bare text is harmless residue.
+end_count="$(grep -cF -- '<!-- AGENTIC-SYNC:END -->' "$ROOT/AGENTS.md")"
+if [ "$end_count" -eq 1 ]; then ok "exactly one END marker after write (nested sentinel neutralized)"; else bad "nested comment sentinel leaked a second END marker (count=$end_count)"; fi
+if grep "Fixture" "$ROOT/AGENTS.md" | grep -q -e '<!--' -e '-->'; then
+  bad "interpolated value still contains a comment token after sanitization"
+else
+  ok "interpolated value carries no '<!--' or '-->' residue"
+fi
+if run_gen "$ROOT" --check >/dev/null 2>&1; then ok "nested-sentinel target is stable on --check"; else bad "nested sentinel corrupted the target (drift/throw on --check)"; fi
+rm -rf "$ROOT"
+
+echo "== generator: the malformed '--!>' comment close cannot survive sanitization =="
+# HTML parsers also accept '--!>' as a comment close (CodeQL js/bad-tag-filter:
+# comment-matching regexes that only handle '-->' are bypassable via '--!>').
+# The sanitizer strips the raw tokens '<!--', '-->', AND '--!>' to a fixed
+# point, so a value mixing all three forms must leave no token residue and
+# exactly one functional END sentinel in the target.
+ROOT="$(make_fixture)"
+perl -0pi -e 's/"projectName": "Fixture Project"/"projectName": "Fixture <!--!> <!-- x --!> AGENTIC-SYNC:END --!>-- --> Project"/' "$ROOT/tools/agentic-sync/canonical.json"
+run_gen "$ROOT" --write >/dev/null 2>&1
+end_count="$(grep -cF -- '<!-- AGENTIC-SYNC:END -->' "$ROOT/AGENTS.md")"
+if [ "$end_count" -eq 1 ]; then ok "exactly one END marker after write ('--!>' variant neutralized)"; else bad "'--!>' sentinel variant leaked a second END marker (count=$end_count)"; fi
+if grep "Fixture" "$ROOT/AGENTS.md" | grep -q -e '<!--' -e '-->' -e '--!>'; then
+  bad "interpolated value still contains a comment token ('<!--', '-->', or '--!>') after sanitization"
+else
+  ok "interpolated value carries no '<!--', '-->', or '--!>' residue"
+fi
+if run_gen "$ROOT" --check >/dev/null 2>&1; then ok "'--!>'-variant target is stable on --check"; else bad "'--!>' variant corrupted the target (drift/throw on --check)"; fi
+rm -rf "$ROOT"
+
 echo "== generator: fail-safe on a path-traversal target (must not escape repo root) =="
 # A canonical.json whose targets[] points OUTSIDE the root (../secret.md) must be
 # refused, not silently followed. A vulnerable generator would `join(ROOT, rel)`,

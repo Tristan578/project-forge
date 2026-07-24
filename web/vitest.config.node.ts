@@ -26,6 +26,10 @@ export default defineConfig({
       // vitest.config.ts, never in the workspace gate.
       'src/__tests__/**/*.test.ts',
       'src/__tests__/**/*.test.tsx',
+      // Unit tests for standalone build/provisioning scripts (not under
+      // src/) — mirrors the same glob in vitest.config.ts so these run
+      // under the workspace gate too, not just the standalone config.
+      'scripts/__tests__/**/*.test.ts',
     ],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
@@ -39,12 +43,13 @@ export default defineConfig({
         'src/app/**/layout.tsx',
         'src/app/**/page.tsx',
       ],
-      // Ratcheted up per sprint — must match vitest.config.ts thresholds
+      // Kept in lockstep with vitest.config.ts by the coverage ratchet
+      // (PF-996) — do not edit by hand.
       thresholds: {
-        statements: 70,
-        branches: 60,
-        functions: 65,
-        lines: 72,
+        statements: 81,
+        branches: 71,
+        functions: 75,
+        lines: 82,
       },
     },
   },
