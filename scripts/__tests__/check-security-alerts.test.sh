@@ -209,6 +209,13 @@ JSON
 res="$(run_gate "cat $ERR_OBJ" "cat $EMPTY")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "2" ]; then pass "API error object instead of array → exit 2 (fail closed)"; else fail "error-object payload → expected 2, got $rc: $out"; fi
+# The error body's .message must reach the log — an opaque shape error hid the
+# real cause ("Resource not accessible by integration") on the first live run.
+if grep -qF "API rate limit exceeded" <<<"$out"; then
+  pass "API error object's .message is surfaced in the failure output"
+else
+  fail "expected the API error message to be surfaced, got: $out"
+fi
 
 # --- 10. Fetch command failing with no output → exit 2 --------------------------
 res="$(run_gate "false" "cat $EMPTY")"
@@ -230,9 +237,20 @@ if [ -f "$WF_YML" ]; then
   wf="$(cat "$WF_YML")"
 
   if grep -qF 'security-events: read' <<<"$wf"; then
-    pass "workflow grants security-events: read (needed for both alert APIs)"
+    pass "workflow grants security-events: read (covers the code-scanning API)"
   else
     fail "workflow missing 'security-events: read' permission"
+  fi
+
+  # The Actions GITHUB_TOKEN cannot read the Dependabot alerts API (the Actions
+  # app has no such permission), so GH_TOKEN must prefer the fine-grained PAT
+  # secret, with github.token only as the fail-closed fallback.
+  # The ${{ }} below is a literal Actions expression, not a shell expansion.
+  # shellcheck disable=SC2016
+  if grep -qF 'GH_TOKEN: ${{ secrets.SECURITY_ALERTS_TOKEN || github.token }}' <<<"$wf"; then
+    pass "workflow GH_TOKEN prefers SECURITY_ALERTS_TOKEN with github.token fallback"
+  else
+    fail "workflow GH_TOKEN must be \${{ secrets.SECURITY_ALERTS_TOKEN || github.token }} — github.token alone cannot read Dependabot alerts"
   fi
 
   if grep -qF 'bash scripts/check-security-alerts.sh' <<<"$wf"; then

@@ -123,16 +123,19 @@ function renderBlock(canonical) {
   // stray sentinel would terminate the managed span early and corrupt the target
   // on the next --write/--check. canonical.json is repo-controlled, so this is
   // defense in depth — it keeps one careless edit from silently breaking every
-  // provider target. Removal strips whole comments AND unpaired stray tokens,
-  // and must run to a FIXED POINT: a single pass can splice a fresh opener out
-  // of the surrounding bytes (`<!<!-- x -->--` → `<!--`), so loop until the
-  // value is stable — then it provably contains no `<!--` or `-->` at all.
+  // provider target. Removal strips whole comments — accepting BOTH the
+  // standard `-->` close and the malformed-but-parser-accepted `--!>` close
+  // (CodeQL js/bad-tag-filter: comment regexes that only handle `-->` are
+  // bypassable via `--!>`) — plus unpaired stray tokens, and must run to a
+  // FIXED POINT: a single pass can splice a fresh opener out of the
+  // surrounding bytes (`<!<!-- x -->--` → `<!--`), so loop until the value is
+  // stable — then it provably contains no `<!--`, `-->`, or `--!>` at all.
   // Terminates because every changing pass strictly shortens the string.
   const s = (v) => {
     let out = String(v ?? '');
     for (let prev = null; prev !== out; ) {
       prev = out;
-      out = out.replace(/<!--[\s\S]*?-->|<!--|-->/g, '');
+      out = out.replace(/<!--[\s\S]*?(?:--!>|-->)|<!--|--!>|-->/g, '');
     }
     return out;
   };

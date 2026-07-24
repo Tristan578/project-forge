@@ -10,7 +10,11 @@
 #
 # It runs on a SCHEDULE (.github/workflows/security-alerts.yml), NOT as a PR
 # gate, by design: repo-level alerts only close after the fixing PR merges, so
-# blocking PRs on them would deadlock the very PR that fixes them.
+# blocking PRs on them would deadlock the very PR that fixes them. In CI the
+# workflow authenticates with the SECURITY_ALERTS_TOKEN fine-grained PAT — the
+# Actions GITHUB_TOKEN cannot read the Dependabot alerts API (no such
+# permission exists for the Actions app); locally, a classic `gh auth` token's
+# repo scope suffices.
 #
 # CONTRACT
 #   check-security-alerts.sh
@@ -69,7 +73,13 @@ fetch_json() {
     return 1
   fi
   if [ "$(jq -s '[.[] | type == "array"] | all' <<<"$body")" != "true" ]; then
-    echo "::error::$label payload is not the expected array shape (API error?) — failing closed" >&2
+    # A GitHub API error body is an object with .message (e.g. "Resource not
+    # accessible by integration" when the token lacks the Dependabot-alerts
+    # permission — see the PAT note in security-alerts.yml). Surface it so the
+    # run log names the cause instead of just the shape mismatch.
+    local api_msg
+    api_msg="$(jq -rs '[.[] | objects | .message // empty] | first // empty' <<<"$body")"
+    echo "::error::$label payload is not the expected array shape — failing closed${api_msg:+ (API said: $api_msg)}" >&2
     return 1
   fi
   printf '%s' "$body"
