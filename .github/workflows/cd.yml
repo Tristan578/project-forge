@@ -795,10 +795,20 @@ jobs:
         # statement — passing a whole multi-statement file throws "cannot insert
         # multiple commands into a prepared statement". Drizzle SQL files ARE
         # multi-statement, delimited by the canonical `--> statement-breakpoint`
-        # marker, so split on it and apply each statement on its own. Files with
-        # no marker split to a one-element array (unchanged behavior). We can't
-        # use sql.transaction([...]) here because CREATE INDEX CONCURRENTLY may
-        # not run inside a transaction, and we need per-statement idempotency.
+        # marker, so split on it and apply each statement on its own. INVARIANT:
+        # every multi-statement migration file MUST delimit each statement with
+        # `--> statement-breakpoint` (drizzle-kit emits this automatically; a
+        # hand-authored migration must add it too). A file whose statements are
+        # NOT so delimited yields a single multi-command segment that neon()
+        # rejects with "cannot insert multiple commands into a prepared
+        # statement", failing this step (0009 regressed exactly this way until a
+        # marker was added between its two ALTER TABLEs). A single-statement file
+        # legitimately splits to a one-element array. We deliberately do NOT
+        # split on `;` instead — dollar-quoted bodies (e.g. 0006's `DO $$ ... $$;`
+        # blocks) contain semicolons that are not statement terminators, so only
+        # the `--> statement-breakpoint` marker is a safe boundary. We can't use
+        # sql.transaction([...]) here because CREATE INDEX CONCURRENTLY may not
+        # run inside a transaction, and we need per-statement idempotency.
         if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema') || contains(needs.check-changes.outputs.web-changed-files, 'drizzle/')
         working-directory: web
         env:
