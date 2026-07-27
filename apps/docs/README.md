@@ -19,7 +19,7 @@ The dev script generates MCP docs from `mcp-server/manifest/commands.json` befor
 
 ## Build Prerequisites
 
-- **Node 24** — same as the rest of the monorepo (`.node-version`, `engines.node` `>=24 <25`)
+- **Node 24** — same as the rest of the monorepo (`.node-version`, `engines.node` `>=24.15 <25`)
 - **`@spawnforge/ui` built** — `packages/ui/dist/` must exist before `next build` runs
 - **`mcp-server/manifest/commands.json`** — source of truth for MCP command pages; kept in sync with `web/src/data/commands.json` by `scripts/check-manifest-sync.ts`
 

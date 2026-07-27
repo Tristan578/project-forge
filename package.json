@@ -27,7 +27,7 @@
     "mcp-server"
   ],
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=24.15 <25"
   },
   "overrides": {
     "@clerk/nextjs": "^7.5.12",

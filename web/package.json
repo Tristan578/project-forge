@@ -18,7 +18,7 @@
     "game development platform"
   ],
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=24.15 <25"
   },
   "scripts": {
     "dev": "portless -- next dev --webpack",
