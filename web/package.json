@@ -88,7 +88,7 @@
     "sonner": "^2.0.7",
     "stripe": "^22.3.2",
     "svix": "^1.98.0",
-    "web-vitals": "^5.1.0",
+    "web-vitals": "^6.0.1",
     "zod": "^4.4.3",
     "zustand": "^5.0.14"
   },
@@ -100,7 +100,7 @@
     "@swc/helpers": "^0.5.23",
     "@tailwindcss/postcss": "^4.3.3",
     "@testing-library/dom": "^10.4.1",
-    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "^26.1.1",
@@ -127,9 +127,9 @@
     "path-to-regexp": ">=8.4.0",
     "fast-xml-parser": ">=5.7.2",
     "uuid": ">=14.0.0",
-    "postcss": ">=8.5.10",
+    "postcss": ">=8.5.18",
     "next": {
-      "postcss": ">=8.5.10"
+      "postcss": ">=8.5.18"
     },
     "next-intl": {
       "typescript": "$typescript"

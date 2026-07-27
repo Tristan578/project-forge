@@ -71,6 +71,13 @@
       "when": 1784550000000,
       "tag": "0009_token_usage_meter_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784640476531,
+      "tag": "0010_graph_retrieval_nodes_edges",
+      "breakpoints": true
     }
   ]
 }

@@ -7,13 +7,15 @@
 #
 # WHY THIS GATE EXISTS
 # --------------------
-# drizzle-kit (dev-only; 0.31.x is the latest) transitively bundles an old
-# esbuild via the deprecated @esbuild-kit/* loaders AND a direct esbuild ^0.25
-# range. npm 11.x `overrides` provably do not cascade into those nested copies and
-# `--omit=dev` does not prune them, so two dev-only, non-exploitable esbuild
-# advisories (GHSA-gv7w-rqvm-qjhr, GHSA-g7r4-m6w7-qqqr) cannot be relocked away and
-# must be WAIVED BY ID while the gate stays hard for everything else. A raw
-# `npm audit --audit-level=high` therefore can never pass on this tree.
+# This tree recurrently carries a transitive, dev-only advisory whose only
+# patched release the pinning toolchain cannot take (npm `overrides` do not
+# cascade into nested copies; `--omit=dev` does not prune them). Such advisories
+# cannot be relocked away and must be WAIVED BY ID while the gate stays hard for
+# everything else — a raw `npm audit --audit-level=high` can never pass. The
+# current occupant is brace-expansion GHSA-mh99-v99m-4gvg (patched only in 5.0.8,
+# no 1.x backport; the root 1.1.x copy is pinned ^1.1.7 by the eslint-9/
+# minimatch@3 toolchain). See ALLOWED_ADVISORIES in the gate for the full
+# justification and removal path.
 #
 # HERMETIC TESTING
 # ----------------
@@ -85,10 +87,9 @@ if [ "$rc" = "0" ]; then pass "clean report passes (exit 0)"; else fail "clean s
 # --- 2. Only allowlisted high advisory → exit 0 -------------------------------
 f="$(fixture waived.json <<'JSON'
 {"auditReportVersion":2,"vulnerabilities":{
-  "esbuild":{"name":"esbuild","severity":"high","via":[
-    {"source":1,"name":"esbuild","title":"esbuild Deno RCE","url":"https://github.com/advisories/GHSA-gv7w-rqvm-qjhr","severity":"high","range":"0.17.0 - 0.28.0"},
-    {"source":2,"name":"esbuild","title":"esbuild dev-server file read","url":"https://github.com/advisories/GHSA-g7r4-m6w7-qqqr","severity":"low","range":"<=0.28.0"}]},
-  "vite":{"name":"vite","severity":"high","via":["esbuild"]}}}
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}]},
+  "minimatch":{"name":"minimatch","severity":"high","via":["brace-expansion"]}}}
 JSON
 )"
 res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
@@ -120,8 +121,8 @@ if [ "$rc" = "1" ]; then pass "non-allowlisted critical advisory blocks (exit 1)
 # --- 5. Allowlisted + non-allowlisted mixed → exit 1 (the real one still blocks)
 f="$(fixture mixed.json <<'JSON'
 {"auditReportVersion":2,"vulnerabilities":{
-  "esbuild":{"name":"esbuild","severity":"high","via":[
-    {"source":1,"name":"esbuild","title":"esbuild Deno RCE","url":"https://github.com/advisories/GHSA-gv7w-rqvm-qjhr","severity":"high","range":"*"}]},
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"*"}]},
   "evil":{"name":"evil","severity":"high","via":[
     {"source":9,"name":"evil","title":"evil RCE","url":"https://github.com/advisories/GHSA-aaaa-bbbb-cccc","severity":"high","range":"*"}]}}}
 JSON
@@ -201,13 +202,23 @@ if [ "$rc" = "2" ]; then pass "no workspace argument fails closed (exit 2)"; els
 
 echo ""
 echo "=== gate script hardening (structural) ==="
-# The allowlist must be non-empty AND contain exactly the two documented esbuild
-# advisories — a structural pin so a future edit cannot silently broaden it (a
-# too-wide allowlist is a silent gate-disable, the F25/#8617 failure mode).
-if grep -qF 'GHSA-gv7w-rqvm-qjhr' "$SCRIPT" && grep -qF 'GHSA-g7r4-m6w7-qqqr' "$SCRIPT"; then
-  pass "allowlist documents the two esbuild advisories by id"
+# The allowlist must contain exactly the one documented advisory — a structural
+# pin so a future edit cannot silently broaden it (a too-wide allowlist is a
+# silent gate-disable, the F25/#8617 failure mode).
+if grep -qF 'GHSA-mh99-v99m-4gvg' "$SCRIPT"; then
+  pass "allowlist documents the brace-expansion advisory by id"
 else
-  fail "allowlist is missing one of the documented esbuild advisory ids"
+  fail "allowlist is missing the documented brace-expansion advisory id"
+fi
+# The pruned esbuild waivers must STAY pruned from ALLOWED_ADVISORIES — their
+# advisories left every workspace, and a lingering entry is dead-weight gate
+# surface. The ids may appear in prose (the gate's History note), so scope the
+# check to the array body between `ALLOWED_ADVISORIES=(` and its closing `)`.
+allowlist_body="$(awk '/^ALLOWED_ADVISORIES=\(/{f=1;next} f && /^\)/{exit} f' "$SCRIPT")"
+if grep -qF 'GHSA-gv7w-rqvm-qjhr' <<<"$allowlist_body" || grep -qF 'GHSA-g7r4-m6w7-qqqr' <<<"$allowlist_body"; then
+  fail "pruned esbuild waiver still present in ALLOWED_ADVISORIES (advisories are gone from every workspace)"
+else
+  pass "stale esbuild waivers stay pruned from ALLOWED_ADVISORIES"
 fi
 # The gate must FAIL CLOSED — `exit 2` on tooling error must exist in the script.
 if grep -qE 'exit 2' "$SCRIPT"; then
