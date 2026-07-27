@@ -135,32 +135,138 @@ assert_jq "auto-approve hook wired under PreToolUse with a Bash matcher" '
 '
 
 # --- Permission-mode guards: the pinned allow-list is meaningless if the
-#     mode bypasses prompting entirely. defaultMode may be absent (the
-#     default) or an interactive mode; "bypassPermissions" and "acceptEdits"
-#     are committed-posture weakenings and fail here (unknown/new modes also
-#     fail — fail closed). ---
-# shellcheck disable=SC2016
-assert_jq "defaultMode absent or interactive (never bypassPermissions/acceptEdits)" '
+#     mode bypasses prompting entirely. This guard pins the allow-set
+#     {default, plan} — every other value fails closed: "bypassPermissions"
+#     and "acceptEdits" are committed-posture weakenings, "auto" and
+#     "dontAsk" are additional documented modes that also weaken prompting,
+#     "manual" is a documented alias of "default" that this guard still
+#     rejects (accepted fail-closed noise, not a bug), and any unknown or
+#     future mode name fails the same way. ---
+# shellcheck disable=SC2016  # jq filter; no shell expansion intended
+assert_jq "defaultMode absent, \"default\", or \"plan\" — all other modes (bypassPermissions/acceptEdits/auto/dontAsk/manual/unknown) fail closed" '
   (.permissions.defaultMode // "default") as $m
   | ($m == "default" or $m == "plan")
 '
-# shellcheck disable=SC2016
+# shellcheck disable=SC2016  # jq filter; no shell expansion intended
 assert_jq "additionalDirectories absent or empty (no widened write surface)" '
   (.permissions.additionalDirectories // []) | length == 0
 '
-# shellcheck disable=SC2016
+# shellcheck disable=SC2016  # jq filter; no shell expansion intended
 assert_jq "disableBypassPermissionsMode absent or the hardening value \"disable\"" '
   (.permissions.disableBypassPermissionsMode // "disable") == "disable"
+'
+# shellcheck disable=SC2016  # jq filter; no shell expansion intended
+assert_jq "disableAutoMode absent or the hardening value \"disable\"" '
+  (.permissions.disableAutoMode // "disable") == "disable"
 '
 
 # --- Seam self-defense: SETTINGS_PERMISSIONS_FILE must never be wired in a
 #     workflow — that would validate a fixture instead of the real file.
-#     Fail closed if the workflows dir is missing (mis-rooted checkout). ---
-WORKFLOWS_DIR="$HERE/../../../.github/workflows"
-if [ -d "$WORKFLOWS_DIR" ] && ! grep -rq "SETTINGS_PERMISSIONS_FILE" "$WORKFLOWS_DIR"; then
+#     Fail closed if the workflows dir is missing (mis-rooted checkout) or a
+#     scan error occurs.
+#
+# seam_not_wired <dir> — true (0) iff <dir> exists AND no non-comment line
+# anywhere under it names SETTINGS_PERMISSIONS_FILE. Distinguishes grep's exit
+# codes: 1 (no match at all) means "not wired" => 0; >=2 (scan/read error,
+# e.g. an unreadable file) is treated as failure => 1, fail-closed rather than
+# silently passing on a broken scan.
+#
+# COMMENT-STRIP: of the lines that DO name the seam, strip full-comment lines
+# (leading whitespace then `#`) before deciding — a doc comment that merely
+# mentions the seam name (e.g. this very file's own comments, or a gotchas.md
+# fragment quoted in a workflow) must not trip the guard; a real `env:` wiring
+# is a non-comment line and is still caught. Mirrors the convention in
+# scripts/__tests__/check-ghaw-lock-sync.test.sh. ---
+seam_not_wired() {
+  local dir="$1"
+  [ -d "$dir" ] || return 1
+  local hits rc
+  hits="$(grep -rh "SETTINGS_PERMISSIONS_FILE" "$dir" 2>/dev/null)"
+  rc=$?
+  if [ "$rc" -ge 2 ]; then
+    return 1
+  fi
+  if [ "$rc" -eq 1 ]; then
+    return 0
+  fi
+  ! grep -v '^[[:space:]]*#' <<<"$hits" | grep -q .
+}
+
+# --- Hermetic self-tests for seam_not_wired(): exercise the helper directly
+#     against synthetic fixture directories (created OUTSIDE the repo tree via
+#     mktemp, cleaned up immediately below) so the guard's own logic has
+#     coverage independent of whatever the real .github/workflows currently
+#     contains. ---
+SEAM_TMPROOT="$(mktemp -d)"
+mkdir -p "$SEAM_TMPROOT/clean/workflows" "$SEAM_TMPROOT/wired/workflows" "$SEAM_TMPROOT/comment-only/workflows"
+
+# (a) innocent workflow, no mention of the seam at all
+cat > "$SEAM_TMPROOT/clean/workflows/ci.yml" <<'EOF'
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm test
+EOF
+
+# (b) a workflow genuinely wiring the seam in a real (executable) env line
+cat > "$SEAM_TMPROOT/wired/workflows/evil.yml" <<'EOF'
+name: Neuter
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      SETTINGS_PERMISSIONS_FILE: /tmp/fixture.json
+    steps:
+      - run: bash .claude/hooks/__tests__/settings-permissions.test.sh
+EOF
+
+# (c) the only mention of the seam is inside a full-comment line
+cat > "$SEAM_TMPROOT/comment-only/workflows/doc.yml" <<'EOF'
+name: Doc
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # This job intentionally never sets SETTINGS_PERMISSIONS_FILE — see gotchas.md
+      - run: npm test
+EOF
+
+if seam_not_wired "$SEAM_TMPROOT/clean/workflows"; then
+  pass=$((pass + 1)); printf '  ok   %s\n' "seam_not_wired: clean workflow dir reports not-wired"
+else
+  fail=$((fail + 1)); printf '  FAIL %s\n' "seam_not_wired: clean workflow dir should report not-wired"
+fi
+
+if ! seam_not_wired "$SEAM_TMPROOT/wired/workflows"; then
+  pass=$((pass + 1)); printf '  ok   %s\n' "seam_not_wired: workflow wiring the seam in an executable line reports wired"
+else
+  fail=$((fail + 1)); printf '  FAIL %s\n' "seam_not_wired: workflow wiring the seam in an executable line should report wired"
+fi
+
+if seam_not_wired "$SEAM_TMPROOT/comment-only/workflows"; then
+  pass=$((pass + 1)); printf '  ok   %s\n' "seam_not_wired: seam name only inside a full-comment line reports not-wired"
+else
+  fail=$((fail + 1)); printf '  FAIL %s\n' "seam_not_wired: seam name only inside a full-comment line should report not-wired"
+fi
+
+if ! seam_not_wired "$SEAM_TMPROOT/does-not-exist"; then
+  pass=$((pass + 1)); printf '  ok   %s\n' "seam_not_wired: nonexistent dir fails closed (reports wired)"
+else
+  fail=$((fail + 1)); printf '  FAIL %s\n' "seam_not_wired: nonexistent dir should fail closed (report wired)"
+fi
+
+rm -rf "$SEAM_TMPROOT"
+
+# --- Real check: apply the helper to the actual workflows directory ---
+if seam_not_wired "$HERE/../../../.github/workflows"; then
   pass=$((pass + 1)); printf '  ok   %s\n' "seam SETTINGS_PERMISSIONS_FILE not wired in any workflow"
 else
-  fail=$((fail + 1)); printf '  FAIL %s\n' "seam SETTINGS_PERMISSIONS_FILE wired in a workflow (or workflows dir missing)"
+  fail=$((fail + 1)); printf '  FAIL %s\n' "seam SETTINGS_PERMISSIONS_FILE wired in a workflow (or workflows dir missing/unreadable)"
 fi
 
 echo ""

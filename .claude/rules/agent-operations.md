@@ -324,3 +324,12 @@ in a hook's exit-code contract fails the PR instead of silently shipping.
   word-boundary near-misses (`PASSED` is not the `PASS` verdict).
 - Guard host assumptions at the top (`command -v jq` etc.) so a missing tool
   reports clearly instead of every case failing.
+- A hook test that needs to verify negative cases against a file the hook reads
+  (not stdin/env args) needs a fixture seam: an env override defaulting to the
+  real file, e.g. `FOO="${FOO_FILE:-$HERE/../../real.json}"`. NEVER set the
+  override in CI — it must be paired with an in-suite self-defense assertion
+  that greps `.github/workflows/` for the seam name, comment-stripped (a full-
+  comment mention doesn't count as wired), fail-closed on a missing workflows
+  dir AND on grep scan errors (exit >= 2). See `settings-permissions.test.sh`'s
+  `SETTINGS_PERMISSIONS_FILE` seam for the canonical example — the same pattern
+  as the `$NPM_AUDIT_CMD`/`$GHAW_COMPILE_CMD` seams in scripts land.
