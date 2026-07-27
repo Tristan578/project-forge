@@ -13,11 +13,16 @@
 set -uo pipefail
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required to run these tests"; exit 1; }
+command -v mktemp >/dev/null 2>&1 || { echo "mktemp is required to run these tests"; exit 1; }
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Test-only seam: point the suite at a fixture copy to verify the negative
-# cases. NEVER set in CI — hook-tests must always validate the real file.
-# The seam-guard assertion below enforces this.
+# Test-only seam: point the suite at a fixture copy. Negative-path coverage
+# for the permission-mode guards below is obtained by SELF-RE-EXEC — see the
+# "Negative coverage via self-re-exec" block near the end of this file, which
+# jq-mutates a copy of the real settings, sets this var to point at it, and
+# asserts on the re-exec'd child's exit code. NEVER set this var in CI outside
+# that self-re-exec: the seam_not_wired self-defense scan below AND the
+# parent-only runtime CI assertion (same block) both enforce that.
 SETTINGS="${SETTINGS_PERMISSIONS_FILE:-$HERE/../../settings.json}"
 
 pass=0
@@ -189,7 +194,9 @@ seam_not_wired() {
   if [ "$rc" -eq 1 ]; then
     return 0
   fi
-  ! grep -v '^[[:space:]]*#' <<<"$hits" | grep -q .
+  local stripped
+  stripped="$(grep -v '^[[:space:]]*#' <<<"$hits")"
+  [ -z "$stripped" ]
 }
 
 # --- Hermetic self-tests for seam_not_wired(): exercise the helper directly
@@ -197,7 +204,8 @@ seam_not_wired() {
 #     mktemp, cleaned up immediately below) so the guard's own logic has
 #     coverage independent of whatever the real .github/workflows currently
 #     contains. ---
-SEAM_TMPROOT="$(mktemp -d)"
+SEAM_TMPROOT="$(mktemp -d)" || { echo "mktemp -d failed"; exit 1; }
+trap 'rm -rf "$SEAM_TMPROOT"' EXIT
 mkdir -p "$SEAM_TMPROOT/clean/workflows" "$SEAM_TMPROOT/wired/workflows" "$SEAM_TMPROOT/comment-only/workflows"
 
 # (a) innocent workflow, no mention of the seam at all
@@ -260,13 +268,98 @@ else
   fail=$((fail + 1)); printf '  FAIL %s\n' "seam_not_wired: nonexistent dir should fail closed (report wired)"
 fi
 
-rm -rf "$SEAM_TMPROOT"
-
-# --- Real check: apply the helper to the actual workflows directory ---
-if seam_not_wired "$HERE/../../../.github/workflows"; then
-  pass=$((pass + 1)); printf '  ok   %s\n' "seam SETTINGS_PERMISSIONS_FILE not wired in any workflow"
+# (e) grep scan-error path: an unreadable file inside the fixture dir must
+#     fail closed, not be silently treated as "no match".
+mkdir -p "$SEAM_TMPROOT/unreadable/workflows"
+echo "SETTINGS_PERMISSIONS_FILE: /tmp/x" > "$SEAM_TMPROOT/unreadable/workflows/secret.yml"
+chmod 000 "$SEAM_TMPROOT/unreadable/workflows/secret.yml"
+if ! seam_not_wired "$SEAM_TMPROOT/unreadable/workflows"; then
+  pass=$((pass + 1)); printf '  ok   %s\n' "seam_not_wired: unreadable file (grep scan error) fails closed (reports wired)"
 else
-  fail=$((fail + 1)); printf '  FAIL %s\n' "seam SETTINGS_PERMISSIONS_FILE wired in a workflow (or workflows dir missing/unreadable)"
+  fail=$((fail + 1)); printf '  FAIL %s\n' "seam_not_wired: unreadable file (grep scan error) should fail closed (report wired)"
+fi
+
+# --- Real check: apply the helper to the actual workflows directory AND any
+#     composite actions under .github/actions/ (mirrors the precedent in
+#     scripts/__tests__/check-native-bindings.test.sh:136-137 — an existence
+#     test on .github/actions keeps a missing dir from poisoning the result,
+#     since seam_not_wired already fails closed on a missing dir on its own). ---
+seam_dirs=("$HERE/../../../.github/workflows")
+[ -d "$HERE/../../../.github/actions" ] && seam_dirs+=("$HERE/../../../.github/actions")
+
+seam_real_clean=true
+for seam_dir in "${seam_dirs[@]}"; do
+  seam_not_wired "$seam_dir" || seam_real_clean=false
+done
+
+if $seam_real_clean; then
+  pass=$((pass + 1)); printf '  ok   %s\n' "seam SETTINGS_PERMISSIONS_FILE not wired in any workflow or composite action"
+else
+  fail=$((fail + 1)); printf '  FAIL %s\n' "seam SETTINGS_PERMISSIONS_FILE wired in a workflow or composite action (or a scanned dir missing/unreadable)"
+fi
+
+# --- Negative coverage via self-re-exec: SETTINGS_PERMISSIONS_SELFTEST=1
+#     tells a re-exec'd child to skip THIS block (preventing infinite
+#     recursion) — the child still runs the rest of the suite above, but
+#     against the bad fixture pointed to by SETTINGS_PERMISSIONS_FILE, so its
+#     own $fail count (and therefore its exit code) reflects whether the
+#     mutated posture value was rejected. The parent-only runtime CI
+#     assertion below (same guard) catches out-of-tree wiring no static grep
+#     could ever see: a composite action or org-level env exporting
+#     SETTINGS_PERMISSIONS_FILE via $GITHUB_ENV rather than a literal string
+#     in a committed file. ---
+if [ -z "${SETTINGS_PERMISSIONS_SELFTEST:-}" ]; then
+  run_selftest_child() {
+    SETTINGS_PERMISSIONS_SELFTEST=1 SETTINGS_PERMISSIONS_FILE="$1" bash "${BASH_SOURCE[0]}" >/dev/null 2>&1
+  }
+
+  assert_child_rejects() {
+    local desc="$1" fixture="$2"
+    if ! run_selftest_child "$fixture"; then
+      pass=$((pass + 1)); printf '  ok   %s\n' "$desc"
+    else
+      fail=$((fail + 1)); printf '  FAIL %s\n' "$desc"
+    fi
+  }
+
+  assert_child_accepts() {
+    local desc="$1" fixture="$2"
+    if run_selftest_child "$fixture"; then
+      pass=$((pass + 1)); printf '  ok   %s\n' "$desc"
+    else
+      fail=$((fail + 1)); printf '  FAIL %s\n' "$desc"
+    fi
+  }
+
+  make_bad_fixture() {
+    jq "$2" "$SETTINGS" > "$SEAM_TMPROOT/badcfg/$1"
+  }
+
+  mkdir -p "$SEAM_TMPROOT/badcfg"
+  make_bad_fixture "default-mode-bypass.json"      '.permissions.defaultMode = "bypassPermissions"'
+  make_bad_fixture "default-mode-acceptedits.json" '.permissions.defaultMode = "acceptEdits"'
+  make_bad_fixture "default-mode-auto.json"        '.permissions.defaultMode = "auto"'
+  make_bad_fixture "default-mode-dontask.json"     '.permissions.defaultMode = "dontAsk"'
+  make_bad_fixture "additional-dirs.json"          '.permissions.additionalDirectories = ["/"]'
+  make_bad_fixture "disable-bypass-allow.json"     '.permissions.disableBypassPermissionsMode = "allow"'
+  make_bad_fixture "disable-auto-allow.json"       '.permissions.disableAutoMode = "allow"'
+  make_bad_fixture "default-mode-plan.json"        '.permissions.defaultMode = "plan"'
+
+  assert_child_rejects "self-test: defaultMode=bypassPermissions rejected by child re-exec" "$SEAM_TMPROOT/badcfg/default-mode-bypass.json"
+  assert_child_rejects "self-test: defaultMode=acceptEdits rejected by child re-exec" "$SEAM_TMPROOT/badcfg/default-mode-acceptedits.json"
+  assert_child_rejects "self-test: defaultMode=auto rejected by child re-exec" "$SEAM_TMPROOT/badcfg/default-mode-auto.json"
+  assert_child_rejects "self-test: defaultMode=dontAsk rejected by child re-exec" "$SEAM_TMPROOT/badcfg/default-mode-dontask.json"
+  assert_child_rejects "self-test: additionalDirectories=[\"/\"] rejected by child re-exec" "$SEAM_TMPROOT/badcfg/additional-dirs.json"
+  assert_child_rejects "self-test: disableBypassPermissionsMode=allow rejected by child re-exec" "$SEAM_TMPROOT/badcfg/disable-bypass-allow.json"
+  assert_child_rejects "self-test: disableAutoMode=allow rejected by child re-exec" "$SEAM_TMPROOT/badcfg/disable-auto-allow.json"
+  assert_child_accepts "self-test: defaultMode=plan accepted by child re-exec (positive control)" "$SEAM_TMPROOT/badcfg/default-mode-plan.json"
+
+  # --- Parent-only runtime CI assertion ---
+  if [ -n "${SETTINGS_PERMISSIONS_FILE:-}" ] && [ -n "${CI:-}" ]; then
+    fail=$((fail + 1)); printf '  FAIL %s\n' "runtime: SETTINGS_PERMISSIONS_FILE must never be set in CI (out-of-tree wiring detected)"
+  else
+    pass=$((pass + 1)); printf '  ok   %s\n' "runtime: SETTINGS_PERMISSIONS_FILE is unset in CI (no out-of-tree wiring)"
+  fi
 fi
 
 echo ""

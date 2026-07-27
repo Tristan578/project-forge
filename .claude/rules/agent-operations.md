@@ -328,8 +328,17 @@ in a hook's exit-code contract fails the PR instead of silently shipping.
   (not stdin/env args) needs a fixture seam: an env override defaulting to the
   real file, e.g. `FOO="${FOO_FILE:-$HERE/../../real.json}"`. NEVER set the
   override in CI — it must be paired with an in-suite self-defense assertion
-  that greps `.github/workflows/` for the seam name, comment-stripped (a full-
-  comment mention doesn't count as wired), fail-closed on a missing workflows
-  dir AND on grep scan errors (exit >= 2). See `settings-permissions.test.sh`'s
-  `SETTINGS_PERMISSIONS_FILE` seam for the canonical example — the same pattern
-  as the `$NPM_AUDIT_CMD`/`$GHAW_COMPILE_CMD` seams in scripts land.
+  that greps both `.github/workflows/` and (if present) `.github/actions/` for
+  the seam name, comment-stripped (a full-comment mention doesn't count as
+  wired), fail-closed on a missing/unreadable dir AND on grep scan errors
+  (exit >= 2), plus a parent-only runtime assertion that fails if the override
+  is ever set while `CI` is set (catches wiring no static grep could see, e.g.
+  a composite action exporting it via `$GITHUB_ENV`). Consume the seam itself
+  via self-re-exec: re-invoke the suite (`bash "${BASH_SOURCE[0]}"`) with the
+  override pointed at a jq-mutated bad fixture plus a second `_SELFTEST=1` env
+  var telling the child to skip its own negative-coverage block (no
+  recursion), and assert on the child's exit code. See
+  `settings-permissions.test.sh`'s `SETTINGS_PERMISSIONS_FILE`/
+  `SETTINGS_PERMISSIONS_SELFTEST` seam for the canonical example — the same
+  scan pattern as the `$NPM_AUDIT_CMD`/`$GHAW_COMPILE_CMD`/`$NATIVE_BINDINGS_*`
+  seams in scripts land.
