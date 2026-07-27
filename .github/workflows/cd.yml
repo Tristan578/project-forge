@@ -823,16 +823,18 @@ jobs:
               console.log('Applying drizzle/' + f);
               const content = readFileSync('drizzle/' + f, 'utf8');
               const statements = content.split('--> statement-breakpoint').map(s => s.trim()).filter(Boolean);
+              let failed = 0;
               for (const stmt of statements) {
                 try { await sql(stmt); }
                 catch(e) {
                   const msg = e.message || '';
                   const isIdempotent = msg.includes('already exists') || msg.includes('duplicate key') || msg.includes('relation') && msg.includes('already');
                   if (isIdempotent) { console.log('  Skipped (idempotent):', msg); }
-                  else { console.error('  FAILED:', msg); process.exitCode = 1; }
+                  else { console.error('  FAILED:', msg); failed++; process.exitCode = 1; }
                 }
               }
-              console.log('  OK (' + statements.length + ' statement(s))');
+              if (failed) { console.error('  FAILED (' + failed + ' of ' + statements.length + ' statement(s) failed)'); }
+              else { console.log('  OK (' + statements.length + ' statement(s))'); }
             }
           "
 
