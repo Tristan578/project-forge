@@ -112,7 +112,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.2.9",
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.0",
     "portless": "^0.15.4",
     "tailwindcss": "^4",
     "typescript": "^6.0.3",
