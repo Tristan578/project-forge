@@ -1,29 +1,992 @@
 #!/bin/bash
-# PreToolUse hook for Bash: block git commit on main/master.
-# Agents (especially worktree agents) must use feature branches.
+# PreToolUse hook for Bash: block commit-creating git operations on
+# main/master. Agents (especially worktree agents) must use feature branches.
 # Direct commits to main bypass CI/CD and Sentry review.
+#
+# The branch check must run against the repo each git invocation actually
+# targets. Hooks execute with the SESSION's cwd — often the main checkout,
+# parked on main — while agents commit inside `cd <worktree> && git commit`
+# compound commands, via `git -C <dir> commit`, or via GIT_DIR/--git-dir/
+# --work-tree redirection. Checking the hook's own cwd would block every
+# worktree commit whenever the main checkout sits on main.
+#
+# Blocked subcommands: commit, merge, cherry-pick, revert, pull (unless
+# --ff-only, which cannot create commits — the sanctioned way to sync main),
+# and stash pop (restages work for a commit on the current branch). merge
+# --no-commit and revert --no-commit/-n are exempt for the same reason as
+# pull --ff-only: no commit is created.
+#
+# Contract: exit 0 = allow, exit 2 = block (stderr carries the reason).
+# Fail-open posture: if the effective target can't be resolved (subshells,
+# variables, interpolation), the hook allows — PR review is the backstop.
+# This is an ACCIDENT gate, not an adversarial one.
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 
-# Only check git commit commands
-if ! echo "$COMMAND" | grep -qE 'git\s+commit'; then
+if [ -z "$COMMAND" ]; then
   exit 0
 fi
 
-# If the command also checks out a new branch before committing, allow it
-# (e.g., "git checkout -b feat/xxx && git add . && git commit")
-if echo "$COMMAND" | grep -qE 'git\s+(checkout\s+-b|switch\s+-c)'; then
-  exit 0
-fi
+# --- Cost guards (PF-995 / #8989 finding F4). The static analysis below is
+# O(n^2) in the command length — strip_line_continuations joins `\<NL>` with a
+# char-by-char scan, and the per-segment word reduction re-scans substrings — so
+# a very long command line could blow the hook's 3s PreToolUse budget. Two O(n)
+# guards run FIRST, before any quadratic work:
+#
+#   1. Fast pre-gate. CHEAP is the MOST-reduced view of the command (newlines,
+#      backslashes, quotes and backticks removed, ANSI-C `$'` neutralized) — a
+#      strict superset of the reductions every downstream prefilter view applies
+#      to expose the word `git`. So if CHEAP contains no `git` substring, NO
+#      downstream view can match a git-mutate and the pipeline would exit 0
+#      anyway; exiting here just skips the quadratic work. This can only ever
+#      SKIP analysis of a non-blockable command — it never early-allows a
+#      blockable one. (`tr -d` strips the backslashes first, so escaped forms
+#      like `g\it`/`\g\i\t` still reduce to `git` and pass the gate.)
+#   2. Size cap. A command that survives the pre-gate (so it CONTAINS `git`) but
+#      exceeds MAX_ANALYZE is refused rather than analyzed. This FAILS CLOSED —
+#      an over-long git command line is blocked, never silently allowed. Large
+#      commit content belongs in a file: `git commit -F <file>`.
+CHEAP=$(printf '%s' "$COMMAND" | tr -d '\n' | sed "s/\$'/'/g" | tr -d '\\"'\''`')
+case "$CHEAP" in
+  *git*) ;;
+  *) exit 0 ;;
+esac
 
-CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
-
-if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
-  echo "BLOCKED: git commit on '$CURRENT_BRANCH' is not allowed."
-  echo "Create a feature branch first: git checkout -b feat/your-feature"
-  echo "Direct commits to main bypass CI/CD, Sentry review, and code review."
+MAX_ANALYZE=4000
+if [ "${#COMMAND}" -gt "$MAX_ANALYZE" ]; then
+  {
+    echo "BLOCKED: command too long to analyze safely (${#COMMAND} > ${MAX_ANALYZE} chars)."
+    echo "Refusing on the side of caution rather than skip the main-branch check."
+    echo "Use a feature branch, and pass large content via a file: git commit -F <file>"
+  } >&2
   exit 2
 fi
+
+# Join backslash-newline LINE CONTINUATIONS before anything else classifies the
+# command. Bash deletes a `\<newline>` pair during tokenization (BEFORE word
+# splitting), so `git \<NL>commit` runs `git commit` — a REAL commit on main
+# (verified by execution: HEAD advances). The downstream split_segments treats a
+# literal newline as an `O` separator, so without this pre-pass it splits
+# `git \` | `commit` and neither half reconstructs command-position `git commit`,
+# and the line-oriented prefilter grep never sees `git` and `commit` on one line
+# either — a bypass in the plain-shell static-reduction family (PF-995 / #8988
+# round 10 finding 1).
+#
+# Quoting boundary (verified against real bash): a `\<NL>` INSIDE a single-quoted
+# span is LITERAL (single quotes suppress the continuation) and is preserved;
+# unquoted and double-quoted `\<NL>` ARE removed. The quote-state model mirrors
+# split_segments' (a bare `"`/`'` toggles the span; backslash escapes are NOT
+# otherwise interpreted) so the two always agree on what is "inside quotes". Only
+# the continuation is touched here — the prefilter's ANSI-C neutralization and
+# the per-segment reduction still run afterward on the joined command.
+strip_line_continuations() {
+  local s="$1"
+  local n=${#s}
+  local i=0 c nc inq=0 out=""
+  local nl='
+'
+  while [ "$i" -lt "$n" ]; do
+    c=${s:i:1}
+    if [ "$inq" -eq 1 ]; then                 # single quotes: literal, no continuation
+      [ "$c" = "'" ] && inq=0
+      out="$out$c"; i=$((i + 1)); continue
+    fi
+    if [ "$inq" -eq 2 ]; then                 # double quotes: continuation IS removed
+      if [ "$c" = "\\" ]; then
+        nc=${s:i+1:1}
+        if [ "$nc" = "$nl" ]; then i=$((i + 2)); continue; fi
+      fi
+      [ "$c" = '"' ] && inq=0
+      out="$out$c"; i=$((i + 1)); continue
+    fi
+    case "$c" in
+      "'") inq=1; out="$out$c"; i=$((i + 1)); continue ;;
+      '"') inq=2; out="$out$c"; i=$((i + 1)); continue ;;
+    esac
+    if [ "$c" = "\\" ]; then                  # unquoted: continuation IS removed
+      nc=${s:i+1:1}
+      if [ "$nc" = "$nl" ]; then i=$((i + 2)); continue; fi
+      out="$out$c"; i=$((i + 1)); continue
+    fi
+    out="$out$c"; i=$((i + 1))
+  done
+  printf '%s' "$out"
+}
+# Only pay strip_line_continuations' O(n^2) join when a backslash-newline
+# continuation is actually present; otherwise it is a no-op (PF-995 / #8989 F4).
+case "$COMMAND" in
+  *\\$'\n'*) COMMAND=$(strip_line_continuations "$COMMAND") ;;
+esac
+
+# A single (possibly quoted) argument token.
+Q='"[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+'
+
+# Global git options that may sit between `git` and its subcommand:
+# -C <dir>, -c <key=val>, value-taking long options in their SPACE-separated
+# form (`--git-dir <path>`, not just `--git-dir=<path>`), --long-flag[=value],
+# and single-letter flags. The value-taking long options are enumerated
+# explicitly (git's global set is small and fixed) rather than matched as a
+# generic `--opt <value>` — a generic form would greedily swallow the
+# subcommand token as if it were the option's value and defeat detection.
+GIT_VALOPT='--(git-dir|work-tree|namespace|super-prefix|config-env|attr-source)[[:space:]]+('"$Q"')'
+GIT_OPT='(-C[[:space:]]+('"$Q"')|-c[[:space:]]+('"$Q"')|'"$GIT_VALOPT"'|--[[:alnum:]-]+(=('"$Q"'))?|-[[:alnum:]])'
+
+# `git` at a word boundary (so text like "legit commit" does not match),
+# optionally preceded by GIT_* env assignments, followed by global options.
+# The leading boundary is a NEGATED word-char class: start-of-string OR any
+# single character that is NOT alnum/underscore/dot/hyphen. Rounds 5-6 kept
+# ENUMERATING boundary characters (added quotes, then the backtick) and each
+# re-review found the next missing one (redirects, backslash, slash) — an
+# allowlist of separators ALWAYS has a next gap. Inverting the class closes the
+# whole family at once: quotes, backtick, redirects (`>`,`<`), backslash, `/`,
+# and any future single separator all become boundaries automatically, while
+# `e`/`-`/`.` stay word chars so `legit commit`, `some-git`, `.git` still do
+# NOT match. `/` becoming a boundary means path-invoked `/usr/bin/git commit`
+# newly matches — a bonus catch, safe because the pipeline decides the verdict
+# (PF-995 round 7 Fix A).
+GIT_CMD='(^|[^[:alnum:]_.-])(GIT_[A-Z_]+=('"$Q"')[[:space:]]+)*git([[:space:]]+'"$GIT_OPT"')*[[:space:]]+'
+
+# Trailing boundary after a mutate subcommand. The SAME negated word-char class
+# as the GIT_CMD leading boundary (above), plus end-of-string: any character
+# that is NOT alnum/underscore/dot/hyphen terminates the subcommand. So a
+# subcommand abutting a closing quote/backtick (`bash -c "git commit"`), a shell
+# separator, OR a redirect with NO intervening space (`git commit>out.txt`,
+# `>>`, `<in.txt`, `>&2`) is caught, while the hyphen staying a word char keeps
+# `git commit-tree` (plumbing) unmatched. Factored into ONE variable used at all
+# three trailing-class sites (here + detect_subcmd's two greps) so they cannot
+# drift (PF-995 round 7 Fix A).
+SUB_END='([^[:alnum:]_.-]|$)'
+
+# Every git subcommand that creates commits (or, for stash pop, restages
+# work for one on the current branch), abutting the trailing boundary above.
+MUTATE_SUB='(commit|merge|cherry-pick|revert|pull|stash[[:space:]]+pop)'"$SUB_END"
+GIT_MUTATE_RE="${GIT_CMD}${MUTATE_SUB}"
+
+# COMMAND-POSITION variant of the git prefix. GIT_CMD's leading boundary
+# `(^|[^[:alnum:]_.-])` matches `git` ANYWHERE — correct for the X-collapse copy,
+# where a quoted ARGUMENT's git word is already destroyed to a placeholder. But
+# the WORD-reconstructed copy (reduce_words, below) UN-quotes command-position
+# AND argument git words alike, so `echo "git" "commit"` reconstructs to
+# `echo git commit`; matching git ANYWHERE there would false-block a benign
+# argument. These anchored forms require `git` to be the FIRST word of the
+# reconstructed segment — after leading whitespace and any GIT_* env assignments,
+# with NO preceding command — so only a genuine command-position invocation
+# matches. Used ONLY against reduce_words output (PF-995 / #8988 round 9).
+GIT_CMD_ANCHORED='^[[:space:]]*(GIT_[A-Z_]+=('"$Q"')[[:space:]]+)*git([[:space:]]+'"$GIT_OPT"')*[[:space:]]+'
+GIT_MUTATE_ANCHORED="${GIT_CMD_ANCHORED}${MUTATE_SUB}"
+
+# Normalized copy: strip backslashes, double quotes, single quotes, and
+# backticks. The escaped-quote nested forms defeat RAW-text matching even with
+# Fix A's boundary classes — `sh -c "\"git\" commit"` puts an escaped quote
+# immediately after the word `git`, so GIT_CMD's required whitespace-after-git
+# never appears in the raw text. Stripping those four characters collapses the
+# form to `sh -c git commit`, which matches. Enter the pipeline if EITHER the
+# raw command OR the normalized copy matches: over-matching is the SAFE
+# direction — a prefilter match only ROUTES into the pipeline, whose quote-aware
+# segment logic + attribution decide the actual verdict (a benign
+# `echo "git" "commit"` normalizes to a match but its segment collapses to
+# `echo X X` and resolves no target, so it still exits 0). detect_subcmd falls
+# back to $COMMAND_NORM below so a normalized-only block still NAMEs its
+# subcommand (PF-995 round 7 Fix B).
+# The `sed` neutralizes the ANSI-C `$'` introducer to a plain quote FIRST, so
+# `$'commit'` normalizes to `commit` once `tr` strips the quotes — without it the
+# `$` survives (`git $commit`) and this fast-path gate would miss a real
+# `git $'commit'` and exit 0 before the quote-aware pipeline ever runs (PF-995 /
+# #8988 round 9 finding 2). Only `$'` is rewritten; `$x`/`$(` (runtime
+# indirection, deliberately fail-open) are untouched. The precise per-segment
+# reduction (reduce_words, in the loop) is what actually classifies — this is
+# only the router, which over-matches in the SAFE direction.
+COMMAND_NORM=$(printf '%s' "$COMMAND" | sed "s/\$'/'/g" | tr -d '\\"'\''`')
+# Inner-shell view (PF-995 / #8988 round 11): a NESTED interpreter (`sh -c '…'`)
+# re-parses its `-c` payload and removes `\<newline>` line continuations during
+# ITS OWN tokenization — regardless of the OUTER shell's single-quote literalness.
+# strip_line_continuations (line 81) correctly PRESERVES a single-quoted `\<NL>`
+# for the outer shell, but that leaves a literal newline that splits `git` from
+# `commit` across two physical lines, so the line-based greps above miss
+# `git commit` and this gate exits 0 — while the inner shell actually runs it (a
+# real commit lands on main). Add a copy with ALL `\<NL>` continuations removed
+# unconditionally so such a payload still ROUTES into the quote-aware pipeline,
+# where NESTED_INTERP + the fail-closed $PWD fallback decide the verdict. As with
+# COMMAND_NORM, over-matching here is the SAFE direction — routing only; the
+# per-segment reduction and attribution below decide the real verdict. NL is not
+# defined until later, so use a local newline.
+cont_nl=$'\n'
+COMMAND_INNER=${COMMAND//\\$cont_nl/}
+COMMAND_INNER_NORM=$(printf '%s' "$COMMAND_INNER" | sed "s/\$'/'/g" | tr -d '\\"'\''`')
+if ! printf '%s' "$COMMAND" | grep -qE "$GIT_MUTATE_RE" &&
+   ! printf '%s' "$COMMAND_NORM" | grep -qE "$GIT_MUTATE_RE" &&
+   ! printf '%s' "$COMMAND_INNER" | grep -qE "$GIT_MUTATE_RE" &&
+   ! printf '%s' "$COMMAND_INNER_NORM" | grep -qE "$GIT_MUTATE_RE"; then
+  exit 0
+fi
+
+# Strip surrounding single or double quotes from a path token.
+unquote() {
+  local s="$1"
+  case "$s" in
+    \"*\") s="${s%\"}"; s="${s#\"}" ;;
+    \'*\') s="${s%\'}"; s="${s#\'}" ;;
+  esac
+  printf '%s' "$s"
+}
+
+# Delete adjacent EMPTY quote pairs ("" or '') from a classification copy
+# BEFORE any non-empty quoted span is collapsed to a placeholder. In real
+# shell an empty quoted string contributes nothing to its word, so `""git
+# commit` executes as a plain `git commit` and `git ""commit` as `git commit`
+# (verified against real bash). Collapsing an empty pair to the placeholder X
+# instead would GLUE it to the adjacent word (`""git` -> `Xgit`), destroy
+# git's leading word boundary, and let a REAL commit on main slip the
+# classifier (PF-995 / #8988 round 8 finding 1). Deletion is semantically
+# exact; a NON-empty pair still collapses to X afterwards, so a quoted span
+# mid-word keeps gluing the word together (`git"x"commit` stays the single
+# non-git word `gitxcommit`, not a `git commit` invocation).
+strip_empty_quotes() {
+  printf '%s' "$1" | sed -E 's/""//g' | sed -E "s/''//g"
+}
+
+# Full classification skeleton: empty pairs deleted, then every remaining
+# non-empty single/double-quoted span collapsed to the placeholder X. Every
+# both-quote collapse site feeds a yes/no classifier and must route through
+# this so the empty-pair bypass is closed uniformly.
+collapse_quotes() {
+  strip_empty_quotes "$1" | sed -E 's/"[^"]*"/X/g' | sed -E "s/'[^']*'/X/g"
+}
+
+# Quote-AWARE word count. `wc -w` splits on raw whitespace and miscounts a quoted
+# argument with internal spaces (`-M "old name" main` -> 4, not 3). Collapsing
+# every quoted span to a single placeholder X first (via collapse_quotes) makes
+# each quoted token count as ONE word, so git-branch rename arity is classified
+# correctly regardless of quoting. git branch names cannot contain spaces, so a
+# quoted spaced name is never a real branch — but the miscount still skips BOTH
+# arity branches and, on the fail-closed (unresolvable-dir) path, DEFEATS the
+# fail-closed pend that would otherwise block a following commit (PF-995 / #8989
+# finding F2).
+count_tokens() {
+  collapse_quotes "$1" | wc -w | tr -d '[:space:]'
+}
+
+# Bash-faithful WORD reconstruction of a segment: remove quote characters,
+# process backslash escapes, and treat `$'...'` ANSI-C spans as literal quoted
+# text, EXACTLY as the shell does its static word-splitting before execution.
+# Where collapse_quotes maps every quoted span to the placeholder X (so a quoted
+# git word or subcommand is destroyed), this reconstructs the words the shell
+# would actually run — so a statically quoted/escaped `git <mutate>` in command
+# position resolves the same way real bash would, WITHOUT enumerating every
+# quote/escape sub-case (PF-995 / #8988 round 9 findings 1 & 2).
+#
+# Rules (verified against real bash):
+#   - Adjacent quoted and unquoted spans with NO intervening UNQUOTED whitespace
+#     CONCATENATE into one word (`git"x"commit` -> `gitxcommit`, a non-git word).
+#   - Whitespace INSIDE a quoted span is glued out, so it never splits the word
+#     (`echo "git commit"` -> two words `echo` + `gitcommit`; git is NOT in
+#     command position, correctly benign).
+#   - Whitespace OUTSIDE quotes splits words; runs collapse to one space and
+#     leading/trailing space is dropped.
+#   - A backslash escapes the next char (unquoted and inside double quotes);
+#     `$'...'` is treated as a single-quoted literal (escape decoding inside it is
+#     out of scope — only the far-fetched `$'\x67it'` form, well past the accident
+#     threat model, would differ).
+# Only STATIC reduction is in scope. Runtime indirection (`$x commit`,
+# `$(echo git) commit`) does not reduce statically and stays fail-open.
+#
+# WJOIN is a non-splitting placeholder for a word-JOINING (escaped or quoted)
+# space: a byte the anchored `git[[:space:]]+<mutate>` regex never reads as the
+# whitespace separating git from its subcommand, so `git\ commit` reconstructs
+# to the single word `git<WJOIN>commit` (NOT command-position git) and ALLOWS,
+# matching real bash (a 127 non-command; git never runs). Only UNQUOTED
+# whitespace stays a real space that splits words (PF-995 / #8988 round 10
+# finding 2). \x1d (GS) mirrors the existing FS=\x1f sentinel convention.
+WJOIN=$'\x1d'
+reduce_words() {
+  local s="$1"
+  local n=${#s}
+  local i=0 c nc inq=0 out="" pend=0
+  while [ "$i" -lt "$n" ]; do
+    c=${s:i:1}
+    # Single-quote (1) and ANSI-C (3) spans: literal text, whitespace glued out.
+    if [ "$inq" = 1 ] || [ "$inq" = 3 ]; then
+      if [ "$c" = "'" ]; then inq=0; else
+        case "$c" in [[:space:]]) ;; *) out="$out$c" ;; esac
+      fi
+      i=$((i + 1)); continue
+    fi
+    # Double-quote span: backslash escapes ", \, $, `; whitespace glued out.
+    if [ "$inq" = 2 ]; then
+      if [ "$c" = '"' ]; then inq=0; i=$((i + 1)); continue; fi
+      if [ "$c" = "\\" ]; then
+        nc=${s:i+1:1}
+        case "$nc" in
+          '"'|"\\"|'$'|'`') out="$out$nc"; i=$((i + 2)); continue ;;
+        esac
+      fi
+      case "$c" in [[:space:]]) ;; *) out="$out$c" ;; esac
+      i=$((i + 1)); continue
+    fi
+    # Unquoted: whitespace defers a word break (flushed when the next word char
+    # arrives, so a trailing run adds no space).
+    case "$c" in
+      [[:space:]]) [ -n "$out" ] && pend=1; i=$((i + 1)); continue ;;
+    esac
+    if [ "$pend" = 1 ]; then out="$out "; pend=0; fi
+    case "$c" in
+      "'") inq=1; i=$((i + 1)); continue ;;
+      '"') inq=2; i=$((i + 1)); continue ;;
+    esac
+    if [ "$c" = '$' ]; then
+      nc=${s:i+1:1}
+      if [ "$nc" = "'" ]; then inq=3; i=$((i + 2)); continue; fi
+    fi
+    if [ "$c" = "\\" ]; then
+      nc=${s:i+1:1}
+      if [ -n "$nc" ]; then
+        # The escaped char joins the current word. An escaped WHITESPACE is a
+        # word-JOINING space (`git\ commit` => single word `git commit`, a 127
+        # non-command — git is never invoked), so emit the non-splitting WJOIN
+        # placeholder, never a bare space the anchored regex would re-split on.
+        case "$nc" in
+          [[:space:]]) out="$out$WJOIN" ;;
+          *) out="$out$nc" ;;
+        esac
+        i=$((i + 2)); continue
+      fi
+      i=$((i + 1)); continue
+    fi
+    out="$out$c"; i=$((i + 1))
+  done
+  printf '%s' "$out"
+}
+
+# Resolve a (possibly quoted, possibly relative, possibly empty) directory
+# token against the currently tracked cwd, yielding an absolute-ish path.
+resolve_dir() {
+  local d
+  d=$(unquote "$1")
+  case "$d" in
+    /*) printf '%s' "$d" ;;
+    "") printf '%s' "$TRACKED_DIR" ;;
+    *) printf '%s' "$TRACKED_DIR/$d" ;;
+  esac
+}
+
+# Per-directory pending-branch-switch state, as two parallel bash 3.2
+# indexed arrays (NOT associative arrays — those require bash 4+, and the
+# system bash on macOS is 3.2.57). Two independent `-C <dirA>`/`-C <dirB>`
+# segments in one compound command must track distinct pending branches
+# instead of clobbering a single global scalar (PF-995 / #8988 round 2 fix 1).
+pending_lookup() {
+  local d="$1" i
+  for i in "${!PENDING_DIRS[@]}"; do
+    if [ "${PENDING_DIRS[$i]}" = "$d" ]; then
+      printf '%s' "${PENDING_BRANCHES[$i]}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+pending_set() {
+  local d="$1" b="$2" i
+  for i in "${!PENDING_DIRS[@]}"; do
+    if [ "${PENDING_DIRS[$i]}" = "$d" ]; then
+      PENDING_BRANCHES[i]="$b"
+      return 0
+    fi
+  done
+  PENDING_DIRS+=("$d")
+  PENDING_BRANCHES+=("$b")
+}
+
+pending_clear_all() {
+  PENDING_DIRS=()
+  PENDING_BRANCHES=()
+}
+
+# Which commit-creating subcommand appears in (classification) text, so the
+# BLOCKED message can name it specifically (PF-995 / #8988 round 2 fix 4).
+detect_subcmd() {
+  local text="$1" sc
+  for sc in commit merge cherry-pick revert pull; do
+    if printf '%s' "$text" | grep -qE "${GIT_CMD}${sc}${SUB_END}"; then
+      printf '%s' "$sc"
+      return 0
+    fi
+  done
+  if printf '%s' "$text" | grep -qE "${GIT_CMD}stash[[:space:]]+pop${SUB_END}"; then
+    printf '%s' "stash pop"
+    return 0
+  fi
+  return 1
+}
+
+# Split a command string into its shell command segments, one per line, each
+# line PREFIXED with a single link-code char and $FS: `A` = this segment is
+# linked to its predecessor by a guaranteed-success `&&` chain (so a recorded
+# branch switch/rename earlier in the chain is TRUSTED to have taken effect
+# before this segment runs); `R` = linked by `||`, which runs this segment ONLY
+# when the predecessor FAILED (a conditional link — its `cd` is tracked as a
+# candidate, not a definite move; see the F2 handling below); `O` = linked by any
+# OTHER separator (`;`, `|`, `&`, a literal newline) — or it is the first segment.
+# Only `&&` short-circuits on the predecessor's success, so only `A` may carry
+# pending switch/rename trust forward; both `R` and `O` links RESET that trust in
+# the loop below, so a following commit falls through to the live $PWD lookup
+# (PF-995 / #8988 round 4 finding 1 — the round-3 splitter collapsed EVERY
+# separator to a bare newline, erasing this distinction and letting
+# `git checkout feat/x ; git commit` launder a commit onto main).
+#
+# Separators recognized OUTSIDE single/double quotes: `&&`, `||`, `;`, a
+# single `&` (background), a single `|` (pipe), and a literal newline. A
+# separator INSIDE a quoted span is inert data, never a split point — so a
+# quoted VALUE that merely contains `git commit` (e.g. a jq `--arg` payload)
+# can never form a pseudo command segment (PF-995 / #8988 round 3 fixes 1/2).
+#
+# Bash 3.2 char scanner (the system bash on macOS is 3.2.57 — NO associative
+# arrays, NO mapfile). The quoting model matches $seg_class's below (a bare
+# `"`/`'` toggles the span; backslash escapes are NOT interpreted, exactly as
+# the sed collapse does not), so the splitter and the classifier always agree
+# on what is "inside quotes". A literal newline inside a quoted span is emitted
+# as a space so a single quoted value never straddles two `read` iterations;
+# unbalanced quoting simply runs to end-of-string (fail-open — the resulting
+# segment fails the branch lookup below and the hook allows).
+split_segments() {
+  # NOTE: `n=${#s}` MUST be a separate `local` from `s="$1"` — bash 3.2 expands
+  # every RHS on a single `local` line against the PRE-command environment, so
+  # `local s="$1" n=${#s}` would read the OLD (unset) s and set n=0, making the
+  # loop below never run and every command fall through to the PWD fallback.
+  local s="$1"
+  local n=${#s} i=0 c nc inq=0 out=""
+  out="A$FS"                                   # first segment: no predecessor
+  while [ "$i" -lt "$n" ]; do
+    c=${s:i:1}
+    if [ "$inq" -eq 1 ]; then                 # inside single quotes
+      [ "$c" = "'" ] && inq=0
+      if [ "$c" = "$NL" ]; then out="$out "; else out="$out$c"; fi
+      i=$((i + 1)); continue
+    fi
+    if [ "$inq" -eq 2 ]; then                 # inside double quotes
+      [ "$c" = '"' ] && inq=0
+      if [ "$c" = "$NL" ]; then out="$out "; else out="$out$c"; fi
+      i=$((i + 1)); continue
+    fi
+    case "$c" in
+      "'") inq=1; out="$out$c"; i=$((i + 1)); continue ;;
+      '"') inq=2; out="$out$c"; i=$((i + 1)); continue ;;
+    esac
+    nc=${s:i+1:1}
+    if [ "$c" = "&" ] && [ "$nc" = "&" ]; then
+      out="$out${NL}A$FS"; i=$((i + 2)); continue    # `&&` — trusted link
+    fi
+    if [ "$c" = "|" ] && [ "$nc" = "|" ]; then
+      out="$out${NL}R$FS"; i=$((i + 2)); continue    # `||` — conditional link (F2)
+    fi
+    case "$c" in
+      "&"|"|"|";"|"$NL") out="$out${NL}O$FS"; i=$((i + 1)); continue ;;   # single &, |, ;, newline
+    esac
+    out="$out$c"; i=$((i + 1))
+  done
+  printf '%s' "$out"
+}
+
+# Walk the command's segments (see split_segments) in order, tracking `cd` so
+# we know the working directory of each git invocation, and tracking branch
+# switches so `git checkout -b tmp && git commit` is allowed while
+# `git checkout -b tmp && git checkout main && git commit` is still blocked.
+# A segment whose quoting is unbalanced yields a bogus tracked dir that fails
+# the branch lookup below and the hook fails OPEN — same posture as the
+# malformed-stdin path.
+TRACKED_DIR="$PWD"
+PENDING_DIRS=()      # per-directory pending-branch state (see helpers above)
+PENDING_BRANCHES=()
+FS=$'\x1f'           # field separator inside a COMMIT_TARGETS record
+COMMIT_TARGETS=""    # newline-separated records: <kind>FS<subcmd>FS<value>
+                     # kind: B=pending branch, G=git-dir, D=directory
+HANDLED=0
+# Set when a commit-creating subcommand shares a segment with a switch/branch
+# keyword (so the switch/branch short-circuit skips it and it is never recorded
+# as a target). It forces the $PWD fallback below to fire even when an EARLIER
+# benign target was recorded, so an unattributed commit cannot slip (PF-995 /
+# #8988 round 3 fix 3).
+UNATTRIBUTED=0
+# Set when a segment resolves NO direct git target yet still carries a git-mutate
+# inside a nested executor (`bash -c "git commit"`, `eval "git commit"`) or a live
+# command substitution (`"$(git commit)"`). OR'd into the $PWD fallback below so a
+# benign EARLIER target (COMMIT_TARGETS non-empty, HANDLED=1) cannot suppress the
+# fail-closed check for a later hidden commit (PF-995 / #8989 finding F1).
+NESTED_MUTATE=0
+# Candidate directories the effective cwd COULD be because a `cd` was reached via
+# a `||` conditional (the predecessor may have succeeded, so the cd may never
+# run). A deterministic (`&&`/`;`/first-segment) cd RESETS this list and moves
+# TRACKED_DIR; a `||` cd instead APPENDS here and leaves TRACKED_DIR intact, so a
+# following commit is checked against BOTH the tracked cwd and every candidate,
+# blocking if ANY resolves to main — fail-closed on the ambiguous control flow
+# that the old "last cd wins" tracker silently mis-resolved (PF-995 / #8989 F2).
+CD_OR_DIRS=()
+# Directories captured AT THE MOMENT a hidden/unattributed git-mutate is seen (the
+# tracked cwd plus any ||-candidate then in effect). The precise fallback below
+# emits one target per entry, so an earlier `cd` is honored instead of the hook's
+# launch cwd ($PWD) — fixing both the false-ALLOW (`cd <main> && bash -c "git
+# commit"` from a feature cwd) and the false-BLOCK (the symmetric case) of the old
+# single-$PWD fallback (PF-995 / #8989 finding F1).
+FALLBACK_DIRS=()
+NL='
+'
+# Nested-interpreter / eval detectors, shared by the per-segment F1 check inside
+# the loop and the global quoted-only fallback after it. Defined once here so both
+# sites use the identical pattern. `-[[:alnum:]]*c` matches a `-c` flag possibly
+# bundled with other letters (`-xc`); the `([^[:space:]]+[[:space:]]+)*` hop skips
+# intervening options (`bash -euo pipefail -c …`) between interpreter and `-c`.
+INTERP_RE='(^|[[:space:]]|[;&|()])(bash|sh|zsh|ksh|dash)[[:space:]]+([^[:space:]]+[[:space:]]+)*-[[:alnum:]]*c([[:space:]]|$)'
+EVAL_RE='(^|[[:space:]]|[;&|()])eval([[:space:]]|$)'
+
+# Snapshot the dir(s) the CURRENT segment's hidden/unattributed git-mutate could
+# run in — the tracked cwd plus any ||-conditional cd candidate then in effect —
+# AT THE MOMENT it is seen, so a later `cd` cannot retroactively change the
+# resolved target (PF-995 / #8989 F1 + F2).
+capture_fallback_dirs() {
+  local d
+  FALLBACK_DIRS+=("$TRACKED_DIR")
+  for d in "${CD_OR_DIRS[@]}"; do
+    FALLBACK_DIRS+=("$d")
+  done
+}
+
+SEGMENTS=$(split_segments "$COMMAND")
+
+# Each SEGMENTS line is `<sepcode>$FS<segment text>` (see split_segments):
+# `A` = linked to its predecessor by a guaranteed-success `&&` chain, `R` = a
+# `||` conditional link (runs only if the predecessor failed), `O` = any other
+# link (`;`, `|`, `&`, newline) or the first segment. On every NON-`A` link we
+# DROP the pending branch-switch/rename trust recorded by earlier segments,
+# because only `&&` guarantees the switch actually succeeded before this segment
+# runs — so `git checkout feat/x ; git commit` (semicolon), `... || git commit`,
+# `... | git commit`, `... & git commit` all fall through to the live $PWD branch
+# lookup (block on main) instead of trusting a switch that may never have taken
+# effect (PF-995 / #8988 round 4 finding 1). TRACKED_DIR (from `cd`) is
+# intentionally NOT reset here — that is orthogonal to switch trust — but a `||`
+# (`R`) cd is recorded as a CANDIDATE rather than moving TRACKED_DIR (F2 below).
+while IFS="$FS" read -r sepcode seg; do
+  if [ "$sepcode" != "A" ]; then pending_clear_all; fi
+  case "$seg" in *[![:space:]]*) ;; *) continue ;; esac
+
+  # Classification-only copy with each single/double-quoted span collapsed to a
+  # single placeholder token, so a quoted VALUE that happens to contain a git
+  # subcommand or switch keyword (e.g. a commit message `-m "see git checkout
+  # feature"` or `-m "git pull --ff-only"`) is never MISCLASSIFIED as a real
+  # switch/mutation/exemption. A placeholder (not removal) preserves the token's
+  # structural position, so a quoted OPTION VALUE like `--git-dir="path with
+  # space"` or `-C "dir"` still parses as an option-with-value for the
+  # classifiers. Only the yes/no classifiers below scan $seg_class; every
+  # target- and directory-EXTRACTION still uses the original $seg — a genuine
+  # keyword is unquoted there, and quoting is load-bearing for a branch/path
+  # with spaces (PF-995 / #8988).
+  seg_class=$(collapse_quotes "$seg")
+
+  # Bash-faithful WORD reconstruction of the SAME segment (quotes/backslashes/
+  # ANSI-C removed within each word, adjacent spans concatenated). Read ONLY by
+  # the command-position mutate check below, so a statically quoted or escaped
+  # `git <mutate>` invocation (`"git" commit`, `g\it commit`, `$'git' commit`)
+  # is classified as a mutation the same way real bash would run it — a case the
+  # X-collapse seg_class destroys to a placeholder (PF-995 / #8988 round 9).
+  seg_reduced=$(reduce_words "$seg")
+
+  # `cd <path>` segment: update the tracked directory. A branch switch in
+  # one directory says nothing about another, so reset that state too.
+  if printf '%s' "$seg" | grep -qE '^[[:space:]]*cd[[:space:]]'; then
+    dir=$(printf '%s' "$seg" | sed -E 's/^[[:space:]]*cd[[:space:]]+//; s/[[:space:]]+$//')
+    dir=$(unquote "$dir")
+    # Resolve the cd target the same way TRACKED_DIR would be updated (absolute
+    # wins; relative is joined onto the tracked cwd; bare `cd` yields nothing).
+    case "$dir" in
+      /*) cd_new="$dir" ;;
+      "") cd_new="" ;;
+      *) cd_new="$TRACKED_DIR/$dir" ;;
+    esac
+    if [ "$sepcode" = "R" ] && [ -n "$cd_new" ]; then
+      # `||`-conditional cd (F2): the predecessor may have SUCCEEDED, so this cd
+      # may never run. Do NOT move the tracked cwd to it — record it as an
+      # ADDITIONAL candidate the cwd COULD be, and fail closed at commit time if
+      # any candidate resolves to main. The old tracker moved TRACKED_DIR here
+      # unconditionally, so `cd <main> || cd <feature>` ended on <feature> while
+      # execution stayed on <main> — a wrongly-ALLOWED commit (PF-995 / #8989 F2).
+      CD_OR_DIRS+=("$cd_new")
+    else
+      # Deterministic cd (`&&` / `;` / first segment): the cwd definitely moves
+      # here, so any earlier ||-candidate no longer applies.
+      [ -n "$cd_new" ] && TRACKED_DIR="$cd_new"
+      CD_OR_DIRS=()
+    fi
+    pending_clear_all
+    continue
+  fi
+
+  # Branch switches earlier in the chain. Detection is opt-aware (GIT_CMD),
+  # so the extraction must tolerate the same global-option chain too
+  # (`git -C dir checkout -b X`, `git -c k=v switch Y`) — otherwise a
+  # detected switch would extract no branch and fall through to a live
+  # pre-execution lookup that still reports main.
+  if printf '%s' "$seg_class" | grep -qE "${GIT_CMD}(checkout|switch)([[:space:]]|$)"; then
+    # Effective directory of the switch: `git -C <dir>` overrides the cwd.
+    head_co=$(printf '%s' "$seg" | sed -E 's/[[:space:]](checkout|switch)[[:space:]].*$//')
+    co_cdir=$(printf '%s' "$head_co" | sed -nE 's/.*[[:space:]]-C[[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+).*/\1/p')
+    sw_dir=$(resolve_dir "$co_cdir")
+    # Isolate "<sub> <args>" from the switch keyword onward, dropping the
+    # opt chain so the branch extraction below is a simple anchored match.
+    co=$(printf '%s' "$seg" | sed -nE 's/.*[[:space:]](checkout|switch)[[:space:]]+(.*)$/\1 \2/p')
+    # Force-create/reset forms name a brand-new branch: checkout -b / -B and
+    # switch -c / -C all set the pending branch identically.
+    nb=$(printf '%s' "$co" | sed -nE 's/^(checkout[[:space:]]+-[bB]|switch[[:space:]]+-[cC])[[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+).*/\2/p')
+    if [ -n "$nb" ]; then
+      pending_set "$sw_dir" "$(unquote "$nb")"
+    elif printf '%s' "$seg" | grep -qE '[[:space:]]--([[:space:]]|$)'; then
+      # Pathspec form (`git checkout main -- file`) — restores files, does
+      # NOT change branch, so leave the pending state untouched. Deliberate
+      # fail-open tradeoff: a pathspec-only checkout of a file whose name
+      # happens to look like a branch would also be treated as "not a switch"
+      # — acceptable under the accident threat model.
+      :
+    else
+      # Plain `checkout|switch [opts] <target>`. Record the target — a switch
+      # to a non-main/master ref is a legitimate feature branch, so a following
+      # commit resolves to it instead of the pre-execution live branch (which
+      # from a main checkout is still main → the false-block this fixes). A
+      # switch to main/master records "main" and keeps the block.
+      #
+      # Skip any option tokens (`-q`, `--quiet`, …) that sit between the
+      # keyword and the branch operand, then take the first operand. The bare
+      # `-`/`--` (previous-branch shorthand / end-of-options) stops the scan
+      # (PF-995 fix 4).
+      rest=$(printf '%s' "$co" | sed -nE 's/^(checkout|switch)[[:space:]]+(.*)$/\2/p')
+      while [ -n "$rest" ]; do
+        first=$(printf '%s' "$rest" | sed -nE 's/^([^[:space:]]+).*/\1/p')
+        case "$first" in
+          -|--) break ;;
+          -*) rest=$(printf '%s' "$rest" | sed -E 's/^[^[:space:]]+[[:space:]]*//') ;;
+          *) break ;;
+        esac
+      done
+      tgt=$(printf '%s' "$rest" | sed -nE 's/^("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+).*/\1/p')
+      tgt=$(unquote "$tgt")
+      if [ "$tgt" = "-" ]; then
+        # `checkout -` / `switch -`: return to the previous branch. If an
+        # earlier switch in THIS command already set the pending branch for the
+        # same dir, that in-command switch is the branch we are leaving, so the
+        # previous branch is that dir's live current branch; otherwise it is the
+        # dir's real @{-1}. Fail CLOSED to main if neither resolves (PF-995 fix
+        # 3) — an unresolved return could land back on main and must not slip.
+        prevb=""
+        if pending_lookup "$sw_dir" >/dev/null; then
+          prevb=$(git -C "$sw_dir" branch --show-current 2>/dev/null)
+        elif ! prevb=$(git -C "$sw_dir" rev-parse --abbrev-ref '@{-1}' 2>/dev/null); then
+          prevb=""
+        fi
+        # A repo with no previous branch prints the literal '@{-1}' on stdout
+        # while exiting non-zero; treat that (and an empty result) as
+        # unresolved and fail CLOSED to main.
+        case "$prevb" in ""|'@{-1}') prevb="main" ;; esac
+        pending_set "$sw_dir" "$prevb"
+      elif [ -n "$tgt" ]; then
+        pending_set "$sw_dir" "$tgt"
+      else
+        # A genuine switch keyword was detected but no branch operand parsed
+        # (e.g. options only). Any pending branch from an earlier switch is now
+        # stale — clear it and fail CLOSED to main rather than leave the stale
+        # value to falsely allow a following commit (PF-995 fix 4).
+        pending_set "$sw_dir" "main"
+      fi
+    fi
+    # A commit-creating subcommand riding in the SAME segment as this switch
+    # (e.g. hidden in a `$(...)`/backtick the splitter can't see) is never
+    # recorded as a target because of the `continue` below — flag it so the
+    # $PWD fallback still checks it (PF-995 / #8988 round 3 fix 3).
+    if printf '%s' "$seg_class" | grep -qE "$GIT_MUTATE_RE"; then UNATTRIBUTED=1; capture_fallback_dirs; fi
+    continue
+  elif printf '%s' "$seg_class" | grep -qE "${GIT_CMD}branch([[:space:]]|$)"; then
+    # `git branch -M <new>` / `-m <new>` renames the CURRENT branch, and the
+    # two-argument `git branch -M <old> <new>` / `-m <old> <new>` renames the
+    # named branch to <new> — no checkout/switch keyword is involved either
+    # way, so both are invisible to the detector above. When the resulting
+    # branch name is main/master AND the rename targets the segment's current
+    # branch, set the same pending-rename state a switch-to-main would (PF-995
+    # / #8988 round 2 fix 2 + round 3 fix 4).
+    head_br=$(printf '%s' "$seg" | sed -E 's/[[:space:]]branch[[:space:]].*$//')
+    br_cdir=$(printf '%s' "$head_br" | sed -nE 's/.*[[:space:]]-C[[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+).*/\1/p')
+    br_dir=$(resolve_dir "$br_cdir")
+    br_rest=$(printf '%s' "$seg" | sed -nE 's/^.*[[:space:]]branch[[:space:]]+(.*)$/\1/p')
+    br_words=$(count_tokens "$br_rest")
+    if printf '%s' "$br_rest" | grep -qE '^-[mM]([[:space:]]|$)'; then
+      if [ "$br_words" -eq 2 ]; then
+        # One-arg rename: `-M <new>` renames whatever branch is current.
+        br_new=$(printf '%s' "$br_rest" | sed -nE 's/^-[mM][[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+)[[:space:]]*$/\1/p')
+        br_new=$(unquote "$br_new")
+        case "$br_new" in
+          main|master) pending_set "$br_dir" "$br_new" ;;
+        esac
+      elif [ "$br_words" -eq 3 ]; then
+        # Two-arg rename: `-M <old> <new>`. Only pends when <new> is main/master
+        # AND <old> is the effective directory's current branch — renaming some
+        # OTHER branch to main does not move HEAD, so a following commit is not
+        # on main. If the current branch can't be resolved (bad dir / not a
+        # repo), fail CLOSED and treat it as renaming the current branch.
+        br_old=$(printf '%s' "$br_rest" | sed -nE 's/^-[mM][[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+)[[:space:]]+.*$/\1/p')
+        br_old=$(unquote "$br_old")
+        br_new=$(printf '%s' "$br_rest" | sed -nE 's/^-[mM][[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+)[[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+)[[:space:]]*$/\2/p')
+        br_new=$(unquote "$br_new")
+        case "$br_new" in
+          main|master)
+            br_cur=$(git -C "$br_dir" branch --show-current 2>/dev/null)
+            if [ -z "$br_cur" ] || [ "$br_cur" = "$br_old" ]; then
+              pending_set "$br_dir" "$br_new"
+            fi
+            ;;
+        esac
+      fi
+    fi
+    # Same guard as the switch branch: a commit hidden in this branch-rename
+    # segment (via `$(...)`/backtick) is skipped by the `continue`, so flag it
+    # for the $PWD fallback (PF-995 / #8988 round 3 fix 3).
+    if printf '%s' "$seg_class" | grep -qE "$GIT_MUTATE_RE"; then UNATTRIBUTED=1; capture_fallback_dirs; fi
+    continue
+  fi
+
+  # Only commit-creating segments from here on. A segment qualifies if EITHER
+  # the X-collapse copy matches git-mutate ANYWHERE (the established boundary-
+  # anywhere path — preserves every prior case, incl. `FOO=1 git commit` and the
+  # glued-argument allows like `echo "git" "commit"` -> `echo X X`) OR the WORD-
+  # reconstructed copy matches git-mutate in COMMAND position (the round-9
+  # quoted/escaped-token path: `"git" commit`, `g\it commit`, `$'git' commit`).
+  # The OR is purely additive — it only opens new BLOCK routes, never removes an
+  # existing allow, and the anchoring keeps a benign reconstructed argument
+  # (`echo "git" "commit"` -> `echo git commit`) from false-blocking, since git
+  # is not the first word there (PF-995 / #8988 round 9 findings 1 & 2).
+  if ! printf '%s' "$seg_class" | grep -qE "$GIT_MUTATE_RE" \
+     && ! printf '%s' "$seg_reduced" | grep -qE "$GIT_MUTATE_ANCHORED"; then
+    # This segment resolves NO direct command-position git target. But a nested
+    # executor (`bash -c "git commit"`, `eval "git commit"`) or a LIVE command
+    # substitution (`"$(git commit)"`) in THIS segment can still run a git-mutate
+    # the splitter cannot see. When an EARLIER segment already recorded a benign
+    # (non-main) target, COMMIT_TARGETS is non-empty and HANDLED=1, which
+    # suppresses the global NESTED_INTERP fallback below and lets the hidden
+    # commit slip through (`git -C <feat> commit && bash -c "git commit"` — PF-995
+    # / #8989 finding F1). Flag it per-segment so the fail-closed $PWD fallback
+    # fires regardless. Only segments that reach HERE are inspected — a legit
+    # `git -C /feature commit -m "$(date)"` is HANDLED above and never arrives, so
+    # it is not false-flagged.
+    seg_exec=0
+    if printf '%s' "$seg_class" | grep -qE "$INTERP_RE" \
+       || printf '%s' "$seg_class" | grep -qE "$EVAL_RE"; then
+      seg_exec=1
+    else
+      # A `$(...)`/backtick inside SINGLE quotes is inert (`echo 'see $(git
+      # commit)'` must stay allowed) — collapse single-quoted spans first, exactly
+      # as the global SUBST_SCAN does, before looking for a live substitution.
+      seg_subst=$(strip_empty_quotes "$seg" | sed -E "s/'[^']*'/X/g")
+      if printf '%s' "$seg_subst" | grep -qE '\$\(' \
+         || printf '%s' "$seg_subst" | grep -q '`'; then
+        seg_exec=1
+      fi
+    fi
+    if [ "$seg_exec" -eq 1 ]; then
+      seg_norm=$(printf '%s' "$seg" | sed "s/\$'/'/g" | tr -d '\\"'\''`')
+      if printf '%s' "$seg_norm" | grep -qE "$GIT_MUTATE_RE"; then
+        NESTED_MUTATE=1
+        capture_fallback_dirs
+      fi
+    fi
+    continue
+  fi
+  HANDLED=1
+  subcmd=$(detect_subcmd "$seg_class")
+  # Newly-blocked quoted/escaped forms carry no literal subcommand in seg_class
+  # (it is a placeholder there); name it from the reconstruction so the block
+  # message reads `git merge`/`git commit`, not the "commit" default.
+  [ -z "$subcmd" ] && subcmd=$(detect_subcmd "$seg_reduced")
+  [ -z "$subcmd" ] && subcmd="commit"
+
+  # `git pull --ff-only` cannot create commits. Both the pull detection and
+  # the --ff-only check run on the quote-stripped copy so a quoted message
+  # like `-m "git pull --ff-only"` cannot smuggle the exemption (PF-995).
+  if printf '%s' "$seg_class" | grep -qE "${GIT_CMD}pull([[:space:]]|$)" \
+     && printf '%s' "$seg_class" | grep -qE -- '--ff-only'; then
+    continue
+  fi
+
+  # `git revert --no-commit`/`-n` and `git merge --no-commit` create NO
+  # commit either — exactly analogous to `pull --ff-only` above. Both the
+  # subcommand detection and the flag check run on the quote-stripped copy
+  # so a quoted commit message cannot smuggle the exemption (PF-995 / #8988
+  # round 2 fix 3).
+  if printf '%s' "$seg_class" | grep -qE "${GIT_CMD}revert([[:space:]]|$)" \
+     && printf '%s' "$seg_class" | grep -qE -- '(^|[[:space:]])(-n|--no-commit)([[:space:]]|$)'; then
+    continue
+  fi
+  if printf '%s' "$seg_class" | grep -qE "${GIT_CMD}merge([[:space:]]|$)" \
+     && printf '%s' "$seg_class" | grep -qE -- '(^|[[:space:]])--no-commit([[:space:]]|$)'; then
+    continue
+  fi
+
+  # Options after the subcommand belong to the subcommand (`git commit -C
+  # <commit>` reuses a message, it does not change directory) — resolve
+  # repo redirection only from the text BEFORE the subcommand.
+  head_part=$(printf '%s' "$seg" | sed -E 's/[[:space:]](commit|merge|cherry-pick|revert|pull|stash[[:space:]]+pop)([[:space:]].*)?$//')
+
+  # GIT_DIR= / --git-dir redirect the repository regardless of cwd.
+  g_dir=$(printf '%s' "$head_part" | sed -nE 's/.*(GIT_DIR=|--git-dir[= ])("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+).*/\2/p')
+  if [ -n "$g_dir" ]; then
+    g_dir=$(unquote "$g_dir")
+    case "$g_dir" in
+      /*) COMMIT_TARGETS="${COMMIT_TARGETS}G${FS}${subcmd}${FS}${g_dir}${NL}" ;;
+      *) COMMIT_TARGETS="${COMMIT_TARGETS}G${FS}${subcmd}${FS}${TRACKED_DIR}/${g_dir}${NL}" ;;
+    esac
+    continue
+  fi
+
+  # GIT_WORK_TREE= / --work-tree point the commit at another checkout —
+  # treat that checkout as the target (conservative).
+  w_tree=$(printf '%s' "$head_part" | sed -nE 's/.*(GIT_WORK_TREE=|--work-tree[= ])("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+).*/\2/p')
+  if [ -n "$w_tree" ]; then
+    w_tree=$(unquote "$w_tree")
+    case "$w_tree" in
+      /*) COMMIT_TARGETS="${COMMIT_TARGETS}D${FS}${subcmd}${FS}${w_tree}${NL}" ;;
+      *) COMMIT_TARGETS="${COMMIT_TARGETS}D${FS}${subcmd}${FS}${TRACKED_DIR}/${w_tree}${NL}" ;;
+    esac
+    continue
+  fi
+
+  # `git -C <dir>` overrides the tracked cd for this invocation; otherwise
+  # the commit lands in the tracked cwd. A statically-known branch switch for
+  # the SAME effective directory wins over a pre-execution live lookup (the
+  # `git -C dir checkout -b X && git -C dir commit` case).
+  c_dir=$(printf '%s' "$head_part" | sed -nE 's/.*[[:space:]]-C[[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+).*/\1/p')
+  effdir=$(resolve_dir "$c_dir")
+  if pb=$(pending_lookup "$effdir"); then
+    COMMIT_TARGETS="${COMMIT_TARGETS}B${FS}${subcmd}${FS}${pb}${NL}"
+  else
+    COMMIT_TARGETS="${COMMIT_TARGETS}D${FS}${subcmd}${FS}${effdir}${NL}"
+  fi
+  # F2: when the commit lands in the tracked cwd (no explicit `git -C <dir>`), a
+  # `||`-conditional `cd` earlier in the chain could have been the ACTUAL cwd.
+  # Emit one extra candidate target per such dir so a commit that COULD land on
+  # main blocks — fail-closed on the ambiguous control flow (PF-995 / #8989 F2).
+  if [ -z "$c_dir" ]; then
+    for cd_cand in "${CD_OR_DIRS[@]}"; do
+      if pb=$(pending_lookup "$cd_cand"); then
+        COMMIT_TARGETS="${COMMIT_TARGETS}B${FS}${subcmd}${FS}${pb}${NL}"
+      else
+        COMMIT_TARGETS="${COMMIT_TARGETS}D${FS}${subcmd}${FS}${cd_cand}${NL}"
+      fi
+    done
+  fi
+done <<EOF_SEGMENTS
+$SEGMENTS
+EOF_SEGMENTS
+
+# The whole-command prefilter (top of file) is NOT quote-aware, so a benign
+# command whose ONLY "git commit" text sits inside a quoted string (an `echo`
+# reminder, a `jq --arg` payload) passes it, yet no segment's quote-stripped
+# class resolves a real git target. Blocking such a command on $PWD is a false
+# BLOCK (PF-995 / #8988 round 4 finding 3). To tell it apart from a quoted
+# payload handed to a NESTED shell — `bash -c 'git commit'`, `eval 'git commit'`,
+# where the quoted text really will execute — compute a quote-collapsed skeleton
+# and look for an interpreter-with-inline-code (`bash|sh|zsh|ksh|dash … -c`) or
+# `eval`. Present → keep the fail-CLOSED $PWD fallback; absent → allow.
+COMMAND_CLASS=$(collapse_quotes "$COMMAND")
+NESTED_INTERP=0
+# INTERP_RE / EVAL_RE are defined once above the segment loop (shared with the
+# per-segment F1 nested-mutate check).
+if printf '%s' "$COMMAND_CLASS" | grep -qE "$INTERP_RE" \
+   || printf '%s' "$COMMAND_CLASS" | grep -qE "$EVAL_RE"; then
+  NESTED_INTERP=1
+fi
+
+# Command substitution — `$(...)` or backticks — EXECUTES its contents even
+# inside DOUBLE quotes, so `"$(git commit)"` and `` "`git commit`" `` run the
+# inner git exactly like a `bash -c` payload does. COMMAND_CLASS collapses ALL
+# quoted spans (incl. double), wiping the substitution to X, so the interpreter
+# check above never sees it and the round-4 quoted-only gate would allow. Detect
+# it here on a copy with ONLY single-quoted spans collapsed — single-quoted
+# substitution text is INERT (`echo 'see $(git commit)'` must stay allowed, and
+# its `$(` sits inside the collapsed span) — and treat its presence as a nested
+# executor so the fail-CLOSED $PWD fallback fires. Straightforward quoted-
+# substitution forms thus block; oddball benign forms that merely MENTION a
+# substitution and a commit-word in the same double-quoted string stay within
+# the hook's documented fail-open accident-gate posture (PF-995 round 7 Fix C).
+# Empty pairs are deleted first (round 8) so this copy classifies the same
+# post-concatenation text as the others; a NON-empty double-quoted span (where
+# a live `$(...)` could hide) is deliberately NOT collapsed here.
+SUBST_SCAN=$(strip_empty_quotes "$COMMAND" | sed -E "s/'[^']*'/X/g")
+if printf '%s' "$SUBST_SCAN" | grep -qE '\$\(' \
+   || printf '%s' "$SUBST_SCAN" | grep -q '`'; then
+  NESTED_INTERP=1
+fi
+
+# Fall back so a commit that no segment attributed a real target for is still
+# checked. Two mutually-exclusive branches, PRECISE first:
+#   PRECISE (F1) — a commit rode inside a switch/branch segment and was never
+#     attributed ($UNATTRIBUTED), or a segment carried a git-mutate inside a
+#     nested executor / live command substitution ($NESTED_MUTATE). Both capture
+#     $FALLBACK_DIRS at the moment the hidden commit is seen — the dir tracked
+#     THEN (honoring any earlier `cd`), plus any ||-candidate — so we emit one
+#     record per captured dir instead of the hook's launch cwd. Resolving from
+#     $PWD ignored the tracked `cd` and both mis-ALLOWED `cd <main> && bash -c
+#     "git commit"` (from a feature cwd) and mis-BLOCKED its symmetric case
+#     (PF-995 / #8989 finding F1). Fires even when an EARLIER benign (non-main)
+#     target was recorded, so a non-main target from one segment cannot suppress
+#     the fail-closed check for a later hidden commit (PF-995 / #8988 round 3 fix
+#     3 + #8989 F1). The records are APPENDED, never assigned.
+#   COARSE ($PWD) — the whole-command filter matched but NO segment resolved a
+#     target AND no per-segment dir was captured: a nested interpreter/eval or a
+#     live substitution is present ($NESTED_INTERP) yet the git-mutate text sits
+#     in a different place than any attributed segment. With no per-segment dir to
+#     honor, fall back to the launch cwd (the documented accident-gate posture;
+#     team-lead-confirmed to stay $PWD). The HANDLED guard keeps an exempted
+#     `pull --ff-only` from re-entering here.
+if { [ "$NESTED_MUTATE" -eq 1 ] || [ "$UNATTRIBUTED" -eq 1 ]; } \
+   || { [ -z "$COMMIT_TARGETS" ] && [ "$HANDLED" -eq 0 ] && [ "$NESTED_INTERP" -eq 1 ]; }; then
+  fb_subcmd=$(detect_subcmd "$COMMAND")
+  # Escaped-quote forms (`sh -c "\"git\" merge"`) hide the subcommand from a RAW
+  # detect_subcmd — GIT_CMD's whitespace-after-git never matches — so fall back
+  # to the normalized copy (Fix B) to NAME the real subcommand before the
+  # generic "commit" default (PF-995 round 7 Fix B).
+  [ -z "$fb_subcmd" ] && fb_subcmd=$(detect_subcmd "$COMMAND_NORM")
+  [ -z "$fb_subcmd" ] && fb_subcmd="commit"
+  if [ "$NESTED_MUTATE" -eq 1 ] || [ "$UNATTRIBUTED" -eq 1 ]; then
+    # Precise per-segment attribution (F1). capture_fallback_dirs always appends
+    # at least TRACKED_DIR when either flag is set, so the array is non-empty
+    # here; the guard is defensive (never emit zero records — fail closed).
+    [ "${#FALLBACK_DIRS[@]}" -eq 0 ] && FALLBACK_DIRS=("$PWD")
+    for fb_d in "${FALLBACK_DIRS[@]}"; do
+      COMMIT_TARGETS="${COMMIT_TARGETS}D${FS}${fb_subcmd}${FS}${fb_d}${NL}"
+    done
+  else
+    COMMIT_TARGETS="${COMMIT_TARGETS}D${FS}${fb_subcmd}${FS}${PWD}${NL}"
+  fi
+fi
+
+while IFS="$FS" read -r kind subcmd val; do
+  [ -z "$kind" ] && continue
+  case "$kind" in
+    B) CURRENT_BRANCH="$val"; CONTEXT="pending branch '${val}'" ;;
+    G) CURRENT_BRANCH=$(git --git-dir="$val" branch --show-current 2>/dev/null); CONTEXT="git-dir '${val}'" ;;
+    D) CURRENT_BRANCH=$(git -C "$val" branch --show-current 2>/dev/null); CONTEXT="directory '${val}'" ;;
+    *) CURRENT_BRANCH=""; CONTEXT="" ;;
+  esac
+  if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
+    # Feedback must go to STDERR — the harness surfaces stderr on exit 2;
+    # stdout is dropped ("No stderr output"). Name the resolving context so
+    # multi-segment chains are debuggable, and name the specific subcommand
+    # that triggered the block (PF-995 / #8988 round 2 fix 4).
+    {
+      echo "BLOCKED: 'git ${subcmd}' on '$CURRENT_BRANCH' is not allowed."
+      echo "Resolved from ${CONTEXT}."
+      echo "Create a feature branch first: git checkout -b feat/your-feature"
+      echo "To sync main from origin, use: git pull --ff-only"
+      echo "Direct commits to main bypass CI/CD, Sentry review, and code review."
+    } >&2
+    exit 2
+  fi
+done <<EOF_DIRS
+$COMMIT_TARGETS
+EOF_DIRS
 
 exit 0

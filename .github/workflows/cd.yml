@@ -746,6 +746,30 @@ jobs:
       - name: Install dependencies for migrations
         run: npm ci
 
+      - name: Enable pgvector extension
+        # MUST run BEFORE `drizzle-kit push`. drizzle-kit's schema-diff engine
+        # emits `graph_nodes.embedding vector(1536)` + an HNSW index but does NOT
+        # emit `CREATE EXTENSION` for the built-in `vector` type (see the comment
+        # in drizzle/0010_graph_retrieval_nodes_edges.sql). On a production DB that
+        # has never enabled pgvector, push would fail with `type "vector" does not
+        # exist` before the "Apply custom SQL migrations" step below (which also
+        # carries this statement) ever gets a chance to run — that step is ordered
+        # AFTER push, so it cannot self-heal the failure. Enabling the extension in
+        # its own step here guarantees the vector type exists first.
+        # CREATE EXTENSION IF NOT EXISTS is idempotent and Neon-supported.
+        # Gated identically to the push step: only needed when schema files change.
+        if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema')
+        working-directory: web
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          node --input-type=module -e "
+            import { neon } from '@neondatabase/serverless';
+            const sql = neon(process.env.DATABASE_URL);
+            await sql('CREATE EXTENSION IF NOT EXISTS vector');
+            console.log('pgvector extension ensured');
+          "
+
       - name: Run database migrations
         # db:push diffs schema.ts against the live DB and applies only what's
         # needed. This is idempotent — safe to run even if schema was already
@@ -761,9 +785,30 @@ jobs:
         run: npx drizzle-kit push
 
       - name: Apply custom SQL migrations
-        # Drizzle can't model partial unique indexes (WHERE predicates).
-        # These migrations are idempotent (CREATE ... IF NOT EXISTS or
-        # CONCURRENTLY which skips if the index already exists).
+        # Drizzle can't model partial unique indexes (WHERE predicates) or
+        # CONCURRENTLY, so these SQL files are applied directly here. They are
+        # idempotent (CREATE ... IF NOT EXISTS / CONCURRENTLY skips an existing
+        # index), and any residual "already exists" is caught below.
+        #
+        # Neon's HTTP driver (`neon()`) sends each call as ONE query over the
+        # extended (prepared-statement) protocol, which permits only a SINGLE
+        # statement — passing a whole multi-statement file throws "cannot insert
+        # multiple commands into a prepared statement". Drizzle SQL files ARE
+        # multi-statement, delimited by the canonical `--> statement-breakpoint`
+        # marker, so split on it and apply each statement on its own. INVARIANT:
+        # every multi-statement migration file MUST delimit each statement with
+        # `--> statement-breakpoint` (drizzle-kit emits this automatically; a
+        # hand-authored migration must add it too). A file whose statements are
+        # NOT so delimited yields a single multi-command segment that neon()
+        # rejects with "cannot insert multiple commands into a prepared
+        # statement", failing this step (0009 regressed exactly this way until a
+        # marker was added between its two ALTER TABLEs). A single-statement file
+        # legitimately splits to a one-element array. We deliberately do NOT
+        # split on `;` instead — dollar-quoted bodies (e.g. 0006's `DO $$ ... $$;`
+        # blocks) contain semicolons that are not statement terminators, so only
+        # the `--> statement-breakpoint` marker is a safe boundary. We can't use
+        # sql.transaction([...]) here because CREATE INDEX CONCURRENTLY may not
+        # run inside a transaction, and we need per-statement idempotency.
         if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema') || contains(needs.check-changes.outputs.web-changed-files, 'drizzle/')
         working-directory: web
         env:
@@ -777,13 +822,19 @@ jobs:
             for (const f of files) {
               console.log('Applying drizzle/' + f);
               const content = readFileSync('drizzle/' + f, 'utf8');
-              try { await sql(content); console.log('  OK'); }
-              catch(e) {
-                const msg = e.message || '';
-                const isIdempotent = msg.includes('already exists') || msg.includes('duplicate key') || msg.includes('relation') && msg.includes('already');
-                if (isIdempotent) { console.log('  Skipped (idempotent):', msg); }
-                else { console.error('  FAILED:', msg); process.exitCode = 1; }
+              const statements = content.split('--> statement-breakpoint').map(s => s.trim()).filter(Boolean);
+              let failed = 0;
+              for (const stmt of statements) {
+                try { await sql(stmt); }
+                catch(e) {
+                  const msg = e.message || '';
+                  const isIdempotent = msg.includes('already exists') || msg.includes('duplicate key') || msg.includes('relation') && msg.includes('already');
+                  if (isIdempotent) { console.log('  Skipped (idempotent):', msg); }
+                  else { console.error('  FAILED:', msg); failed++; process.exitCode = 1; }
+                }
               }
+              if (failed) { console.error('  FAILED (' + failed + ' of ' + statements.length + ' statement(s) failed)'); }
+              else { console.log('  OK (' + statements.length + ' statement(s))'); }
             }
           "
 
