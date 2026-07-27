@@ -2,27 +2,20 @@
 # npm-audit gate with a documented, per-advisory allowlist.
 #
 # Replaces a raw `npm audit --audit-level=high` in the Quality Gates `security`
-# job. DO NOT revert to the raw command — it cannot pass on this tree, and the
-# reason is not fixable by relocking:
+# job. DO NOT revert to the raw command — this tree recurrently carries a
+# transitive, dev-only advisory whose only patched release is a major the pinning
+# toolchain cannot take (npm `overrides` provably do not cascade into such nested
+# copies, and `--omit=dev` does not prune them). Such an advisory cannot be
+# relocked away and must be explicitly WAIVED by id — while the gate stays HARD
+# for every other advisory at or above the fail threshold.
 #
-#   drizzle-kit (a dev-only DB migration tool; 0.31.x is already the LATEST
-#   published version) transitively pulls an OLD esbuild via two paths — a direct
-#   `esbuild ^0.25` range AND the DEPRECATED @esbuild-kit/* loaders
-#   (@esbuild-kit/esm-loader → @esbuild-kit/core-utils → esbuild ~0.18). npm 11.x
-#   `overrides` provably DO NOT cascade into those nested esbuild copies (verified
-#   across global-range, global-exact and deeply-nested-scoped override forms), and
-#   `--omit=dev` does not prune them either (tsx/vite hoist esbuild to the root).
-#   There is no version of drizzle-kit to upgrade to that drops the old esbuild.
+# History: the original occupants were two esbuild advisories under drizzle-kit's
+# deprecated @esbuild-kit/* chain (GHSA-gv7w-rqvm-qjhr, GHSA-g7r4-m6w7-qqqr),
+# pruned once the gate's anti-rot note reported them gone from every workspace.
+# The current occupant is brace-expansion (see ALLOWED_ADVISORIES below).
 #
-# Both esbuild advisories are dev/build-time only and non-exploitable in this repo
-# (we never use esbuild's Deno install path, and never run esbuild's dev server —
-# least of all on Windows; CI is Linux). They therefore cannot be relocked away and
-# must be explicitly WAIVED by id — while the gate stays HARD for every other
-# advisory at or above the fail threshold.
-#
-# Tracking issue: re-evaluate the allowlist when drizzle-kit drops @esbuild-kit/*
-# (folded into tsx upstream) or ships an esbuild >= 0.28.1 floor. See the
-# ESBUILD advisory issue linked from the gate's PR.
+# Tracking issue: #8617 (F25) — re-evaluate every entry when its removal path
+# (documented alongside the id) becomes available.
 #
 # CONTRACT
 #   check-npm-audit.sh <workspace-dir>
@@ -49,14 +42,14 @@ set -uo pipefail
 # path to removal. Add an id here ONLY for a transitive, dev-only, un-relockable
 # advisory that is non-exploitable in this repo's usage.
 ALLOWED_ADVISORIES=(
-  # esbuild: missing binary integrity verification in the Deno module enables RCE
-  # via NPM_CONFIG_REGISTRY. Dev/install-time only; we never use esbuild's Deno
-  # install path. Reaches us only through dev-only drizzle-kit (see header).
-  "GHSA-gv7w-rqvm-qjhr"
-  # esbuild: arbitrary file read when running esbuild's development server on
-  # Windows. We never run esbuild's dev server, and CI is Linux. Same dev-only,
-  # un-relockable drizzle-kit chain.
-  "GHSA-g7r4-m6w7-qqqr"
+  # brace-expansion: unbounded expansion -> OOM DoS. Patched ONLY in 5.0.8 (no
+  # 1.x/2.x backport exists). The 5.0.x copies relock to 5.0.8, but the root
+  # brace-expansion@1.1.x (lockfile dev:true) sits under the minimatch@3 /
+  # eslint-9 lint toolchain, which pins "^1.1.7" — un-relockable without an
+  # eslint-major migration. Non-exploitable here: input is our own lint globs,
+  # never attacker-controlled. Remove when the eslint/minimatch@3 cohort exits
+  # the tree (eslint 10) or a 1.x backport ships.
+  "GHSA-mh99-v99m-4gvg"
 )
 
 # Severities that BLOCK when not allowlisted — mirrors the prior gate's
