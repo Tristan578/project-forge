@@ -15,7 +15,10 @@ set -uo pipefail
 command -v jq >/dev/null 2>&1 || { echo "jq is required to run these tests"; exit 1; }
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SETTINGS="$HERE/../../settings.json"
+# Test-only seam: point the suite at a fixture copy to verify the negative
+# cases. NEVER set in CI — hook-tests must always validate the real file.
+# The seam-guard assertion below enforces this.
+SETTINGS="${SETTINGS_PERMISSIONS_FILE:-$HERE/../../settings.json}"
 
 pass=0
 fail=0
@@ -130,6 +133,35 @@ assert_jq "auto-approve hook wired under PreToolUse with a Bash matcher" '
     | .matcher // "" ]
   | any(test("Bash"))
 '
+
+# --- Permission-mode guards: the pinned allow-list is meaningless if the
+#     mode bypasses prompting entirely. defaultMode may be absent (the
+#     default) or an interactive mode; "bypassPermissions" and "acceptEdits"
+#     are committed-posture weakenings and fail here (unknown/new modes also
+#     fail — fail closed). ---
+# shellcheck disable=SC2016
+assert_jq "defaultMode absent or interactive (never bypassPermissions/acceptEdits)" '
+  (.permissions.defaultMode // "default") as $m
+  | ($m == "default" or $m == "plan")
+'
+# shellcheck disable=SC2016
+assert_jq "additionalDirectories absent or empty (no widened write surface)" '
+  (.permissions.additionalDirectories // []) | length == 0
+'
+# shellcheck disable=SC2016
+assert_jq "disableBypassPermissionsMode absent or the hardening value \"disable\"" '
+  (.permissions.disableBypassPermissionsMode // "disable") == "disable"
+'
+
+# --- Seam self-defense: SETTINGS_PERMISSIONS_FILE must never be wired in a
+#     workflow — that would validate a fixture instead of the real file.
+#     Fail closed if the workflows dir is missing (mis-rooted checkout). ---
+WORKFLOWS_DIR="$HERE/../../../.github/workflows"
+if [ -d "$WORKFLOWS_DIR" ] && ! grep -rq "SETTINGS_PERMISSIONS_FILE" "$WORKFLOWS_DIR"; then
+  pass=$((pass + 1)); printf '  ok   %s\n' "seam SETTINGS_PERMISSIONS_FILE not wired in any workflow"
+else
+  fail=$((fail + 1)); printf '  FAIL %s\n' "seam SETTINGS_PERMISSIONS_FILE wired in a workflow (or workflows dir missing)"
+fi
 
 echo ""
 echo "passed: $pass  failed: $fail"
