@@ -424,14 +424,16 @@ detect_subcmd() {
 # line PREFIXED with a single link-code char and $FS: `A` = this segment is
 # linked to its predecessor by a guaranteed-success `&&` chain (so a recorded
 # branch switch/rename earlier in the chain is TRUSTED to have taken effect
-# before this segment runs); `O` = linked by any OTHER separator (`;`, `||`,
-# `|`, `&`, a literal newline) — or it is the first segment. Only `&&`
-# short-circuits on the predecessor's success, so only `A` may carry pending
-# switch/rename trust forward; every `O` link RESETS that trust in the loop
-# below, so a following commit falls through to the live $PWD lookup (PF-995 /
-# #8988 round 4 finding 1 — the round-3 splitter collapsed EVERY separator to a
-# bare newline, erasing this distinction and letting `git checkout feat/x ;
-# git commit` launder a commit onto main).
+# before this segment runs); `R` = linked by `||`, which runs this segment ONLY
+# when the predecessor FAILED (a conditional link — its `cd` is tracked as a
+# candidate, not a definite move; see the F2 handling below); `O` = linked by any
+# OTHER separator (`;`, `|`, `&`, a literal newline) — or it is the first segment.
+# Only `&&` short-circuits on the predecessor's success, so only `A` may carry
+# pending switch/rename trust forward; both `R` and `O` links RESET that trust in
+# the loop below, so a following commit falls through to the live $PWD lookup
+# (PF-995 / #8988 round 4 finding 1 — the round-3 splitter collapsed EVERY
+# separator to a bare newline, erasing this distinction and letting
+# `git checkout feat/x ; git commit` launder a commit onto main).
 #
 # Separators recognized OUTSIDE single/double quotes: `&&`, `||`, `;`, a
 # single `&` (background), a single `|` (pipe), and a literal newline. A
@@ -476,7 +478,7 @@ split_segments() {
       out="$out${NL}A$FS"; i=$((i + 2)); continue    # `&&` — trusted link
     fi
     if [ "$c" = "|" ] && [ "$nc" = "|" ]; then
-      out="$out${NL}O$FS"; i=$((i + 2)); continue    # `||` — untrusted link
+      out="$out${NL}R$FS"; i=$((i + 2)); continue    # `||` — conditional link (F2)
     fi
     case "$c" in
       "&"|"|"|";"|"$NL") out="$out${NL}O$FS"; i=$((i + 1)); continue ;;   # single &, |, ;, newline
@@ -512,6 +514,21 @@ UNATTRIBUTED=0
 # benign EARLIER target (COMMIT_TARGETS non-empty, HANDLED=1) cannot suppress the
 # fail-closed check for a later hidden commit (PF-995 / #8989 finding F1).
 NESTED_MUTATE=0
+# Candidate directories the effective cwd COULD be because a `cd` was reached via
+# a `||` conditional (the predecessor may have succeeded, so the cd may never
+# run). A deterministic (`&&`/`;`/first-segment) cd RESETS this list and moves
+# TRACKED_DIR; a `||` cd instead APPENDS here and leaves TRACKED_DIR intact, so a
+# following commit is checked against BOTH the tracked cwd and every candidate,
+# blocking if ANY resolves to main — fail-closed on the ambiguous control flow
+# that the old "last cd wins" tracker silently mis-resolved (PF-995 / #8989 F2).
+CD_OR_DIRS=()
+# Directories captured AT THE MOMENT a hidden/unattributed git-mutate is seen (the
+# tracked cwd plus any ||-candidate then in effect). The precise fallback below
+# emits one target per entry, so an earlier `cd` is honored instead of the hook's
+# launch cwd ($PWD) — fixing both the false-ALLOW (`cd <main> && bash -c "git
+# commit"` from a feature cwd) and the false-BLOCK (the symmetric case) of the old
+# single-$PWD fallback (PF-995 / #8989 finding F1).
+FALLBACK_DIRS=()
 NL='
 '
 # Nested-interpreter / eval detectors, shared by the per-segment F1 check inside
@@ -521,18 +538,33 @@ NL='
 # intervening options (`bash -euo pipefail -c …`) between interpreter and `-c`.
 INTERP_RE='(^|[[:space:]]|[;&|()])(bash|sh|zsh|ksh|dash)[[:space:]]+([^[:space:]]+[[:space:]]+)*-[[:alnum:]]*c([[:space:]]|$)'
 EVAL_RE='(^|[[:space:]]|[;&|()])eval([[:space:]]|$)'
+
+# Snapshot the dir(s) the CURRENT segment's hidden/unattributed git-mutate could
+# run in — the tracked cwd plus any ||-conditional cd candidate then in effect —
+# AT THE MOMENT it is seen, so a later `cd` cannot retroactively change the
+# resolved target (PF-995 / #8989 F1 + F2).
+capture_fallback_dirs() {
+  local d
+  FALLBACK_DIRS+=("$TRACKED_DIR")
+  for d in "${CD_OR_DIRS[@]}"; do
+    FALLBACK_DIRS+=("$d")
+  done
+}
+
 SEGMENTS=$(split_segments "$COMMAND")
 
 # Each SEGMENTS line is `<sepcode>$FS<segment text>` (see split_segments):
-# `A` = linked to its predecessor by a guaranteed-success `&&` chain, `O` = any
-# other link (`;`, `||`, `|`, `&`, newline) or the first segment. On every `O`
-# link we DROP the pending branch-switch/rename trust recorded by earlier
-# segments, because only `&&` guarantees the switch actually succeeded before
-# this segment runs — so `git checkout feat/x ; git commit` (semicolon), `... ||
-# git commit`, `... | git commit`, `... & git commit` all fall through to the
-# live $PWD branch lookup (block on main) instead of trusting a switch that may
-# never have taken effect (PF-995 / #8988 round 4 finding 1). TRACKED_DIR (from
-# `cd`) is intentionally NOT reset — that is orthogonal to switch trust.
+# `A` = linked to its predecessor by a guaranteed-success `&&` chain, `R` = a
+# `||` conditional link (runs only if the predecessor failed), `O` = any other
+# link (`;`, `|`, `&`, newline) or the first segment. On every NON-`A` link we
+# DROP the pending branch-switch/rename trust recorded by earlier segments,
+# because only `&&` guarantees the switch actually succeeded before this segment
+# runs — so `git checkout feat/x ; git commit` (semicolon), `... || git commit`,
+# `... | git commit`, `... & git commit` all fall through to the live $PWD branch
+# lookup (block on main) instead of trusting a switch that may never have taken
+# effect (PF-995 / #8988 round 4 finding 1). TRACKED_DIR (from `cd`) is
+# intentionally NOT reset here — that is orthogonal to switch trust — but a `||`
+# (`R`) cd is recorded as a CANDIDATE rather than moving TRACKED_DIR (F2 below).
 while IFS="$FS" read -r sepcode seg; do
   if [ "$sepcode" != "A" ]; then pending_clear_all; fi
   case "$seg" in *[![:space:]]*) ;; *) continue ;; esac
@@ -563,11 +595,27 @@ while IFS="$FS" read -r sepcode seg; do
   if printf '%s' "$seg" | grep -qE '^[[:space:]]*cd[[:space:]]'; then
     dir=$(printf '%s' "$seg" | sed -E 's/^[[:space:]]*cd[[:space:]]+//; s/[[:space:]]+$//')
     dir=$(unquote "$dir")
+    # Resolve the cd target the same way TRACKED_DIR would be updated (absolute
+    # wins; relative is joined onto the tracked cwd; bare `cd` yields nothing).
     case "$dir" in
-      /*) TRACKED_DIR="$dir" ;;
-      "") : ;;
-      *) TRACKED_DIR="$TRACKED_DIR/$dir" ;;
+      /*) cd_new="$dir" ;;
+      "") cd_new="" ;;
+      *) cd_new="$TRACKED_DIR/$dir" ;;
     esac
+    if [ "$sepcode" = "R" ] && [ -n "$cd_new" ]; then
+      # `||`-conditional cd (F2): the predecessor may have SUCCEEDED, so this cd
+      # may never run. Do NOT move the tracked cwd to it — record it as an
+      # ADDITIONAL candidate the cwd COULD be, and fail closed at commit time if
+      # any candidate resolves to main. The old tracker moved TRACKED_DIR here
+      # unconditionally, so `cd <main> || cd <feature>` ended on <feature> while
+      # execution stayed on <main> — a wrongly-ALLOWED commit (PF-995 / #8989 F2).
+      CD_OR_DIRS+=("$cd_new")
+    else
+      # Deterministic cd (`&&` / `;` / first segment): the cwd definitely moves
+      # here, so any earlier ||-candidate no longer applies.
+      [ -n "$cd_new" ] && TRACKED_DIR="$cd_new"
+      CD_OR_DIRS=()
+    fi
     pending_clear_all
     continue
   fi
@@ -651,7 +699,7 @@ while IFS="$FS" read -r sepcode seg; do
     # (e.g. hidden in a `$(...)`/backtick the splitter can't see) is never
     # recorded as a target because of the `continue` below — flag it so the
     # $PWD fallback still checks it (PF-995 / #8988 round 3 fix 3).
-    if printf '%s' "$seg_class" | grep -qE "$GIT_MUTATE_RE"; then UNATTRIBUTED=1; fi
+    if printf '%s' "$seg_class" | grep -qE "$GIT_MUTATE_RE"; then UNATTRIBUTED=1; capture_fallback_dirs; fi
     continue
   elif printf '%s' "$seg_class" | grep -qE "${GIT_CMD}branch([[:space:]]|$)"; then
     # `git branch -M <new>` / `-m <new>` renames the CURRENT branch, and the
@@ -697,7 +745,7 @@ while IFS="$FS" read -r sepcode seg; do
     # Same guard as the switch branch: a commit hidden in this branch-rename
     # segment (via `$(...)`/backtick) is skipped by the `continue`, so flag it
     # for the $PWD fallback (PF-995 / #8988 round 3 fix 3).
-    if printf '%s' "$seg_class" | grep -qE "$GIT_MUTATE_RE"; then UNATTRIBUTED=1; fi
+    if printf '%s' "$seg_class" | grep -qE "$GIT_MUTATE_RE"; then UNATTRIBUTED=1; capture_fallback_dirs; fi
     continue
   fi
 
@@ -742,6 +790,7 @@ while IFS="$FS" read -r sepcode seg; do
       seg_norm=$(printf '%s' "$seg" | sed "s/\$'/'/g" | tr -d '\\"'\''`')
       if printf '%s' "$seg_norm" | grep -qE "$GIT_MUTATE_RE"; then
         NESTED_MUTATE=1
+        capture_fallback_dirs
       fi
     fi
     continue
@@ -815,6 +864,19 @@ while IFS="$FS" read -r sepcode seg; do
   else
     COMMIT_TARGETS="${COMMIT_TARGETS}D${FS}${subcmd}${FS}${effdir}${NL}"
   fi
+  # F2: when the commit lands in the tracked cwd (no explicit `git -C <dir>`), a
+  # `||`-conditional `cd` earlier in the chain could have been the ACTUAL cwd.
+  # Emit one extra candidate target per such dir so a commit that COULD land on
+  # main blocks — fail-closed on the ambiguous control flow (PF-995 / #8989 F2).
+  if [ -z "$c_dir" ]; then
+    for cd_cand in "${CD_OR_DIRS[@]}"; do
+      if pb=$(pending_lookup "$cd_cand"); then
+        COMMIT_TARGETS="${COMMIT_TARGETS}B${FS}${subcmd}${FS}${pb}${NL}"
+      else
+        COMMIT_TARGETS="${COMMIT_TARGETS}D${FS}${subcmd}${FS}${cd_cand}${NL}"
+      fi
+    done
+  fi
 done <<EOF_SEGMENTS
 $SEGMENTS
 EOF_SEGMENTS
@@ -858,22 +920,29 @@ if printf '%s' "$SUBST_SCAN" | grep -qE '\$\(' \
   NESTED_INTERP=1
 fi
 
-# Fall back to the hook cwd so a plain commit is still checked. Two triggers:
-#   1. The whole-command filter matched but NO segment resolved a target — a
-#      quoting edge case. This now fires ONLY when a nested interpreter is
-#      present (see above): a benign quoted "git commit" mention is allowed,
-#      but a quoted payload fed to `bash -c`/`eval` stays blocked (fail closed).
-#      The HANDLED guard keeps an exempted `pull --ff-only` from re-entering here.
-#   2. A commit rode inside a switch/branch segment and was never attributed
-#      ($UNATTRIBUTED). This fires even when an EARLIER benign target WAS
-#      recorded — a non-main target from one segment must not suppress the
-#      fallback for a later unattributed commit — so the record is APPENDED,
-#      not assigned (PF-995 / #8988 round 3 fix 3).
-#   3. A later segment carried a git-mutate inside a nested executor or a live
-#      command substitution ($NESTED_MUTATE). Like trigger 2, this must fire even
-#      when an earlier benign target was recorded, so the fallback is not
-#      suppressed by an unrelated non-main target (PF-995 / #8989 finding F1).
-if { [ -z "$COMMIT_TARGETS" ] && [ "$HANDLED" -eq 0 ] && [ "$NESTED_INTERP" -eq 1 ]; } || [ "$UNATTRIBUTED" -eq 1 ] || [ "$NESTED_MUTATE" -eq 1 ]; then
+# Fall back so a commit that no segment attributed a real target for is still
+# checked. Two mutually-exclusive branches, PRECISE first:
+#   PRECISE (F1) — a commit rode inside a switch/branch segment and was never
+#     attributed ($UNATTRIBUTED), or a segment carried a git-mutate inside a
+#     nested executor / live command substitution ($NESTED_MUTATE). Both capture
+#     $FALLBACK_DIRS at the moment the hidden commit is seen — the dir tracked
+#     THEN (honoring any earlier `cd`), plus any ||-candidate — so we emit one
+#     record per captured dir instead of the hook's launch cwd. Resolving from
+#     $PWD ignored the tracked `cd` and both mis-ALLOWED `cd <main> && bash -c
+#     "git commit"` (from a feature cwd) and mis-BLOCKED its symmetric case
+#     (PF-995 / #8989 finding F1). Fires even when an EARLIER benign (non-main)
+#     target was recorded, so a non-main target from one segment cannot suppress
+#     the fail-closed check for a later hidden commit (PF-995 / #8988 round 3 fix
+#     3 + #8989 F1). The records are APPENDED, never assigned.
+#   COARSE ($PWD) — the whole-command filter matched but NO segment resolved a
+#     target AND no per-segment dir was captured: a nested interpreter/eval or a
+#     live substitution is present ($NESTED_INTERP) yet the git-mutate text sits
+#     in a different place than any attributed segment. With no per-segment dir to
+#     honor, fall back to the launch cwd (the documented accident-gate posture;
+#     team-lead-confirmed to stay $PWD). The HANDLED guard keeps an exempted
+#     `pull --ff-only` from re-entering here.
+if { [ "$NESTED_MUTATE" -eq 1 ] || [ "$UNATTRIBUTED" -eq 1 ]; } \
+   || { [ -z "$COMMIT_TARGETS" ] && [ "$HANDLED" -eq 0 ] && [ "$NESTED_INTERP" -eq 1 ]; }; then
   fb_subcmd=$(detect_subcmd "$COMMAND")
   # Escaped-quote forms (`sh -c "\"git\" merge"`) hide the subcommand from a RAW
   # detect_subcmd — GIT_CMD's whitespace-after-git never matches — so fall back
@@ -881,7 +950,17 @@ if { [ -z "$COMMIT_TARGETS" ] && [ "$HANDLED" -eq 0 ] && [ "$NESTED_INTERP" -eq 
   # generic "commit" default (PF-995 round 7 Fix B).
   [ -z "$fb_subcmd" ] && fb_subcmd=$(detect_subcmd "$COMMAND_NORM")
   [ -z "$fb_subcmd" ] && fb_subcmd="commit"
-  COMMIT_TARGETS="${COMMIT_TARGETS}D${FS}${fb_subcmd}${FS}${PWD}${NL}"
+  if [ "$NESTED_MUTATE" -eq 1 ] || [ "$UNATTRIBUTED" -eq 1 ]; then
+    # Precise per-segment attribution (F1). capture_fallback_dirs always appends
+    # at least TRACKED_DIR when either flag is set, so the array is non-empty
+    # here; the guard is defensive (never emit zero records — fail closed).
+    [ "${#FALLBACK_DIRS[@]}" -eq 0 ] && FALLBACK_DIRS=("$PWD")
+    for fb_d in "${FALLBACK_DIRS[@]}"; do
+      COMMIT_TARGETS="${COMMIT_TARGETS}D${FS}${fb_subcmd}${FS}${fb_d}${NL}"
+    done
+  else
+    COMMIT_TARGETS="${COMMIT_TARGETS}D${FS}${fb_subcmd}${FS}${PWD}${NL}"
+  fi
 fi
 
 while IFS="$FS" read -r kind subcmd val; do

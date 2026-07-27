@@ -1266,6 +1266,80 @@ if [ "$((t1 - t0))" -lt 3 ]; then PASS=$((PASS + 1)); echo "ok: 60k-char git com
 run_hook "$FEAT_REPO" "$GC -m ok"
 check "short git commit on a feature branch still allowed (F4 cap is size-gated, not blanket)" 0
 
+# =====================================================================
+# ROUND 13 (PF-995 / #8989) — F1 directory attribution + F2 ||-guarded cd.
+# =====================================================================
+
+# --- F1 (HIGH): the NESTED_MUTATE / UNATTRIBUTED fail-closed fallback resolved the
+# --- hidden commit's directory from the hook's LAUNCH cwd ($PWD), ignoring an earlier
+# --- tracked `cd`. So `cd <main> && bash -c "git commit"` from a FEATURE cwd resolved
+# --- against the feature dir and was wrongly ALLOWED, while the symmetric
+# --- `cd <feature> && bash -c "git commit"` from a MAIN cwd was wrongly BLOCKED. The
+# --- fix records the tracked dir AT THE MOMENT each nested/unattributed git-mutate is
+# --- seen and emits one target per captured dir.
+
+# F1 direction (a) — THE BYPASS: cd into a MAIN checkout, THEN a nested-executor
+# commit, while the hook's own cwd is a FEATURE repo. The commit runs on main → BLOCK.
+run_hook "$FEAT_REPO" "cd $MAIN_REPO && bash -c \"$GC -m x\""
+check "cd <main> && bash -c \"git commit\" from a feature cwd resolves to main; blocked (F1 dir-a)" 2
+
+run_hook "$FEAT_REPO" "cd $MAIN_REPO && eval \"$GC\""
+check "cd <main> && eval \"git commit\" from a feature cwd resolves to main; blocked (F1 dir-a eval)" 2
+
+# F1 direction (b) — THE SYMMETRIC FALSE-BLOCK: cd into a FEATURE worktree, THEN a
+# nested-executor commit, while the hook's own cwd is MAIN. Runs on the feature → ALLOW.
+run_hook "$MAIN_REPO" "cd $FEAT_REPO && bash -c \"$GC -m x\""
+check "cd <feature> && bash -c \"git commit\" from a main cwd resolves to feature; allowed (F1 dir-b)" 0
+
+run_hook "$MAIN_REPO" "cd \"$SPACE_REPO\" && bash -c \"$GC\""
+check "cd '<feature with space>' && bash -c \"git commit\" from a main cwd allowed (F1 dir-b spaced)" 0
+
+# F1 TRAP: a nested-executor commit FOLLOWED BY a `cd` must resolve against the
+# PRE-cd dir (the commit already ran there), NOT the final tracked dir. Resolving
+# against the final dir (the naive one-word fix) would let
+# `bash -c "git commit" && cd <feature>` launder a main commit — assert it still
+# BLOCKS on a main cwd.
+run_hook "$MAIN_REPO" "bash -c \"$GC -m x\" && cd $FEAT_REPO"
+check "bash -c \"git commit\" && cd <feature> resolves against the pre-cd (main) cwd; blocked (F1 trap)" 2
+
+# F1 TRAP mirror: the same shape from a feature cwd stays ALLOWED — the commit ran on
+# the feature branch; the trailing cd to main is irrelevant.
+run_hook "$FEAT_REPO" "bash -c \"$GC -m x\" && cd $MAIN_REPO"
+check "bash -c \"git commit\" && cd <main> from a feature cwd resolves against the pre-cd (feature) cwd; allowed (F1 trap mirror)" 0
+
+# F1 multiple nested executors in DIFFERENT cd'd dirs: each is checked against the
+# dir tracked when IT runs; any that lands on main blocks.
+run_hook "$FEAT_REPO" "cd $FEAT_REPO && bash -c \"$GC\" && cd $MAIN_REPO && bash -c \"$GC\""
+check "two nested-executor commits, second after cd <main>; blocked (F1 multi-exec)" 2
+
+run_hook "$MAIN_REPO" "cd $FEAT_REPO && bash -c \"$GC\" && cd \"$SPACE_REPO\" && bash -c \"$GC\""
+check "two nested-executor commits, both in feature dirs from a main cwd; allowed (F1 multi-exec mirror)" 0
+
+# --- F2 (MEDIUM): a `cd` reached via `||` (conditional) updated the tracked dir
+# --- UNCONDITIONALLY, so `cd <main> || cd <feature>` left the tracker on <feature>
+# --- while real execution stayed on <main> — a following commit was wrongly ALLOWED.
+# --- The fix treats a ||-guarded cd as a CANDIDATE dir (leaving the deterministic
+# --- tracked dir intact) and blocks if ANY candidate resolves to main.
+
+# F2 THE BYPASS: cd <main> || cd <feature>, then commit, from a feature cwd. The
+# first cd succeeds so real cwd is main → BLOCK. The buggy tracker ended on <feature>
+# (last cd wins) and allowed.
+run_hook "$FEAT_REPO" "cd $MAIN_REPO || cd $FEAT_REPO && $GC -m x"
+check "cd <main> || cd <feature> && commit: main is a live candidate; blocked (F2)" 2
+
+# F2 fail-closed: `true || cd <main>`, then commit, from a feature cwd. Real execution
+# never runs the cd (true short-circuits), so the commit lands on the feature branch —
+# but the hook does NOT prove the cd unreachable; it treats <main> as a candidate and
+# FAILS CLOSED (blocks). Documents the chosen conservative behavior.
+run_hook "$FEAT_REPO" "true || cd $MAIN_REPO && $GC -m x"
+check "true || cd <main> && commit fails closed on the unprovable candidate; blocked (F2 fail-closed)" 2
+
+# F2 must NOT blanket-block: a ||-guarded cd to a FEATURE dir (no main candidate
+# anywhere) stays allowed — the candidate machinery only ADDS candidates to check,
+# it does not block on their mere presence.
+run_hook "$FEAT_REPO" "cd $FEAT_REPO || cd \"$SPACE_REPO\" && $GC -m x"
+check "cd <feature> || cd <feature-spaced> && commit: no main candidate; allowed (F2 no over-block)" 0
+
 echo ""
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
