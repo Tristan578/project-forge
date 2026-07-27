@@ -750,7 +750,7 @@ jobs:
         # MUST run BEFORE `drizzle-kit push`. drizzle-kit's schema-diff engine
         # emits `graph_nodes.embedding vector(1536)` + an HNSW index but does NOT
         # emit `CREATE EXTENSION` for the built-in `vector` type (see the comment
-        # in drizzle/0009_graph_retrieval_nodes_edges.sql). On a production DB that
+        # in drizzle/0010_graph_retrieval_nodes_edges.sql). On a production DB that
         # has never enabled pgvector, push would fail with `type "vector" does not
         # exist` before the "Apply custom SQL migrations" step below (which also
         # carries this statement) ever gets a chance to run — that step is ordered
