@@ -12,5 +12,5 @@
 -- section 4 for the full claim/repair-state rules.
 --
 -- Idempotent (IF NOT EXISTS) per the 0006/0008 convention.
-ALTER TABLE "token_usage" ADD COLUMN IF NOT EXISTS "meter_attempted_at" timestamp with time zone;
+ALTER TABLE "token_usage" ADD COLUMN IF NOT EXISTS "meter_attempted_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "token_usage" ADD COLUMN IF NOT EXISTS "metered_at" timestamp with time zone;

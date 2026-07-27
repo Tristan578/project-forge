@@ -215,6 +215,24 @@ async function buildSchema(pglite: PGlite): Promise<void> {
       // file in one. The index is otherwise identical (same columns/predicate).
       .replace(/\bCREATE\s+(UNIQUE\s+)?INDEX\s+CONCURRENTLY\b/gi, (m) =>
         m.replace(/\s+CONCURRENTLY/i, ''),
+      )
+      // pgvector compat shim (PF-985 #8977): the graph migration
+      // (0010_graph_retrieval_nodes_edges.sql) is the only place we depend on
+      // the `vector` extension, and @electric-sql/pglite 0.5.x does not bundle
+      // pgvector — `CREATE EXTENSION vector` throws "extension not available"
+      // and the whole harness build fails, breaking EVERY *.db.test.ts, not
+      // just the graph tests. Parity's scope is explicitly name-existence only
+      // ("does NOT diff column types … or index column lists/predicates" — see
+      // schemaMigrationParity.db.test.ts SCOPE docblock), so degrading the
+      // vector column to `text` and the HNSW index to a plain btree under the
+      // SAME index name keeps every parity assertion honest (table/column/index
+      // NAME all still created) without needing the real extension. Production
+      // keeps the real `vector(1536)` + hnsw — this rewrite is test-harness-only.
+      .replace(/\bCREATE\s+EXTENSION\s+(IF\s+NOT\s+EXISTS\s+)?vector\s*;/gi, '')
+      .replace(/\bvector\(\s*\d+\s*\)/gi, 'text')
+      .replace(
+        /\bUSING\s+hnsw\s*\(\s*("?[\w]+"?)\s+vector_cosine_ops\s*\)/gi,
+        'USING btree ($1)',
       );
     await pglite.exec(ddl);
   }
