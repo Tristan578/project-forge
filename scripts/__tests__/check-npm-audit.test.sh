@@ -23,13 +23,26 @@
 # `npm audit --json`). These tests inject `cat <fixture>` / `printf …` stubs in a
 # throwaway git repo so the branching/exit-code contract is pinned without npm or
 # the network. CI never sets the seam; the real npm invocation is exercised there.
+# Two additional harness pieces: make_gate_variant (sed-swaps ONLY the
+# ALLOWED_ADVISORIES entry literal, so allowlist-format validation and
+# multi-path pins are exercised without another seam in the shipped gate) and an
+# automatic bash-runtime-error sweep (run_gate_script logs any unbound-variable /
+# bad-substitution / syntax-error text a gate invocation leaks; the suite fails
+# at the end if any accumulated — catching the macOS bash-3.2 empty-array crash
+# class even when the exit code coincides with the expected verdict).
 set -uo pipefail
 
 # SIGPIPE-safe matching: feed grep/awk from a here-string (`grep PAT <<<"$var"`),
 # never pipe a large variable's `echo` into grep/awk — under pipefail the reader
 # closing the pipe on first match SIGPIPEs the writer and misreports a real match
-# as a miss (this bit CI on the ~31 KB ci.yml read). The suite-hygiene guard at the
-# end fails if the antipattern is reintroduced.
+# as a miss (this bit CI on the ~31 KB ci.yml read). The same mechanism inverts a
+# NEGATIVE assertion into a false PASS: a here-string-fed stage chained into a
+# further `grep -q` gets SIGPIPE'd when the reader exits on an EARLY match, the
+# pipeline goes non-zero, and the `if` falls through to the pass branch — so a
+# wired bypass near the top of a workflow file would be reported as absent.
+# Discipline: materialize every intermediate (comment-strip, context window) into
+# a variable first, then match with a SINGLE grep against a here-string. The
+# suite-hygiene guards at the end fail if either antipattern is reintroduced.
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/../check-npm-audit.sh"
@@ -62,17 +75,53 @@ REPO="$(mktemp -d)"
 )
 trap 'rm -rf "$FIX" "$REPO"' EXIT
 
-# Run the gate inside $REPO against workspace `ws` with a given audit stub command.
-# Echoes "<exit>|<output>".
-run_gate() {
-  local auditcmd="$1" out rc
-  out="$(cd "$REPO" && NPM_AUDIT_CMD="$auditcmd" bash "$SCRIPT" ws 2>&1)"
+# Run a gate script inside $REPO against workspace `ws` with a given audit stub
+# command. Echoes "<exit>|<output>".
+#
+# AUTOMATIC bash-runtime-error detection: any `unbound variable` / `bad
+# substitution` / `syntax error` leaking from the gate is appended to
+# $FIX/bash-errors.log and failed at the END of the suite — even when the exit
+# code coincides with the expected verdict. This is the macOS bash-3.2 trap: an
+# empty-array "${arr[@]}" expansion under set -u aborts the subshell INSIDE a
+# command substitution, and the crashed substitution's empty capture used to
+# read as a WAIVED verdict for the wrong reason, invisibly.
+run_gate_script() {
+  local script="$1" auditcmd="$2" out rc
+  out="$(cd "$REPO" && NPM_AUDIT_CMD="$auditcmd" bash "$script" ws 2>&1)"
   rc=$?
+  grep -E 'unbound variable|bad substitution|syntax error' <<<"$out" >> "$FIX/bash-errors.log" || true
   printf '%s|%s' "$rc" "$out"
+}
+
+# Same, against the real gate under test.
+run_gate() {
+  run_gate_script "$SCRIPT" "$1"
 }
 
 # Helper: write a fixture file, echo its absolute path.
 fixture() { local name="$1"; cat > "$FIX/$name"; echo "$FIX/$name"; }
+
+# Build a gate-script VARIANT whose only byte difference from the real gate is
+# the ALLOWED_ADVISORIES entry ($2 must include its surrounding double quotes).
+# This exercises allowlist-format validation and the comma-separated multi-path
+# pin machinery against otherwise-identical gate code, without adding another
+# test seam to the shipped script. Both sanity greps fail the whole suite
+# loudly if the real entry literal ever drifts — otherwise a variant would
+# silently test the unmodified gate.
+REAL_ENTRY='"GHSA-mh99-v99m-4gvg:node_modules/brace-expansion"'
+make_gate_variant() {
+  local name="$1" entry="$2"
+  sed "s|$REAL_ENTRY|$entry|" "$SCRIPT" > "$FIX/$name"
+  grep -qF "$entry" "$FIX/$name" \
+    || { echo "make_gate_variant: sed anchor missed for $name — did the real ALLOWED_ADVISORIES entry change?"; exit 1; }
+  if [ "$entry" != "$REAL_ENTRY" ] && grep -qF "$REAL_ENTRY" "$FIX/$name"; then
+    echo "make_gate_variant: real entry still present in $name — substitution did not take"; exit 1
+  fi
+  echo "$FIX/$name"
+}
+
+# The bash-runtime-error log run_gate_script appends to; swept at suite end.
+: > "$FIX/bash-errors.log"
 
 echo "=== check-npm-audit.sh contract ==="
 
@@ -83,12 +132,16 @@ JSON
 )"
 res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "0" ]; then pass "clean report passes (exit 0)"; else fail "clean should exit 0, got $rc"; fi
+if grep -qF "✓ no blocking advisory" <<<"$out"; then pass "success line reflects the location-verified contract"; else fail "success line missing/stale — expected '✓ no blocking advisory …'"; fi
 
 # --- 2. Only allowlisted high advisory → exit 0 -------------------------------
+# Post-PF-1009 the gate verifies WHERE a waived id sits, so fixtures carry
+# `nodes` at the pinned path (absent/empty nodes is its own BLOCK case — 6g/6h).
 f="$(fixture waived.json <<'JSON'
 {"auditReportVersion":2,"vulnerabilities":{
   "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
-    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}]},
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion"]},
   "minimatch":{"name":"minimatch","severity":"high","via":["brace-expansion"]}}}
 JSON
 )"
@@ -107,6 +160,7 @@ JSON
 res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "non-allowlisted high advisory blocks (exit 1)"; else fail "non-allowlisted high should exit 1, got $rc"; fi
 if grep -qF "BLOCK" <<<"$out"; then pass "non-allowlisted advisory is reported as BLOCK"; else fail "BLOCK marker missing"; fi
+if grep -qF "::error::non-allowlisted advisory GHSA-aaaa-bbbb-cccc" <<<"$out"; then pass "per-advisory ::error:: names the blocking id"; else fail "per-advisory ::error:: annotation missing for GHSA-aaaa-bbbb-cccc"; fi
 
 # --- 4. Non-allowlisted CRITICAL advisory → exit 1 ---------------------------
 f="$(fixture block-crit.json <<'JSON'
@@ -122,9 +176,11 @@ if [ "$rc" = "1" ]; then pass "non-allowlisted critical advisory blocks (exit 1)
 f="$(fixture mixed.json <<'JSON'
 {"auditReportVersion":2,"vulnerabilities":{
   "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
-    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"*"}]},
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"*"}],
+    "nodes":["node_modules/brace-expansion"]},
   "evil":{"name":"evil","severity":"high","via":[
-    {"source":9,"name":"evil","title":"evil RCE","url":"https://github.com/advisories/GHSA-aaaa-bbbb-cccc","severity":"high","range":"*"}]}}}
+    {"source":9,"name":"evil","title":"evil RCE","url":"https://github.com/advisories/GHSA-aaaa-bbbb-cccc","severity":"high","range":"*"}],
+    "nodes":["node_modules/evil"]}}}
 JSON
 )"
 res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
@@ -177,6 +233,229 @@ if grep -qF "GHSA-7777-8888-9999" <<<"$out"; then pass "the object advisory afte
 block_count="$(grep -cF "BLOCK" <<<"$out")"
 if [ "$block_count" = "1" ]; then pass "string-via produces no spurious finding (exactly one BLOCK)"; else fail "expected exactly one BLOCK, got $block_count (string-via mis-counted?)"; fi
 
+# --- 6d. Allowed advisory ONLY at its pinned node path → WAIVED, exit 0 ------
+# Location pinning (PF-1009/#9026): an id-only allowlist is a hole wider than it
+# looks. PF-1002/#9007 relocked the two NESTED brace-expansion copies (under
+# glob/ and @typescript-eslint/typescript-estree/) to the patched 5.0.8, leaving
+# only the un-relockable root copy waived; Dependabot PR #9016 then did a full
+# relock that silently reverted both nested copies back to 5.0.7 — a
+# production-reachable regression (the glob/ copy is prod-reachable) — and the
+# id-only gate stayed GREEN throughout because it never looked at WHERE the id
+# occurred. This fixture is the correct, un-regressed shape: the id present only
+# at its pinned root copy.
+f="$(fixture pinned-only.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "advisory confined to its pinned node path passes (exit 0)"; else fail "pinned-only location should exit 0, got $rc"; fi
+if grep -qF "WAIVED" <<<"$out"; then pass "pinned-only location is reported as WAIVED"; else fail "WAIVED marker missing for pinned-only location"; fi
+
+# --- 6e. Allowed advisory ALSO at an unpinned node path → BLOCK, exit 1 -------
+# Mirrors the real regression exactly: brace-expansion present at its pinned
+# root copy PLUS the two nested copies that should have stayed patched. This is
+# the case the id-only gate could never catch — it must now BLOCK and name the
+# unexpected locations.
+f="$(fixture unpinned-location.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion","node_modules/glob/node_modules/brace-expansion","node_modules/@typescript-eslint/typescript-estree/node_modules/brace-expansion"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "advisory at an unpinned node path blocks (exit 1)"; else fail "unpinned location should exit 1, got $rc"; fi
+if grep -qF "node_modules/glob/node_modules/brace-expansion" <<<"$out"; then pass "output names the unexpected glob/ location"; else fail "output does not name the unexpected glob/ location"; fi
+if grep -qF "node_modules/@typescript-eslint/typescript-estree/node_modules/brace-expansion" <<<"$out"; then pass "output names the unexpected typescript-estree/ location"; else fail "output does not name the unexpected typescript-estree/ location"; fi
+if grep -qF "GHSA-mh99-v99m-4gvg" <<<"$out"; then pass "output names the advisory id for the unpinned-location block"; else fail "output does not name the advisory id"; fi
+# The pinned root copy is NOT an unexpected location — it must never be listed
+# as one. Detail lines use the fixed "            - <path>" format (12 spaces,
+# hyphen, space), so an anchored whole-line match is exact.
+if ! grep -qxF '            - node_modules/brace-expansion' <<<"$out"; then pass "pinned root copy is not listed among the unexpected locations"; else fail "pinned root copy wrongly listed as an unexpected location"; fi
+block_count="$(grep -cF "BLOCK" <<<"$out")"
+if [ "$block_count" = "1" ]; then pass "unexpected locations grouped under exactly one BLOCK"; else fail "expected exactly one BLOCK for the unpinned-location case, got $block_count"; fi
+if grep -qF "pinned location(s) for GHSA-mh99-v99m-4gvg: node_modules/brace-expansion" <<<"$out"; then pass "output names the pinned location(s) alongside the unexpected ones"; else fail "pinned-location display line missing"; fi
+if grep -qF "::error::allowlisted advisory GHSA-mh99-v99m-4gvg found outside its pinned location(s)" <<<"$out"; then pass "::error:: annotation fires for the pin violation"; else fail "::error:: pin-violation annotation missing"; fi
+if grep -qF "outside their pinned location(s)" <<<"$out"; then pass "summary counts the failure in the pin-violation bucket"; else fail "pin-violation summary bucket missing"; fi
+if ! grep -qF "non-allowlisted advisory(ies) at or above" <<<"$out"; then pass "pin violation is not miscounted as a non-allowlisted advisory"; else fail "pin violation miscounted in the non-allowlisted summary bucket"; fi
+
+# --- 6f. Anti-rot note fires when a waived id is fully absent (exit 0) -------
+f="$(fixture clean-note.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "advisory fully absent still passes (exit 0)"; else fail "fully-absent advisory should exit 0, got $rc"; fi
+if grep -qiF "not present" <<<"$out"; then pass "anti-rot note fires when the waived advisory is absent"; else fail "anti-rot note missing for fully-absent advisory"; fi
+
+# --- 6g. Allowlisted id with NO nodes data → BLOCK, exit 1 -------------------
+# The silent-waive hole: pre-PF-1009 an allowlisted id whose vulnerability had
+# no `nodes` key produced an empty locations csv, which read as "nothing
+# unexpected" → WAIVED, exit 0. Absent location data cannot verify the pin, so
+# it must BLOCK with a distinct message, not waive.
+f="$(fixture no-nodes.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "allowlisted id with no nodes data blocks (exit 1)"; else fail "missing nodes should exit 1 (silent-waive hole), got $rc"; fi
+if grep -qF "no location data" <<<"$out"; then pass "missing-nodes block prints the no-location-data message"; else fail "no-location-data message missing"; fi
+
+# --- 6h. Allowlisted id with EMPTY nodes array → BLOCK, exit 1 ---------------
+f="$(fixture empty-nodes.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":[]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"
+if [ "$rc" = "1" ]; then pass "allowlisted id with empty nodes array blocks (exit 1)"; else fail "empty nodes should exit 1 (silent-waive hole), got $rc"; fi
+
+# --- 6i. Allowlisted id with STRING nodes → BLOCK, exit 1 --------------------
+# A string `nodes` used to abort jq mid-stream (`join` on a string), the loop
+# then saw zero rows, and the gate exited 0 — clean-by-crash. The type guard
+# must route any non-array nodes into the no-location-data BLOCK instead.
+f="$(fixture string-nodes.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":"node_modules/brace-expansion"}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"
+if [ "$rc" = "1" ]; then pass "allowlisted id with string (non-array) nodes blocks (exit 1)"; else fail "string nodes should exit 1 (clean-by-crash hole), got $rc"; fi
+
+# --- 6j. Sibling-prefix path → BLOCK (kills a prefix-match rewrite) ----------
+# node_modules/brace-expansion-extra shares the pinned path as a string PREFIX.
+# Exact-match containment must reject it; a future "optimization" to prefix or
+# substring matching would wrongly waive it — this case pins that down.
+f="$(fixture sibling-prefix.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion-extra"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "sibling-prefix path (brace-expansion-extra) blocks (exit 1 — exact match, not prefix)"; else fail "sibling-prefix path should exit 1, got $rc"; fi
+if grep -qF -- "- node_modules/brace-expansion-extra" <<<"$out"; then pass "output names the sibling-prefix path as unexpected"; else fail "sibling-prefix path not named as unexpected"; fi
+
+# --- 6k. MISSING title on waived id at an unpinned path → BLOCK, exit 1 ------
+# The field-shift bypass (security review, PF-1009): `title` is field 3 of the
+# TSV row, and tab is IFS-whitespace — bash collapses the doubled tab an empty
+# field leaves behind, sliding the node list into $title and emptying
+# $nodes_csv. Pre-fix that turned this exact report (waived id at the unpinned
+# glob/ copy, no title key) into WAIVED exit 0. The nz() sentinel projection
+# must keep the columns aligned so the pin violation still blocks.
+f="$(fixture missing-title.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion","node_modules/glob/node_modules/brace-expansion"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "missing title with waived id at unpinned path blocks (exit 1 — field-shift bypass)"; else fail "missing title should exit 1 (field-shift bypass), got $rc"; fi
+if grep -qF "node_modules/glob/node_modules/brace-expansion" <<<"$out"; then pass "missing-title block still names the unexpected glob/ location"; else fail "missing-title block does not name the unexpected location"; fi
+if grep -qF "(untitled)" <<<"$out"; then pass "missing title is rendered as the (untitled) sentinel"; else fail "(untitled) sentinel missing from output"; fi
+
+# --- 6l. EMPTY-STRING title on waived id at an unpinned path → BLOCK, exit 1 --
+# Same bypass, different trigger: jq's `//` does NOT fire on "" (only
+# null/false), so a `"title": ""` also emitted an empty TSV field pre-fix.
+f="$(fixture empty-title.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion","node_modules/glob/node_modules/brace-expansion"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "empty-string title with waived id at unpinned path blocks (exit 1)"; else fail "empty title should exit 1 (field-shift bypass), got $rc"; fi
+if grep -qF "::error::allowlisted advisory GHSA-mh99-v99m-4gvg found outside its pinned location(s)" <<<"$out"; then pass "empty-title case takes the pin-violation path"; else fail "empty-title case did not take the pin-violation path"; fi
+
+# --- 6m. MISSING severity on a non-allowlisted advisory → BLOCK, exit 1 -------
+# Leading-position shift: severity is field 1, and bash strips LEADING
+# IFS-whitespace, so an absent severity slid the URL into $severity pre-fix —
+# is_fail_severity never matched and a non-allowlisted advisory was silently
+# `ignore`d (exit 0). The "unknown" sentinel cannot be proven below threshold,
+# so it must be blocking-eligible.
+f="$(fixture missing-severity.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "evil-pkg":{"name":"evil-pkg","via":[
+    {"source":2,"name":"evil-pkg","title":"evil-pkg RCE","url":"https://github.com/advisories/GHSA-aaaa-bbbb-cccc","range":"*"}],
+    "nodes":["node_modules/evil-pkg"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "missing severity on non-allowlisted advisory blocks (exit 1 — unknown is blocking-eligible)"; else fail "missing severity should exit 1, got $rc"; fi
+if grep -qF "[unknown]" <<<"$out"; then pass "missing severity is rendered as the [unknown] sentinel"; else fail "[unknown] sentinel missing from output"; fi
+
+# --- 6n. EMPTY-STRING severity on a non-allowlisted advisory → BLOCK, exit 1 --
+f="$(fixture empty-severity.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "evil-pkg":{"name":"evil-pkg","severity":"critical","via":[
+    {"source":2,"name":"evil-pkg","title":"evil-pkg RCE","url":"https://github.com/advisories/GHSA-aaaa-bbbb-cccc","severity":"","range":"*"}],
+    "nodes":["node_modules/evil-pkg"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "empty-string severity on non-allowlisted advisory blocks (exit 1)"; else fail "empty severity should exit 1, got $rc"; fi
+if grep -qF "[unknown]" <<<"$out"; then pass "empty severity is rendered as the [unknown] sentinel"; else fail "[unknown] sentinel missing for empty severity"; fi
+
+# --- 6o. Nodes array of EMPTY STRINGS → no-location-data BLOCK, exit 1 --------
+# ["",""] survives an `if nodes empty` length check but yields zero usable
+# paths — the projection must filter to non-empty strings BEFORE deciding
+# between real locations and the (no-nodes) sentinel, else join(",") emits ","
+# and field 4 becomes garbage that is neither a path nor the sentinel.
+f="$(fixture empty-string-nodes.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["",""]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "nodes array of empty strings blocks (exit 1 — no usable location data)"; else fail "empty-string nodes should exit 1, got $rc"; fi
+if grep -qF "no location data" <<<"$out"; then pass "empty-string nodes route to the no-location-data block"; else fail "empty-string nodes did not route to the no-location-data block"; fi
+
+# --- 6p. BOTH title and severity absent on waived id at unpinned path → exit 1
+# Compound sentinel case: two empty fields at once shifted the row by two
+# positions pre-fix. Both sentinels must project and the pin violation must
+# still block.
+f="$(fixture missing-title-and-severity.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion","node_modules/glob/node_modules/brace-expansion"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "missing title AND severity with waived id at unpinned path blocks (exit 1)"; else fail "compound missing fields should exit 1, got $rc"; fi
+if grep -qF "[unknown]" <<<"$out" && grep -qF "(untitled)" <<<"$out"; then pass "both sentinels project in the compound case"; else fail "compound case missing a sentinel in output"; fi
+
+# --- 6q. ADJACENT-RUN severity ("info low") on non-allowlisted advisory → exit 1
+# is_known_severity must exact-match each severity word: a substring scan of
+# the space-joined known list accepts any adjacent run ("info low",
+# "low moderate", …) as known, and a run below the fail threshold was then
+# silently `ignore`d (exit 0) — the exact class the unknown-severity fix
+# exists to make blocking-eligible.
+f="$(fixture adjacent-run-severity.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "evil-pkg":{"name":"evil-pkg","severity":"critical","via":[
+    {"source":2,"name":"evil-pkg","title":"evil-pkg RCE","url":"https://github.com/advisories/GHSA-bbbb-cccc-dddd","severity":"info low","range":"*"}],
+    "nodes":["node_modules/evil-pkg"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "adjacent-run severity (info low) on non-allowlisted advisory blocks (exit 1)"; else fail "adjacent-run severity should exit 1 (unknown, blocking-eligible), got $rc"; fi
+if grep -qE '^ *BLOCK +\[info low\]' <<<"$out"; then pass "adjacent-run severity is rendered verbatim in the BLOCK line"; else fail "adjacent-run severity not on a BLOCK line (an ignore line rendering [info low] must not satisfy this)"; fi
+
 # --- 7. Malformed JSON → fail-closed (exit 2) --------------------------------
 res="$(run_gate "printf 'not json{{{'")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "2" ]; then pass "malformed audit JSON fails closed (exit 2)"; else fail "malformed JSON should exit 2, got $rc"; fi
@@ -192,6 +471,35 @@ if [ "$rc" = "2" ]; then pass "empty audit output fails closed (exit 2)"; else f
 res="$(run_gate "printf '{}'")"; rc="${res%%|*}"
 if [ "$rc" = "2" ]; then pass "non-audit JSON ({} with no auditReportVersion) fails closed (exit 2)"; else fail "non-audit JSON should exit 2, got $rc"; fi
 
+# --- 9b. jq aborts mid-extraction → fail-closed (exit 2) ----------------------
+# Pre-PF-1009 the jq feed ran inside a process substitution, so a jq failure's
+# exit status was discarded — the loop saw zero rows and the gate exited 0
+# (clean-by-crash). An object-valued `title` makes @tsv throw (jq exit 5); the
+# captured-rows rewrite must surface that as a fail-closed exit 2.
+f="$(fixture jq-abort.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "weird":{"name":"weird","severity":"high","via":[
+    {"source":7,"name":"weird","title":{"not":"a string"},"url":"https://github.com/advisories/GHSA-jjjj-kkkk-llll","severity":"high","range":"*"}],
+    "nodes":["node_modules/weird"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "2" ]; then pass "jq abort mid-extraction fails closed (exit 2, not clean-by-crash exit 0)"; else fail "jq abort should exit 2, got $rc"; fi
+if grep -qiF "failing closed" <<<"$out"; then pass "jq abort prints a fail-closed message"; else fail "jq-abort fail-closed message missing"; fi
+
+# --- 9c. auditReportVersion 1 → fail-closed (exit 2) --------------------------
+# npm 6-era reports use `advisories`, not `vulnerabilities` — evaluating one
+# with the v2 extraction yields zero rows and a silent pass. Only version 2 is
+# recognized. (Fixture file, not inline printf: the audit command goes through
+# `eval` inside the gate, which makes inline-quoted JSON fragile.)
+f="$(fixture v1-report.json <<'JSON'
+{"auditReportVersion":1,"advisories":{"1":{"severity":"high"}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "2" ]; then pass "auditReportVersion 1 fails closed (exit 2)"; else fail "v1 report should exit 2, got $rc"; fi
+if grep -qF "not a recognized audit report" <<<"$out"; then pass "v1 report prints the not-recognized message"; else fail "not-recognized message missing for v1 report"; fi
+
 # --- 10. Missing workspace dir → fail-closed (exit 2) ------------------------
 out="$(cd "$REPO" && NPM_AUDIT_CMD="true" bash "$SCRIPT" no_such_ws 2>&1)"; rc=$?
 if [ "$rc" = "2" ]; then pass "missing workspace dir fails closed (exit 2)"; else fail "missing workspace should exit 2, got $rc"; fi
@@ -199,6 +507,48 @@ if [ "$rc" = "2" ]; then pass "missing workspace dir fails closed (exit 2)"; els
 # --- 11. No argument → fail-closed (exit 2) ----------------------------------
 out="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"; rc=$?
 if [ "$rc" = "2" ]; then pass "no workspace argument fails closed (exit 2)"; else fail "no argument should exit 2, got $rc"; fi
+
+echo ""
+echo "=== allowlist entry format + multi-path pins (gate variants) ==="
+# --- 12. Bare-id allowlist entry (no colon) → fail-closed (exit 2) ------------
+# The pre-PF-1009 entry format. A bare id would silently mean "no pinned paths"
+# — every location unexpected, or worse, format-dependent behavior. Malformed
+# entries are a config error: fail closed, never guess.
+v="$(make_gate_variant gate-bare-id.sh '"GHSA-mh99-v99m-4gvg"')"
+res="$(run_gate_script "$v" "cat $FIX/clean.json")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "2" ]; then pass "bare-id allowlist entry fails closed (exit 2)"; else fail "bare-id entry should exit 2, got $rc"; fi
+if grep -qF "malformed ALLOWED_ADVISORIES" <<<"$out"; then pass "bare-id entry names the malformed-allowlist error"; else fail "malformed-allowlist message missing for bare-id entry"; fi
+
+# --- 13. Empty-path allowlist entry ("id:") → fail-closed (exit 2) ------------
+v="$(make_gate_variant gate-empty-path.sh '"GHSA-mh99-v99m-4gvg:"')"
+res="$(run_gate_script "$v" "cat $FIX/clean.json")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "2" ]; then pass "empty-path allowlist entry fails closed (exit 2)"; else fail "empty-path entry should exit 2, got $rc"; fi
+if grep -qF "malformed ALLOWED_ADVISORIES" <<<"$out"; then pass "empty-path entry names the malformed-allowlist error"; else fail "malformed-allowlist message missing for empty-path entry"; fi
+
+# --- 14. Multi-path pin, id at exactly those paths → WAIVED, exit 0 -----------
+v="$(make_gate_variant gate-multi.sh '"GHSA-mh99-v99m-4gvg:node_modules/brace-expansion,node_modules/vendored/brace-expansion"')"
+f="$(fixture multi-pinned.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion","node_modules/vendored/brace-expansion"]}}}
+JSON
+)"
+res="$(run_gate_script "$v" "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "multi-path pin waives the id at exactly its pinned paths (exit 0)"; else fail "multi-path pinned-only should exit 0, got $rc"; fi
+if grep -qF "WAIVED" <<<"$out"; then pass "multi-path pinned-only is reported as WAIVED"; else fail "WAIVED marker missing for multi-path pin"; fi
+
+# --- 15. Multi-path pin + a third unpinned path → BLOCK, exit 1 ---------------
+f="$(fixture multi-third.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion","node_modules/vendored/brace-expansion","node_modules/extra/node_modules/brace-expansion"]}}}
+JSON
+)"
+res="$(run_gate_script "$v" "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "third path outside a multi-path pin blocks (exit 1)"; else fail "unpinned third path should exit 1, got $rc"; fi
+if grep -qF "node_modules/extra/node_modules/brace-expansion" <<<"$out"; then pass "output names the unpinned third path"; else fail "unpinned third path not named"; fi
 
 echo ""
 echo "=== gate script hardening (structural) ==="
@@ -246,24 +596,39 @@ if [ -f "$QG_YML" ]; then
     fail "the 'Rust Security Audit' job name changed — required-check wiring may break"
   fi
 
-  # The job must invoke the gate for BOTH workspaces.
-  if grep -qF 'bash scripts/check-npm-audit.sh web' <<<"$qg"; then
-    pass "security job runs the allowlist gate for web"
-  else
-    fail "security job does not run scripts/check-npm-audit.sh web"
+  # Materialize the comment-stripped text ONCE, then match with single greps
+  # against here-strings. Chaining the strip into `grep -q` false-PASSES under
+  # pipefail: the reader exits at the first (early) match, the strip stage takes
+  # SIGPIPE, the pipeline goes non-zero, and the `if` falls through to the pass
+  # branch — reporting a wired bypass as absent. Fail closed if the strip
+  # produced nothing: an empty result means these assertions cannot see the file.
+  qg_exec="$(grep -v '^[[:space:]]*#' <<<"$qg" || true)"
+  if [ -z "$qg_exec" ]; then
+    fail "comment-strip of quality-gates.yml produced no output — self-defense assertions cannot be verified"
   fi
-  if grep -qF 'bash scripts/check-npm-audit.sh mcp-server' <<<"$qg"; then
-    pass "security job runs the allowlist gate for mcp-server"
+
+  # The job must invoke the gate for BOTH workspaces — asserted against the
+  # comment-STRIPPED text. A raw-text grep cannot tell "the gate runs" from
+  # "the gate is commented out": prefixing the run: line with `# ` is a
+  # two-character edit that unwires the gate while still satisfying a raw
+  # substring match.
+  if grep -qF 'bash scripts/check-npm-audit.sh web' <<<"$qg_exec"; then
+    pass "security job runs the allowlist gate for web (executable line)"
   else
-    fail "security job does not run scripts/check-npm-audit.sh mcp-server"
+    fail "security job does not run scripts/check-npm-audit.sh web in any executable line"
+  fi
+  if grep -qF 'bash scripts/check-npm-audit.sh mcp-server' <<<"$qg_exec"; then
+    pass "security job runs the allowlist gate for mcp-server (executable line)"
+  else
+    fail "security job does not run scripts/check-npm-audit.sh mcp-server in any executable line"
   fi
 
   # The raw, un-allowlisted gate must be FULLY replaced — if a stray
   # `npm audit --audit-level=high` survives it will fail on the un-relockable
-  # esbuild advisory and re-wedge the pipeline. Strip comment lines first: the
+  # esbuild advisory and re-wedge the pipeline. Comments are stripped: the
   # gate's own rationale comment legitimately names the old command in prose, and
   # only an EXECUTABLE occurrence re-wedges the pipeline.
-  if grep -v '^[[:space:]]*#' <<<"$qg" | grep -qF 'npm audit --audit-level=high'; then
+  if grep -qF 'npm audit --audit-level=high' <<<"$qg_exec"; then
     fail "a raw 'npm audit --audit-level=high' still exists in an executable line — it will fail on the un-relockable esbuild advisory"
   else
     pass "no raw 'npm audit --audit-level=high' remains in an executable line (fully replaced by the gate)"
@@ -271,9 +636,9 @@ if [ -f "$QG_YML" ]; then
 
   # SECURITY: the $NPM_AUDIT_CMD test seam must NEVER be wired into the real job —
   # `env: NPM_AUDIT_CMD: true` would make the gate audit nothing and pass blindly.
-  # Strip comment lines first (the rationale comment may name it), then assert no
+  # Comments are stripped (the rationale comment may name it); assert no
   # executable line references it.
-  if grep -v '^[[:space:]]*#' <<<"$qg" | grep -q 'NPM_AUDIT_CMD'; then
+  if grep -q 'NPM_AUDIT_CMD' <<<"$qg_exec"; then
     fail "quality-gates wires the NPM_AUDIT_CMD test seam in an executable line — gate can be no-op'd into a false pass"
   else
     pass "quality-gates does not wire the NPM_AUDIT_CMD test seam (gate cannot be bypassed via job env)"
@@ -282,8 +647,14 @@ if [ -f "$QG_YML" ]; then
   # SECURITY: `continue-on-error: true` on the audit step would swallow the gate's
   # non-zero exit and pass the job regardless. Scope the check to a window around
   # the invocation so an unrelated continue-on-error elsewhere in the file (there
-  # are several legitimate ones) does not false-positive.
-  if grep -v '^[[:space:]]*#' <<<"$qg" | grep -B3 -A1 'check-npm-audit' | grep -q 'continue-on-error'; then
+  # are several legitimate ones) does not false-positive. Materialize the window
+  # first for the same SIGPIPE reason. An empty window stays non-vacuous: the
+  # invocation assertions above match the SAME stripped text this window is cut
+  # from, so "window empty while invocation assertions passed" is impossible —
+  # including for a commented-out invocation, which raw-text matching would
+  # have accepted while leaving this window empty.
+  qg_audit_ctx="$(grep -B3 -A1 'check-npm-audit' <<<"$qg_exec" || true)"
+  if grep -q 'continue-on-error' <<<"$qg_audit_ctx"; then
     fail "quality-gates npm-audit step has continue-on-error — gate exit code would be ignored"
   else
     pass "quality-gates npm-audit step has no continue-on-error bypass"
@@ -299,13 +670,24 @@ echo "=== cd.yml integration wiring ==="
 # raw audit silently re-wedges CD instead of slipping through.
 if [ -f "$CD_YML" ]; then
   cd_yml="$(cat "$CD_YML")"
-  if grep -qF 'bash scripts/check-npm-audit.sh web' <<<"$cd_yml" \
-     && grep -qF 'bash scripts/check-npm-audit.sh mcp-server' <<<"$cd_yml"; then
-    pass "cd.yml security step runs the allowlist gate for both workspaces"
-  else
-    fail "cd.yml security step does not run scripts/check-npm-audit.sh for both workspaces"
+  # Same materialize-then-match discipline as the quality-gates block above:
+  # chaining the comment-strip into `grep -q` false-PASSES under pipefail on an
+  # early match (SIGPIPE), so a wired bypass would be reported as absent.
+  cd_exec="$(grep -v '^[[:space:]]*#' <<<"$cd_yml" || true)"
+  if [ -z "$cd_exec" ]; then
+    fail "comment-strip of cd.yml produced no output — self-defense assertions cannot be verified"
   fi
-  if grep -v '^[[:space:]]*#' <<<"$cd_yml" | grep -qF 'npm audit --audit-level=high'; then
+
+  # Invocation asserted against the comment-STRIPPED text — a commented-out
+  # run: line still satisfies a raw-text grep (see the quality-gates block).
+  if grep -qF 'bash scripts/check-npm-audit.sh web' <<<"$cd_exec" \
+     && grep -qF 'bash scripts/check-npm-audit.sh mcp-server' <<<"$cd_exec"; then
+    pass "cd.yml security step runs the allowlist gate for both workspaces (executable lines)"
+  else
+    fail "cd.yml security step does not run scripts/check-npm-audit.sh for both workspaces in executable lines"
+  fi
+
+  if grep -qF 'npm audit --audit-level=high' <<<"$cd_exec"; then
     fail "cd.yml still has a raw 'npm audit --audit-level=high' in an executable line — it will wedge the deploy pipeline"
   else
     pass "cd.yml has no raw 'npm audit --audit-level=high' in an executable line"
@@ -315,7 +697,7 @@ if [ -f "$CD_YML" ]; then
   # on the CD step would no-op the audit into a blind pass. cd.yml is editable
   # independently of quality-gates, so it needs its own assertion (the deploy
   # pipeline's audit is the last gate before artifacts ship).
-  if grep -v '^[[:space:]]*#' <<<"$cd_yml" | grep -q 'NPM_AUDIT_CMD'; then
+  if grep -q 'NPM_AUDIT_CMD' <<<"$cd_exec"; then
     fail "cd.yml wires the NPM_AUDIT_CMD test seam in an executable line — CD audit can be no-op'd into a false pass"
   else
     pass "cd.yml does not wire the NPM_AUDIT_CMD test seam"
@@ -324,8 +706,12 @@ if [ -f "$CD_YML" ]; then
   # SECURITY: `continue-on-error: true` on the audit step would swallow the gate's
   # non-zero exit and let the deploy proceed past a real advisory. Scope the check
   # to a window around the invocation so an unrelated continue-on-error elsewhere in
-  # cd.yml does not false-positive.
-  if grep -v '^[[:space:]]*#' <<<"$cd_yml" | grep -B3 -A1 'check-npm-audit' | grep -q 'continue-on-error'; then
+  # cd.yml does not false-positive. Window materialized first (SIGPIPE); an empty
+  # window is fine here — the both-workspaces assertion above matches the SAME
+  # stripped text this window is cut from, so it already fails whenever no
+  # executable invocation exists (commented-out included).
+  cd_audit_ctx="$(grep -B3 -A1 'check-npm-audit' <<<"$cd_exec" || true)"
+  if grep -q 'continue-on-error' <<<"$cd_audit_ctx"; then
     fail "cd.yml npm-audit step has continue-on-error — a real advisory would not fail the deploy"
   else
     pass "cd.yml npm-audit step has no continue-on-error bypass"
@@ -342,18 +728,32 @@ echo "=== ci.yml self-defense wiring ==="
 # the gate fails a required check.
 if [ -f "$CI_YML" ]; then
   ci="$(cat "$CI_YML")"
-  lst_block="$(awk '/^  lockfile-sync-tests:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  lockfile-sync-tests:/{exit}' <<<"$ci")"
+  # Same comment-strip discipline as the qg/cd blocks above: cut the job block
+  # from EXECUTABLE lines only, else `# `-prefixing the shellcheck line or the
+  # suite invocation inside lockfile-sync-tests satisfies both raw-text greps
+  # while the self-defense job silently stops covering this gate. The awk job
+  # anchors match `^  <job>:` lines, which no comment line can, so stripping
+  # cannot change which block is cut. Fail closed on an empty strip or an
+  # empty block: neither assertion below may pass vacuously.
+  ci_exec="$(grep -v '^[[:space:]]*#' <<<"$ci" || true)"
+  if [ -z "$ci_exec" ]; then
+    fail "comment-strip of ci.yml produced no output — self-defense assertions cannot be verified"
+  fi
+  lst_block="$(awk '/^  lockfile-sync-tests:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  lockfile-sync-tests:/{exit}' <<<"$ci_exec")"
+  if [ -z "$lst_block" ]; then
+    fail "lockfile-sync-tests job block is empty after comment-strip — self-defense job missing or fully commented out"
+  fi
 
   if grep -qF 'scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh' <<<"$lst_block"; then
     pass "self-defense job shellchecks the npm-audit gate + its suite"
   else
-    fail "self-defense job does not shellcheck scripts/check-npm-audit.sh and its suite"
+    fail "self-defense job does not shellcheck scripts/check-npm-audit.sh and its suite in an executable line"
   fi
 
   if grep -qF 'bash scripts/__tests__/check-npm-audit.test.sh' <<<"$lst_block"; then
     pass "self-defense job runs the npm-audit gate bash suite"
   else
-    fail "self-defense job does not run scripts/__tests__/check-npm-audit.test.sh"
+    fail "self-defense job does not run scripts/__tests__/check-npm-audit.test.sh in an executable line"
   fi
 else
   fail "ci.yml not found at $CI_YML"
@@ -361,14 +761,40 @@ fi
 
 echo ""
 echo "=== suite hygiene (structural) ==="
-# Regression lock for the SIGPIPE-under-pipefail false failure (see the note at the
-# top). The needle glues `echo` to `[[:space:]]` so this guard line cannot match
-# itself.
+# Regression locks for the two SIGPIPE-under-pipefail failure modes (see the note
+# at the top). Each needle is constructed so the guard line cannot match itself:
+# the first glues `echo` to `[[:space:]]`; the second's literal redirection token
+# is followed in-pattern by a bracket class, never by a real quoted variable.
 SELF="${BASH_SOURCE[0]}"
 if grep -nE 'echo[[:space:]]+"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*\|[[:space:]]*(grep|awk)' "$SELF" >/dev/null; then
   fail "a variable's echo output is piped into grep/awk — feed it via a here-string to stay correct under pipefail"
 else
   pass "suite feeds grep/awk via here-strings, not variable pipes (SIGPIPE-safe under pipefail)"
+fi
+
+# Second failure mode: a here-string-fed stage CHAINED into a further grep/awk.
+# On an early match the reader exits, SIGPIPEs the upstream stage, and a negative
+# assertion's `if` falls through to its pass branch — a false PASS, the inverse of
+# the false FAIL above. Materialize the intermediate text into a variable and
+# match with a single grep instead.
+if grep -nE '<<<[[:space:]]*"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*\|[[:space:]]*(grep|awk)' "$SELF" >/dev/null; then
+  fail "a here-string-fed pipeline stage pipes into grep/awk — materialize the intermediate text first (false-PASS risk under pipefail)"
+else
+  pass "suite has no here-string-fed pipeline chains (no false-PASS SIGPIPE risk under pipefail)"
+fi
+
+echo ""
+echo "=== bash runtime-error sweep (whole suite) ==="
+# Any `unbound variable` / `bad substitution` / `syntax error` the gate emitted
+# during ANY invocation above was captured by run_gate_script into
+# $FIX/bash-errors.log. A crash inside a command substitution can read as an
+# empty capture (→ silent WAIVE on bash 3.2), so leaked runtime errors are a
+# suite failure even when every exit-code assertion passed.
+if [ -s "$FIX/bash-errors.log" ]; then
+  fail "bash runtime error(s) leaked from the gate during the suite:"
+  sed 's/^/    /' "$FIX/bash-errors.log"
+else
+  pass "no bash runtime errors leaked from any gate invocation"
 fi
 
 echo ""
