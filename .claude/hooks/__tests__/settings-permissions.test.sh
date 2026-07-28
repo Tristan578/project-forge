@@ -367,6 +367,15 @@ if $seam_real_clean; then
   pass=$((pass + 1)); printf '  ok   %s\n' "seam SETTINGS_PERMISSIONS_FILE / SETTINGS_PERMISSIONS_SELFTEST / --selftest-child / BASH_ENV not wired in any workflow or composite action"
 else
   fail=$((fail + 1)); printf '  FAIL %s\n' "seam SETTINGS_PERMISSIONS_FILE / SETTINGS_PERMISSIONS_SELFTEST / --selftest-child / BASH_ENV wired in a workflow or composite action (or a scanned dir missing/unreadable)"
+  # Diagnostics only (same regex, same pass/fail semantics as seam_not_wired()
+  # above) — name WHICH file/line matched instead of leaving the reader to
+  # reproduce the scan by hand.
+  for seam_dir in "${seam_dirs[@]}"; do
+    [ -d "$seam_dir" ] || continue
+    grep -rnE -e "SETTINGS_PERMISSIONS_(FILE|SELFTEST)" -e "[-][-]selftest-child" -e "BASH_ENV" "$seam_dir" 2>/dev/null |
+      awk -F: '{ content = $0; sub(/^[^:]*:[0-9]+:/, "", content); if (content !~ /^[[:space:]]*#/) print "         " $0 }'
+  done
+  printf '         see .claude/rules/agent-operations.md §12\n'
 fi
 
 # --- Runtime assertion — deliberately runs BEFORE the self-re-exec
@@ -493,9 +502,9 @@ if [ "${1:-}" != "--selftest-child" ] && [ -z "${SETTINGS_PERMISSIONS_SELFTEST:-
   orphan_output="$(env -u SETTINGS_PERMISSIONS_FILE bash "${BASH_SOURCE[0]}" --selftest-child 2>&1)"
   orphan_rc=$?
   if [ "$orphan_rc" -ne 0 ] && grep -qF "FAIL runtime: bare --selftest-child" <<<"$orphan_output"; then
-    pass=$((pass + 1)); printf '  ok   %s\n' "self-test: bare --selftest-child without fixture seam is rejected as an orphan child (S-NEW)"
+    pass=$((pass + 1)); printf '  ok   %s\n' "self-test: bare --selftest-child without fixture seam is rejected as an orphan child (regression probe, round 6)"
   else
-    fail=$((fail + 1)); printf '  FAIL %s\n' "self-test: bare --selftest-child without fixture seam should be rejected as an orphan child (S-NEW)"
+    fail=$((fail + 1)); printf '  FAIL %s\n' "self-test: bare --selftest-child without fixture seam should be rejected as an orphan child (regression probe, round 6)"
   fi
 
   # Negative control for the FAIL anchor (SF2, round 4): additional-dirs.json
@@ -505,9 +514,9 @@ if [ "${1:-}" != "--selftest-child" ] && [ -z "${SETTINGS_PERMISSIONS_SELFTEST:-
   # bug: grep -qF "$expect_substr" with no "FAIL " prefix) would accept that ok
   # line as if it were a rejection. child_rejects must NOT be fooled here.
   if child_rejects "$SEAM_TMPROOT/badcfg/additional-dirs.json" "disableAutoMode absent"; then
-    fail=$((fail + 1)); printf '  FAIL %s\n' "self-test: assert_child_rejects must not accept an ok line as a rejection (SF2 anchor)"
+    fail=$((fail + 1)); printf '  FAIL %s\n' "self-test: assert_child_rejects must not accept an ok line as a rejection (FAIL-anchor negative control, round 4)"
   else
-    pass=$((pass + 1)); printf '  ok   %s\n' "self-test: assert_child_rejects rejects an ok line — FAIL anchor discriminates (SF2)"
+    pass=$((pass + 1)); printf '  ok   %s\n' "self-test: assert_child_rejects rejects an ok line — FAIL anchor discriminates (FAIL-anchor negative control, round 4)"
   fi
 fi
 
