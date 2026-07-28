@@ -284,7 +284,11 @@ jobs:
 
   # ---- Design Internal Gate ----
   # Runs when apps/design/** or packages/ui/** changed.
-  # Builds Storybook to verify no compilation errors in design system changes.
+  # Runs the @spawnforge/ui unit suite and builds Storybook to verify no
+  # compilation errors in design system changes. This is the ONLY per-PR job
+  # that runs the UI unit tests for a packages/ui-only PR (quality-gates'
+  # test-web runs them only when web/ci changed), so it is in the CI Success
+  # anti-tamper map (scripts/check-ci-success.sh <-> needs-design).
   # Path-gated so design-only PRs pay the Storybook build tax but engine/web PRs
   # that don't touch the design system are unaffected.
   design-internal-gate:
@@ -308,6 +312,9 @@ jobs:
 
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
+
+      - name: Test @spawnforge/ui
+        run: cd packages/ui && npx vitest run
 
       - name: Install design app dependencies
         run: cd apps/design && npm ci
