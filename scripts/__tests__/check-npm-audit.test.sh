@@ -177,6 +177,54 @@ if grep -qF "GHSA-7777-8888-9999" <<<"$out"; then pass "the object advisory afte
 block_count="$(grep -cF "BLOCK" <<<"$out")"
 if [ "$block_count" = "1" ]; then pass "string-via produces no spurious finding (exactly one BLOCK)"; else fail "expected exactly one BLOCK, got $block_count (string-via mis-counted?)"; fi
 
+# --- 6d. Allowed advisory ONLY at its pinned node path → WAIVED, exit 0 ------
+# Location pinning (PF-1009/#9026): an id-only allowlist is a hole wider than it
+# looks. PF-1002/#9007 relocked the two NESTED brace-expansion copies (under
+# glob/ and @typescript-eslint/typescript-estree/) to the patched 5.0.8, leaving
+# only the un-relockable root copy waived; Dependabot PR #9016 then did a full
+# relock that silently reverted both nested copies back to 5.0.7 — a
+# production-reachable regression (the glob/ copy is prod-reachable) — and the
+# id-only gate stayed GREEN throughout because it never looked at WHERE the id
+# occurred. This fixture is the correct, un-regressed shape: the id present only
+# at its pinned root copy.
+f="$(fixture pinned-only.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "advisory confined to its pinned node path passes (exit 0)"; else fail "pinned-only location should exit 0, got $rc"; fi
+if grep -qF "WAIVED" <<<"$out"; then pass "pinned-only location is reported as WAIVED"; else fail "WAIVED marker missing for pinned-only location"; fi
+
+# --- 6e. Allowed advisory ALSO at an unpinned node path → BLOCK, exit 1 -------
+# Mirrors the real regression exactly: brace-expansion present at its pinned
+# root copy PLUS the two nested copies that should have stayed patched. This is
+# the case the id-only gate could never catch — it must now BLOCK and name the
+# unexpected locations.
+f="$(fixture unpinned-location.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion","node_modules/glob/node_modules/brace-expansion","node_modules/@typescript-eslint/typescript-estree/node_modules/brace-expansion"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "advisory at an unpinned node path blocks (exit 1)"; else fail "unpinned location should exit 1, got $rc"; fi
+if grep -qF "node_modules/glob/node_modules/brace-expansion" <<<"$out"; then pass "output names the unexpected glob/ location"; else fail "output does not name the unexpected glob/ location"; fi
+if grep -qF "node_modules/@typescript-eslint/typescript-estree/node_modules/brace-expansion" <<<"$out"; then pass "output names the unexpected typescript-estree/ location"; else fail "output does not name the unexpected typescript-estree/ location"; fi
+if grep -qF "GHSA-mh99-v99m-4gvg" <<<"$out"; then pass "output names the advisory id for the unpinned-location block"; else fail "output does not name the advisory id"; fi
+
+# --- 6f. Anti-rot note fires when a waived id is fully absent (exit 0) -------
+f="$(fixture clean-note.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "advisory fully absent still passes (exit 0)"; else fail "fully-absent advisory should exit 0, got $rc"; fi
+if grep -qiF "not present" <<<"$out"; then pass "anti-rot note fires when the waived advisory is absent"; else fail "anti-rot note missing for fully-absent advisory"; fi
+
 # --- 7. Malformed JSON → fail-closed (exit 2) --------------------------------
 res="$(run_gate "printf 'not json{{{'")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "2" ]; then pass "malformed audit JSON fails closed (exit 2)"; else fail "malformed JSON should exit 2, got $rc"; fi
