@@ -327,8 +327,10 @@ jobs:
       # packages/ui-only PR skips test-web, so this gate is that PR's ONLY
       # per-PR run of the suite. check-ci-success.test.sh pins the two
       # invocations byte-identical — change BOTH or the suite fails.
+      # `npm test` (not npx): vitest resolves from the root `npm ci` install,
+      # with no on-demand-install path to accidentally re-enable.
       - name: Test @spawnforge/ui
-        run: cd packages/ui && npx --no-install vitest run
+        run: cd packages/ui && npm test
 
       - name: Install design app dependencies
         run: cd apps/design && npm ci

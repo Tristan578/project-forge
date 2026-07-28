@@ -640,7 +640,10 @@ QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
 # packages/ui-only PR, while quality-gates' test-web covers web/ci PRs. Pinning
 # the two identical means a future change (flags, reporter, path) must touch
 # both or fail here — the lockstep guard the intentional duplication needs.
-UI_TEST_CMD='cd packages/ui && npx --no-install vitest run'
+# `npm test` (packages/ui's "test": "vitest run") rather than npx: the
+# deprecated `--no-install` spelling could silently regain npx's on-demand
+# install; npm run has no install path at all.
+UI_TEST_CMD='cd packages/ui && npm test'
 if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   dig_block="$(awk -v j="  design-internal-gate:" '$0==j{f=1} f{print} f && /^  [a-z][a-z0-9-]*:[[:space:]]*$/ && $0!=j{exit}' "$CI_YML")"
   if [ -n "$dig_block" ]; then

@@ -157,7 +157,7 @@ jobs:
       # Kept byte-identical to ci.yml's design-internal-gate test step —
       # check-ci-success.test.sh pins both invocations. Change BOTH or it fails.
       - name: Test @spawnforge/ui
-        run: cd packages/ui && npx --no-install vitest run
+        run: cd packages/ui && npm test
 
       - name: Run tests with coverage
         working-directory: web
