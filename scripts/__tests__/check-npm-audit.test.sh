@@ -956,16 +956,26 @@ if [ -f "$CD_YML" ]; then
     # intact and the workflow valid while a red audit no longer stops the
     # deploy — the exact one-line unaudited-deploy shape this pin exists to
     # catch. A missing if: block entirely yields an empty scan and FAILs
-    # (fail-closed). Scope note: this pin proves the clause is PRESENT in the
-    # if: body, not that it is EFFECTIVE — a vacuous rewrite like
-    # `(needs.security.result == 'success' || true)` still passes; resisting
-    # that would require parsing GitHub Actions expressions, which is out of
-    # scope for containment pins (same register as the anti-tamper caveats in
-    # gotchas.md: raises cost, doesn't claim to be airtight).
+    # (fail-closed). The if: key is COUNT-pinned first: YAML keeps the last
+    # duplicate key, so an appended second `if: always()` overrides the
+    # clause at runtime while the intact original block still satisfies the
+    # containment match below (the awk cut stops at the first following
+    # job-level key, so it only ever sees the FIRST if: block) — the same
+    # duplicate-key class already pinned on the cd security job's if: and
+    # these jobs' needs:. Scope note: the containment pin proves the clause
+    # is PRESENT in the if: body, not that it is EFFECTIVE — a vacuous
+    # rewrite like `(needs.security.result == 'success' || true)` still
+    # passes; resisting that would require parsing GitHub Actions
+    # expressions, which is out of scope for containment pins (same register
+    # as the anti-tamper caveats in gotchas.md: raises cost, doesn't claim
+    # to be airtight).
+    cd_dj_if_count="$(grep -cE '^    "?if"?[[:space:]]*:' <<<"$cd_dj_block" || true)"
     cd_dj_ifblk="$(awk '/^    "?if"?[[:space:]]*:/{f=1;print;next} f && /^    [A-Za-z_"]/{exit} f{print}' <<<"$cd_dj_block")"
     cd_dj_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cd_dj_ifblk")"
-    if grep -qE "needs\.security\.result[[:space:]]*==[[:space:]]*'success'" <<<"$cd_dj_scan"; then
-      pass "cd.yml ${cd_dj} if: still requires needs.security.result == 'success' — the clause that stops this deploy on a red audit"
+    if [ "$cd_dj_if_count" -ne 1 ]; then
+      fail "cd.yml ${cd_dj} job has $cd_dj_if_count job-level if: keys (expected exactly 1) — YAML keeps the last duplicate key, so a second if: overrides the needs.security.result clause at runtime while the original block still matches"
+    elif grep -qE "needs\.security\.result[[:space:]]*==[[:space:]]*'success'" <<<"$cd_dj_scan"; then
+      pass "cd.yml ${cd_dj} if: still requires needs.security.result == 'success' — the clause that stops this deploy on a red audit (exactly 1 if: key)"
     else
       fail "cd.yml ${cd_dj} if: no longer contains needs.security.result == 'success' — under always(), needs: membership alone blocks nothing, so a red audit would not stop this deploy"
     fi
