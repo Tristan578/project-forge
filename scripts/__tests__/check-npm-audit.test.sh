@@ -728,18 +728,32 @@ echo "=== ci.yml self-defense wiring ==="
 # the gate fails a required check.
 if [ -f "$CI_YML" ]; then
   ci="$(cat "$CI_YML")"
-  lst_block="$(awk '/^  lockfile-sync-tests:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  lockfile-sync-tests:/{exit}' <<<"$ci")"
+  # Same comment-strip discipline as the qg/cd blocks above: cut the job block
+  # from EXECUTABLE lines only, else `# `-prefixing the shellcheck line or the
+  # suite invocation inside lockfile-sync-tests satisfies both raw-text greps
+  # while the self-defense job silently stops covering this gate. The awk job
+  # anchors match `^  <job>:` lines, which no comment line can, so stripping
+  # cannot change which block is cut. Fail closed on an empty strip or an
+  # empty block: neither assertion below may pass vacuously.
+  ci_exec="$(grep -v '^[[:space:]]*#' <<<"$ci" || true)"
+  if [ -z "$ci_exec" ]; then
+    fail "comment-strip of ci.yml produced no output — self-defense assertions cannot be verified"
+  fi
+  lst_block="$(awk '/^  lockfile-sync-tests:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  lockfile-sync-tests:/{exit}' <<<"$ci_exec")"
+  if [ -z "$lst_block" ]; then
+    fail "lockfile-sync-tests job block is empty after comment-strip — self-defense job missing or fully commented out"
+  fi
 
   if grep -qF 'scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh' <<<"$lst_block"; then
     pass "self-defense job shellchecks the npm-audit gate + its suite"
   else
-    fail "self-defense job does not shellcheck scripts/check-npm-audit.sh and its suite"
+    fail "self-defense job does not shellcheck scripts/check-npm-audit.sh and its suite in an executable line"
   fi
 
   if grep -qF 'bash scripts/__tests__/check-npm-audit.test.sh' <<<"$lst_block"; then
     pass "self-defense job runs the npm-audit gate bash suite"
   else
-    fail "self-defense job does not run scripts/__tests__/check-npm-audit.test.sh"
+    fail "self-defense job does not run scripts/__tests__/check-npm-audit.test.sh in an executable line"
   fi
 else
   fail "ci.yml not found at $CI_YML"
