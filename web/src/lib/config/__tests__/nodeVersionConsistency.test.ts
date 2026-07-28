@@ -37,7 +37,7 @@ const REPO_ROOT = path.resolve(HERE, '../../../../..');
 /** Canonical Node major the whole monorepo must agree on. */
 const CANONICAL_MAJOR = 24;
 /** Canonical `engines.node` range string every workspace must declare. */
-const CANONICAL_ENGINES = '>=24 <25';
+const CANONICAL_ENGINES = '>=24.15 <25';
 
 function readRepoFile(rel: string): string {
   return readFileSync(path.join(REPO_ROOT, rel), 'utf8');
