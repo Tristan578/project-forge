@@ -642,8 +642,10 @@ AUDIT_STEP_WS_RE=('web' 'mcp-server' '\.')
 # Step-scoped tamper assertions for one security job block ($2), labeled $1:
 # each gate step must exist by name, carry no step-level `if:` (a skipped
 # step's run: line still greps as present — and a skipped required check reads
-# as satisfied under branch protection; `if[[:space:]]*:` because YAML also
-# accepts a space before the colon), no `continue-on-error:` anywhere in its
+# as satisfied under branch protection; `"?if"?[[:space:]]*:` because YAML
+# also accepts a space before the colon and a QUOTED key — `"if": false` is
+# the same key as `if:` to the parser but invisible to an unquoted-only
+# grep), no `continue-on-error:` anywhere in its
 # block (not just inside a fixed grep window around the run: line), and
 # exactly ONE run: key whose whole line is its own workspace's invocation —
 # YAML keeps only the LAST duplicate key, so a second run: merged into a
@@ -660,7 +662,7 @@ assert_audit_steps_untampered() {
       fail "$wf security job has no step named '$needle' — step-scoped tamper checks cannot run (fail closed)"
       continue
     fi
-    if grep -qE '^[[:space:]]*if[[:space:]]*:' <<<"$blk"; then
+    if grep -qE '^[[:space:]]*"?if"?[[:space:]]*:' <<<"$blk"; then
       fail "$wf step '$needle' carries a step-level if: — the gate can be skipped while its run: line still greps as present"
     else
       pass "$wf step '$needle' has no step-level if:"
@@ -670,7 +672,7 @@ assert_audit_steps_untampered() {
     else
       pass "$wf step '$needle' has no continue-on-error anywhere in its step block"
     fi
-    run_count="$(grep -cE '^[[:space:]]*run[[:space:]]*:' <<<"$blk" || true)"
+    run_count="$(grep -cE '^[[:space:]]*"?run"?[[:space:]]*:' <<<"$blk" || true)"
     if [ "$run_count" -ne 1 ]; then
       fail "$wf step '$needle' has $run_count run: keys (expected exactly 1) — YAML keeps only the last duplicate key, so an audit can be silently dropped"
     elif grep -qE "^[[:space:]]*run: bash scripts/check-npm-audit\\.sh ${ws_re}[[:space:]]*\$" <<<"$blk"; then
@@ -725,10 +727,10 @@ if [ -f "$QG_YML" ]; then
   # required check reads as satisfied under branch protection, so this is the
   # one-line edit that unwires all three npm audits AND the cargo audit at
   # once. The job carries no `if:` today; pin that. (4-space indent = job-level
-  # key; step-level `if:` is covered per step block below. `if[[:space:]]*:`
-  # because YAML also accepts a space before the colon — `if : false` is the
-  # same key.)
-  if grep -qE '^    if[[:space:]]*:' <<<"$qg_sec"; then
+  # key; step-level `if:` is covered per step block below. `"?if"?[[:space:]]*:`
+  # because YAML also accepts a space before the colon AND a quoted key —
+  # `if : false` and `"if": false` are both the same key as `if:`.)
+  if grep -qE '^    "?if"?[[:space:]]*:' <<<"$qg_sec"; then
     fail "quality-gates security job carries a job-level if: — the required check could be skipped wholesale"
   else
     pass "quality-gates security job has no job-level if: (cannot be skipped wholesale)"
@@ -739,10 +741,21 @@ if [ -f "$QG_YML" ]; then
   # success, so the required check goes green and cd.yml's deploy jobs (which
   # `needs: security`) proceed past a red gate. The step-scoped scan below only
   # sees step blocks — a 4-space job key never enters one. Pin absence here.
-  if grep -qE '^    continue-on-error[[:space:]]*:' <<<"$qg_sec"; then
+  if grep -qE '^    "?continue-on-error"?[[:space:]]*:' <<<"$qg_sec"; then
     fail "quality-gates security job carries a job-level continue-on-error — a failing gate would report success"
   else
     pass "quality-gates security job has no job-level continue-on-error"
+  fi
+
+  # A job-level `needs:` is the third door: the security job has none today
+  # and must stay that way — `editor-boot` (and others) carry conditional
+  # `if:`s, so `needs: [editor-boot]` would cascade-SKIP the security job on
+  # any run where the dependency skips, and a skipped required check reads as
+  # satisfied under branch protection. Pin absence, mirroring the if: pin.
+  if grep -qE '^    "?needs"?[[:space:]]*:' <<<"$qg_sec"; then
+    fail "quality-gates security job carries a job-level needs: — a skipped dependency would cascade-skip the audit, and a skipped required check reads as satisfied"
+  else
+    pass "quality-gates security job has no job-level needs: (cannot be cascade-skipped via a conditional dependency)"
   fi
 
   # The job must invoke the gate for BOTH workspaces — asserted against the
@@ -843,7 +856,7 @@ if [ -f "$CD_YML" ]; then
   # skipping the job wholesale. Containment, not equality — this raises the
   # cost of a silent one-line disable; it does not claim to be airtight
   # against a crafted compound condition.
-  cd_if_lines="$(grep -cE '^    if[[:space:]]*:' <<<"$cd_sec" || true)"
+  cd_if_lines="$(grep -cE '^    "?if"?[[:space:]]*:' <<<"$cd_sec" || true)"
   if [ "$cd_if_lines" -ne 1 ]; then
     fail "cd.yml security job has $cd_if_lines job-level if: lines (expected exactly 1) — missing or duplicated condition (YAML keeps the last duplicate key)"
   elif grep -qE '^    if[[:space:]]*:.*refs/heads/main' <<<"$cd_sec"; then
@@ -854,11 +867,38 @@ if [ -f "$CD_YML" ]; then
 
   # Job-level continue-on-error — same blast radius as on quality-gates: the
   # deploy jobs' `needs: security` would see success on a red gate.
-  if grep -qE '^    continue-on-error[[:space:]]*:' <<<"$cd_sec"; then
+  if grep -qE '^    "?continue-on-error"?[[:space:]]*:' <<<"$cd_sec"; then
     fail "cd.yml security job carries a job-level continue-on-error — deploys would proceed past a failing gate"
   else
     pass "cd.yml security job has no job-level continue-on-error"
   fi
+
+  # The `needs:` edge itself: `security` in the deploy jobs' needs: lists is
+  # the SOLE mechanism by which a red audit blocks a deploy — every pin above
+  # protects the security job's own execution, but dropping `security` from a
+  # deploy job's flow list detaches the gate entirely while all of those pins
+  # stay green. Cut each deploy job's block (same awk anchor idiom), assert
+  # exactly ONE needs: line (YAML keeps the last duplicate key), and assert
+  # `security` appears as a flow-list ELEMENT — `(\[|,) security (,|\])`
+  # bounds it so a look-alike like `security-scan` cannot satisfy it. The
+  # element grep intentionally fails on a block-style rewrite: flag it and
+  # keep the flow list rather than guess at a new shape.
+  for cd_dj in deploy-staging deploy-production; do
+    cd_dj_block="$(awk -v hdr="  ${cd_dj}:" '$0 == hdr {f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 != hdr {exit}' <<<"$cd_exec")"
+    if [ -z "$cd_dj_block" ]; then
+      fail "cd.yml ${cd_dj} job block is empty after comment-strip — job missing, renamed, or fully commented out (deploy gating cannot be verified)"
+      continue
+    fi
+    cd_dj_needs_count="$(grep -cE '^    "?needs"?[[:space:]]*:' <<<"$cd_dj_block" || true)"
+    cd_dj_needs_line="$(grep -E '^    "?needs"?[[:space:]]*:' <<<"$cd_dj_block" || true)"
+    if [ "$cd_dj_needs_count" -ne 1 ]; then
+      fail "cd.yml ${cd_dj} job has $cd_dj_needs_count job-level needs: lines (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key)"
+    elif grep -qE '(\[|,)[[:space:]]*security[[:space:]]*(,|\])' <<<"$cd_dj_needs_line"; then
+      pass "cd.yml ${cd_dj} needs: still lists security — a red audit blocks this deploy"
+    else
+      fail "cd.yml ${cd_dj} needs: no longer lists security as a flow-list element — this deploy would proceed past a failing audit gate"
+    fi
+  done
 
   # Invocations asserted against the comment-stripped SECURITY JOB block,
   # key-anchored to the whole run: line — a commented-out run: still satisfies
