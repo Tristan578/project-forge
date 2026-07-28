@@ -362,7 +362,7 @@ in a hook's exit-code contract fails the PR instead of silently shipping.
   nonzero exit doesn't prove *which* check failed, and an unanchored match
   can pass against the wrong line). See `settings-permissions.test.sh`'s
   `SETTINGS_PERMISSIONS_FILE`/`--selftest-child` seam for the canonical
-  example (round 3-5 hardening, PF-853) — the runtime assertion there also
+  example (round 3-6 hardening, PF-853) — the runtime assertion there also
   covers the legacy `SETTINGS_PERMISSIONS_SELFTEST` env-var name so a
   scan/assertion widened for one seam variant doesn't miss the other. Same
   scan pattern as the `$NPM_AUDIT_CMD`/`$GHAW_COMPILE_CMD`/`$NATIVE_BINDINGS_*`

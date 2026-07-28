@@ -21,7 +21,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # "Negative coverage via self-re-exec" block near the end of this file, which
 # jq-mutates a copy of the real settings, sets this var to point at it, and
 # asserts on the re-exec'd child's exit code. NEVER set this var (or
-# SETTINGS_PERMISSIONS_SELFTEST) in CI outside that self-re-exec: the
+# SETTINGS_PERMISSIONS_SELFTEST) anywhere outside the self-re-exec seam: the
 # seam_not_wired self-defense scan below AND the hoisted runtime assertion
 # (evaluated on every non-child invocation, not just the top-level parent)
 # both enforce that, regardless of which of the two names is wired.
@@ -389,9 +389,16 @@ fi
 if [ "${1:-}" != "--selftest-child" ] && { [ -n "${SETTINGS_PERMISSIONS_FILE:-}" ] || [ -n "${SETTINGS_PERMISSIONS_SELFTEST:-}" ]; }; then
   fail=$((fail + 1))
   printf '  FAIL %s\n' "runtime: SETTINGS_PERMISSIONS_FILE / SETTINGS_PERMISSIONS_SELFTEST must never be wired outside the self-re-exec seam (--selftest-child) (out-of-tree tampering detected)"
-elif [ "${1:-}" = "--selftest-child" ]; then
+elif [ "${1:-}" = "--selftest-child" ] && [ -n "${SETTINGS_PERMISSIONS_FILE:-}" ]; then
+  # Parentage proof: run_selftest_child (below) is the only legitimate spawner
+  # of --selftest-child, and it always sets SETTINGS_PERMISSIONS_FILE. A flagged
+  # invocation WITHOUT that var is therefore not a real child of this suite —
+  # see the orphan-child arm immediately below.
   pass=$((pass + 1))
-  printf '  ok   %s\n' "runtime: self-re-exec child (assertion enforced by the parent invocation)"
+  printf '  ok   %s\n' "runtime: self-re-exec child (fixture seam present; assertion enforced by the parent invocation)"
+elif [ "${1:-}" = "--selftest-child" ]; then
+  fail=$((fail + 1))
+  printf '  FAIL %s\n' "runtime: bare --selftest-child without the parent fixture seam (orphan child invocation)"
 else
   pass=$((pass + 1))
   printf '  ok   %s\n' "runtime: neither SETTINGS_PERMISSIONS_FILE nor SETTINGS_PERMISSIONS_SELFTEST wired (no out-of-tree wiring)"
@@ -461,22 +468,50 @@ if [ "${1:-}" != "--selftest-child" ] && [ -z "${SETTINGS_PERMISSIONS_SELFTEST:-
   assert_child_rejects "self-test: disableBypassPermissionsMode=allow rejected by child re-exec" "$SEAM_TMPROOT/badcfg/disable-bypass-allow.json" "disableBypassPermissionsMode absent"
   assert_child_rejects "self-test: disableAutoMode=allow rejected by child re-exec" "$SEAM_TMPROOT/badcfg/disable-auto-allow.json" "disableAutoMode absent"
   assert_child_accepts "self-test: defaultMode=plan accepted by child re-exec (positive control)" "$SEAM_TMPROOT/badcfg/default-mode-plan.json"
+
+  # Regression probe for the orphan-child arm (S-NEW, round 6): a bare
+  # --selftest-child invocation with no parent-provided fixture seam must be
+  # rejected as an orphan, not silently accepted — proves the four-branch
+  # runtime assertion above doesn't regress to the old three-branch shape
+  # where any flagged invocation printed a bogus "ok" regardless of
+  # parentage. Explicitly unsets SETTINGS_PERMISSIONS_FILE so this probe
+  # can't accidentally inherit a fixture path from its own environment.
+  orphan_output="$(env -u SETTINGS_PERMISSIONS_FILE bash "${BASH_SOURCE[0]}" --selftest-child 2>&1)"
+  orphan_rc=$?
+  if [ "$orphan_rc" -ne 0 ] && grep -qF "FAIL runtime: bare --selftest-child" <<<"$orphan_output"; then
+    pass=$((pass + 1)); printf '  ok   %s\n' "self-test: bare --selftest-child without fixture seam is rejected as an orphan child (S-NEW)"
+  else
+    fail=$((fail + 1)); printf '  FAIL %s\n' "self-test: bare --selftest-child without fixture seam should be rejected as an orphan child (S-NEW)"
+  fi
 fi
 
 # --- Self-test: prove a top-level invocation tampered with the OLD
 #     SETTINGS_PERMISSIONS_SELFTEST=1 env var (the exact vector this round's
-#     fix closes) still FAILS in CI, now that the recursion guard is
-#     argv-based rather than env-var-based. Guarded on
-#     SETTINGS_PERMISSIONS_SELFTEST being unset so this doesn't recurse
-#     forever: the tamper-child below inherits that var into its own
-#     environment, which skips this same block on its end. ---
+#     fix closes) still fails regardless of CI presence, now that the
+#     recursion guard is argv-based rather than env-var-based. Two tamper
+#     children are spawned — one with CI unset, one with CI=true — because
+#     the runtime assertion above is deliberately unconditional (not scoped
+#     to CI): a mutant that silently re-adds a `[ -n "${CI:-}" ]` conjunct to
+#     that condition would stay invisible to a CI=true-only tamper child, so
+#     both sides must be exercised. Guarded on SETTINGS_PERMISSIONS_SELFTEST
+#     being unset so this doesn't recurse forever: each tamper-child below
+#     inherits that var into its own environment, which skips this same
+#     block on its end. ---
 if [ "${1:-}" != "--selftest-child" ] && [ -z "${SETTINGS_PERMISSIONS_SELFTEST:-}" ]; then
-  tamper_output="$(CI=true SETTINGS_PERMISSIONS_SELFTEST=1 bash "${BASH_SOURCE[0]}" 2>&1)"
-  tamper_rc=$?
-  if [ "$tamper_rc" -ne 0 ] && grep -qF "must never be wired outside the self-re-exec seam" <<<"$tamper_output"; then
-    pass=$((pass + 1)); printf '  ok   %s\n' "self-test: SETTINGS_PERMISSIONS_SELFTEST=1 tampering in CI still fails (argv guard closes the env-var bypass)"
+  tamper_output_noci="$(env -u CI SETTINGS_PERMISSIONS_SELFTEST=1 bash "${BASH_SOURCE[0]}" 2>&1)"
+  tamper_rc_noci=$?
+  if [ "$tamper_rc_noci" -ne 0 ] && grep -qF "must never be wired outside the self-re-exec seam" <<<"$tamper_output_noci"; then
+    pass=$((pass + 1)); printf '  ok   %s\n' "self-test: SETTINGS_PERMISSIONS_SELFTEST=1 tampering with CI unset still fails (argv guard closes the env-var bypass)"
   else
-    fail=$((fail + 1)); printf '  FAIL %s\n' "self-test: SETTINGS_PERMISSIONS_SELFTEST=1 tampering in CI should still fail"
+    fail=$((fail + 1)); printf '  FAIL %s\n' "self-test: SETTINGS_PERMISSIONS_SELFTEST=1 tampering with CI unset should still fail"
+  fi
+
+  tamper_output_ci="$(CI=true SETTINGS_PERMISSIONS_SELFTEST=1 bash "${BASH_SOURCE[0]}" 2>&1)"
+  tamper_rc_ci=$?
+  if [ "$tamper_rc_ci" -ne 0 ] && grep -qF "must never be wired outside the self-re-exec seam" <<<"$tamper_output_ci"; then
+    pass=$((pass + 1)); printf '  ok   %s\n' "self-test: SETTINGS_PERMISSIONS_SELFTEST=1 tampering with CI=true still fails (argv guard closes the env-var bypass)"
+  else
+    fail=$((fail + 1)); printf '  FAIL %s\n' "self-test: SETTINGS_PERMISSIONS_SELFTEST=1 tampering with CI=true should still fail"
   fi
 fi
 
