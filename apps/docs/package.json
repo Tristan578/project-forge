@@ -2,7 +2,7 @@
   "name": "@spawnforge/docs",
   "private": true,
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=24.15 <25"
   },
   "scripts": {
     "dev": "tsx scripts/generate-mcp-docs.ts && next dev -p 3001",
