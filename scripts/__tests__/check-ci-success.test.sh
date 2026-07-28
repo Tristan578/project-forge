@@ -75,22 +75,30 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 #      Defaults false so every fixture that does not touch engine/ keeps the
 #      engine-smoke gate's success/skip as a legitimate path-filter skip; set true
 #      to exercise the engine-smoke anti-tamper arm via the engine surface.
+#   $25 design-internal-gate.result (default success) — the design workbench gate
+#      (PF-1003): the ONLY per-PR job that runs the @spawnforge/ui unit suite for
+#      a packages/ui-only PR. Mapped to needs-design in the anti-tamper map (its
+#      job `if:`); set skipped with $26=true to exercise its anti-tamper arm.
+#   $26 needs-design (default false) — design-internal-gate's OWN ci-gate trigger.
+#      Defaults false so every fixture that does not touch apps/design or
+#      packages/ui keeps the design gate's success/skip as a legitimate
+#      path-filter skip; set true to exercise the design anti-tamper arm.
 mk() {
-  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}"
+  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}" dig="${25:-success}" ndesign="${26:-false}"
   jq -nc \
     --arg nci "$nci" --arg ndeps "$ndeps" --arg ls "$ls" --arg lst "$lst" \
     --arg qg "$qg" --arg ht "$ht" --arg nagentic "$nagentic" --arg as "$as" \
     --arg nonboarding "$nonboarding" --arg tog "$tog" --arg ncodex "$ncodex" --arg ccg "$ccg" \
     --arg nghaw "$nghaw" --arg glr "$glr" --arg nhooks "$nhooks" --arg te2ej "$te2ej" --arg nweb "$nweb" \
     --arg nskills "$nskills" --arg sl "$sl" --arg napi "$napi" --arg ors "$ors" --arg apc "$apc" \
-    --arg te2es "$te2es" --arg nengine "$nengine" '
+    --arg te2es "$te2es" --arg nengine "$nengine" --arg dig "$dig" --arg ndesign "$ndesign" '
     {
-      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-any-code": "true" } },
+      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-design": $ndesign, "needs-any-code": "true" } },
       "quality-gates":        { result: $qg },
       "command-parity":       { result: "success" },
       "build-nextjs":         { result: "success" },
       "docs-internal-gate":   { result: "success" },
-      "design-internal-gate": { result: "success" },
+      "design-internal-gate": { result: $dig },
       "hook-tests":           { result: $ht },
       "lockfile-sync":        { result: $ls },
       "lockfile-sync-tests":  { result: $lst },
@@ -549,6 +557,34 @@ res="$(run_verify "$(mk true true success success success success true success t
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "engine-smoke failure fails (exit 1)"; else fail "engine-smoke failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "test-e2e-engine-smoke"; then pass "the failing engine-smoke gate is named"; else fail "failing engine-smoke gate not named"; fi
+
+# --- 48. TAMPER: design-internal-gate skipped while needs-design=true → exit 1 --
+# The design gate (PF-1003) is the ONLY per-PR job that runs the @spawnforge/ui
+# unit suite for a packages/ui-only PR — quality-gates' test-web runs that suite
+# only when web/ci changed, so a UI-only PR relies entirely on this gate. A PR
+# touching packages/ui sets needs-design=true, so the gate SHOULD run; an
+# `if: false` skip is the same single-line unwiring vector guarded for every
+# other self-defending gate. All other gates run+succeed here (dig=skipped at
+# $25, ndesign=true at $26), so the skipped design job is the SOLE tamper.
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success false false success false success success success false skipped true)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "design-internal-gate skipped while needs-design=true fails (exit 1)"; else fail "tamper (design-internal-gate) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "design-internal-gate tamper is flagged as a possible unwiring"; else fail "design-internal-gate tamper message missing"; fi
+if echo "$out" | grep -q "design-internal-gate ("; then pass "the unwired design-internal-gate is named"; else fail "unwired design-internal-gate not named"; fi
+
+# --- 49. design-internal-gate legit-skips (needs-design=false) → exit 0 ---------
+# A PR that touches neither apps/design nor packages/ui legitimately skips the
+# design gate; that must NOT trip the anti-tamper check (proves the needs-design
+# arm does not false-positive on an unrelated PR).
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success false false success false success success success false skipped false)")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "design-internal-gate legit-skip (needs-design=false) passes (exit 0)"; else fail "design-internal-gate legit skip should exit 0, got $rc"; fi
+
+# --- 50. design-internal-gate FAILED while triggered → exit 1 (hard-failure path)
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success false false success false success success success false failure true)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "design-internal-gate failure fails (exit 1)"; else fail "design-internal-gate failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "design-internal-gate"; then pass "the failing design-internal-gate is named"; else fail "failing design-internal-gate not named"; fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
