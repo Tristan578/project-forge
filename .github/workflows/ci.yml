@@ -284,7 +284,11 @@ jobs:
 
   # ---- Design Internal Gate ----
   # Runs when apps/design/** or packages/ui/** changed.
-  # Builds Storybook to verify no compilation errors in design system changes.
+  # Runs the @spawnforge/ui unit suite and builds Storybook to verify no
+  # compilation errors in design system changes. This is the ONLY per-PR job
+  # that runs the UI unit tests for a packages/ui-only PR (quality-gates'
+  # test-web runs them only when web/ci changed), so it is in the CI Success
+  # anti-tamper map (scripts/check-ci-success.sh <-> needs-design).
   # Path-gated so design-only PRs pay the Storybook build tax but engine/web PRs
   # that don't touch the design system are unaffected.
   design-internal-gate:
@@ -306,8 +310,27 @@ jobs:
 
       - run: npm ci
 
+      # Same key as quality-gates' ui-cache-typecheck / ui-cache-test-web —
+      # whichever job builds packages/ui first warms the cache for the others.
+      - name: Cache @spawnforge/ui build
+        id: ui-cache-design
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: packages/ui/dist
+          key: ui-build-${{ hashFiles('packages/ui/src/**', 'packages/ui/package.json', 'packages/ui/tsconfig.json') }}
+
       - name: Build @spawnforge/ui
+        if: steps.ui-cache-design.outputs.cache-hit != 'true'
         run: cd packages/ui && npm run build
+
+      # Intentionally duplicates quality-gates' test-web UI step: a
+      # packages/ui-only PR skips test-web, so this gate is that PR's ONLY
+      # per-PR run of the suite. check-ci-success.test.sh pins the two
+      # invocations byte-identical — change BOTH or the suite fails.
+      # `npm test` (not npx): vitest resolves from the root `npm ci` install,
+      # with no on-demand-install path to accidentally re-enable.
+      - name: Test @spawnforge/ui
+        run: cd packages/ui && npm test
 
       - name: Install design app dependencies
         run: cd apps/design && npm ci

@@ -65,11 +65,21 @@ fi
 #    its `if:` — guarding only one arm would leave the other as a silent
 #    single-line `if: false` skip vector.
 tamper=""
+drift=""
 check_triggered() {
   local job="$1"; shift
   local trig result fired=""
   result="$(jq -r --arg j "$job" '.[$j].result // "absent"' "$needs_file")"
   for trigger in "$@"; do
+    # Fail CLOSED on a missing trigger output. `.outputs[$t] // empty` reads a
+    # RENAMED or REMOVED ci-gate output as "did not fire", which silently
+    # disarms this gate's anti-tamper arm — the exact class of drift this
+    # script exists to catch. A mapped trigger the workflow no longer emits is
+    # config drift, not a legitimate skip: refuse to certify.
+    if [ "$(jq -r --arg t "$trigger" '(."ci-gate".outputs // {}) | has($t)' "$needs_file")" != "true" ]; then
+      drift="$drift"$'\n'"  - $job: trigger output '$trigger' missing from ci-gate outputs"
+      continue
+    fi
     trig="$(jq -r --arg t "$trigger" '."ci-gate".outputs[$t] // empty' "$needs_file")"
     if [ "$trig" = "true" ]; then
       fired="${fired:+$fired,}$trigger"
@@ -96,6 +106,11 @@ check_triggered "skills-lint"               "needs-skills"
 check_triggered "ghaw-lock-sync"            "needs-ghaw"
 check_triggered "openapi-route-sync"        "needs-api"
 check_triggered "actions-pin-check"         "needs-ci"
+# The design gate (PF-1003) is the ONLY per-PR job that runs the @spawnforge/ui
+# unit suite for a packages/ui-only PR — quality-gates' test-web runs that suite
+# only when web/ci changed, so a UI-only PR relies entirely on this gate for its
+# unit tests. Protect it from a silent `if: false` skip like the gates above.
+check_triggered "design-internal-gate"      "needs-design"
 # The journey gate is the ONLY runtime proof that the E2E store-exposure flag
 # (NEXT_PUBLIC_E2E_HOOKS) gates correctly on a real prod build, and the required
 # proof that the core new-user journey stays winnable + exportable. Protect it
@@ -108,6 +123,11 @@ check_triggered "test-e2e-journey"          "needs-web"
 # are mapped — guarding only one would leave the other as a silent `if: false`
 # skip vector. Protect it from unwiring like the other self-defending gates.
 check_triggered "test-e2e-engine-smoke"     "needs-web" "needs-engine"
+if [ -n "$drift" ]; then
+  echo "::error::Anti-tamper trigger output(s) missing from ci-gate outputs (map/workflow drift — renamed or removed trigger?):"
+  echo "$drift"
+  exit 1
+fi
 if [ -n "$tamper" ]; then
   echo "::error::Self-defending gate skipped despite its trigger firing (possible unwiring):"
   echo "$tamper"
