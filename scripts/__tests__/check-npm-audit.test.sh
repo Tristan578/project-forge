@@ -439,6 +439,23 @@ res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "missing title AND severity with waived id at unpinned path blocks (exit 1)"; else fail "compound missing fields should exit 1, got $rc"; fi
 if grep -qF "[unknown]" <<<"$out" && grep -qF "(untitled)" <<<"$out"; then pass "both sentinels project in the compound case"; else fail "compound case missing a sentinel in output"; fi
 
+# --- 6q. ADJACENT-RUN severity ("info low") on non-allowlisted advisory → exit 1
+# is_known_severity must exact-match each severity word: a substring scan of
+# the space-joined known list accepts any adjacent run ("info low",
+# "low moderate", …) as known, and a run below the fail threshold was then
+# silently `ignore`d (exit 0) — the exact class the unknown-severity fix
+# exists to make blocking-eligible.
+f="$(fixture adjacent-run-severity.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "evil-pkg":{"name":"evil-pkg","severity":"critical","via":[
+    {"source":2,"name":"evil-pkg","title":"evil-pkg RCE","url":"https://github.com/advisories/GHSA-bbbb-cccc-dddd","severity":"info low","range":"*"}],
+    "nodes":["node_modules/evil-pkg"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "adjacent-run severity (info low) on non-allowlisted advisory blocks (exit 1)"; else fail "adjacent-run severity should exit 1 (unknown, blocking-eligible), got $rc"; fi
+if grep -qF "[info low]" <<<"$out"; then pass "adjacent-run severity is rendered verbatim in the block line"; else fail "adjacent-run severity missing from block output"; fi
+
 # --- 7. Malformed JSON → fail-closed (exit 2) --------------------------------
 res="$(run_gate "printf 'not json{{{'")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "2" ]; then pass "malformed audit JSON fails closed (exit 2)"; else fail "malformed JSON should exit 2, got $rc"; fi

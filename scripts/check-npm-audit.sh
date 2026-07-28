@@ -201,11 +201,14 @@ is_fail_severity() {
 # Severities npm can legitimately emit. Anything else — including the "unknown"
 # sentinel the extraction substitutes for a missing/empty severity — cannot be
 # proven below threshold, so the loop treats it as blocking-eligible instead of
-# silently `ignore`-ing it.
-KNOWN_SEVERITIES="info low moderate high critical"
+# silently `ignore`-ing it. Exact-match branches, NOT a substring scan of a
+# space-joined list: the substring form accepts any adjacent run of the words
+# ("info low") as known, and a run below threshold would then be silently
+# ignored. (is_fail_severity keeps the substring form — there a spurious run
+# match can only over-block, never under-block.)
 is_known_severity() {
-  case " $KNOWN_SEVERITIES " in
-    *" $1 "*) return 0 ;;
+  case "$1" in
+    info|low|moderate|high|critical) return 0 ;;
     *) return 1 ;;
   esac
 }
