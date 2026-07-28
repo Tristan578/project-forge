@@ -857,9 +857,19 @@ if [ -f "$CD_YML" ]; then
   # cost of a silent one-line disable; it does not claim to be airtight
   # against a crafted compound condition.
   cd_if_lines="$(grep -cE '^    "?if"?[[:space:]]*:' <<<"$cd_sec" || true)"
+  # The containment must run on a TRAILING-comment-stripped copy of the
+  # condition line: `if: false # refs/heads/main` keeps the needle alive
+  # inside a YAML comment (whitespace-then-#), which the line-level strip
+  # above cannot remove — and because the deploy jobs' if: conditions accept
+  # `needs.security.result == 'skipped'`, a skipped security job SATISFIES
+  # the deploy gate, making this one line a deploy-through, not a deploy-block.
+  # Two materialized steps (no here-string-fed chain into grep); an over-
+  # truncated legitimate quoted `#` turns the pin red, never green.
+  cd_if_line="$(grep -E '^    "?if"?[[:space:]]*:' <<<"$cd_sec" || true)"
+  cd_if_scan="$(awk '{sub(/[[:space:]]#.*/, ""); print}' <<<"$cd_if_line")"
   if [ "$cd_if_lines" -ne 1 ]; then
     fail "cd.yml security job has $cd_if_lines job-level if: lines (expected exactly 1) — missing or duplicated condition (YAML keeps the last duplicate key)"
-  elif grep -qE '^    if[[:space:]]*:.*refs/heads/main' <<<"$cd_sec"; then
+  elif grep -qE '^    if[[:space:]]*:.*refs/heads/main' <<<"$cd_if_scan"; then
     pass "cd.yml security job-level if: still gates on refs/heads/main (exactly one condition line)"
   else
     fail "cd.yml security job-level if: no longer references refs/heads/main — condition removed or rewritten (deploy audits may be disabled)"
@@ -873,16 +883,23 @@ if [ -f "$CD_YML" ]; then
     pass "cd.yml security job has no job-level continue-on-error"
   fi
 
-  # The `needs:` edge itself: `security` in the deploy jobs' needs: lists is
-  # the SOLE mechanism by which a red audit blocks a deploy — every pin above
-  # protects the security job's own execution, but dropping `security` from a
-  # deploy job's flow list detaches the gate entirely while all of those pins
-  # stay green. Cut each deploy job's block (same awk anchor idiom), assert
-  # exactly ONE needs: line (YAML keeps the last duplicate key), and assert
-  # `security` appears as a flow-list ELEMENT — `(\[|,) security (,|\])`
-  # bounds it so a look-alike like `security-scan` cannot satisfy it. The
-  # element grep intentionally fails on a block-style rewrite: flag it and
-  # keep the flow list rather than guess at a new shape.
+  # The `needs:` edge itself: `security` in deploy-staging's and
+  # deploy-production's needs: lists is the edge by which a red audit blocks
+  # those two deploys — every pin above protects the security job's own
+  # execution, but dropping `security` from a deploy job's flow list detaches
+  # the gate entirely while all of those pins stay green. (Not the SOLE
+  # mechanism in the strict sense: both deploy if: conditions accept
+  # `needs.security.result == 'skipped'`, so the if:-count/containment pins
+  # above — which keep the security job un-skippable — are load-bearing for
+  # the same guarantee. deploy-docs/deploy-design carry no audit gating at
+  # all: pre-existing gap, tracked in PF-1011/#9030.) Cut each deploy job's block
+  # (same awk anchor idiom), assert exactly ONE needs: line (YAML keeps the
+  # last duplicate key), and assert `security` appears as a flow-list ELEMENT
+  # on a trailing-comment-stripped copy of that line — `(\[|,) security (,|\])`
+  # bounds it so a look-alike like `security-scan` cannot satisfy it, and the
+  # strip stops a `# [security]` smuggled in a YAML comment from satisfying
+  # it. The element grep intentionally fails on a block-style rewrite: flag it
+  # and keep the flow list rather than guess at a new shape.
   for cd_dj in deploy-staging deploy-production; do
     cd_dj_block="$(awk -v hdr="  ${cd_dj}:" '$0 == hdr {f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 != hdr {exit}' <<<"$cd_exec")"
     if [ -z "$cd_dj_block" ]; then
@@ -891,9 +908,10 @@ if [ -f "$CD_YML" ]; then
     fi
     cd_dj_needs_count="$(grep -cE '^    "?needs"?[[:space:]]*:' <<<"$cd_dj_block" || true)"
     cd_dj_needs_line="$(grep -E '^    "?needs"?[[:space:]]*:' <<<"$cd_dj_block" || true)"
+    cd_dj_needs_scan="$(awk '{sub(/[[:space:]]#.*/, ""); print}' <<<"$cd_dj_needs_line")"
     if [ "$cd_dj_needs_count" -ne 1 ]; then
       fail "cd.yml ${cd_dj} job has $cd_dj_needs_count job-level needs: lines (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key)"
-    elif grep -qE '(\[|,)[[:space:]]*security[[:space:]]*(,|\])' <<<"$cd_dj_needs_line"; then
+    elif grep -qE '(\[|,)[[:space:]]*security[[:space:]]*(,|\])' <<<"$cd_dj_needs_scan"; then
       pass "cd.yml ${cd_dj} needs: still lists security — a red audit blocks this deploy"
     else
       fail "cd.yml ${cd_dj} needs: no longer lists security as a flow-list element — this deploy would proceed past a failing audit gate"
@@ -968,13 +986,23 @@ if [ -f "$CI_YML" ]; then
     fail "lockfile-sync-tests job block is empty after comment-strip — self-defense job missing or fully commented out"
   fi
 
-  if grep -qF 'scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh' <<<"$lst_block"; then
+  # The two substring pins below must not be satisfiable from inside a TRAILING
+  # YAML comment: `run: true # bash scripts/__tests__/check-npm-audit.test.sh`
+  # executes `true` while a -F grep still matches the needle in the comment,
+  # which the line-level strip above cannot remove (same class round 2 closed
+  # for the qg/cd run: lines by whole-line anchoring — not available here,
+  # since the lint needle sits mid-line in a multi-line invocation). A YAML comment
+  # starts at whitespace-then-#, so strip that to end-of-line first; a
+  # legitimate quoted `#` over-truncated by this turns the pin red, never green.
+  lst_scan="$(awk '{sub(/[[:space:]]#.*/, ""); print}' <<<"$lst_block")"
+
+  if grep -qF 'scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh' <<<"$lst_scan"; then
     pass "self-defense job shellchecks the npm-audit gate + its suite"
   else
     fail "self-defense job does not shellcheck scripts/check-npm-audit.sh and its suite in an executable line"
   fi
 
-  if grep -qF 'bash scripts/__tests__/check-npm-audit.test.sh' <<<"$lst_block"; then
+  if grep -qF 'bash scripts/__tests__/check-npm-audit.test.sh' <<<"$lst_scan"; then
     pass "self-defense job runs the npm-audit gate bash suite"
   else
     fail "self-defense job does not run scripts/__tests__/check-npm-audit.test.sh in an executable line"
