@@ -22,6 +22,7 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for these tests"; exit 1
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/../check-ci-success.sh"
+REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
@@ -585,6 +586,96 @@ res="$(run_verify "$(mk true true success success success success true success t
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "design-internal-gate failure fails (exit 1)"; else fail "design-internal-gate failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "design-internal-gate"; then pass "the failing design-internal-gate is named"; else fail "failing design-internal-gate not named"; fi
+
+# --- 51. CONFIG DRIFT: mapped trigger output ABSENT from ci-gate outputs → 1 ----
+# `.outputs[$t] // empty` reads a RENAMED/REMOVED ci-gate output as "did not
+# fire" — a rename of `design` in ci-gate's filter block (or of the `needs-design`
+# output line) would silently disarm the design gate's anti-tamper arm while
+# every fixture above stays green, because the fixtures always carry every key.
+# A mapped trigger the workflow no longer emits is config drift, not a
+# legitimate skip: the verifier must refuse to certify. dig=skipped so the ONLY
+# reason to exit non-zero is the missing key itself (before the fail-closed
+# guard, this exact input exited 0).
+needs="$(mk true true success success success success true success true success true success true success false success false false success false success success success false skipped false | jq -c 'del(."ci-gate".outputs."needs-design")')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "absent mapped trigger output fails closed (exit 1)"; else fail "absent needs-design output should exit 1 (config drift), got $rc"; fi
+if echo "$out" | grep -q "missing from ci-gate outputs"; then pass "config drift names the missing-output condition"; else fail "config-drift message missing"; fi
+if echo "$out" | grep -q "needs-design"; then pass "config drift names the missing trigger (needs-design)"; else fail "missing trigger not named"; fi
+
+# --- 52. design-internal-gate ran + succeeded while triggered → exit 0 ----------
+# The green path for a packages/ui PR: needs-design=true and the gate ran to
+# success. Pins that the anti-tamper arm does not false-positive on the normal
+# triggered-and-passed outcome.
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success false false success false success success success false success true)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "design-internal-gate success while triggered passes (exit 0)"; else fail "triggered+success design gate should exit 0, got $rc"; fi
+if echo "$out" | grep -q "All required gates passed"; then pass "green path prints the all-passed line"; else fail "all-passed line missing"; fi
+
+# --- 53. design-internal-gate job ABSENT from needs while triggered → exit 1 ----
+# Deleting the job from ci-success's `needs:` list is the other one-line
+# unwiring (the gate stops reporting at all). `.result // "absent"` must read
+# that as absent ≠ success → tamper. Pins the existing fail-closed behavior so
+# a refactor cannot regress it to fail-open.
+needs="$(mk true true success success success success true success true success true success true success false success false false success false success success success false success true | jq -c 'del(."design-internal-gate")')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "design-internal-gate absent from needs while triggered fails (exit 1)"; else fail "absent design gate should exit 1, got $rc"; fi
+if echo "$out" | grep -q "design-internal-gate ("; then pass "the absent design gate is named"; else fail "absent design gate not named"; fi
+if echo "$out" | grep -q "result=absent"; then pass "the absent design gate reports result=absent"; else fail "result=absent missing"; fi
+
+# --- Structural: the REAL workflow wiring (not hermetic fixtures) ---------------
+# The hermetic cases above prove this verifier's decision logic against synthetic
+# NEEDS_JSON; none of them can catch a PR that reworks the real wiring the logic
+# certifies — swapping the design gate's test step for a no-op, slipping a
+# `continue-on-error` onto it, or detaching its `if:` from needs-design would
+# pass every fixture while shipping a dead gate. Pin the load-bearing bytes of
+# ci.yml / quality-gates.yml here (same pattern as check-native-bindings.test.sh).
+echo ""
+echo "--- structural assertions against the real workflow files ---"
+CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
+QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
+# The invocation is INTENTIONALLY byte-identical in both workflows: ci.yml's
+# design-internal-gate is the only per-PR run of the UI suite for a
+# packages/ui-only PR, while quality-gates' test-web covers web/ci PRs. Pinning
+# the two identical means a future change (flags, reporter, path) must touch
+# both or fail here — the lockstep guard the intentional duplication needs.
+UI_TEST_CMD='cd packages/ui && npx --no-install vitest run'
+if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
+  dig_block="$(awk -v j="  design-internal-gate:" '$0==j{f=1} f{print} f && /^  [a-z][a-z0-9-]*:[[:space:]]*$/ && $0!=j{exit}' "$CI_YML")"
+  if [ -n "$dig_block" ]; then
+    pass "ci.yml has a design-internal-gate job"
+  else
+    fail "ci.yml is missing the design-internal-gate job"
+  fi
+  if grep -v '^[[:space:]]*#' <<<"$dig_block" | grep -qF "$UI_TEST_CMD"; then
+    pass "design-internal-gate runs the UI suite ('$UI_TEST_CMD')"
+  else
+    fail "design-internal-gate does not run '$UI_TEST_CMD' (un-commented)"
+  fi
+  if grep -v '^[[:space:]]*#' <<<"$dig_block" | grep -q 'continue-on-error'; then
+    fail "design-internal-gate must not carry continue-on-error (would shadow a red suite)"
+  else
+    pass "design-internal-gate has no continue-on-error"
+  fi
+  if grep -v '^[[:space:]]*#' <<<"$dig_block" | grep -qF "needs.ci-gate.outputs.needs-design == 'true'"; then
+    pass "design-internal-gate is gated on needs-design"
+  else
+    fail "design-internal-gate's if: no longer names needs-design"
+  fi
+  if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Eq 'check_triggered "design-internal-gate"[[:space:]]+"needs-design"'; then
+    pass "verifier anti-tamper map covers design-internal-gate <-> needs-design"
+  else
+    fail "verifier anti-tamper map lost its design-internal-gate/needs-design entry"
+  fi
+  if grep -v '^[[:space:]]*#' "$QG_YML" | grep -qF "$UI_TEST_CMD"; then
+    pass "quality-gates test-web runs the byte-identical UI suite invocation"
+  else
+    fail "quality-gates.yml UI suite invocation drifted from ci.yml's ('$UI_TEST_CMD')"
+  fi
+else
+  fail "workflow files not found at $CI_YML / $QG_YML — structural assertions cannot run"
+fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
