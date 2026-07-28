@@ -354,15 +354,27 @@ in a hook's exit-code contract fails the PR instead of silently shipping.
   a strictly more conspicuous, `BASH_ENV`-class arbitrary-code-exec
   primitive, and it is itself caught by the widened static scan above (same
   register as the `check-ci-success.sh` anti-tamper language in
-  `gotchas.md`: raises cost, doesn't claim to be airtight). Assert on the
-  child's exit code AND that its captured output contains the specific FAIL
+  `gotchas.md`: raises cost, doesn't claim to be airtight).
+
+  The argv gate also leaves a hole in the reverse direction: a top-level
+  `bash <suite> --selftest-child` satisfies the flag with no parent,
+  silently skipping the whole negative-coverage block and exiting 0. So
+  the runtime assertion needs FOUR branches, not three — the flagged arm
+  must additionally prove parentage (the spawner helper is the only
+  legitimate source of the flag and always sets the override, so a
+  flagged invocation WITHOUT the override is an orphan), and an orphan
+  must FAIL. Give that arm its own regression probe: spawn a bare flagged
+  child with the override unset and assert the orphan FAIL.
+
+  Assert on the child's exit code AND that its captured output contains
+  the specific FAIL
   message the hook emits, anchored to the FAIL line specifically (e.g. grep
   `FAIL <substr>`, not a bare substring) — both `ok` and `FAIL` lines can
   print the same descriptive text, so an unanchored grep is vacuous (a bare
   nonzero exit doesn't prove *which* check failed, and an unanchored match
   can pass against the wrong line). See `settings-permissions.test.sh`'s
   `SETTINGS_PERMISSIONS_FILE`/`--selftest-child` seam for the canonical
-  example (round 3-6 hardening, PF-853) — the runtime assertion there also
+  example (round 3-7 hardening, PF-853) — the runtime assertion there also
   covers the legacy `SETTINGS_PERMISSIONS_SELFTEST` env-var name so a
   scan/assertion widened for one seam variant doesn't miss the other. Same
   scan pattern as the `$NPM_AUDIT_CMD`/`$GHAW_COMPILE_CMD`/`$NATIVE_BINDINGS_*`

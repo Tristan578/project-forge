@@ -424,11 +424,25 @@ run_selftest_child() {
 }
 
 if [ "${1:-}" != "--selftest-child" ] && [ -z "${SETTINGS_PERMISSIONS_SELFTEST:-}" ]; then
-  assert_child_rejects() {
-    local desc="$1" fixture="$2" expect_substr="$3" output rc
+  # child_rejects <fixture> <expect_substr> — 0 (true) iff the re-exec'd child
+  # rejected <fixture> FOR THE NAMED GUARD specifically: the child must exit
+  # nonzero AND its output must contain a FAIL line anchored on expect_substr.
+  # Anchoring on "FAIL " (not a bare substring) matters — assert_jq prints the
+  # same $desc text on both its ok and FAIL branches, so an unanchored match
+  # can accept an unrelated ok line as if it were a rejection (see the
+  # negative control below). Split out from assert_child_rejects so the
+  # negative control can reuse the child-spawn path without double-counting
+  # pass/fail.
+  child_rejects() {
+    local fixture="$1" expect_substr="$2" output rc
     output="$(run_selftest_child "$fixture" 2>&1)"
     rc=$?
-    if [ "$rc" -ne 0 ] && grep -qF "FAIL $expect_substr" <<<"$output"; then
+    [ "$rc" -ne 0 ] && grep -qF "FAIL $expect_substr" <<<"$output"
+  }
+
+  assert_child_rejects() {
+    local desc="$1" fixture="$2" expect_substr="$3"
+    if child_rejects "$fixture" "$expect_substr"; then
       pass=$((pass + 1)); printf '  ok   %s\n' "$desc"
     else
       fail=$((fail + 1)); printf '  FAIL %s\n' "$desc"
@@ -482,6 +496,18 @@ if [ "${1:-}" != "--selftest-child" ] && [ -z "${SETTINGS_PERMISSIONS_SELFTEST:-
     pass=$((pass + 1)); printf '  ok   %s\n' "self-test: bare --selftest-child without fixture seam is rejected as an orphan child (S-NEW)"
   else
     fail=$((fail + 1)); printf '  FAIL %s\n' "self-test: bare --selftest-child without fixture seam should be rejected as an orphan child (S-NEW)"
+  fi
+
+  # Negative control for the FAIL anchor (SF2, round 4): additional-dirs.json
+  # leaves disableAutoMode intact, so the child prints `ok   disableAutoMode
+  # absent…`. assert_jq prints the SAME desc text on its ok branch as it would
+  # on a FAIL branch, so an unanchored substring match (the round-4 vacuity
+  # bug: grep -qF "$expect_substr" with no "FAIL " prefix) would accept that ok
+  # line as if it were a rejection. child_rejects must NOT be fooled here.
+  if child_rejects "$SEAM_TMPROOT/badcfg/additional-dirs.json" "disableAutoMode absent"; then
+    fail=$((fail + 1)); printf '  FAIL %s\n' "self-test: assert_child_rejects must not accept an ok line as a rejection (SF2 anchor)"
+  else
+    pass=$((pass + 1)); printf '  ok   %s\n' "self-test: assert_child_rejects rejects an ok line — FAIL anchor discriminates (SF2)"
   fi
 fi
 
