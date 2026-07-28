@@ -945,12 +945,25 @@ if [ -f "$CD_YML" ]; then
     fi
     # The load-bearing half of the edge (see comment above): the explicit
     # success clause in the if: body. Containment on a comment-stripped copy
-    # of the WHOLE job block — deploy-staging carries it directly (alongside
-    # its skipped-acceptance), deploy-production in its workflow_dispatch
-    # promote branch. Deleting the clause leaves needs: intact and the
-    # workflow valid while a red audit no longer stops the deploy — the
-    # exact one-line unaudited-deploy shape this pin exists to catch.
-    cd_dj_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cd_dj_block")"
+    # of the job-level if: BLOCK ONLY — cut from the if: key through the next
+    # job-level key so multi-line expression continuations are included. NOT
+    # the whole job block: a needle occurrence anywhere else in the job (an
+    # env: value, a step name, a run: echo) has no gating effect and must not
+    # satisfy this pin, or deleting the real clause goes green the moment any
+    # innocent mention of it exists. deploy-staging carries the clause
+    # directly (alongside its skipped-acceptance), deploy-production in its
+    # workflow_dispatch promote branch. Deleting the clause leaves needs:
+    # intact and the workflow valid while a red audit no longer stops the
+    # deploy — the exact one-line unaudited-deploy shape this pin exists to
+    # catch. A missing if: block entirely yields an empty scan and FAILs
+    # (fail-closed). Scope note: this pin proves the clause is PRESENT in the
+    # if: body, not that it is EFFECTIVE — a vacuous rewrite like
+    # `(needs.security.result == 'success' || true)` still passes; resisting
+    # that would require parsing GitHub Actions expressions, which is out of
+    # scope for containment pins (same register as the anti-tamper caveats in
+    # gotchas.md: raises cost, doesn't claim to be airtight).
+    cd_dj_ifblk="$(awk '/^    "?if"?[[:space:]]*:/{f=1;print;next} f && /^    [A-Za-z_"]/{exit} f{print}' <<<"$cd_dj_block")"
+    cd_dj_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cd_dj_ifblk")"
     if grep -qE "needs\.security\.result[[:space:]]*==[[:space:]]*'success'" <<<"$cd_dj_scan"; then
       pass "cd.yml ${cd_dj} if: still requires needs.security.result == 'success' — the clause that stops this deploy on a red audit"
     else
