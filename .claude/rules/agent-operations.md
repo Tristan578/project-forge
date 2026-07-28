@@ -331,14 +331,23 @@ in a hook's exit-code contract fails the PR instead of silently shipping.
   that greps both `.github/workflows/` and (if present) `.github/actions/` for
   the seam name, comment-stripped (a full-comment mention doesn't count as
   wired), fail-closed on a missing/unreadable dir AND on grep scan errors
-  (exit >= 2), plus a parent-only runtime assertion that fails if the override
-  is ever set while `CI` is set (catches wiring no static grep could see, e.g.
-  a composite action exporting it via `$GITHUB_ENV`). Consume the seam itself
-  via self-re-exec: re-invoke the suite (`bash "${BASH_SOURCE[0]}"`) with the
-  override pointed at a jq-mutated bad fixture plus a second `_SELFTEST=1` env
-  var telling the child to skip its own negative-coverage block (no
-  recursion), and assert on the child's exit code. See
-  `settings-permissions.test.sh`'s `SETTINGS_PERMISSIONS_FILE`/
-  `SETTINGS_PERMISSIONS_SELFTEST` seam for the canonical example — the same
+  (exit >= 2), plus a runtime assertion — hoisted OUT of any recursion-guarded
+  block so it evaluates on every non-child invocation, not only a top-level
+  one — that fails if the override is ever set while `CI` is set (catches
+  wiring no static grep could see, e.g. a composite action exporting it via
+  `$GITHUB_ENV`). Consume the seam itself via self-re-exec: re-invoke the
+  suite (`bash "${BASH_SOURCE[0]}" --selftest-child`) with the override
+  pointed at a jq-mutated bad fixture, gating the negative-coverage block on
+  an **argv flag** (`[ "${1:-}" != "--selftest-child" ]`), never an env var —
+  an env-var recursion guard (e.g. a bare `_SELFTEST=1`) is spoofable via
+  `$GITHUB_ENV` and would let CI-side tampering neuter the negative-path
+  self-tests, whereas a positional arg cannot be injected that way. Assert on
+  the child's exit code AND that its captured output contains the specific
+  FAIL message the hook emits (a bare nonzero exit doesn't prove *which*
+  check failed). See `settings-permissions.test.sh`'s
+  `SETTINGS_PERMISSIONS_FILE`/`--selftest-child` seam for the canonical
+  example (round 3 hardening, PF-853) — the runtime assertion there also
+  covers the legacy `SETTINGS_PERMISSIONS_SELFTEST` env-var name so a
+  scan/assertion widened for one seam variant doesn't miss the other. Same
   scan pattern as the `$NPM_AUDIT_CMD`/`$GHAW_COMPILE_CMD`/`$NATIVE_BINDINGS_*`
   seams in scripts land.
