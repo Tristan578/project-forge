@@ -340,6 +340,99 @@ res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "sibling-prefix path (brace-expansion-extra) blocks (exit 1 — exact match, not prefix)"; else fail "sibling-prefix path should exit 1, got $rc"; fi
 if grep -qF -- "- node_modules/brace-expansion-extra" <<<"$out"; then pass "output names the sibling-prefix path as unexpected"; else fail "sibling-prefix path not named as unexpected"; fi
 
+# --- 6k. MISSING title on waived id at an unpinned path → BLOCK, exit 1 ------
+# The field-shift bypass (security review, PF-1009): `title` is field 3 of the
+# TSV row, and tab is IFS-whitespace — bash collapses the doubled tab an empty
+# field leaves behind, sliding the node list into $title and emptying
+# $nodes_csv. Pre-fix that turned this exact report (waived id at the unpinned
+# glob/ copy, no title key) into WAIVED exit 0. The nz() sentinel projection
+# must keep the columns aligned so the pin violation still blocks.
+f="$(fixture missing-title.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion","node_modules/glob/node_modules/brace-expansion"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "missing title with waived id at unpinned path blocks (exit 1 — field-shift bypass)"; else fail "missing title should exit 1 (field-shift bypass), got $rc"; fi
+if grep -qF "node_modules/glob/node_modules/brace-expansion" <<<"$out"; then pass "missing-title block still names the unexpected glob/ location"; else fail "missing-title block does not name the unexpected location"; fi
+if grep -qF "(untitled)" <<<"$out"; then pass "missing title is rendered as the (untitled) sentinel"; else fail "(untitled) sentinel missing from output"; fi
+
+# --- 6l. EMPTY-STRING title on waived id at an unpinned path → BLOCK, exit 1 --
+# Same bypass, different trigger: jq's `//` does NOT fire on "" (only
+# null/false), so a `"title": ""` also emitted an empty TSV field pre-fix.
+f="$(fixture empty-title.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion","node_modules/glob/node_modules/brace-expansion"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "empty-string title with waived id at unpinned path blocks (exit 1)"; else fail "empty title should exit 1 (field-shift bypass), got $rc"; fi
+if grep -qF "::error::allowlisted advisory GHSA-mh99-v99m-4gvg found outside its pinned location(s)" <<<"$out"; then pass "empty-title case takes the pin-violation path"; else fail "empty-title case did not take the pin-violation path"; fi
+
+# --- 6m. MISSING severity on a non-allowlisted advisory → BLOCK, exit 1 -------
+# Leading-position shift: severity is field 1, and bash strips LEADING
+# IFS-whitespace, so an absent severity slid the URL into $severity pre-fix —
+# is_fail_severity never matched and a non-allowlisted advisory was silently
+# `ignore`d (exit 0). The "unknown" sentinel cannot be proven below threshold,
+# so it must be blocking-eligible.
+f="$(fixture missing-severity.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "evil-pkg":{"name":"evil-pkg","via":[
+    {"source":2,"name":"evil-pkg","title":"evil-pkg RCE","url":"https://github.com/advisories/GHSA-aaaa-bbbb-cccc","range":"*"}],
+    "nodes":["node_modules/evil-pkg"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "missing severity on non-allowlisted advisory blocks (exit 1 — unknown is blocking-eligible)"; else fail "missing severity should exit 1, got $rc"; fi
+if grep -qF "[unknown]" <<<"$out"; then pass "missing severity is rendered as the [unknown] sentinel"; else fail "[unknown] sentinel missing from output"; fi
+
+# --- 6n. EMPTY-STRING severity on a non-allowlisted advisory → BLOCK, exit 1 --
+f="$(fixture empty-severity.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "evil-pkg":{"name":"evil-pkg","severity":"critical","via":[
+    {"source":2,"name":"evil-pkg","title":"evil-pkg RCE","url":"https://github.com/advisories/GHSA-aaaa-bbbb-cccc","severity":"","range":"*"}],
+    "nodes":["node_modules/evil-pkg"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "empty-string severity on non-allowlisted advisory blocks (exit 1)"; else fail "empty severity should exit 1, got $rc"; fi
+if grep -qF "[unknown]" <<<"$out"; then pass "empty severity is rendered as the [unknown] sentinel"; else fail "[unknown] sentinel missing for empty severity"; fi
+
+# --- 6o. Nodes array of EMPTY STRINGS → no-location-data BLOCK, exit 1 --------
+# ["",""] survives an `if nodes empty` length check but yields zero usable
+# paths — the projection must filter to non-empty strings BEFORE deciding
+# between real locations and the (no-nodes) sentinel, else join(",") emits ","
+# and field 4 becomes garbage that is neither a path nor the sentinel.
+f="$(fixture empty-string-nodes.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["",""]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "nodes array of empty strings blocks (exit 1 — no usable location data)"; else fail "empty-string nodes should exit 1, got $rc"; fi
+if grep -qF "no location data" <<<"$out"; then pass "empty-string nodes route to the no-location-data block"; else fail "empty-string nodes did not route to the no-location-data block"; fi
+
+# --- 6p. BOTH title and severity absent on waived id at unpinned path → exit 1
+# Compound sentinel case: two empty fields at once shifted the row by two
+# positions pre-fix. Both sentinels must project and the pin violation must
+# still block.
+f="$(fixture missing-title-and-severity.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion","node_modules/glob/node_modules/brace-expansion"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "missing title AND severity with waived id at unpinned path blocks (exit 1)"; else fail "compound missing fields should exit 1, got $rc"; fi
+if grep -qF "[unknown]" <<<"$out" && grep -qF "(untitled)" <<<"$out"; then pass "both sentinels project in the compound case"; else fail "compound case missing a sentinel in output"; fi
+
 # --- 7. Malformed JSON → fail-closed (exit 2) --------------------------------
 res="$(run_gate "printf 'not json{{{'")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "2" ]; then pass "malformed audit JSON fails closed (exit 2)"; else fail "malformed JSON should exit 2, got $rc"; fi

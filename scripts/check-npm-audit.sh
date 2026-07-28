@@ -39,15 +39,22 @@
 #     together with its vulnerability's `nodes` (the node_modules paths it was
 #     found at).
 #   - FAILS (exit 1) if any source advisory whose severity is in $FAIL_SEVERITIES
-#     either (a) has an id NOT in $ALLOWED_ADVISORIES, or (b) has an id that IS
+#     — or is not a recognized npm severity at all (missing/empty severities are
+#     projected to the "unknown" sentinel; a row that cannot be classified below
+#     threshold is blocking-eligible, never silently ignored) — either (a) has an
+#     id NOT in $ALLOWED_ADVISORIES, or (b) has an id that IS
 #     allowlisted but occurs at a node_modules path outside that id's pinned
 #     set — naming the unexpected location(s) — or (c) has an allowlisted id but
-#     the report carries no usable location data (`nodes` missing, empty, or
-#     non-array) — a waiver that cannot be location-verified is not a waiver.
+#     the report carries no usable location data (`nodes` missing, empty,
+#     non-array, or containing no non-empty strings) — a waiver that cannot be
+#     location-verified is not a waiver.
 #     PASSES (exit 0) otherwise.
 #   - FAILS CLOSED (exit 2) on any tooling error — missing jq, npm emitting no
 #     parseable JSON, output that is not a recognized v2 audit report
-#     (auditReportVersion != 2), a jq extraction failure mid-report, or a
+#     (auditReportVersion != 2), a jq extraction failure mid-report (including a
+#     non-string severity/url/title, which the projection rejects via error()),
+#     a malformed extracted row (an empty TSV field that the sentinel projection
+#     should have made impossible), or a
 #     malformed $ALLOWED_ADVISORIES entry (an id without a pinned path). A gate
 #     that cannot evaluate must never report "clean".
 #
@@ -160,7 +167,7 @@ is_allowed() {
 # substring, so "node_modules/brace-expansion" never accidentally matches
 # "node_modules/glob/node_modules/brace-expansion".
 paths_within_pin() {
-  local id="$1" nodes_csv="$2" pinned_csv unexpected_found=0
+  local id="$1" nodes_csv="$2" pinned_csv unexpected_found=0 pinned_arr observed_arr
   pinned_csv="$(pinned_paths_for "$id")" || return 0
   local IFS=','
   read -r -a pinned_arr <<<"$pinned_csv"
@@ -191,6 +198,18 @@ is_fail_severity() {
   esac
 }
 
+# Severities npm can legitimately emit. Anything else — including the "unknown"
+# sentinel the extraction substitutes for a missing/empty severity — cannot be
+# proven below threshold, so the loop treats it as blocking-eligible instead of
+# silently `ignore`-ing it.
+KNOWN_SEVERITIES="info low moderate high critical"
+is_known_severity() {
+  case " $KNOWN_SEVERITIES " in
+    *" $1 "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 echo "=== npm audit gate ($WORKSPACE) ==="
 
 # Emit one line per SOURCE advisory: "<severity>\t<url>\t<title>\t<nodes_csv>".
@@ -198,23 +217,42 @@ echo "=== npm audit gate ($WORKSPACE) ==="
 # by select(type==…). `nodes` lives on the VULNERABILITY (a sibling of `via`,
 # not per-via-entry) — capture it once per vulnerability via `as $vuln` before
 # flat-mapping into its `via[]` objects, so each row still carries the node
-# paths that vulnerability was found at. Missing/empty/non-array `nodes`
-# becomes the "(no-nodes)" sentinel (unambiguous — a real node path always
-# starts with node_modules/), which the loop below treats as a blocking
-# violation for allowlisted ids: a waiver that cannot be location-verified is
-# not a waiver. Captured into a variable (NOT a `done < <(jq …)` process
+# paths that vulnerability was found at. `nodes` is filtered to its non-empty
+# STRING entries; if none survive (missing/empty/non-array `nodes`, or an array
+# of empty strings) the row gets the "(no-nodes)" sentinel (unambiguous — a
+# real node path always starts with node_modules/), which the loop below treats
+# as a blocking violation for allowlisted ids: a waiver that cannot be
+# location-verified is not a waiver.
+#
+# EVERY TSV FIELD IS GUARANTEED NON-EMPTY via nz(). This is load-bearing, not
+# cosmetic: tab is IFS-whitespace, so the `read` loop below COLLAPSES a run of
+# tabs around an empty field (and strips leading tabs), sliding every later
+# field left — a missing `title` once shifted the node list into $title and
+# emptied $nodes_csv, flipping a BLOCK into a WAIVED exit 0 (fail-open;
+# security review, PF-1009). jq's `//` alternative does NOT fire on "" — only
+# on null/false — so nz() checks null and "" explicitly. A NON-STRING field
+# value (e.g. an object-valued title) aborts the projection via error() →
+# jq_rc != 0 → fail-closed exit 2. @tsv escapes any embedded tab/newline as
+# \t/\n, so a field can never contain a raw delimiter — empty fields were the
+# only field-shift vector, and nz() closes it.
+#
+# Captured into a variable (NOT a `done < <(jq …)` process
 # substitution, whose exit status is discarded) so a mid-report jq failure
 # fails closed instead of silently evaluating a truncated advisory list;
 # pipefail (set above, inherited by the command substitution) carries jq's
 # exit status through `sort -u`.
 rows="$(jq -r '
+  def nz(alt):
+    if . == null or . == "" then alt
+    elif type == "string" then .
+    else error("non-string advisory field") end;
   .vulnerabilities[]?
   | . as $vuln
-  | (if ($vuln.nodes | type) == "array" and ($vuln.nodes | length) > 0
-     then $vuln.nodes else ["(no-nodes)"] end) as $nodes
+  | ([$vuln.nodes[]? | select(type == "string" and . != "")]) as $usable
+  | (if ($usable | length) > 0 then $usable else ["(no-nodes)"] end) as $nodes
   | $vuln.via[]?
   | select(type == "object")
-  | [(.severity // "unknown"), (.url // ""), (.title // ""), ($nodes | join(","))]
+  | [(.severity | nz("unknown")), (.url | nz("(no-url)")), (.title | nz("(untitled)")), ($nodes | join(","))]
   | @tsv
 ' <<<"$audit_json" | sort -u)"
 jq_rc=$?
@@ -228,13 +266,27 @@ pin_violations=0
 seen_allowed=""
 
 while IFS=$'\t' read -r severity url title nodes_csv; do
-  [ -z "$severity" ] && continue
+  # A fully-blank line is the here-string's trailing newline on a zero-row
+  # extraction, not an advisory — skip it.
+  if [ -z "$severity" ] && [ -z "$url" ] && [ -z "$title" ] && [ -z "$nodes_csv" ]; then
+    continue
+  fi
+  # Defense-in-depth: the jq projection guarantees all four fields non-empty
+  # (nz() sentinels), so an empty field here means field-splitting shifted and
+  # this row cannot be trusted to classify — refuse, fail closed. (This exit
+  # works because the loop is fed by a here-string, not a pipeline subshell.)
+  if [ -z "$severity" ] || [ -z "$url" ] || [ -z "$title" ] || [ -z "$nodes_csv" ]; then
+    echo "::error::malformed advisory row (empty field after sentinel projection) in $WORKSPACE — failing closed"
+    exit 2
+  fi
   id="${url##*/}"        # GHSA id (or numeric advisory id) from the advisory url
   [ -z "$id" ] && id="(unidentified advisory)"
   # Record an allowlisted id as seen at ANY severity so the anti-rot note below
   # only fires when the advisory is genuinely absent — not merely below threshold.
   is_allowed "$id" && seen_allowed="$seen_allowed $id"
-  if is_fail_severity "$severity"; then
+  # An unrecognized severity (incl. the "unknown" sentinel for missing/empty)
+  # cannot be proven below threshold — blocking-eligible, never `ignore`d.
+  if is_fail_severity "$severity" || ! is_known_severity "$severity"; then
     if is_allowed "$id"; then
       pinned_display="$(pinned_paths_for "$id")"
       if [ "$nodes_csv" = "(no-nodes)" ]; then
@@ -284,7 +336,7 @@ done
 echo ""
 total_violations=$((unlisted_violations + pin_violations))
 if [ "$unlisted_violations" -gt 0 ]; then
-  echo "::error::$unlisted_violations non-allowlisted advisory(ies) at or above [$FAIL_SEVERITIES] in $WORKSPACE."
+  echo "::error::$unlisted_violations non-allowlisted advisory(ies) at or above [$FAIL_SEVERITIES] (or with unrecognized severity) in $WORKSPACE."
   echo "Fix the dependency (upgrade/relock) — do NOT add it to the allowlist unless it is"
   echo "transitive, dev-only, un-relockable AND non-exploitable in this repo (see header)."
 fi
