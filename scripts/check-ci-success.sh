@@ -96,6 +96,11 @@ check_triggered "skills-lint"               "needs-skills"
 check_triggered "ghaw-lock-sync"            "needs-ghaw"
 check_triggered "openapi-route-sync"        "needs-api"
 check_triggered "actions-pin-check"         "needs-ci"
+# The design gate (PF-1003) is the ONLY per-PR job that runs the @spawnforge/ui
+# unit suite for a packages/ui-only PR — quality-gates' test-web runs that suite
+# only when web/ci changed, so a UI-only PR relies entirely on this gate for its
+# unit tests. Protect it from a silent `if: false` skip like the gates above.
+check_triggered "design-internal-gate"      "needs-design"
 # The journey gate is the ONLY runtime proof that the E2E store-exposure flag
 # (NEXT_PUBLIC_E2E_HOOKS) gates correctly on a real prod build, and the required
 # proof that the core new-user journey stays winnable + exportable. Protect it
