@@ -454,7 +454,7 @@ JSON
 )"
 res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "adjacent-run severity (info low) on non-allowlisted advisory blocks (exit 1)"; else fail "adjacent-run severity should exit 1 (unknown, blocking-eligible), got $rc"; fi
-if grep -qF "[info low]" <<<"$out"; then pass "adjacent-run severity is rendered verbatim in the block line"; else fail "adjacent-run severity missing from block output"; fi
+if grep -qE '^ *BLOCK +\[info low\]' <<<"$out"; then pass "adjacent-run severity is rendered verbatim in the BLOCK line"; else fail "adjacent-run severity not on a BLOCK line (an ignore line rendering [info low] must not satisfy this)"; fi
 
 # --- 7. Malformed JSON → fail-closed (exit 2) --------------------------------
 res="$(run_gate "printf 'not json{{{'")"; rc="${res%%|*}"; out="${res#*|}"
