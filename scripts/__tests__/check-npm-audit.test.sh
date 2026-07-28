@@ -75,8 +75,8 @@ REPO="$(mktemp -d)"
 )
 trap 'rm -rf "$FIX" "$REPO"' EXIT
 
-# Run a gate script inside $REPO against workspace `ws` with a given audit stub
-# command. Echoes "<exit>|<output>".
+# Run a gate script inside $REPO against a workspace (default `ws`) with a
+# given audit stub command. Echoes "<exit>|<output>".
 #
 # AUTOMATIC bash-runtime-error detection: any `unbound variable` / `bad
 # substitution` / `syntax error` leaking from the gate is appended to
@@ -86,8 +86,8 @@ trap 'rm -rf "$FIX" "$REPO"' EXIT
 # command substitution, and the crashed substitution's empty capture used to
 # read as a WAIVED verdict for the wrong reason, invisibly.
 run_gate_script() {
-  local script="$1" auditcmd="$2" out rc
-  out="$(cd "$REPO" && NPM_AUDIT_CMD="$auditcmd" bash "$script" ws 2>&1)"
+  local script="$1" auditcmd="$2" ws_arg="${3:-ws}" out rc
+  out="$(cd "$REPO" && NPM_AUDIT_CMD="$auditcmd" bash "$script" "$ws_arg" 2>&1)"
   rc=$?
   grep -E 'unbound variable|bad substitution|syntax error' <<<"$out" >> "$FIX/bash-errors.log" || true
   printf '%s|%s' "$rc" "$out"
@@ -96,6 +96,12 @@ run_gate_script() {
 # Same, against the real gate under test.
 run_gate() {
   run_gate_script "$SCRIPT" "$1"
+}
+
+# Same, but invoked with the ROOT workspace arg (`.`) — the invocation shape
+# quality-gates.yml/cd.yml use for the repo-root audit (PF-1010 / #9029).
+run_gate_root() {
+  run_gate_script "$SCRIPT" "$1" .
 }
 
 # Helper: write a fixture file, echo its absolute path.
@@ -456,6 +462,29 @@ res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "adjacent-run severity (info low) on non-allowlisted advisory blocks (exit 1)"; else fail "adjacent-run severity should exit 1 (unknown, blocking-eligible), got $rc"; fi
 if grep -qE '^ *BLOCK +\[info low\]' <<<"$out"; then pass "adjacent-run severity is rendered verbatim in the BLOCK line"; else fail "adjacent-run severity not on a BLOCK line (an ignore line rendering [info low] must not satisfy this)"; fi
 
+# --- 6r. ROOT-workspace invocation (`.`): blocking advisory blocks (exit 1) ---
+# PF-1010 / #9029: npm audit scopes advisories to the INVOKING workspace's
+# dependency subtree, so the workflows also run the gate from the repo root
+# (`check-npm-audit.sh .`) to cover root devDeps and the packages*/apps*
+# workspaces. These cases pin the gate's contract for that `.` arg — TARGET
+# resolves to "$ROOT/.", which must behave identically to a named workspace,
+# not trip the missing-dir fail-closed path.
+res="$(run_gate_root "cat $FIX/block-high.json")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "root invocation (.): non-allowlisted high blocks (exit 1)"; else fail "root invocation with blocking advisory should exit 1, got $rc"; fi
+if grep -qF "npm audit gate (.)" <<<"$out"; then pass "root invocation (.): header names the root workspace"; else fail "root invocation header missing '(.)'— the workspace arg did not flow through"; fi
+
+# --- 6s. ROOT-workspace invocation (`.`): waived-at-pin passes (exit 0) -------
+# waived.json is the real root-audit shape: the pinned source advisory plus a
+# string-`via` propagation row (minimatch) — propagation must stay covered by
+# the source waiver when invoked via `.` too.
+res="$(run_gate_root "cat $FIX/waived.json")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "root invocation (.): allowlisted-at-pin advisory passes (exit 0)"; else fail "root invocation with waived-at-pin advisory should exit 0, got $rc"; fi
+if grep -qF "WAIVED" <<<"$out"; then pass "root invocation (.): allowlisted advisory reported as WAIVED"; else fail "root invocation WAIVED marker missing"; fi
+
+# --- 6t. ROOT-workspace invocation (`.`): empty output fails closed (exit 2) --
+res="$(run_gate_root "true")"; rc="${res%%|*}"
+if [ "$rc" = "2" ]; then pass "root invocation (.): empty audit output fails closed (exit 2)"; else fail "root invocation with empty output should exit 2, got $rc"; fi
+
 # --- 7. Malformed JSON → fail-closed (exit 2) --------------------------------
 res="$(run_gate "printf 'not json{{{'")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "2" ]; then pass "malformed audit JSON fails closed (exit 2)"; else fail "malformed JSON should exit 2, got $rc"; fi
@@ -622,6 +651,17 @@ if [ -f "$QG_YML" ]; then
   else
     fail "security job does not run scripts/check-npm-audit.sh mcp-server in any executable line"
   fi
+  # PF-1010 / #9029: npm audit scopes advisories to the INVOKING workspace's
+  # dependency subtree — the web and mcp-server runs never evaluate the ROOT
+  # workspace's own devDeps, nor the packages/* and apps/* workspaces. The job
+  # must ALSO invoke the gate for the repo root. End-anchored -E match: a -F
+  # substring needle ending in `.` would also be satisfied by a `.something`
+  # path argument.
+  if grep -Eq 'bash scripts/check-npm-audit\.sh \.[[:space:]]*$' <<<"$qg_exec"; then
+    pass "security job runs the allowlist gate for the root workspace (.) (executable line)"
+  else
+    fail "security job does not run scripts/check-npm-audit.sh . (root workspace) in any executable line — root devDeps and packages*/apps* go unaudited"
+  fi
 
   # The raw, un-allowlisted gate must be FULLY replaced — if a stray
   # `npm audit --audit-level=high` survives it will fail on the un-relockable
@@ -685,6 +725,13 @@ if [ -f "$CD_YML" ]; then
     pass "cd.yml security step runs the allowlist gate for both workspaces (executable lines)"
   else
     fail "cd.yml security step does not run scripts/check-npm-audit.sh for both workspaces in executable lines"
+  fi
+  # Root-workspace invocation, mirroring the quality-gates assertion above —
+  # cd.yml is editable independently, so it needs its own pin (PF-1010 / #9029).
+  if grep -Eq 'bash scripts/check-npm-audit\.sh \.[[:space:]]*$' <<<"$cd_exec"; then
+    pass "cd.yml security step runs the allowlist gate for the root workspace (.) (executable line)"
+  else
+    fail "cd.yml security step does not run scripts/check-npm-audit.sh . (root workspace) in any executable line"
   fi
 
   if grep -qF 'npm audit --audit-level=high' <<<"$cd_exec"; then
