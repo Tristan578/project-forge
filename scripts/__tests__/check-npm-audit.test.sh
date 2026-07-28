@@ -958,11 +958,13 @@ if [ -f "$CD_YML" ]; then
     # catch. A missing if: block entirely yields an empty scan and FAILs
     # (fail-closed). The if: key is COUNT-pinned first: YAML keeps the last
     # duplicate key, so an appended second `if: always()` overrides the
-    # clause at runtime while the intact original block still satisfies the
-    # containment match below (the awk cut stops at the first following
-    # job-level key, so it only ever sees the FIRST if: block) — the same
-    # duplicate-key class already pinned on the cd security job's if: and
-    # these jobs' needs:. Scope note: the containment pin proves the clause
+    # clause at runtime while the containment match below still passes — a
+    # duplicate if: line re-matches the cut's start pattern (its rule ends
+    # in `next`, so it never hits the exit rule), meaning EVERY if: block
+    # concatenates into one scan and the pin cannot tell which key is
+    # effective. Count first closes that: with exactly one if: key, the
+    # scanned body IS the effective body. Same duplicate-key class already
+    # pinned on the cd security job's if: and these jobs' needs:. Scope note: the containment pin proves the clause
     # is PRESENT in the if: body, not that it is EFFECTIVE — a vacuous
     # rewrite like `(needs.security.result == 'success' || true)` still
     # passes; resisting that would require parsing GitHub Actions
