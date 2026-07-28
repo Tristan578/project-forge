@@ -35,8 +35,14 @@ set -uo pipefail
 # SIGPIPE-safe matching: feed grep/awk from a here-string (`grep PAT <<<"$var"`),
 # never pipe a large variable's `echo` into grep/awk — under pipefail the reader
 # closing the pipe on first match SIGPIPEs the writer and misreports a real match
-# as a miss (this bit CI on the ~31 KB ci.yml read). The suite-hygiene guard at the
-# end fails if the antipattern is reintroduced.
+# as a miss (this bit CI on the ~31 KB ci.yml read). The same mechanism inverts a
+# NEGATIVE assertion into a false PASS: a here-string-fed stage chained into a
+# further `grep -q` gets SIGPIPE'd when the reader exits on an EARLY match, the
+# pipeline goes non-zero, and the `if` falls through to the pass branch — so a
+# wired bypass near the top of a workflow file would be reported as absent.
+# Discipline: materialize every intermediate (comment-strip, context window) into
+# a variable first, then match with a SINGLE grep against a here-string. The
+# suite-hygiene guards at the end fail if either antipattern is reintroduced.
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/../check-npm-audit.sh"
@@ -585,12 +591,23 @@ if [ -f "$QG_YML" ]; then
     fail "security job does not run scripts/check-npm-audit.sh mcp-server"
   fi
 
+  # Materialize the comment-stripped text ONCE, then match with single greps
+  # against here-strings. Chaining the strip into `grep -q` false-PASSES under
+  # pipefail: the reader exits at the first (early) match, the strip stage takes
+  # SIGPIPE, the pipeline goes non-zero, and the `if` falls through to the pass
+  # branch — reporting a wired bypass as absent. Fail closed if the strip
+  # produced nothing: an empty result means these assertions cannot see the file.
+  qg_exec="$(grep -v '^[[:space:]]*#' <<<"$qg" || true)"
+  if [ -z "$qg_exec" ]; then
+    fail "comment-strip of quality-gates.yml produced no output — self-defense assertions cannot be verified"
+  fi
+
   # The raw, un-allowlisted gate must be FULLY replaced — if a stray
   # `npm audit --audit-level=high` survives it will fail on the un-relockable
-  # esbuild advisory and re-wedge the pipeline. Strip comment lines first: the
+  # esbuild advisory and re-wedge the pipeline. Comments are stripped: the
   # gate's own rationale comment legitimately names the old command in prose, and
   # only an EXECUTABLE occurrence re-wedges the pipeline.
-  if grep -v '^[[:space:]]*#' <<<"$qg" | grep -qF 'npm audit --audit-level=high'; then
+  if grep -qF 'npm audit --audit-level=high' <<<"$qg_exec"; then
     fail "a raw 'npm audit --audit-level=high' still exists in an executable line — it will fail on the un-relockable esbuild advisory"
   else
     pass "no raw 'npm audit --audit-level=high' remains in an executable line (fully replaced by the gate)"
@@ -598,9 +615,9 @@ if [ -f "$QG_YML" ]; then
 
   # SECURITY: the $NPM_AUDIT_CMD test seam must NEVER be wired into the real job —
   # `env: NPM_AUDIT_CMD: true` would make the gate audit nothing and pass blindly.
-  # Strip comment lines first (the rationale comment may name it), then assert no
+  # Comments are stripped (the rationale comment may name it); assert no
   # executable line references it.
-  if grep -v '^[[:space:]]*#' <<<"$qg" | grep -q 'NPM_AUDIT_CMD'; then
+  if grep -q 'NPM_AUDIT_CMD' <<<"$qg_exec"; then
     fail "quality-gates wires the NPM_AUDIT_CMD test seam in an executable line — gate can be no-op'd into a false pass"
   else
     pass "quality-gates does not wire the NPM_AUDIT_CMD test seam (gate cannot be bypassed via job env)"
@@ -609,8 +626,11 @@ if [ -f "$QG_YML" ]; then
   # SECURITY: `continue-on-error: true` on the audit step would swallow the gate's
   # non-zero exit and pass the job regardless. Scope the check to a window around
   # the invocation so an unrelated continue-on-error elsewhere in the file (there
-  # are several legitimate ones) does not false-positive.
-  if grep -v '^[[:space:]]*#' <<<"$qg" | grep -B3 -A1 'check-npm-audit' | grep -q 'continue-on-error'; then
+  # are several legitimate ones) does not false-positive. Materialize the window
+  # first for the same SIGPIPE reason (empty window = no invocation context = the
+  # invocation assertions above already failed, so this stays non-vacuous).
+  qg_audit_ctx="$(grep -B3 -A1 'check-npm-audit' <<<"$qg_exec" || true)"
+  if grep -q 'continue-on-error' <<<"$qg_audit_ctx"; then
     fail "quality-gates npm-audit step has continue-on-error — gate exit code would be ignored"
   else
     pass "quality-gates npm-audit step has no continue-on-error bypass"
@@ -632,7 +652,15 @@ if [ -f "$CD_YML" ]; then
   else
     fail "cd.yml security step does not run scripts/check-npm-audit.sh for both workspaces"
   fi
-  if grep -v '^[[:space:]]*#' <<<"$cd_yml" | grep -qF 'npm audit --audit-level=high'; then
+  # Same materialize-then-match discipline as the quality-gates block above:
+  # chaining the comment-strip into `grep -q` false-PASSES under pipefail on an
+  # early match (SIGPIPE), so a wired bypass would be reported as absent.
+  cd_exec="$(grep -v '^[[:space:]]*#' <<<"$cd_yml" || true)"
+  if [ -z "$cd_exec" ]; then
+    fail "comment-strip of cd.yml produced no output — self-defense assertions cannot be verified"
+  fi
+
+  if grep -qF 'npm audit --audit-level=high' <<<"$cd_exec"; then
     fail "cd.yml still has a raw 'npm audit --audit-level=high' in an executable line — it will wedge the deploy pipeline"
   else
     pass "cd.yml has no raw 'npm audit --audit-level=high' in an executable line"
@@ -642,7 +670,7 @@ if [ -f "$CD_YML" ]; then
   # on the CD step would no-op the audit into a blind pass. cd.yml is editable
   # independently of quality-gates, so it needs its own assertion (the deploy
   # pipeline's audit is the last gate before artifacts ship).
-  if grep -v '^[[:space:]]*#' <<<"$cd_yml" | grep -q 'NPM_AUDIT_CMD'; then
+  if grep -q 'NPM_AUDIT_CMD' <<<"$cd_exec"; then
     fail "cd.yml wires the NPM_AUDIT_CMD test seam in an executable line — CD audit can be no-op'd into a false pass"
   else
     pass "cd.yml does not wire the NPM_AUDIT_CMD test seam"
@@ -651,8 +679,11 @@ if [ -f "$CD_YML" ]; then
   # SECURITY: `continue-on-error: true` on the audit step would swallow the gate's
   # non-zero exit and let the deploy proceed past a real advisory. Scope the check
   # to a window around the invocation so an unrelated continue-on-error elsewhere in
-  # cd.yml does not false-positive.
-  if grep -v '^[[:space:]]*#' <<<"$cd_yml" | grep -B3 -A1 'check-npm-audit' | grep -q 'continue-on-error'; then
+  # cd.yml does not false-positive. Window materialized first (SIGPIPE); an empty
+  # window is fine here — the both-workspaces assertion above already fails when
+  # the invocation is missing entirely.
+  cd_audit_ctx="$(grep -B3 -A1 'check-npm-audit' <<<"$cd_exec" || true)"
+  if grep -q 'continue-on-error' <<<"$cd_audit_ctx"; then
     fail "cd.yml npm-audit step has continue-on-error — a real advisory would not fail the deploy"
   else
     pass "cd.yml npm-audit step has no continue-on-error bypass"
@@ -688,14 +719,26 @@ fi
 
 echo ""
 echo "=== suite hygiene (structural) ==="
-# Regression lock for the SIGPIPE-under-pipefail false failure (see the note at the
-# top). The needle glues `echo` to `[[:space:]]` so this guard line cannot match
-# itself.
+# Regression locks for the two SIGPIPE-under-pipefail failure modes (see the note
+# at the top). Each needle is constructed so the guard line cannot match itself:
+# the first glues `echo` to `[[:space:]]`; the second's literal redirection token
+# is followed in-pattern by a bracket class, never by a real quoted variable.
 SELF="${BASH_SOURCE[0]}"
 if grep -nE 'echo[[:space:]]+"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*\|[[:space:]]*(grep|awk)' "$SELF" >/dev/null; then
   fail "a variable's echo output is piped into grep/awk — feed it via a here-string to stay correct under pipefail"
 else
   pass "suite feeds grep/awk via here-strings, not variable pipes (SIGPIPE-safe under pipefail)"
+fi
+
+# Second failure mode: a here-string-fed stage CHAINED into a further grep/awk.
+# On an early match the reader exits, SIGPIPEs the upstream stage, and a negative
+# assertion's `if` falls through to its pass branch — a false PASS, the inverse of
+# the false FAIL above. Materialize the intermediate text into a variable and
+# match with a single grep instead.
+if grep -nE '<<<[[:space:]]*"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*\|[[:space:]]*(grep|awk)' "$SELF" >/dev/null; then
+  fail "a here-string-fed pipeline stage pipes into grep/awk — materialize the intermediate text first (false-PASS risk under pipefail)"
+else
+  pass "suite has no here-string-fed pipeline chains (no false-PASS SIGPIPE risk under pipefail)"
 fi
 
 echo ""
