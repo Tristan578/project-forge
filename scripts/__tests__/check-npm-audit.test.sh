@@ -860,9 +860,12 @@ if [ -f "$CD_YML" ]; then
   # The containment must run on a TRAILING-comment-stripped copy of the
   # condition line: `if: false # refs/heads/main` keeps the needle alive
   # inside a YAML comment (whitespace-then-#), which the line-level strip
-  # above cannot remove — and because the deploy jobs' if: conditions accept
-  # `needs.security.result == 'skipped'`, a skipped security job SATISFIES
-  # the deploy gate, making this one line a deploy-through, not a deploy-block.
+  # above cannot remove — and a skipped security job still deploys: deploy-
+  # staging's if: accepts `needs.security.result == 'skipped'`, and deploy-
+  # production inherits that exposure on the push path (its push branch gates
+  # only on deploy-staging's success; only the workflow_dispatch promote
+  # branch requires `security == 'success'` strictly), making this one line
+  # a deploy-through, not a deploy-block.
   # Two materialized steps (no here-string-fed chain into grep); an over-
   # truncated legitimate quoted `#` turns the pin red, never green.
   cd_if_line="$(grep -E '^    "?if"?[[:space:]]*:' <<<"$cd_sec" || true)"
@@ -888,8 +891,11 @@ if [ -f "$CD_YML" ]; then
   # those two deploys — every pin above protects the security job's own
   # execution, but dropping `security` from a deploy job's flow list detaches
   # the gate entirely while all of those pins stay green. (Not the SOLE
-  # mechanism in the strict sense: both deploy if: conditions accept
-  # `needs.security.result == 'skipped'`, so the if:-count/containment pins
+  # mechanism in the strict sense: deploy-staging's if: accepts
+  # `needs.security.result == 'skipped'`, and deploy-production inherits that
+  # exposure on the push path — its push branch gates only on deploy-staging's
+  # success, with a strict `security == 'success'` check only in the
+  # workflow_dispatch promote branch — so the if:-count/containment pins
   # above — which keep the security job un-skippable — are load-bearing for
   # the same guarantee. deploy-docs/deploy-design carry no audit gating at
   # all: pre-existing gap, tracked in PF-1011/#9030.) Cut each deploy job's block
