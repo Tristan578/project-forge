@@ -613,17 +613,58 @@ else
   fail "gate does not validate auditReportVersion — npm error JSON could read as clean"
 fi
 
+# Cut one named step's OWN key block from a comment-stripped job block: from
+# its `- name:` line up to (not including) the next step's `- ` line. Every
+# tamper-relevant key a step can carry (`if:`, `continue-on-error:`, `env:`)
+# lives inside this block, so scanning the WHOLE block closes the
+# window-evasion class: a `continue-on-error: true` separated from the run:
+# line by a multi-line env: block escapes a fixed `grep -B3 -A1` window, and a
+# step-level `if: false` (step skipped, run: line still greps as present) sits
+# entirely outside any run:-anchored window. Empty output = the named step is
+# gone — callers fail closed on it, never skip.
+step_block() { # $1 = comment-stripped job block, $2 = step-name needle (fixed string)
+  awk -v needle="$2" '
+    !f && /^      - name:/ && index($0, needle) {f=1; print; next}
+    f && /^      - /{exit}
+    f {print}
+  ' <<<"$1"
+}
+
+# The three workspace invocations every security job must carry, by EXACT step
+# name — anchoring on the name both scopes the tamper checks and forces the
+# steps to stay named (a bare `- run:` step would read as a missing step).
+AUDIT_STEP_NAMES=('npm audit (web) — allowlist gate' 'npm audit (mcp-server) — allowlist gate' 'npm audit (root) — allowlist gate')
+
+# Step-scoped tamper assertions for one security job block ($2), labeled $1:
+# each gate step must exist by name, carry no step-level `if:` (a skipped
+# step's run: line still greps as present — and a skipped required check reads
+# as satisfied under branch protection), and no `continue-on-error:` anywhere
+# in its block (not just inside a fixed grep window around the run: line).
+assert_audit_steps_untampered() {
+  local wf="$1" job_block="$2" needle blk
+  for needle in "${AUDIT_STEP_NAMES[@]}"; do
+    blk="$(step_block "$job_block" "$needle")"
+    if [ -z "$blk" ]; then
+      fail "$wf security job has no step named '$needle' — step-scoped tamper checks cannot run (fail closed)"
+      continue
+    fi
+    if grep -qE '^[[:space:]]*if:' <<<"$blk"; then
+      fail "$wf step '$needle' carries a step-level if: — the gate can be skipped while its run: line still greps as present"
+    else
+      pass "$wf step '$needle' has no step-level if:"
+    fi
+    if grep -q 'continue-on-error' <<<"$blk"; then
+      fail "$wf step '$needle' carries continue-on-error — the gate's exit code would be ignored"
+    else
+      pass "$wf step '$needle' has no continue-on-error anywhere in its step block"
+    fi
+  done
+}
+
 echo ""
 echo "=== quality-gates.yml integration wiring ==="
 if [ -f "$QG_YML" ]; then
   qg="$(cat "$QG_YML")"
-
-  # The required security job must keep its name (the required-check surface).
-  if grep -qE '^[[:space:]]+name: Rust Security Audit' <<<"$qg"; then
-    pass "quality-gates keeps the 'Rust Security Audit' job (required check name stable)"
-  else
-    fail "the 'Rust Security Audit' job name changed — required-check wiring may break"
-  fi
 
   # Materialize the comment-stripped text ONCE, then match with single greps
   # against here-strings. Chaining the strip into `grep -q` false-PASSES under
@@ -636,20 +677,52 @@ if [ -f "$QG_YML" ]; then
     fail "comment-strip of quality-gates.yml produced no output — self-defense assertions cannot be verified"
   fi
 
-  # The job must invoke the gate for BOTH workspaces — asserted against the
-  # comment-STRIPPED text. A raw-text grep cannot tell "the gate runs" from
-  # "the gate is commented out": prefixing the run: line with `# ` is a
-  # two-character edit that unwires the gate while still satisfying a raw
-  # substring match.
-  if grep -qF 'bash scripts/check-npm-audit.sh web' <<<"$qg_exec"; then
-    pass "security job runs the allowlist gate for web (executable line)"
-  else
-    fail "security job does not run scripts/check-npm-audit.sh web in any executable line"
+  # Job-scope every invocation assertion: cut the `security` job block (same
+  # awk anchor idiom as the lockfile-sync-tests extraction below — 2-space
+  # keys are job ids, which no comment or step line can match). A FILE-scoped
+  # grep cannot tell "the security job runs the gate" from "the invocation was
+  # relocated into an unrelated job" (e.g. lighthouse-delta) — the required
+  # 'Rust Security Audit' check would then go green without ever auditing.
+  # Fail closed on an empty cut: nothing below may pass vacuously.
+  qg_sec="$(awk '/^  security:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  security:/{exit}' <<<"$qg_exec")"
+  if [ -z "$qg_sec" ]; then
+    fail "security job block is empty after comment-strip — job missing, renamed, or fully commented out"
   fi
-  if grep -qF 'bash scripts/check-npm-audit.sh mcp-server' <<<"$qg_exec"; then
-    pass "security job runs the allowlist gate for mcp-server (executable line)"
+
+  # The required security job must keep its display name (the required-check
+  # surface) — asserted inside the job block on an executable line, so neither
+  # a commented-out `# name:` nor the same name on a different job satisfies it.
+  if grep -qE '^    name: Rust Security Audit' <<<"$qg_sec"; then
+    pass "security job keeps the 'Rust Security Audit' display name (required check name stable)"
   else
-    fail "security job does not run scripts/check-npm-audit.sh mcp-server in any executable line"
+    fail "the security job's 'Rust Security Audit' name changed — required-check wiring may break"
+  fi
+
+  # A job-level `if:` would skip the security job wholesale — and a skipped
+  # required check reads as satisfied under branch protection, so this is the
+  # one-line edit that unwires all three npm audits AND the cargo audit at
+  # once. The job carries no `if:` today; pin that. (4-space indent = job-level
+  # key; step-level `if:` is covered per step block below.)
+  if grep -qE '^    if:' <<<"$qg_sec"; then
+    fail "quality-gates security job carries a job-level if: — the required check could be skipped wholesale"
+  else
+    pass "quality-gates security job has no job-level if: (cannot be skipped wholesale)"
+  fi
+
+  # The job must invoke the gate for BOTH workspaces — asserted against the
+  # comment-stripped SECURITY JOB block. A raw-text grep cannot tell "the gate
+  # runs" from "the gate is commented out": prefixing the run: line with `# `
+  # is a two-character edit that unwires the gate while still satisfying a raw
+  # substring match.
+  if grep -qF 'bash scripts/check-npm-audit.sh web' <<<"$qg_sec"; then
+    pass "security job runs the allowlist gate for web (executable line, in-job)"
+  else
+    fail "security job does not run scripts/check-npm-audit.sh web in any executable line of its own block"
+  fi
+  if grep -qF 'bash scripts/check-npm-audit.sh mcp-server' <<<"$qg_sec"; then
+    pass "security job runs the allowlist gate for mcp-server (executable line, in-job)"
+  else
+    fail "security job does not run scripts/check-npm-audit.sh mcp-server in any executable line of its own block"
   fi
   # PF-1010 / #9029: npm audit scopes advisories to the INVOKING workspace's
   # dependency subtree — the web and mcp-server runs never evaluate the ROOT
@@ -657,10 +730,10 @@ if [ -f "$QG_YML" ]; then
   # must ALSO invoke the gate for the repo root. End-anchored -E match: a -F
   # substring needle ending in `.` would also be satisfied by a `.something`
   # path argument.
-  if grep -Eq 'bash scripts/check-npm-audit\.sh \.[[:space:]]*$' <<<"$qg_exec"; then
-    pass "security job runs the allowlist gate for the root workspace (.) (executable line)"
+  if grep -Eq 'bash scripts/check-npm-audit\.sh \.[[:space:]]*$' <<<"$qg_sec"; then
+    pass "security job runs the allowlist gate for the root workspace (.) (executable line, in-job)"
   else
-    fail "security job does not run scripts/check-npm-audit.sh . (root workspace) in any executable line — root devDeps and packages*/apps* go unaudited"
+    fail "security job does not run scripts/check-npm-audit.sh . (root workspace) in any executable line of its own block — root devDeps and packages*/apps* go unaudited"
   fi
 
   # The raw, un-allowlisted gate must be FULLY replaced — if a stray
@@ -684,21 +757,14 @@ if [ -f "$QG_YML" ]; then
     pass "quality-gates does not wire the NPM_AUDIT_CMD test seam (gate cannot be bypassed via job env)"
   fi
 
-  # SECURITY: `continue-on-error: true` on the audit step would swallow the gate's
-  # non-zero exit and pass the job regardless. Scope the check to a window around
-  # the invocation so an unrelated continue-on-error elsewhere in the file (there
-  # are several legitimate ones) does not false-positive. Materialize the window
-  # first for the same SIGPIPE reason. An empty window stays non-vacuous: the
-  # invocation assertions above match the SAME stripped text this window is cut
-  # from, so "window empty while invocation assertions passed" is impossible —
-  # including for a commented-out invocation, which raw-text matching would
-  # have accepted while leaving this window empty.
-  qg_audit_ctx="$(grep -B3 -A1 'check-npm-audit' <<<"$qg_exec" || true)"
-  if grep -q 'continue-on-error' <<<"$qg_audit_ctx"; then
-    fail "quality-gates npm-audit step has continue-on-error — gate exit code would be ignored"
-  else
-    pass "quality-gates npm-audit step has no continue-on-error bypass"
-  fi
+  # SECURITY: step-scoped tamper checks. `if:` and `continue-on-error:` are
+  # asserted absent across each gate step's WHOLE key block, not a fixed grep
+  # window: a continue-on-error separated from the run: line by a multi-line
+  # env: block escapes a -B3/-A1 window, and a step-level `if: false` (step
+  # skipped, run: line still greps as present) sits outside any run:-anchored
+  # window entirely. Unrelated continue-on-error elsewhere in the file (there
+  # are several legitimate ones) cannot false-positive a per-step scan.
+  assert_audit_steps_untampered "quality-gates" "$qg_sec"
 else
   fail "quality-gates.yml not found at $QG_YML"
 fi
@@ -718,20 +784,42 @@ if [ -f "$CD_YML" ]; then
     fail "comment-strip of cd.yml produced no output — self-defense assertions cannot be verified"
   fi
 
-  # Invocation asserted against the comment-STRIPPED text — a commented-out
-  # run: line still satisfies a raw-text grep (see the quality-gates block).
-  if grep -qF 'bash scripts/check-npm-audit.sh web' <<<"$cd_exec" \
-     && grep -qF 'bash scripts/check-npm-audit.sh mcp-server' <<<"$cd_exec"; then
-    pass "cd.yml security step runs the allowlist gate for both workspaces (executable lines)"
+  # Job-scope the cd.yml assertions too — same relocation blind spot as
+  # quality-gates: a file-scoped grep is satisfied by the invocation living in
+  # ANY job (e.g. deploy-docs), not the security job that must gate the deploy.
+  cd_sec="$(awk '/^  security:/{f=1} f{print} f && /^  [a-z][a-z-]*:/ && !/^  security:/{exit}' <<<"$cd_exec")"
+  if [ -z "$cd_sec" ]; then
+    fail "cd.yml security job block is empty after comment-strip — job missing, renamed, or fully commented out"
+  fi
+
+  # cd.yml's security job legitimately carries a job-level `if:` (main +
+  # workflow_dispatch only) — so unlike quality-gates, absence cannot be
+  # pinned. Pin its INTENT instead: the condition must still reference
+  # refs/heads/main. Mutating it to `if: false` (or dropping the ref check) is
+  # the cd-side analogue of skipping the job wholesale. Containment, not
+  # equality — this raises the cost of a silent one-line disable; it does not
+  # claim to be airtight against a crafted compound condition.
+  if grep -qE '^    if:.*refs/heads/main' <<<"$cd_sec"; then
+    pass "cd.yml security job-level if: still gates on refs/heads/main"
   else
-    fail "cd.yml security step does not run scripts/check-npm-audit.sh for both workspaces in executable lines"
+    fail "cd.yml security job-level if: no longer references refs/heads/main — condition removed or rewritten (deploy audits may be disabled)"
+  fi
+
+  # Invocations asserted against the comment-stripped SECURITY JOB block — a
+  # commented-out run: line still satisfies a raw-text grep, and a relocated
+  # one satisfies a file-scoped grep (see the quality-gates block).
+  if grep -qF 'bash scripts/check-npm-audit.sh web' <<<"$cd_sec" \
+     && grep -qF 'bash scripts/check-npm-audit.sh mcp-server' <<<"$cd_sec"; then
+    pass "cd.yml security job runs the allowlist gate for both workspaces (executable lines, in-job)"
+  else
+    fail "cd.yml security job does not run scripts/check-npm-audit.sh for both workspaces in executable lines of its own block"
   fi
   # Root-workspace invocation, mirroring the quality-gates assertion above —
   # cd.yml is editable independently, so it needs its own pin (PF-1010 / #9029).
-  if grep -Eq 'bash scripts/check-npm-audit\.sh \.[[:space:]]*$' <<<"$cd_exec"; then
-    pass "cd.yml security step runs the allowlist gate for the root workspace (.) (executable line)"
+  if grep -Eq 'bash scripts/check-npm-audit\.sh \.[[:space:]]*$' <<<"$cd_sec"; then
+    pass "cd.yml security job runs the allowlist gate for the root workspace (.) (executable line, in-job)"
   else
-    fail "cd.yml security step does not run scripts/check-npm-audit.sh . (root workspace) in any executable line"
+    fail "cd.yml security job does not run scripts/check-npm-audit.sh . (root workspace) in any executable line of its own block"
   fi
 
   if grep -qF 'npm audit --audit-level=high' <<<"$cd_exec"; then
@@ -750,19 +838,11 @@ if [ -f "$CD_YML" ]; then
     pass "cd.yml does not wire the NPM_AUDIT_CMD test seam"
   fi
 
-  # SECURITY: `continue-on-error: true` on the audit step would swallow the gate's
-  # non-zero exit and let the deploy proceed past a real advisory. Scope the check
-  # to a window around the invocation so an unrelated continue-on-error elsewhere in
-  # cd.yml does not false-positive. Window materialized first (SIGPIPE); an empty
-  # window is fine here — the both-workspaces assertion above matches the SAME
-  # stripped text this window is cut from, so it already fails whenever no
-  # executable invocation exists (commented-out included).
-  cd_audit_ctx="$(grep -B3 -A1 'check-npm-audit' <<<"$cd_exec" || true)"
-  if grep -q 'continue-on-error' <<<"$cd_audit_ctx"; then
-    fail "cd.yml npm-audit step has continue-on-error — a real advisory would not fail the deploy"
-  else
-    pass "cd.yml npm-audit step has no continue-on-error bypass"
-  fi
+  # SECURITY: step-scoped tamper checks, mirroring the quality-gates block —
+  # whole-step-block scan for `if:` and `continue-on-error:`, closing the
+  # env:-block window evasion and the never-checked step-level `if:` for the
+  # deploy pipeline's audits too.
+  assert_audit_steps_untampered "cd.yml" "$cd_sec"
 else
   fail "cd.yml not found at $CD_YML"
 fi
