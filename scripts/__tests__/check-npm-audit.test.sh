@@ -869,7 +869,7 @@ if [ -f "$CD_YML" ]; then
   # Two materialized steps (no here-string-fed chain into grep); an over-
   # truncated legitimate quoted `#` turns the pin red, never green.
   cd_if_line="$(grep -E '^    "?if"?[[:space:]]*:' <<<"$cd_sec" || true)"
-  cd_if_scan="$(awk '{sub(/[[:space:]]#.*/, ""); print}' <<<"$cd_if_line")"
+  cd_if_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cd_if_line")"
   if [ "$cd_if_lines" -ne 1 ]; then
     fail "cd.yml security job has $cd_if_lines job-level if: lines (expected exactly 1) — missing or duplicated condition (YAML keeps the last duplicate key)"
   elif grep -qE '^    if[[:space:]]*:.*refs/heads/main' <<<"$cd_if_scan"; then
@@ -886,26 +886,47 @@ if [ -f "$CD_YML" ]; then
     pass "cd.yml security job has no job-level continue-on-error"
   fi
 
-  # The `needs:` edge itself: `security` in deploy-staging's and
-  # deploy-production's needs: lists is the edge by which a red audit blocks
-  # those two deploys — every pin above protects the security job's own
-  # execution, but dropping `security` from a deploy job's flow list detaches
-  # the gate entirely while all of those pins stay green. (Not the SOLE
-  # mechanism in the strict sense: deploy-staging's if: accepts
+  # A job-level `needs:` on THIS job is a deploy-through: a skipped
+  # dependency (e.g. build-wasm, which skips on any main push that doesn't
+  # touch the engine) cascade-skips the audit — the job's if: has no
+  # always() to rescue it — and deploy-staging's if: accepts
+  # `needs.security.result == 'skipped'`, with deploy-production inheriting
+  # that exposure on the push path. Pin absence, mirroring the
+  # quality-gates pin.
+  if grep -qE '^    "?needs"?[[:space:]]*:' <<<"$cd_sec"; then
+    fail "cd.yml security job carries a job-level needs: — a skipped dependency would cascade-skip the audit, and deploy-staging's if: accepts needs.security.result == 'skipped', so deploys would proceed with no audit having run"
+  else
+    pass "cd.yml security job has no job-level needs: (cannot be cascade-skipped into a deploy-through)"
+  fi
+
+  # The `needs:` edge: `security` in deploy-staging's and deploy-production's
+  # needs: lists is what makes `needs.security` RESOLVABLE in their if:
+  # bodies — necessary but NOT sufficient. Both deploy if: blocks start
+  # `always() &&`, and under always() a FAILED dependency does not skip the
+  # dependent job, so needs: membership alone blocks nothing; the explicit
+  # `needs.security.result == 'success'` clause in each if: body (pinned
+  # below) is what actually stops a deploy on a red audit. Dropping
+  # `security` from a needs: list fails SAFE today (the clause becomes
+  # unresolvable-false and the deploy skips loudly) but is still tampering
+  # with the wiring this suite exists to pin. (The if:-count/containment
+  # pins above — which keep the security job itself un-skippable — stay
+  # load-bearing too: deploy-staging's if: accepts
   # `needs.security.result == 'skipped'`, and deploy-production inherits that
   # exposure on the push path — its push branch gates only on deploy-staging's
   # success, with a strict `security == 'success'` check only in the
-  # workflow_dispatch promote branch — so the if:-count/containment pins
-  # above — which keep the security job un-skippable — are load-bearing for
-  # the same guarantee. deploy-docs/deploy-design carry no audit gating at
-  # all: pre-existing gap, tracked in PF-1011/#9030.) Cut each deploy job's block
-  # (same awk anchor idiom), assert exactly ONE needs: line (YAML keeps the
-  # last duplicate key), and assert `security` appears as a flow-list ELEMENT
-  # on a trailing-comment-stripped copy of that line — `(\[|,) security (,|\])`
-  # bounds it so a look-alike like `security-scan` cannot satisfy it, and the
-  # strip stops a `# [security]` smuggled in a YAML comment from satisfying
-  # it. The element grep intentionally fails on a block-style rewrite: flag it
-  # and keep the flow list rather than guess at a new shape.
+  # workflow_dispatch promote branch. deploy-docs/deploy-design carry no
+  # audit gating at all: pre-existing gap, tracked in PF-1011/#9030.)
+  # Cut each deploy job's block (same awk anchor idiom), assert exactly ONE
+  # needs: line (YAML keeps the last duplicate key), and assert `security`
+  # appears as a flow-list ELEMENT on a trailing-comment-stripped copy of
+  # that line — `(\[|,) security (,|\])` bounds it so a look-alike like
+  # `security-scan` cannot satisfy it, and the strip (whitespace OPTIONAL
+  # before `#` — in YAML flow context `]#` still opens a comment, so the
+  # no-space form must not walk past it) stops a smuggled `# [security]`
+  # from satisfying it. The element grep intentionally fails on a
+  # block-style rewrite: flag it and keep the flow list rather than guess
+  # at a new shape. Then pin the success clause itself on a
+  # comment-stripped copy of the WHOLE job block.
   for cd_dj in deploy-staging deploy-production; do
     cd_dj_block="$(awk -v hdr="  ${cd_dj}:" '$0 == hdr {f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 != hdr {exit}' <<<"$cd_exec")"
     if [ -z "$cd_dj_block" ]; then
@@ -914,13 +935,26 @@ if [ -f "$CD_YML" ]; then
     fi
     cd_dj_needs_count="$(grep -cE '^    "?needs"?[[:space:]]*:' <<<"$cd_dj_block" || true)"
     cd_dj_needs_line="$(grep -E '^    "?needs"?[[:space:]]*:' <<<"$cd_dj_block" || true)"
-    cd_dj_needs_scan="$(awk '{sub(/[[:space:]]#.*/, ""); print}' <<<"$cd_dj_needs_line")"
+    cd_dj_needs_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cd_dj_needs_line")"
     if [ "$cd_dj_needs_count" -ne 1 ]; then
       fail "cd.yml ${cd_dj} job has $cd_dj_needs_count job-level needs: lines (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key)"
     elif grep -qE '(\[|,)[[:space:]]*security[[:space:]]*(,|\])' <<<"$cd_dj_needs_scan"; then
-      pass "cd.yml ${cd_dj} needs: still lists security — a red audit blocks this deploy"
+      pass "cd.yml ${cd_dj} needs: still lists security as a flow-list element (keeps needs.security resolvable for the if: clause)"
     else
-      fail "cd.yml ${cd_dj} needs: no longer lists security as a flow-list element — this deploy would proceed past a failing audit gate"
+      fail "cd.yml ${cd_dj} needs: no longer lists security as a flow-list element — the if: clause's needs.security.result becomes unresolvable (deploy gating rewired; fails safe today, but the wiring this suite pins is tampered)"
+    fi
+    # The load-bearing half of the edge (see comment above): the explicit
+    # success clause in the if: body. Containment on a comment-stripped copy
+    # of the WHOLE job block — deploy-staging carries it directly (alongside
+    # its skipped-acceptance), deploy-production in its workflow_dispatch
+    # promote branch. Deleting the clause leaves needs: intact and the
+    # workflow valid while a red audit no longer stops the deploy — the
+    # exact one-line unaudited-deploy shape this pin exists to catch.
+    cd_dj_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cd_dj_block")"
+    if grep -qE "needs\.security\.result[[:space:]]*==[[:space:]]*'success'" <<<"$cd_dj_scan"; then
+      pass "cd.yml ${cd_dj} if: still requires needs.security.result == 'success' — the clause that stops this deploy on a red audit"
+    else
+      fail "cd.yml ${cd_dj} if: no longer contains needs.security.result == 'success' — under always(), needs: membership alone blocks nothing, so a red audit would not stop this deploy"
     fi
   done
 
@@ -1000,7 +1034,7 @@ if [ -f "$CI_YML" ]; then
   # since the lint needle sits mid-line in a multi-line invocation). A YAML comment
   # starts at whitespace-then-#, so strip that to end-of-line first; a
   # legitimate quoted `#` over-truncated by this turns the pin red, never green.
-  lst_scan="$(awk '{sub(/[[:space:]]#.*/, ""); print}' <<<"$lst_block")"
+  lst_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$lst_block")"
 
   if grep -qF 'scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh' <<<"$lst_scan"; then
     pass "self-defense job shellchecks the npm-audit gate + its suite"
