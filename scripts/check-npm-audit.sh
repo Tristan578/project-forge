@@ -22,7 +22,7 @@
 # relock that silently reverted BOTH nested copies back to the unpatched 5.0.7 —
 # a production-reachable regression (the glob/ copy is prod-reachable) — and the
 # id-only gate stayed GREEN throughout, because it never looked at WHERE the id
-# occurred. PF-1008/#9023 had to re-fix it ~24h later with nothing having caught
+# occurred. PF-1008/#9023 (PR #9027) had to re-fix it ~24h later with nothing having caught
 # the regression in between. Each ALLOWED_ADVISORIES entry now pins the id to its
 # EXPECTED node_modules path(s); the id showing up anywhere else is a BLOCK, not
 # a WAIVE, naming the unexpected location(s) so the next regression is loud.
@@ -41,10 +41,15 @@
 #   - FAILS (exit 1) if any source advisory whose severity is in $FAIL_SEVERITIES
 #     either (a) has an id NOT in $ALLOWED_ADVISORIES, or (b) has an id that IS
 #     allowlisted but occurs at a node_modules path outside that id's pinned
-#     set — naming the unexpected location(s). PASSES (exit 0) otherwise.
+#     set — naming the unexpected location(s) — or (c) has an allowlisted id but
+#     the report carries no usable location data (`nodes` missing, empty, or
+#     non-array) — a waiver that cannot be location-verified is not a waiver.
+#     PASSES (exit 0) otherwise.
 #   - FAILS CLOSED (exit 2) on any tooling error — missing jq, npm emitting no
-#     parseable JSON, or output that is not a recognized audit report. A gate that
-#     cannot evaluate must never report "clean".
+#     parseable JSON, output that is not a recognized v2 audit report
+#     (auditReportVersion != 2), a jq extraction failure mid-report, or a
+#     malformed $ALLOWED_ADVISORIES entry (an id without a pinned path). A gate
+#     that cannot evaluate must never report "clean".
 #
 # TEST SEAM: $NPM_AUDIT_CMD overrides the audit command and is run via `eval`
 #   PURELY so the hermetic unit test (scripts/__tests__/check-npm-audit.test.sh)
@@ -93,6 +98,19 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 2
 fi
 
+# Every allowlist entry MUST carry a pinned path — a bare id (or an empty path)
+# would silently degrade this back to the id-only gate that missed the #9016
+# regression, so a malformed entry is a config error, not a wider waiver.
+for entry in "${ALLOWED_ADVISORIES[@]}"; do
+  case "$entry" in
+    ?*:?*) ;;
+    *)
+      echo "::error::malformed ALLOWED_ADVISORIES entry '$entry' — expected \"<GHSA-id>:<pinned-path>[,<pinned-path>...]\" — failing closed"
+      exit 2
+      ;;
+  esac
+done
+
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 TARGET="$ROOT/$WORKSPACE"
 if [ ! -d "$TARGET" ]; then
@@ -112,8 +130,9 @@ if [ -z "$audit_json" ] || ! jq -e . >/dev/null 2>&1 <<<"$audit_json"; then
   echo "::error::npm audit produced no parseable JSON in $WORKSPACE — failing closed"
   exit 2
 fi
-if [ "$(jq -r '.auditReportVersion // empty' <<<"$audit_json")" = "" ]; then
-  echo "::error::npm audit output is not a recognized audit report (no auditReportVersion) — failing closed"
+report_version="$(jq -r '.auditReportVersion // empty' <<<"$audit_json")"
+if [ "$report_version" != "2" ]; then
+  echo "::error::npm audit output is not a recognized audit report (auditReportVersion '${report_version:-absent}' != 2) — failing closed"
   exit 2
 fi
 
@@ -147,10 +166,14 @@ paths_within_pin() {
   read -r -a pinned_arr <<<"$pinned_csv"
   read -r -a observed_arr <<<"$nodes_csv"
   local observed pinned matched
-  for observed in "${observed_arr[@]}"; do
+  # ${arr[@]+"${arr[@]}"} — bash-3.2 (macOS default): expanding an EMPTY array
+  # with a bare "${arr[@]}" under `set -u` aborts the subshell, which a caller
+  # reading $(paths_within_pin …) sees as empty output → a silent waive. The
+  # +-guard expands to nothing when the array is empty instead of erroring.
+  for observed in ${observed_arr[@]+"${observed_arr[@]}"}; do
     [ -z "$observed" ] && continue
     matched=0
-    for pinned in "${pinned_arr[@]}"; do
+    for pinned in ${pinned_arr[@]+"${pinned_arr[@]}"}; do
       [ "$observed" = "$pinned" ] && { matched=1; break; }
     done
     if [ "$matched" -eq 0 ]; then
@@ -169,15 +192,41 @@ is_fail_severity() {
 }
 
 echo "=== npm audit gate ($WORKSPACE) ==="
-violations=0
-seen_allowed=""
 
 # Emit one line per SOURCE advisory: "<severity>\t<url>\t<title>\t<nodes_csv>".
 # The string-typed `via` entries (bare propagation, e.g. "esbuild") are dropped
 # by select(type==…). `nodes` lives on the VULNERABILITY (a sibling of `via`,
 # not per-via-entry) — capture it once per vulnerability via `as $vuln` before
 # flat-mapping into its `via[]` objects, so each row still carries the node
-# paths that vulnerability was found at.
+# paths that vulnerability was found at. Missing/empty/non-array `nodes`
+# becomes the "(no-nodes)" sentinel (unambiguous — a real node path always
+# starts with node_modules/), which the loop below treats as a blocking
+# violation for allowlisted ids: a waiver that cannot be location-verified is
+# not a waiver. Captured into a variable (NOT a `done < <(jq …)` process
+# substitution, whose exit status is discarded) so a mid-report jq failure
+# fails closed instead of silently evaluating a truncated advisory list;
+# pipefail (set above, inherited by the command substitution) carries jq's
+# exit status through `sort -u`.
+rows="$(jq -r '
+  .vulnerabilities[]?
+  | . as $vuln
+  | (if ($vuln.nodes | type) == "array" and ($vuln.nodes | length) > 0
+     then $vuln.nodes else ["(no-nodes)"] end) as $nodes
+  | $vuln.via[]?
+  | select(type == "object")
+  | [(.severity // "unknown"), (.url // ""), (.title // ""), ($nodes | join(","))]
+  | @tsv
+' <<<"$audit_json" | sort -u)"
+jq_rc=$?
+if [ "$jq_rc" -ne 0 ]; then
+  echo "::error::jq failed (exit $jq_rc) extracting advisories from the npm audit report in $WORKSPACE — failing closed"
+  exit 2
+fi
+
+unlisted_violations=0
+pin_violations=0
+seen_allowed=""
+
 while IFS=$'\t' read -r severity url title nodes_csv; do
   [ -z "$severity" ] && continue
   id="${url##*/}"        # GHSA id (or numeric advisory id) from the advisory url
@@ -187,34 +236,39 @@ while IFS=$'\t' read -r severity url title nodes_csv; do
   is_allowed "$id" && seen_allowed="$seen_allowed $id"
   if is_fail_severity "$severity"; then
     if is_allowed "$id"; then
-      unexpected="$(paths_within_pin "$id" "$nodes_csv")"
-      if [ -z "$unexpected" ]; then
-        echo "  WAIVED  [$severity] $id — $title"
-      else
+      pinned_display="$(pinned_paths_for "$id")"
+      if [ "$nodes_csv" = "(no-nodes)" ]; then
         echo "  BLOCK   [$severity] $id — $title"
-        echo "          unexpected location(s) outside the pinned allowlist for $id:"
-        while IFS= read -r loc; do
-          [ -z "$loc" ] && continue
-          echo "            - $loc"
-        done <<<"$unexpected"
-        violations=$((violations + 1))
+        echo "          no location data (nodes) in the audit report for $id — cannot verify it sits at its pinned location(s) [$pinned_display]"
+        echo "::error::allowlisted advisory $id has no location data (nodes) in the npm audit report for $WORKSPACE — cannot verify its pinned location(s) [$pinned_display]; treating as a blocking violation"
+        pin_violations=$((pin_violations + 1))
+      else
+        unexpected="$(paths_within_pin "$id" "$nodes_csv")"
+        if [ -z "$unexpected" ]; then
+          echo "  WAIVED  [$severity] $id — $title (at pinned location(s): $pinned_display)"
+        else
+          echo "  BLOCK   [$severity] $id — $title"
+          echo "          unexpected location(s) outside the pinned allowlist for $id:"
+          unexpected_csv=""
+          while IFS= read -r loc; do
+            [ -z "$loc" ] && continue
+            echo "            - $loc"
+            unexpected_csv="${unexpected_csv:+$unexpected_csv,}$loc"
+          done <<<"$unexpected"
+          echo "          pinned location(s) for $id: $pinned_display"
+          echo "::error::allowlisted advisory $id found outside its pinned location(s) in $WORKSPACE — unexpected: $unexpected_csv; pinned: $pinned_display. This is the #9016 regression class: a relock likely reverted a patched nested copy. Re-relock the nested copy; do NOT widen the pin."
+          pin_violations=$((pin_violations + 1))
+        fi
       fi
     else
       echo "  BLOCK   [$severity] $id — $title"
-      violations=$((violations + 1))
+      echo "::error::non-allowlisted advisory $id ([$severity] $title) in $WORKSPACE — fix the dependency (upgrade/relock); the allowlist is only for transitive, dev-only, un-relockable, non-exploitable advisories"
+      unlisted_violations=$((unlisted_violations + 1))
     fi
   else
     echo "  ignore  [$severity] $id — $title"
   fi
-done < <(jq -r '
-  .vulnerabilities[]?
-  | . as $vuln
-  | ($vuln.nodes // []) as $nodes
-  | $vuln.via[]?
-  | select(type == "object")
-  | [(.severity // "unknown"), (.url // ""), (.title // ""), ($nodes | join(","))]
-  | @tsv
-' <<<"$audit_json" | sort -u)
+done <<<"$rows"
 
 # Anti-rot: a waived id that no longer appears is dead weight (the advisory was
 # fixed/relocked). Informational only — never fail on absence, or a future cleanup
@@ -228,12 +282,20 @@ for entry in "${ALLOWED_ADVISORIES[@]}"; do
 done
 
 echo ""
-if [ "$violations" -gt 0 ]; then
-  echo "::error::$violations non-allowlisted advisory(ies) at or above [$FAIL_SEVERITIES] in $WORKSPACE."
+total_violations=$((unlisted_violations + pin_violations))
+if [ "$unlisted_violations" -gt 0 ]; then
+  echo "::error::$unlisted_violations non-allowlisted advisory(ies) at or above [$FAIL_SEVERITIES] in $WORKSPACE."
   echo "Fix the dependency (upgrade/relock) — do NOT add it to the allowlist unless it is"
   echo "transitive, dev-only, un-relockable AND non-exploitable in this repo (see header)."
+fi
+if [ "$pin_violations" -gt 0 ]; then
+  echo "::error::$pin_violations allowlisted advisory(ies) outside their pinned location(s) (or with no location data) in $WORKSPACE."
+  echo "A relock likely reverted a patched nested copy (the #9016 regression class)."
+  echo "Re-relock the nested copy; widen the pin ONLY if the new location is genuinely un-relockable."
+fi
+if [ "$total_violations" -gt 0 ]; then
   exit 1
 fi
 
-echo "✓ no non-allowlisted advisory at or above [$FAIL_SEVERITIES] in $WORKSPACE."
+echo "✓ no blocking advisory at or above [$FAIL_SEVERITIES] in $WORKSPACE (allowlisted waivers verified at their pinned locations)."
 exit 0
