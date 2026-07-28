@@ -596,18 +596,6 @@ if [ -f "$QG_YML" ]; then
     fail "the 'Rust Security Audit' job name changed — required-check wiring may break"
   fi
 
-  # The job must invoke the gate for BOTH workspaces.
-  if grep -qF 'bash scripts/check-npm-audit.sh web' <<<"$qg"; then
-    pass "security job runs the allowlist gate for web"
-  else
-    fail "security job does not run scripts/check-npm-audit.sh web"
-  fi
-  if grep -qF 'bash scripts/check-npm-audit.sh mcp-server' <<<"$qg"; then
-    pass "security job runs the allowlist gate for mcp-server"
-  else
-    fail "security job does not run scripts/check-npm-audit.sh mcp-server"
-  fi
-
   # Materialize the comment-stripped text ONCE, then match with single greps
   # against here-strings. Chaining the strip into `grep -q` false-PASSES under
   # pipefail: the reader exits at the first (early) match, the strip stage takes
@@ -617,6 +605,22 @@ if [ -f "$QG_YML" ]; then
   qg_exec="$(grep -v '^[[:space:]]*#' <<<"$qg" || true)"
   if [ -z "$qg_exec" ]; then
     fail "comment-strip of quality-gates.yml produced no output — self-defense assertions cannot be verified"
+  fi
+
+  # The job must invoke the gate for BOTH workspaces — asserted against the
+  # comment-STRIPPED text. A raw-text grep cannot tell "the gate runs" from
+  # "the gate is commented out": prefixing the run: line with `# ` is a
+  # two-character edit that unwires the gate while still satisfying a raw
+  # substring match.
+  if grep -qF 'bash scripts/check-npm-audit.sh web' <<<"$qg_exec"; then
+    pass "security job runs the allowlist gate for web (executable line)"
+  else
+    fail "security job does not run scripts/check-npm-audit.sh web in any executable line"
+  fi
+  if grep -qF 'bash scripts/check-npm-audit.sh mcp-server' <<<"$qg_exec"; then
+    pass "security job runs the allowlist gate for mcp-server (executable line)"
+  else
+    fail "security job does not run scripts/check-npm-audit.sh mcp-server in any executable line"
   fi
 
   # The raw, un-allowlisted gate must be FULLY replaced — if a stray
@@ -644,8 +648,11 @@ if [ -f "$QG_YML" ]; then
   # non-zero exit and pass the job regardless. Scope the check to a window around
   # the invocation so an unrelated continue-on-error elsewhere in the file (there
   # are several legitimate ones) does not false-positive. Materialize the window
-  # first for the same SIGPIPE reason (empty window = no invocation context = the
-  # invocation assertions above already failed, so this stays non-vacuous).
+  # first for the same SIGPIPE reason. An empty window stays non-vacuous: the
+  # invocation assertions above match the SAME stripped text this window is cut
+  # from, so "window empty while invocation assertions passed" is impossible —
+  # including for a commented-out invocation, which raw-text matching would
+  # have accepted while leaving this window empty.
   qg_audit_ctx="$(grep -B3 -A1 'check-npm-audit' <<<"$qg_exec" || true)"
   if grep -q 'continue-on-error' <<<"$qg_audit_ctx"; then
     fail "quality-gates npm-audit step has continue-on-error — gate exit code would be ignored"
@@ -663,18 +670,21 @@ echo "=== cd.yml integration wiring ==="
 # raw audit silently re-wedges CD instead of slipping through.
 if [ -f "$CD_YML" ]; then
   cd_yml="$(cat "$CD_YML")"
-  if grep -qF 'bash scripts/check-npm-audit.sh web' <<<"$cd_yml" \
-     && grep -qF 'bash scripts/check-npm-audit.sh mcp-server' <<<"$cd_yml"; then
-    pass "cd.yml security step runs the allowlist gate for both workspaces"
-  else
-    fail "cd.yml security step does not run scripts/check-npm-audit.sh for both workspaces"
-  fi
   # Same materialize-then-match discipline as the quality-gates block above:
   # chaining the comment-strip into `grep -q` false-PASSES under pipefail on an
   # early match (SIGPIPE), so a wired bypass would be reported as absent.
   cd_exec="$(grep -v '^[[:space:]]*#' <<<"$cd_yml" || true)"
   if [ -z "$cd_exec" ]; then
     fail "comment-strip of cd.yml produced no output — self-defense assertions cannot be verified"
+  fi
+
+  # Invocation asserted against the comment-STRIPPED text — a commented-out
+  # run: line still satisfies a raw-text grep (see the quality-gates block).
+  if grep -qF 'bash scripts/check-npm-audit.sh web' <<<"$cd_exec" \
+     && grep -qF 'bash scripts/check-npm-audit.sh mcp-server' <<<"$cd_exec"; then
+    pass "cd.yml security step runs the allowlist gate for both workspaces (executable lines)"
+  else
+    fail "cd.yml security step does not run scripts/check-npm-audit.sh for both workspaces in executable lines"
   fi
 
   if grep -qF 'npm audit --audit-level=high' <<<"$cd_exec"; then
@@ -697,8 +707,9 @@ if [ -f "$CD_YML" ]; then
   # non-zero exit and let the deploy proceed past a real advisory. Scope the check
   # to a window around the invocation so an unrelated continue-on-error elsewhere in
   # cd.yml does not false-positive. Window materialized first (SIGPIPE); an empty
-  # window is fine here — the both-workspaces assertion above already fails when
-  # the invocation is missing entirely.
+  # window is fine here — the both-workspaces assertion above matches the SAME
+  # stripped text this window is cut from, so it already fails whenever no
+  # executable invocation exists (commented-out included).
   cd_audit_ctx="$(grep -B3 -A1 'check-npm-audit' <<<"$cd_exec" || true)"
   if grep -q 'continue-on-error' <<<"$cd_audit_ctx"; then
     fail "cd.yml npm-audit step has continue-on-error — a real advisory would not fail the deploy"
