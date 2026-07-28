@@ -663,12 +663,17 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   else
     fail "design-internal-gate's if: no longer names needs-design"
   fi
-  if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Eq 'check_triggered "design-internal-gate"[[:space:]]+"needs-design"'; then
+  # Whole-file asserts count matches with `grep -c` (reads to EOF) instead of
+  # `grep -q`: under `set -o pipefail`, -q's first-match exit SIGPIPEs the
+  # upstream grep mid-file (rc 141) → the pipeline false-FAILs on a real match.
+  # The <<<"$dig_block" asserts above are immune — a single job block always
+  # fits the pipe buffer, so the upstream finishes writing before -q exits.
+  if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "design-internal-gate"[[:space:]]+"needs-design"')" -ge 1 ]; then
     pass "verifier anti-tamper map covers design-internal-gate <-> needs-design"
   else
     fail "verifier anti-tamper map lost its design-internal-gate/needs-design entry"
   fi
-  if grep -v '^[[:space:]]*#' "$QG_YML" | grep -qF "$UI_TEST_CMD"; then
+  if [ "$(grep -v '^[[:space:]]*#' "$QG_YML" | grep -cF "$UI_TEST_CMD")" -ge 1 ]; then
     pass "quality-gates test-web runs the byte-identical UI suite invocation"
   else
     fail "quality-gates.yml UI suite invocation drifted from ci.yml's ('$UI_TEST_CMD')"

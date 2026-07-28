@@ -65,11 +65,21 @@ fi
 #    its `if:` — guarding only one arm would leave the other as a silent
 #    single-line `if: false` skip vector.
 tamper=""
+drift=""
 check_triggered() {
   local job="$1"; shift
   local trig result fired=""
   result="$(jq -r --arg j "$job" '.[$j].result // "absent"' "$needs_file")"
   for trigger in "$@"; do
+    # Fail CLOSED on a missing trigger output. `.outputs[$t] // empty` reads a
+    # RENAMED or REMOVED ci-gate output as "did not fire", which silently
+    # disarms this gate's anti-tamper arm — the exact class of drift this
+    # script exists to catch. A mapped trigger the workflow no longer emits is
+    # config drift, not a legitimate skip: refuse to certify.
+    if [ "$(jq -r --arg t "$trigger" '(."ci-gate".outputs // {}) | has($t)' "$needs_file")" != "true" ]; then
+      drift="$drift"$'\n'"  - $job: trigger output '$trigger' missing from ci-gate outputs"
+      continue
+    fi
     trig="$(jq -r --arg t "$trigger" '."ci-gate".outputs[$t] // empty' "$needs_file")"
     if [ "$trig" = "true" ]; then
       fired="${fired:+$fired,}$trigger"
@@ -113,6 +123,11 @@ check_triggered "test-e2e-journey"          "needs-web"
 # are mapped — guarding only one would leave the other as a silent `if: false`
 # skip vector. Protect it from unwiring like the other self-defending gates.
 check_triggered "test-e2e-engine-smoke"     "needs-web" "needs-engine"
+if [ -n "$drift" ]; then
+  echo "::error::Anti-tamper trigger output(s) missing from ci-gate outputs (map/workflow drift — renamed or removed trigger?):"
+  echo "$drift"
+  exit 1
+fi
 if [ -n "$tamper" ]; then
   echo "::error::Self-defending gate skipped despite its trigger firing (possible unwiring):"
   echo "$tamper"

@@ -310,11 +310,25 @@ jobs:
 
       - run: npm ci
 
+      # Same key as quality-gates' ui-cache-typecheck / ui-cache-test-web —
+      # whichever job builds packages/ui first warms the cache for the others.
+      - name: Cache @spawnforge/ui build
+        id: ui-cache-design
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: packages/ui/dist
+          key: ui-build-${{ hashFiles('packages/ui/src/**', 'packages/ui/package.json', 'packages/ui/tsconfig.json') }}
+
       - name: Build @spawnforge/ui
+        if: steps.ui-cache-design.outputs.cache-hit != 'true'
         run: cd packages/ui && npm run build
 
+      # Intentionally duplicates quality-gates' test-web UI step: a
+      # packages/ui-only PR skips test-web, so this gate is that PR's ONLY
+      # per-PR run of the suite. check-ci-success.test.sh pins the two
+      # invocations byte-identical — change BOTH or the suite fails.
       - name: Test @spawnforge/ui
-        run: cd packages/ui && npx vitest run
+        run: cd packages/ui && npx --no-install vitest run
 
       - name: Install design app dependencies
         run: cd apps/design && npm ci
