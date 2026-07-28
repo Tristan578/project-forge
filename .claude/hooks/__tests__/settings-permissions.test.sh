@@ -22,9 +22,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # jq-mutates a copy of the real settings, sets this var to point at it, and
 # asserts on the re-exec'd child's exit code. NEVER set this var (or
 # SETTINGS_PERMISSIONS_SELFTEST) in CI outside that self-re-exec: the
-# seam_not_wired self-defense scan below AND the hoisted runtime CI assertion
-# (evaluated on EVERY invocation, not just the top-level parent) both enforce
-# that, regardless of which of the two names is wired.
+# seam_not_wired self-defense scan below AND the hoisted runtime assertion
+# (evaluated on every non-child invocation, not just the top-level parent)
+# both enforce that, regardless of which of the two names is wired.
 SETTINGS="${SETTINGS_PERMISSIONS_FILE:-$HERE/../../settings.json}"
 
 pass=0
@@ -190,7 +190,7 @@ seam_not_wired() {
   local dir="$1"
   [ -d "$dir" ] || return 1
   local hits rc
-  hits="$(grep -rhE "SETTINGS_PERMISSIONS_(FILE|SELFTEST)" "$dir" 2>/dev/null)"
+  hits="$(grep -rhE -e "SETTINGS_PERMISSIONS_(FILE|SELFTEST)" -e "[-][-]selftest-child" -e "BASH_ENV" "$dir" 2>/dev/null)"
   rc=$?
   if [ "$rc" -ge 2 ]; then
     return 1
@@ -210,7 +210,7 @@ seam_not_wired() {
 #     contains. ---
 SEAM_TMPROOT="$(mktemp -d)" || { echo "mktemp -d failed"; exit 1; }
 trap 'rm -rf "$SEAM_TMPROOT"' EXIT
-mkdir -p "$SEAM_TMPROOT/clean/workflows" "$SEAM_TMPROOT/wired/workflows" "$SEAM_TMPROOT/comment-only/workflows" "$SEAM_TMPROOT/wired-selftest-only/workflows"
+mkdir -p "$SEAM_TMPROOT/clean/workflows" "$SEAM_TMPROOT/wired/workflows" "$SEAM_TMPROOT/comment-only/workflows" "$SEAM_TMPROOT/wired-selftest-only/workflows" "$SEAM_TMPROOT/wired-argv-flag/workflows" "$SEAM_TMPROOT/wired-bash-env/workflows"
 
 # (a) innocent workflow, no mention of the seam at all
 cat > "$SEAM_TMPROOT/clean/workflows/ci.yml" <<'EOF'
@@ -263,6 +263,34 @@ jobs:
       - run: bash .claude/hooks/__tests__/settings-permissions.test.sh
 EOF
 
+# (g) a workflow step passing --selftest-child as an argument to the suite —
+#     out-of-tree wiring of the argv recursion guard, caught by the widened
+#     scan even though neither env var name appears anywhere in the file.
+cat > "$SEAM_TMPROOT/wired-argv-flag/workflows/evil3.yml" <<'EOF'
+name: Neuter3
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: bash .claude/hooks/__tests__/settings-permissions.test.sh --selftest-child
+EOF
+
+# (h) a workflow wiring BASH_ENV in an env block — the vector that lets a
+#     non-interactive bash source attacker-controlled code (e.g. `set --
+#     --selftest-child`) before the script body runs.
+cat > "$SEAM_TMPROOT/wired-bash-env/workflows/evil4.yml" <<'EOF'
+name: Neuter4
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      BASH_ENV: /tmp/inject.sh
+    steps:
+      - run: bash .claude/hooks/__tests__/settings-permissions.test.sh
+EOF
+
 if seam_not_wired "$SEAM_TMPROOT/clean/workflows"; then
   pass=$((pass + 1)); printf '  ok   %s\n' "seam_not_wired: clean workflow dir reports not-wired"
 else
@@ -285,6 +313,18 @@ if ! seam_not_wired "$SEAM_TMPROOT/wired-selftest-only/workflows"; then
   pass=$((pass + 1)); printf '  ok   %s\n' "seam_not_wired: workflow wiring ONLY the SETTINGS_PERMISSIONS_SELFTEST sibling reports wired"
 else
   fail=$((fail + 1)); printf '  FAIL %s\n' "seam_not_wired: workflow wiring ONLY the SETTINGS_PERMISSIONS_SELFTEST sibling should report wired"
+fi
+
+if ! seam_not_wired "$SEAM_TMPROOT/wired-argv-flag/workflows"; then
+  pass=$((pass + 1)); printf '  ok   %s\n' "seam_not_wired: workflow passing --selftest-child as an argument reports wired"
+else
+  fail=$((fail + 1)); printf '  FAIL %s\n' "seam_not_wired: workflow passing --selftest-child as an argument should report wired"
+fi
+
+if ! seam_not_wired "$SEAM_TMPROOT/wired-bash-env/workflows"; then
+  pass=$((pass + 1)); printf '  ok   %s\n' "seam_not_wired: workflow wiring BASH_ENV in an env block reports wired"
+else
+  fail=$((fail + 1)); printf '  FAIL %s\n' "seam_not_wired: workflow wiring BASH_ENV in an env block should report wired"
 fi
 
 if ! seam_not_wired "$SEAM_TMPROOT/does-not-exist"; then
@@ -324,34 +364,37 @@ for seam_dir in "${seam_dirs[@]}"; do
 done
 
 if $seam_real_clean; then
-  pass=$((pass + 1)); printf '  ok   %s\n' "seam SETTINGS_PERMISSIONS_FILE not wired in any workflow or composite action"
+  pass=$((pass + 1)); printf '  ok   %s\n' "seam SETTINGS_PERMISSIONS_FILE / SETTINGS_PERMISSIONS_SELFTEST / --selftest-child / BASH_ENV not wired in any workflow or composite action"
 else
-  fail=$((fail + 1)); printf '  FAIL %s\n' "seam SETTINGS_PERMISSIONS_FILE wired in a workflow or composite action (or a scanned dir missing/unreadable)"
+  fail=$((fail + 1)); printf '  FAIL %s\n' "seam SETTINGS_PERMISSIONS_FILE / SETTINGS_PERMISSIONS_SELFTEST / --selftest-child / BASH_ENV wired in a workflow or composite action (or a scanned dir missing/unreadable)"
 fi
 
-# --- Runtime CI assertion — deliberately runs BEFORE the self-re-exec
+# --- Runtime assertion — deliberately runs BEFORE the self-re-exec
 #     fixture-generation block below, NOT nested inside it and NOT after it.
 #     It evaluates on every non-child invocation (not only when the fixture
 #     block happens to run) and covers BOTH SETTINGS_PERMISSIONS_FILE and its
 #     legacy sibling SETTINGS_PERMISSIONS_SELFTEST, catching out-of-tree
 #     wiring no static grep could ever see: a composite action or org-level
 #     env exporting either var via $GITHUB_ENV rather than a literal string
-#     in a committed file. Ordering matters: if SETTINGS_PERMISSIONS_FILE is
-#     wired directly (not via run_selftest_child), $SETTINGS below is
-#     redirected to that path for the WHOLE script, so make_bad_fixture's jq
-#     read of a nonexistent/decoy path would abort the suite via `exit 1`
-#     before ever reaching a later assertion — running this check first
-#     guarantees its FAIL message is always emitted regardless of what a
-#     wired decoy path does downstream. ---
-if [ "${1:-}" != "--selftest-child" ] && [ -n "${CI:-}" ] && { [ -n "${SETTINGS_PERMISSIONS_FILE:-}" ] || [ -n "${SETTINGS_PERMISSIONS_SELFTEST:-}" ]; }; then
+#     in a committed file. UNCONDITIONAL — deliberately NOT scoped to CI: a
+#     bare `CI=` (empty) one-liner in a workflow env block would otherwise
+#     neuter the whole check, since CI detection is itself attacker/
+#     misconfiguration-controlled, not a trust boundary. Ordering matters: if
+#     SETTINGS_PERMISSIONS_FILE is wired directly (not via
+#     run_selftest_child), $SETTINGS below is redirected to that path for the
+#     WHOLE script, so make_bad_fixture's jq read of a nonexistent/decoy path
+#     would abort the suite via `exit 1` before ever reaching a later
+#     assertion — running this check first guarantees its FAIL message is
+#     always emitted regardless of what a wired decoy path does downstream. ---
+if [ "${1:-}" != "--selftest-child" ] && { [ -n "${SETTINGS_PERMISSIONS_FILE:-}" ] || [ -n "${SETTINGS_PERMISSIONS_SELFTEST:-}" ]; }; then
   fail=$((fail + 1))
-  printf '  FAIL %s\n' "runtime: SETTINGS_PERMISSIONS_FILE/SETTINGS_PERMISSIONS_SELFTEST must never be wired in CI outside the self-re-exec seam (out-of-tree tampering detected)"
-elif [ -z "${CI:-}" ]; then
+  printf '  FAIL %s\n' "runtime: SETTINGS_PERMISSIONS_FILE / SETTINGS_PERMISSIONS_SELFTEST must never be wired outside the self-re-exec seam (--selftest-child) (out-of-tree tampering detected)"
+elif [ "${1:-}" = "--selftest-child" ]; then
   pass=$((pass + 1))
-  printf '  ok   %s\n' "runtime: CI unset (not in CI — assertion not applicable)"
+  printf '  ok   %s\n' "runtime: self-re-exec child (assertion enforced by the parent invocation)"
 else
   pass=$((pass + 1))
-  printf '  ok   %s\n' "runtime: neither SETTINGS_PERMISSIONS_FILE nor SETTINGS_PERMISSIONS_SELFTEST is wired in CI (no out-of-tree wiring)"
+  printf '  ok   %s\n' "runtime: neither SETTINGS_PERMISSIONS_FILE nor SETTINGS_PERMISSIONS_SELFTEST wired (no out-of-tree wiring)"
 fi
 
 # --- Negative coverage via self-re-exec: the argv flag --selftest-child
@@ -373,12 +416,12 @@ run_selftest_child() {
   SETTINGS_PERMISSIONS_FILE="$1" bash "${BASH_SOURCE[0]}" --selftest-child
 }
 
-if [ "${1:-}" != "--selftest-child" ]; then
+if [ "${1:-}" != "--selftest-child" ] && [ -z "${SETTINGS_PERMISSIONS_SELFTEST:-}" ]; then
   assert_child_rejects() {
     local desc="$1" fixture="$2" expect_substr="$3" output rc
     output="$(run_selftest_child "$fixture" 2>&1)"
     rc=$?
-    if [ "$rc" -ne 0 ] && grep -qF "$expect_substr" <<<"$output"; then
+    if [ "$rc" -ne 0 ] && grep -qF "FAIL $expect_substr" <<<"$output"; then
       pass=$((pass + 1)); printf '  ok   %s\n' "$desc"
     else
       fail=$((fail + 1)); printf '  FAIL %s\n' "$desc"
@@ -430,7 +473,7 @@ fi
 if [ "${1:-}" != "--selftest-child" ] && [ -z "${SETTINGS_PERMISSIONS_SELFTEST:-}" ]; then
   tamper_output="$(CI=true SETTINGS_PERMISSIONS_SELFTEST=1 bash "${BASH_SOURCE[0]}" 2>&1)"
   tamper_rc=$?
-  if [ "$tamper_rc" -ne 0 ] && grep -qF "must never be wired in CI outside the self-re-exec seam" <<<"$tamper_output"; then
+  if [ "$tamper_rc" -ne 0 ] && grep -qF "must never be wired outside the self-re-exec seam" <<<"$tamper_output"; then
     pass=$((pass + 1)); printf '  ok   %s\n' "self-test: SETTINGS_PERMISSIONS_SELFTEST=1 tampering in CI still fails (argv guard closes the env-var bypass)"
   else
     fail=$((fail + 1)); printf '  FAIL %s\n' "self-test: SETTINGS_PERMISSIONS_SELFTEST=1 tampering in CI should still fail"
