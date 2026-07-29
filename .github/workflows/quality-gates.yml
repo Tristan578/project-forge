@@ -456,12 +456,13 @@ jobs:
       - run: npm ci
 
       # Hardened npm-audit gate. A raw `npm audit --audit-level=high` cannot pass
-      # here: dev-only drizzle-kit transitively bundles an old esbuild (via the
-      # deprecated @esbuild-kit/* loaders AND a direct esbuild ^0.25 range) that
-      # npm `overrides` provably cannot relock and that has no upstream fix. The
-      # gate waives ONLY those two documented, dev-only, non-exploitable esbuild
-      # advisories by id and stays HARD for every other high/critical advisory.
-      # See scripts/check-npm-audit.sh (unit-tested by the CI Self-Defense Tests job).
+      # here: the tree recurrently carries a transitive, dev-only advisory that
+      # npm `overrides` provably cannot relock away (see ALLOWED_ADVISORIES in
+      # scripts/check-npm-audit.sh for the current occupant + justification).
+      # The gate waives ONLY documented, dev-only, non-exploitable advisories by
+      # id — each pinned to its expected node_modules location — and stays HARD
+      # for every other high/critical advisory. Unit-tested by the CI
+      # Self-Defense Tests job.
       - name: npm audit (web) — allowlist gate
         run: bash scripts/check-npm-audit.sh web
 
@@ -470,6 +471,13 @@ jobs:
 
       - name: npm audit (mcp-server) — allowlist gate
         run: bash scripts/check-npm-audit.sh mcp-server
+
+      # npm audit scopes advisories to the INVOKING workspace's dependency
+      # subtree, so the two runs above never evaluate the ROOT workspace's own
+      # devDeps — nor the packages/* and apps/* workspaces. Auditing from the
+      # repo root covers the entire install graph (PF-1010 / #9029).
+      - name: npm audit (root) — allowlist gate
+        run: bash scripts/check-npm-audit.sh .
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:

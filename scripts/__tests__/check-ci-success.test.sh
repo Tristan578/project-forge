@@ -624,6 +624,57 @@ if [ "$rc" = "1" ]; then pass "design-internal-gate absent from needs while trig
 if echo "$out" | grep -q "design-internal-gate ("; then pass "the absent design gate is named"; else fail "absent design gate not named"; fi
 if echo "$out" | grep -q "result=absent"; then pass "the absent design gate reports result=absent"; else fail "result=absent missing"; fi
 
+# --- 54. TAMPER: quality-gates skipped while needs-any-code=true → exit 1 ------
+# quality-gates.yml is `workflow_call`-only and ci.yml's `quality-gates:` job is
+# its SOLE caller, so on the PR path that one job is the only execution site for
+# all three npm audits (web, mcp-server, repo root) plus the cargo audit — cd.yml
+# does not run on `pull_request`. An `if: false` on the caller leaves the job
+# EXISTING (so ci-success's `needs:` still resolves) and merely SKIPPED, which
+# this verifier certified green until the quality-gates map entry was added:
+# it fails only on failure/cancelled. 5th mk arg = quality-gates.result.
+res="$(run_verify "$(mk true true success success skipped)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "quality-gates skipped while needs-any-code=true fails (exit 1)"; else fail "tamper (quality-gates) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "quality-gates tamper is flagged as a possible unwiring"; else fail "quality-gates tamper message missing"; fi
+if echo "$out" | grep -q "quality-gates ("; then pass "the unwired quality-gates job is named"; else fail "unwired quality-gates job not named"; fi
+
+# --- 55. quality-gates job ABSENT from needs while triggered → exit 1 -----------
+# The OTHER one-line unwiring, and the cheaper one: deleting `- quality-gates`
+# from ci-success's `needs:` list. Valid YAML, no dangling reference, the caller
+# keeps running — the required aggregate simply stops waiting on and observing
+# it, so a red audit leaves "CI Success" green. `.result // "absent"` reads that
+# as absent ≠ success → tamper, but ONLY for jobs this map lists, which is why
+# the entry (not the fail-closed default) is what closes this. PF-1010.
+needs="$(mk true true success success success | jq -c 'del(."quality-gates")')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "quality-gates absent from needs while triggered fails (exit 1)"; else fail "absent quality-gates should exit 1, got $rc"; fi
+if echo "$out" | grep -q "quality-gates ("; then pass "the absent quality-gates job is named"; else fail "absent quality-gates job not named"; fi
+if echo "$out" | grep -q "result=absent"; then pass "the absent quality-gates job reports result=absent"; else fail "quality-gates result=absent missing"; fi
+
+# --- 56. quality-gates legit-skips (needs-any-code=false) → exit 0 --------------
+# The false-positive guard. A docs-only PR sets needs-any-code=false, the caller
+# legitimately skips, and that must NOT read as tamper — otherwise the entry
+# above would turn every non-code PR red. `mk` hardcodes needs-any-code=true (it
+# is true for essentially every fixture here), so flip it with jq rather than
+# adding a 26th positional arg. Everything else path-filter-skips too, matching
+# the real shape of a docs-only run.
+needs="$(mk false false skipped skipped skipped skipped false skipped false skipped false skipped false skipped false \
+  | jq -c '."ci-gate".outputs."needs-any-code" = "false"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "quality-gates legit-skip (needs-any-code=false) passes (exit 0)"; else fail "quality-gates legit skip should exit 0, got $rc"; fi
+if echo "$out" | grep -q "All required gates passed"; then pass "docs-only green path prints the all-passed line"; else fail "docs-only all-passed line missing"; fi
+
+# --- 57. quality-gates FAILED while triggered → exit 1 (hard-failure path) ------
+# The path this PR exists to protect: a red npm audit inside quality-gates must
+# fail the aggregate. Covered by the plain required-gate check (case 1), pinned
+# again here so the audit's blocking path is asserted by name.
+res="$(run_verify "$(mk true true success success failure)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "quality-gates failure fails (exit 1)"; else fail "quality-gates failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "quality-gates"; then pass "the failing quality-gates job is named"; else fail "failing quality-gates job not named"; fi
+
 # --- Structural: the REAL workflow wiring (not hermetic fixtures) ---------------
 # The hermetic cases above prove this verifier's decision logic against synthetic
 # NEEDS_JSON; none of them can catch a PR that reworks the real wiring the logic
@@ -675,6 +726,46 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
     pass "verifier anti-tamper map covers design-internal-gate <-> needs-design"
   else
     fail "verifier anti-tamper map lost its design-internal-gate/needs-design entry"
+  fi
+  if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "quality-gates"[[:space:]]+"needs-any-code"')" -ge 1 ]; then
+    pass "verifier anti-tamper map covers quality-gates <-> needs-any-code"
+  else
+    fail "verifier anti-tamper map lost its quality-gates/needs-any-code entry — a skipped or dropped quality-gates job is certified green again, and the npm audits stop being observed on the PR path"
+  fi
+  # The trigger named in the map must be the one the caller's own `if:` is gated
+  # on, or the arm is mapped to an output that never fires with the job and the
+  # entry above is decorative. Cut the caller job block and pin the pairing.
+  #
+  # Three vectors were measured against a caller degated to `if: false`, each of
+  # which an earlier form of this pin certified with an affirmative PASS. All
+  # three are closed here, and the shape that closes them is the one the
+  # design-internal-gate pin above already uses -- match the WHOLE expression as
+  # a fixed string, on the `if:` line alone:
+  #   1. run-on cut. A bare-key terminator (`^  [A-Za-z_]...:`) does not stop at
+  #      a QUOTED job key, so `'command-parity':` let the cut swallow following
+  #      jobs and find the needle in one of them. Terminator now tolerates
+  #      optional quotes. Same defect the guide records at :42.
+  #   2. trailing-comment survival. Stripping only FULL-line comments left a
+  #      needle alive inside a YAML trailing comment (`can-commit-ratchet: false
+  #      # needs-any-code`) -- tampering, not wiring (guide :105). Trailing
+  #      comments are now stripped and the needle is sought on the `if:` line
+  #      only, not anywhere in the block.
+  #   3. gate inversion. `needs-any-code != 'true'` still NAMES needs-any-code,
+  #      so any substring match passes it while the job runs only when there is
+  #      no code change -- dead for exactly the PRs it must gate. Only the full
+  #      `== 'true'` expression rejects it.
+  # `grep -q` is safe here (cf. the pipefail/SIGPIPE note above): the input is
+  # one job block, then one line, so the upstream always finishes writing.
+  qg_caller_blk="$(awk '/^  quality-gates:/{f=1} f{print} f && /^  ["'"'"']?[A-Za-z_][A-Za-z0-9_-]*["'"'"']?[[:space:]]*:/ && !/^  quality-gates:/{exit}' "$CI_YML")"
+  qg_caller_if="$(grep -v '^[[:space:]]*#' <<<"$qg_caller_blk" | sed 's/#.*$//' | grep -E '^    ["'"'"']?if["'"'"']?[[:space:]]*:')"
+  if [ -z "$qg_caller_blk" ]; then
+    fail "ci.yml quality-gates caller job block is empty — cannot verify its if: trigger"
+  elif [ -z "$qg_caller_if" ]; then
+    fail "ci.yml quality-gates caller has no job-level if: — cannot verify the trigger the map entry above is paired with"
+  elif grep -qF "needs.ci-gate.outputs.needs-any-code == 'true'" <<<"$qg_caller_if"; then
+    pass "ci.yml quality-gates caller if: is gated on needs-any-code == 'true' (matches the map entry)"
+  else
+    fail "ci.yml quality-gates caller's if: is no longer exactly \"needs.ci-gate.outputs.needs-any-code == 'true'\" — the map entry above is paired with a trigger that no longer gates the job"
   fi
   if [ "$(grep -v '^[[:space:]]*#' "$QG_YML" | grep -cF "$UI_TEST_CMD")" -ge 1 ]; then
     pass "quality-gates test-web runs the byte-identical UI suite invocation"

@@ -106,6 +106,19 @@ check_triggered "skills-lint"               "needs-skills"
 check_triggered "ghaw-lock-sync"            "needs-ghaw"
 check_triggered "openapi-route-sync"        "needs-api"
 check_triggered "actions-pin-check"         "needs-ci"
+# quality-gates is `workflow_call`-only, and ci.yml's `quality-gates:` job is its
+# SOLE caller — cd.yml does not run on `pull_request`, so on the PR path that one
+# job is the only execution site for all three npm audits (web, mcp-server, and
+# the repo root) plus the cargo audit. Two one-line unwires previously certified
+# green here: `if: false` on the caller (the job still EXISTS, so ci-success's
+# `needs:` resolves and the job merely SKIPS — and this script fails only on
+# failure/cancelled), and dropping `- quality-gates` from that `needs:` list
+# (valid YAML, no dangling reference, caller still runs, aggregate stops
+# observing it — an absent job resolves to result="absent" above, which is only
+# flagged for jobs THIS map lists). needs-any-code is the single trigger in the
+# caller's own `if:` (ci.yml), so this entry is one-armed by construction, and a
+# docs-only PR leaves it unfired rather than false-positive. PF-1010.
+check_triggered "quality-gates"             "needs-any-code"
 # The design gate (PF-1003) is the ONLY per-PR job that runs the @spawnforge/ui
 # unit suite for a packages/ui-only PR — quality-gates' test-web runs that suite
 # only when web/ci changed, so a UI-only PR relies entirely on this gate for its
