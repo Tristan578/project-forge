@@ -863,6 +863,62 @@ step_block() { # $1 = comment-stripped job block, $2 = step-name needle (fixed s
   ' <<<"$1"
 }
 
+# The STEP-level twin of assert_job_level_keys, and it exists for the same
+# measured reason one layer down. Every pin inside a cut STEP block -- the
+# `if:`/`continue-on-error:` absence checks and the `run:` count -- matches key
+# names by literal bytes through a `["']?` class, so the \u-escape that walked
+# through the job-level pins before round 20 walks through these too. Appending
+#
+#     "run": echo pwned
+#
+# to ci-success's verify step measured 160 PASS / 0 FAIL while PyYAML resolved
+# that step to `run: echo pwned` -- the required check's own verifier replaced
+# under last-key-wins, with the ORIGINAL run: line still satisfying the
+# containment pin and the run:-count pin still reading 1. An escaped
+# `continue-on-error` was false green the same way, and so was the pair against
+# lockfile-sync-tests' suite-run step. The plain spelling of either payload is
+# RED, which is what makes the escape the whole ingredient.
+#
+# Same fix as at column 0, at 2 spaces and at 4: pin the exact SET of keys the
+# block contains rather than trying to decide whether a given line IS a given
+# key. A respelled key lands as an unexpected element and a duplicate as an
+# extra one, whatever escape it is written with. Values are stripped -- no
+# step-level value is load-bearing for THIS pin, and the ones that are
+# load-bearing (each `run:` line) keep their own whole-line containment
+# assertions -- so a cosmetic step rename stays green. A continuation line from
+# a multi-line scalar sits deeper than 8 spaces and is not enumerated at all; a
+# continuation dedented to exactly 8 carries no colon, survives the value strip
+# intact, and lands as an unexpected element. An empty enumeration is refused
+# outright rather than passing vacuously, as everywhere else here.
+#
+# This replaces the claim that stood above assert_audit_steps_untampered --
+# that resisting a respelled key "means resolving YAML rather than grepping it,
+# which is out of register here". The measurement disproves it: the enumeration
+# decides the question without resolving anything. Scope is unchanged and worth
+# restating: spelling-independent, NOT parser-equivalent. Whether GitHub's own
+# workflow parser resolves \u escapes the way PyYAML does is not something this
+# suite measures.
+assert_step_level_keys() { # $1 = cut step block, $2 = label, $3 = expected key lines
+  local actual delta
+  actual="$(awk '
+    /^      - [^ ]/ || /^        [^ ]/ {
+      sub(/:.*/, "")
+      sub(/[[:space:]]+$/, "")
+      if ($0 != "") print
+    }
+  ' <<<"$1")"
+  if [ -z "$actual" ]; then
+    fail "$2: found no step-level key lines in the step block — the cut read nothing, so every count and absence pin on it passes vacuously"
+    return
+  fi
+  if [ "$actual" != "$3" ]; then
+    delta="$(diff <(printf '%s\n' "$3") <(printf '%s\n' "$actual") | grep '^[<>]' | tr '\n' ' ')"
+    fail "$2: the step-level keys are not exactly the expected set — the count and absence pins on this step match key names by BYTES, so a respelled key (e.g. a \\u escape, which YAML resolves to the same key) or a duplicate one slips them ('<' expected-but-absent, '>' present-but-unexpected): $delta"
+    return
+  fi
+  pass "$2: the step-level keys are exactly the $(grep -c '' <<<"$actual") expected keys (no key below can be respelled or duplicated past the pins on it)"
+}
+
 # The three workspace invocations every security job must carry, by EXACT step
 # name — anchoring on the name both scopes the tamper checks and forces the
 # steps to stay named (a bare `- run:` step would read as a missing step).
@@ -880,12 +936,14 @@ AUDIT_STEP_WS_RE=('web' 'mcp-server' '\.')
 # `"if": false` and `'if': false` are both the same key as `if:` to the parser
 # but invisible to an unquoted-only grep. Every count and absence pin in this
 # suite uses that same `["']?` class for exactly this reason; a double-quote-
-# only class left single-quoted duplicates of every pinned key green. RESIDUAL:
-# this closes the quoting vector, not the general same-key-different-spelling
-# class — a double-quoted key admits escapes, so an escape-spelled `"security":`
-# is still the same key and would still slip the pin. Resisting that means
-# resolving YAML rather than grepping it, which is out of register here: these
-# pins raise the cost of textual tampering, they do not decide key identity),
+# only class left single-quoted duplicates of every pinned key green. The
+# quoting vector is only half of the same-key-different-spelling class — a
+# double-quoted key admits \u escapes, so an escape-spelled key is the same key
+# to the parser and a different byte string to grep, and every pin below was
+# measured false green against one. That half is closed not by these matchers
+# but by assert_step_level_keys above, which enumerates the step's exact key set
+# instead of deciding whether a given line IS a given key; the note that used to
+# stand here called that "out of register", which the measurement disproved),
 # no `continue-on-error:` anywhere in its
 # block (not just inside a fixed grep window around the run: line), and
 # exactly ONE run: key whose whole line is its own workspace's invocation —
@@ -903,6 +961,8 @@ assert_audit_steps_untampered() {
       fail "$wf security job has no step named '$needle' — step-scoped tamper checks cannot run (fail closed)"
       continue
     fi
+    assert_step_level_keys "$blk" "$wf step '$needle'" "      - name
+        run"
     if grep -qE "^[[:space:]]*[\"']?if[\"']?[[:space:]]*:" <<<"$blk"; then
       fail "$wf step '$needle' carries a step-level if: — the gate can be skipped while its run: line still greps as present"
     else
@@ -1620,13 +1680,65 @@ jobs"
   # the verifier that would have caught it is the thing that was removed. Three
   # appended lines, valid YAML, no truncation and no exotic spelling.
   cs_steps_count="$(grep -cE "^    [\"']?steps[\"']?[[:space:]]*:" <<<"$ci_success_block" || true)"
-  cs_run_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$ci_success_block")"
   if [ "$cs_steps_count" -ne 1 ]; then
     fail "ci.yml ci-success has $cs_steps_count steps: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended second steps: replaces the verifier invocation wholesale while the job still reports SUCCESS, taking the required check green over a red audit)"
-  elif grep -qE "^[[:space:]]+run:[[:space:]]+bash[[:space:]]+scripts/check-ci-success\.sh[[:space:]]*$" <<<"$cs_run_scan"; then
-    pass "ci.yml ci-success has exactly one steps: key and still invokes scripts/check-ci-success.sh"
   else
-    fail "ci.yml ci-success no longer invokes scripts/check-ci-success.sh in a run: scalar — a single-but-replaced steps: list is the next spelling after the duplicate-key one, and it removes the anti-tamper verifier every other pin in this suite relies on for runtime enforcement"
+    pass "ci.yml ci-success has exactly one steps: key"
+  fi
+
+  # STEP-scoped, four assertions, same helper and same shape as the three
+  # siblings (audit steps at :901, lst suite-run at :1697, lst shellcheck at
+  # :1722). The pin that stood here was job-block-scoped with only the
+  # containment half, and a job-wide scan cannot tell which run: key owns the
+  # needle it matched — every one of these four is a one-line edit that left
+  # the old pin printing its affirmative:
+  #   append `run: echo …` inside the step   -> last-key-wins, original line still greps
+  #   needle into an env: block scalar        -> satisfied from a non-executable value
+  #   continue-on-error: true on the step     -> verifier's exit code ignored
+  #   if: false on the step                   -> verifier never runs
+  # The stakes are the highest in this file: ci-success carries
+  # `if: ${{ always() }}` so it runs when quality-gates FAILS, "CI Success" is
+  # the sole required check on main, and under any of the four the job exits 0
+  # and reports SUCCESS — no skip for the skip-based anti-tamper to notice, and
+  # a red npm audit (the whole point of this gate) leaves the required check
+  # green. Because ci.yml is pull_request-triggered GitHub runs the PR's own
+  # workflow file, so the mutation takes effect in the very run that should
+  # catch it — the same argument the lst suite-run pin makes for itself.
+  # Order matters: count FIRST, containment only after, because with exactly
+  # one run: key the scanned line IS the effective one. That ordering is also
+  # what makes the scalar cut below belt-and-braces rather than load-bearing
+  # today — any line that could satisfy the whole-line-anchored needle also
+  # matches the run:-key count regex, so an env: smuggle bumps the count to 2
+  # and fails there first. It is kept for parity with the shellcheck sibling
+  # and so a later conversion of this run: to a `run: |` block scalar cannot
+  # silently reopen the smuggle path.
+  cs_verify_blk="$(step_block "$ci_success_block" 'Verify all required gates passed')"
+  if [ -z "$cs_verify_blk" ]; then
+    fail "ci.yml ci-success has no step named 'Verify all required gates passed' — the verifier invocation cannot be located, so every pin below it would pass vacuously (fail closed)"
+  else
+    assert_step_level_keys "$cs_verify_blk" "ci ci-success verify step" "      - name
+        env
+        run"
+    if grep -qE "^[[:space:]]*[\"']?if[\"']?[[:space:]]*:" <<<"$cs_verify_blk"; then
+      fail "ci.yml ci-success's verify step carries a step-level if: — the verifier can be skipped while its run: line still greps as present, and the job still reports SUCCESS as the required check"
+    else
+      pass "ci.yml ci-success's verify step has no step-level if:"
+    fi
+    if grep -q 'continue-on-error' <<<"$cs_verify_blk"; then
+      fail "ci.yml ci-success's verify step carries continue-on-error — a failing check-ci-success.sh would be ignored and the required check would go green over a red audit"
+    else
+      pass "ci.yml ci-success's verify step has no continue-on-error"
+    fi
+    cs_verify_run_count="$(grep -cE "^[[:space:]]*[\"']?run[\"']?[[:space:]]*:" <<<"$cs_verify_blk" || true)"
+    cs_verify_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cs_verify_blk")"
+    cs_verify_scalar="$(awk "/^[[:space:]]*[\"']?run[\"']?[[:space:]]*:/{f=1;print;next} f && /^        [A-Za-z_\"'-]/{exit} f{print}" <<<"$cs_verify_scan")"
+    if [ "$cs_verify_run_count" -ne 1 ]; then
+      fail "ci.yml ci-success's verify step has $cs_verify_run_count run: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended run: executes instead of the verifier while the original line still greps as present; a needle smuggled into an env: value lands here too)"
+    elif grep -qE '^[[:space:]]*run: bash scripts/check-ci-success\.sh[[:space:]]*$' <<<"$cs_verify_scalar"; then
+      pass "ci.yml ci-success invokes scripts/check-ci-success.sh as the step's single whole-line run: scalar"
+    else
+      fail "ci.yml ci-success's verify step no longer invokes scripts/check-ci-success.sh as its single run: line — a replaced-but-single steps: list is the next spelling after the duplicate-key one, and it removes the anti-tamper verifier every other pin in this suite relies on for runtime enforcement"
+    fi
   fi
 
   # Same JOB-key count pin (rationale at the quality-gates security pin) —
@@ -1698,6 +1810,8 @@ jobs"
   if [ -z "$lst_suite_blk" ]; then
     fail "self-defense job has no step named 'Run npm-audit allowlist gate test suite' — the suite's own CI execution cannot be verified (fail closed)"
   else
+    assert_step_level_keys "$lst_suite_blk" "self-defense suite-run step" "      - name
+        run"
     if grep -qE "^[[:space:]]*[\"']?if[\"']?[[:space:]]*:" <<<"$lst_suite_blk"; then
       fail "self-defense suite-run step carries a step-level if: — the suite can be skipped while its run: line still greps as present"
     else
@@ -1723,6 +1837,8 @@ jobs"
   if [ -z "$lst_shck_blk" ]; then
     fail "self-defense job has no step named 'Shellcheck the gate scripts and their suites' — lint coverage of this gate cannot be verified (fail closed)"
   else
+    assert_step_level_keys "$lst_shck_blk" "self-defense shellcheck step" "      - name
+        run"
     if grep -qE "^[[:space:]]*[\"']?if[\"']?[[:space:]]*:" <<<"$lst_shck_blk"; then
       fail "self-defense shellcheck step carries a step-level if: — lint coverage can be skipped while its needle still greps as present"
     else
