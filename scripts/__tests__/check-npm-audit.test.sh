@@ -2454,8 +2454,17 @@ tag != "" { if ($0 == tag) tag = ""; next }
 }
 END { if (tag != "") printf "heredoc %s is still open at EOF\n", tag > "/dev/stderr" }
 '
+# Frozen at the point of definition. A later assignment -- in ANY spelling, since
+# bash accepts one with leading blanks, under `declare`/`typeset`, or after a
+# command separator -- then fails and leaves the pinned value in place, so every
+# reassignment vector is fail-closed by VALUE PRESERVATION rather than merely
+# detected. The suite runs under `set -uo pipefail` with no `-e`, so the readonly
+# error does not abort the run; preservation is what does the work. The two pins
+# further down are the detection layer that survives this line being deleted.
+readonly SELF_EXEC_FILTER
 SELF_EXEC="$(awk "$SELF_EXEC_FILTER" "$SELF" 2>/dev/null)"
 SELF_EXEC_DIAG="$(awk "$SELF_EXEC_FILTER" "$SELF" 2>&1 >/dev/null)"
+readonly SELF_EXEC SELF_EXEC_DIAG
 # Fails closed three ways: an empty filter would make both locks pass vacuously;
 # an unrecognized opener shape means the scope is no longer provably code-only;
 # a delimiter left open at EOF means every line after it was silently dropped.
@@ -2465,6 +2474,34 @@ elif [ -n "$SELF_EXEC_DIAG" ]; then
   fail "the suite's executable-line filter could not parse its own heredocs — $SELF_EXEC_DIAG"
 else
   pass "suite's executable-line filter parsed every heredoc opener (locks below scan code, not fixture payload)"
+fi
+
+# ROUND 31. The pin further down proves the FILTER's text. This one proves the
+# filter's OUTPUT is what the two hygiene locks actually scan. They read
+# `$SELF_EXEC`, one assignment downstream of the pinned variable, and THAT HOP
+# WAS UNPINNED: a single `SELF_EXEC="pinned-scope-removed"` inserted after the
+# assignment above measured 194 PASS / 0 FAIL, `bash -n` clean, with a planted
+# hygiene violation executing at runtime and both affirmative pin lines still
+# printing -- the `-z` arm is satisfied by any non-empty string, and
+# `SELF_EXEC_DIAG` is computed separately from the real filter so it stays empty.
+# The lesson, which is why round 30's fix did not cover this: a pin protects the
+# link it NAMES, not the link the evidence flows through, so pin every hop
+# between a pinned artifact and its consumer.
+#
+# Volume is the cheapest honest proxy for "this is still the filtered file": the
+# filter drops exactly the suite's own heredoc fixture payload, so an overwrite,
+# a degenerate program, and any swallow that runs to EOF all move this number.
+# It is a pin whose evidence is the artifact's own text (round 30's lesson), not
+# one that consumes the audited program's output. Regenerate after editing any
+# fixture: the failure message prints the observed value, which IS the new pin.
+readonly SELF_EXEC_EXPECTED_DROP=326
+self_exec_total="$(awk 'END { print NR }' "$SELF")"
+self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
+self_exec_dropped=$(( self_exec_total - self_exec_kept ))
+if [ "$self_exec_dropped" -ne "$SELF_EXEC_EXPECTED_DROP" ]; then
+  fail "the executable-line filter dropped ${self_exec_dropped} of ${self_exec_total} lines, expected ${SELF_EXEC_EXPECTED_DROP} — either \$SELF_EXEC no longer holds the filtered suite (the locks below would scan the wrong text), or a heredoc fixture changed size and this pin needs updating to ${self_exec_dropped}"
+else
+  pass "the executable-line filter drops exactly ${SELF_EXEC_EXPECTED_DROP} fixture-payload lines (\$SELF_EXEC reaching the locks IS the filtered suite)"
 fi
 
 # ROUND 30. The self-check above is VACUOUS against a reversion of the filter
@@ -2485,17 +2522,23 @@ fi
 #
 # So the filter's own body is pinned line-for-line -- the sixth application of
 # the exact-line-set idiom, and the first turned on the suite's own machinery
-# rather than on what it pins. The count pin runs FIRST so the cut block is
-# provably the effective assignment (a later `SELF_EXEC_FILTER=` would win under
-# last-assignment-wins while this pin read the dead first one). Cost, by design:
+# rather than on what it pins.
+#
+# ROUND 31 changed WHAT is pinned, not how much. Round 30 cut the block out of
+# the FILE at column 0 (`/^SELF_EXEC_FILTER='$/`), guarded by a column-0
+# `grep -cE "^SELF_EXEC_FILTER="` count. Column 0 is not bash's assignment
+# grammar: a leading space, a leading tab, `declare `, `typeset `, and a `: ; `
+# separator all assign, and all five measured 194 PASS / 0 FAIL with a naive
+# filter in force and a planted hygiene violation executing, while the column-0
+# baseline of the very same mutation went red -- so the guard was a blacklist of
+# one spelling. Modelling a language construct with a convenient byte pattern is
+# the same defect round 29 fixed one level in (a `here_end` is a WORD, not a C
+# identifier), which is the reason to stop widening patterns: the pin now asserts
+# on the EFFECTIVE RUNTIME VALUE. Last-assignment-wins means whatever
+# `$SELF_EXEC_FILTER` holds at this point IS what ran, in every spelling at once,
+# with no grammar to model and no count pin left to keep honest. Cost, by design:
 # editing the filter reddens this until the expected set is updated alongside --
 # for a self-defense suite, that prompt is the point.
-filter_def_count="$(grep -cE "^SELF_EXEC_FILTER=" "$SELF" || true)"
-if [ "${filter_def_count}" -ne 1 ]; then
-  fail "the suite assigns SELF_EXEC_FILTER ${filter_def_count} times (expected exactly 1) -- a later assignment wins under last-assignment-wins while the pin below reads the dead first one"
-else
-  pass "the suite assigns SELF_EXEC_FILTER exactly once (the block pinned below IS the effective filter)"
-fi
 IFS= read -r -d '' expected_filter_body <<'STEPS_EOF' || true
 tag != "" { if ($0 == tag) tag = ""; next }
 {
@@ -2516,10 +2559,9 @@ tag != "" { if ($0 == tag) tag = ""; next }
 }
 END { if (tag != "") printf "heredoc %s is still open at EOF\n", tag > "/dev/stderr" }
 STEPS_EOF
-filter_body_blk="$(awk "/^SELF_EXEC_FILTER='\$/{f=1;next} f && /^'\$/{exit} f{print}" "$SELF")"
-assert_block_lines_exact "$filter_body_blk" "the suite's executable-line filter body" \
+assert_block_lines_exact "$SELF_EXEC_FILTER" "the suite's executable-line filter body (effective runtime value)" \
   "${expected_filter_body%$'\n'}" \
-  "the stderr-based self-check above cannot see a filter that writes no stderr AT ALL, so a reversion to the naive pre-round-27 program silently restores the comment/string/EOF swallow -- hiding real code from both hygiene locks -- while every surrounding line stays byte-identical"
+  "the stderr-based self-check above cannot see a filter that writes no stderr AT ALL, so a reversion to the naive pre-round-27 program silently restores the comment/string/EOF swallow -- hiding real code from both hygiene locks -- while every surrounding line stays byte-identical; asserting on the VALUE rather than on column-0 bytes covers every assignment spelling at once, because last-assignment-wins makes whatever this variable holds here the program that actually ran"
 if grep -nE 'echo[[:space:]]+"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*\|[[:space:]]*(grep|awk)' <<<"$SELF_EXEC" >/dev/null; then
   fail "a variable's echo output is piped into grep/awk — feed it via a here-string to stay correct under pipefail"
 else
