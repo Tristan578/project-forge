@@ -2494,7 +2494,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=326
+readonly SELF_EXEC_EXPECTED_DROP=361
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -2562,6 +2562,81 @@ STEPS_EOF
 assert_block_lines_exact "$SELF_EXEC_FILTER" "the suite's executable-line filter body (effective runtime value)" \
   "${expected_filter_body%$'\n'}" \
   "the stderr-based self-check above cannot see a filter that writes no stderr AT ALL, so a reversion to the naive pre-round-27 program silently restores the comment/string/EOF swallow -- hiding real code from both hygiene locks -- while every surrounding line stays byte-identical; asserting on the VALUE rather than on column-0 bytes covers every assignment spelling at once, because last-assignment-wins makes whatever this variable holds here the program that actually ran"
+
+# ROUND 32 — pin the exact ORDERED set of lines that can open a filter swallow.
+#
+# The shape whitelist inside that filter is LINE-LOCAL, but bash's parse is not.
+# Whether a line is a heredoc redirection depends on quoting state carried in
+# from EARLIER lines, so a line can match a listed opener shape byte-for-byte
+# while being pure string content to bash. Measured at 976e3f3c: a three-line
+# assignment whose middle line reads `f="$(fixture zz.json @@'JSON'` (inert to
+# bash -- the quote inside `@@'` closes the string the first line opened, with
+# `@@` spelled `<` twice) made awk drop the four lines after it, hiding a real
+# hygiene violation that EXECUTED at runtime from BOTH locks below, at 194 PASS
+# / 0 FAIL, `bash -n` clean, with neither fail-closed arm firing.
+#
+# The volume pin below catches that mutation as written (it drops 330, not 326)
+# -- but only as arithmetic, and arithmetic is compensable. Re-measured at
+# 2efd084c: the same insertion PLUS a one-line bump of SELF_EXEC_EXPECTED_DROP
+# to 330 is GREEN 194/0 with the violation still executing, and a JSON fixture
+# reformatted four lines shorter would compensate without touching any pin at
+# all. So pin the LINES instead -- the seventh application of the exact-line-set
+# idiom on this branch, after column-0, 2-space, 4-space, step-key, step-line
+# and job-steps. A phantom opener is a line that was not there before, so it
+# lands as an unexpected element whatever it spells; an ORDERED comparison also
+# catches a phantom spelled identically to a real opener, since a duplicate is
+# an extra element. No bash quoting grammar is modelled anywhere.
+#
+# The two patterns MUST mirror the two shapes in the filter body above. That
+# body is itself pinned verbatim, so changing a shape there already reddens this
+# file and puts the mirror in front of the editor.
+#
+# `<<` is respelled `@@` on both sides so the expected list can quote the real
+# openers verbatim without matching the shapes itself -- the same self-match
+# avoidance the awk program uses when it spells its own `<<` as `[<][<]`.
+opener_shape_fixture="^f=\"\\\$\\(fixture [A-Za-z0-9._-]+ [<][<]'JSON'\$"
+opener_shape_read="^[[:blank:]]*IFS= read -r -d '' [A-Za-z_][A-Za-z0-9_]* [<][<]'(STEPS_EOF|OUTPUTS_EOF)' \\|\\| true\$"
+suite_openers="$(grep -E "$opener_shape_fixture|$opener_shape_read" "$SELF" | sed 's/[<][<]/@@/g')"
+IFS= read -r -d '' expected_openers <<'STEPS_EOF' || true
+f="$(fixture clean.json @@'JSON'
+f="$(fixture waived.json @@'JSON'
+f="$(fixture block-high.json @@'JSON'
+f="$(fixture block-crit.json @@'JSON'
+f="$(fixture mixed.json @@'JSON'
+f="$(fixture low.json @@'JSON'
+f="$(fixture moderate.json @@'JSON'
+f="$(fixture string-via.json @@'JSON'
+f="$(fixture pinned-only.json @@'JSON'
+f="$(fixture unpinned-location.json @@'JSON'
+f="$(fixture clean-note.json @@'JSON'
+f="$(fixture no-nodes.json @@'JSON'
+f="$(fixture empty-nodes.json @@'JSON'
+f="$(fixture string-nodes.json @@'JSON'
+f="$(fixture sibling-prefix.json @@'JSON'
+f="$(fixture missing-title.json @@'JSON'
+f="$(fixture empty-title.json @@'JSON'
+f="$(fixture missing-severity.json @@'JSON'
+f="$(fixture empty-severity.json @@'JSON'
+f="$(fixture empty-string-nodes.json @@'JSON'
+f="$(fixture missing-title-and-severity.json @@'JSON'
+f="$(fixture adjacent-run-severity.json @@'JSON'
+f="$(fixture jq-abort.json @@'JSON'
+f="$(fixture v1-report.json @@'JSON'
+f="$(fixture multi-pinned.json @@'JSON'
+f="$(fixture multi-third.json @@'JSON'
+  IFS= read -r -d '' expected_ci_gate_outputs @@'OUTPUTS_EOF' || true
+IFS= read -r -d '' expected_filter_body @@'STEPS_EOF' || true
+IFS= read -r -d '' expected_openers @@'STEPS_EOF' || true
+IFS= read -r -d '' expected_steps_1 @@'STEPS_EOF' || true
+IFS= read -r -d '' expected_steps_2 @@'STEPS_EOF' || true
+IFS= read -r -d '' expected_steps_3 @@'STEPS_EOF' || true
+IFS= read -r -d '' expected_steps_4 @@'STEPS_EOF' || true
+IFS= read -r -d '' expected_steps_5 @@'STEPS_EOF' || true
+STEPS_EOF
+assert_block_lines_exact "$suite_openers" "the set of lines that can open a filter swallow" \
+  "${expected_openers%$'\n'}" \
+  "the filter's shape whitelist is line-local while bash's parse is not, so a line inside a multi-line quoted string can match an opener shape byte-for-byte and open a swallow bash never performs -- hiding executable code, including a hygiene violation, from both locks below; the volume pin catches the arithmetic but a bumped expected-drop or a reformatted fixture compensates for it, whereas a phantom opener is by construction a line that was not in this list"
+
 if grep -nE 'echo[[:space:]]+"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*\|[[:space:]]*(grep|awk)' <<<"$SELF_EXEC" >/dev/null; then
   fail "a variable's echo output is piped into grep/awk — feed it via a here-string to stay correct under pipefail"
 else
