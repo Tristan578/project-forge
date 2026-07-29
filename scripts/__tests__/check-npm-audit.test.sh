@@ -17,6 +17,48 @@
 # minimatch@3 toolchain). See ALLOWED_ADVISORIES in the gate for the full
 # justification and removal path.
 #
+# MAP OF THIS FILE
+# ----------------
+# This file is long. Its sections are announced at RUNTIME rather than by comment
+# banners, so the table of contents is a grep, and this is it (no line numbers
+# here on purpose -- they would rot on the next round; the grep never does):
+#
+#   grep -n '^echo "=== ' scripts/__tests__/check-npm-audit.test.sh
+#
+# (anchored at column 0 so this comment block is not itself a hit.)
+#
+#   1. check-npm-audit.sh contract .............. the gate's own decision logic:
+#      exit codes, severity thresholds, waiver matching, fail-closed paths.
+#   2. allowlist entry format + multi-path pins . malformed waivers and the
+#      location pins added in PF-1009, via make_gate_variant. Sections 1-2 are
+#      the only ones whose individual cases carry `# --- N.` markers: they run
+#      1-11 in section 1 and 12-15 in section 2, with letter-suffixed variants
+#      (6b-6t, 9b-9c) where one case grew a family. Everything after section 2
+#      is grouped by target, not numbered.
+#   3. gate script hardening (structural) ....... properties of the gate FILE
+#      (seam not wired, fail-closed ordering) rather than of a gate run.
+#   4-6. <workflow>.yml integration wiring ...... one section each for
+#      quality-gates.yml, cd.yml and ci.yml: proof the gate is actually INVOKED
+#      and that nothing can silently unwire it. This is the bulk of the file and
+#      the reason it is long -- see ENFORCEMENT SHAPE below.
+#   7. suite hygiene (structural) ............... the suite auditing ITSELF (the
+#      executable-line filter, its volume pin, the heredoc-opener set).
+#   8. bash runtime-error sweep ................. the accumulated-error check.
+#
+# ENFORCEMENT SHAPE
+# -----------------
+# Sections 4-6 are not a list of ad-hoc greps. They apply one idiom repeatedly:
+# pin the EXACT SET OF LINES of a block, rather than describe what its lines may
+# look like. That choice is the scar tissue of ~30 review rounds in which every
+# byte-pattern rule (which keys may appear, which shapes open a heredoc, which
+# lines look like job keys) was defeated by a spelling it did not model -- YAML
+# `\u` escapes, quoted scalars continuing at any indentation, plain-scalar
+# continuations extending a value from the line below. An exact line set is
+# spelling-independent by construction: an inserted line is unexpected whatever
+# it spells. The cost is deliberate churn -- adding a job or bumping an action
+# reddens the suite until the expected set is updated, which is the prompt, not
+# a defect. See ROUND 33 above expected_steps_1 for the routine trigger.
+#
 # HERMETIC TESTING
 # ----------------
 # The gate reads its audit command from $NPM_AUDIT_CMD (default real
@@ -1042,9 +1084,22 @@ $delta"
 # set is updated. For a self-defense pin on the clause that gates production
 # deploys, that prompt is the point.
 # $1 = cut block, $2 = label, $3 = expected verbatim lines, $4 = why it matters
-# (optional; defaults to the scalar-block rationale this helper was written for).
+# (optional; defaults to the scalar-block rationale this helper was written for),
+# $5 = the line number to name in the failure message (optional).
+#
+# $5 exists because this helper's whole value on a FAIL is telling the developer
+# WHICH expected-set literal to go edit, and `${BASH_LINENO[0]}` cannot find that
+# on its own: read inside a function it yields the line where THAT function was
+# called, so it is right only when the caller is the assertion itself. Every
+# caller that reaches this helper through a WRAPPER (`assert_steps_block`) would
+# otherwise name the wrapper's one internal call site for all five of its pins --
+# a fixed line number pointing at shared plumbing, with nothing to edit there.
+# The wrapper therefore reads `${BASH_LINENO[0]}` in ITS OWN frame (where it
+# resolves to the wrapper's caller, i.e. the true assertion site) and passes it
+# down. Direct callers omit $5 and the default is already correct for them.
 assert_block_lines_exact() {
   local actual delta why="${4:-the containment pin on this block proves its clause is PRESENT, and a line appended below that clause (or a rewrite of any OTHER line in it) changes what the expression EVALUATES TO while leaving the pinned clause byte-identical}"
+  local site="${5:-${BASH_LINENO[0]}}"
   actual="$(awk '{ sub(/[[:space:]]+$/, ""); if ($0 != "") print }' <<<"$1")"
   if [ -z "$actual" ]; then
     fail "$2: found no lines in the block — the cut read nothing, so every containment pin on it passes vacuously"
@@ -1052,7 +1107,7 @@ assert_block_lines_exact() {
   fi
   if [ "$actual" != "$3" ]; then
     delta="$(diff <(printf '%s\n' "$3") <(printf '%s\n' "$actual") | grep '^[<>]')"
-    fail "$2: the block's lines are not exactly the expected set — $why. '<' expected-but-absent, '>' present-but-unexpected; if the change is legitimate, update the expected set passed at this assertion's call site, ${BASH_SOURCE[0]##*/}:${BASH_LINENO[0]}:
+    fail "$2: the block's lines are not exactly the expected set — $why. '<' expected-but-absent, '>' present-but-unexpected; if the change is legitimate, update the expected set passed at this assertion's call site, ${BASH_SOURCE[0]##*/}:${site}:
 $delta"
     return
   fi
@@ -1101,8 +1156,13 @@ $delta"
 # where a leading `#` is load-bearing, which nothing here does.
 assert_steps_block() {
   local blk
+  # Read in THIS frame, where it is the line that called the wrapper -- i.e. the
+  # `assert_steps_block` call whose expected-set literal a FAIL needs edited.
+  # Reading it one frame deeper (inside the helper) would name line "$LINENO"
+  # below for all five pins, which is plumbing with nothing to edit.
+  local site="${BASH_LINENO[0]}"
   blk="$(awk "/^    [\"']?steps[\"']?[[:space:]]*:/{f=1;print;next} f && \$0 != \"\" && !/^      /{exit} f{print}" <<<"$1")"
-  assert_block_lines_exact "$blk" "$2" "$3" "the per-step pins cover only the steps they NAME, so a step added beside them -- or a one-line edit to an unpinned sibling such as \`npm ci\` -- runs arbitrary code before the first audit while every named step stays byte-identical"
+  assert_block_lines_exact "$blk" "$2" "$3" "the per-step pins cover only the steps they NAME, so a step added beside them -- or a one-line edit to an unpinned sibling such as \`npm ci\` -- runs arbitrary code before the first audit while every named step stays byte-identical" "$site"
 }
 
 # The three workspace invocations every security job must carry, by EXACT step
@@ -2680,7 +2740,27 @@ fi
 # failure here reads as "the step LIST changed", distinct from "a pinned step
 # changed". Each block is read with :- so a workflow that failed to parse above
 # lands on the helper's empty-block FAIL instead of tripping `set -u`.
-
+#
+# ROUND 33 -- WHEN THESE FIVE BLOCKS GO RED ON A PR THAT LOOKS UNRELATED.
+# The five expected_steps_N blocks below quote whole workflow steps verbatim,
+# action pins included, so they are the most churn-prone assertions in the suite
+# and the trip is usually MAINTENANCE, not tampering. The routine trigger is
+# scheduled: `.github/dependabot.yml` runs the `github-actions` ecosystem weekly
+# (Mondays) over `directory: /`, and its own comment records that the
+# hand-authored ci.yml / cd.yml / quality-gates.yml are still scanned and DO get
+# bumped -- only the generated gh-aw `*.lock.yml` files are excluded. One
+# `actions/checkout` bump therefore rewrites a `uses:` line inside ALL FIVE
+# blocks in a single Dependabot PR, so all five pins fail together. A step
+# RENAME, an added `with:` key, or a reordered step does the same for whichever
+# blocks it touches.
+#
+# That churn is the pin working as designed -- the whole point is that no line of
+# a gate-bearing job's step list changes without a human looking at it -- so the
+# fix is never to loosen the pin. Read the FAIL's diff ('<' expected-but-absent,
+# '>' present-but-unexpected), confirm the change is the bump you think it is,
+# then paste the new line into the expected_steps_N block the failure names.
+# Since round 33 that name is the true assertion site (see assert_steps_block):
+# five distinct line numbers, one per block, not one shared plumbing line.
 IFS= read -r -d '' expected_steps_1 <<'STEPS_EOF' || true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
