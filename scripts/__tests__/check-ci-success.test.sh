@@ -735,13 +735,37 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   # The trigger named in the map must be the one the caller's own `if:` is gated
   # on, or the arm is mapped to an output that never fires with the job and the
   # entry above is decorative. Cut the caller job block and pin the pairing.
-  qg_caller_blk="$(awk '/^  quality-gates:/{f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && !/^  quality-gates:/{exit}' "$CI_YML")"
+  #
+  # Three vectors were measured against a caller degated to `if: false`, each of
+  # which an earlier form of this pin certified with an affirmative PASS. All
+  # three are closed here, and the shape that closes them is the one the
+  # design-internal-gate pin above already uses -- match the WHOLE expression as
+  # a fixed string, on the `if:` line alone:
+  #   1. run-on cut. A bare-key terminator (`^  [A-Za-z_]...:`) does not stop at
+  #      a QUOTED job key, so `'command-parity':` let the cut swallow following
+  #      jobs and find the needle in one of them. Terminator now tolerates
+  #      optional quotes. Same defect the guide records at :42.
+  #   2. trailing-comment survival. Stripping only FULL-line comments left a
+  #      needle alive inside a YAML trailing comment (`can-commit-ratchet: false
+  #      # needs-any-code`) -- tampering, not wiring (guide :105). Trailing
+  #      comments are now stripped and the needle is sought on the `if:` line
+  #      only, not anywhere in the block.
+  #   3. gate inversion. `needs-any-code != 'true'` still NAMES needs-any-code,
+  #      so any substring match passes it while the job runs only when there is
+  #      no code change -- dead for exactly the PRs it must gate. Only the full
+  #      `== 'true'` expression rejects it.
+  # `grep -q` is safe here (cf. the pipefail/SIGPIPE note above): the input is
+  # one job block, then one line, so the upstream always finishes writing.
+  qg_caller_blk="$(awk '/^  quality-gates:/{f=1} f{print} f && /^  ["'"'"']?[A-Za-z_][A-Za-z0-9_-]*["'"'"']?[[:space:]]*:/ && !/^  quality-gates:/{exit}' "$CI_YML")"
+  qg_caller_if="$(grep -v '^[[:space:]]*#' <<<"$qg_caller_blk" | sed 's/#.*$//' | grep -E '^    ["'"'"']?if["'"'"']?[[:space:]]*:')"
   if [ -z "$qg_caller_blk" ]; then
     fail "ci.yml quality-gates caller job block is empty — cannot verify its if: trigger"
-  elif echo "$qg_caller_blk" | grep -v '^[[:space:]]*#' | grep -q 'needs-any-code'; then
-    pass "ci.yml quality-gates caller if: names needs-any-code (matches the map entry)"
+  elif [ -z "$qg_caller_if" ]; then
+    fail "ci.yml quality-gates caller has no job-level if: — cannot verify the trigger the map entry above is paired with"
+  elif grep -qF "needs.ci-gate.outputs.needs-any-code == 'true'" <<<"$qg_caller_if"; then
+    pass "ci.yml quality-gates caller if: is gated on needs-any-code == 'true' (matches the map entry)"
   else
-    fail "ci.yml quality-gates caller's if: no longer names needs-any-code — the map entry above is mapped to a trigger that no longer gates the job"
+    fail "ci.yml quality-gates caller's if: is no longer exactly \"needs.ci-gate.outputs.needs-any-code == 'true'\" — the map entry above is paired with a trigger that no longer gates the job"
   fi
   if [ "$(grep -v '^[[:space:]]*#' "$QG_YML" | grep -cF "$UI_TEST_CMD")" -ge 1 ]; then
     pass "quality-gates test-web runs the byte-identical UI suite invocation"
