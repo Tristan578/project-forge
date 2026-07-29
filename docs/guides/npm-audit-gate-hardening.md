@@ -273,3 +273,104 @@ did not exist when that message was written.
 
 Docs-only round: the suite is unchanged at **214 PASS / 0 FAIL**, shellcheck
 clean, and the roll-call table gains no row — round 37 added no pin.
+
+## Round 38: the pin that certified a dead gate, and a needle worth copying
+
+Round 38 dispatched four seats. Two (architect, docs) returned FAIL; the security
+and test seats were **stopped mid-review, un-returned**, when the round was cut
+short — see "Where this stopped" at the end of this section. The two findings
+that did land share a root cause worth naming: **a guard is only as strong as the
+uniqueness of the text it looks for.** Both defects were pins that could be
+satisfied by text the tamperer themselves supplies.
+
+### The architect finding
+
+The branch added `check_triggered "quality-gates" "needs-any-code"` to the
+`ci-success` anti-tamper map. That entry is only meaningful if `needs-any-code`
+is genuinely what ci.yml's `quality-gates` caller is gated on — pair it with the
+wrong output and the arm never fires with the job, so the branch also added a
+pin asserting the pairing. The pin was satisfiable three ways, each measured
+against a caller degated to `if: false`:
+
+| # | Vector | Why the pin passed anyway |
+|---|--------|---------------------------|
+| t1 | run-on cut | The awk terminator `^  [A-Za-z_][A-Za-z0-9_-]*:` is bare-key-only, so a following **quoted** key (`'command-parity':`) never terminated the block. The cut swallowed later jobs and found the needle in one of them. |
+| t2 | trailing-comment survival | The strip was full-line-only and the needle was matched against the whole block, so `can-commit-ratchet: false # needs-any-code` satisfied it. |
+| t3 | gate inversion | `needs-any-code != 'true'` still *names* `needs-any-code`. Any substring match passes it while the job runs only when there is **no** code change — dead for exactly the PRs it exists to gate. |
+
+t1 and t2 came from the seat. **t3 came from re-measuring the seat's own
+proposed fix**, which scoped the match to the `if:` line but kept a loose
+substring needle — so it closed t1 and t2 and left t3 wide open. Applying a
+review finding without re-deriving it would have shipped a pin that was still
+bypassable, with a round entry claiming it was fixed.
+
+The real root cause is sharper than "the terminator is bare-only". Twenty-five
+lines earlier, the pre-existing `design-internal-gate` pin survives the **same**
+run-on cut — measured, not assumed — because its needle is the whole expression
+as a fixed string, `needs.ci-gate.outputs.needs-design == 'true'`, which occurs
+nowhere else in the file. A run-on cut cannot manufacture a match for a needle
+that unique. The new pin had reached for the bare substring `needs-any-code`
+instead, which appears twice in ci.yml and, more importantly, is trivially
+re-introducible by the very edit the pin exists to catch.
+
+So the fix does not invent a third shape — it adopts the neighbour's proven one:
+optional quotes in the terminator, trailing comments stripped, the needle sought
+on the `if:` line alone, matched as the full `== 'true'` expression, plus a
+fail-closed arm so a caller with no job-level `if:` at all can no longer read as
+"trigger absent, therefore fine".
+
+Measured with the real suite against four full repo replicas — control exit 0
+(123 PASS / 0 FAIL, pin PASSes); t1, t2 and t3 each exit 1 (122 PASS / 1 FAIL),
+and in every case **the failing assertion is the pin itself**, not an unrelated
+one carrying it.
+
+One nuance the seat measured and this entry preserves: `check-npm-audit.test.sh`
+independently reddens t1 and t2, so CI overall never went green on them. This
+was a false-green in one guard, not a live merge path. That is not a reason to
+leave it. A guard that prints an affirmative PASS certifying the wiring it was
+added to protect, while that wiring is dead, is worse than no guard — it
+converts "unprotected" into "audited and fine".
+
+**Lesson: pin the whole expression, not a word inside it.** A needle a tamperer
+can re-introduce in a comment, a neighbouring job, or an inverted comparison is
+not evidence.
+
+### The docs finding
+
+See Round 37 above, which is the entry that was missing when round 38 opened —
+one round after Round 36 was itself written to fix exactly that staleness. The
+round log has now lagged twice in three rounds, which is itself the datum: a log
+maintained by intention rather than by a gate will lag. Nothing here changes
+that; it is recorded so the next person weighing "should this be mechanized"
+has the frequency in front of them rather than a vibe.
+
+### What did not change
+
+The roll-call table gains no row. Round 38 hardened an existing pin and appended
+two round entries; it added no new application of the exact-line-set idiom.
+
+### Where this stopped, and why that is the right place
+
+Round 38 is the last round. The security and test seats were stopped mid-review
+and their verdicts were never collected, so **this branch ships without a clean
+sweep** — that is a deliberate, recorded decision, not an oversight.
+
+The reason is proportionality. The change this suite defends is **two lines**: a
+third `check-npm-audit.sh` invocation for the root workspace, and one entry in
+the verifier's anti-tamper map. Thirty-eight antagonistic rounds accreted around
+it. Every round found something real, which is exactly why the loop never
+terminated on its own: the stopping rule was "all seats PASS at one HEAD", and
+each fix created fresh surface for the next round to attack. A suite whose own
+pins are attackable artifacts has no natural fixed point.
+
+Round 38's own finding is the argument. The architect defect was a **false-green
+in one guard, not a live merge path** — `check-npm-audit.test.sh` independently
+reddened two of the three vectors, so CI never went green on them. Worth fixing;
+not worth another full round to look for its successor. Whoever picks this up
+should read the frequency in the round log rather than the severity of any single
+entry: the marginal round has been buying smaller and smaller findings for a
+fixed price for some time.
+
+**If you are extending this suite: budget rounds against the size of the shipped
+change, not the size of the suite around it.** Finding a real defect in round N is
+not evidence that round N was worth its cost.
