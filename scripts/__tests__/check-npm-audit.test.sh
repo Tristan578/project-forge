@@ -714,6 +714,21 @@ if [ -f "$QG_YML" ]; then
     fail "security job block is empty after comment-strip — job missing, renamed, or fully commented out"
   fi
 
+  # The job's steps: key is COUNT-pinned: YAML keeps the last duplicate key,
+  # so a second `steps:` appended at the end of the job replaces the ENTIRE
+  # step list — all three npm audits plus the cargo audit — while the job
+  # still exits 0 and reports SUCCESS (not skipped, so the CI Success
+  # anti-tamper never fires). The step-scoped assertions below are textual
+  # and cannot tell which steps: key owns the steps they match; with exactly
+  # one steps: key, the scanned steps ARE the effective steps. Same
+  # duplicate-key class as the run:/if:/needs: count pins.
+  qg_sec_steps_count="$(grep -cE '^    "?steps"?[[:space:]]*:' <<<"$qg_sec" || true)"
+  if [ "$qg_sec_steps_count" -ne 1 ]; then
+    fail "quality-gates security job has $qg_sec_steps_count job-level steps: keys (expected exactly 1) — YAML keeps the last duplicate key, so a second steps: silently replaces every audit step while the job still reports success"
+  else
+    pass "quality-gates security job has exactly 1 job-level steps: key"
+  fi
+
   # The required security job must keep its display name (the required-check
   # surface) — asserted inside the job block on an executable line, so neither
   # a commented-out `# name:` nor the same name on a different job satisfies it.
@@ -844,6 +859,17 @@ if [ -f "$CD_YML" ]; then
   cd_sec="$(awk '/^  security:/{f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && !/^  security:/{exit}' <<<"$cd_exec")"
   if [ -z "$cd_sec" ]; then
     fail "cd.yml security job block is empty after comment-strip — job missing, renamed, or fully commented out"
+  fi
+
+  # Same steps: count pin as quality-gates (rationale there) — on cd.yml a
+  # replaced step list additionally makes needs.security.result == 'success'
+  # genuinely TRUE, so every deploy-side clause pin passes on its own terms
+  # while both deploys proceed unaudited.
+  cd_sec_steps_count="$(grep -cE '^    "?steps"?[[:space:]]*:' <<<"$cd_sec" || true)"
+  if [ "$cd_sec_steps_count" -ne 1 ]; then
+    fail "cd.yml security job has $cd_sec_steps_count job-level steps: keys (expected exactly 1) — YAML keeps the last duplicate key, so a second steps: silently replaces every audit step while the job still reports success and both deploys proceed"
+  else
+    pass "cd.yml security job has exactly 1 job-level steps: key"
   fi
 
   # cd.yml's security job legitimately carries a job-level `if:` (main +
@@ -1051,26 +1077,82 @@ if [ -f "$CI_YML" ]; then
     fail "lockfile-sync-tests job block is empty after comment-strip — self-defense job missing or fully commented out"
   fi
 
-  # The two substring pins below must not be satisfiable from inside a TRAILING
-  # YAML comment: `run: true # bash scripts/__tests__/check-npm-audit.test.sh`
-  # executes `true` while a -F grep still matches the needle in the comment,
-  # which the line-level strip above cannot remove (same class round 2 closed
-  # for the qg/cd run: lines by whole-line anchoring — not available here,
-  # since the lint needle sits mid-line in a multi-line invocation). A YAML comment
-  # starts at whitespace-then-#, so strip that to end-of-line first; a
-  # legitimate quoted `#` over-truncated by this turns the pin red, never green.
-  lst_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$lst_block")"
-
-  if grep -qF 'scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh' <<<"$lst_scan"; then
-    pass "self-defense job shellchecks the npm-audit gate + its suite"
+  # Both pins are STEP-scoped via step_block (same helper as the audit
+  # steps): a job-block-wide grep cannot tell which run: key owns the needle
+  # it matches — an appended `run: true` after either step wins under YAML
+  # last-key-wins while the job-wide grep still matches the dead line,
+  # silently disabling this suite's own CI execution. That is the one pin
+  # whose failure makes every other green here prove nothing: for
+  # pull_request events GitHub runs the PR's workflow file, so the mutated
+  # step takes effect in the same run that should have caught it, and the
+  # job still reports SUCCESS (not skipped — the CI Success anti-tamper
+  # never fires). Each step: fail closed on a missing/empty cut, no
+  # step-level if: (skipped step, needle still greps as present), no
+  # continue-on-error, and exactly ONE run: key — count FIRST, containment
+  # only after (with one run: key the scanned body IS the effective body).
+  # Containment runs on a trailing-comment-stripped copy: a needle alive
+  # only inside a YAML comment (`run: true # bash scripts/...`) is
+  # tampering, not wiring; an over-truncated legitimate quoted `#` turns a
+  # pin red, never green.
+  lst_suite_blk="$(step_block "$lst_block" 'Run npm-audit allowlist gate test suite')"
+  if [ -z "$lst_suite_blk" ]; then
+    fail "self-defense job has no step named 'Run npm-audit allowlist gate test suite' — the suite's own CI execution cannot be verified (fail closed)"
   else
-    fail "self-defense job does not shellcheck scripts/check-npm-audit.sh and its suite in an executable line"
+    if grep -qE '^[[:space:]]*"?if"?[[:space:]]*:' <<<"$lst_suite_blk"; then
+      fail "self-defense suite-run step carries a step-level if: — the suite can be skipped while its run: line still greps as present"
+    else
+      pass "self-defense suite-run step has no step-level if:"
+    fi
+    if grep -q 'continue-on-error' <<<"$lst_suite_blk"; then
+      fail "self-defense suite-run step carries continue-on-error — a red suite would be ignored"
+    else
+      pass "self-defense suite-run step has no continue-on-error"
+    fi
+    lst_suite_run_count="$(grep -cE '^[[:space:]]*"?run"?[[:space:]]*:' <<<"$lst_suite_blk" || true)"
+    lst_suite_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$lst_suite_blk")"
+    if [ "$lst_suite_run_count" -ne 1 ]; then
+      fail "self-defense suite-run step has $lst_suite_run_count run: keys (expected exactly 1) — YAML keeps the last duplicate key, so an appended run: true executes instead of the suite while the original line still greps as present"
+    elif grep -qE '^[[:space:]]*run: bash scripts/__tests__/check-npm-audit\.test\.sh[[:space:]]*$' <<<"$lst_suite_scan"; then
+      pass "self-defense job runs the npm-audit gate bash suite as the step's single run: line"
+    else
+      fail "self-defense suite-run step's run: line is not 'bash scripts/__tests__/check-npm-audit.test.sh' — neutered, rewritten, or comment-suffixed"
+    fi
   fi
 
-  if grep -qF 'bash scripts/__tests__/check-npm-audit.test.sh' <<<"$lst_scan"; then
-    pass "self-defense job runs the npm-audit gate bash suite"
+  lst_shck_blk="$(step_block "$lst_block" 'Shellcheck the gate scripts and their suites')"
+  if [ -z "$lst_shck_blk" ]; then
+    fail "self-defense job has no step named 'Shellcheck the gate scripts and their suites' — lint coverage of this gate cannot be verified (fail closed)"
   else
-    fail "self-defense job does not run scripts/__tests__/check-npm-audit.test.sh in an executable line"
+    if grep -qE '^[[:space:]]*"?if"?[[:space:]]*:' <<<"$lst_shck_blk"; then
+      fail "self-defense shellcheck step carries a step-level if: — lint coverage can be skipped while its needle still greps as present"
+    else
+      pass "self-defense shellcheck step has no step-level if:"
+    fi
+    if grep -q 'continue-on-error' <<<"$lst_shck_blk"; then
+      fail "self-defense shellcheck step carries continue-on-error — shellcheck findings would be ignored"
+    else
+      pass "self-defense shellcheck step has no continue-on-error"
+    fi
+    # The gate+suite needle sits MID-LINE in a run: | block scalar, so
+    # whole-line anchoring is unavailable. Scope the needle to the run:
+    # SCALAR, not the step block — else it survives in an env: value inside
+    # the same step while `run: true` executes (the needle-satisfiable-from-
+    # elsewhere failure shape). The scalar cut starts at the run: line and
+    # stops at the next 8-space step key; block-scalar content is indented
+    # deeper, so it passes through. This proves the needle sits in the
+    # single run: scalar of the named step — NOT that shellcheck
+    # semantically lints it (same present-not-effective residual register
+    # as the deploy clause pin).
+    lst_shck_run_count="$(grep -cE '^[[:space:]]*"?run"?[[:space:]]*:' <<<"$lst_shck_blk" || true)"
+    lst_shck_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$lst_shck_blk")"
+    lst_shck_scalar="$(awk '/^[[:space:]]*"?run"?[[:space:]]*:/{f=1;print;next} f && /^        [A-Za-z_"-]/{exit} f{print}' <<<"$lst_shck_scan")"
+    if [ "$lst_shck_run_count" -ne 1 ]; then
+      fail "self-defense shellcheck step has $lst_shck_run_count run: keys (expected exactly 1) — YAML keeps the last duplicate key, so an appended run: true executes instead of shellcheck while the needle still greps as present"
+    elif grep -qF 'scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh' <<<"$lst_shck_scalar"; then
+      pass "self-defense job shellchecks the npm-audit gate + its suite inside the step's single run: scalar"
+    else
+      fail "self-defense shellcheck step's run: scalar no longer covers scripts/check-npm-audit.sh + its suite — coverage dropped or relocated outside the executable scalar"
+    fi
   fi
 else
   fail "ci.yml not found at $CI_YML"
