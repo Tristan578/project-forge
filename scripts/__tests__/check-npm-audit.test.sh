@@ -639,16 +639,95 @@ fi
 # class rounds 12-13 swept out of the 29 key MATCHERS, missed on the
 # terminators those rounds introduced.
 #
-# COLONLESS: inside `jobs:`, a 2-space-indented line beginning with a letter,
-# underscore, or quote IS a job key — job properties sit at 4 spaces, and block
-# scalars nest deeper still. Dropping the `:` requirement also terminates on key
-# spellings the old class could not express at all. Mirrors the key-level cut
-# already used for `if:`/`needs:` blocks one indent level down.
+# COLON-REQUIRING: round 14 dropped the `:` on the theory that inside `jobs:`,
+# any 2-space-indented line starting with a letter/underscore/quote IS a job key
+# because properties sit at 4 spaces. That theory is FALSE, and dropping the
+# colon was a regression the parent commit did not have. YAML indentation bounds
+# BLOCK structure, not scalars: a multi-line quoted scalar continues at ANY
+# indentation, including *less* than its own key's. So
+#
+#     name: "trunc
+#   decoy"
+#     steps:
+#       - run: echo "all audits removed"
+#
+# puts a 2-space, letter-initial, colonless line INSIDE the job. The colonless
+# class matched it, truncating the cut while the job continued — and every pin
+# below the truncation point then read a block that no longer contained the keys
+# it was pinning. That fails OPEN, not closed: count pins ("exactly one steps:")
+# and absence pins ("no continue-on-error:") are satisfied by evidence that has
+# been cut away, so the appended duplicate `steps:` wins under last-key-wins,
+# every audit is replaced, and the job still reports SUCCESS — which is strictly
+# worse than round 13's finding, where the mutation at least made the required
+# check red. On cd.yml it additionally makes `needs.security.result == 'success'`
+# genuinely true, satisfying both deploy clause pins on their own terms.
+# Found independently by two review seats; measured green at 143/0 with the
+# colonless class, red with the colon restored.
+#
+# The key-level cuts elsewhere in this file stay colonless SAFELY, and the
+# asymmetry is the reason the precedent did not transfer: those host positive
+# containment pins, where truncation removes the needle and fails CLOSED. Only
+# the job-level cuts host count/absence pins, where truncation removes the
+# evidence instead.
 #
 # A quoted spelling of a cut's OWN header is safe by construction: every cut
 # anchors its start on the bare form, so a quoted target header yields an empty
 # block, and every caller fails closed on empty rather than passing vacuously.
-job_key_re="^  [A-Za-z_\"']"
+job_key_re="^  [\"']?[A-Za-z_][A-Za-z0-9_-]*[\"']?[[:space:]]*:"
+
+# The colon alone is necessary but NOT sufficient — a continuation line can also
+# carry a colon (`  B: 2}`, closing a flow mapping opened on the line above), and
+# a hand-crafted one can be spelled exactly like a bare job key (`  decoy:`).
+# Both defeat any charset. Rather than trade one spelling for the next, assert
+# the STRUCTURAL PRECONDITION the line-based cut actually depends on: that in
+# these three files, a 2-space line inside `jobs:` cannot be anything but a job
+# key. Two checks, together sufficient:
+#
+#   (1) every non-blank 2-space line inside `jobs:` has job-key SHAPE — optional
+#       quote, name, optional quote, colon, then nothing but whitespace/comment.
+#       A GHA job value is always a block mapping, so content after the colon is
+#       never a job key. This rejects `  B: 2}` and `  decoy"`.
+#   (2) no line opens a quoted scalar or flow collection that does not close on
+#       the same line. This forecloses continuations existing at all, which is
+#       what (1) cannot see: a crafted `  decoy:` continuation has valid shape.
+#
+# Both are zero-violation on the current files, so this pins existing structure
+# rather than demanding a reformat. A future multi-line value trips (2) and goes
+# red — deliberately: at that point the cuts' premise no longer holds and the
+# right answer is a parser, not another regex. That is the durable design point
+# raised by review, recorded rather than silently deferred: this closes the class
+# for these files, it does not make line-based cutting sound in general.
+assert_cut_preconditions() { # $1 = comment-stripped workflow, $2 = label
+  local shape_bad opener_bad
+  shape_bad="$(awk '
+    /^jobs:/ {j=1; next}
+    j && /^[A-Za-z_]/ {j=0}
+    j && /^  [^ ]/ && $0 !~ /^  ["'"'"']?[A-Za-z_][A-Za-z0-9_-]*["'"'"']?[[:space:]]*:[[:space:]]*(#.*)?$/ {print}
+  ' <<<"$1")"
+  if [ -n "$shape_bad" ]; then
+    fail "$2 has a 2-space line inside jobs: that is not a job key — the block cuts terminate on it and every pin below reads a truncated block: $(head -1 <<<"$shape_bad")"
+  else
+    pass "$2: every 2-space line inside jobs: has job-key shape (cuts cannot terminate mid-job)"
+  fi
+  opener_bad="$(awk '
+    match($0, /^[[:space:]]*-?[[:space:]]*["'"'"']?[A-Za-z_][A-Za-z0-9_.-]*["'"'"']?[[:space:]]*:[[:space:]]*/) {
+      v = substr($0, RSTART + RLENGTH)
+      if (v == "") next
+      q = substr(v, 1, 1)
+      if (q == "\"" || q == "'"'"'") {
+        n = gsub(q, q, v)
+        if (n % 2 == 1) print
+      } else if (q == "[" || q == "{") {
+        if (gsub(/\[/, "[", v) != gsub(/\]/, "]", v) || gsub(/{/, "{", v) != gsub(/}/, "}", v)) print
+      }
+    }
+  ' <<<"$1")"
+  if [ -n "$opener_bad" ]; then
+    fail "$2 opens a multi-line quoted scalar or flow collection — its continuation can be spelled as a job key and truncate a block cut: $(head -1 <<<"$opener_bad")"
+  else
+    pass "$2: no multi-line quoted scalar or flow collection (no continuation can impersonate a job key)"
+  fi
+}
 
 step_block() { # $1 = comment-stripped job block, $2 = step-name needle (fixed string)
   awk -v needle="$2" '
@@ -734,6 +813,7 @@ if [ -f "$QG_YML" ]; then
   if [ -z "$qg_exec" ]; then
     fail "comment-strip of quality-gates.yml produced no output — self-defense assertions cannot be verified"
   fi
+  assert_cut_preconditions "$qg_exec" "quality-gates.yml"
 
   # Top of the duplicate-key hierarchy: the top-level jobs: key itself is
   # COUNT-pinned. An appended second jobs: mapping at end of file replaces
@@ -924,6 +1004,7 @@ if [ -f "$CD_YML" ]; then
   if [ -z "$cd_exec" ]; then
     fail "comment-strip of cd.yml produced no output — self-defense assertions cannot be verified"
   fi
+  assert_cut_preconditions "$cd_exec" "cd.yml"
 
   # Same top-level jobs: key count pin as quality-gates (rationale there) —
   # on cd.yml a duplicate jobs: mapping that re-declares its own deploy jobs
@@ -1181,6 +1262,7 @@ if [ -f "$CI_YML" ]; then
   if [ -z "$ci_exec" ]; then
     fail "comment-strip of ci.yml produced no output — self-defense assertions cannot be verified"
   fi
+  assert_cut_preconditions "$ci_exec" "ci.yml"
 
   # Same top-level jobs: key count pin as quality-gates (rationale there).
   ci_jobs_count="$(grep -cE "^[\"']?jobs[\"']?[[:space:]]*:" <<<"$ci_exec" || true)"
