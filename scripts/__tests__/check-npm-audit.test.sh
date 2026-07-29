@@ -1656,6 +1656,37 @@ jobs"
       *) cd_dj_expect="" ;;
     esac
     assert_block_lines_exact "$cd_dj_ifblk" "cd.yml ${cd_dj} if: block" "$cd_dj_expect"
+
+    # `environment:` names the GitHub Environment whose protection rules —
+    # required reviewers, wait timers, deployment branch policies — gate this
+    # job. It is a SECOND lock on the same door the if: clause above guards, and
+    # it has the same continuation exposure the if: block did: a deeper-indented
+    # line beneath `name: production` folds into the scalar, resolving the
+    # environment to `production decoy`. GitHub creates an unknown environment on
+    # demand with NO protection rules, so the deploy proceeds unreviewed while
+    # every line here stays byte-identical (measured 170 PASS / 0 FAIL pre-pin).
+    # Same remedy as the if: block: pin the lines verbatim, plus a count pin,
+    # since a duplicate `environment:` key would win under last-key-wins while
+    # the original block still satisfied any containment match.
+    cd_dj_env_count="$(grep -cE "^    [\"']?environment[\"']?[[:space:]]*:" <<<"$cd_dj_block" || true)"
+    if [ "$cd_dj_env_count" != "1" ]; then
+      fail "cd.yml ${cd_dj} has ${cd_dj_env_count} job-level environment: keys (expected exactly 1) — YAML keeps the LAST duplicate, so an appended second environment: retargets the deploy at an unprotected environment while the original block stays intact"
+    else
+      pass "cd.yml ${cd_dj} has exactly one job-level environment: key"
+    fi
+    cd_dj_envblk="$(awk "/^    [\"']?environment[\"']?[[:space:]]*:/{f=1;print;next} f && /^    [A-Za-z_\"']/{exit} f{print}" <<<"$cd_dj_block")"
+    # shellcheck disable=SC2016  # the expected set is a YAML literal: `${{ }}` is
+    # GitHub Actions expression syntax and MUST NOT be expanded by the shell.
+    case "$cd_dj" in
+      deploy-staging) cd_dj_env_expect='    environment:
+      name: staging
+      url: ${{ steps.deploy.outputs.url }}' ;;
+      deploy-production) cd_dj_env_expect='    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}' ;;
+      *) cd_dj_env_expect="" ;;
+    esac
+    assert_block_lines_exact "$cd_dj_envblk" "cd.yml ${cd_dj} environment: block" "$cd_dj_env_expect" "the environment named here carries this deploy's protection rules (required reviewers, wait timers, branch policies), and a line folded into its name: scalar retargets the job at an unknown environment, which GitHub creates on demand with NO protection rules"
   done
 
   # Invocations asserted against the comment-stripped SECURITY JOB block,
