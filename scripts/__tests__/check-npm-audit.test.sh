@@ -1205,7 +1205,11 @@ if [ -f "$CI_YML" ]; then
   #       caught externally by the `check_triggered "quality-gates"
   #       "needs-any-code"` map entry added in the same round as this comment.
   #       Both layers are kept deliberately: the map entry lives in a different
-  #       file, and this pin is what stays red if it is ever dropped.
+  #       file, and this pin is what still catches the `if: false` mutation if
+  #       that entry is ever dropped. Note the narrower claim — dropping the map
+  #       entry ALONE leaves this suite green (nothing has been unwired yet, the
+  #       caller still runs); what this pin guarantees is that the mutation the
+  #       entry was added for cannot then land unseen.
   #   (b) `uses:` repointed away from quality-gates.yml — the file stays on
   #       disk with every pin intact and audits nothing.
   # Deleting the caller job outright is caught by the JOB-key count pin below.
