@@ -999,6 +999,55 @@ $delta"
   pass "$2: the step-level lines are exactly the $(grep -c '' <<<"$actual") expected lines (no key can be respelled or duplicated, and no scalar extended by a continuation, past the pins on it)"
 }
 
+# Round 23. The continuation class recurs at JOB level, and round 22's scope
+# decision -- step level only -- did not survive being measured.
+#
+# Appending `      || true` under either cd.yml deploy job's `if:` block scalar
+# resolves the guard to `... || true` (PyYAML-confirmed) while every line of the
+# original block, including the `needs.security.result == 'success'` clause,
+# stays BYTE-IDENTICAL. Suite measured 170 PASS / 0 FAIL green on both jobs.
+# Both deploy gates neutered; a red audit no longer stops either deploy.
+#
+# Round 22 declined to extend line enumeration here on the argument that these
+# clause pins already declare themselves PRESENT-not-EFFECTIVE, so a
+# continuation falls inside an already-stated residual. That argument is wrong,
+# and the way it is wrong is the reusable lesson: the residual is JUSTIFIED by
+# "resisting a vacuous rewrite would require parsing GitHub Actions
+# expressions". True for a rewrite -- `(X || true)` edits the clause line
+# itself. FALSE for a continuation, which a line pin catches with no expression
+# parsing whatsoever. The residual was excusing a case outside its own
+# justification. A stated limitation only covers what its reason covers.
+#
+# A line COUNT arm -- sufficient for ci-success's single-line `if:` -- is NOT
+# sufficient here: rewriting the LAST clause line to `(...) || true` keeps the
+# count identical and leaves the security containment intact while neutering
+# the guard. So the whole block is pinned VERBATIM.
+#
+# No value stripping, unlike the key enumerations: inside `if: |` every line IS
+# the load-bearing value. Comments are NOT stripped either -- in a literal block
+# scalar a `#` is content, not a comment, so stripping would let
+# `(...) # || true` masquerade as the original line. Only trailing whitespace is
+# trimmed, so an editor cannot redden the suite over nothing.
+#
+# Cost, deliberately: editing a deploy guard turns this red until the expected
+# set is updated. For a self-defense pin on the clause that gates production
+# deploys, that prompt is the point.
+assert_scalar_block_lines() { # $1 = cut scalar block, $2 = label, $3 = expected verbatim lines
+  local actual delta
+  actual="$(awk '{ sub(/[[:space:]]+$/, ""); if ($0 != "") print }' <<<"$1")"
+  if [ -z "$actual" ]; then
+    fail "$2: found no lines in the scalar block — the cut read nothing, so every containment pin on it passes vacuously"
+    return
+  fi
+  if [ "$actual" != "$3" ]; then
+    delta="$(diff <(printf '%s\n' "$3") <(printf '%s\n' "$actual") | grep '^[<>]')"
+    fail "$2: the scalar block's lines are not exactly the expected set — the containment pin on this block proves its clause is PRESENT, and a line appended below that clause (or a rewrite of any OTHER line in it) changes what the expression EVALUATES TO while leaving the pinned clause byte-identical. '<' expected-but-absent, '>' present-but-unexpected; if the change is legitimate, update the expected set passed at this assertion's call site, ${BASH_SOURCE[0]##*/}:${BASH_LINENO[0]}:
+$delta"
+    return
+  fi
+  pass "$2: the scalar block is exactly the $(grep -c '' <<<"$actual") expected lines (no continuation can extend it and no clause can be rewritten past the containment pin on it)"
+}
+
 # The three workspace invocations every security job must carry, by EXACT step
 # name — anchoring on the name both scopes the tamper checks and forces the
 # steps to stay named (a bare `- run:` step would read as a missing step).
@@ -1521,6 +1570,44 @@ jobs"
     else
       fail "cd.yml ${cd_dj} if: no longer contains needs.security.result == 'success' — under always(), needs: membership alone blocks nothing, so a red audit would not stop this deploy"
     fi
+
+    # Round 23: the containment arm above proves the clause is PRESENT; this
+    # proves nothing has been appended BELOW it or rewritten BESIDE it. See
+    # assert_scalar_block_lines for the measurement that motivated it (a
+    # `|| true` continuation neutered both gates at 170 PASS / 0 FAIL green).
+    # Double-quoted because the blocks contain single quotes; they contain no
+    # `$`, backtick or backslash, so no expansion is possible.
+    case "$cd_dj" in
+      deploy-staging) cd_dj_expect="    if: |
+      always() &&
+      vars.VERCEL_DEPLOY_ENABLED == 'true' &&
+      github.event.inputs.promote_to_production != 'true' &&
+      needs.lint.result == 'success' &&
+      needs.typecheck.result == 'success' &&
+      needs.test-web.result == 'success' &&
+      (needs.test-mcp.result == 'success' || needs.test-mcp.result == 'skipped') &&
+      (needs.security.result == 'success' || needs.security.result == 'skipped') &&
+      (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
+      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
+      (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped')" ;;
+      deploy-production) cd_dj_expect="    if: |
+      always() &&
+      vars.VERCEL_DEPLOY_ENABLED == 'true' &&
+      (
+        (needs.deploy-staging.result == 'success' && github.event_name == 'push') ||
+        (github.event.inputs.promote_to_production == 'true' &&
+         needs.lint.result == 'success' &&
+         needs.typecheck.result == 'success' &&
+         needs.test-web.result == 'success' &&
+         needs.test-mcp.result == 'success' &&
+         (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
+         (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
+         needs.security.result == 'success' &&
+         (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped'))
+      )" ;;
+      *) cd_dj_expect="" ;;
+    esac
+    assert_scalar_block_lines "$cd_dj_ifblk" "cd.yml ${cd_dj} if: block" "$cd_dj_expect"
   done
 
   # Invocations asserted against the comment-stripped SECURITY JOB block,
@@ -1687,6 +1774,23 @@ jobs"
     pass "ci.yml quality-gates caller still invokes ./.github/workflows/quality-gates.yml"
   else
     fail "ci.yml quality-gates caller does not invoke ./.github/workflows/quality-gates.yml — repointing uses: leaves quality-gates.yml on disk with every pin intact while no npm audit runs on the PR path"
+  fi
+
+  # Round 23: the containment arm above greps the uses: LINE, so a
+  # deeper-indented continuation beneath it is not read at all. Measured: an
+  # inserted `      decoy.yml` resolves uses: to
+  # './.github/workflows/quality-gates.yml decoy.yml' at 170 PASS / 0 FAIL
+  # green. Round 22 declined to pin this on the argument that a folded path
+  # stops resolving and therefore fails CLOSED. That may well be true, but it
+  # is an assumption about GitHub's workflow loader that nothing here measures
+  # -- and the pin costs one assertion, so the suite does not lean on it. A
+  # count arm suffices for a single-line scalar: with the value already pinned
+  # by containment, one line means the pinned line IS the whole value.
+  qg_caller_uses_blk="$(awk "/^    [\"']?uses[\"']?[[:space:]]*:/{f=1;print;next} f && /^    [A-Za-z_\"']/{exit} f{print}" <<<"$qg_caller_block")"
+  if [ "$(grep -c '' <<<"$qg_caller_uses_blk")" -ne 1 ]; then
+    fail "ci.yml quality-gates caller's uses: spans $(grep -c '' <<<"$qg_caller_uses_blk") lines (expected exactly 1) — a deeper-indented continuation folds into the workflow path while the uses: line itself stays byte-identical, so the containment above cannot see it"
+  else
+    pass "ci.yml quality-gates caller's uses: is a single line (no continuation can extend the workflow path past the containment pin on it)"
   fi
 
   qg_caller_if_count="$(grep -cE "^    [\"']?if[\"']?[[:space:]]*:" <<<"$qg_caller_block" || true)"
