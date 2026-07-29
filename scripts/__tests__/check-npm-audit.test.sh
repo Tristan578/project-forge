@@ -964,7 +964,7 @@ if [ -f "$CD_YML" ]; then
   cd_if_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cd_if_line")"
   if [ "$cd_if_lines" -ne 1 ]; then
     fail "cd.yml security job has $cd_if_lines job-level if: lines (expected exactly 1) — missing or duplicated condition (YAML keeps the last duplicate key)"
-  elif grep -qE '^    if[[:space:]]*:.*refs/heads/main' <<<"$cd_if_scan"; then
+  elif grep -qE "^    [\"']?if[\"']?[[:space:]]*:.*refs/heads/main" <<<"$cd_if_scan"; then
     pass "cd.yml security job-level if: still gates on refs/heads/main (exactly one condition line)"
   else
     fail "cd.yml security job-level if: no longer references refs/heads/main — condition removed or rewritten (deploy audits may be disabled)"
@@ -1171,16 +1171,23 @@ if [ -f "$CI_YML" ]; then
   # the root invocation this suite pins) plus the cargo audit. Two one-line
   # unwires left every other pin in this suite green:
   #   (a) `if: false` on the caller — the job still EXISTS, so ci-success's
-  #       `needs: [ci-gate, quality-gates]` still resolves (there is no
-  #       dangling-needs backstop) and the job is merely SKIPPED;
-  #       check-ci-success.sh fails only on failure/cancelled, and its
-  #       check_triggered map carries no quality-gates entry, so a skipped
-  #       quality-gates is certified green.
+  #       `needs:` list still resolves (there is no dangling-needs backstop)
+  #       and the job is merely SKIPPED. That skip USED to be certified green
+  #       (check-ci-success.sh fails only on failure/cancelled); it is now also
+  #       caught externally by the `check_triggered "quality-gates"
+  #       "needs-any-code"` map entry added in the same round as this comment.
+  #       Both layers are kept deliberately: the map entry lives in a different
+  #       file, and this pin is what stays red if it is ever dropped.
   #   (b) `uses:` repointed away from quality-gates.yml — the file stays on
   #       disk with every pin intact and audits nothing.
-  # Deleting the caller job outright needs no pin: ci-success still lists
-  # quality-gates in its `needs:`, which is a workflow validation error —
-  # externally fail-safe.
+  # Deleting the caller job outright is caught by the JOB-key count pin below.
+  # It is NOT caught by "ci-success still lists it in `needs:`, so deletion is a
+  # workflow validation error" — that reasoning was WRONG, and it is exactly the
+  # sentence a future reviewer would have relied on to skip a pin. The
+  # membership is itself one deletable list item: dropping `- quality-gates`
+  # from ci-success's `needs:` leaves the workflow valid, leaves no dangling
+  # reference, leaves the caller running, and stops the required aggregate from
+  # ever observing the audit. That membership is now pinned explicitly below.
   # Same count-plus-containment shape as the cd.yml deploy clause: JOB key
   # count-pinned, `uses:` target pinned, and exactly ONE if: whose trailing-
   # comment-stripped body still references the ci-gate output that legitimately
@@ -1218,7 +1225,48 @@ if [ -f "$CI_YML" ]; then
   elif grep -q 'needs-any-code' <<<"$qg_caller_if_scan"; then
     pass "ci.yml quality-gates caller if: still gates on the ci-gate needs-any-code output"
   else
-    fail "ci.yml quality-gates caller if: no longer gates on needs-any-code — a SKIPPED quality-gates job is certified green by check-ci-success.sh (it fails only on failure/cancelled and has no quality-gates entry in its check_triggered map), so every npm audit silently stops running on the PR path"
+    fail "ci.yml quality-gates caller if: no longer gates on needs-any-code — the trigger named here is the one check-ci-success.sh maps quality-gates to, so degating it both stops every npm audit on the PR path and desynchronizes the anti-tamper arm that catches the resulting skip"
+  fi
+
+  # ci-success's `needs:` MEMBERSHIP. Everything above pins that the caller job
+  # exists, invokes the right workflow, and is gated on the right trigger — none
+  # of it pins that the required aggregate still WAITS for it. Deleting the one
+  # line `- quality-gates` from ci-success's `needs:` is valid YAML with no
+  # dangling reference: the caller keeps running, and the required "CI Success"
+  # check stops aggregating it, so a red audit (including the root-workspace
+  # invocation this suite exists for) no longer blocks the merge. Same property
+  # the cd.yml deploy pins enforce for `security` one workflow over; this is the
+  # ci.yml side of it, and the PR path is the only path where the root audit runs
+  # at all (cd.yml does not run on `pull_request`).
+  # Externally, check-ci-success.sh's `check_triggered "quality-gates"
+  # "needs-any-code"` entry also catches the drop (an absent job resolves to
+  # result="absent", which the map flags as tamper). This pin is what keeps that
+  # entry honest from inside the suite.
+  cs_job_count="$(grep -cE "^  [\"']?ci-success[\"']?[[:space:]]*:" <<<"$ci_exec" || true)"
+  if [ "$cs_job_count" -ne 1 ]; then
+    fail "ci.yml defines the ci-success job $cs_job_count times (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate JOB key, so an appended second ci-success: job replaces the required aggregate wholesale while the block cut below only ever sees the first)"
+  else
+    pass "ci.yml defines the ci-success job exactly once"
+  fi
+
+  ci_success_block="$(awk '/^  ci-success:/{f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && !/^  ci-success:/{exit}' <<<"$ci_exec")"
+  if [ -z "$ci_success_block" ]; then
+    fail "ci.yml ci-success job block is empty after comment-strip — the required aggregate is missing or fully commented out"
+  fi
+
+  # Count-pin `needs:` first: a duplicate needs: key replaces the ENTIRE list
+  # under last-key-wins, so a containment grep against the dead first block
+  # would still find quality-gates while the effective aggregate waits for
+  # nothing. Same ordering rationale as every count-first fold in this suite.
+  cs_needs_count="$(grep -cE "^    [\"']?needs[\"']?[[:space:]]*:" <<<"$ci_success_block" || true)"
+  cs_needs_block="$(awk "/^    [\"']?needs[\"']?[[:space:]]*:/{f=1;print;next} f && /^    [A-Za-z_\"']/{exit} f{print}" <<<"$ci_success_block")"
+  cs_needs_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cs_needs_block")"
+  if [ "$cs_needs_count" -ne 1 ]; then
+    fail "ci.yml ci-success has $cs_needs_count needs: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended second needs: replaces the whole aggregate list while a containment-only grep still sees the original)"
+  elif grep -qE "^      -[[:space:]]+[\"']?quality-gates[\"']?[[:space:]]*$" <<<"$cs_needs_scan"; then
+    pass "ci.yml ci-success still lists quality-gates in its needs: aggregate"
+  else
+    fail "ci.yml ci-success no longer lists quality-gates in its needs: — the required CI Success check stops waiting on and aggregating the workflow that runs all three npm audits, so a red audit leaves the required check green (one-line list-item deletion, valid YAML, no dangling reference)"
   fi
 
   # Same JOB-key count pin (rationale at the quality-gates security pin) —
