@@ -699,6 +699,22 @@ if [ -f "$QG_YML" ]; then
     fail "comment-strip of quality-gates.yml produced no output — self-defense assertions cannot be verified"
   fi
 
+  # Top of the duplicate-key hierarchy: the top-level jobs: key itself is
+  # COUNT-pinned. An appended second jobs: mapping at end of file replaces
+  # EVERY job under YAML last-key-wins; if the replacement re-declares the
+  # jobs it wants (renamed or gutted), each job-key pin below still reads
+  # the dead first mapping and stays green. A "collapses every job so it
+  # fails closed on its own" argument was tested and rejected: it only
+  # holds if the replacement OMITS a required/deploy job, and what the
+  # replacement contains is the attacker's choice, not a property of YAML.
+  # Same pin on cd.yml and ci.yml below.
+  qg_jobs_count="$(grep -cE '^"?jobs"?[[:space:]]*:' <<<"$qg_exec" || true)"
+  if [ "$qg_jobs_count" -ne 1 ]; then
+    fail "quality-gates.yml has $qg_jobs_count top-level jobs: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended second jobs: mapping replaces every job in the workflow while all job-key pins below read the dead first mapping)"
+  else
+    pass "quality-gates.yml has exactly 1 top-level jobs: key"
+  fi
+
   # Job-scope every invocation assertion: cut the `security` job block (same
   # awk anchor idiom as the lockfile-sync-tests extraction below — 2-space
   # keys are job ids, which no comment or step line can match; the terminator
@@ -715,9 +731,9 @@ if [ -f "$QG_YML" ]; then
   # first block, and the job reports SUCCESS under the original display
   # name (actionlint would flag the duplicate job key, but it is not wired
   # into this repo's CI). The level above THIS — a duplicated top-level
-  # jobs: key — fails closed on its own: it collapses every other job,
-  # deploys and aggregate dependencies included, so the job key is the top
-  # rung of the exploitable hierarchy.
+  # jobs: key — is count-pinned above rather than argued away: the
+  # rationale (and why "fails closed on its own" was rejected) lives at
+  # that pin.
   qg_sec_job_count="$(grep -cE '^  "?security"?[[:space:]]*:' <<<"$qg_exec" || true)"
   if [ "$qg_sec_job_count" -ne 1 ]; then
     fail "quality-gates defines the security job $qg_sec_job_count times (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate JOB key, so an appended second security: job replaces the whole job while the block cut below only ever sees the first)"
@@ -870,6 +886,17 @@ if [ -f "$CD_YML" ]; then
     fail "comment-strip of cd.yml produced no output — self-defense assertions cannot be verified"
   fi
 
+  # Same top-level jobs: key count pin as quality-gates (rationale there) —
+  # on cd.yml a duplicate jobs: mapping that re-declares its own deploy jobs
+  # replaces the entire pipeline, gating included, while every job-key pin
+  # below reads the dead first mapping.
+  cd_jobs_count="$(grep -cE '^"?jobs"?[[:space:]]*:' <<<"$cd_exec" || true)"
+  if [ "$cd_jobs_count" -ne 1 ]; then
+    fail "cd.yml has $cd_jobs_count top-level jobs: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended second jobs: mapping replaces every job in the workflow while all job-key pins below read the dead first mapping)"
+  else
+    pass "cd.yml has exactly 1 top-level jobs: key"
+  fi
+
   # Job-scope the cd.yml assertions too — same relocation blind spot as
   # quality-gates: a file-scoped grep is satisfied by the invocation living in
   # ANY job (e.g. deploy-docs), not the security job that must gate the deploy.
@@ -982,6 +1009,20 @@ if [ -f "$CD_YML" ]; then
   # at a new shape. Then pin the success clause itself on a
   # comment-stripped copy of the WHOLE job block.
   for cd_dj in deploy-staging deploy-production; do
+    # Same JOB-key count pin as the security jobs (rationale at the
+    # quality-gates security pin) — the cut below stops at the first
+    # following job key, so it only ever sees the FIRST definition. An
+    # appended duplicate deploy job at end of file is the effective one
+    # under last-key-wins and deploys with NONE of the gating pinned
+    # below (no needs:, no success clause), while the Actions UI still
+    # shows a job under the same key — nothing looks missing, and cd.yml
+    # runs on push to main so no required-check absence backstops it.
+    cd_dj_job_count="$(grep -cE "^  \"?${cd_dj}\"?[[:space:]]*:" <<<"$cd_exec" || true)"
+    if [ "$cd_dj_job_count" -ne 1 ]; then
+      fail "cd.yml defines the ${cd_dj} job $cd_dj_job_count times (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate JOB key, so an appended second ${cd_dj}: job deploys with none of the gating this suite pins while the block cut below only ever sees the first)"
+    else
+      pass "cd.yml defines the ${cd_dj} job exactly once"
+    fi
     cd_dj_block="$(awk -v hdr="  ${cd_dj}:" '$0 == hdr {f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 != hdr {exit}' <<<"$cd_exec")"
     if [ -z "$cd_dj_block" ]; then
       fail "cd.yml ${cd_dj} job block is empty after comment-strip — job missing, renamed, or fully commented out (deploy gating cannot be verified)"
@@ -1101,11 +1142,19 @@ if [ -f "$CI_YML" ]; then
   if [ -z "$ci_exec" ]; then
     fail "comment-strip of ci.yml produced no output — self-defense assertions cannot be verified"
   fi
+
+  # Same top-level jobs: key count pin as quality-gates (rationale there).
+  ci_jobs_count="$(grep -cE '^"?jobs"?[[:space:]]*:' <<<"$ci_exec" || true)"
+  if [ "$ci_jobs_count" -ne 1 ]; then
+    fail "ci.yml has $ci_jobs_count top-level jobs: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended second jobs: mapping replaces every job in the workflow while all job-key pins below read the dead first mapping)"
+  else
+    pass "ci.yml has exactly 1 top-level jobs: key"
+  fi
+
   # Same JOB-key count pin (rationale at the quality-gates security pin) —
   # an appended second lockfile-sync-tests: job replaces this suite's own
   # CI execution wholesale while the check reports SUCCESS under the
-  # original display name: the one defeat that sits above every step- and
-  # job-key pin below.
+  # original display name.
   lst_job_count="$(grep -cE '^  "?lockfile-sync-tests"?[[:space:]]*:' <<<"$ci_exec" || true)"
   if [ "$lst_job_count" -ne 1 ]; then
     fail "ci.yml defines the lockfile-sync-tests job $lst_job_count times (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate JOB key, so an appended second lockfile-sync-tests: job replaces this suite's own CI execution while the block cut below only ever sees the first)"
