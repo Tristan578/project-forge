@@ -1945,6 +1945,31 @@ OUTPUTS_EOF
     fail "ci.yml quality-gates caller job block is empty after comment-strip — the sole PR-path invocation of quality-gates.yml is missing or fully commented out"
   fi
 
+  # ROUND 29. `assert_job_level_keys` above proves the KEY `needs` EXISTS on this
+  # job and says nothing about what it EQUALS -- the same key-vs-value asymmetry
+  # this suite has now closed at column-0, 2-space, 4-space, step-key and
+  # step-line level. This job is the sole PR-path execution site of all three npm audits. `needs: [ci-gate]` -> `needs: []` leaves
+  # the `if:` below referencing an undeclared job, so the sole PR-path execution site of all three npm audits never runs. Measured
+  # GREEN at 188 PASS / 0 FAIL; `[decoy]` and a deeper-indented continuation
+  # measured green the same way. A duplicate `needs:` key was already caught (it
+  # lands as an extra element in the 4-space key set), which is exactly why the
+  # count arm comes FIRST here: with one key, the cut block below IS the
+  # effective value.
+  #
+  # Whether GitHub then treats the dangling reference as permissive-false or as a
+  # load error is not something this suite measures, and both readings are
+  # fail-safe for the attack -- but that is an assumption about GitHub's workflow
+  # loader, and the pin costs two assertions, so the suite does not lean on it.
+  qg_caller_needs_count="$(grep -cE "^    [\"']?needs[\"']?[[:space:]]*:" <<<"$qg_caller_block" || true)"
+  if [ "${qg_caller_needs_count}" -ne 1 ]; then
+    fail "ci.yml quality-gates caller has ${qg_caller_needs_count} job-level needs: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended needs: wins while the cut below still reads the first)"
+  else
+    pass "ci.yml quality-gates caller has exactly 1 job-level needs: key"
+  fi
+  qg_caller_needs_blk="$(awk "/^    [\"']?needs[\"']?[[:space:]]*:/{f=1;print;next} f && /^    [A-Za-z_\"']/{exit} f{print}" <<<"$qg_caller_block")"
+  assert_block_lines_exact "${qg_caller_needs_blk}" "ci.yml quality-gates caller's needs:" "    needs: [ci-gate]" \
+    "emptying or repointing it leaves the job's if: referencing an undeclared job, and a deeper-indented continuation extends the list while the needs: line itself stays byte-identical"
+
   # Two materialized steps per pin (never a here-string-fed pipeline into
   # grep -q: SIGPIPE under pipefail would read as a false PASS).
   qg_caller_uses_count="$(grep -cE "^    [\"']?uses[\"']?[[:space:]]*:" <<<"$qg_caller_block" || true)"
@@ -2176,6 +2201,33 @@ OUTPUTS_EOF
     fail "lockfile-sync-tests job block is empty after comment-strip — self-defense job missing or fully commented out"
   fi
 
+  # ROUND 29. `assert_job_level_keys` above proves the KEY `needs` EXISTS on this
+  # job and says nothing about what it EQUALS -- the same key-vs-value asymmetry
+  # this suite has now closed at column-0, 2-space, 4-space, step-key and
+  # step-line level. This job is what RUNS this suite in CI. `needs: [ci-gate]` -> `needs: []` leaves
+  # the `if:` below referencing an undeclared job, so the self-defense suite that every other pin here relies on never runs — the
+  # same class as the ci-success verifier pin, where a neuter makes every other
+  # green prove nothing. Measured
+  # GREEN at 188 PASS / 0 FAIL; `[decoy]` and a deeper-indented continuation
+  # measured green the same way. A duplicate `needs:` key was already caught (it
+  # lands as an extra element in the 4-space key set), which is exactly why the
+  # count arm comes FIRST here: with one key, the cut block below IS the
+  # effective value.
+  #
+  # Whether GitHub then treats the dangling reference as permissive-false or as a
+  # load error is not something this suite measures, and both readings are
+  # fail-safe for the attack -- but that is an assumption about GitHub's workflow
+  # loader, and the pin costs two assertions, so the suite does not lean on it.
+  lst_needs_count="$(grep -cE "^    [\"']?needs[\"']?[[:space:]]*:" <<<"$lst_block" || true)"
+  if [ "${lst_needs_count}" -ne 1 ]; then
+    fail "ci.yml lockfile-sync-tests job has ${lst_needs_count} job-level needs: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended needs: wins while the cut below still reads the first)"
+  else
+    pass "ci.yml lockfile-sync-tests job has exactly 1 job-level needs: key"
+  fi
+  lst_needs_blk="$(awk "/^    [\"']?needs[\"']?[[:space:]]*:/{f=1;print;next} f && /^    [A-Za-z_\"']/{exit} f{print}" <<<"$lst_block")"
+  assert_block_lines_exact "${lst_needs_blk}" "ci.yml lockfile-sync-tests job's needs:" "    needs: [ci-gate]" \
+    "emptying or repointing it leaves the job's if: referencing an undeclared job, and a deeper-indented continuation extends the list while the needs: line itself stays byte-identical"
+
   # The auditing job's own JOB-level surface: the step-scoped pins below
   # cannot see 4-space job keys, and both of these one-line neuters leave
   # the job reporting SUCCESS — not skipped — so the CI Success skip-based
@@ -2330,11 +2382,37 @@ SELF="${BASH_SOURCE[0]}"
 #   * a leading-# comment can never open a heredoc, so it is never a delimiter.
 #     It stays IN scope for both locks -- a comment that spells a needle is still
 #     a finding, which is why the paragraph above is written in prose.
-#   * any other line carrying the token must match a known opener shape, so the
-#     swallow it starts is one bash performs too. A shape is only listed here if
-#     a line matching it IS a heredoc opener, which is what makes the exclusion
-#     provable rather than assumed.
+#   * any other line carrying a heredoc token must match a known opener shape. A
+#     shape is only listed here if a line matching it IS a heredoc opener, which
+#     is what makes the exclusion provable rather than assumed.
 #   * an unrecognized shape, or a delimiter still open at EOF, fails the suite.
+#
+# ROUND 29. The detector and the shape whitelist are two different tests, and
+# round 28 collapsed them into one regex: a line was scanned for `<<'IDENT'`, and
+# that single pattern decided BOTH "is this an opener?" and "is this an error?".
+# Any heredoc spelling outside it was therefore neither recognized nor rejected
+# -- it was invisible, and bash's payload for it got scanned as if it were code.
+# A payload line matching a recognized shape then opened a swallow in awk that
+# bash never opens. Measured GREEN 188 PASS / 0 FAIL at the previous HEAD via
+# `cat <<"ZZEOF"`, `cat <<-'ZZEOF'` and an unquoted `cat <<ZZEOF`, each hiding a
+# genuine lock violation inside its payload; the mutated files are `bash -n`
+# clean and emit no diagnostic, so no fail-closed arm fired.
+#
+# The polarity of the shape whitelist was right and is unchanged. What was wrong
+# was its INPUT: a whitelist of what may open a swallow says nothing about which
+# lines the whitelist is consulted for. So the DETECTOR is widened to every
+# heredoc spelling bash honours (`<<-`, and quoted, backslash-escaped or bare
+# delimiters), which moves an unmodeled spelling from invisible to REJECTED --
+# the fail-closed state the design already intended. Detection runs on a copy
+# with `<<<` here-strings removed: the widened pattern would otherwise match the
+# trailing `<<"word"` of a literal here-string and report it as an unrecognized
+# opener. That is a false FAIL rather than a false PASS, but a copy is cheaper
+# than living with it, and it avoids shifting RSTART/RLENGTH (which corrupts the
+# tag extraction below) the way a preceding-character guard would.
+#
+# A `<<-` heredoc lets its terminator carry leading tabs, which the delimiter
+# comparison above does not model. That direction fails closed too: the tag stays
+# open, and the END arm reports it.
 # Adding a genuinely new heredoc form is expected to redden this check until its
 # shape is listed below; that prompt is the point. A trailing comment spelling
 # the token on an executable line reddens it too -- reword the comment.
@@ -2344,10 +2422,12 @@ tag != "" { if ($0 == tag) tag = ""; next }
 {
   print
   if ($0 ~ /^[ \t]*#/) next
-  if (!match($0, /<<[ \t]*\047[A-Za-z_][A-Za-z0-9_]*\047/)) next
-  t = substr($0, RSTART, RLENGTH)
-  sub(/^<<[ \t]*\047/, "", t)
-  sub(/\047$/, "", t)
+  d = $0
+  gsub(/<<</, "", d)
+  if (!match(d, /<<-?[ \t]*(\047[A-Za-z_][A-Za-z0-9_]*\047|"[A-Za-z_][A-Za-z0-9_]*"|\\[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*)/)) next
+  t = substr(d, RSTART, RLENGTH)
+  sub(/^<<-?[ \t]*/, "", t)
+  gsub(/[\047"\\]/, "", t)
   if ($0 ~ /^f="\$\(fixture [A-Za-z0-9._-]+ <<\047JSON\047$/ ||
       $0 ~ /^[ \t]*IFS= read -r -d \047\047 [A-Za-z_][A-Za-z0-9_]* <<\047(STEPS_EOF|OUTPUTS_EOF)\047 \|\| true$/) {
     tag = t
