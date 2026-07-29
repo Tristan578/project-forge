@@ -1032,20 +1032,68 @@ $delta"
 # Cost, deliberately: editing a deploy guard turns this red until the expected
 # set is updated. For a self-defense pin on the clause that gates production
 # deploys, that prompt is the point.
-assert_scalar_block_lines() { # $1 = cut scalar block, $2 = label, $3 = expected verbatim lines
-  local actual delta
+# $1 = cut block, $2 = label, $3 = expected verbatim lines, $4 = why it matters
+# (optional; defaults to the scalar-block rationale this helper was written for).
+assert_block_lines_exact() {
+  local actual delta why="${4:-the containment pin on this block proves its clause is PRESENT, and a line appended below that clause (or a rewrite of any OTHER line in it) changes what the expression EVALUATES TO while leaving the pinned clause byte-identical}"
   actual="$(awk '{ sub(/[[:space:]]+$/, ""); if ($0 != "") print }' <<<"$1")"
   if [ -z "$actual" ]; then
-    fail "$2: found no lines in the scalar block — the cut read nothing, so every containment pin on it passes vacuously"
+    fail "$2: found no lines in the block — the cut read nothing, so every containment pin on it passes vacuously"
     return
   fi
   if [ "$actual" != "$3" ]; then
     delta="$(diff <(printf '%s\n' "$3") <(printf '%s\n' "$actual") | grep '^[<>]')"
-    fail "$2: the scalar block's lines are not exactly the expected set — the containment pin on this block proves its clause is PRESENT, and a line appended below that clause (or a rewrite of any OTHER line in it) changes what the expression EVALUATES TO while leaving the pinned clause byte-identical. '<' expected-but-absent, '>' present-but-unexpected; if the change is legitimate, update the expected set passed at this assertion's call site, ${BASH_SOURCE[0]##*/}:${BASH_LINENO[0]}:
+    fail "$2: the block's lines are not exactly the expected set — $why. '<' expected-but-absent, '>' present-but-unexpected; if the change is legitimate, update the expected set passed at this assertion's call site, ${BASH_SOURCE[0]##*/}:${BASH_LINENO[0]}:
 $delta"
     return
   fi
-  pass "$2: the scalar block is exactly the $(grep -c '' <<<"$actual") expected lines (no continuation can extend it and no clause can be rewritten past the containment pin on it)"
+  pass "$2: the block is exactly the $(grep -c '' <<<"$actual") expected lines (nothing can be appended to it, inserted into it or rewritten inside it past the pins on it)"
+}
+
+# $1 = comment-stripped job block, $2 = label, $3 = expected verbatim lines.
+# Cuts that job's `steps:` list and pins it line-for-line. The cut ends at the
+# first non-blank line indented less than a step's six spaces, so the next job
+# key ends it -- and so does a folded continuation that escapes the list, which
+# truncates the cut into a mismatch rather than out of it (fails CLOSED).
+#
+# ROUND 24. Every other pin in this suite scopes to a block it NAMES: the three
+# audit steps, the verifier step, the two self-defense steps. That boundary was
+# measured to be the cheapest neuter left in the tree. The security job's other
+# steps -- `- uses: actions/checkout`, `- uses: actions/setup-node`, and both
+# `- run: npm ci` -- were unconstrained, and either of two one-line edits ran
+# arbitrary code BEFORE the first audit while every named step stayed
+# byte-identical, at 170 PASS / 0 FAIL green in BOTH workflows:
+#   * ADDED step -- a `warm cache` step whose run: writes `exit 0` over
+#     scripts/check-npm-audit.sh. PyYAML placed it at step 3, ahead of the
+#     audits at 4/6/7.
+#   * EXTENDED step -- appending `&& printf 'exit 0\n' > scripts/...` to the
+#     existing unpinned `- run: npm ci`. Step count unchanged at 11.
+# No new key, no escape, no continuation, no duplicate: the existing pins are
+# all sound and simply never look at the line. That made the boundary
+# inconsistent with this suite's own threshold, since `continue-on-error: true`
+# and `|| true` are BOTH pinned against and are BOTH more conspicuous than
+# editing an `npm ci` line.
+#
+# Pinning the whole list closes added, extended, removed and reordered steps in
+# one move, and it subsumes the $NPM_AUDIT_CMD needle scan for these jobs: that
+# scan is a literal grep, so `NPM_AUDIT_$(printf CMD)=... >> "$GITHUB_ENV"`
+# carries no match and was likewise green -- an exact line set cannot be
+# obfuscated past, because the line is unexpected whatever it spells. The scan
+# stays as the broader net (it covers every job in both workflows, where this
+# pin covers four), but it is no longer the only thing standing between the
+# seam and the audit.
+#
+# Cost, by design: any edit to these four jobs' steps turns the suite red until
+# the expected set is updated. For a self-defense suite the prompt is the point.
+# Residual, stated honestly: the block is read from the comment-stripped copy
+# every sibling assertion in these jobs reads, so a full-line `#` comment is
+# invisible to the pin. That is a comment to YAML and to the shell of a `run:`
+# body alike; it would only matter for a line written verbatim into a file
+# where a leading `#` is load-bearing, which nothing here does.
+assert_steps_block() {
+  local blk
+  blk="$(awk "/^    [\"']?steps[\"']?[[:space:]]*:/{f=1;print;next} f && \$0 != \"\" && !/^      /{exit} f{print}" <<<"$1")"
+  assert_block_lines_exact "$blk" "$2" "$3" "the per-step pins cover only the steps they NAME, so a step added beside them -- or a one-line edit to an unpinned sibling such as \`npm ci\` -- runs arbitrary code before the first audit while every named step stays byte-identical"
 }
 
 # The three workspace invocations every security job must carry, by EXACT step
@@ -1573,7 +1621,7 @@ jobs"
 
     # Round 23: the containment arm above proves the clause is PRESENT; this
     # proves nothing has been appended BELOW it or rewritten BESIDE it. See
-    # assert_scalar_block_lines for the measurement that motivated it (a
+    # assert_block_lines_exact for the measurement that motivated it (a
     # `|| true` continuation neutered both gates at 170 PASS / 0 FAIL green).
     # Double-quoted because the blocks contain single quotes; they contain no
     # `$`, backtick or backslash, so no expansion is possible.
@@ -1607,7 +1655,7 @@ jobs"
       )" ;;
       *) cd_dj_expect="" ;;
     esac
-    assert_scalar_block_lines "$cd_dj_ifblk" "cd.yml ${cd_dj} if: block" "$cd_dj_expect"
+    assert_block_lines_exact "$cd_dj_ifblk" "cd.yml ${cd_dj} if: block" "$cd_dj_expect"
   done
 
   # Invocations asserted against the comment-stripped SECURITY JOB block,
@@ -2156,6 +2204,148 @@ if [ -s "$FIX/bash-errors.log" ]; then
 else
   pass "no bash runtime errors leaked from any gate invocation"
 fi
+
+
+# Each expected set is fed through `read -r -d ''` rather than the more obvious
+# EXPECTED="$(cat <<'STEPS_EOF' ... )". On bash 3.2 -- what macOS ships, and what
+# this suite runs under locally -- a quoted heredoc read through command
+# substitution silently drops a trailing backslash + newline, so the shellcheck
+# step's `shellcheck \` continuation lines arrived spliced into one line and the
+# pin failed locally while passing on a CI runner's bash 5. `read` is byte-exact
+# on both. The %$'\n' strips the single trailing newline `read` leaves behind.
+# ROUND 24 -- see assert_steps_block. Placed after every per-step assertion so a
+# failure here reads as "the step LIST changed", distinct from "a pinned step
+# changed". Each block is read with :- so a workflow that failed to parse above
+# lands on the helper's empty-block FAIL instead of tripping `set -u`.
+
+IFS= read -r -d '' expected_steps_1 <<'STEPS_EOF' || true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: npm audit (web) — allowlist gate
+        run: bash scripts/check-npm-audit.sh web
+      - run: npm ci
+        working-directory: mcp-server
+      - name: npm audit (mcp-server) — allowlist gate
+        run: bash scripts/check-npm-audit.sh mcp-server
+      - name: npm audit (root) — allowlist gate
+        run: bash scripts/check-npm-audit.sh .
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: engine -> target
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      - name: cargo audit (engine)
+        working-directory: engine
+        run: cargo audit
+STEPS_EOF
+assert_steps_block "${qg_sec:-}" "quality-gates security job steps:" "${expected_steps_1%$'\n'}"
+
+IFS= read -r -d '' expected_steps_2 <<'STEPS_EOF' || true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: npm audit (web) — allowlist gate
+        run: bash scripts/check-npm-audit.sh web
+      - run: npm ci
+        working-directory: mcp-server
+      - name: npm audit (mcp-server) — allowlist gate
+        run: bash scripts/check-npm-audit.sh mcp-server
+      - name: npm audit (root) — allowlist gate
+        run: bash scripts/check-npm-audit.sh .
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: engine -> target
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      - name: cargo audit (engine)
+        working-directory: engine
+        run: cargo audit
+STEPS_EOF
+assert_steps_block "${cd_sec:-}" "cd.yml security job steps:" "${expected_steps_2%$'\n'}"
+
+IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version-file: .node-version
+      - name: Shellcheck the gate scripts and their suites
+        run: |
+          shellcheck \
+            scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh \
+            scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh \
+            scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
+            scripts/check-taskboard-onboarding-hygiene.sh scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh \
+            scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
+            scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
+            scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
+            scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
+            scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
+            scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
+            scripts/check-changeset-packages.sh scripts/__tests__/check-changeset-packages.test.sh \
+            scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
+            scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
+            .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
+            .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
+      - name: Run lockfile gate test suite
+        run: bash scripts/__tests__/check-lockfile-sync.test.sh
+      - name: Run ci-success verifier test suite
+        run: bash scripts/__tests__/check-ci-success.test.sh
+      - name: Run agentic-config gate test suite
+        run: bash scripts/__tests__/check-agentic-sync.test.sh
+      - name: Run taskboard onboarding-hygiene gate test suite
+        run: bash scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh
+      - name: Run Codex config-safety gate test suite
+        run: bash scripts/__tests__/check-codex-config-safety.test.sh
+      - name: Run gh-aw lock-sync gate test suite
+        run: bash scripts/__tests__/check-ghaw-lock-sync.test.sh
+      - name: Run vitest exit-gate test suite
+        run: bash scripts/__tests__/check-vitest-exit.test.sh
+      - name: Run npm-audit allowlist gate test suite
+        run: bash scripts/__tests__/check-npm-audit.test.sh
+      - name: Run security-alerts gate test suite
+        run: bash scripts/__tests__/check-security-alerts.test.sh
+      - name: Run cross-provider DX-audit contract test
+        run: bash .claude/tools/__tests__/dx-audit.test.sh
+      - name: Run OpenAPI route-sync gate test suite
+        run: bash scripts/__tests__/check-openapi-route-sync.test.sh
+      - name: Run changeset-packages gate test suite
+        run: bash scripts/__tests__/check-changeset-packages.test.sh
+      - name: Run actions-pinned gate test suite
+        run: bash scripts/__tests__/check-actions-pinned.test.sh
+      - name: Run native-bindings gate test suite
+        run: bash scripts/__tests__/check-native-bindings.test.sh
+      - name: Run coverage-ratchet script test suite
+        run: bash scripts/__tests__/ratchet-coverage.test.sh
+STEPS_EOF
+assert_steps_block "${lst_block:-}" "ci.yml lockfile-sync-tests job steps:" "${expected_steps_3%$'\n'}"
+
+IFS= read -r -d '' expected_steps_4 <<'STEPS_EOF' || true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify all required gates passed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: bash scripts/check-ci-success.sh
+STEPS_EOF
+assert_steps_block "${ci_success_block:-}" "ci.yml ci-success job steps:" "${expected_steps_4%$'\n'}"
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
