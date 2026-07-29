@@ -31,10 +31,16 @@
 #      exit codes, severity thresholds, waiver matching, fail-closed paths.
 #   2. allowlist entry format + multi-path pins . malformed waivers and the
 #      location pins added in PF-1009, via make_gate_variant. Sections 1-2 are
-#      the only ones whose individual cases carry `# --- N.` markers: they run
+#      the only ones whose individual cases carry `# --- N.` markers -- numbered
 #      1-11 in section 1 and 12-15 in section 2, with letter-suffixed variants
-#      (6b-6t, 9b-9c) where one case grew a family. Everything after section 2
-#      is grouped by target, not numbered.
+#      where one case grew a family. Their live inventory is another grep, for
+#      the same reason as above, and the ranges DID rot: the 6-family reached 6w
+#      and case 11 grew 11b/11c a few rounds after this block first enumerated
+#      them.
+#
+#        grep -n '^# --- ' scripts/__tests__/check-npm-audit.test.sh
+#
+#      Everything after section 2 is grouped by target, not numbered.
 #   3. gate script hardening (structural) ....... properties of the gate FILE
 #      (seam not wired, fail-closed ordering) rather than of a gate run.
 #   4-6. <workflow>.yml integration wiring ...... one section each for
@@ -59,19 +65,41 @@
 # reddens the suite until the expected set is updated, which is the prompt, not
 # a defect. See ROUND 33 above expected_steps_1 for the routine trigger.
 #
+# WHY EACH PIN EXISTS
+# -------------------
+# Nearly every assertion here was added because a specific mutation measured
+# GREEN against the suite as it then stood. Those measurements -- what was
+# attacked, what it scored before and after, and which alternatives were rejected
+# -- are logged round by round in docs/guides/npm-audit-gate-hardening.md. Read
+# it before weakening, widening or deleting a pin: the reason is rarely visible
+# from the assertion alone, and several pins look redundant with a neighbour
+# precisely because the neighbour was measured insufficient on its own.
+#
 # HERMETIC TESTING
 # ----------------
 # The gate reads its audit command from $NPM_AUDIT_CMD (default real
-# `npm audit --json`). These tests inject `cat <fixture>` / `printf …` stubs in a
+# `npm audit --json`). MOST tests inject `cat <fixture>` / `printf …` stubs in a
 # throwaway git repo so the branching/exit-code contract is pinned without npm or
-# the network. CI never sets the seam; the real npm invocation is exercised there.
-# Two additional harness pieces: make_gate_variant (sed-swaps ONLY the
+# the network. CI never sets the seam -- and wiring it there is itself a finding
+# the suite blocks (section 3), since the gate `eval`s whatever it holds.
+#
+# TWO cases deliberately bypass the seam, and both are load-bearing. 11b runs the
+# shipped DEFAULT command for real (seam unset and `env -u`'d, against a PATH
+# shim) because for 200 assertions nothing ever executed the string CI actually
+# runs; 11c drives the gate with an unresolvable PATH so its `command -v jq`
+# fail-closed guard is reached. "Hermetic" here therefore means "no npm, no
+# network" -- NOT "always through the seam".
+#
+# Three additional harness pieces: make_gate_variant (sed-swaps ONLY the
 # ALLOWED_ADVISORIES entry literal, so allowlist-format validation and
-# multi-path pins are exercised without another seam in the shipped gate) and an
-# automatic bash-runtime-error sweep (run_gate_script logs any unbound-variable /
-# bad-substitution / syntax-error text a gate invocation leaks; the suite fails
-# at the end if any accumulated — catching the macOS bash-3.2 empty-array crash
-# class even when the exit code coincides with the expected verdict).
+# multi-path pins are exercised without another seam in the shipped gate);
+# make_npm_shim + run_gate_default_cmd (the PATH shim 11b needs, recording the
+# argv the default resolves to, so that pin is BY EFFECT rather than by
+# spelling); and an automatic bash-runtime-error sweep (run_gate_script logs any
+# unbound-variable / bad-substitution / syntax-error text a gate invocation
+# leaks; the suite fails at the end if any accumulated — catching the macOS
+# bash-3.2 empty-array crash class even when the exit code coincides with the
+# expected verdict).
 set -uo pipefail
 
 # SIGPIPE-safe matching: feed grep/awk from a here-string (`grep PAT <<<"$var"`),
