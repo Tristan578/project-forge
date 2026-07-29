@@ -3039,8 +3039,12 @@ assert_block_lines_exact "$SELF_EXEC_FILTER" "the suite's executable-line filter
 # to 330 is GREEN 194/0 with the violation still executing, and a JSON fixture
 # reformatted four lines shorter would compensate without touching any pin at
 # all. So pin the LINES instead -- the ninth application of the exact-line-set
-# idiom on this branch, after column-0, 2-space, 4-space, step-key, step-line
-# and job-steps. A phantom opener is a line that was not there before, so it
+# idiom on this branch (row 9 of the roll-call table in
+# docs/guides/npm-audit-gate-hardening.md; look the ordinal up there rather
+# than rebuilding an "after A, B, C" list here -- this comment used to carry a
+# six-item one, which both contradicts the word "ninth" and omits the two rows
+# whose omission is how "sixth" and "seventh" each got spent twice).
+# A phantom opener is a line that was not there before, so it
 # lands as an unexpected element whatever it spells; an ORDERED comparison also
 # catches a phantom spelled identically to a real opener, since a duplicate is
 # an extra element. No bash quoting grammar is modelled anywhere.
