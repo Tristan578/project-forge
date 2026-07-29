@@ -2314,25 +2314,60 @@ SELF="${BASH_SOURCE[0]}"
 # executed here, but a literal match for the first needle. (Spelled in prose on
 # purpose: this comment is itself scanned, so writing the pattern out would trip
 # the lock it explains, the same self-match constraint the note above records.)
-# Dropping quoted-heredoc
-# payload SCOPES the locks to code rather than weakening them: the filter is
-# bounded by each heredoc's own terminator, so no executable line can hide
-# behind it, and an unquoted heredoc is left in scope (stricter, not looser).
-# Fails closed — an empty filter would make both locks pass vacuously.
-SELF_EXEC="$(awk '
-  tag != "" { if ($0 == tag) tag = ""; next }
-  {
-    print
-    if (match($0, /<<[ \t]*\047[A-Za-z_][A-Za-z0-9_]*\047/)) {
-      t = substr($0, RSTART, RLENGTH)
-      sub(/^<<[ \t]*\047/, "", t)
-      sub(/\047$/, "", t)
-      tag = t
-    }
+# Dropping quoted-heredoc PAYLOAD scopes the locks to code. awk has no notion of
+# bash syntax, so a naive "this line contains a heredoc token" test would let any
+# line -- a comment, or the same token inside an ordinary string -- open a
+# swallow that hides executable lines from both locks, and an opener whose
+# terminator never appears alone would swallow to EOF. That is a weakening, not a
+# scoping, and it was live here: the comment above the expected_steps_1 fixture
+# spells that fixture's own delimiter while explaining why the fixtures avoid
+# command substitution, and a naive filter hid the 39 lines after it -- including
+# a real opener -- from both locks.
+#
+# So the filter recognizes ONLY the line shapes that are unambiguously real
+# heredoc openers in bash, and treats anything else carrying the token as an
+# error rather than as a delimiter:
+#   * a leading-# comment can never open a heredoc, so it is never a delimiter.
+#     It stays IN scope for both locks -- a comment that spells a needle is still
+#     a finding, which is why the paragraph above is written in prose.
+#   * any other line carrying the token must match a known opener shape, so the
+#     swallow it starts is one bash performs too. A shape is only listed here if
+#     a line matching it IS a heredoc opener, which is what makes the exclusion
+#     provable rather than assumed.
+#   * an unrecognized shape, or a delimiter still open at EOF, fails the suite.
+# Adding a genuinely new heredoc form is expected to redden this check until its
+# shape is listed below; that prompt is the point. A trailing comment spelling
+# the token on an executable line reddens it too -- reword the comment.
+# shellcheck disable=SC2016  # awk program text: $0/$SELF are awk fields, not shell
+SELF_EXEC_FILTER='
+tag != "" { if ($0 == tag) tag = ""; next }
+{
+  print
+  if ($0 ~ /^[ \t]*#/) next
+  if (!match($0, /<<[ \t]*\047[A-Za-z_][A-Za-z0-9_]*\047/)) next
+  t = substr($0, RSTART, RLENGTH)
+  sub(/^<<[ \t]*\047/, "", t)
+  sub(/\047$/, "", t)
+  if ($0 ~ /^f="\$\(fixture [A-Za-z0-9._-]+ <<\047JSON\047$/ ||
+      $0 ~ /^[ \t]*IFS= read -r -d \047\047 [A-Za-z_][A-Za-z0-9_]* <<\047(STEPS_EOF|OUTPUTS_EOF)\047 \|\| true$/) {
+    tag = t
+    next
   }
-' "$SELF")"
+  printf "line %d opens heredoc %s but matches no recognized opener shape\n", NR, t > "/dev/stderr"
+}
+END { if (tag != "") printf "heredoc %s is still open at EOF\n", tag > "/dev/stderr" }
+'
+SELF_EXEC="$(awk "$SELF_EXEC_FILTER" "$SELF" 2>/dev/null)"
+SELF_EXEC_DIAG="$(awk "$SELF_EXEC_FILTER" "$SELF" 2>&1 >/dev/null)"
+# Fails closed three ways: an empty filter would make both locks pass vacuously;
+# an unrecognized opener shape means the scope is no longer provably code-only;
+# a delimiter left open at EOF means every line after it was silently dropped.
 if [ -z "$SELF_EXEC" ]; then
   fail "the suite's executable-line filter produced no output — both SIGPIPE hygiene locks below would pass vacuously"
+elif [ -n "$SELF_EXEC_DIAG" ]; then
+  fail "the suite's executable-line filter could not parse its own heredocs — $SELF_EXEC_DIAG"
+else
+  pass "suite's executable-line filter parsed every heredoc opener (locks below scan code, not fixture payload)"
 fi
 if grep -nE 'echo[[:space:]]+"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*\|[[:space:]]*(grep|awk)' <<<"$SELF_EXEC" >/dev/null; then
   fail "a variable's echo output is piped into grep/awk — feed it via a here-string to stay correct under pipefail"
