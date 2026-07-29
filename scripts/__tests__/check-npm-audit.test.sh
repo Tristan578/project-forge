@@ -823,6 +823,73 @@ assert_top_level_keys() { # $1 = comment-stripped workflow, $2 = label, $3 = exp
   pass "$2: the column-0 keys are exactly the $(grep -c '' <<<"$actual") expected top-level keys with jobs last (the job-key enumeration cannot be ended early from inside a job body)"
 }
 
+# The two enumerations above bound the region AT and BELOW `jobs:`. Nothing
+# bounded the region ABOVE it. assert_top_level_keys reads column-0 lines only,
+# so it sees `env:` and `permissions:` as keys and never looks at their BODIES;
+# assert_job_key_lines' awk skips every line before `jobs:` outright. The whole
+# workflow preamble was therefore enumerated by nothing, and a one-line
+# insertion into an already-existing top-level block was invisible to all 195
+# assertions.
+#
+# That is not cosmetic. A workflow-level `env:` entry applies to every step of
+# every job, so an added NPM_AUDIT_CMD wires this suite's own eval'd test seam
+# into all three npm audits at once: the gate reports a clean report it never
+# ran, the job exits 0 and reports SUCCESS rather than skipped (so the
+# CI-Success skip-based anti-tamper never fires), and on cd.yml
+# `needs.security.result == 'success'` becomes genuinely true, deploying to
+# production past an audit that did not happen. The value is eval'd by
+# check-npm-audit.sh, so this is arbitrary code execution in CI, not merely a
+# silenced gate. The only thing in front of it was the literal
+# `grep -q 'NPM_AUDIT_CMD'` scan, which is byte-based:
+#
+#     "NPM_AUDIT_CMD": "printf '%s' '{\"auditReportVersion\":2,...}'"
+#
+# is the same mapping key to a YAML parser and a different string to grep, and
+# measured 195 PASS / 0 FAIL with the seam live, `grep -c` returning 0, in
+# quality-gates.yml and again in cd.yml. The plain spelling of the identical
+# payload is RED, which is what makes the escape the whole ingredient rather
+# than an incidental detail. The same gap passed `permissions: contents: write`
+# on the reusable workflow, which its own documented rule forbids outright.
+#
+# Fixed the way every earlier level of this file was fixed, and deliberately
+# NOT by widening the grep to tolerate `\u`: that is the byte-pattern treadmill
+# rounds 28-32 rejected five times over. The region is enumerated instead.
+#
+# The cut is the WHOLE preamble rather than a chosen list of block names,
+# because a list of names is the same blacklist one level in: `on:` and
+# `concurrency:` would have been scoped out on a fails-closed argument that was
+# never measured, which is precisely the reasoning round 21's `uses:` exemption
+# was overturned for. Anything above `jobs:` — including a top-level block that
+# does not exist yet — lands as an unexpected line.
+#
+# Values are NOT stripped here, unlike the two key enumerations above, because
+# in this region the value IS the payload: `contents: read` vs `write`, and
+# every `env:` entry. Trailing comments and trailing whitespace ARE stripped,
+# as in assert_job_key_lines — a trailing `#` in a YAML mapping is inert, so
+# dropping it loses nothing, and stripping at a bare `#` inside a quoted scalar
+# could only ever shorten a line into a mismatch, the fail-CLOSED direction.
+assert_preamble_lines() { # $1 = comment-stripped workflow, $2 = label, $3 = expected preamble lines
+  local actual delta
+  actual="$(awk '
+    /^["'"'"']?jobs["'"'"']?[[:space:]]*:/ {exit}
+    {
+      sub(/[[:space:]]*#.*/, "")
+      sub(/[[:space:]]+$/, "")
+      if ($0 != "") print
+    }
+  ' <<<"$1")"
+  if [ -z "$actual" ]; then
+    fail "$2: found no lines above jobs: — the preamble is unverifiable, so a workflow-level env: entry wiring the eval'd NPM_AUDIT_CMD seam into every step of every job would be unpinned"
+    return
+  fi
+  if [ "$actual" != "$3" ]; then
+    delta="$(diff <(printf '%s\n' "$3") <(printf '%s\n' "$actual") | grep '^[<>]' | tr '\n' ' ')"
+    fail "$2: the lines above jobs: are not exactly the expected preamble — a workflow-level env: entry applies to every step of every job (an added NPM_AUDIT_CMD no-ops all three npm audits and is eval'd), and permissions: here is the workflow's default token scope ('<' expected-but-absent, '>' present-but-unexpected): $delta — if the change is legitimate, paste the new line into the expected preamble at this assertion's call site, ${BASH_SOURCE[0]##*/}:${BASH_LINENO[0]}"
+    return
+  fi
+  pass "$2: the lines above jobs: are exactly the $(grep -c '' <<<"$actual") expected preamble lines (no workflow-level env:/permissions: entry can be added, however its key is spelled)"
+}
+
 # One level deeper, the same defect again: the pins INSIDE each cut job block --
 # the 4-space job-level keys -- match by literal bytes through a `["']?` class.
 # YAML 1.2 double-quoted scalars support \u escapes, so `"\u0073teps"` and
@@ -1251,6 +1318,69 @@ permissions
 env
 jobs"
 
+  # ROUND 34. The key pin above sees `permissions` and `env` and never their
+  # BODIES. This one pins every line above `jobs:`, verbatim. quality-gates.yml
+  # is where it matters most: it is `workflow_call`-only and holds the sole
+  # PR-path execution site of all three npm audits, so one workflow-level env:
+  # entry no-ops every one of them at once.
+  IFS= read -r -d '' expected_preamble_qg <<'STEPS_EOF' || true
+name: Quality Gates
+on:
+  workflow_call:
+    inputs:
+      web-changed:
+        description: 'Whether web/** or package*.json changed (defaults to true when unset)'
+        type: boolean
+        default: true
+      mcp-changed:
+        description: 'Whether mcp-server/** changed (defaults to true when unset)'
+        type: boolean
+        default: true
+      engine-changed:
+        description: 'Whether engine/** or Cargo.* changed (defaults to true when unset)'
+        type: boolean
+        default: true
+      ci-changed:
+        description: 'Whether .github/** changed (defaults to true when unset)'
+        type: boolean
+        default: true
+      can-commit-ratchet:
+        description: 'Whether the ratchet job can commit+push (only fires on main branch, requires write perms)'
+        type: boolean
+        default: true
+    outputs:
+      lint-result:
+        description: 'Outcome of the lint job'
+        value: ${{ jobs.lint.result }}
+      typecheck-result:
+        description: 'Outcome of the typecheck job'
+        value: ${{ jobs.typecheck.result }}
+      test-web-result:
+        description: 'Outcome of the test-web job'
+        value: ${{ jobs.test-web.result }}
+      test-mcp-result:
+        description: 'Outcome of the test-mcp job'
+        value: ${{ jobs.test-mcp.result }}
+      build-wasm-result:
+        description: 'Outcome of the build-wasm job'
+        value: ${{ jobs.build-wasm.result }}
+      security-result:
+        description: 'Outcome of the security job'
+        value: ${{ jobs.security.result }}
+      coverage-ratchet-result:
+        description: 'Outcome of the coverage-ratchet job'
+        value: ${{ jobs.coverage-ratchet.result }}
+      editor-boot-result:
+        description: 'Outcome of the editor-boot job (informational — not a required check)'
+        value: ${{ jobs.editor-boot.result }}
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: --cfg=web_sys_unstable_apis
+STEPS_EOF
+  assert_preamble_lines "$qg_exec" "quality-gates.yml" "${expected_preamble_qg%$'\n'}"
+
   assert_job_key_lines "$qg_exec" "quality-gates.yml" "  lint:
   typecheck:
   test-web:
@@ -1464,6 +1594,39 @@ permissions
 concurrency
 env
 jobs"
+
+  # ROUND 34 — cd.yml twin. Strictly worse here than on the caller: a
+  # workflow-level env: seam makes the security job exit 0 on its own terms, so
+  # `needs.security.result == 'success'` is genuinely TRUE and both deploy jobs'
+  # pinned clauses are satisfied honestly. Production ships past an audit that
+  # never ran, with no required check absent to backstop it.
+  IFS= read -r -d '' expected_preamble_cd <<'STEPS_EOF' || true
+name: CD
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      promote_to_production:
+        description: 'Promote staging to production'
+        required: false
+        type: boolean
+        default: false
+      rollback_production:
+        description: 'Rollback production to a previous deployment URL (leave blank to skip)'
+        required: false
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: --cfg=web_sys_unstable_apis
+STEPS_EOF
+  assert_preamble_lines "$cd_exec" "cd.yml" "${expected_preamble_cd%$'\n'}"
 
   assert_job_key_lines "$cd_exec" "cd.yml" "  rollback-production-manual:
   lint:
@@ -1826,6 +1989,25 @@ on
 concurrency
 permissions
 jobs"
+
+  # ROUND 34 — ci.yml has NO top-level env: today, and the key pin above would
+  # already flag an added one as a new ordered element. It is pinned anyway,
+  # because that is the whole argument the round rejects: scoping a file out on
+  # a fails-closed theory nobody measured is how round 21's `uses:` exemption
+  # shipped. Here it also buys the `permissions:` body, which the key pin does
+  # not cover in any file, and it forecloses a seam smuggled into `concurrency:`.
+  IFS= read -r -d '' expected_preamble_ci <<'STEPS_EOF' || true
+name: CI
+on:
+  pull_request:
+    branches: [main]
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+STEPS_EOF
+  assert_preamble_lines "$ci_exec" "ci.yml" "${expected_preamble_ci%$'\n'}"
 
   assert_job_key_lines "$ci_exec" "ci.yml" "  ci-gate:
   quality-gates:
@@ -2554,7 +2736,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=361
+readonly SELF_EXEC_EXPECTED_DROP=454
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -2684,6 +2866,9 @@ f="$(fixture jq-abort.json @@'JSON'
 f="$(fixture v1-report.json @@'JSON'
 f="$(fixture multi-pinned.json @@'JSON'
 f="$(fixture multi-third.json @@'JSON'
+  IFS= read -r -d '' expected_preamble_qg @@'STEPS_EOF' || true
+  IFS= read -r -d '' expected_preamble_cd @@'STEPS_EOF' || true
+  IFS= read -r -d '' expected_preamble_ci @@'STEPS_EOF' || true
   IFS= read -r -d '' expected_ci_gate_outputs @@'OUTPUTS_EOF' || true
 IFS= read -r -d '' expected_filter_body @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_openers @@'STEPS_EOF' || true
