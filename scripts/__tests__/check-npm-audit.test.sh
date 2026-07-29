@@ -1309,6 +1309,7 @@ if [ -f "$QG_YML" ]; then
   # branch — reporting a wired bypass as absent. Fail closed if the strip
   # produced nothing: an empty result means these assertions cannot see the file.
   qg_exec="$(grep -v '^[[:space:]]*#' <<<"$qg" || true)"
+  readonly qg_exec
   if [ -z "$qg_exec" ]; then
     fail "comment-strip of quality-gates.yml produced no output — self-defense assertions cannot be verified"
   fi
@@ -1379,6 +1380,7 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: --cfg=web_sys_unstable_apis
 STEPS_EOF
+  readonly expected_preamble_qg
   assert_preamble_lines "$qg_exec" "quality-gates.yml" "${expected_preamble_qg%$'\n'}"
 
   assert_job_key_lines "$qg_exec" "quality-gates.yml" "  lint:
@@ -1437,6 +1439,7 @@ STEPS_EOF
 
   # Fail closed on an empty cut: nothing below may pass vacuously.
   qg_sec="$(awk -v re="$job_key_re" '/^  security:/{f=1} f{print} f && $0 ~ re && !/^  security:/{exit}' <<<"$qg_exec")"
+  readonly qg_sec
 
   assert_job_level_keys "$qg_sec" "quality-gates security job" "    name
     runs-on
@@ -1585,6 +1588,7 @@ if [ -f "$CD_YML" ]; then
   # chaining the comment-strip into `grep -q` false-PASSES under pipefail on an
   # early match (SIGPIPE), so a wired bypass would be reported as absent.
   cd_exec="$(grep -v '^[[:space:]]*#' <<<"$cd_yml" || true)"
+  readonly cd_exec
   if [ -z "$cd_exec" ]; then
     fail "comment-strip of cd.yml produced no output — self-defense assertions cannot be verified"
   fi
@@ -1626,6 +1630,7 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: --cfg=web_sys_unstable_apis
 STEPS_EOF
+  readonly expected_preamble_cd
   assert_preamble_lines "$cd_exec" "cd.yml" "${expected_preamble_cd%$'\n'}"
 
   assert_job_key_lines "$cd_exec" "cd.yml" "  rollback-production-manual:
@@ -1669,6 +1674,7 @@ STEPS_EOF
   fi
 
   cd_sec="$(awk -v re="$job_key_re" '/^  security:/{f=1} f{print} f && $0 ~ re && !/^  security:/{exit}' <<<"$cd_exec")"
+  readonly cd_sec
 
   assert_job_level_keys "$cd_sec" "cd security job" "    name
     if
@@ -1981,6 +1987,7 @@ if [ -f "$CI_YML" ]; then
   # cannot change which block is cut. Fail closed on an empty strip or an
   # empty block: neither assertion below may pass vacuously.
   ci_exec="$(grep -v '^[[:space:]]*#' <<<"$ci" || true)"
+  readonly ci_exec
   if [ -z "$ci_exec" ]; then
     fail "comment-strip of ci.yml produced no output — self-defense assertions cannot be verified"
   fi
@@ -2007,6 +2014,7 @@ concurrency:
 permissions:
   contents: read
 STEPS_EOF
+  readonly expected_preamble_ci
   assert_preamble_lines "$ci_exec" "ci.yml" "${expected_preamble_ci%$'\n'}"
 
   assert_job_key_lines "$ci_exec" "ci.yml" "  ci-gate:
@@ -2085,6 +2093,7 @@ STEPS_EOF
   fi
 
   ci_gate_block="$(awk -v re="$job_key_re" '/^  ci-gate:/{f=1} f{print} f && $0 ~ re && !/^  ci-gate:/{exit}' <<<"$ci_exec")"
+  readonly ci_gate_block
 
   # No job-level if: and no continue-on-error: in the expected set — either one
   # skips or neuters the detector, and a skipped ci-gate leaves every downstream
@@ -2107,6 +2116,7 @@ STEPS_EOF
   fi
 
   ci_gate_outputs_blk="$(awk "/^    [\"']?outputs[\"']?[[:space:]]*:/{f=1;print;next} f && /^    [A-Za-z_\"']/{exit} f{print}" <<<"$ci_gate_block")"
+  readonly ci_gate_outputs_blk
   IFS= read -r -d '' expected_ci_gate_outputs <<'OUTPUTS_EOF' || true
     outputs:
       needs-web: ${{ steps.changes.outputs.web }}
@@ -2125,6 +2135,7 @@ STEPS_EOF
       needs-skills: ${{ steps.changes.outputs.skills }}
       needs-any-code: ${{ steps.changes.outputs.any-code }}
 OUTPUTS_EOF
+  readonly expected_ci_gate_outputs
   assert_block_lines_exact "$ci_gate_outputs_blk" "ci.yml ci-gate outputs:" "${expected_ci_gate_outputs%$'\n'}" "these entries sit at SIX spaces, below the four-space key enumeration above, so hardcoding needs-any-code to a literal (or repointing it at another step output) degates the sole PR-path caller of all three npm audits while every other pin in this suite stays green"
 
   ci_gate_steps_count="$(grep -cE "^    [\"']?steps[\"']?[[:space:]]*:" <<<"$ci_gate_block" || true)"
@@ -2275,6 +2286,7 @@ OUTPUTS_EOF
   fi
 
   ci_success_block="$(awk -v re="$job_key_re" '/^  ci-success:/{f=1} f{print} f && $0 ~ re && !/^  ci-success:/{exit}' <<<"$ci_exec")"
+  readonly ci_success_block
 
   assert_job_level_keys "$ci_success_block" "ci ci-success job" "    name
     if
@@ -2431,6 +2443,7 @@ OUTPUTS_EOF
   fi
 
   lst_block="$(awk -v re="$job_key_re" '/^  lockfile-sync-tests:/{f=1} f{print} f && $0 ~ re && !/^  lockfile-sync-tests:/{exit}' <<<"$ci_exec")"
+  readonly lst_block
 
   assert_job_level_keys "$lst_block" "ci lockfile-sync-tests job" "    name
     needs
@@ -2801,6 +2814,7 @@ tag != "" { if ($0 == tag) tag = ""; next }
 }
 END { if (tag != "") printf "heredoc %s is still open at EOF\n", tag > "/dev/stderr" }
 STEPS_EOF
+readonly expected_filter_body
 assert_block_lines_exact "$SELF_EXEC_FILTER" "the suite's executable-line filter body (effective runtime value)" \
   "${expected_filter_body%$'\n'}" \
   "the stderr-based self-check above cannot see a filter that writes no stderr AT ALL, so a reversion to the naive pre-round-27 program silently restores the comment/string/EOF swallow -- hiding real code from both hygiene locks -- while every surrounding line stays byte-identical; asserting on the VALUE rather than on column-0 bytes covers every assignment spelling at once, because last-assignment-wins makes whatever this variable holds here the program that actually ran"
@@ -2837,8 +2851,11 @@ assert_block_lines_exact "$SELF_EXEC_FILTER" "the suite's executable-line filter
 # openers verbatim without matching the shapes itself -- the same self-match
 # avoidance the awk program uses when it spells its own `<<` as `[<][<]`.
 opener_shape_fixture="^f=\"\\\$\\(fixture [A-Za-z0-9._-]+ [<][<]'JSON'\$"
+readonly opener_shape_fixture
 opener_shape_read="^[[:blank:]]*IFS= read -r -d '' [A-Za-z_][A-Za-z0-9_]* [<][<]'(STEPS_EOF|OUTPUTS_EOF)' \\|\\| true\$"
+readonly opener_shape_read
 suite_openers="$(grep -E "$opener_shape_fixture|$opener_shape_read" "$SELF" | sed 's/[<][<]/@@/g')"
+readonly suite_openers
 IFS= read -r -d '' expected_openers <<'STEPS_EOF' || true
 f="$(fixture clean.json @@'JSON'
 f="$(fixture waived.json @@'JSON'
@@ -2878,6 +2895,7 @@ IFS= read -r -d '' expected_steps_3 @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_steps_4 @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_steps_5 @@'STEPS_EOF' || true
 STEPS_EOF
+readonly expected_openers
 assert_block_lines_exact "$suite_openers" "the set of lines that can open a filter swallow" \
   "${expected_openers%$'\n'}" \
   "the filter's shape whitelist is line-local while bash's parse is not, so a line inside a multi-line quoted string can match an opener shape byte-for-byte and open a swallow bash never performs -- hiding executable code, including a hygiene violation, from both locks below; the volume pin catches the arithmetic but a bumped expected-drop or a reformatted fixture compensates for it, whereas a phantom opener is by construction a line that was not in this list"
@@ -2975,6 +2993,7 @@ IFS= read -r -d '' expected_steps_1 <<'STEPS_EOF' || true
         working-directory: engine
         run: cargo audit
 STEPS_EOF
+readonly expected_steps_1
 assert_steps_block "${qg_sec:-}" "quality-gates security job steps:" "${expected_steps_1%$'\n'}"
 
 IFS= read -r -d '' expected_steps_2 <<'STEPS_EOF' || true
@@ -3006,6 +3025,7 @@ IFS= read -r -d '' expected_steps_2 <<'STEPS_EOF' || true
         working-directory: engine
         run: cargo audit
 STEPS_EOF
+readonly expected_steps_2
 assert_steps_block "${cd_sec:-}" "cd.yml security job steps:" "${expected_steps_2%$'\n'}"
 
 IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
@@ -3063,6 +3083,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
       - name: Run coverage-ratchet script test suite
         run: bash scripts/__tests__/ratchet-coverage.test.sh
 STEPS_EOF
+readonly expected_steps_3
 assert_steps_block "${lst_block:-}" "ci.yml lockfile-sync-tests job steps:" "${expected_steps_3%$'\n'}"
 
 IFS= read -r -d '' expected_steps_4 <<'STEPS_EOF' || true
@@ -3073,6 +3094,7 @@ IFS= read -r -d '' expected_steps_4 <<'STEPS_EOF' || true
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: bash scripts/check-ci-success.sh
 STEPS_EOF
+readonly expected_steps_4
 assert_steps_block "${ci_success_block:-}" "ci.yml ci-success job steps:" "${expected_steps_4%$'\n'}"
 
 # ci-gate's detect step: the one block that decides whether the caller above
@@ -3132,7 +3154,117 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
             echo "No relevant changes — downstream jobs will be skipped"
           fi
 STEPS_EOF
+readonly expected_steps_5
 assert_steps_block "${ci_gate_block:-}" "ci.yml ci-gate job steps:" "${expected_steps_5%$'\n'}"
+
+# ---------------------------------------------------------------------------
+# ROUND 34 (sec-r30 F2). Every pin above compares two values, and nothing
+# stopped a THIRD line from overwriting either side between the assignment and
+# the comparison. The variable holding the OBSERVED text and the variable
+# holding the EXPECTED text are equally good targets: set one to the other and
+# the pin compares a value to itself, passing on any input. Three one-line
+# neuters were measured against a clean replica of 0589e243, each taking the
+# suite from RED (with a real violation planted) to 198 PASS / 0 FAIL:
+#
+#   scenario                                            pre-fix        post-fix
+#   O1  extra real heredoc opener, NO neuter            197/1 RED      197/1 RED
+#   O2  same + suite_openers="$expected_openers"        198/0 GREEN    197/1 RED
+#   O3  same + expected_openers="$suite_openers"        198/0 GREEN    197/1 RED
+#   G1  ci-gate needs-any-code falsified, NO neuter     197/1 RED      197/1 RED
+#   G2  same + ci_gate_outputs_blk=<expected>           198/0 GREEN    197/1 RED
+#
+# O1/G1 are the controls that make the neuter the whole ingredient. G2 is the
+# severe one: it hardcodes ci-gate's needs-any-code output to 'false', which
+# makes the quality-gates caller's `if:` unsatisfiable on every PR, so the sole
+# PR-path execution site of all three npm audits never runs -- and one inserted
+# line puts the pin that catches it back to sleep.
+#
+# Fixed by marking every pin input `readonly`, which under `set -uo pipefail`
+# with no `-e` is fail-closed BY PRESERVATION rather than by detection: a later
+# assignment errors, does not abort, and THE ORIGINAL VALUE SURVIVES. Round 31
+# established that precedent for SELF_EXEC_FILTER; this generalizes it to every
+# variable a pin reads on either side.
+#
+# `readonly` is then verified BY EFFECT, not by text. A pin on the spelling of
+# the declarations would be the byte-pattern treadmill rounds 29 and 31 both
+# measured their way off: a leading space or tab, `declare`, `typeset`, or a
+# `: ;` separator all defeat a column-0 anchor, and round 31 deleted exactly
+# such a pin rather than widen it a third time. Probing the effect in a
+# subshell covers every spelling by construction and is non-destructive -- the
+# assignment fails, so the real value is untouched, and a `readonly` line that
+# is DELETED fails the probe (round 30's lesson: evidence produced by the thing
+# under audit cannot fail when that thing is removed; this evidence is produced
+# by the probe). Verified portable on bash 3.2.57 and bash 5.
+# ---------------------------------------------------------------------------
+PIN_INPUTS='qg_exec
+expected_preamble_qg
+qg_sec
+cd_exec
+expected_preamble_cd
+cd_sec
+ci_exec
+expected_preamble_ci
+ci_gate_block
+ci_gate_outputs_blk
+expected_ci_gate_outputs
+ci_success_block
+lst_block
+expected_filter_body
+opener_shape_fixture
+opener_shape_read
+suite_openers
+expected_openers
+expected_steps_1
+expected_steps_2
+expected_steps_3
+expected_steps_4
+expected_steps_5
+SELF_EXEC_FILTER
+SELF_EXEC
+SELF_EXEC_DIAG
+SELF_EXEC_EXPECTED_DROP
+PIN_INPUTS'
+readonly PIN_INPUTS
+
+# An unset name probes as MUTABLE and lands in the failure list, so a pin whose
+# workflow file was missing is reported here too rather than skipped -- there is
+# deliberately no "skip if unset" arm.
+pin_not_ro=""
+while IFS= read -r pin_v; do
+  [ -n "$pin_v" ] || continue
+  if ( eval "$pin_v=__probe__" ) 2>/dev/null; then
+    pin_not_ro="$pin_not_ro $pin_v"
+  fi
+done <<<"$PIN_INPUTS"
+if [ -n "$pin_not_ro" ]; then
+  fail "pin-input variable(s) are not readonly, so one inserted assignment makes their pin compare a value to itself (and any input pass):$pin_not_ro"
+else
+  pass "all $(grep -c '' <<<"$PIN_INPUTS") pin-input variables are readonly (a later assignment errors and the original value is preserved)"
+fi
+
+# Cross-check the probed list against the declarations actually in the file.
+# This is a DRIFT check, NOT anti-tamper, and is labelled that way deliberately:
+# it keeps the list in step with the declarations as the suite grows (a new pin
+# variable given a `readonly` but no list entry, or the reverse, is reported),
+# but an edit that removes BOTH shrinks both sides and still matches. The effect
+# probe above is what proves the surviving declarations are in force. The
+# residual this cannot close: a NEW pin variable added later with neither a
+# `readonly` nor a list entry is unprotected -- no assertion can know about a
+# variable that does not exist yet.
+ro_decls="$(sed -n 's/^[[:space:]]*readonly[[:space:]]\{1,\}//p' <<<"$SELF_EXEC")"
+ro_names="$(tr ' ' '\n' <<<"$ro_decls")"
+ro_bare=""
+while IFS= read -r ro_line; do
+  [ -n "$ro_line" ] || continue
+  ro_bare="${ro_bare}${ro_line%%=*}
+"
+done <<<"$ro_names"
+declared_ro="$(sort -u <<<"$ro_bare")"
+expected_ro="$(sort -u <<<"$PIN_INPUTS")"
+assert_block_lines_exact "$declared_ro" \
+  "the set of readonly-declared names (drift check against the probed list)" \
+  "$expected_ro" \
+  "the probed list and the declarations have drifted apart -- a pin variable carries one without the other, so either the probe silently covers nothing or a declared name is never probed"
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
