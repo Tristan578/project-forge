@@ -675,58 +675,54 @@ fi
 # block, and every caller fails closed on empty rather than passing vacuously.
 job_key_re="^  [\"']?[A-Za-z_][A-Za-z0-9_-]*[\"']?[[:space:]]*:"
 
-# The colon alone is necessary but NOT sufficient — a continuation line can also
-# carry a colon (`  B: 2}`, closing a flow mapping opened on the line above), and
-# a hand-crafted one can be spelled exactly like a bare job key (`  decoy:`).
-# Both defeat any charset. Rather than trade one spelling for the next, assert
-# the STRUCTURAL PRECONDITION the line-based cut actually depends on: that in
-# these three files, a 2-space line inside `jobs:` cannot be anything but a job
-# key. Two checks, together sufficient:
+# The colon alone is necessary but NOT sufficient. A continuation line can carry
+# a colon (`  B: 2}`, closing a flow mapping opened above) or be spelled exactly
+# like a bare job key (`  decoy:`), and the scalar that emits it can be opened in
+# ways no `key: "..."` test sees — behind a backslash-escaped quote (`"grp\"`),
+# as a bare sequence item (`- "a`), or behind a YAML anchor or tag
+# (`&a "trunc`, `!!str "trunc`). Every one of those was measured live against an
+# earlier revision of this file: suite green, PyYAML confirming a gutted job.
 #
-#   (1) every non-blank 2-space line inside `jobs:` has job-key SHAPE — optional
-#       quote, name, optional quote, colon, then nothing but whitespace/comment.
-#       A GHA job value is always a block mapping, so content after the colon is
-#       never a job key. This rejects `  B: 2}` and `  decoy"`.
-#   (2) no line opens a quoted scalar or flow collection that does not close on
-#       the same line. This forecloses continuations existing at all, which is
-#       what (1) cannot see: a crafted `  decoy:` continuation has valid shape.
+# The lesson is that "does this line LOOK like a job key?" is the wrong question.
+# Three successive rounds of widening the charset each traded one spelling for
+# the next, because the question is a blacklist and YAML has unbounded spellings.
 #
-# Both are zero-violation on the current files, so this pins existing structure
-# rather than demanding a reformat. A future multi-line value trips (2) and goes
-# red — deliberately: at that point the cuts' premise no longer holds and the
-# right answer is a parser, not another regex. That is the durable design point
-# raised by review, recorded rather than silently deferred: this closes the class
-# for these files, it does not make line-based cutting sound in general.
-assert_cut_preconditions() { # $1 = comment-stripped workflow, $2 = label
-  local shape_bad opener_bad
-  shape_bad="$(awk '
-    /^jobs:/ {j=1; next}
-    j && /^[A-Za-z_]/ {j=0}
-    j && /^  [^ ]/ && $0 !~ /^  ["'"'"']?[A-Za-z_][A-Za-z0-9_-]*["'"'"']?[[:space:]]*:[[:space:]]*(#.*)?$/ {print}
+# So ask a question with a finite answer instead: the cut's premise is that the
+# ONLY 2-space lines inside `jobs:` are the job keys themselves. Enumerate them
+# and pin the exact set. That is spelling-independent by construction — a
+# continuation, however it is opened or spelled, is a 2-space line that is not in
+# the list, and goes red. It also covers the reverse direction the shape tests
+# never did: respelling a REAL job key (`  "security":`) so the terminator stops
+# matching it, which would make a cut over-run into the following job.
+#
+# Consequences, stated rather than discovered later: adding, renaming or removing
+# a job turns this suite red until the list below is updated. That is a one-line,
+# obviously-correct edit, and for a self-defense suite the prompt is the point.
+# It fails closed in every direction — an anchor that stops matching, a section
+# that ends early, a workflow that grows a key all produce a mismatch, never a
+# vacuous pass, and an empty enumeration is refused outright.
+#
+# Scope, honestly: this makes the cuts' premise VERIFIED rather than assumed for
+# these three files. It does not make line-based cutting sound in general, and
+# like every pin here it is defeated by a coordinated edit of both the workflow
+# and this suite — it raises the cost of tampering, it is not a proof.
+assert_job_key_lines() { # $1 = comment-stripped workflow, $2 = label, $3 = expected job-key lines
+  local actual delta
+  actual="$(awk '
+    /^["'"'"']?jobs["'"'"']?[[:space:]]*:/ {j=1; next}
+    j && /^[^[:space:]]/ {j=0}
+    j && /^  [^ ]/ {print}
   ' <<<"$1")"
-  if [ -n "$shape_bad" ]; then
-    fail "$2 has a 2-space line inside jobs: that is not a job key — the block cuts terminate on it and every pin below reads a truncated block: $(head -1 <<<"$shape_bad")"
-  else
-    pass "$2: every 2-space line inside jobs: has job-key shape (cuts cannot terminate mid-job)"
+  if [ -z "$actual" ]; then
+    fail "$2: found no 2-space lines inside jobs: — every block cut below would read an empty block and every count/absence pin would pass vacuously"
+    return
   fi
-  opener_bad="$(awk '
-    match($0, /^[[:space:]]*-?[[:space:]]*["'"'"']?[A-Za-z_][A-Za-z0-9_.-]*["'"'"']?[[:space:]]*:[[:space:]]*/) {
-      v = substr($0, RSTART + RLENGTH)
-      if (v == "") next
-      q = substr(v, 1, 1)
-      if (q == "\"" || q == "'"'"'") {
-        n = gsub(q, q, v)
-        if (n % 2 == 1) print
-      } else if (q == "[" || q == "{") {
-        if (gsub(/\[/, "[", v) != gsub(/\]/, "]", v) || gsub(/{/, "{", v) != gsub(/}/, "}", v)) print
-      }
-    }
-  ' <<<"$1")"
-  if [ -n "$opener_bad" ]; then
-    fail "$2 opens a multi-line quoted scalar or flow collection — its continuation can be spelled as a job key and truncate a block cut: $(head -1 <<<"$opener_bad")"
-  else
-    pass "$2: no multi-line quoted scalar or flow collection (no continuation can impersonate a job key)"
+  if [ "$actual" != "$3" ]; then
+    delta="$(diff <(printf '%s\n' "$3") <(printf '%s\n' "$actual") | grep '^[<>]' | tr '\n' ' ')"
+    fail "$2: the 2-space lines inside jobs: are not exactly the expected job keys — a block cut terminates on every one of them, so an unexpected line truncates a job block and the count/absence pins below it read evidence that was cut away ('<' expected-but-absent, '>' present-but-unexpected): $delta"
+    return
   fi
+  pass "$2: the 2-space lines inside jobs: are exactly the $(grep -c '' <<<"$actual") expected job keys (nothing can truncate or over-run a block cut)"
 }
 
 step_block() { # $1 = comment-stripped job block, $2 = step-name needle (fixed string)
@@ -813,7 +809,17 @@ if [ -f "$QG_YML" ]; then
   if [ -z "$qg_exec" ]; then
     fail "comment-strip of quality-gates.yml produced no output — self-defense assertions cannot be verified"
   fi
-  assert_cut_preconditions "$qg_exec" "quality-gates.yml"
+  assert_job_key_lines "$qg_exec" "quality-gates.yml" "  lint:
+  typecheck:
+  test-web:
+  coverage-ratchet:
+  test-mcp:
+  build-wasm:
+  editor-boot:
+  security:
+  lighthouse-delta:
+  storybook-internal-gate:
+  chromatic:"
 
   # Top of the duplicate-key hierarchy: the top-level jobs: key itself is
   # COUNT-pinned. An appended second jobs: mapping at end of file replaces
@@ -1004,7 +1010,20 @@ if [ -f "$CD_YML" ]; then
   if [ -z "$cd_exec" ]; then
     fail "comment-strip of cd.yml produced no output — self-defense assertions cannot be verified"
   fi
-  assert_cut_preconditions "$cd_exec" "cd.yml"
+  assert_job_key_lines "$cd_exec" "cd.yml" "  rollback-production-manual:
+  lint:
+  typecheck:
+  test-web:
+  test-mcp:
+  check-changes:
+  build-wasm:
+  e2e:
+  security:
+  upload-wasm-cdn:
+  deploy-staging:
+  deploy-production:
+  deploy-docs:
+  deploy-design:"
 
   # Same top-level jobs: key count pin as quality-gates (rationale there) —
   # on cd.yml a duplicate jobs: mapping that re-declares its own deploy jobs
@@ -1262,7 +1281,28 @@ if [ -f "$CI_YML" ]; then
   if [ -z "$ci_exec" ]; then
     fail "comment-strip of ci.yml produced no output — self-defense assertions cannot be verified"
   fi
-  assert_cut_preconditions "$ci_exec" "ci.yml"
+  assert_job_key_lines "$ci_exec" "ci.yml" "  ci-gate:
+  quality-gates:
+  command-parity:
+  build-nextjs:
+  docs-internal-gate:
+  design-internal-gate:
+  hook-tests:
+  skills-lint:
+  lockfile-sync:
+  openapi-route-sync:
+  agentic-sync:
+  taskboard-onboarding-guard:
+  codex-config-guard:
+  ghaw-lock-sync:
+  actions-pin-check:
+  lockfile-sync-tests:
+  preview-deploy:
+  test-e2e-ui:
+  test-e2e-journey:
+  test-e2e-engine-smoke:
+  merge-e2e-reports:
+  ci-success:"
 
   # Same top-level jobs: key count pin as quality-gates (rationale there).
   ci_jobs_count="$(grep -cE "^[\"']?jobs[\"']?[[:space:]]*:" <<<"$ci_exec" || true)"
