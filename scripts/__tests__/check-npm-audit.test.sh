@@ -579,6 +579,76 @@ if [ "$rc" = "2" ]; then pass "missing workspace dir fails closed (exit 2)"; els
 out="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"; rc=$?
 if [ "$rc" = "2" ]; then pass "no workspace argument fails closed (exit 2)"; else fail "no argument should exit 2, got $rc"; fi
 
+# --- 11b. The PRODUCTION default audit command, with the seam UNSET ----------
+# Every case above reaches the gate through run_gate_script, which ALWAYS sets
+# NPM_AUDIT_CMD. So the shipped default in
+#     AUDIT_CMD="${NPM_AUDIT_CMD:-npm audit --json}"
+# was executed by ZERO assertions and pinned by none — a branch this suite has
+# 100+ cases about and never once ran. Appending `--omit=dev` to it measured
+# green, and on the real tree that is not cosmetic: at the repo root
+# `npm audit --json` reports 9 high rows and `npm audit --json --omit=dev`
+# reports 0, because the entire high surface is eslint-family devDependencies.
+# With the waiver's pinned path repointed, the shipped default exits 1 (BLOCKS)
+# where the --omit=dev default exits 0 (PASSES).
+#
+# So run it for real: seam unset, against a shimmed `npm` first on PATH that
+# records its argv and prints a fixture. That pins the default BY EFFECT — what
+# npm actually receives — rather than by spelling, the distinction rounds 29-31
+# measured their way onto four times. A default rewritten to some other binary
+# (`pnpm audit --json`) misses the shim, produces no parseable JSON, and fails
+# closed at exit 2, so that direction is covered by the exit-code pin below
+# rather than by enumerating binary names.
+NPM_SHIM_DIR="$FIX/npmshim"
+mkdir -p "$NPM_SHIM_DIR"
+
+# $1 = absolute path to the JSON the stub prints. Built with printf rather than
+# a heredoc so the round-32 opener enumeration keeps its exact shape list.
+make_npm_shim() {
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    "printf '%s' \"\$*\" > '$FIX/npm-args'" \
+    "cat '$1'" > "$NPM_SHIM_DIR/npm"
+  chmod +x "$NPM_SHIM_DIR/npm"
+}
+
+# Deliberately does NOT set NPM_AUDIT_CMD — and unsets any inherited value, so
+# a developer running this suite with the seam exported still exercises the
+# default branch rather than silently re-testing their own export.
+run_gate_default_cmd() {
+  local out rc
+  make_npm_shim "$1"
+  : > "$FIX/npm-args"
+  out="$(cd "$REPO" && PATH="$NPM_SHIM_DIR:$PATH" env -u NPM_AUDIT_CMD bash "$SCRIPT" "${2:-ws}" 2>&1)"
+  rc=$?
+  printf '%s|%s' "$rc" "$out"
+}
+
+res="$(run_gate_default_cmd "$FIX/clean.json")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "the default audit command (seam unset) actually runs, and passes a clean report (exit 0)"; else fail "default audit command on a clean report should exit 0, got $rc — output: $out"; fi
+npm_argv="$(cat "$FIX/npm-args")"
+if [ "$npm_argv" = "audit --json" ]; then
+  pass "the default audit command invokes npm with exactly 'audit --json' (no --omit=dev, no scope or severity narrowing)"
+else
+  fail "the default audit command invoked npm with '$npm_argv', not 'audit --json' — a scope-narrowing flag hides real advisories (at the repo root --omit=dev drops all 9 high rows to 0), and every other case in this suite sets the seam, so nothing else executes this branch"
+fi
+
+res="$(run_gate_default_cmd "$FIX/block-high.json")"; rc="${res%%|*}"
+if [ "$rc" = "1" ]; then pass "the default audit command's OUTPUT is evaluated, not just produced — a blocking advisory still exits 1"; else fail "default audit command on a blocking report should exit 1, got $rc"; fi
+
+# The seam NAME, pinned in the gate script itself. The effect probe above cannot
+# see a rename: renaming the variable in BOTH the gate and this suite's
+# run_gate_script would leave every case green while the workflow seam scans
+# further down — which grep for the literal string NPM_AUDIT_CMD — silently
+# matched nothing, and a scan that matches nothing waves through the `env:` entry
+# it exists to forbid.
+# shellcheck disable=SC2016  # a literal needle: the point is that the gate's
+# `${NPM_AUDIT_CMD:-...}` is matched byte-for-byte, unexpanded.
+if grep -qxF 'AUDIT_CMD="${NPM_AUDIT_CMD:-npm audit --json}"' "$SCRIPT"; then
+  pass "the gate still spells its default as AUDIT_CMD=\"\${NPM_AUDIT_CMD:-npm audit --json}\" (the seam name the workflow scans grep for)"
+else
+  fail "the gate's default-command line has changed — the workflow seam scans grep for the literal NPM_AUDIT_CMD, so a rename makes them match nothing while this suite (which sets whatever name the gate reads) stays green"
+fi
+
 echo ""
 echo "=== allowlist entry format + multi-path pins (gate variants) ==="
 # --- 12. Bare-id allowlist entry (no colon) → fail-closed (exit 2) ------------
