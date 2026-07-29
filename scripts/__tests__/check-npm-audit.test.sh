@@ -674,7 +674,7 @@ assert_audit_steps_untampered() {
     fi
     run_count="$(grep -cE '^[[:space:]]*"?run"?[[:space:]]*:' <<<"$blk" || true)"
     if [ "$run_count" -ne 1 ]; then
-      fail "$wf step '$needle' has $run_count run: keys (expected exactly 1) — YAML keeps only the last duplicate key, so an audit can be silently dropped"
+      fail "$wf step '$needle' has $run_count run: keys (expected exactly 1) — missing or duplicated (YAML keeps only the last duplicate key, so an audit can be silently dropped)"
     elif grep -qE "^[[:space:]]*run: bash scripts/check-npm-audit\\.sh ${ws_re}[[:space:]]*\$" <<<"$blk"; then
       pass "$wf step '$needle' runs its own workspace's gate ($ws) as its single run: line"
     else
@@ -708,6 +708,23 @@ if [ -f "$QG_YML" ]; then
   # runs the gate" from "the invocation was relocated into an unrelated job"
   # (e.g. lighthouse-delta) — the required 'Rust Security Audit' check would
   # then go green without ever auditing.
+  # The JOB key itself is COUNT-pinned first — the level above every pin
+  # below. The block cut anchors on the FIRST `^  security:` match, so an
+  # appended second security: job at end of file replaces the whole job
+  # under YAML last-key-wins while every pin below keeps reading the dead
+  # first block, and the job reports SUCCESS under the original display
+  # name (actionlint would flag the duplicate job key, but it is not wired
+  # into this repo's CI). The level above THIS — a duplicated top-level
+  # jobs: key — fails closed on its own: it collapses every other job,
+  # deploys and aggregate dependencies included, so the job key is the top
+  # rung of the exploitable hierarchy.
+  qg_sec_job_count="$(grep -cE '^  "?security"?[[:space:]]*:' <<<"$qg_exec" || true)"
+  if [ "$qg_sec_job_count" -ne 1 ]; then
+    fail "quality-gates defines the security job $qg_sec_job_count times (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate JOB key, so an appended second security: job replaces the whole job while the block cut below only ever sees the first)"
+  else
+    pass "quality-gates defines the security job exactly once"
+  fi
+
   # Fail closed on an empty cut: nothing below may pass vacuously.
   qg_sec="$(awk '/^  security:/{f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && !/^  security:/{exit}' <<<"$qg_exec")"
   if [ -z "$qg_sec" ]; then
@@ -724,7 +741,7 @@ if [ -f "$QG_YML" ]; then
   # duplicate-key class as the run:/if:/needs: count pins.
   qg_sec_steps_count="$(grep -cE '^    "?steps"?[[:space:]]*:' <<<"$qg_sec" || true)"
   if [ "$qg_sec_steps_count" -ne 1 ]; then
-    fail "quality-gates security job has $qg_sec_steps_count job-level steps: keys (expected exactly 1) — YAML keeps the last duplicate key, so a second steps: silently replaces every audit step while the job still reports success"
+    fail "quality-gates security job has $qg_sec_steps_count job-level steps: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so a second steps: silently replaces every audit step while the job still reports success)"
   else
     pass "quality-gates security job has exactly 1 job-level steps: key"
   fi
@@ -856,6 +873,17 @@ if [ -f "$CD_YML" ]; then
   # Job-scope the cd.yml assertions too — same relocation blind spot as
   # quality-gates: a file-scoped grep is satisfied by the invocation living in
   # ANY job (e.g. deploy-docs), not the security job that must gate the deploy.
+  # Same JOB-key count pin as quality-gates (rationale there) — on cd.yml a
+  # replaced security job additionally makes needs.security.result ==
+  # 'success' genuinely TRUE, so every deploy-side clause pin passes on its
+  # own terms while both deploys proceed unaudited.
+  cd_sec_job_count="$(grep -cE '^  "?security"?[[:space:]]*:' <<<"$cd_exec" || true)"
+  if [ "$cd_sec_job_count" -ne 1 ]; then
+    fail "cd.yml defines the security job $cd_sec_job_count times (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate JOB key, so an appended second security: job replaces the whole job and makes needs.security.result == 'success' genuinely true for both deploys, while the block cut below only ever sees the first)"
+  else
+    pass "cd.yml defines the security job exactly once"
+  fi
+
   cd_sec="$(awk '/^  security:/{f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && !/^  security:/{exit}' <<<"$cd_exec")"
   if [ -z "$cd_sec" ]; then
     fail "cd.yml security job block is empty after comment-strip — job missing, renamed, or fully commented out"
@@ -867,7 +895,7 @@ if [ -f "$CD_YML" ]; then
   # while both deploys proceed unaudited.
   cd_sec_steps_count="$(grep -cE '^    "?steps"?[[:space:]]*:' <<<"$cd_sec" || true)"
   if [ "$cd_sec_steps_count" -ne 1 ]; then
-    fail "cd.yml security job has $cd_sec_steps_count job-level steps: keys (expected exactly 1) — YAML keeps the last duplicate key, so a second steps: silently replaces every audit step while the job still reports success and both deploys proceed"
+    fail "cd.yml security job has $cd_sec_steps_count job-level steps: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so a second steps: silently replaces every audit step while the job still reports success and both deploys proceed)"
   else
     pass "cd.yml security job has exactly 1 job-level steps: key"
   fi
@@ -990,7 +1018,8 @@ if [ -f "$CD_YML" ]; then
     # concatenates into one scan and the pin cannot tell which key is
     # effective. Count first closes that: with exactly one if: key, the
     # scanned body IS the effective body. Same duplicate-key class already
-    # pinned on the cd security job's if: and these jobs' needs:. Scope note: the containment pin proves the clause
+    # pinned on the cd security job's if: and these jobs' needs:.
+    # Scope note: the containment pin proves the clause
     # is PRESENT in the if: body, not that it is EFFECTIVE — a vacuous
     # rewrite like `(needs.security.result == 'success' || true)` still
     # passes; resisting that would require parsing GitHub Actions
@@ -1001,7 +1030,7 @@ if [ -f "$CD_YML" ]; then
     cd_dj_ifblk="$(awk '/^    "?if"?[[:space:]]*:/{f=1;print;next} f && /^    [A-Za-z_"]/{exit} f{print}' <<<"$cd_dj_block")"
     cd_dj_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cd_dj_ifblk")"
     if [ "$cd_dj_if_count" -ne 1 ]; then
-      fail "cd.yml ${cd_dj} job has $cd_dj_if_count job-level if: keys (expected exactly 1) — YAML keeps the last duplicate key, so a second if: overrides the needs.security.result clause at runtime while the original block still matches"
+      fail "cd.yml ${cd_dj} job has $cd_dj_if_count job-level if: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so a second if: overrides the needs.security.result clause at runtime while the original block still matches)"
     elif grep -qE "needs\.security\.result[[:space:]]*==[[:space:]]*'success'" <<<"$cd_dj_scan"; then
       pass "cd.yml ${cd_dj} if: still requires needs.security.result == 'success' — the clause that stops this deploy on a red audit (exactly 1 if: key)"
     else
@@ -1072,9 +1101,45 @@ if [ -f "$CI_YML" ]; then
   if [ -z "$ci_exec" ]; then
     fail "comment-strip of ci.yml produced no output — self-defense assertions cannot be verified"
   fi
+  # Same JOB-key count pin (rationale at the quality-gates security pin) —
+  # an appended second lockfile-sync-tests: job replaces this suite's own
+  # CI execution wholesale while the check reports SUCCESS under the
+  # original display name: the one defeat that sits above every step- and
+  # job-key pin below.
+  lst_job_count="$(grep -cE '^  "?lockfile-sync-tests"?[[:space:]]*:' <<<"$ci_exec" || true)"
+  if [ "$lst_job_count" -ne 1 ]; then
+    fail "ci.yml defines the lockfile-sync-tests job $lst_job_count times (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate JOB key, so an appended second lockfile-sync-tests: job replaces this suite's own CI execution while the block cut below only ever sees the first)"
+  else
+    pass "ci.yml defines the lockfile-sync-tests job exactly once"
+  fi
+
   lst_block="$(awk '/^  lockfile-sync-tests:/{f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && !/^  lockfile-sync-tests:/{exit}' <<<"$ci_exec")"
   if [ -z "$lst_block" ]; then
     fail "lockfile-sync-tests job block is empty after comment-strip — self-defense job missing or fully commented out"
+  fi
+
+  # The auditing job's own JOB-level surface: the step-scoped pins below
+  # cannot see 4-space job keys, and both of these one-line neuters leave
+  # the job reporting SUCCESS — not skipped — so the CI Success skip-based
+  # anti-tamper never fires either. A job-level continue-on-error lets a
+  # red suite pass the job; an appended second job-level steps: replaces
+  # the ENTIRE step list under YAML last-key-wins while every step-scoped
+  # pin still matches the dead original text. The job's legitimate
+  # job-level if: (the ci-gate trigger) is deliberately NOT count-pinned:
+  # an appended if: false SKIPS the job, which check-ci-success.sh's
+  # check_triggered anti-tamper genuinely catches, and an appended
+  # if: true only widens when the job runs — the harmful direction of a
+  # duplicated if: is covered externally, unlike these two.
+  lst_steps_count="$(grep -cE '^    "?steps"?[[:space:]]*:' <<<"$lst_block" || true)"
+  if [ "$lst_steps_count" -ne 1 ]; then
+    fail "self-defense lockfile-sync-tests job has $lst_steps_count job-level steps: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so a second steps: silently replaces this suite's own CI execution while the job still reports success)"
+  else
+    pass "self-defense lockfile-sync-tests job has exactly 1 job-level steps: key"
+  fi
+  if grep -qE '^    "?continue-on-error"?[[:space:]]*:' <<<"$lst_block"; then
+    fail "self-defense lockfile-sync-tests job carries a job-level continue-on-error — a failing suite would report success"
+  else
+    pass "self-defense lockfile-sync-tests job has no job-level continue-on-error"
   fi
 
   # Both pins are STEP-scoped via step_block (same helper as the audit
@@ -1111,7 +1176,7 @@ if [ -f "$CI_YML" ]; then
     lst_suite_run_count="$(grep -cE '^[[:space:]]*"?run"?[[:space:]]*:' <<<"$lst_suite_blk" || true)"
     lst_suite_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$lst_suite_blk")"
     if [ "$lst_suite_run_count" -ne 1 ]; then
-      fail "self-defense suite-run step has $lst_suite_run_count run: keys (expected exactly 1) — YAML keeps the last duplicate key, so an appended run: true executes instead of the suite while the original line still greps as present"
+      fail "self-defense suite-run step has $lst_suite_run_count run: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended run: true executes instead of the suite while the original line still greps as present)"
     elif grep -qE '^[[:space:]]*run: bash scripts/__tests__/check-npm-audit\.test\.sh[[:space:]]*$' <<<"$lst_suite_scan"; then
       pass "self-defense job runs the npm-audit gate bash suite as the step's single run: line"
     else
@@ -1147,7 +1212,7 @@ if [ -f "$CI_YML" ]; then
     lst_shck_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$lst_shck_blk")"
     lst_shck_scalar="$(awk '/^[[:space:]]*"?run"?[[:space:]]*:/{f=1;print;next} f && /^        [A-Za-z_"-]/{exit} f{print}' <<<"$lst_shck_scan")"
     if [ "$lst_shck_run_count" -ne 1 ]; then
-      fail "self-defense shellcheck step has $lst_shck_run_count run: keys (expected exactly 1) — YAML keeps the last duplicate key, so an appended run: true executes instead of shellcheck while the needle still greps as present"
+      fail "self-defense shellcheck step has $lst_shck_run_count run: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended run: true executes instead of shellcheck while the needle still greps as present)"
     elif grep -qF 'scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh' <<<"$lst_shck_scalar"; then
       pass "self-defense job shellchecks the npm-audit gate + its suite inside the step's single run: scalar"
     else
