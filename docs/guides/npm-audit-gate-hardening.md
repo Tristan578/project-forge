@@ -221,3 +221,55 @@ The obvious fix — collapse to `readonly X="$(…)"` — is available only to t
 One implementation detail is worth more than it looks, because the check FAILED ON ITS OWN FIXTURE first and was fixed by measurement rather than by reasoning: the count must be taken over the FILTERED copy, not the raw file. The round-32 opener-set pin's expected payload carries a de-fanged copy of every `IFS= read` opener line, so a raw-file count reports 2 for all eleven heredoc pins. A round-34-style enrolment gap surfaced in the same seat — one pin input that was neither `readonly` nor enrolled, exactly the residual round 34's own comment predicted, materialising one commit later — and the count check is the mechanism answer to that class rather than a one-off correction. Not claimed, and stated in the file rather than left to inference: the drift check's own inputs remain unpinned hops, and one of them is loop-accumulated so it can never be `readonly` at all.
 
 The round's other half is the gate rather than the suite, and it is the fail-closed mirror of round 35's coverage finding: `check-npm-audit.sh`'s `command -v jq` guard was the one reachable branch of the gate no case reached. Two independent neuters both measured **211/0 GREEN** — deleting the guard, and flipping its `exit 2` to `exit 0` — and the second is not cosmetic: run against a critical, non-allowlisted advisory with jq off PATH, the pristine gate exits 2 and names the missing tool while the neutered one exits 0, certifying green having audited nothing. Every OTHER fail-closed exit was already covered (each flipped to `exit 0` in turn goes red), so this was the sole exception, and the structural `grep -qE 'exit 2'` pin does not cover it — that stays green while any `exit 2` survives anywhere. The case drives it for real with an unresolvable PATH and an absolute-path shell re-invocation, and asserts on the MESSAGE as well as the code, because a later fail-closed branch supplies the same 2 and would prove nothing about this guard. Alongside it, one more member of the empty-cut class that every job- and step-level cut already guards against: the pruned-waiver pin cut its input with a column-0 anchor, so indenting the allowlist declaration by ONE space yielded zero lines and the pin still printed its affirmative PASS from a body of nothing — and stayed vacuous under the exact mutation it was written to catch. It now fails closed on an empty cut, naming it. Suite 211 → 214.
+
+## Round 37: a number nobody can grep, in a sentence written to fix a number
+
+Round 37 is the round whose own entry was missing, which is the finding. The
+guide's last section was `Round 36` while the branch was at round 37 — the
+identical staleness round 36's entry was written to fix one round earlier, and
+the HEAD commit of the branch was the very round that should have closed it. A
+round log that documents every round except the most recent is not a log, it is
+a lagging indicator, and it lags hardest exactly when a reader reaches for it:
+after the newest change. This section exists because the round-38 docs seat
+measured its absence rather than assumed the log was current.
+
+The round's substantive fix was a comment that contradicted itself. The
+`$suite_openers` pin (roll-call row 9) described itself as "the ninth
+application of the exact-line-set idiom ... after column-0, 2-space, 4-space,
+step-key, step-line and job-steps" — a six-item list under the word "ninth".
+The list was rebuilt inline from memory each time it was cited, which is how
+"sixth" and "seventh" each came to be spent on two different rounds. The fix is
+the one the roll-call table was added for: **cite the ordinal by looking it up,
+never by recounting it.** The comment now points at the table and says why the
+inline list was removed, so the next editor appends a row instead of
+re-deriving a sequence.
+
+The second half is a correction to a correction, and it is recorded here at
+full weight because it is the most instructive failure on the branch.
+Commit `54f7eacb`'s message claimed "there is no guides index to update";
+that was false, and `59ed7e5d`'s message corrected it — but stated that
+`docs/_meta.json` "carries search topic entries for five". **The real count is
+three.** `grep -n '"guides/' docs/_meta.json` returns five lines, of which only
+three are topic entries — `guides/build-fps-game` (:126),
+`guides/build-platformer` (:131) and `guides/ai-workflow` (:136). The other two
+(:45, :144) are `related:` cross-references *pointing at* those entries. The
+number came from counting grep hits instead of entries: the exact
+grep-vs-count failure the round-33 lesson above describes, committed inside a
+sentence whose entire job was correcting a different wrong claim. That is an
+argument for the lesson, not against it.
+
+The durability point is separate from the arithmetic and matters more. That
+correction lived only in a commit message. "Corrected here" meant *in this
+commit message* rather than in this guide — true as written, and still the
+wrong place: a pushed commit message cannot be amended, is not greppable from
+the guide, and is discoverable only by `git log` archaeology by someone who
+already suspects there is something to find. So the count above is now stated
+in a tracked file with the discriminator named, which is the whole point — a
+reader can re-derive `3` from the `related:` distinction instead of trusting a
+digit. **A claim with no durable home is indistinguishable from one nobody can
+check.** Where a later commit message cites "the PR body" for a companion fix,
+read the guide and the suite instead; the PR body is not a tracked artifact and
+did not exist when that message was written.
+
+Docs-only round: the suite is unchanged at **214 PASS / 0 FAIL**, shellcheck
+clean, and the roll-call table gains no row — round 37 added no pin.
