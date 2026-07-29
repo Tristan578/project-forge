@@ -527,6 +527,71 @@ if grep -qF "WAIVED" <<<"$out"; then pass "root invocation (.): allowlisted advi
 res="$(run_gate_root "true")"; rc="${res%%|*}"
 if [ "$rc" = "2" ]; then pass "root invocation (.): empty audit output fails closed (exit 2)"; else fail "root invocation with empty output should exit 2, got $rc"; fi
 
+# --- 6u. MISSING url → the (no-url) sentinel, still BLOCKs (exit 1) ----------
+# The third field sentinel, and the only one no case reached (test-r32 F2).
+# 6k-6p cover `(untitled)` and `[unknown]`; `(no-url)` was projected by
+# check-npm-audit.sh's nz() and then never exercised, so nothing proved a
+# url-less advisory survives the projection at all. It matters more than the
+# other two: `url` is what the id is DERIVED from (`id="${url##*/}"`), so a
+# regression here does not merely mislabel a row, it decides which allowlist
+# entry the row is compared against. A `//` alternative in place of nz() would
+# not fire on ""; an empty url then empties the field and the row is refused at
+# the field-shift guard — the fail-closed direction, but a different one, and
+# only a case can tell them apart.
+f="$(fixture no-url.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "urlless":{"name":"urlless","severity":"high","via":[
+    {"source":9,"name":"urlless","title":"urlless RCE","severity":"high","range":"*"}],
+    "nodes":["node_modules/urlless"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "advisory with no url still blocks (exit 1) — the (no-url) sentinel does not swallow the row"; else fail "url-less high advisory should exit 1, got $rc"; fi
+if grep -qE '^ *BLOCK +\[high\] \(no-url\)' <<<"$out"; then pass "the (no-url) sentinel is rendered as the id on the BLOCK line"; else fail "(no-url) sentinel missing from the BLOCK line — an ignore line or a summary mention must not satisfy this"; fi
+
+# --- 6v. url with a TRAILING SLASH → (unidentified advisory), exit 1 ---------
+# `id="${url##*/}"` yields the EMPTY string for any url ending in `/`, which is
+# why the line after it substitutes a sentinel. That fallback had no case, and
+# an empty id is the dangerous shape: `is_allowed ""` decides waiver membership,
+# and the id is what every BLOCK/WAIVED line and ::error:: annotation names. An
+# unnamed row in a red gate is a row nobody can act on.
+f="$(fixture unidentified-id.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "slashy":{"name":"slashy","severity":"critical","via":[
+    {"source":9,"name":"slashy","title":"slashy critical","url":"https://github.com/advisories/","severity":"critical","range":"*"}],
+    "nodes":["node_modules/slashy"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "trailing-slash url (empty derived id) still blocks (exit 1)"; else fail "trailing-slash url should exit 1, got $rc"; fi
+if grep -qE '^ *BLOCK +\[critical\] \(unidentified advisory\)' <<<"$out"; then pass "an empty derived id is named by the (unidentified advisory) sentinel, not left blank"; else fail "(unidentified advisory) sentinel missing from the BLOCK line"; fi
+
+# --- 6w. Waived id present ONLY below threshold → no anti-rot note (exit 0) ---
+# The gate records `seen_allowed` BEFORE the severity gate, deliberately: an
+# allowlisted advisory that npm currently reports as `low` is PRESENT, just not
+# blocking. Move that one line inside the `if is_fail_severity` block and the
+# anti-rot note fires anyway — telling a contributor the waiver is dead weight
+# and "safe to prune" while the advisory is still in the tree, one severity
+# re-rating away from blocking again. 6f covers the note firing on true absence
+# and case 2 covers it staying silent for a present HIGH; this is the third
+# state, and the only one where the note's placement is load-bearing.
+#
+# The node path here is deliberately OUTSIDE the pin: a below-threshold row must
+# not reach the location check at all, so an unpinned path is the sharper
+# fixture — it also fails loudly if the severity gate is ever moved after the
+# pin check.
+f="$(fixture low-waived.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"low","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion ReDoS (re-rated low)","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"low","range":"<=5.0.7"}],
+    "nodes":["node_modules/glob/node_modules/brace-expansion"]}}}
+JSON
+)"
+res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "waived id reported below threshold does not block (exit 0)"; else fail "below-threshold waived id should exit 0, got $rc"; fi
+if grep -qE '^ *ignore +\[low\] GHSA-mh99-v99m-4gvg' <<<"$out"; then pass "the below-threshold waived id is reported as ignore"; else fail "below-threshold waived id not on an ignore line"; fi
+if ! grep -qiF "not present" <<<"$out"; then pass "no anti-rot note for a waived id present only below threshold (seen_allowed is recorded before the severity gate)"; else fail "anti-rot note fired for an advisory that IS present — seen_allowed is being recorded inside the severity gate, so a below-threshold waiver reads as prunable"; fi
+
 # --- 7. Malformed JSON → fail-closed (exit 2) --------------------------------
 res="$(run_gate "printf 'not json{{{'")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "2" ]; then pass "malformed audit JSON fails closed (exit 2)"; else fail "malformed JSON should exit 2, got $rc"; fi
@@ -2819,7 +2884,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=454
+readonly SELF_EXEC_EXPECTED_DROP=472
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -2949,6 +3014,9 @@ f="$(fixture empty-severity.json @@'JSON'
 f="$(fixture empty-string-nodes.json @@'JSON'
 f="$(fixture missing-title-and-severity.json @@'JSON'
 f="$(fixture adjacent-run-severity.json @@'JSON'
+f="$(fixture no-url.json @@'JSON'
+f="$(fixture unidentified-id.json @@'JSON'
+f="$(fixture low-waived.json @@'JSON'
 f="$(fixture jq-abort.json @@'JSON'
 f="$(fixture v1-report.json @@'JSON'
 f="$(fixture multi-pinned.json @@'JSON'
