@@ -706,11 +706,19 @@ job_key_re="^  [\"']?[A-Za-z_][A-Za-z0-9_-]*[\"']?[[:space:]]*:"
 # these three files. It does not make line-based cutting sound in general, and
 # like every pin here it is defeated by a coordinated edit of both the workflow
 # and this suite — it raises the cost of tampering, it is not a proof.
+#
+# The scan runs to EOF rather than stopping at the next column-0 line. Stopping
+# there was itself attackable: a quoted scalar may continue at column 0 while
+# staying inside a nested job, so the enumeration could be ended from inside a
+# job body. At most cut sites that costs the attacker the FOLLOWING job keys and
+# goes red — but in the LAST job of a file every key has already been printed and
+# the kill is free. ci.yml's `ci-success` is last, is a cut target, and hosts a
+# count pin that fails OPEN when its block is truncated. Running to EOF is sound
+# only because assert_top_level_keys below pins `jobs` as the final top-level key.
 assert_job_key_lines() { # $1 = comment-stripped workflow, $2 = label, $3 = expected job-key lines
   local actual delta
   actual="$(awk '
     /^["'"'"']?jobs["'"'"']?[[:space:]]*:/ {j=1; next}
-    j && /^[^[:space:]]/ {j=0}
     j && /^  [^ ]/ {print}
   ' <<<"$1")"
   if [ -z "$actual" ]; then
@@ -723,6 +731,34 @@ assert_job_key_lines() { # $1 = comment-stripped workflow, $2 = label, $3 = expe
     return
   fi
   pass "$2: the 2-space lines inside jobs: are exactly the $(grep -c '' <<<"$actual") expected job keys (nothing can truncate or over-run a block cut)"
+}
+
+# The job-key enumeration above is anchored at `jobs:` and runs to EOF. What
+# makes that sound is the set of COLUMN-0 lines — and leaving THAT set inferred
+# line-by-line would reproduce the very defect the enumeration fixes, one level
+# up. So it is pinned by the same discipline: the exact ordered set of top-level
+# keys, per workflow, with `jobs` last. An unexpected column-0 line — a quoted
+# scalar continuing at column 0 from inside a job body, the round-18 vector — is
+# a key absent from the list, whatever it is spelled like.
+#
+# Values are stripped (`name: CI` -> `name`) so a cosmetic workflow rename does
+# not turn this suite red; no column-0 VALUE is load-bearing for any pin here,
+# only the key set and its order. A repeated key (a continuation spelled exactly
+# like a real top-level key) still lands as an extra list element, so the
+# ordered comparison catches it.
+assert_top_level_keys() { # $1 = comment-stripped workflow, $2 = label, $3 = expected column-0 keys
+  local actual delta
+  actual="$(awk '/^[^[:space:]]/ {sub(/:.*/, ""); print}' <<<"$1")"
+  if [ -z "$actual" ]; then
+    fail "$2: found no column-0 lines — the jobs: anchor and its scan boundary cannot be verified, so every enumeration below would be unanchored"
+    return
+  fi
+  if [ "$actual" != "$3" ]; then
+    delta="$(diff <(printf '%s\n' "$3") <(printf '%s\n' "$actual") | grep '^[<>]' | tr '\n' ' ')"
+    fail "$2: the column-0 keys are not exactly the expected top-level keys — the job-key enumeration is anchored at jobs: and assumes it is the LAST of them, so an unexpected column-0 line (e.g. a quoted scalar continuing at column 0 from inside a job body) leaves job keys unpinned and the block cuts below them truncatable ('<' expected-but-absent, '>' present-but-unexpected): $delta"
+    return
+  fi
+  pass "$2: the column-0 keys are exactly the $(grep -c '' <<<"$actual") expected top-level keys with jobs last (the job-key enumeration cannot be ended early from inside a job body)"
 }
 
 step_block() { # $1 = comment-stripped job block, $2 = step-name needle (fixed string)
@@ -809,6 +845,12 @@ if [ -f "$QG_YML" ]; then
   if [ -z "$qg_exec" ]; then
     fail "comment-strip of quality-gates.yml produced no output — self-defense assertions cannot be verified"
   fi
+  assert_top_level_keys "$qg_exec" "quality-gates.yml" "name
+on
+permissions
+env
+jobs"
+
   assert_job_key_lines "$qg_exec" "quality-gates.yml" "  lint:
   typecheck:
   test-web:
@@ -1010,6 +1052,13 @@ if [ -f "$CD_YML" ]; then
   if [ -z "$cd_exec" ]; then
     fail "comment-strip of cd.yml produced no output — self-defense assertions cannot be verified"
   fi
+  assert_top_level_keys "$cd_exec" "cd.yml" "name
+on
+permissions
+concurrency
+env
+jobs"
+
   assert_job_key_lines "$cd_exec" "cd.yml" "  rollback-production-manual:
   lint:
   typecheck:
@@ -1281,6 +1330,12 @@ if [ -f "$CI_YML" ]; then
   if [ -z "$ci_exec" ]; then
     fail "comment-strip of ci.yml produced no output — self-defense assertions cannot be verified"
   fi
+  assert_top_level_keys "$ci_exec" "ci.yml" "name
+on
+concurrency
+permissions
+jobs"
+
   assert_job_key_lines "$ci_exec" "ci.yml" "  ci-gate:
   quality-gates:
   command-parity:
@@ -1421,6 +1476,26 @@ if [ -f "$CI_YML" ]; then
     pass "ci.yml ci-success still lists quality-gates in its needs: aggregate"
   else
     fail "ci.yml ci-success no longer lists quality-gates in its needs: — the required CI Success check stops waiting on and aggregating the workflow that runs all three npm audits, so a red audit leaves the required check green (one-line list-item deletion, valid YAML, no dangling reference)"
+  fi
+
+  # Count-pin ci-success's own job-level `steps:` — the backstop was the one job
+  # left unpinned, while the three jobs it backstops (quality-gates.security,
+  # cd.security, lockfile-sync-tests) each carry this pin. ci-success runs
+  # check-ci-success.sh, the verifier whose anti-tamper arms give every OTHER pin
+  # here its runtime enforcement. An appended second `steps:` replaces that step
+  # list under last-key-wins; because the job carries `if: ${{ always() }}` it
+  # still runs when quality-gates fails, now executing an echo, and reports
+  # SUCCESS — the required "CI Success" check goes green over a red npm audit and
+  # the verifier that would have caught it is the thing that was removed. Three
+  # appended lines, valid YAML, no truncation and no exotic spelling.
+  cs_steps_count="$(grep -cE "^    [\"']?steps[\"']?[[:space:]]*:" <<<"$ci_success_block" || true)"
+  cs_run_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$ci_success_block")"
+  if [ "$cs_steps_count" -ne 1 ]; then
+    fail "ci.yml ci-success has $cs_steps_count steps: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended second steps: replaces the verifier invocation wholesale while the job still reports SUCCESS, taking the required check green over a red audit)"
+  elif grep -qE "^[[:space:]]+run:[[:space:]]+bash[[:space:]]+scripts/check-ci-success\.sh[[:space:]]*$" <<<"$cs_run_scan"; then
+    pass "ci.yml ci-success has exactly one steps: key and still invokes scripts/check-ci-success.sh"
+  else
+    fail "ci.yml ci-success no longer invokes scripts/check-ci-success.sh in a run: scalar — a single-but-replaced steps: list is the next spelling after the duplicate-key one, and it removes the anti-tamper verifier every other pin in this suite relies on for runtime enforcement"
   fi
 
   # Same JOB-key count pin (rationale at the quality-gates security pin) —
