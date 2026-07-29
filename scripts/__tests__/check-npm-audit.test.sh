@@ -715,6 +715,36 @@ else
   fail "the gate's default-command line has changed — the workflow seam scans grep for the literal NPM_AUDIT_CMD, so a rename makes them match nothing while this suite (which sets whatever name the gate reads) stays green"
 fi
 
+# --- 11c. jq missing from PATH → fail-closed (exit 2) ------------------------
+# The gate's `command -v jq` guard was the ONE reachable fail-closed branch no
+# case reached: deleting it outright, and flipping its `exit 2` to `exit 0`,
+# both measured 211/0 green. The structural `grep -qE 'exit 2'` pin below does
+# not cover it — it stays green while any exit 2 survives anywhere.
+#
+# The neuter is not cosmetic. Against a critical, non-allowlisted advisory with
+# jq off PATH, the pristine gate exits 2 and names jq; with `exit 0` in its
+# place the gate certifies GREEN having audited nothing at all.
+#
+# Both call sites run on ubuntu-latest, whose image ships jq, so the branch is
+# not taken today — the guard exists because its author judged jq's absence
+# possible, and an unreached fail-closed guard is one edit from being a
+# fail-OPEN one. `command -v` is a builtin and the guard sits above every
+# external call, so an unresolvable PATH reaches it; "$BASH" re-invokes the
+# shell by absolute path, which a PATH lookup could no longer do.
+out="$(cd "$REPO" && PATH=/nonexistent "$BASH" "$SCRIPT" ws 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ]; then
+  pass "gate fails closed (exit 2) when jq is not on PATH"
+else
+  fail "gate with jq off PATH should exit 2, got $rc"
+fi
+# Assert on the MESSAGE too: a later fail-closed exit (unparseable JSON, say)
+# would supply the same 2 from a different branch and prove nothing about this
+# guard.
+case "$out" in
+  *"jq is required but not installed"*) pass "gate's jq-missing exit names the missing tool" ;;
+  *) fail "gate's jq-missing exit did not name jq (a later fail-closed may be masking it): $out" ;;
+esac
+
 echo ""
 echo "=== allowlist entry format + multi-path pins (gate variants) ==="
 # --- 12. Bare-id allowlist entry (no colon) → fail-closed (exit 2) ------------
@@ -771,8 +801,16 @@ fi
 # advisories left every workspace, and a lingering entry is dead-weight gate
 # surface. The ids may appear in prose (the gate's History note), so scope the
 # check to the array body between `ALLOWED_ADVISORIES=(` and its closing `)`.
+# The cut is anchored at column 0, so indenting the declaration by ONE space
+# yields zero lines — and the pin below then printed its affirmative PASS from
+# an empty body (measured 211/0, with the waiver re-added it stayed vacuous).
+# That is the failure mode this file's own round-13 note calls "strictly worse
+# than a false positive". Every job- and step-level cut here already fails
+# closed on an empty block; this one now does too.
 allowlist_body="$(awk '/^ALLOWED_ADVISORIES=\(/{f=1;next} f && /^\)/{exit} f' "$SCRIPT")"
-if grep -qF 'GHSA-gv7w-rqvm-qjhr' <<<"$allowlist_body" || grep -qF 'GHSA-g7r4-m6w7-qqqr' <<<"$allowlist_body"; then
+if [ -z "$allowlist_body" ]; then
+  fail "the ALLOWED_ADVISORIES body cut read nothing — the column-0 anchor no longer matches the declaration, so the pruned-waiver pin below would affirm from an empty body"
+elif grep -qF 'GHSA-gv7w-rqvm-qjhr' <<<"$allowlist_body" || grep -qF 'GHSA-g7r4-m6w7-qqqr' <<<"$allowlist_body"; then
   fail "pruned esbuild waiver still present in ALLOWED_ADVISORIES (advisories are gone from every workspace)"
 else
   pass "stale esbuild waivers stay pruned from ALLOWED_ADVISORIES"
