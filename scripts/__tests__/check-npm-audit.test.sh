@@ -1798,6 +1798,100 @@ jobs"
     pass "ci.yml has exactly 1 top-level jobs: key"
   fi
 
+  # ---- ci-gate: the caller's TRIGGER INPUT (round 26) ----
+  #
+  # The pins below cover the caller job — that it exists, invokes the right
+  # workflow, and is gated on `needs-any-code`. None of them pins what that
+  # trigger EVALUATES TO. `needs-any-code` is computed by a shell block inside
+  # ci-gate's `Detect changed paths` step, and ci-gate was not one of the four
+  # jobs whose steps: lists round 24 pinned. Measured: flipping the single token
+  # in `any_code=true` to `any_code=false` leaves the suite at 181 PASS / 0 FAIL
+  # — identical to control — makes the caller's if: unsatisfiable on EVERY PR,
+  # and skips all three npm audits plus the cargo audit while
+  # check-ci-success.sh still exits 0 printing "All required gates passed (or
+  # were correctly skipped via path filter)". check_triggered() fails closed on
+  # a REMOVED or RENAMED output but has no arm for a FALSIFIED one: a false
+  # trigger is indistinguishable from a legitimate path-filter skip, which that
+  # verifier's own suite deliberately asserts as passing. Stealthier spellings
+  # measure the same — deleting the `|| [ "$ci" = "true" ]` arm disarms the
+  # audits only on workflow/scripts-only PRs, i.e. exactly the PRs that would
+  # carry such an edit — and because `pull_request` runs the PR's OWN workflow
+  # file, the mutation takes effect in the very run that should catch it.
+  #
+  # Pinned by the same exact-line-set idiom already applied at five levels, for
+  # the reason it was applied to the four gate-bearing jobs in round 24:
+  # `any_code=false` is one line, and an exact line set catches a line whatever
+  # it spells — a rewritten assignment, a deleted `||` arm, a rewritten
+  # `echo "any-code=..."`, or a SECOND `any_code=false` appended between the
+  # condition and the echo, the last of which a containment pin on the condition
+  # block alone would miss entirely. The `outputs:` mapping is pinned
+  # separately: its entries sit at SIX spaces, so assert_job_level_keys (which
+  # enumerates FOUR-space keys) never sees them, and `needs-any-code: 'false'`
+  # would otherwise be a green one-line unwire of the same audits.
+  #
+  # Churn, weighed and accepted: this suite already pins ci.yml's exact job-key
+  # list, so adding a CI gate already reddens it — a new job, a new matcher and
+  # a new echo are one change, not three. The marginal cost of pinning the
+  # detect step is ~zero, and the step is read from the same comment-stripped
+  # copy every sibling pin reads, so its ~90 source lines reduce to 52
+  # executable ones.
+  ci_gate_count="$(grep -cE "^  [\"']?ci-gate[\"']?[[:space:]]*:" <<<"$ci_exec" || true)"
+  if [ "$ci_gate_count" -ne 1 ]; then
+    fail "ci.yml defines the ci-gate job $ci_gate_count times (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate JOB key, so an appended second ci-gate: job replaces the path detector every downstream if: reads while the block cut below only ever sees the first)"
+  else
+    pass "ci.yml defines the ci-gate job exactly once"
+  fi
+
+  ci_gate_block="$(awk -v re="$job_key_re" '/^  ci-gate:/{f=1} f{print} f && $0 ~ re && !/^  ci-gate:/{exit}' <<<"$ci_exec")"
+
+  # No job-level if: and no continue-on-error: in the expected set — either one
+  # skips or neuters the detector, and a skipped ci-gate leaves every downstream
+  # output empty, which reads downstream exactly like "no relevant changes".
+  assert_job_level_keys "$ci_gate_block" "ci ci-gate job" "    name
+    runs-on
+    timeout-minutes
+    permissions
+    outputs
+    steps"
+  if [ -z "$ci_gate_block" ]; then
+    fail "ci.yml ci-gate job block is empty after comment-strip — the job computing every downstream trigger is missing or fully commented out"
+  fi
+
+  ci_gate_outputs_count="$(grep -cE "^    [\"']?outputs[\"']?[[:space:]]*:" <<<"$ci_gate_block" || true)"
+  if [ "$ci_gate_outputs_count" -ne 1 ]; then
+    fail "ci.yml ci-gate has $ci_gate_outputs_count job-level outputs: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended second outputs: mapping replaces every trigger the workflow publishes while the verbatim pin below reads the dead first one)"
+  else
+    pass "ci.yml ci-gate has exactly 1 job-level outputs: key"
+  fi
+
+  ci_gate_outputs_blk="$(awk "/^    [\"']?outputs[\"']?[[:space:]]*:/{f=1;print;next} f && /^    [A-Za-z_\"']/{exit} f{print}" <<<"$ci_gate_block")"
+  IFS= read -r -d '' expected_ci_gate_outputs <<'OUTPUTS_EOF' || true
+    outputs:
+      needs-web: ${{ steps.changes.outputs.web }}
+      needs-engine: ${{ steps.changes.outputs.engine }}
+      needs-mcp: ${{ steps.changes.outputs.mcp }}
+      needs-ci: ${{ steps.changes.outputs.ci }}
+      needs-docs: ${{ steps.changes.outputs.docs }}
+      needs-design: ${{ steps.changes.outputs.design }}
+      needs-hooks: ${{ steps.changes.outputs.hooks }}
+      needs-deps: ${{ steps.changes.outputs.deps }}
+      needs-agentic: ${{ steps.changes.outputs.agentic }}
+      needs-onboarding: ${{ steps.changes.outputs.onboarding }}
+      needs-codex: ${{ steps.changes.outputs.codex }}
+      needs-ghaw: ${{ steps.changes.outputs.ghaw }}
+      needs-api: ${{ steps.changes.outputs.api }}
+      needs-skills: ${{ steps.changes.outputs.skills }}
+      needs-any-code: ${{ steps.changes.outputs.any-code }}
+OUTPUTS_EOF
+  assert_block_lines_exact "$ci_gate_outputs_blk" "ci.yml ci-gate outputs:" "${expected_ci_gate_outputs%$'\n'}" "these entries sit at SIX spaces, below the four-space key enumeration above, so hardcoding needs-any-code to a literal (or repointing it at another step output) degates the sole PR-path caller of all three npm audits while every other pin in this suite stays green"
+
+  ci_gate_steps_count="$(grep -cE "^    [\"']?steps[\"']?[[:space:]]*:" <<<"$ci_gate_block" || true)"
+  if [ "$ci_gate_steps_count" -ne 1 ]; then
+    fail "ci.yml ci-gate has $ci_gate_steps_count job-level steps: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended second steps: list replaces the whole detector with an echo while the job still reports SUCCESS, not skipped, and publishes empty outputs that read downstream as 'no relevant changes')"
+  else
+    pass "ci.yml ci-gate has exactly 1 job-level steps: key"
+  fi
+
   # Every pin above covers the INSIDE of the gating job; this one pins that the
   # workflow CONTAINING it is still invoked. quality-gates.yml is
   # `workflow_call`-only and is called from exactly one place — ci.yml's
@@ -2214,7 +2308,33 @@ echo "=== suite hygiene (structural) ==="
 # the first glues `echo` to `[[:space:]]`; the second's literal redirection token
 # is followed in-pattern by a bracket class, never by a real quoted variable.
 SELF="${BASH_SOURCE[0]}"
-if grep -nE 'echo[[:space:]]+"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*\|[[:space:]]*(grep|awk)' "$SELF" >/dev/null; then
+# Both locks scan the suite's EXECUTABLE lines only. Since round 26 this file
+# pins ci-gate's detect step verbatim, and that step's own shell body pipes an
+# echoed variable into grep fourteen times — data inside a quoted heredoc, never
+# executed here, but a literal match for the first needle. (Spelled in prose on
+# purpose: this comment is itself scanned, so writing the pattern out would trip
+# the lock it explains, the same self-match constraint the note above records.)
+# Dropping quoted-heredoc
+# payload SCOPES the locks to code rather than weakening them: the filter is
+# bounded by each heredoc's own terminator, so no executable line can hide
+# behind it, and an unquoted heredoc is left in scope (stricter, not looser).
+# Fails closed — an empty filter would make both locks pass vacuously.
+SELF_EXEC="$(awk '
+  tag != "" { if ($0 == tag) tag = ""; next }
+  {
+    print
+    if (match($0, /<<[ \t]*\047[A-Za-z_][A-Za-z0-9_]*\047/)) {
+      t = substr($0, RSTART, RLENGTH)
+      sub(/^<<[ \t]*\047/, "", t)
+      sub(/\047$/, "", t)
+      tag = t
+    }
+  }
+' "$SELF")"
+if [ -z "$SELF_EXEC" ]; then
+  fail "the suite's executable-line filter produced no output — both SIGPIPE hygiene locks below would pass vacuously"
+fi
+if grep -nE 'echo[[:space:]]+"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*\|[[:space:]]*(grep|awk)' <<<"$SELF_EXEC" >/dev/null; then
   fail "a variable's echo output is piped into grep/awk — feed it via a here-string to stay correct under pipefail"
 else
   pass "suite feeds grep/awk via here-strings, not variable pipes (SIGPIPE-safe under pipefail)"
@@ -2225,7 +2345,7 @@ fi
 # assertion's `if` falls through to its pass branch — a false PASS, the inverse of
 # the false FAIL above. Materialize the intermediate text into a variable and
 # match with a single grep instead.
-if grep -nE '<<<[[:space:]]*"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*\|[[:space:]]*(grep|awk)' "$SELF" >/dev/null; then
+if grep -nE '<<<[[:space:]]*"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*\|[[:space:]]*(grep|awk)' <<<"$SELF_EXEC" >/dev/null; then
   fail "a here-string-fed pipeline stage pipes into grep/awk — materialize the intermediate text first (false-PASS risk under pipefail)"
 else
   pass "suite has no here-string-fed pipeline chains (no false-PASS SIGPIPE risk under pipefail)"
@@ -2386,6 +2506,65 @@ IFS= read -r -d '' expected_steps_4 <<'STEPS_EOF' || true
         run: bash scripts/check-ci-success.sh
 STEPS_EOF
 assert_steps_block "${ci_success_block:-}" "ci.yml ci-success job steps:" "${expected_steps_4%$'\n'}"
+
+# ci-gate's detect step: the one block that decides whether the caller above
+# runs at all. `any_code=false` is a one-token edit that skips every npm audit
+# on the PR path with the suite green and the required check green (round 26).
+IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Detect changed paths
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false
+          echo "$CHANGED" | grep -q '^web/' && web=true
+          echo "$CHANGED" | grep -q '^engine/' && engine=true
+          echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
+          echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
+          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && docs=true
+          echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
+          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$' && hooks=true
+          echo "$CHANGED" | grep -qE '(^|/)package\.json$|^package-lock\.json$' && deps=true
+          echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$' && agentic=true
+          echo "$CHANGED" | grep -qE '^README\.md$|^CONTRIBUTING\.md$|^AGENTS\.md$|^GEMINI\.md$|^\.cursorrules$|^\.claude/|^\.codex/|^\.gemini/|^\.github/|^\.windsurf/|^\.agent/|^\.agents/|^docs/|^tools/agentic-sync/|^scripts/check-taskboard-onboarding-hygiene\.sh$|^scripts/__tests__/check-taskboard-onboarding-hygiene\.test\.sh$' && onboarding=true
+          echo "$CHANGED" | grep -qE '^\.codex/config\.toml$|^scripts/check-codex-config-safety\.sh$|^scripts/__tests__/check-codex-config-safety\.test\.sh$' && codex=true
+          echo "$CHANGED" | grep -qE '^\.claude/skills/|^scripts/check-skills\.sh$|^scripts/check-skills-baseline\.txt$|^scripts/__tests__/check-skills\.test\.sh$' && skills=true
+          echo "$CHANGED" | grep -qE '^\.github/workflows/.*\.md$|^\.github/workflows/.*\.lock\.yml$|^\.github/aw/|^scripts/check-ghaw-lock-sync\.sh$|^scripts/get-ghaw-compiler-version\.sh$|^scripts/__tests__/check-ghaw-lock-sync\.test\.sh$' && ghaw=true
+          echo "$CHANGED" | grep -qE '^web/src/app/api/|^docs/api/openapi\.json$|^docs/api/openapi-internal-routes\.json$|^scripts/check-openapi-route-sync\.sh$|^scripts/__tests__/check-openapi-route-sync\.test\.sh$' && api=true
+          any_code=false
+          if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] || [ "$design" = "true" ]; then
+            any_code=true
+          fi
+          {
+            echo "web=$web"
+            echo "engine=$engine"
+            echo "mcp=$mcp"
+            echo "ci=$ci"
+            echo "docs=$docs"
+            echo "design=$design"
+            echo "hooks=$hooks"
+            echo "deps=$deps"
+            echo "agentic=$agentic"
+            echo "onboarding=$onboarding"
+            echo "codex=$codex"
+            echo "ghaw=$ghaw"
+            echo "api=$api"
+            echo "skills=$skills"
+            echo "any-code=$any_code"
+          } >> "$GITHUB_OUTPUT"
+          echo "Changed paths detected:"
+          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw api=$api skills=$skills any-code=$any_code"
+          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ] && [ "$api" = "false" ] && [ "$skills" = "false" ]; then
+            echo "No relevant changes — downstream jobs will be skipped"
+          fi
+STEPS_EOF
+assert_steps_block "${ci_gate_block:-}" "ci.yml ci-gate job steps:" "${expected_steps_5%$'\n'}"
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
