@@ -691,6 +691,7 @@ run_gate_default_cmd() {
 res="$(run_gate_default_cmd "$FIX/clean.json")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "0" ]; then pass "the default audit command (seam unset) actually runs, and passes a clean report (exit 0)"; else fail "default audit command on a clean report should exit 0, got $rc — output: $out"; fi
 npm_argv="$(cat "$FIX/npm-args")"
+readonly npm_argv
 if [ "$npm_argv" = "audit --json" ]; then
   pass "the default audit command invokes npm with exactly 'audit --json' (no --omit=dev, no scope or severity narrowing)"
 else
@@ -3361,6 +3362,7 @@ SELF_EXEC_FILTER
 SELF_EXEC
 SELF_EXEC_DIAG
 SELF_EXEC_EXPECTED_DROP
+npm_argv
 PIN_INPUTS'
 readonly PIN_INPUTS
 
@@ -3378,6 +3380,47 @@ if [ -n "$pin_not_ro" ]; then
   fail "pin-input variable(s) are not readonly, so one inserted assignment makes their pin compare a value to itself (and any input pass):$pin_not_ro"
 else
   pass "all $(grep -c '' <<<"$PIN_INPUTS") pin-input variables are readonly (a later assignment errors and the original value is preserved)"
+fi
+
+# ROUND 35. `readonly` freezes, but the freeze is a SECOND statement: every
+# declaration above sits on the line AFTER its assignment, so ONE line inserted
+# between the two rewrites the value before it is frozen. The variable is then
+# genuinely readonly (the effect probe passes, holding the wrong value) and the
+# declaration text is unchanged (the drift check passes), so both halves of the
+# round-34 guard report green while the pin compares a block to itself.
+# Measured: `expected_ci_gate_outputs="$ci_gate_outputs_blk"` inserted before
+# its `readonly` is 211 PASS / 0 FAIL, byte-identical to clean, against a
+# violation that is 210/1 without it -- and that pin is the SOLE backstop on the
+# VALUE of `needs-any-code`, the single trigger degating all three npm audits on
+# the PR path.
+#
+# Collapsing the window (`readonly X="$(...)"`) is available only to the
+# command-substitution half; a heredoc pin cannot assign and freeze in one
+# statement, and routing it through a helper relocates the window into the
+# helper rather than removing it. So close it by COUNT. Every pin input is
+# assigned exactly once in this file (measured, all 29), which makes a SECOND
+# assignment site -- wherever it sits, in either spelling below -- not a
+# legitimate one by construction. That converts the attack from "insert one
+# subtle line" into "replace the real assignment", and for a heredoc pin
+# replacing it means writing the forged expected value into the payload in
+# plain sight. Like every pin here it raises cost rather than proving
+# impossibility; the count is what makes the cheap version red.
+#
+# Count over $SELF_EXEC, not the raw file: the opener-set pin's own expected
+# payload carries a de-fanged copy of every `IFS= read` opener line, so a
+# raw-file count reports 2 for all eleven heredoc pins (measured) and the check
+# would fail on its own fixture. The filter drops heredoc payload and is itself
+# pinned by body and by volume above.
+pin_multi=""
+while IFS= read -r pin_v; do
+  [ -n "$pin_v" ] || continue
+  n_assign="$(grep -cE "^[[:space:]]*(readonly[[:space:]]+)?${pin_v}=|^[[:space:]]*IFS= read -r -d '' ${pin_v}[[:space:]]" <<<"$SELF_EXEC" || true)"
+  [ "$n_assign" = "1" ] || pin_multi="$pin_multi ${pin_v}=${n_assign}"
+done <<<"$PIN_INPUTS"
+if [ -n "$pin_multi" ]; then
+  fail "pin-input variable(s) are assigned other than exactly once, so the value a pin reads is not the one this file shows at its assignment site (name=count):$pin_multi"
+else
+  pass "every pin-input variable has exactly one assignment site (no inserted line can rewrite one before its readonly freezes it)"
 fi
 
 # Cross-check the probed list against the declarations actually in the file.
