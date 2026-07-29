@@ -781,6 +781,80 @@ assert_top_level_keys() { # $1 = comment-stripped workflow, $2 = label, $3 = exp
   pass "$2: the column-0 keys are exactly the $(grep -c '' <<<"$actual") expected top-level keys with jobs last (the job-key enumeration cannot be ended early from inside a job body)"
 }
 
+# One level deeper, the same defect again: the pins INSIDE each cut job block --
+# the 4-space job-level keys -- match by literal bytes through a `["']?` class.
+# YAML 1.2 double-quoted scalars support \u escapes, so `"\u0073teps"` and
+# `steps` are the same mapping key to the parser and different byte strings to
+# grep. That defeats every count and absence pin at this level, and the
+# duplicate-key mutation they exist to catch rides straight through: appending
+#
+#     "\u0073teps":
+#       - run: echo pwned
+#
+# to quality-gates.yml's security job was measured at 150 PASS / 0 FAIL while
+# PyYAML resolved the job to steps=1 with zero audit steps -- all three npm audits
+# and the cargo audit replaced, job reporting SUCCESS, not skipped, so the
+# CI-Success skip-based anti-tamper never fires either. The plain spelling of the
+# identical payload is RED, which is what makes the escape the whole ingredient
+# rather than an incidental detail. `"\u0063ontinue-on-error": true` and an
+# escaped `needs:` were false green the same way.
+#
+# So the exact-set enumeration idiom is applied here too, and for the same reason
+# it was applied to the 2-space and column-0 lines: deciding whether a line IS a
+# given key means resolving YAML, while asking which keys a block contains has a
+# finite answer. A respelled key lands as an unexpected element and a duplicate
+# lands as an extra one, whatever escape it is written with.
+#
+# Values are stripped (`name: Rust Security Audit` -> `name`), as in
+# assert_top_level_keys: no job-level VALUE is load-bearing for this pin -- the
+# values that ARE load-bearing (the deploy `if:` clause, the audit `run:` lines,
+# the caller's `uses:`) have their own containment assertions -- so a cosmetic
+# rename must not turn this suite red. A line with no colon at all, which is what
+# a 4-space continuation from a multi-line scalar looks like, survives the strip
+# intact and lands as an unexpected element: the fail-CLOSED direction.
+#
+# All six cut blocks get it, and each was measured rather than reasoned about --
+# which is how the last one earned its place. The obvious load-bearing cases are
+# the blocks hosting count and absence pins (both security jobs, both deploy
+# jobs, lockfile-sync-tests, ci-success), where a respelled key removes the
+# evidence a pin reads and fails OPEN. The ci.yml `quality-gates` caller looked
+# like uniformity-only, on the theory that its `uses:` pin is positive
+# containment and so fails closed. It does not: appending an escaped duplicate
+# `"\u0075ses": ./.github/workflows/decoy.yml` repoints the reusable-workflow call
+# under last-key-wins while the ORIGINAL `uses:` line still satisfies
+# containment. Measured 156 PASS / 1 FAIL with the enumeration and green without
+# it -- the caller's enumeration is the only pin standing between that mutation
+# and a green required check over three un-run npm audits.
+#
+# Cost, by design and stated rather than discovered later: adding a job-level key
+# (an `env:`, a `concurrency:`) to one of these jobs turns this suite red until
+# the list is updated. Same one-line, obviously-correct edit as the enumerations
+# above. Scope, honestly: this is spelling-independent, not parser-equivalent --
+# a coordinated edit of both the workflow and this suite still defeats it, and
+# whether GitHub's own workflow parser resolves \u escapes the way PyYAML does is
+# not something this suite measures. It raises the cost of textual tampering; it
+# is not a proof.
+assert_job_level_keys() { # $1 = cut job block, $2 = label, $3 = expected 4-space keys
+  local actual delta
+  actual="$(awk '
+    /^    [^ ]/ {
+      sub(/:.*/, "")
+      sub(/[[:space:]]+$/, "")
+      if ($0 != "") print
+    }
+  ' <<<"$1")"
+  if [ -z "$actual" ]; then
+    fail "$2: found no 4-space key lines in the job block — the block cut read nothing, so every count and absence pin on it passes vacuously"
+    return
+  fi
+  if [ "$actual" != "$3" ]; then
+    delta="$(diff <(printf '%s\n' "$3") <(printf '%s\n' "$actual") | grep '^[<>]' | tr '\n' ' ')"
+    fail "$2: the job-level keys are not exactly the expected set — the count and absence pins on this block match key names by BYTES, so a respelled key (e.g. a \\u escape, which YAML resolves to the same key) or a duplicate one slips them ('<' expected-but-absent, '>' present-but-unexpected): $delta"
+    return
+  fi
+  pass "$2: the job-level keys are exactly the $(grep -c '' <<<"$actual") expected keys (no key below can be respelled or duplicated past the pins on it)"
+}
+
 step_block() { # $1 = comment-stripped job block, $2 = step-name needle (fixed string)
   awk -v needle="$2" '
     !f && /^      - name:/ && index($0, needle) {f=1; print; next}
@@ -927,6 +1001,12 @@ jobs"
 
   # Fail closed on an empty cut: nothing below may pass vacuously.
   qg_sec="$(awk -v re="$job_key_re" '/^  security:/{f=1} f{print} f && $0 ~ re && !/^  security:/{exit}' <<<"$qg_exec")"
+
+  assert_job_level_keys "$qg_sec" "quality-gates security job" "    name
+    runs-on
+    timeout-minutes
+    permissions
+    steps"
   if [ -z "$qg_sec" ]; then
     fail "security job block is empty after comment-strip — job missing, renamed, or fully commented out"
   fi
@@ -1120,6 +1200,13 @@ jobs"
   fi
 
   cd_sec="$(awk -v re="$job_key_re" '/^  security:/{f=1} f{print} f && $0 ~ re && !/^  security:/{exit}' <<<"$cd_exec")"
+
+  assert_job_level_keys "$cd_sec" "cd security job" "    name
+    if
+    runs-on
+    timeout-minutes
+    permissions
+    steps"
   if [ -z "$cd_sec" ]; then
     fail "cd.yml security job block is empty after comment-strip — job missing, renamed, or fully commented out"
   fi
@@ -1232,6 +1319,15 @@ jobs"
       pass "cd.yml defines the ${cd_dj} job exactly once"
     fi
     cd_dj_block="$(awk -v hdr="  ${cd_dj}:" -v re="$job_key_re" '$0 == hdr {f=1} f{print} f && $0 ~ re && $0 != hdr {exit}' <<<"$cd_exec")"
+
+    assert_job_level_keys "$cd_dj_block" "cd $cd_dj job" "    name
+    runs-on
+    timeout-minutes
+    needs
+    if
+    permissions
+    environment
+    steps"
     if [ -z "$cd_dj_block" ]; then
       fail "cd.yml ${cd_dj} job block is empty after comment-strip — job missing, renamed, or fully commented out (deploy gating cannot be verified)"
       continue
@@ -1429,6 +1525,13 @@ jobs"
   fi
 
   qg_caller_block="$(awk -v re="$job_key_re" '/^  quality-gates:/{f=1} f{print} f && $0 ~ re && !/^  quality-gates:/{exit}' <<<"$ci_exec")"
+
+  assert_job_level_keys "$qg_caller_block" "ci quality-gates caller job" "    name
+    needs
+    if
+    uses
+    with
+    secrets"
   if [ -z "$qg_caller_block" ]; then
     fail "ci.yml quality-gates caller job block is empty after comment-strip — the sole PR-path invocation of quality-gates.yml is missing or fully commented out"
   fi
@@ -1479,6 +1582,14 @@ jobs"
   fi
 
   ci_success_block="$(awk -v re="$job_key_re" '/^  ci-success:/{f=1} f{print} f && $0 ~ re && !/^  ci-success:/{exit}' <<<"$ci_exec")"
+
+  assert_job_level_keys "$ci_success_block" "ci ci-success job" "    name
+    if
+    needs
+    runs-on
+    timeout-minutes
+    permissions
+    steps"
   if [ -z "$ci_success_block" ]; then
     fail "ci.yml ci-success job block is empty after comment-strip — the required aggregate is missing or fully commented out"
   fi
@@ -1530,6 +1641,14 @@ jobs"
   fi
 
   lst_block="$(awk -v re="$job_key_re" '/^  lockfile-sync-tests:/{f=1} f{print} f && $0 ~ re && !/^  lockfile-sync-tests:/{exit}' <<<"$ci_exec")"
+
+  assert_job_level_keys "$lst_block" "ci lockfile-sync-tests job" "    name
+    needs
+    if
+    runs-on
+    timeout-minutes
+    permissions
+    steps"
   if [ -z "$lst_block" ]; then
     fail "lockfile-sync-tests job block is empty after comment-strip — self-defense job missing or fully commented out"
   fi
