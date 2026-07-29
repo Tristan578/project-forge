@@ -622,6 +622,34 @@ fi
 # step-level `if: false` (step skipped, run: line still greps as present) sits
 # entirely outside any run:-anchored window. Empty output = the named step is
 # gone — callers fail closed on it, never skip.
+# Terminator for every job-level block cut below. Quote-tolerant, and colonless
+# on purpose.
+#
+# QUOTE-TOLERANT: YAML accepts a job key in either quote style, so a bare-only
+# class (`^  [A-Za-z_][A-Za-z0-9_-]*:`) does not terminate on `  'zz-decoy':`.
+# When the target job is the LAST one in the file — ci-success is — the cut then
+# runs to EOF and every pin beneath it reads a FOLLOWING job's keys. That is
+# strictly worse than a false positive: it lets the suite print an affirmative
+# PASS about a property the target does not have. Found by review at round 13's
+# ci-success `needs:` pin, where deleting that key and appending a single-quoted
+# decoy job carrying `- quality-gates` produced a GREEN suite and the line
+# "ci-success still lists quality-gates in its needs: aggregate" while
+# ci-success listed nothing at all. The bare-key form of the same mutation was
+# already caught, so the quote was the whole ingredient — the same spelling
+# class rounds 12-13 swept out of the 29 key MATCHERS, missed on the
+# terminators those rounds introduced.
+#
+# COLONLESS: inside `jobs:`, a 2-space-indented line beginning with a letter,
+# underscore, or quote IS a job key — job properties sit at 4 spaces, and block
+# scalars nest deeper still. Dropping the `:` requirement also terminates on key
+# spellings the old class could not express at all. Mirrors the key-level cut
+# already used for `if:`/`needs:` blocks one indent level down.
+#
+# A quoted spelling of a cut's OWN header is safe by construction: every cut
+# anchors its start on the bare form, so a quoted target header yields an empty
+# block, and every caller fails closed on empty rather than passing vacuously.
+job_key_re="^  [A-Za-z_\"']"
+
 step_block() { # $1 = comment-stripped job block, $2 = step-name needle (fixed string)
   awk -v needle="$2" '
     !f && /^      - name:/ && index($0, needle) {f=1; print; next}
@@ -750,7 +778,7 @@ if [ -f "$QG_YML" ]; then
   fi
 
   # Fail closed on an empty cut: nothing below may pass vacuously.
-  qg_sec="$(awk '/^  security:/{f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && !/^  security:/{exit}' <<<"$qg_exec")"
+  qg_sec="$(awk -v re="$job_key_re" '/^  security:/{f=1} f{print} f && $0 ~ re && !/^  security:/{exit}' <<<"$qg_exec")"
   if [ -z "$qg_sec" ]; then
     fail "security job block is empty after comment-strip — job missing, renamed, or fully commented out"
   fi
@@ -922,7 +950,7 @@ if [ -f "$CD_YML" ]; then
     pass "cd.yml defines the security job exactly once"
   fi
 
-  cd_sec="$(awk '/^  security:/{f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && !/^  security:/{exit}' <<<"$cd_exec")"
+  cd_sec="$(awk -v re="$job_key_re" '/^  security:/{f=1} f{print} f && $0 ~ re && !/^  security:/{exit}' <<<"$cd_exec")"
   if [ -z "$cd_sec" ]; then
     fail "cd.yml security job block is empty after comment-strip — job missing, renamed, or fully commented out"
   fi
@@ -1034,7 +1062,7 @@ if [ -f "$CD_YML" ]; then
     else
       pass "cd.yml defines the ${cd_dj} job exactly once"
     fi
-    cd_dj_block="$(awk -v hdr="  ${cd_dj}:" '$0 == hdr {f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 != hdr {exit}' <<<"$cd_exec")"
+    cd_dj_block="$(awk -v hdr="  ${cd_dj}:" -v re="$job_key_re" '$0 == hdr {f=1} f{print} f && $0 ~ re && $0 != hdr {exit}' <<<"$cd_exec")"
     if [ -z "$cd_dj_block" ]; then
       fail "cd.yml ${cd_dj} job block is empty after comment-strip — job missing, renamed, or fully commented out (deploy gating cannot be verified)"
       continue
@@ -1199,7 +1227,7 @@ if [ -f "$CI_YML" ]; then
     pass "ci.yml defines the quality-gates caller job exactly once"
   fi
 
-  qg_caller_block="$(awk '/^  quality-gates:/{f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && !/^  quality-gates:/{exit}' <<<"$ci_exec")"
+  qg_caller_block="$(awk -v re="$job_key_re" '/^  quality-gates:/{f=1} f{print} f && $0 ~ re && !/^  quality-gates:/{exit}' <<<"$ci_exec")"
   if [ -z "$qg_caller_block" ]; then
     fail "ci.yml quality-gates caller job block is empty after comment-strip — the sole PR-path invocation of quality-gates.yml is missing or fully commented out"
   fi
@@ -1249,7 +1277,7 @@ if [ -f "$CI_YML" ]; then
     pass "ci.yml defines the ci-success job exactly once"
   fi
 
-  ci_success_block="$(awk '/^  ci-success:/{f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && !/^  ci-success:/{exit}' <<<"$ci_exec")"
+  ci_success_block="$(awk -v re="$job_key_re" '/^  ci-success:/{f=1} f{print} f && $0 ~ re && !/^  ci-success:/{exit}' <<<"$ci_exec")"
   if [ -z "$ci_success_block" ]; then
     fail "ci.yml ci-success job block is empty after comment-strip — the required aggregate is missing or fully commented out"
   fi
@@ -1280,7 +1308,7 @@ if [ -f "$CI_YML" ]; then
     pass "ci.yml defines the lockfile-sync-tests job exactly once"
   fi
 
-  lst_block="$(awk '/^  lockfile-sync-tests:/{f=1} f{print} f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && !/^  lockfile-sync-tests:/{exit}' <<<"$ci_exec")"
+  lst_block="$(awk -v re="$job_key_re" '/^  lockfile-sync-tests:/{f=1} f{print} f && $0 ~ re && !/^  lockfile-sync-tests:/{exit}' <<<"$ci_exec")"
   if [ -z "$lst_block" ]; then
     fail "lockfile-sync-tests job block is empty after comment-strip — self-defense job missing or fully commented out"
   fi
