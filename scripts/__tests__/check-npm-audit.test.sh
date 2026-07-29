@@ -715,11 +715,31 @@ job_key_re="^  [\"']?[A-Za-z_][A-Za-z0-9_-]*[\"']?[[:space:]]*:"
 # the kill is free. ci.yml's `ci-success` is last, is a cut target, and hosts a
 # count pin that fails OPEN when its block is truncated. Running to EOF is sound
 # only because assert_top_level_keys below pins `jobs` as the final top-level key.
+#
+# Each enumerated line is stripped of a trailing comment and trailing whitespace
+# before comparison. Without that, `  security:  # runs the three npm audits` --
+# a purely cosmetic, entirely legitimate edit -- turns this suite red with a
+# message about block cuts and truncation that is accurate for tampering and
+# actively misleading here. That matters beyond noise: both natural remediations
+# are bad. Baking the comment text into the expected list couples a security pin
+# to comment wording, and loosening the matcher is the outcome this whole file
+# exists to prevent. So a false positive on a cosmetic edit IS a plausible path
+# to the pin being weakened, and is fixed rather than documented. The strip does
+# not require whitespace before the `#`, matching the containment assertions
+# elsewhere in this file; a job key cannot legally contain `#` (GitHub job IDs
+# are [A-Za-z_][A-Za-z0-9_-]*), so stripping at a bare `#` can only ever shorten
+# a line into a mismatch -- the fail-CLOSED direction. Lines that strip to empty
+# are dropped so a 2-space section-header comment cannot enter the set as a
+# blank element.
 assert_job_key_lines() { # $1 = comment-stripped workflow, $2 = label, $3 = expected job-key lines
   local actual delta
   actual="$(awk '
     /^["'"'"']?jobs["'"'"']?[[:space:]]*:/ {j=1; next}
-    j && /^  [^ ]/ {print}
+    j && /^  [^ ]/ {
+      sub(/[[:space:]]*#.*/, "")
+      sub(/[[:space:]]+$/, "")
+      if ($0 != "") print
+    }
   ' <<<"$1")"
   if [ -z "$actual" ]; then
     fail "$2: found no 2-space lines inside jobs: — every block cut below would read an empty block and every count/absence pin would pass vacuously"
