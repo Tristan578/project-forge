@@ -931,9 +931,18 @@ step_block() { # $1 = comment-stripped job block, $2 = step-name needle (fixed s
 # `bash scripts/check-npm-audit.sh . || true` while the `run:` line itself stays
 # BYTE-IDENTICAL -- the whole-line-anchored containment pin still matches, the
 # run:-key count still reads 1, and the key enumeration never examines the
-# inserted line at all. Measured live at five sites, each 169 PASS / 0 FAIL with
-# PyYAML confirming the folded value: both quality-gates.yml audit steps, cd.yml's
-# root audit step, ci-success's verifier, and the suite's own CI run step. The
+# inserted line at all. The class is live at ALL NINE cut step sites -- the
+# authoritative enumeration is the four assert_step_level_keys call sites:
+# quality-gates.yml security x3 (web, mcp-server, root), cd.yml security x3,
+# ci.yml ci-success's verifier, and ci.yml lockfile-sync-tests' two steps (the
+# suite-run and the lint one). Nine is the number that governs this pin's
+# obligation. Round 21 measured five of them, each 169 PASS / 0 FAIL with PyYAML
+# confirming the folded value (two of quality-gates.yml's three audit steps,
+# cd.yml's root audit step, ci-success's verifier, and the suite's own CI run
+# step); the test seat later measured all nine live. An earlier revision of this
+# comment said "five sites" and "both quality-gates.yml audit steps" -- the
+# former was a sample reported as a total, the latter simply wrong, since
+# making that count three is the whole point of PF-1010. The
 # effect is exactly what `continue-on-error: true` does -- the thing this suite
 # pins the absence of, at every one of those steps, for exactly this reason --
 # reached through the value instead of a key. On cd.yml it is worse than
