@@ -2910,7 +2910,7 @@ fi
 # the class that fails today, and only incidentally: with no swallow at all the
 # fixture payload reaches the locks and one of them trips.
 #
-# So the filter's own body is pinned line-for-line -- the sixth application of
+# So the filter's own body is pinned line-for-line -- the eighth application of
 # the exact-line-set idiom, and the first turned on the suite's own machinery
 # rather than on what it pins.
 #
@@ -2971,7 +2971,7 @@ assert_block_lines_exact "$SELF_EXEC_FILTER" "the suite's executable-line filter
 # 2efd084c: the same insertion PLUS a one-line bump of SELF_EXEC_EXPECTED_DROP
 # to 330 is GREEN 194/0 with the violation still executing, and a JSON fixture
 # reformatted four lines shorter would compensate without touching any pin at
-# all. So pin the LINES instead -- the seventh application of the exact-line-set
+# all. So pin the LINES instead -- the ninth application of the exact-line-set
 # idiom on this branch, after column-0, 2-space, 4-space, step-key, step-line
 # and job-steps. A phantom opener is a line that was not there before, so it
 # lands as an unexpected element whatever it spells; an ORDERED comparison also
