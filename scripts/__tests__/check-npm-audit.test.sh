@@ -2400,10 +2400,27 @@ SELF="${BASH_SOURCE[0]}"
 #
 # The polarity of the shape whitelist was right and is unchanged. What was wrong
 # was its INPUT: a whitelist of what may open a swallow says nothing about which
-# lines the whitelist is consulted for. So the DETECTOR is widened to every
-# heredoc spelling bash honours (`<<-`, and quoted, backslash-escaped or bare
-# delimiters), which moves an unmodeled spelling from invisible to REJECTED --
-# the fail-closed state the design already intended. Detection runs on a copy
+# lines the whitelist is consulted for. So the DETECTOR is widened -- and round
+# 30 had to widen it a SECOND time, because round 29's version still modelled
+# the delimiter as a C identifier while POSIX makes it an arbitrary WORD
+# (`io_here : DLESS here_end`). A delimiter that is digit-, dash- or dot-leading
+# is honoured by bash and is not an identifier, so the round-28 exploit
+# reproduced verbatim through the widened detector. Seven spellings measured at
+# the previous HEAD -- bare, single-quoted, double-quoted and backslash-escaped
+# `1ZEOF`, `<<-"1ZEOF"`, `<<'-ZEOF'`, `<<'.ZEOF'` -- each GREEN at 192 PASS /
+# 0 FAIL, each `bash -n` clean, each with its hidden line EXECUTING at runtime
+# while absent from the filtered copy, neither fail-closed arm firing, and the
+# affirmative "parsed every heredoc opener" PASS still printing. Opening the
+# swallow early dropped 410 lines from the locks' scope, still green. Every one
+# is now RED with the shape diagnostic, while a violation planted with no
+# swallow at all stays RED via the lock itself (so the rows are not vacuous).
+# The class is now derived from the grammar rather
+# than enumerated -- a WORD is everything up to the first character that ends
+# one -- which moves an unmodeled spelling from invisible to REJECTED, the
+# fail-closed state the design already intended. Every literal `<<` in this
+# program is respelled `[<][<]` so the program's own source lines do not match
+# the widened pattern and self-trip it (measured: respelling only some of them
+# gives 191/1 on an otherwise clean tree). Detection runs on a copy
 # with `<<<` here-strings removed: the widened pattern would otherwise match the
 # trailing `<<"word"` of a literal here-string and report it as an unrecognized
 # opener. That is a false FAIL rather than a false PASS, but a copy is cheaper
@@ -2423,13 +2440,13 @@ tag != "" { if ($0 == tag) tag = ""; next }
   print
   if ($0 ~ /^[ \t]*#/) next
   d = $0
-  gsub(/<<</, "", d)
-  if (!match(d, /<<-?[ \t]*(\047[A-Za-z_][A-Za-z0-9_]*\047|"[A-Za-z_][A-Za-z0-9_]*"|\\[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*)/)) next
+  gsub(/[<][<][<]/, "", d)
+  if (!match(d, /[<][<]-?[ \t]*[^ \t<>;&|()]+/)) next
   t = substr(d, RSTART, RLENGTH)
-  sub(/^<<-?[ \t]*/, "", t)
+  sub(/^[<][<]-?[ \t]*/, "", t)
   gsub(/[\047"\\]/, "", t)
-  if ($0 ~ /^f="\$\(fixture [A-Za-z0-9._-]+ <<\047JSON\047$/ ||
-      $0 ~ /^[ \t]*IFS= read -r -d \047\047 [A-Za-z_][A-Za-z0-9_]* <<\047(STEPS_EOF|OUTPUTS_EOF)\047 \|\| true$/) {
+  if ($0 ~ /^f="\$\(fixture [A-Za-z0-9._-]+ [<][<]\047JSON\047$/ ||
+      $0 ~ /^[ \t]*IFS= read -r -d \047\047 [A-Za-z_][A-Za-z0-9_]* [<][<]\047(STEPS_EOF|OUTPUTS_EOF)\047 \|\| true$/) {
     tag = t
     next
   }
@@ -2449,6 +2466,60 @@ elif [ -n "$SELF_EXEC_DIAG" ]; then
 else
   pass "suite's executable-line filter parsed every heredoc opener (locks below scan code, not fixture payload)"
 fi
+
+# ROUND 30. The self-check above is VACUOUS against a reversion of the filter
+# ITSELF. `SELF_EXEC_DIAG` is populated only from what the awk program writes to
+# stderr, so a program carrying no stderr-writing logic can never populate it,
+# for ANY input -- the `elif` arm is structurally unreachable the moment the
+# filter regresses to the pre-round-27 naive form, and the only defense left is
+# incidental (whether the newly-swallowed region happens to hold a live
+# violation for a lock below to trip on). Measured at the round-29 HEAD:
+# swapping ONLY the awk body back to that naive form -- touching nothing else,
+# not even this scaffold -- left the suite at 192 PASS / 0 FAIL, and it stayed
+# green with a hygiene violation planted inside the region that form swallows,
+# so the reversion does not merely go unpinned, it re-opens the comment/string
+# /EOF hole round 27 closed. Dropping the END still-open-at-EOF arm alone was
+# green the same way. The degenerate `{ print }` filter is the one member of
+# the class that fails today, and only incidentally: with no swallow at all the
+# fixture payload reaches the locks and one of them trips.
+#
+# So the filter's own body is pinned line-for-line -- the sixth application of
+# the exact-line-set idiom, and the first turned on the suite's own machinery
+# rather than on what it pins. The count pin runs FIRST so the cut block is
+# provably the effective assignment (a later `SELF_EXEC_FILTER=` would win under
+# last-assignment-wins while this pin read the dead first one). Cost, by design:
+# editing the filter reddens this until the expected set is updated alongside --
+# for a self-defense suite, that prompt is the point.
+filter_def_count="$(grep -cE "^SELF_EXEC_FILTER=" "$SELF" || true)"
+if [ "${filter_def_count}" -ne 1 ]; then
+  fail "the suite assigns SELF_EXEC_FILTER ${filter_def_count} times (expected exactly 1) -- a later assignment wins under last-assignment-wins while the pin below reads the dead first one"
+else
+  pass "the suite assigns SELF_EXEC_FILTER exactly once (the block pinned below IS the effective filter)"
+fi
+IFS= read -r -d '' expected_filter_body <<'STEPS_EOF' || true
+tag != "" { if ($0 == tag) tag = ""; next }
+{
+  print
+  if ($0 ~ /^[ \t]*#/) next
+  d = $0
+  gsub(/[<][<][<]/, "", d)
+  if (!match(d, /[<][<]-?[ \t]*[^ \t<>;&|()]+/)) next
+  t = substr(d, RSTART, RLENGTH)
+  sub(/^[<][<]-?[ \t]*/, "", t)
+  gsub(/[\047"\\]/, "", t)
+  if ($0 ~ /^f="\$\(fixture [A-Za-z0-9._-]+ [<][<]\047JSON\047$/ ||
+      $0 ~ /^[ \t]*IFS= read -r -d \047\047 [A-Za-z_][A-Za-z0-9_]* [<][<]\047(STEPS_EOF|OUTPUTS_EOF)\047 \|\| true$/) {
+    tag = t
+    next
+  }
+  printf "line %d opens heredoc %s but matches no recognized opener shape\n", NR, t > "/dev/stderr"
+}
+END { if (tag != "") printf "heredoc %s is still open at EOF\n", tag > "/dev/stderr" }
+STEPS_EOF
+filter_body_blk="$(awk "/^SELF_EXEC_FILTER='\$/{f=1;next} f && /^'\$/{exit} f{print}" "$SELF")"
+assert_block_lines_exact "$filter_body_blk" "the suite's executable-line filter body" \
+  "${expected_filter_body%$'\n'}" \
+  "the stderr-based self-check above cannot see a filter that writes no stderr AT ALL, so a reversion to the naive pre-round-27 program silently restores the comment/string/EOF swallow -- hiding real code from both hygiene locks -- while every surrounding line stays byte-identical"
 if grep -nE 'echo[[:space:]]+"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*\|[[:space:]]*(grep|awk)' <<<"$SELF_EXEC" >/dev/null; then
   fail "a variable's echo output is piped into grep/awk — feed it via a here-string to stay correct under pipefail"
 else
