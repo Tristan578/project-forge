@@ -747,7 +747,7 @@ assert_job_key_lines() { # $1 = comment-stripped workflow, $2 = label, $3 = expe
   fi
   if [ "$actual" != "$3" ]; then
     delta="$(diff <(printf '%s\n' "$3") <(printf '%s\n' "$actual") | grep '^[<>]' | tr '\n' ' ')"
-    fail "$2: the 2-space lines inside jobs: are not exactly the expected job keys — a block cut terminates on every one of them, so an unexpected line truncates a job block and the count/absence pins below it read evidence that was cut away ('<' expected-but-absent, '>' present-but-unexpected): $delta"
+    fail "$2: the 2-space lines inside jobs: are not exactly the expected job keys — a block cut terminates on every one of them, so an unexpected line truncates a job block and the count/absence pins below it read evidence that was cut away ('<' expected-but-absent, '>' present-but-unexpected): $delta — if the new key is legitimate, add it to the expected set passed at this assertion's call site, ${BASH_SOURCE[0]##*/}:${BASH_LINENO[0]}"
     return
   fi
   pass "$2: the 2-space lines inside jobs: are exactly the $(grep -c '' <<<"$actual") expected job keys (nothing can truncate or over-run a block cut)"
@@ -775,7 +775,7 @@ assert_top_level_keys() { # $1 = comment-stripped workflow, $2 = label, $3 = exp
   fi
   if [ "$actual" != "$3" ]; then
     delta="$(diff <(printf '%s\n' "$3") <(printf '%s\n' "$actual") | grep '^[<>]' | tr '\n' ' ')"
-    fail "$2: the column-0 keys are not exactly the expected top-level keys — the job-key enumeration is anchored at jobs: and assumes it is the LAST of them, so an unexpected column-0 line (e.g. a quoted scalar continuing at column 0 from inside a job body) leaves job keys unpinned and the block cuts below them truncatable ('<' expected-but-absent, '>' present-but-unexpected): $delta"
+    fail "$2: the column-0 keys are not exactly the expected top-level keys — the job-key enumeration is anchored at jobs: and assumes it is the LAST of them, so an unexpected column-0 line (e.g. a quoted scalar continuing at column 0 from inside a job body) leaves job keys unpinned and the block cuts below them truncatable ('<' expected-but-absent, '>' present-but-unexpected): $delta — if the new key is legitimate, add it to the expected set passed at this assertion's call site, ${BASH_SOURCE[0]##*/}:${BASH_LINENO[0]}"
     return
   fi
   pass "$2: the column-0 keys are exactly the $(grep -c '' <<<"$actual") expected top-level keys with jobs last (the job-key enumeration cannot be ended early from inside a job body)"
@@ -806,12 +806,41 @@ assert_top_level_keys() { # $1 = comment-stripped workflow, $2 = label, $3 = exp
 # lands as an extra one, whatever escape it is written with.
 #
 # Values are stripped (`name: Rust Security Audit` -> `name`), as in
-# assert_top_level_keys: no job-level VALUE is load-bearing for this pin -- the
-# values that ARE load-bearing (the deploy `if:` clause, the audit `run:` lines,
-# the caller's `uses:`) have their own containment assertions -- so a cosmetic
-# rename must not turn this suite red. A line with no colon at all, which is what
-# a 4-space continuation from a multi-line scalar looks like, survives the strip
-# intact and lands as an unexpected element: the fail-CLOSED direction.
+# assert_top_level_keys: no job-level VALUE is load-bearing for THIS pin, so a
+# cosmetic rename must not turn the suite red. The values that ARE load-bearing
+# each carry their own containment assertion, and there are five of them, not the
+# three an earlier draft of this comment listed:
+#   1. both deploy jobs' `if:` clause          (`needs.security.result == 'success'`)
+#   2. the audit steps' `run:` lines           (assert_audit_steps_untampered)
+#   3. the ci.yml caller's `uses:`             (./.github/workflows/quality-gates.yml)
+#   4. the security job's `name:`              (the display name the branch
+#                                               protection rule matches on)
+#   5. ci-success's own job-level `if:`        (`always()`, without which the
+#                                               required check SKIPS -- and a
+#                                               skipped required check reads as
+#                                               satisfied)
+# Undercounting that list is not cosmetic: each entry is a value this enumeration
+# deliberately does NOT cover, so the list is the record of what still needs a
+# containment pin of its own.
+#
+# A line with no colon at all, which is what a 4-space continuation from a
+# multi-line scalar looks like, survives the strip intact and lands as an
+# unexpected element: the fail-CLOSED direction.
+#
+# SCOPE, deliberately: assert_step_level_keys (below) enumerates every LINE of a
+# cut step, not just the key-shaped ones, because a plain-scalar continuation
+# extends a value while leaving its key line byte-identical. That treatment is
+# NOT extended to job level here, and the reason is per-value rather than
+# general. Of the five above, (1) and (5) are `if:` clauses whose pins already
+# claim PRESENT-not-EFFECTIVE (a vacuous rewrite like `|| true` passes them), so
+# a continuation lands inside an already-stated residual rather than opening a
+# new one -- and (5) has a line-count arm of its own besides. (3) is a path: a
+# continuation folds a second token into it, the reusable-workflow reference
+# stops resolving, and the workflow fails to load -- fails CLOSED. (2) is
+# step-level and IS covered. cd.yml's deploy `if:` blocks are legitimately
+# multi-line, so a job-level line enumeration would have to encode them
+# verbatim for no gain against those residuals. Logged on PF-1012 so the
+# decision is revisited rather than inherited.
 #
 # All six cut blocks get it, and each was measured rather than reasoned about --
 # which is how the last one earned its place. The obvious load-bearing cases are
@@ -849,7 +878,7 @@ assert_job_level_keys() { # $1 = cut job block, $2 = label, $3 = expected 4-spac
   fi
   if [ "$actual" != "$3" ]; then
     delta="$(diff <(printf '%s\n' "$3") <(printf '%s\n' "$actual") | grep '^[<>]' | tr '\n' ' ')"
-    fail "$2: the job-level keys are not exactly the expected set — the count and absence pins on this block match key names by BYTES, so a respelled key (e.g. a \\u escape, which YAML resolves to the same key) or a duplicate one slips them ('<' expected-but-absent, '>' present-but-unexpected): $delta"
+    fail "$2: the job-level keys are not exactly the expected set — the count and absence pins on this block match key names by BYTES, so a respelled key (e.g. a \\u escape, which YAML resolves to the same key) or a duplicate one slips them ('<' expected-but-absent, '>' present-but-unexpected): $delta — if the new key is legitimate, add it to the expected set passed at this assertion's call site, ${BASH_SOURCE[0]##*/}:${BASH_LINENO[0]}"
     return
   fi
   pass "$2: the job-level keys are exactly the $(grep -c '' <<<"$actual") expected keys (no key below can be respelled or duplicated past the pins on it)"
@@ -883,13 +912,55 @@ step_block() { # $1 = comment-stripped job block, $2 = step-name needle (fixed s
 # block contains rather than trying to decide whether a given line IS a given
 # key. A respelled key lands as an unexpected element and a duplicate as an
 # extra one, whatever escape it is written with. Values are stripped -- no
-# step-level value is load-bearing for THIS pin, and the ones that are
-# load-bearing (each `run:` line) keep their own whole-line containment
-# assertions -- so a cosmetic step rename stays green. A continuation line from
-# a multi-line scalar sits deeper than 8 spaces and is not enumerated at all; a
-# continuation dedented to exactly 8 carries no colon, survives the value strip
-# intact, and lands as an unexpected element. An empty enumeration is refused
-# outright rather than passing vacuously, as everywhere else here.
+# step-level value is load-bearing for the KEY half of this pin, and the ones
+# that are load-bearing (each `run:` line) keep their own whole-line containment
+# assertions -- so a cosmetic step rename stays green. An empty enumeration is
+# refused outright rather than passing vacuously, as everywhere else here.
+#
+# The round-21 form of this helper enumerated KEY lines only, and its comment
+# argued that was sufficient because "a continuation line from a multi-line
+# scalar sits deeper than 8 spaces and is not enumerated at all". That sentence
+# named the hole and mistook it for a proof. An enumeration of keys constrains
+# which keys exist and says NOTHING about what they are worth, so the class
+# simply moved off the key axis: YAML continues a PLAIN scalar onto any line
+# indented deeper than its key and folds the newline to a space, so inserting
+#
+#           || true
+#
+# (10 spaces) directly under a step's `run:` line makes the effective command
+# `bash scripts/check-npm-audit.sh . || true` while the `run:` line itself stays
+# BYTE-IDENTICAL -- the whole-line-anchored containment pin still matches, the
+# run:-key count still reads 1, and the key enumeration never examines the
+# inserted line at all. Measured live at five sites, each 169 PASS / 0 FAIL with
+# PyYAML confirming the folded value: both quality-gates.yml audit steps, cd.yml's
+# root audit step, ci-success's verifier, and the suite's own CI run step. The
+# effect is exactly what `continue-on-error: true` does -- the thing this suite
+# pins the absence of, at every one of those steps, for exactly this reason --
+# reached through the value instead of a key. On cd.yml it is worse than
+# non-blocking: the security job genuinely exits 0, so
+# `needs.security.result == 'success'` becomes true on its own terms and both
+# deploy jobs proceed past a red audit. The indentation is the attacker's free
+# choice (10, 12 and 14 all parse and all measured green), so no adjustment to
+# the match WIDTH closes it -- only 8 is caught, and an 8-space continuation is
+# invalid YAML that GitHub would reject anyway, making it a void case.
+#
+# So the enumeration is applied to the exact set of LINES rather than the set of
+# keys: key lines are still value-stripped (cosmetic renames stay green), and
+# every other non-empty line is listed VERBATIM. A continuation then lands as an
+# unexpected element regardless of its indentation, because it is a line that
+# was not there before. Listing the non-key lines verbatim also pins the two
+# real ones -- the shellcheck step's `run: |` body and ci-success's
+# `NEEDS_JSON: ${{ toJSON(needs) }}` -- so a rewrite of the verifier's input to
+# something it reads as "no jobs" is caught too, which the key-set form missed.
+# The cost is the same one the column-0 and 2-space job lists already carry and
+# accept: adding a script to the shellcheck list reddens the suite until the
+# expected set is updated, a one-line edit the FAIL message points directly at.
+# For a self-defense suite the prompt is the point.
+#
+# The general lesson, worth stating because it has now recurred at five levels:
+# wherever a VALUE is load-bearing -- the audit `run:` lines, the caller's
+# `uses:`, the deploy `if:` clause -- a containment pin on its line does not
+# prevent that value being EXTENDED from the line below it.
 #
 # This replaces the claim that stood above assert_audit_steps_untampered --
 # that resisting a respelled key "means resolving YAML rather than grepping it,
@@ -898,25 +969,34 @@ step_block() { # $1 = comment-stripped job block, $2 = step-name needle (fixed s
 # restating: spelling-independent, NOT parser-equivalent. Whether GitHub's own
 # workflow parser resolves \u escapes the way PyYAML does is not something this
 # suite measures.
-assert_step_level_keys() { # $1 = cut step block, $2 = label, $3 = expected key lines
+assert_step_level_keys() { # $1 = cut step block, $2 = label, $3 = expected line set
   local actual delta
   actual="$(awk '
-    /^      - [^ ]/ || /^        [^ ]/ {
-      sub(/:.*/, "")
+    {
       sub(/[[:space:]]+$/, "")
-      if ($0 != "") print
+      if ($0 == "") next
+      # Key lines are value-stripped so a cosmetic rename stays green; every
+      # other line is kept VERBATIM so a plain-scalar continuation, at any
+      # indentation, lands as an element that was not there before.
+      if (/^      - [^ ]/ || /^        [^ ]/) {
+        sub(/:.*/, "")
+        sub(/[[:space:]]+$/, "")
+        if ($0 == "") next
+      }
+      print
     }
   ' <<<"$1")"
   if [ -z "$actual" ]; then
-    fail "$2: found no step-level key lines in the step block — the cut read nothing, so every count and absence pin on it passes vacuously"
+    fail "$2: found no lines in the step block — the cut read nothing, so every count and absence pin on it passes vacuously"
     return
   fi
   if [ "$actual" != "$3" ]; then
-    delta="$(diff <(printf '%s\n' "$3") <(printf '%s\n' "$actual") | grep '^[<>]' | tr '\n' ' ')"
-    fail "$2: the step-level keys are not exactly the expected set — the count and absence pins on this step match key names by BYTES, so a respelled key (e.g. a \\u escape, which YAML resolves to the same key) or a duplicate one slips them ('<' expected-but-absent, '>' present-but-unexpected): $delta"
+    delta="$(diff <(printf '%s\n' "$3") <(printf '%s\n' "$actual") | grep '^[<>]')"
+    fail "$2: the step-level lines are not exactly the expected set — the count and absence pins on this step match key names by BYTES (so a respelled key, e.g. a \\u escape that YAML resolves to the same key, or a duplicate one slips them), and the whole-line containment pin on its run: reads ONE line (so a deeper-indented continuation folds into the effective command while leaving that line byte-identical). '<' expected-but-absent, '>' present-but-unexpected; if the new line is legitimate, add it to the expected set passed at this assertion's call site, ${BASH_SOURCE[0]##*/}:${BASH_LINENO[0]}:
+$delta"
     return
   fi
-  pass "$2: the step-level keys are exactly the $(grep -c '' <<<"$actual") expected keys (no key below can be respelled or duplicated past the pins on it)"
+  pass "$2: the step-level lines are exactly the $(grep -c '' <<<"$actual") expected lines (no key can be respelled or duplicated, and no scalar extended by a continuation, past the pins on it)"
 }
 
 # The three workspace invocations every security job must carry, by EXACT step
@@ -1654,6 +1734,48 @@ jobs"
     fail "ci.yml ci-success job block is empty after comment-strip — the required aggregate is missing or fully commented out"
   fi
 
+  # ci-success's own job-level `if:` VALUE is load-bearing, and it is the one
+  # gap the 4-space key-set pin structurally cannot cover: assert_job_level_keys
+  # lists `if` and strips its VALUE by design (so a cosmetic job edit stays
+  # green), which leaves `if: ${{ always() }}` -> `if: false` a one-line edit
+  # that measured GREEN at 157 PASS / 0 FAIL with PyYAML confirming if=False.
+  # The job then SKIPS, and this suite's own threat model — stated above, and
+  # the reason check-ci-success.sh has skip-based anti-tamper arms at all — is
+  # that a skipped required check reads as SATISFIED under branch protection.
+  # So one line takes the sole required check on main green with no audit
+  # enforced and the verifier never run.
+  #
+  # The reasoning that deliberately leaves the OTHER job-level if: values
+  # unpinned does not transfer here. lockfile-sync-tests and the quality-gates
+  # caller are each backstopped at RUNTIME by check-ci-success.sh's
+  # check_triggered map, so an if: false on either is caught when the verifier
+  # runs. ci-success cannot be backstopped that way and cannot ever have a
+  # check_triggered entry — it IS the job that runs the verifier. A pin here is
+  # the only guard, which is exactly why its absence was the highest-severity
+  # gap left in the file.
+  #
+  # Count-pinned before containment for the same last-key-wins reason as every
+  # other if: in this suite, and with the same honest scope limit as the deploy
+  # clause pin: this proves always() is PRESENT, not that the condition is
+  # EFFECTIVE — a vacuous `always() && false` still passes, since resisting that
+  # would mean parsing GitHub Actions expressions.
+  cs_if_count="$(grep -cE "^    [\"']?if[\"']?[[:space:]]*:" <<<"$ci_success_block" || true)"
+  cs_if_blk="$(awk "/^    [\"']?if[\"']?[[:space:]]*:/{f=1;print;next} f && /^    [A-Za-z_\"']/{exit} f{print}" <<<"$ci_success_block")"
+  cs_if_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cs_if_blk")"
+  if [ "$cs_if_count" -ne 1 ]; then
+    fail "ci.yml ci-success has $cs_if_count job-level if: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended second if: overrides the always() guard at runtime while the original line still satisfies the containment below)"
+  elif [ "$(grep -c '' <<<"$cs_if_blk")" -ne 1 ]; then
+    # The same continuation class assert_step_level_keys closes one level down:
+    # a plain scalar continues onto any deeper-indented line and folds, so a
+    # 6-space `&& false` under this key would extend the guard while leaving the
+    # `if:` line — and therefore the containment below — byte-identical.
+    fail "ci.yml ci-success's if: spans $(grep -c '' <<<"$cs_if_blk") lines (expected exactly 1) — a deeper-indented continuation folds into the guard expression while the if: line itself stays byte-identical, so the always() containment below cannot see it"
+  elif grep -qE "always[[:space:]]*\(" <<<"$cs_if_scan"; then
+    pass "ci.yml ci-success's if: still contains always() — the verifier cannot be made to skip its way to a green required check (exactly 1 if: key)"
+  else
+    fail "ci.yml ci-success's if: no longer contains always() — a falsy or narrowed condition SKIPS the sole required check on main, and a skipped required check reads as satisfied under branch protection, so no audit is enforced and the verifier never runs"
+  fi
+
   # Count-pin `needs:` first: a duplicate needs: key replaces the ENTIRE list
   # under last-key-wins, so a containment grep against the dead first block
   # would still find quality-gates while the effective aggregate waits for
@@ -1716,9 +1838,12 @@ jobs"
   if [ -z "$cs_verify_blk" ]; then
     fail "ci.yml ci-success has no step named 'Verify all required gates passed' — the verifier invocation cannot be located, so every pin below it would pass vacuously (fail closed)"
   else
-    assert_step_level_keys "$cs_verify_blk" "ci ci-success verify step" "      - name
+    # shellcheck disable=SC2016  # the expected set is a YAML literal: `${{ }}` is
+    # GitHub Actions expression syntax and MUST NOT be expanded by the shell.
+    assert_step_level_keys "$cs_verify_blk" "ci ci-success verify step" '      - name
         env
-        run"
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run'
     if grep -qE "^[[:space:]]*[\"']?if[\"']?[[:space:]]*:" <<<"$cs_verify_blk"; then
       fail "ci.yml ci-success's verify step carries a step-level if: — the verifier can be skipped while its run: line still greps as present, and the job still reports SUCCESS as the required check"
     else
@@ -1837,8 +1962,24 @@ jobs"
   if [ -z "$lst_shck_blk" ]; then
     fail "self-defense job has no step named 'Shellcheck the gate scripts and their suites' — lint coverage of this gate cannot be verified (fail closed)"
   else
-    assert_step_level_keys "$lst_shck_blk" "self-defense shellcheck step" "      - name
-        run"
+    assert_step_level_keys "$lst_shck_blk" "self-defense shellcheck step" '      - name
+        run
+          shellcheck \
+            scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh \
+            scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh \
+            scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
+            scripts/check-taskboard-onboarding-hygiene.sh scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh \
+            scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
+            scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
+            scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
+            scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
+            scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
+            scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
+            scripts/check-changeset-packages.sh scripts/__tests__/check-changeset-packages.test.sh \
+            scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
+            scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
+            .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
+            .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh'
     if grep -qE "^[[:space:]]*[\"']?if[\"']?[[:space:]]*:" <<<"$lst_shck_blk"; then
       fail "self-defense shellcheck step carries a step-level if: — lint coverage can be skipped while its needle still greps as present"
     else
