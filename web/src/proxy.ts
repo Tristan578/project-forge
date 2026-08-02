@@ -131,8 +131,15 @@ function addSecurityHeaders(response: NextResponse, req: NextRequest): NextRespo
 /**
  * Non-Clerk passthrough middleware for CI/E2E.
  * Applies CORS + security headers but skips authentication.
+ *
+ * Exported for the same reason as {@link applyAuthDecision}: this is the branch
+ * `buildProxy()` selects whenever Clerk keys are absent or malformed, which is
+ * exactly the configuration the DB-less E2E gate runs under. Reaching it through
+ * the live `proxy` export is impossible in unit tests (the key check runs once at
+ * module load), so without a direct export the `/play` nonce would be proven only
+ * on the Clerk path and could silently regress on the one CI actually exercises.
  */
-function passthroughMiddleware(req: NextRequest): NextResponse {
+export function passthroughMiddleware(req: NextRequest): NextResponse {
   const corsResponse = handleCors(req);
   if (corsResponse) return corsResponse;
   return addSecurityHeaders(startResponse(req), req);

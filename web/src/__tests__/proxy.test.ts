@@ -29,7 +29,12 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { NextRequest } from 'next/server';
 import { createRouteMatcher } from '@clerk/nextjs/server';
 
-import { buildPublicRoutes, applyAuthDecision, isPlayPath } from '../proxy';
+import {
+  buildPublicRoutes,
+  applyAuthDecision,
+  isPlayPath,
+  passthroughMiddleware,
+} from '../proxy';
 
 vi.mock('server-only', () => ({}));
 
@@ -172,6 +177,25 @@ describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
     return out;
   }
 
+  /**
+   * Assert a client-supplied header was STRIPPED, not merely unobservable.
+   *
+   * Checking `!forwardedHeaders(res).has(name)` alone is vacuous: if the proxy
+   * skips the rewrite entirely, there is no override encoding to read, the
+   * helper returns an empty set, and the assertion passes — while the original
+   * attacker-supplied header flows through to the app untouched. That is the
+   * vulnerable case, so the rewrite must be proven to have HAPPENED first.
+   * (Verified by mutation: narrowing CLIENT_SPOOFABLE_HEADERS to `['x-nonce']`
+   * passes the naive form of this check and fails this one.)
+   */
+  function expectStripped(res: Response, name: string) {
+    expect(
+      res.headers.get('x-middleware-override-headers'),
+      'proxy did not rewrite the request, so nothing was stripped',
+    ).not.toBeNull();
+    expect(forwardedHeaders(res).has(name)).toBe(false);
+  }
+
   const play = (init?: { headers?: Record<string, string> }) => {
     const req = reqFor('/play/user_abc/my-game');
     for (const [k, v] of Object.entries(init?.headers ?? {})) req.headers.set(k, v);
@@ -232,8 +256,41 @@ describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
     // Otherwise any page reading `x-nonce` would trust caller-controlled input.
     const req = reqFor('/community/games/1');
     req.headers.set('x-nonce', 'attacker-chosen');
-    const res = await applyAuthDecision(unauthed, req, isPublicRoute);
-    expect(forwardedHeaders(res).has('x-nonce')).toBe(false);
+    expectStripped(await applyAuthDecision(unauthed, req, isPublicRoute), 'x-nonce');
+  });
+
+  it('strips a client-supplied CSP on non-play routes even with no x-nonce', async () => {
+    // `CLIENT_SPOOFABLE_HEADERS` treats both names identically, but the sibling
+    // test above only supplies `x-nonce`. Without this case, a regression that
+    // narrowed the strip to `x-nonce` alone would stay green while letting a
+    // caller hand the app a `content-security-policy` request header of their
+    // choosing — the exact input Next.js reads to nonce its bootstrap scripts.
+    const req = reqFor('/community/games/1');
+    req.headers.set('content-security-policy', 'script-src *');
+    expectStripped(
+      await applyAuthDecision(unauthed, req, isPublicRoute),
+      'content-security-policy',
+    );
+  });
+
+  it('applies the same nonce policy on the Clerk-less passthrough path', async () => {
+    // `buildProxy()` falls back to passthroughMiddleware whenever Clerk keys are
+    // absent or malformed — which is precisely how the DB-less E2E gate and any
+    // mis-provisioned deployment run. Proving the nonce only on the Clerk path
+    // would leave the branch CI actually exercises unverified.
+    const res = passthroughMiddleware(reqFor('/play/user_abc/my-game'));
+    const nonce = forwardedHeaders(res).get('x-nonce');
+    expect(nonce).toBeTruthy();
+    expect(res.headers.get('Content-Security-Policy')).toContain(`'nonce-${nonce}'`);
+  });
+
+  it('strips client-supplied nonce headers on the passthrough path too', async () => {
+    const req = reqFor('/play/user_abc/my-game');
+    req.headers.set('x-nonce', 'attacker-chosen');
+    req.headers.set('content-security-policy', 'script-src *');
+    const res = passthroughMiddleware(req);
+    expect(forwardedHeaders(res).get('x-nonce')).not.toBe('attacker-chosen');
+    expect(res.headers.get('Content-Security-Policy')).not.toContain('attacker-chosen');
   });
 
   it('leaves ordinary non-play requests untouched (no nonce, no CSP header)', async () => {

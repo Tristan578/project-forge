@@ -113,6 +113,15 @@ describe('clerkFrontendApiFromPublishableKey', () => {
     expect(clerkFrontendApiFromPublishableKey(`pk_test_${btoa('clerk.example.com')}`)).toBeNull();
   });
 
+  it('returns null when the payload is not decodable base64', () => {
+    // `atob` throws a DOMException on invalid input rather than returning a
+    // falsy value, so this reaches the catch branch — the only path that keeps
+    // a malformed NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY from taking down every
+    // /play request with a 500 instead of degrading to "no Clerk host".
+    expect(clerkFrontendApiFromPublishableKey('pk_test_***not-base64***')).toBeNull();
+    expect(clerkFrontendApiFromPublishableKey('pk_live_%%%%')).toBeNull();
+  });
+
   it('rejects a decoded value that would inject a CSP directive', () => {
     // The decoded host is interpolated into a header. A key crafted to decode to
     // a value containing ';' or whitespace must be dropped, not emitted.
