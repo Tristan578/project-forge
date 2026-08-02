@@ -57,8 +57,20 @@ function handleCors(req: NextRequest): NextResponse | null {
   return null;
 }
 
-/** Request headers a client must never be able to supply — see {@link startResponse}. */
-const CLIENT_SPOOFABLE_HEADERS = ['x-nonce', 'content-security-policy'] as const;
+/**
+ * Request headers a client must never be able to supply — see {@link startResponse}.
+ *
+ * `content-security-policy-report-only` is on this list because Next.js reads the
+ * nonce from EITHER CSP header (`app-render.js`: `headers['content-security-policy']
+ * || headers['content-security-policy-report-only']`). Stripping only the enforcing
+ * one would let a caller smuggle a nonce of their choosing through the report-only
+ * variant and have Next stamp it onto every framework script.
+ */
+const CLIENT_SPOOFABLE_HEADERS = [
+  'x-nonce',
+  'content-security-policy',
+  'content-security-policy-report-only',
+] as const;
 
 /** True for the published-game routes, which get the nonce-based CSP. */
 export function isPlayPath(pathname: string): boolean {
@@ -95,7 +107,14 @@ function startResponse(req: NextRequest): NextResponse {
   for (const header of CLIENT_SPOOFABLE_HEADERS) requestHeaders.delete(header);
   if (!isPlay) return NextResponse.next({ request: { headers: requestHeaders } });
 
-  const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
+  // `btoa`, not `Buffer` — this runs in the Edge runtime, where a bare global
+  // `Buffer` is NOT guaranteed. Next's Edge sandbox only exposes Buffer through
+  // the `node:buffer` NativeModuleMap; the bare global came from a webpack
+  // `ProvidePlugin` that Turbopack (the Next 16 production default) never runs.
+  // A ReferenceError here would 500 every published game, so use the primitive
+  // the Edge runtime actually documents. `randomUUID()` is ASCII, so `btoa` is
+  // safe on it without a latin1 conversion step.
+  const nonce = btoa(crypto.randomUUID());
   const csp = buildPlayContentSecurityPolicy({
     engineCdn: process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '',
     nonce,

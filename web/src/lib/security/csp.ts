@@ -65,6 +65,15 @@
  * same-origin `/_vercel/{insights,speed-insights}/script.js`, already covered by
  * `'self'`. Adding the host would be permanent policy surface for a dev-only
  * script that merely console-logs.
+ *
+ * Which is the general rule: **never validate a CSP change against `next dev`.**
+ * The dev server keeps `'unsafe-eval'` and inline scripts alive for Fast Refresh,
+ * so a policy that blanks every page in production looks perfectly healthy there
+ * (this is exactly how PF-1018 shipped). Repro against a production build:
+ *
+ *     cd web && npm run build && npx next start
+ *     # then load the route in a REAL browser and watch the console —
+ *     # curl sees the server HTML and reports success on a page that never hydrates
  */
 export function isDevEvalAllowed(nodeEnv: string | undefined = process.env.NODE_ENV): boolean {
   return nodeEnv === 'development';
@@ -194,9 +203,10 @@ export interface PlayCspOptions {
  * The previous policy was `script-src 'self' 'wasm-unsafe-eval'` with neither a
  * nonce nor `'unsafe-inline'`. Next.js bootstraps App Router hydration with
  * inline `<script>` tags (`self.__next_f.push(...)`), so EVERY published game
- * rendered a blank/stuck page: the server HTML painted, all 17 inline bootstrap
- * scripts were blocked, and hydration never ran. Nothing threw server-side, so
- * it failed silently in production.
+ * rendered a blank/stuck page: the server HTML painted, every inline bootstrap
+ * script was blocked, and hydration never ran. Nothing threw server-side, so it
+ * failed silently in production. (The exact tag count varies with payload size
+ * and Next version, so it is deliberately not pinned here.)
  *
  * A nonce is viable here specifically because `/play/[userId]/[slug]` awaits
  * `safeAuth()` and is therefore dynamically rendered. A nonce forces dynamic
@@ -210,13 +220,26 @@ export interface PlayCspOptions {
  * `import()` of the WASM glue on browser-dependent propagation semantics. An
  * explicit allowlist is predictable and directly verifiable.
  *
- * ## The no-nonce fallback
+ * ## The no-nonce fallback, and why BOTH writers must be safe
  *
  * `next.config.ts` emits this policy statically and cannot carry a per-request
- * nonce, so that call omits it and gets `'unsafe-inline'`. In practice the proxy
- * always runs on `/play` and its nonce-bearing header wins; the static rule is a
- * fail-safe for the case where it does not. Degrading to the site-wide inline
- * posture is the correct failure mode — degrading to a blank page is not.
+ * nonce, so that call omits it and gets `'unsafe-inline'`. That means `/play` has
+ * two writers for one header key: this static rule and the proxy's nonce-bearing
+ * response header.
+ *
+ * Which one wins is verified only for the self-hosted/dev router, where the proxy
+ * wins (`resolve-routes.js` orders `fsChecker.headers` before `middleware`, and
+ * `router-server.js` re-`setHeader`s in that order). Vercel routes through its own
+ * edge layer, so that proof does NOT transfer — treat the winner there as unknown
+ * until observed on a real deployment:
+ *
+ *     curl -sI https://<deployment>/play/<userId>/<slug> | grep -i content-security-policy
+ *
+ * This is deliberately not load-bearing. Both outcomes are safe: the proxy's
+ * policy is the nonce-based one, and this static one degrades to the same inline
+ * posture the rest of the site already runs. What must never happen is `/play`
+ * ending up with NEITHER a nonce nor `'unsafe-inline'` — that is the blank-page
+ * regression above — so neither writer may emit a policy without one of the two.
  */
 export function buildPlayContentSecurityPolicy({
   engineCdn = '',

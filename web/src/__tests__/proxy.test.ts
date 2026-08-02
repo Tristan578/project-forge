@@ -273,6 +273,30 @@ describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
     );
   });
 
+  it('strips a client-supplied report-only CSP, which Next also reads a nonce from', async () => {
+    // `app-render.js` resolves the nonce as
+    //   headers['content-security-policy'] || headers['content-security-policy-report-only']
+    // so stripping only the enforcing header still lets a caller smuggle a nonce
+    // of their choosing through the report-only name and have Next stamp it onto
+    // every framework script. Both names must be stripped.
+    const req = reqFor('/community/games/1');
+    req.headers.set('content-security-policy-report-only', "script-src 'nonce-attacker'");
+    expectStripped(
+      await applyAuthDecision(unauthed, req, isPublicRoute),
+      'content-security-policy-report-only',
+    );
+  });
+
+  it('strips a report-only CSP on /play so it cannot shadow the minted nonce', async () => {
+    const res = await play({
+      headers: { 'content-security-policy-report-only': "script-src 'nonce-attacker'" },
+    });
+    const fwd = forwardedHeaders(res);
+    expect(fwd.has('content-security-policy-report-only')).toBe(false);
+    // The forwarded enforcing header is the one the proxy minted, not the attacker's.
+    expect(fwd.get('content-security-policy')).toContain(`'nonce-${fwd.get('x-nonce')}'`);
+  });
+
   it('applies the same nonce policy on the Clerk-less passthrough path', async () => {
     // `buildProxy()` falls back to passthroughMiddleware whenever Clerk keys are
     // absent or malformed — which is precisely how the DB-less E2E gate and any

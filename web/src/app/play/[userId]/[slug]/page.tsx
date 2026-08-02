@@ -87,10 +87,14 @@ export default async function PlayPage({ params }: PlayPageProps) {
   const { userId, slug } = await params;
   const { userId: viewerClerkId } = await safeAuth();
 
-  // /play runs a nonce-based CSP with no 'unsafe-inline' (PF-1018), so this
-  // page's own inline <script> must carry the nonce the proxy minted for this
-  // request or the browser drops it. Next.js stamps its OWN bootstrap scripts
-  // automatically from the request CSP header; app-authored tags are not.
+  // /play runs a nonce-based CSP with no 'unsafe-inline' (PF-1018). The JSON-LD
+  // tag below does not strictly need this: `type="application/ld+json"` is a
+  // data block, not executable script, so `script-src` never gates it (verified
+  // in production — two un-nonced ld+json tags produced zero CSP violations).
+  // It is stamped anyway because the distinction is subtle and the cost is one
+  // attribute: any EXECUTABLE inline <script> added to this page later WOULD be
+  // blocked, and the nonce is then already wired. Next.js stamps its own
+  // bootstrap scripts from the request CSP header; app-authored tags are not.
   const nonce = (await headers()).get('x-nonce') ?? undefined;
 
   const game = await getGameData(userId, slug);
