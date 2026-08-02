@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { e2eHooksEnabled } from '@/lib/e2e/testHooks';
+import { ViewportLock } from '@/components/layout/ViewportLock';
 
 export default function DevLayout({ children }: { children: React.ReactNode }) {
   // The /dev auth-bypass editor renders in local development AND in the strict
@@ -9,5 +10,7 @@ export default function DevLayout({ children }: { children: React.ReactNode }) {
   if (!e2eHooksEnabled()) {
     redirect('/sign-in');
   }
-  return <>{children}</>;
+  // /dev renders the same EditorLayout as /editor/[id], so it needs the same
+  // full-viewport scroll lock.
+  return <ViewportLock>{children}</ViewportLock>;
 }

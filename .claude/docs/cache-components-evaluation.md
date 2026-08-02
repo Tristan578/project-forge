@@ -41,7 +41,7 @@ The following pure Server Component pages had `'use cache'` added as their first
 
 | File | Purpose |
 |------|---------|
-| `web/src/app/(marketing)/page.tsx` | Marketing home page — static content, icons, no dynamic data |
+| `web/src/components/marketing/LandingPage.tsx` | Marketing home page — static content, icons, no dynamic data |
 | `web/src/app/privacy/page.tsx` | Privacy policy — static legal content |
 | `web/src/app/terms/page.tsx` | Terms of service — static legal content |
 
