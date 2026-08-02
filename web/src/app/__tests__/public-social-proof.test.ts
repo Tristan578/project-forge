@@ -30,16 +30,33 @@ import { join, resolve } from 'path';
 const APP_DIR = resolve(__dirname, '..');
 const WEB_ROOT = resolve(APP_DIR, '..', '..');
 
-/** Public, unauthenticated routes plus the shared marketing components. */
+/**
+ * Public, unauthenticated routes plus the shared marketing components.
+ *
+ * "Public" here means: reachable with no auth redirect. Verified per entry —
+ * `play/[userId]/[slug]` calls `safeAuth()` only to set a display flag and
+ * never redirects, so it belongs; `dashboard`, `settings`, `editor` and
+ * `admin` all redirect and are rightly absent.
+ *
+ * Adding a public route? Add it here. The per-entry assertion below fails if
+ * an entry stops resolving, but nothing can detect a route you never listed.
+ */
 const PUBLIC_SURFACE = [
   'src/app/page.tsx',
   'src/app/about',
+  'src/app/api-docs',
   'src/app/blog',
   'src/app/changelog',
   'src/app/community',
   'src/app/compare',
+  'src/app/docs',
   'src/app/faq',
+  'src/app/play',
   'src/app/pricing',
+  'src/app/privacy',
+  'src/app/sign-in',
+  'src/app/sign-up',
+  'src/app/terms',
   'src/app/use-cases',
   'src/components/marketing',
 ];
@@ -95,13 +112,19 @@ function collectSources(relative: string): string[] {
 describe('public marketing surface', () => {
   const files = PUBLIC_SURFACE.flatMap(collectSources);
 
-  it('actually resolves the public surface', () => {
-    // Fail closed. A renamed route directory would otherwise scan nothing and
-    // report green, which is the failure mode this whole file exists to avoid.
+  /**
+   * Fail closed, per entry.
+   *
+   * A single aggregate floor is not enough: the list resolves to ~30 files, so
+   * a floor of 10 would still pass green after two route directories were
+   * renamed away. Asserting that EVERY entry resolves to at least one file
+   * makes any one rename turn red, and names the entry that broke.
+   */
+  it.each(PUBLIC_SURFACE)('resolves %s to at least one source file', (entry) => {
     expect(
-      files.length,
-      'PUBLIC_SURFACE resolved to (almost) no files — a route moved, update the list'
-    ).toBeGreaterThanOrEqual(10);
+      collectSources(entry).length,
+      `${entry} resolved to no files — the route moved or was deleted. Update PUBLIC_SURFACE; do not delete the entry to make this pass.`
+    ).toBeGreaterThan(0);
   });
 
   it.each(FABRICATED_SOCIAL_PROOF)(

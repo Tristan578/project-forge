@@ -606,8 +606,16 @@ export default async function LandingPage() {
         LandingPage.test.tsx. (PF-1020)
       */}
 
-      {/* ---- CTA Footer ---- */}
-      <section className="border-t border-zinc-800 bg-zinc-900/30 px-6 py-20">
+      {/*
+        ---- CTA Footer ----
+        Plain, and with no border-t of its own: the pricing section above ends
+        on a `border-y`, so that bottom edge is already the seam. This matches
+        how `features` follows the shaded `how-it-works` section. Restoring
+        `bg-zinc-900/30`/`border-t` here would fuse this band into pricing and
+        double the hairline, which is what removing the section between them
+        exposed. (PF-1020)
+      */}
+      <section className="px-6 py-20">
         <div className="mx-auto max-w-3xl text-center">
           <h2 className="text-3xl font-bold text-white sm:text-4xl">
             Ready to create your first game?
