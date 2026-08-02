@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { buildPlayContentSecurityPolicy, isDevEvalAllowed } from '@/lib/security/csp';
+import {
+  buildPlayContentSecurityPolicy,
+  isPlayPath,
+  playCspOptionsFromEnv,
+} from '@/lib/security/csp';
 
 /**
  * Allowed origins for API requests in production.
@@ -72,11 +76,6 @@ const CLIENT_SPOOFABLE_HEADERS = [
   'content-security-policy-report-only',
 ] as const;
 
-/** True for the published-game routes, which get the nonce-based CSP. */
-export function isPlayPath(pathname: string): boolean {
-  return pathname === '/play' || pathname.startsWith('/play/');
-}
-
 /**
  * Create the `NextResponse.next()` that every non-short-circuiting path returns,
  * applying the per-request CSP nonce on `/play` (PF-1018, #9038).
@@ -123,12 +122,10 @@ function startResponse(req: NextRequest): NextResponse {
   // the Edge runtime actually documents. `randomUUID()` is ASCII, so `btoa` is
   // safe on it without a latin1 conversion step.
   const nonce = btoa(crypto.randomUUID());
-  const csp = buildPlayContentSecurityPolicy({
-    engineCdn: process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '',
-    nonce,
-    clerkPublishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
-    devUnsafeEval: isDevEvalAllowed(),
-  });
+  // Spread the shared env derivation rather than re-listing the fields: the
+  // static rule in `next.config.ts` builds its policy from the same call, so the
+  // nonce is provably the ONLY difference between the two writers of this header.
+  const csp = buildPlayContentSecurityPolicy({ ...playCspOptionsFromEnv(), nonce });
   requestHeaders.set('x-nonce', nonce);
   requestHeaders.set('content-security-policy', csp);
 

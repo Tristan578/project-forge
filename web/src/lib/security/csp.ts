@@ -129,6 +129,17 @@ export function buildContentSecurityPolicy({ allowUnsafeEval, engineCdn = '' }: 
  * the global policy's `'unsafe-eval'`, which their `Function()`-based script
  * sandbox requires.
  */
+/**
+ * Route scope for the published-game policy, in Next.js `headers()` `source`
+ * syntax. This is the ONE definition of "is this a /play request": the static
+ * rule in {@link buildCspRouteRules} is built from it, and {@link isPlayPath} —
+ * which the proxy uses to decide whether to mint a nonce — is derived from it
+ * via {@link cspSourceToRegExp}. Two writers set the CSP on this route; if they
+ * disagreed about which paths it covers, one of them would emit a policy the
+ * other never intended for that URL.
+ */
+export const PLAY_ROUTE_SOURCE = '/play/:path*';
+
 export const EVAL_FREE_ROUTE_SOURCES: string[] = [
   '/community/:path*',
   '/blog/:path*',
@@ -289,6 +300,24 @@ export interface CspRouteRule {
 }
 
 /**
+ * Every input the play policy needs except the nonce, read from the environment.
+ *
+ * Both writers of the `/play` CSP call this — `next.config.ts` for the static
+ * rule and the proxy for the nonce-bearing response header — so the two policies
+ * can differ ONLY in the nonce. Assembling the same object independently at each
+ * site is what lets a new field be wired into one writer and forgotten in the
+ * other: every field is optional, so the omission is not a type error, and each
+ * writer's own tests keep passing while the two headers silently diverge.
+ */
+export function playCspOptionsFromEnv(): Omit<PlayCspOptions, 'nonce'> {
+  return {
+    engineCdn: process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '',
+    clerkPublishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+    devUnsafeEval: isDevEvalAllowed(),
+  };
+}
+
+/**
  * Build the ORDERED list of Content-Security-Policy route rules consumed by
  * `next.config.ts#headers()`. This is the single source of truth for CSP route
  * scoping so the ordering contract below can be unit-tested.
@@ -311,11 +340,7 @@ export function buildCspRouteRules({
   engineCdn = '',
   clerkPublishableKey,
   devUnsafeEval = isDevEvalAllowed(),
-}: {
-  engineCdn?: string;
-  clerkPublishableKey?: string;
-  devUnsafeEval?: boolean;
-} = {}): CspRouteRule[] {
+}: Omit<PlayCspOptions, 'nonce'> = {}): CspRouteRule[] {
   const globalCsp = buildContentSecurityPolicy({ allowUnsafeEval: true, engineCdn });
   // The eval-free routes drop 'unsafe-eval' in every real build; under the dev
   // server they must keep it or Fast Refresh's eval aborts hydration.
@@ -331,7 +356,7 @@ export function buildCspRouteRules({
     // listed here can only be overridden by a more-specific rule BELOW it.
     { source: '/:path*', headers: csp(globalCsp) },
     // Overrides AFTER the global rule so they are the last writer for their paths.
-    { source: '/play/:path*', headers: csp(playCsp) },
+    { source: PLAY_ROUTE_SOURCE, headers: csp(playCsp) },
     ...EVAL_FREE_ROUTE_SOURCES.map((source) => ({ source, headers: csp(evalFreeCsp) })),
   ];
 }
@@ -348,6 +373,23 @@ export function cspSourceToRegExp(source: string): RegExp {
     .replace(/\/:[A-Za-z0-9_]+\*/g, '(?:/.*)?') // "/:path*" → optional trailing segments
     .replace(/:[A-Za-z0-9_]+/g, '[^/]+'); // ":name" → exactly one path segment
   return new RegExp(`^${body}/?$`);
+}
+
+/** Compiled once — {@link cspSourceToRegExp} returns an unanchored-free, non-global
+ * pattern, so `.test()` is stateless and safe to reuse across requests. */
+const PLAY_ROUTE_PATTERN = cspSourceToRegExp(PLAY_ROUTE_SOURCE);
+
+/**
+ * Does `pathname` fall under the published-game policy? Derived from
+ * {@link PLAY_ROUTE_SOURCE} rather than hand-written, so the proxy (which mints
+ * the nonce) and `next.config.ts` (which emits the static rule) cannot drift
+ * apart on which URLs `/play`'s policy covers.
+ *
+ * Matches `/play`, `/play/`, and any descendant; NOT `/playground` or
+ * `/community/play`.
+ */
+export function isPlayPath(pathname: string): boolean {
+  return PLAY_ROUTE_PATTERN.test(pathname);
 }
 
 /**

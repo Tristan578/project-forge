@@ -8,6 +8,9 @@ import {
   effectiveCspForPath,
   EVAL_FREE_ROUTE_SOURCES,
   isDevEvalAllowed,
+  isPlayPath,
+  PLAY_ROUTE_SOURCE,
+  playCspOptionsFromEnv,
 } from '../csp';
 
 /** Pull the `script-src` directive out of a full CSP header value. */
@@ -350,5 +353,78 @@ describe('effectiveCspForPath — resolves last-writer-wins per route (#8612, #8
     expect(playScript).not.toContain("'unsafe-eval'");
     expect(playScript).toContain("'wasm-unsafe-eval'");
     expect(playScript).toContain("'unsafe-inline'");
+  });
+});
+
+describe('PLAY_ROUTE_SOURCE — one definition of the /play scope', () => {
+  it('is the source the static rule is emitted under', () => {
+    const rules = buildCspRouteRules();
+    expect(rules.some((r) => r.source === PLAY_ROUTE_SOURCE)).toBe(true);
+  });
+
+  // The proxy decides whether to mint a nonce from isPlayPath; next.config.ts
+  // emits the static rule under PLAY_ROUTE_SOURCE. If those two disagreed about
+  // a URL, one writer would emit a policy the other never intended for it.
+  it.each([
+    ['/play', true],
+    ['/play/', true],
+    ['/play/user_abc/my-game', true],
+    ['/playground', false],
+    ['/community/play', false],
+    ['/', false],
+  ])('isPlayPath(%s) === %s, and matches the route source', (pathname, expected) => {
+    expect(isPlayPath(pathname as string)).toBe(expected);
+    expect(cspSourceToRegExp(PLAY_ROUTE_SOURCE).test(pathname as string)).toBe(expected);
+  });
+
+  it('is stateless across calls (no lastIndex drift from a reused RegExp)', () => {
+    expect(isPlayPath('/play/a')).toBe(true);
+    expect(isPlayPath('/play/a')).toBe(true);
+    expect(isPlayPath('/playground')).toBe(false);
+    expect(isPlayPath('/play/a')).toBe(true);
+  });
+});
+
+describe('playCspOptionsFromEnv — shared by both writers of the /play header', () => {
+  it('supplies every PlayCspOptions field except the nonce', () => {
+    // A field present on the options type but missing here would be silently
+    // dropped from BOTH writers; a field wired into only one writer is exactly
+    // the divergence this function exists to prevent.
+    expect(Object.keys(playCspOptionsFromEnv()).sort()).toEqual([
+      'clerkPublishableKey',
+      'devUnsafeEval',
+      'engineCdn',
+    ]);
+    expect(playCspOptionsFromEnv()).not.toHaveProperty('nonce');
+  });
+
+  it('reads the engine CDN and Clerk key from the environment', () => {
+    const prevCdn = process.env.NEXT_PUBLIC_ENGINE_CDN_URL;
+    const prevKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    process.env.NEXT_PUBLIC_ENGINE_CDN_URL = 'https://cdn.example.test';
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==';
+    try {
+      const opts = playCspOptionsFromEnv();
+      expect(opts.engineCdn).toBe('https://cdn.example.test');
+      expect(opts.clerkPublishableKey).toBe('pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==');
+      expect(opts.devUnsafeEval).toBe(isDevEvalAllowed());
+    } finally {
+      if (prevCdn === undefined) delete process.env.NEXT_PUBLIC_ENGINE_CDN_URL;
+      else process.env.NEXT_PUBLIC_ENGINE_CDN_URL = prevCdn;
+      if (prevKey === undefined) delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+      else process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = prevKey;
+    }
+  });
+
+  it('yields a static /play policy differing from the proxy policy only by the nonce', () => {
+    const opts = playCspOptionsFromEnv();
+    const staticCsp = effectiveCspForPath(buildCspRouteRules(opts), '/play/user_abc/my-game');
+    const proxyCsp = buildPlayContentSecurityPolicy({ ...opts, nonce: 'dGVzdA==' });
+    expect(staticCsp).toBeDefined();
+    // Same directives, same order, same hosts — the ONLY textual difference is
+    // the script-src auth token, which is the nonce vs the no-nonce fallback.
+    expect(proxyCsp.replace(" 'nonce-dGVzdA=='", ' <AUTH>')).toBe(
+      (staticCsp as string).replace(" 'unsafe-inline'", ' <AUTH>'),
+    );
   });
 });

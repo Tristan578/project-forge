@@ -29,12 +29,10 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { NextRequest } from 'next/server';
 import { createRouteMatcher } from '@clerk/nextjs/server';
 
-import {
-  buildPublicRoutes,
-  applyAuthDecision,
-  isPlayPath,
-  passthroughMiddleware,
-} from '../proxy';
+import { buildPublicRoutes, applyAuthDecision, passthroughMiddleware } from '../proxy';
+// isPlayPath lives with the route source it is derived from; the proxy imports it
+// from there so the nonce minter and the static rule cannot disagree on scope.
+import { isPlayPath } from '@/lib/security/csp';
 
 vi.mock('server-only', () => ({}));
 

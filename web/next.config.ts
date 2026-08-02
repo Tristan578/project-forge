@@ -3,15 +3,12 @@ import { withSentryConfig } from "@sentry/nextjs";
 import withBundleAnalyzer from "@next/bundle-analyzer";
 import createNextIntlPlugin from "next-intl/plugin";
 import { withBotId } from "botid/next/config";
-import { buildCspRouteRules } from "./src/lib/security/csp";
+import { buildCspRouteRules, playCspOptionsFromEnv } from "./src/lib/security/csp";
 
 const analyzer = withBundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
 });
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
-
-// CDN origin for WASM engine files (e.g. "https://cdn.spawnforge.ai")
-const engineCdn = process.env.NEXT_PUBLIC_ENGINE_CDN_URL || "";
 
 // Per-route Content-Security-Policy rules. ORDER IS LOAD-BEARING: Next.js applies
 // every matching headers() rule and the LAST writer of a duplicate key wins (it
@@ -20,10 +17,10 @@ const engineCdn = process.env.NEXT_PUBLIC_ENGINE_CDN_URL || "";
 // overrides AFTER it, so each override is the last writer for its paths and
 // 'unsafe-eval' is actually dropped there (#8612, #8634). Single source of truth
 // + ordering contract live in src/lib/security/csp.ts and are unit-tested.
-const cspRouteRules = buildCspRouteRules({
-  engineCdn,
-  clerkPublishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
-});
+// Options come from playCspOptionsFromEnv() — the SAME call the proxy makes when
+// it mints the nonce — so the two writers of the /play header differ only in the
+// nonce, and a field added there reaches both writers automatically.
+const cspRouteRules = buildCspRouteRules(playCspOptionsFromEnv());
 
 // Non-CSP security headers applied to every route. CSP is intentionally NOT here
 // — it comes from cspRouteRules so the last-writer-wins ordering is explicit and
