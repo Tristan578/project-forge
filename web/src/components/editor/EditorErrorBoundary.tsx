@@ -29,7 +29,12 @@ export class EditorErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex h-screen w-full items-center justify-center bg-zinc-950 p-4">
+        // h-full, not h-screen: this renders inside <ViewportLock> (h-dvh
+        // overflow-hidden), where a 100vh box overflows the dynamic viewport on
+        // mobile and gets clipped. overflow-y-auto because the expanded stack
+        // trace below can exceed the viewport — without it the lock would clip
+        // the recovery buttons out of reach on the one screen that needs them.
+        <div className="flex h-full w-full items-center justify-center overflow-y-auto bg-zinc-950 p-4">
           <div className="max-w-md rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
             <div className="mb-4 flex items-center gap-3">
               <AlertTriangle className="h-8 w-8 shrink-0 text-red-500" />

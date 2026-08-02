@@ -223,11 +223,32 @@ describe('PF-1017: the editor keeps its full-viewport scroll lock', () => {
     expect(lock).not.toMatch(/className="[^"]*\bfixed\b/);
   });
 
-  it('EditorLayout does not overflow the lock with a 100vh root', () => {
-    const editor = readFileSync(
-      resolve(__dirname, '../../components/editor/EditorLayout.tsx'),
-      'utf-8'
-    );
-    expect(editor).not.toMatch(/className="[^"]*\bh-screen\b/);
+  /**
+   * Every file that renders INSIDE <ViewportLock>. The lock is `h-dvh
+   * overflow-hidden`, so a `100vh` box in here is taller than its parent on
+   * mobile (`100vh` is the LARGE viewport, `100dvh` the visual one) and the
+   * excess is CLIPPED rather than scrolled — a centred spinner or error message
+   * drifts below the fold with no way to reach it.
+   *
+   * `EditorLayout` alone is not enough coverage: the route-level loading and
+   * error states are separate files that never mount it, and those are exactly
+   * the screens a user sees when something is already going wrong.
+   */
+  const LOCKED_SUBTREE = [
+    'src/app/dev/page.tsx',
+    'src/app/editor/loading.tsx',
+    'src/app/editor/[id]/page.tsx',
+    'src/components/editor/EditorLayout.tsx',
+    'src/components/editor/EditorErrorBoundary.tsx',
+    'src/components/editor/WasmErrorBoundary.tsx',
+  ];
+
+  it.each(LOCKED_SUBTREE)('%s does not overflow the lock with a 100vh box', (rel) => {
+    const file = join(REPO_ROOT, 'web', rel);
+    expect(existsSync(file), `${rel} moved — update LOCKED_SUBTREE`).toBe(true);
+    // `\b` treats `-` as a boundary, so this matches `min-h-screen` too. That is
+    // intended: `min-height: 100vh` inside the lock overflows it just as surely
+    // as `height: 100vh` does. Use `h-full` — 100% of the h-dvh parent.
+    expect(readFileSync(file, 'utf-8')).not.toMatch(/className="[^"]*\bh-screen\b/);
   });
 });

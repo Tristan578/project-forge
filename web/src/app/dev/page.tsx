@@ -10,7 +10,7 @@ const EditorLayout = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex h-screen items-center justify-center bg-zinc-950">
+      <div className="flex h-full items-center justify-center bg-zinc-950">
         <div className="text-zinc-400">Loading editor...</div>
       </div>
     ),

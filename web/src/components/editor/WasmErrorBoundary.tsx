@@ -166,7 +166,12 @@ export class WasmErrorBoundary extends Component<Props, State> {
       const hasBackup = hasLocalStorageBackup || this.state.hasIndexedDBBackup;
 
       return (
-        <div className="flex h-screen w-full items-center justify-center bg-zinc-950 p-4">
+        // h-full, not h-screen: this renders inside <ViewportLock> (h-dvh
+        // overflow-hidden), where a 100vh box overflows the dynamic viewport on
+        // mobile and gets clipped. overflow-y-auto so a tall recovery panel
+        // (backup-restore options, diagnostics) stays reachable instead of
+        // being cut off by the lock.
+        <div className="flex h-full w-full items-center justify-center overflow-y-auto bg-zinc-950 p-4">
           <div className="max-w-md rounded-lg bg-zinc-900 p-6 shadow-lg">
             <div className="mb-4 flex items-center gap-3">
               <AlertTriangle className="h-8 w-8 text-red-500" />
