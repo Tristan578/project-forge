@@ -30,10 +30,25 @@ no automated check noticed.
 `web/src/app/__tests__/public-scroll.test.ts` adds structural guards for both
 defects plus the editor's viewport lock. The assertions are structural because
 the failure mode is: the rendered markup is correct in jsdom, which has no
-viewport to clip. The guards cover every top-level `html`/`body` block (a later
-block wins the cascade), the `@import`ed `@spawnforge/ui` token sheet, the
-`<body className>` in the root layout, and every `page.*` under `app/` at any
-depth — failing on any URL path claimed twice, not just `/`.
+viewport to clip. The guards cover every `html`/`body` rule in `globals.css` and
+in the `@import`ed `@spawnforge/ui` token sheet, the `<body className>` in the
+root layout, and every `page.*` under `app/` at any depth — failing on any URL
+path claimed twice, not just `/`.
+
+Those CSS guards walk brace depth rather than matching line-anchored regexes, so
+a rule nested inside `@media (max-width: …)` is caught too — a media query gates
+the cascade, it does not suppress it, so a nested `body { overflow: hidden }`
+reintroduces the bug on mobile while a top-level-only guard stays green. The
+extractor is itself pinned against a synthetic stylesheet, which is what guards
+the token sheet: that file legitimately has no `html`/`body` rules today, so
+"found more than zero rules in every real file" is not an assertion that can be
+made there.
+
+`web/e2e/tests/mobile-viewport.spec.ts` gains a document-scroll containment
+assertion at both emulated mobile viewports. Chromium has no retracting URL bar,
+so it cannot reproduce the mobile-Safari large-viewport case — it is a tripwire
+for the general "editor grew a document scrollbar" regression, where there was
+previously none.
 
 That directory also had no coverage in the local workspace gate: `src/app/__tests__`
 matched neither `vitest.config.node.ts` nor `vitest.config.jsdom.ts`, so five

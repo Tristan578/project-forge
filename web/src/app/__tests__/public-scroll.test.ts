@@ -24,13 +24,56 @@ const APP_DIR = resolve(__dirname, '..');
 const REPO_ROOT = resolve(APP_DIR, '../../..');
 
 /**
- * Bodies of EVERY top-level `selector { ... }` block — not just the first.
- * Appending a second `body { ... }` at the end of the sheet is the likeliest
- * way this regression comes back, and the CSS cascade means that later block
- * is the one that wins.
+ * Split a stylesheet into `{ selector, body }` pairs by walking braces, so rules
+ * are found at ANY nesting depth.
+ *
+ * A line-anchored regex (`/^body\s*\{/m`) is not sufficient: `^` under the `m`
+ * flag anchors to start-of-LINE, not start-of-rule, so an indented rule inside
+ * `@media (max-width: 640px) { ... }` is invisible to it while the browser still
+ * applies it. Media queries gate the cascade; they do not suppress it — so that
+ * is a complete reintroduction of PF-1017 on mobile that a top-level-only guard
+ * cannot see.
+ *
+ * Quoted strings are skipped so a brace inside `content: "}"` cannot desync the
+ * walk.
  */
-function topLevelRules(css: string, selector: string): string[] {
-  return [...css.matchAll(new RegExp(`^${selector}\\s*\\{([^}]*)\\}`, 'gm'))].map((m) => m[1]);
+function cssRules(css: string): { selector: string; body: string }[] {
+  const src = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules: { selector: string; body: string }[] = [];
+  const open: { selector: string; bodyStart: number }[] = [];
+  let tokenStart = 0;
+
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const close = src.indexOf(ch, i + 1);
+      i = close === -1 ? src.length : close;
+    } else if (ch === '{') {
+      open.push({ selector: src.slice(tokenStart, i).trim(), bodyStart: i + 1 });
+      tokenStart = i + 1;
+    } else if (ch === '}') {
+      const rule = open.pop();
+      if (rule) rules.push({ selector: rule.selector, body: src.slice(rule.bodyStart, i) });
+      tokenStart = i + 1;
+    } else if (ch === ';') {
+      tokenStart = i + 1;
+    }
+  }
+  return rules;
+}
+
+/**
+ * Matches a selector that targets the `html` or `body` ELEMENT — including
+ * grouped (`html, body`) and qualified (`body.dark`, `html[data-theme]`) forms,
+ * but not lookalike class names such as `.body-text`.
+ */
+const ROOT_SELECTOR = /(?:^|[\s>+~,(])(?:html|body)(?![\w-])/;
+
+/** Bodies of every rule that styles `html` or `body`, at any nesting depth. */
+function rootRuleBodies(css: string): string[] {
+  return cssRules(css)
+    .filter(({ selector }) => ROOT_SELECTOR.test(`,${selector}`))
+    .map(({ body }) => body);
 }
 
 /** Stylesheets that can style `html`/`body` on every page. */
@@ -50,30 +93,60 @@ describe('PF-1017: public pages must be able to scroll', () => {
 
     it(`does not clip the viewport from ${label}`, () => {
       expect(existsSync(sheet), `${label} moved — update GLOBAL_STYLESHEETS`).toBe(true);
-      const css = readFileSync(sheet, 'utf-8');
-      for (const selector of ['html', 'body']) {
-        for (const rule of topLevelRules(css, selector)) {
-          expect(rule, `\`${selector} { ... }\` in ${label}`).not.toMatch(CLIPPING);
-        }
+      for (const rule of rootRuleBodies(readFileSync(sheet, 'utf-8'))) {
+        expect(rule, `an \`html\`/\`body\` rule in ${label}`).not.toMatch(CLIPPING);
       }
     });
   }
 
+  it('finds html/body rules wherever they are nested', () => {
+    // Fail closed. The sheets above are guarded only as well as the extractor
+    // works, and `theme.css` legitimately has NO html/body rules today — so a
+    // "found > 0 in every real file" check is impossible there. Pinning the
+    // extractor against a synthetic sheet guards every file instead, including
+    // the ones that are currently empty of root rules.
+    const found = rootRuleBodies(`
+      html { overflow: visible; }
+      body { background: red; }
+      .body-text { overflow: hidden; }
+      @media (max-width: 640px) {
+        body { overflow: hidden; }
+      }
+      @supports (height: 100dvh) {
+        @media print {
+          html, body { overflow-y: clip; }
+        }
+      }
+      body::after { content: "}"; }
+    `);
+    // The three clipping rules are the ones that matter: media-nested,
+    // doubly-nested + grouped, and none of the lookalike `.body-text`.
+    expect(found.filter((b) => CLIPPING.test(b))).toHaveLength(2);
+    expect(found.length).toBeGreaterThanOrEqual(4);
+    // The `content: "}"` brace must not desync the walk.
+    expect(rootRuleBodies('body { overflow: hidden; }').some((b) => CLIPPING.test(b))).toBe(true);
+  });
+
   it('still finds the html and body rules it is guarding', () => {
-    // Fail closed: a regex that silently matches nothing would make every
-    // assertion above vacuous.
-    const css = readFileSync(join(APP_DIR, 'globals.css'), 'utf-8');
-    expect(topLevelRules(css, 'html').length).toBeGreaterThan(0);
-    expect(topLevelRules(css, 'body').length).toBeGreaterThan(0);
+    // globals.css is the file that actually carries root rules — if the
+    // extractor stops matching there, every assertion above goes vacuous.
+    expect(rootRuleBodies(readFileSync(join(APP_DIR, 'globals.css'), 'utf-8')).length)
+      .toBeGreaterThan(0);
   });
 
   it('does not clip the viewport from the <body> className', () => {
     // A Tailwind `overflow-hidden`/`h-screen` on <body> has the same effect as
     // the CSS rule and is the more idiomatic way to reintroduce it here.
     const layout = readFileSync(join(APP_DIR, 'layout.tsx'), 'utf-8');
-    const bodyClass = /<body\s[^>]*className=\{?[`'"]([^`'"]*)/.exec(layout);
-    expect(bodyClass, 'could not locate the <body> className in layout.tsx').not.toBeNull();
-    expect(bodyClass![1]).not.toMatch(/\b(overflow-hidden|overflow-y-hidden|h-screen|h-dvh)\b/);
+    // `\s` (not `\b`) after the tag name so a prose `<body>` in a comment is
+    // not mistaken for the real tag — layout.tsx has one on the Clerk note.
+    const openTag = /<body\s[^>]*>/.exec(layout);
+    expect(openTag, 'could not locate the <body> tag in layout.tsx').not.toBeNull();
+    // Every string literal in the tag, so a `cn(...)`/`clsx(...)` className is
+    // read as well as a bare string or template literal.
+    const classes = [...openTag![0].matchAll(/[`'"]([^`'"]*)[`'"]/g)].map((m) => m[1]).join(' ');
+    expect(classes.trim(), 'no class literals found on <body>').not.toBe('');
+    expect(classes).not.toMatch(/\b(overflow-hidden|overflow-y-hidden|h-screen|h-dvh)\b/);
   });
 });
 
