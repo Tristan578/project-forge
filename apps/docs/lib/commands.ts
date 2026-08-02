@@ -3,7 +3,26 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MANIFEST_PATH = path.resolve(__dirname, '../../../mcp-server/manifest/commands.json');
+
+/**
+ * The manifest MUST resolve inside the deploy root.
+ *
+ * This previously pointed at `../../../mcp-server/manifest/commands.json` —
+ * the repo-root copy. That path exists locally and does not exist on Vercel:
+ * the `spawnforge-docs` project sets `rootDirectory: apps/docs`, so everything
+ * above `apps/docs/` is absent from the build. The read threw, the catch below
+ * swallowed it, and the page rendered zero commands with no error anywhere.
+ *
+ * `apps/docs/data/commands.json` is the in-root copy, and is already what the
+ * build uses — `vercel.json` runs the page generator with
+ * `MANIFEST_PATH=./data/commands.json`. Honouring the same env var here keeps
+ * the generator and the runtime reader on one path instead of two that can
+ * disagree. Kept in sync with the canonical `mcp-server/manifest/commands.json`
+ * by `scripts/check-manifest-sync.ts`.
+ */
+const MANIFEST_PATH = process.env.MANIFEST_PATH
+  ? path.resolve(process.env.MANIFEST_PATH)
+  : path.resolve(__dirname, '../data/commands.json');
 
 interface CommandEntry {
   name: string;
@@ -35,8 +54,20 @@ export async function readCommandsManifest(): Promise<{
   try {
     const raw = fs.readFileSync(MANIFEST_PATH, 'utf-8');
     manifest = JSON.parse(raw) as CommandsManifest;
-  } catch {
-    return { categories: [], scopes: [], publicCount: 0 };
+  } catch (cause) {
+    // Deliberately fatal. The previous `catch { return zeros }` is the reason
+    // the broken manifest path shipped unnoticed: an unreachable manifest and
+    // a genuinely empty one were indistinguishable, so the docs site rendered
+    // "0 commands" as though that were a valid answer. There is no such thing
+    // as a correct SpawnForge docs build with no commands in it — failing the
+    // build is the only outcome that surfaces the problem to anyone.
+    throw new Error(
+      `Cannot read the MCP commands manifest at ${MANIFEST_PATH}. ` +
+        `It must exist inside the deploy root (rootDirectory: apps/docs) — a ` +
+        `path above apps/docs/ resolves locally but not on Vercel. ` +
+        `Run scripts/check-manifest-sync.ts to verify the in-root copy.`,
+      { cause },
+    );
   }
 
   const publicCommands = (manifest.commands ?? []).filter(

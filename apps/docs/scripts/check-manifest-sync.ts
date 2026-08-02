@@ -76,15 +76,39 @@ const isMainModule =
   path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isMainModule) {
-  const result = checkSync(
-    path.join(repoRoot, 'mcp-server/manifest/commands.json'),
-    path.join(repoRoot, 'web/src/data/commands.json'),
-  );
+  const canonical = path.join(repoRoot, 'mcp-server/manifest/commands.json');
 
-  if (!result.passed) {
-    console.error(result.error);
+  /**
+   * THREE copies exist, not two.
+   *
+   * `apps/docs/data/commands.json` is the copy the docs site actually ships —
+   * it is inside the Vercel deploy root (`rootDirectory: apps/docs`), which is
+   * why both the page generator and the runtime reader point at it. It was
+   * unguarded, and it had already drifted: it was missing the PUBLIC command
+   * `setup_game_from_description`, so the live docs silently documented 281
+   * commands instead of 282, with nothing anywhere reporting a problem
+   * (PF-1019).
+   *
+   * Guarding the copy that gets deployed is the whole point. Adding a copy
+   * without adding it here recreates exactly this bug.
+   */
+  const copies = [
+    path.join(repoRoot, 'web/src/data/commands.json'),
+    path.join(repoRoot, 'apps/docs/data/commands.json'),
+  ];
+
+  let failed = false;
+  for (const copy of copies) {
+    const result = checkSync(canonical, copy);
+    if (!result.passed) {
+      console.error(`${result.error}: ${path.relative(repoRoot, copy)}`);
+      failed = true;
+    }
+  }
+
+  if (failed) {
     process.exit(1);
   }
 
-  console.log('Manifest sync check passed.');
+  console.log(`Manifest sync check passed (${copies.length} copies).`);
 }
