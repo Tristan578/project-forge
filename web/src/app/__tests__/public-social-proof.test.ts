@@ -31,15 +31,29 @@ const APP_DIR = resolve(__dirname, '..');
 const WEB_ROOT = resolve(APP_DIR, '..', '..');
 
 /**
- * Public, unauthenticated routes plus the shared marketing components.
+ * Routes INTENDED to be reachable with no auth redirect, plus the shared
+ * marketing components.
  *
- * "Public" here means: reachable with no auth redirect. Verified per entry —
+ * The authority on what is actually public is `buildPublicRoutes()` in
+ * `web/src/proxy.ts`, not a page-level grep: most public pages carry no auth
+ * code of their own, and anything the proxy's matcher does not list falls
+ * through to `redirectToSignIn`. Every entry below was checked against that
+ * list, with one deliberate exception:
+ *
+ * - `src/app/docs` is INTENDED to be public — it exports SEO metadata, uses
+ *   `cacheLife('days')` (meaningless for a per-user page), and the landing-page
+ *   footer links to it — but it is missing from `buildPublicRoutes()` today, so
+ *   anonymous visitors are currently redirected to sign-in. That is a separate
+ *   routing bug, tracked as PF-1038. It stays listed here on purpose:
+ *   over-inclusion cannot cause a false negative, and the guard starts covering
+ *   the route the moment PF-1038 lands. Do not remove it.
+ *
  * `play/[userId]/[slug]` calls `safeAuth()` only to set a display flag and
- * never redirects, so it belongs; `dashboard`, `settings`, `editor` and
- * `admin` all redirect and are rightly absent.
+ * never redirects, so it belongs. `dashboard`, `settings`, `editor` and `admin`
+ * are rightly absent — each redirects anonymous requests.
  *
- * Adding a public route? Add it here. The per-entry assertion below fails if
- * an entry stops resolving, but nothing can detect a route you never listed.
+ * Adding a public route? Add it here. The per-entry assertion below fails if an
+ * entry stops resolving, but nothing can detect a route you never listed.
  */
 const PUBLIC_SURFACE = [
   'src/app/page.tsx',
