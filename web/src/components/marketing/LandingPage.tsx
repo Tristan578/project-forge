@@ -243,27 +243,6 @@ const pricingTiers: PricingTier[] = [
   },
 ];
 
-const testimonials = [
-  {
-    quote:
-      'I shipped my first mobile game in a weekend. The AI understood exactly what I wanted — no guessing, no tutorials.',
-    name: 'Priya K.',
-    role: 'Indie developer, solo founder',
-  },
-  {
-    quote:
-      'SpawnForge replaced three separate tools for me. The visual scripting alone is worth the subscription.',
-    name: 'Marcus T.',
-    role: 'Game designer, 8 years experience',
-  },
-  {
-    quote:
-      "My students built five different games in one afternoon. I've never seen beginners get this far this fast.",
-    name: 'Lena H.',
-    role: 'Computer science educator',
-  },
-];
-
 const navLinks = [
   { href: '#features', label: 'Features' },
   { href: '#how-it-works', label: 'How It Works' },
@@ -618,38 +597,14 @@ export default async function LandingPage() {
         </div>
       </section>
 
-      {/* ---- Social Proof ---- */}
-      <section className="px-6 py-20" aria-labelledby="testimonials-heading">
-        <div className="mx-auto max-w-5xl text-center">
-          <h2
-            id="testimonials-heading"
-            className="text-3xl font-bold text-white sm:text-4xl"
-          >
-            Trusted by Game Creators
-          </h2>
-          <p className="mx-auto mt-4 max-w-2xl text-zinc-400">
-            Join thousands of creators building games with SpawnForge.
-          </p>
-          <div className="mt-12 grid gap-6 md:grid-cols-3">
-            {testimonials.map((t) => (
-              <figure
-                key={t.name}
-                className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 text-left"
-              >
-                <blockquote>
-                  <p className="text-sm leading-relaxed italic text-zinc-300">
-                    &ldquo;{t.quote}&rdquo;
-                  </p>
-                </blockquote>
-                <figcaption className="mt-4">
-                  <div className="text-sm font-medium text-white">{t.name}</div>
-                  <div className="mt-0.5 text-xs text-zinc-500">{t.role}</div>
-                </figcaption>
-              </figure>
-            ))}
-          </div>
-        </div>
-      </section>
+      {/*
+        No social-proof section. It carried three invented endorsements with
+        names and job titles, plus a user-count claim, on a product whose every
+        CTA is still "Join the Waitlist" — there is nobody to quote yet. Do not
+        reinstate it with softened wording or an "illustrative" disclaimer; an
+        invented person is not salvageable that way. Guarded by
+        LandingPage.test.tsx. (PF-1020)
+      */}
 
       {/* ---- CTA Footer ---- */}
       <section className="border-t border-zinc-800 bg-zinc-900/30 px-6 py-20">
