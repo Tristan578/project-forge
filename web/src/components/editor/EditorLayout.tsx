@@ -585,8 +585,10 @@ export function EditorLayout() {
 
   // --- Compact layout (mobile/tablet) --- unchanged
   if (layout.mode === 'compact') {
+    // h-dvh, not h-screen: 100vh is the LARGE viewport on mobile browsers and
+    // would overflow <ViewportLock> by the browser-chrome height (PF-1017).
     return (
-      <div className="relative h-screen w-screen bg-zinc-950">
+      <div className="relative h-dvh w-screen bg-zinc-950">
         {/* Top bar - simplified */}
         <div className="flex h-8 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-2">
           <div className="flex items-center gap-1.5 min-w-0">
@@ -653,7 +655,7 @@ export function EditorLayout() {
 
   // --- Desktop layout: Sidebar + Dockview Workspace ---
   return (
-    <div className="flex h-screen w-screen flex-col bg-zinc-950">
+    <div className="flex h-dvh w-screen flex-col bg-zinc-950">
       {/* Top bar */}
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-3">
         <div className="flex items-center gap-3">
