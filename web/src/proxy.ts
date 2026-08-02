@@ -93,10 +93,18 @@ export function isPlayPath(pathname: string): boolean {
  * code to nonce its own inline `<script>`) and `Content-Security-Policy` (read
  * by Next.js, which stamps the nonce onto its framework and bootstrap scripts).
  *
- * Both of those headers are stripped from client-supplied input on EVERY path,
- * not just `/play` — otherwise a caller could hand the app a nonce of their
- * choosing. Requests carrying neither header (i.e. all normal traffic outside
- * `/play`) skip the rewrite entirely rather than pay for a header copy.
+ * Both of those headers are stripped from client-supplied input on every path
+ * the proxy runs on, not just `/play` — otherwise a caller could hand the app a
+ * nonce of their choosing. ("Every path the proxy runs on", not every URL: the
+ * `config.matcher` below excludes extension-suffixed paths, so a request for
+ * e.g. `/play/<user>/<slug>.js` — a legal `[slug]` match — is neither stripped
+ * nor nonce-stamped. It falls back to the static `next.config.ts` rule, which
+ * carries `'unsafe-inline'` and therefore still renders. The strip is
+ * defense-in-depth regardless: a browser cannot be induced to send a custom
+ * `Content-Security-Policy` request header cross-origin.)
+ *
+ * Requests carrying neither header (i.e. all normal traffic outside `/play`)
+ * skip the rewrite entirely rather than pay for a header copy.
  */
 function startResponse(req: NextRequest): NextResponse {
   const isPlay = isPlayPath(req.nextUrl.pathname);
