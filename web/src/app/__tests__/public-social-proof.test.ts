@@ -26,6 +26,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
 import { join, resolve } from 'path';
+import { FABRICATED_SOCIAL_PROOF } from '@/test/utils/socialProofPatterns';
 
 const APP_DIR = resolve(__dirname, '..');
 const WEB_ROOT = resolve(APP_DIR, '..', '..');
@@ -76,37 +77,16 @@ const PUBLIC_SURFACE = [
 ];
 
 /**
- * Each pattern describes a claim the product cannot currently back.
+ * The claim patterns live in `@/test/utils/socialProofPatterns` because
+ * LandingPage.test.tsx enforces the same rule against rendered text. They were
+ * hand-copied twins once and drifted within a single commit; sharing them is
+ * what stops that recurring.
  *
  * Deliberately NOT included: a bare `<blockquote>`. Quoting a spec or an
  * article in a blog post is legitimate; it is the ATTRIBUTED-to-a-person shape
  * on the landing page that was the violation, and LandingPage.test.tsx covers
  * that structurally.
  */
-const FABRICATED_SOCIAL_PROOF: { label: string; pattern: RegExp }[] = [
-  {
-    label: 'unverifiable population claim ("thousands of creators")',
-    pattern:
-      /\b(thousands|millions|hundreds|dozens) of\s+(?:\w+\s+)?(creators|developers|devs|users|studios|teams|makers|builders|customers)\b/i,
-  },
-  {
-    label: 'bare user count ("10k+ users", "Join 5,000 creators")',
-    pattern:
-      /\b\d[\d,]*\s*(?:k|m)?\+?\s+(creators|developers|devs|users|studios|teams|makers|builders|customers)\b/i,
-  },
-  {
-    label: 'trust-badge heading ("Trusted by", "Loved by")',
-    pattern: /\b(trusted|loved)\s+by\b/i,
-  },
-  {
-    label: 'review/rating structured data',
-    pattern: /\b(aggregateRating|reviewCount|ratingValue)\b/,
-  },
-  {
-    label: 'Review or AggregateRating JSON-LD',
-    pattern: /"@type"\s*:\s*"(Review|AggregateRating)"/,
-  },
-];
 
 function collectSources(relative: string): string[] {
   const absolute = join(WEB_ROOT, relative);

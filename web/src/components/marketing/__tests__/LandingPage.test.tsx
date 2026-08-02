@@ -5,6 +5,7 @@
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, within } from '@/test/utils/componentTestUtils';
+import { RENDERED_TEXT_CLAIMS } from '@/test/utils/socialProofPatterns';
 import LandingPage from '../LandingPage';
 
 vi.mock('next/cache', () => ({
@@ -199,15 +200,21 @@ describe('LandingPage', () => {
     ).toBeNull();
   });
 
-  it('claims no user population it cannot verify', () => {
+  /**
+   * Shared with the source-level scan in
+   * `src/app/__tests__/public-social-proof.test.ts`. These two suites once held
+   * hand-copied twins of the same regexes and drifted within a single commit —
+   * the source copy was widened, this one was not, so it simultaneously missed
+   * "Join thousands of INDIE creators" and false-fired on "creators,
+   * developers" (a bare `[\d,]+` matches the comma). Importing is what keeps
+   * them honest.
+   */
+  it.each(RENDERED_TEXT_CLAIMS)('claims no $label', ({ pattern, label }) => {
     const text = document.body.textContent ?? '';
-    expect(text).not.toMatch(
-      /\b(thousands|millions|hundreds) of (creators|developers|users|studios|game)/i
-    );
-    // "Join 12,000+ creators" and friends — any bare count of people.
-    expect(text).not.toMatch(
-      /[\d,]+\+?\s+(creators|developers|users|studios|teams)\b/i
-    );
+    expect(
+      text,
+      `${label} found in the rendered landing page. Remove the claim — do not loosen this pattern.`
+    ).not.toMatch(pattern);
   });
 
   it('renders the AI showcase section', () => {
