@@ -16,6 +16,10 @@ stays dropped. The Clerk Frontend API host is derived from the publishable key r
 than hardcoded, so dev and production instances both resolve correctly, and the decoded
 value is validated as a bare hostname before it reaches the header.
 
+Client-supplied `x-nonce`, `Content-Security-Policy` and `Content-Security-Policy-Report-Only`
+request headers are stripped on every route, so a caller cannot hand the app a nonce of
+their choosing — Next.js reads the nonce from either CSP header name.
+
 Also fixes a related dev-server breakage on the 12 eval-free content routes: Next.js's
 Fast Refresh runtime evaluates a string, which threw during module execution and aborted
 hydration under `npm run dev`. `'unsafe-eval'` is now admitted for the dev server only,
