@@ -20,7 +20,10 @@ const engineCdn = process.env.NEXT_PUBLIC_ENGINE_CDN_URL || "";
 // overrides AFTER it, so each override is the last writer for its paths and
 // 'unsafe-eval' is actually dropped there (#8612, #8634). Single source of truth
 // + ordering contract live in src/lib/security/csp.ts and are unit-tested.
-const cspRouteRules = buildCspRouteRules({ engineCdn });
+const cspRouteRules = buildCspRouteRules({
+  engineCdn,
+  clerkPublishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+});
 
 // Non-CSP security headers applied to every route. CSP is intentionally NOT here
 // — it comes from cspRouteRules so the last-writer-wins ordering is explicit and

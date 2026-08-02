@@ -32,9 +32,43 @@
  * user-generated-content surfaces the findings call out (e.g. `/community`) —
  * never compiles scripts and therefore does not need `'unsafe-eval'`. Removing
  * it there shrinks the string-to-code attack surface as defense-in-depth, with
- * no impact on functionality. The `/play` route already runs a strict,
- * eval-free policy (see `next.config.ts`).
+ * no impact on functionality.
+ *
+ * `/play` goes further: it is dynamically rendered, so it can use a per-request
+ * nonce and drop `'unsafe-inline'` entirely. See
+ * {@link buildPlayContentSecurityPolicy} — including why that policy could not
+ * simply omit inline scripts without a nonce (PF-1018), and why the same
+ * approach does not generalize to the statically-cached marketing pages.
  */
+
+/**
+ * Whether the eval-free policies must nonetheless admit `'unsafe-eval'` because
+ * this is a development server.
+ *
+ * Next.js's dev-mode Fast Refresh runtime (`@next/react-refresh-utils`) compiles
+ * a string with `eval`, and it runs from the `main-app` entry chunk — so a policy
+ * without `'unsafe-eval'` does not merely disable hot reload, it throws during
+ * module execution and **aborts hydration for the whole page**. That made every
+ * eval-free route (the 12 content prefixes, and `/play`) render as dead server
+ * HTML under `npm run dev`, which is also why this had to be fixed before
+ * PF-1018 could be verified in a browser at all.
+ *
+ * Strict equality against `'development'` is deliberate: `'test'`, `'production'`
+ * and an unset value must all yield `false`, so a production build can never
+ * emit `'unsafe-eval'` on a route that scoped it out. `nodeEnv` is a parameter so
+ * that contract is directly testable rather than ambient.
+ *
+ * Note for anyone debugging CSP locally: `@vercel/analytics` and
+ * `@vercel/speed-insights` load from `https://va.vercel-scripts.com` **only**
+ * under `next dev`, so their two blocked-script console errors are dev-only noise
+ * and are deliberately NOT allowlisted. In a real build both resolve to the
+ * same-origin `/_vercel/{insights,speed-insights}/script.js`, already covered by
+ * `'self'`. Adding the host would be permanent policy surface for a dev-only
+ * script that merely console-logs.
+ */
+export function isDevEvalAllowed(nodeEnv: string | undefined = process.env.NODE_ENV): boolean {
+  return nodeEnv === 'development';
+}
 
 export interface CspOptions {
   /**
@@ -102,20 +136,126 @@ export const EVAL_FREE_ROUTE_SOURCES: string[] = [
 ];
 
 /**
- * Locked-down policy for published/played games (`/play/:path*`). A played game
- * runs only first-party code + WASM, so script-src carries neither
- * `'unsafe-eval'` nor `'unsafe-inline'` (it does not mount Clerk or the editor).
- * Kept independent of {@link EVAL_FREE_ROUTE_SOURCES} because the game surface
- * needs a strictly smaller allowlist than the marketing/content routes.
+ * A Clerk publishable key encodes its Frontend API host: `pk_(test|live)_<b64>`,
+ * where the base64 payload decodes to `<host>$`. Decoding it is how the play
+ * policy allowlists the EXACT Clerk host this deployment uses — a development
+ * instance serves from `<slug>.clerk.accounts.dev`, production from a custom
+ * domain such as `clerk.spawnforge.ai`, and hardcoding either one silently
+ * breaks the other environment.
+ *
+ * Returns `null` for a missing/!malformed key, which correctly yields a policy
+ * with no Clerk sources: without a publishable key Clerk loads no scripts.
+ *
+ * The decoded value is validated as a bare hostname. It is interpolated into a
+ * header, so a key decoding to `evil.com; script-src *` would otherwise inject a
+ * directive — the regex is the guard against that, not a formatting nicety.
  */
-export function buildPlayContentSecurityPolicy(engineCdn = ''): string {
+export function clerkFrontendApiFromPublishableKey(publishableKey?: string): string | null {
+  if (!publishableKey) return null;
+  const payload = /^pk_(?:test|live)_(.+)$/.exec(publishableKey)?.[1];
+  if (!payload) return null;
+  let decoded: string;
+  try {
+    decoded = atob(payload);
+  } catch {
+    return null;
+  }
+  // Clerk terminates the encoded host with '$'; its absence means this is not a
+  // key we understand, and guessing at the host is worse than omitting it.
+  if (!decoded.endsWith('$')) return null;
+  const host = decoded.slice(0, -1);
+  return /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(host) ? host : null;
+}
+
+export interface PlayCspOptions {
+  /** Optional engine CDN origin to allow for `script-src` / `connect-src`. */
+  engineCdn?: string;
+  /**
+   * Per-request nonce. When present, inline scripts are authorized by nonce and
+   * `'unsafe-inline'` is omitted. When absent, `'unsafe-inline'` is emitted
+   * instead — see the note on the static fallback below.
+   */
+  nonce?: string;
+  /** Clerk publishable key, used to derive the Clerk host to allowlist. */
+  clerkPublishableKey?: string;
+  /**
+   * Admit `'unsafe-eval'` for the dev server's Fast Refresh runtime only.
+   * Callers pass {@link isDevEvalAllowed}; never `true` in a production build.
+   */
+  devUnsafeEval?: boolean;
+}
+
+/**
+ * Policy for published/played games (`/play/:path*`) — the surface that runs
+ * user-generated content, and therefore the one whose policy matters most.
+ *
+ * ## Why this is nonce-based and the rest of the site is not (PF-1018, #9038)
+ *
+ * The previous policy was `script-src 'self' 'wasm-unsafe-eval'` with neither a
+ * nonce nor `'unsafe-inline'`. Next.js bootstraps App Router hydration with
+ * inline `<script>` tags (`self.__next_f.push(...)`), so EVERY published game
+ * rendered a blank/stuck page: the server HTML painted, all 17 inline bootstrap
+ * scripts were blocked, and hydration never ran. Nothing threw server-side, so
+ * it failed silently in production.
+ *
+ * A nonce is viable here specifically because `/play/[userId]/[slug]` awaits
+ * `safeAuth()` and is therefore dynamically rendered. A nonce forces dynamic
+ * rendering, which is exactly why the marketing pages keep `'unsafe-inline'`
+ * instead (see the module docstring) — they are intentionally static-cached.
+ *
+ * ## Why not `'strict-dynamic'`
+ *
+ * It causes host allowlists to be ignored, and this policy relies on host
+ * sources (the engine CDN, Clerk). It would also put the engine's dynamic
+ * `import()` of the WASM glue on browser-dependent propagation semantics. An
+ * explicit allowlist is predictable and directly verifiable.
+ *
+ * ## The no-nonce fallback
+ *
+ * `next.config.ts` emits this policy statically and cannot carry a per-request
+ * nonce, so that call omits it and gets `'unsafe-inline'`. In practice the proxy
+ * always runs on `/play` and its nonce-bearing header wins; the static rule is a
+ * fail-safe for the case where it does not. Degrading to the site-wide inline
+ * posture is the correct failure mode — degrading to a blank page is not.
+ */
+export function buildPlayContentSecurityPolicy({
+  engineCdn = '',
+  nonce,
+  clerkPublishableKey,
+  devUnsafeEval = false,
+}: PlayCspOptions = {}): string {
+  // Fail closed rather than emit a header built from an unexpected value: the
+  // nonce is interpolated directly into the directive.
+  if (nonce !== undefined && !/^[A-Za-z0-9+/=_-]+$/.test(nonce)) {
+    throw new Error('buildPlayContentSecurityPolicy: nonce is not base64');
+  }
   const cdn = engineCdn ? ` ${engineCdn}` : '';
+  const clerkHost = clerkFrontendApiFromPublishableKey(clerkPublishableKey);
+  // The root layout mounts <ClerkProvider> on every route, /play included, so
+  // Clerk's script is genuinely loaded here. Omitting it does not stop Clerk
+  // mounting — it only makes the load fail.
+  const clerk = clerkHost ? ` https://${clerkHost}` : '';
+  const scriptAuth = nonce ? ` 'nonce-${nonce}'` : " 'unsafe-inline'";
+  // Dev server only — see isDevEvalAllowed. Games themselves never need eval:
+  // the engine compiles WASM ('wasm-unsafe-eval') and /play mounts no script
+  // sandbox, so this token is absent from every production /play response.
+  const devEval = devUnsafeEval ? " 'unsafe-eval'" : '';
+
   return [
     "default-src 'self'",
-    `script-src 'self' 'wasm-unsafe-eval'${cdn}`,
-    `connect-src 'self'${cdn}`,
+    `script-src 'self'${scriptAuth}${devEval} 'wasm-unsafe-eval'${clerk}${cdn}`,
+    `connect-src 'self'${clerk}${cdn}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    `img-src 'self' data: blob: https://img.clerk.com${clerk}`,
+    "font-src 'self' data:",
+    // The engine instantiates WASM from a same-origin worker; games may play
+    // audio decoded to blob URLs.
+    "worker-src 'self' blob:",
+    "media-src 'self' blob:",
+    `frame-src 'self'${clerk}`,
+    "form-action 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
     "frame-ancestors 'none'",
   ].join('; ');
 }
@@ -144,10 +284,22 @@ export interface CspRouteRule {
  * a no-op: the global rule overrode every tightened policy, leaving
  * `'unsafe-eval'` live on the public content routes AND on `/play`.
  */
-export function buildCspRouteRules({ engineCdn = '' }: { engineCdn?: string } = {}): CspRouteRule[] {
+export function buildCspRouteRules({
+  engineCdn = '',
+  clerkPublishableKey,
+  devUnsafeEval = isDevEvalAllowed(),
+}: {
+  engineCdn?: string;
+  clerkPublishableKey?: string;
+  devUnsafeEval?: boolean;
+} = {}): CspRouteRule[] {
   const globalCsp = buildContentSecurityPolicy({ allowUnsafeEval: true, engineCdn });
-  const evalFreeCsp = buildContentSecurityPolicy({ allowUnsafeEval: false, engineCdn });
-  const playCsp = buildPlayContentSecurityPolicy(engineCdn);
+  // The eval-free routes drop 'unsafe-eval' in every real build; under the dev
+  // server they must keep it or Fast Refresh's eval aborts hydration.
+  const evalFreeCsp = buildContentSecurityPolicy({ allowUnsafeEval: devUnsafeEval, engineCdn });
+  // No nonce: a static `headers()` rule cannot carry a per-request value. The
+  // proxy emits the nonce-bearing policy that supersedes this one on /play.
+  const playCsp = buildPlayContentSecurityPolicy({ engineCdn, clerkPublishableKey, devUnsafeEval });
   const csp = (value: string): CspRouteRule['headers'] => [
     { key: 'Content-Security-Policy', value },
   ];

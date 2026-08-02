@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { buildPlayContentSecurityPolicy, isDevEvalAllowed } from '@/lib/security/csp';
 
 /**
  * Allowed origins for API requests in production.
@@ -56,6 +57,59 @@ function handleCors(req: NextRequest): NextResponse | null {
   return null;
 }
 
+/** Request headers a client must never be able to supply — see {@link startResponse}. */
+const CLIENT_SPOOFABLE_HEADERS = ['x-nonce', 'content-security-policy'] as const;
+
+/** True for the published-game routes, which get the nonce-based CSP. */
+export function isPlayPath(pathname: string): boolean {
+  return pathname === '/play' || pathname.startsWith('/play/');
+}
+
+/**
+ * Create the `NextResponse.next()` that every non-short-circuiting path returns,
+ * applying the per-request CSP nonce on `/play` (PF-1018, #9038).
+ *
+ * ## Why the nonce is set here and not in `next.config.ts`
+ *
+ * A static `headers()` rule cannot carry a per-request value. `/play` previously
+ * got a policy with neither a nonce nor `'unsafe-inline'`, which blocked all of
+ * Next.js's inline hydration bootstrap and left every published game blank. The
+ * proxy is the only place that can mint a nonce per request; its header wins
+ * over the `next.config.ts` rule for the same key, which remains as a fail-safe.
+ *
+ * The nonce is written to the forwarded REQUEST as both `x-nonce` (read by page
+ * code to nonce its own inline `<script>`) and `Content-Security-Policy` (read
+ * by Next.js, which stamps the nonce onto its framework and bootstrap scripts).
+ *
+ * Both of those headers are stripped from client-supplied input on EVERY path,
+ * not just `/play` — otherwise a caller could hand the app a nonce of their
+ * choosing. Requests carrying neither header (i.e. all normal traffic outside
+ * `/play`) skip the rewrite entirely rather than pay for a header copy.
+ */
+function startResponse(req: NextRequest): NextResponse {
+  const isPlay = isPlayPath(req.nextUrl.pathname);
+  const hasSpoofed = CLIENT_SPOOFABLE_HEADERS.some((h) => req.headers.has(h));
+  if (!isPlay && !hasSpoofed) return NextResponse.next();
+
+  const requestHeaders = new Headers(req.headers);
+  for (const header of CLIENT_SPOOFABLE_HEADERS) requestHeaders.delete(header);
+  if (!isPlay) return NextResponse.next({ request: { headers: requestHeaders } });
+
+  const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
+  const csp = buildPlayContentSecurityPolicy({
+    engineCdn: process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '',
+    nonce,
+    clerkPublishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+    devUnsafeEval: isDevEvalAllowed(),
+  });
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('content-security-policy', csp);
+
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  response.headers.set('Content-Security-Policy', csp);
+  return response;
+}
+
 function addSecurityHeaders(response: NextResponse, req: NextRequest): NextResponse {
   const origin = req.headers.get('origin');
   const { pathname } = req.nextUrl;
@@ -81,7 +135,7 @@ function addSecurityHeaders(response: NextResponse, req: NextRequest): NextRespo
 function passthroughMiddleware(req: NextRequest): NextResponse {
   const corsResponse = handleCors(req);
   if (corsResponse) return corsResponse;
-  return addSecurityHeaders(NextResponse.next(), req);
+  return addSecurityHeaders(startResponse(req), req);
 }
 
 /**
@@ -199,7 +253,7 @@ export async function applyAuthDecision(
     }
   }
 
-  return addSecurityHeaders(NextResponse.next(), req);
+  return addSecurityHeaders(startResponse(req), req);
 }
 
 /**

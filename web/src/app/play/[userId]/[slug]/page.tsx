@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { cache } from 'react';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, users } from '@/lib/db/schema';
@@ -86,6 +87,12 @@ export default async function PlayPage({ params }: PlayPageProps) {
   const { userId, slug } = await params;
   const { userId: viewerClerkId } = await safeAuth();
 
+  // /play runs a nonce-based CSP with no 'unsafe-inline' (PF-1018), so this
+  // page's own inline <script> must carry the nonce the proxy minted for this
+  // request or the browser drops it. Next.js stamps its OWN bootstrap scripts
+  // automatically from the request CSP header; app-authored tags are not.
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
+
   const game = await getGameData(userId, slug);
 
   // VideoGame JSON-LD — user-controlled values from DB (title, description).
@@ -119,6 +126,7 @@ export default async function PlayPage({ params }: PlayPageProps) {
       {videoGameJsonLd && (
         <script
           type="application/ld+json"
+          nonce={nonce}
           dangerouslySetInnerHTML={{ __html: videoGameJsonLd }}
         />
       )}

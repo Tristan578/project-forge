@@ -3,9 +3,11 @@ import {
   buildContentSecurityPolicy,
   buildCspRouteRules,
   buildPlayContentSecurityPolicy,
+  clerkFrontendApiFromPublishableKey,
   cspSourceToRegExp,
   effectiveCspForPath,
   EVAL_FREE_ROUTE_SOURCES,
+  isDevEvalAllowed,
 } from '../csp';
 
 /** Pull the `script-src` directive out of a full CSP header value. */
@@ -89,22 +91,166 @@ describe('buildContentSecurityPolicy (#8612, #8634)', () => {
   });
 });
 
-describe('buildPlayContentSecurityPolicy', () => {
-  it('locks script-src to first-party + WASM only (no eval, no inline)', () => {
-    const csp = buildPlayContentSecurityPolicy();
-    expect(scriptSrc(csp)).toBe("script-src 'self' 'wasm-unsafe-eval'");
-    expect(scriptSrc(csp)).not.toContain("'unsafe-eval'"); // standalone token absent
+/** Forge a Clerk publishable key for `host`, matching Clerk's own encoding. */
+function publishableKeyFor(host: string, prefix = 'pk_test_'): string {
+  return prefix + btoa(`${host}$`);
+}
+
+describe('clerkFrontendApiFromPublishableKey', () => {
+  it('decodes the Frontend API host from a dev and a live key', () => {
+    expect(clerkFrontendApiFromPublishableKey(publishableKeyFor('sunny-cat-42.clerk.accounts.dev')))
+      .toBe('sunny-cat-42.clerk.accounts.dev');
+    expect(clerkFrontendApiFromPublishableKey(publishableKeyFor('clerk.spawnforge.ai', 'pk_live_')))
+      .toBe('clerk.spawnforge.ai');
+  });
+
+  it('returns null for absent or unrecognized keys instead of guessing a host', () => {
+    expect(clerkFrontendApiFromPublishableKey(undefined)).toBeNull();
+    expect(clerkFrontendApiFromPublishableKey('')).toBeNull();
+    expect(clerkFrontendApiFromPublishableKey('sk_test_abc')).toBeNull();
+    expect(clerkFrontendApiFromPublishableKey('pk_test_')).toBeNull();
+    // Valid base64, but missing Clerk's trailing '$' terminator.
+    expect(clerkFrontendApiFromPublishableKey(`pk_test_${btoa('clerk.example.com')}`)).toBeNull();
+  });
+
+  it('rejects a decoded value that would inject a CSP directive', () => {
+    // The decoded host is interpolated into a header. A key crafted to decode to
+    // a value containing ';' or whitespace must be dropped, not emitted.
+    const injected = publishableKeyFor('evil.com; script-src *');
+    expect(clerkFrontendApiFromPublishableKey(injected)).toBeNull();
+    expect(buildPlayContentSecurityPolicy({ clerkPublishableKey: injected }))
+      .not.toContain('evil.com');
+  });
+});
+
+describe('buildPlayContentSecurityPolicy (PF-1018, #9038)', () => {
+  const clerkKey = publishableKeyFor('clerk.spawnforge.test', 'pk_live_');
+
+  it('authorizes inline scripts by nonce, not by unsafe-inline, when a nonce is given', () => {
+    // The whole point of the fix: Next.js bootstraps hydration with inline
+    // <script> tags. The policy must admit them, and a nonce is how it does so
+    // without re-opening arbitrary inline execution.
+    const script = scriptSrc(buildPlayContentSecurityPolicy({ nonce: 'dGVzdC1ub25jZQ==' }));
+    expect(script).toContain("'nonce-dGVzdC1ub25jZQ=='");
+    expect(script).not.toContain("'unsafe-inline'");
+  });
+
+  it('falls back to unsafe-inline when no nonce is available (static headers() rule)', () => {
+    // A next.config.ts rule cannot carry a per-request value. Degrading to the
+    // site-wide inline posture is correct; degrading to a blank page is not.
+    const script = scriptSrc(buildPlayContentSecurityPolicy());
+    expect(script).toContain("'unsafe-inline'");
+    expect(script).not.toContain('nonce-');
+  });
+
+  it("never admits 'unsafe-eval' by default (games need WASM, not string-to-code)", () => {
+    for (const csp of [
+      buildPlayContentSecurityPolicy(),
+      buildPlayContentSecurityPolicy({ nonce: 'abc123' }),
+      // Explicitly false must behave exactly like omitted.
+      buildPlayContentSecurityPolicy({ nonce: 'abc123', devUnsafeEval: false }),
+    ]) {
+      expect(scriptSrc(csp)).not.toContain("'unsafe-eval'");
+      expect(scriptSrc(csp)).toContain("'wasm-unsafe-eval'");
+    }
+  });
+
+  it("admits 'unsafe-eval' ONLY when the dev-server opt-in is passed", () => {
+    // The dev Fast Refresh runtime evals; without this the eval error aborts
+    // hydration and the page is dead server HTML under `npm run dev`.
+    const csp = buildPlayContentSecurityPolicy({ nonce: 'abc123', devUnsafeEval: true });
+    expect(scriptSrc(csp)).toContain("'unsafe-eval'");
+    // The opt-in must not quietly relax anything else.
     expect(scriptSrc(csp)).not.toContain("'unsafe-inline'");
-    expect(csp).toContain("default-src 'self'");
-    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("object-src 'none'");
+  });
+
+  it('is gated on NODE_ENV === "development" and fails closed everywhere else', () => {
+    // This predicate is the ONLY thing standing between the dev convenience and
+    // a production policy that permits string-to-code. Anything that is not
+    // literally 'development' — including an unset value, 'test', and
+    // lookalikes — must be false.
+    expect(isDevEvalAllowed('development')).toBe(true);
+    for (const env of ['production', 'test', 'staging', 'Development', 'development ', '', undefined]) {
+      expect(isDevEvalAllowed(env)).toBe(false);
+    }
+  });
+
+  it('keeps every production route rule free of \'unsafe-eval\' except the editor routes', () => {
+    // buildCspRouteRules defaults devUnsafeEval from NODE_ENV; pin the production
+    // value explicitly so this contract holds regardless of the runner's env.
+    const rules = buildCspRouteRules({ devUnsafeEval: false });
+    expect(scriptSrc(effectiveCspForPath(rules, '/play/u/g')!)).not.toContain("'unsafe-eval'");
+    for (const source of EVAL_FREE_ROUTE_SOURCES) {
+      const path = source.replace('/:path*', '/x');
+      expect(scriptSrc(effectiveCspForPath(rules, path)!)).not.toContain("'unsafe-eval'");
+    }
+    // The editor routes still need it for the Function()-based script sandbox.
+    expect(scriptSrc(effectiveCspForPath(rules, '/editor/scene')!)).toContain("'unsafe-eval'");
+  });
+
+  it('relaxes exactly those same routes under the dev server, and nothing more', () => {
+    const rules = buildCspRouteRules({ devUnsafeEval: true });
+    for (const path of ['/play/u/g', '/pricing', '/community/x']) {
+      const script = scriptSrc(effectiveCspForPath(rules, path)!);
+      expect(script).toContain("'unsafe-eval'");
+      expect(script).toContain("'wasm-unsafe-eval'");
+    }
+    // Frame/object/base restrictions are unaffected by the dev opt-in.
+    const play = effectiveCspForPath(rules, '/play/u/g')!;
+    expect(play).toContain("frame-ancestors 'none'");
+    expect(play).toContain("object-src 'none'");
+  });
+
+  it('throws rather than emit a header built from a non-base64 nonce', () => {
+    expect(() => buildPlayContentSecurityPolicy({ nonce: "x' 'unsafe-inline" })).toThrow(/base64/);
+    expect(() => buildPlayContentSecurityPolicy({ nonce: 'a b' })).toThrow(/base64/);
+  });
+
+  it('allowlists the Clerk host derived from the publishable key', () => {
+    // <ClerkProvider> mounts on /play via the root layout, so Clerk's script is
+    // genuinely loaded here — omitting the host does not stop Clerk mounting, it
+    // only makes the load fail.
+    const csp = buildPlayContentSecurityPolicy({ clerkPublishableKey: clerkKey });
+    for (const name of ['script-src', 'connect-src', 'frame-src', 'img-src']) {
+      const directive = csp.split(';').map((d) => d.trim()).find((d) => d.startsWith(`${name} `));
+      expect(directive).toContain('https://clerk.spawnforge.test');
+    }
+  });
+
+  it('omits the derived Clerk script host when no publishable key is configured', () => {
+    // Without a key Clerk loads no scripts, so allowlisting a Frontend API host
+    // would be dead surface rather than a functional requirement. (`img-src`
+    // keeps Clerk's avatar CDN unconditionally — that is a fixed asset host, not
+    // a derived script origin.)
+    const csp = buildPlayContentSecurityPolicy();
+    for (const name of ['script-src', 'connect-src', 'frame-src']) {
+      const directive = csp.split(';').map((d) => d.trim()).find((d) => d.startsWith(`${name} `));
+      expect(directive).not.toContain('clerk');
+    }
+    expect(csp).not.toContain('undefined');
+    expect(csp).not.toMatch(/\s{2,}/);
   });
 
   it('appends the engine CDN origin to script-src and connect-src when provided', () => {
     const cdn = 'https://cdn.spawnforge.test';
-    const csp = buildPlayContentSecurityPolicy(cdn);
+    const csp = buildPlayContentSecurityPolicy({ engineCdn: cdn });
     expect(scriptSrc(csp)).toContain(cdn);
     const connect = csp.split(';').map((d) => d.trim()).find((d) => d.startsWith('connect-src '));
     expect(connect).toContain(cdn);
+  });
+
+  it('keeps the baseline lockdown directives in both modes', () => {
+    for (const csp of [
+      buildPlayContentSecurityPolicy(),
+      buildPlayContentSecurityPolicy({ nonce: 'abc123', clerkPublishableKey: clerkKey }),
+    ]) {
+      expect(csp).toContain("default-src 'self'");
+      expect(csp).toContain("frame-ancestors 'none'");
+      expect(csp).toContain("object-src 'none'");
+      expect(csp).toContain("base-uri 'self'");
+      expect(csp).toContain("form-action 'self'");
+    }
   });
 });
 
@@ -185,11 +331,15 @@ describe('effectiveCspForPath — resolves last-writer-wins per route (#8612, #8
     expect(evalOf('/community/games/123')).toContain("'wasm-unsafe-eval'");
   });
 
-  it('applies the locked-down game policy to /play (no eval, no inline, no Clerk)', () => {
+  it('applies the eval-free game policy to /play, without blocking its inline bootstrap', () => {
+    // The static rule carries no nonce (a headers() rule cannot), so it MUST
+    // admit inline scripts: Next.js hydrates via inline <script> tags, and a
+    // policy with neither a nonce nor 'unsafe-inline' rendered every published
+    // game blank (PF-1018). The proxy's nonce-bearing header supersedes this one
+    // in practice — see proxy.test.ts.
     const playScript = evalOf('/play/game-1');
-    expect(playScript).toBe("script-src 'self' 'wasm-unsafe-eval'");
     expect(playScript).not.toContain("'unsafe-eval'");
-    expect(playScript).not.toContain("'unsafe-inline'");
-    expect(playScript).not.toContain('clerk');
+    expect(playScript).toContain("'wasm-unsafe-eval'");
+    expect(playScript).toContain("'unsafe-inline'");
   });
 });
