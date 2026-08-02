@@ -1,8 +1,14 @@
 /**
  * check-manifest-sync.ts
  *
- * CI gate: verifies that mcp-server/manifest/commands.json and
- * web/src/data/commands.json are structurally identical.
+ * CI gate: verifies that the canonical mcp-server/manifest/commands.json is
+ * structurally identical to EVERY derived copy — web/src/data/commands.json
+ * and apps/docs/data/commands.json.
+ *
+ * The docs copy was unguarded until PF-1019 and had already drifted (it was
+ * missing a public command), so the deployed docs under-reported the command
+ * count with nothing anywhere reporting a problem. Register every new copy in
+ * the `copies` array below or that failure mode comes straight back.
  *
  * Uses JSON structural comparison (parse + sort by name), not text diff,
  * to avoid false failures from formatting differences.
