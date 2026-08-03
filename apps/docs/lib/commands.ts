@@ -59,8 +59,16 @@ export async function readCommandsManifest(): Promise<{
     // the broken manifest path shipped unnoticed: an unreachable manifest and
     // a genuinely empty one were indistinguishable, so the docs site rendered
     // "0 commands" as though that were a valid answer. There is no such thing
-    // as a correct SpawnForge docs build with no commands in it — failing the
-    // build is the only outcome that surfaces the problem to anyone.
+    // as a correct SpawnForge docs page with no commands in it, so a visible
+    // failure beats a page that quietly lies.
+    //
+    // This throw is the LAST line of defence, not the gate. `app/layout.tsx`
+    // sets `dynamic = 'force-dynamic'`, so this runs per request and a throw
+    // here is a 500 for a reader, not a red build. The actual build-time gate
+    // is `scripts/generate-mcp-docs.ts`, which reads this same manifest (same
+    // MANIFEST_PATH) in `vercel.json`'s buildCommand and exits 1 when it is
+    // unreadable — so in practice a broken manifest fails the deploy and
+    // never reaches this line.
     throw new Error(
       `Cannot read the MCP commands manifest at ${MANIFEST_PATH}. ` +
         `It must exist inside the deploy root (rootDirectory: apps/docs) — a ` +
