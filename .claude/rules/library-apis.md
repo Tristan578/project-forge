@@ -1,3 +1,11 @@
+---
+description: csgrs, noise, serde-wasm-bindgen, terrain, texture pipeline, particle GPU rendering
+paths:
+  - "engine/**"
+  - "**/*.rs"
+  - "**/Cargo.toml"
+---
+
 # Third-Party Library APIs
 
 ## csgrs 0.20 (CSG Boolean Operations)

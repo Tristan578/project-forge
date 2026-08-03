@@ -23,13 +23,9 @@ Game Runtime + TypeScript Scripting           <- Playing user-created games
 - **4 binaries**: 2 editor + 2 runtime (WebGPU/WebGL2), JS auto-selects at runtime
 - **MUST include `tonemapping_luts`** Bevy feature — without it, materials render pink/magenta
 
-## Build Commands
+## Build Rules
 
-```bash
-powershell.exe -File ".\build_wasm.ps1"      # WASM build (WebGL2 + WebGPU)
-cd web && npm run dev                         # Dev server
-cd web && npx eslint --max-warnings 0         # Lint (ZERO warnings enforced)
-```
+Commands live in the root `CLAUDE.md` → Build Commands / Test Commands.
 
 - Do NOT use `cargo check`/`cargo build` without `--target wasm32-unknown-unknown`
 - **neon-http:** `db.transaction()` throws. Use `getNeonSql()` -> `neonSql.transaction([...statements])`
@@ -37,12 +33,7 @@ cd web && npx eslint --max-warnings 0         # Lint (ZERO warnings enforced)
 
 ## Cargo Features
 
-```toml
-default = []
-webgl2 = ["bevy/webgl2"]                    # WebGL2 backend
-webgpu = ["bevy/webgpu", "dep:bevy_hanabi"] # WebGPU backend + GPU particles
-runtime = []                                 # Strips editor-only systems for export
-```
+Declared in `engine/Cargo.toml` (`webgl2`, `webgpu`, `runtime`; `default = []`). What is NOT in that file:
 
 - `runtime`: gates via `#[cfg(not(feature = "runtime"))]` on system *registrations*, NOT function definitions
 - `webgpu`: gates `bevy_hanabi` GPU rendering. Data types always compiled
@@ -61,10 +52,6 @@ runtime = []                                 # Strips editor-only systems for ex
 **Zero tolerance for lint errors AND warnings.** See `.claude/rules/web-quality.md` for details.
 
 Key: `_` prefix for unused params, no `useRef.current` during render, no blanket `eslint-disable`, keep `mcp-server/manifest/commands.json` synced to `web/src/data/commands.json`.
-
-## Phase Roadmap
-
-53 phases shipped. Key capabilities: 3D+2D rendering (WebGPU/WebGL2), physics (Rapier), 350 MCP commands, AI chat with streaming, Stripe payments (4 tiers), 14,200+ tests, skeletal animation, particles, CSG, procedural terrain, material library (56 presets), visual scripting (73 nodes), dialogue system, tilemap editor, leaderboards, localization, economy designer.
 
 ## On-Demand Skills (invoke when needed)
 

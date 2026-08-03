@@ -20,10 +20,12 @@ hooks:
       timeout: 5000
       once: true
     - matcher: Skill
-      command: bash -c 'SKILL="${TOOL_INPUT_skill:-}"; if echo "$SKILL" | grep -qi "shadcn"; then echo "BLOCK: shadcn skill not applicable — this project uses custom primitives in packages/ui/." >&2; exit 2; fi; exit 0'
+      command: >-
+        bash -c 'SKILL="${TOOL_INPUT_skill:-}"; if echo "$SKILL" | grep -qi "shadcn"; then echo "BLOCK: shadcn skill not applicable — this project uses custom primitives in packages/ui/." >&2; exit 2; fi; exit 0'
       timeout: 3000
     - matcher: Bash
-      command: bash -c 'CMD="${TOOL_INPUT_command:-}"; if echo "$CMD" | grep -q "shadcn"; then echo "BLOCK: shadcn CLI not available — this project uses custom primitives in packages/ui/, not shadcn/ui." >&2; exit 2; fi; exit 0'
+      command: >-
+        bash -c 'CMD="${TOOL_INPUT_command:-}"; if echo "$CMD" | grep -q "shadcn"; then echo "BLOCK: shadcn CLI not available — this project uses custom primitives in packages/ui/, not shadcn/ui." >&2; exit 2; fi; exit 0'
       timeout: 3000
     - matcher: Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/block-writes.sh"
