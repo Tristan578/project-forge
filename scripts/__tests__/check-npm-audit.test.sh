@@ -7,15 +7,23 @@
 #
 # WHY THIS GATE EXISTS
 # --------------------
-# This tree recurrently carries a transitive, dev-only advisory whose only
+# This tree recurrently picks up transitive, dev-only advisories whose only
 # patched release the pinning toolchain cannot take (npm `overrides` do not
-# cascade into nested copies; `--omit=dev` does not prune them). Such advisories
-# cannot be relocked away and must be WAIVED BY ID while the gate stays hard for
-# everything else — a raw `npm audit --audit-level=high` can never pass. The
-# current occupant is brace-expansion GHSA-mh99-v99m-4gvg (patched only in 5.0.8,
-# no 1.x backport; the root 1.1.x copy is pinned ^1.1.7 by the eslint-9/
-# minimatch@3 toolchain). See ALLOWED_ADVISORIES in the gate for the full
-# justification and removal path.
+# cascade into nested copies; `--omit=dev` does not prune them). Such an advisory
+# cannot be relocked away, so the gate must be able to WAIVE it BY ID — pinned to
+# the exact node_modules location(s) that are un-relockable — while staying hard
+# for everything else. A raw `npm audit --audit-level=high` has no such seam: it
+# is all-or-nothing, so one un-relockable advisory forces the whole gate off.
+#
+# As of PF-1046 the allowlist is EMPTY — every advisory ever waived here was
+# eventually relocked away and pruned. So a raw `npm audit --audit-level=high`
+# would pass TODAY. That is not a reason to swap this gate for one: the waiver
+# seam has to already exist the next time an un-relockable high lands, or the
+# only lever left is disabling the gate. This suite therefore tests BOTH — the
+# shipped empty configuration (section 0, running the real gate) and the waiver
+# machinery (every later section, against a synthetic one-entry variant built by
+# make_gate_variant). See ALLOWED_ADVISORIES in the gate for the history of the
+# three pruned entries and what generalizes from them.
 #
 # MAP OF THIS FILE
 # ----------------
@@ -163,43 +171,140 @@ run_gate_script() {
   printf '%s|%s' "$rc" "$out"
 }
 
-# Same, against the real gate under test.
+# Same, against the gate under test WITH one synthetic waiver in its allowlist
+# ($WAIVED_GATE, built below). The shipped gate waives nothing, so the WAIVED /
+# pin-violation / anti-rot paths are unreachable without one; every byte of gate
+# logic is otherwise identical. Cases that must see the SHIPPED allowlist call
+# run_gate_script "$SCRIPT" directly.
 run_gate() {
-  run_gate_script "$SCRIPT" "$1"
+  run_gate_script "$WAIVED_GATE" "$1"
 }
 
 # Same, but invoked with the ROOT workspace arg (`.`) — the invocation shape
 # quality-gates.yml/cd.yml use for the repo-root audit (PF-1010 / #9029).
 run_gate_root() {
-  run_gate_script "$SCRIPT" "$1" .
+  run_gate_script "$WAIVED_GATE" "$1" .
 }
 
 # Helper: write a fixture file, echo its absolute path.
 fixture() { local name="$1"; cat > "$FIX/$name"; echo "$FIX/$name"; }
 
 # Build a gate-script VARIANT whose only byte difference from the real gate is
-# the ALLOWED_ADVISORIES entry ($2 must include its surrounding double quotes).
-# This exercises allowlist-format validation and the comma-separated multi-path
-# pin machinery against otherwise-identical gate code, without adding another
-# test seam to the shipped script. Both sanity greps fail the whole suite
-# loudly if the real entry literal ever drifts — otherwise a variant would
-# silently test the unmodified gate.
-REAL_ENTRY='"GHSA-mh99-v99m-4gvg:node_modules/brace-expansion"'
+# ONE INSERTED ALLOWED_ADVISORIES entry ($2 must include its surrounding double
+# quotes). This exercises the whole waiver path — allowlist-format validation,
+# the WAIVED verdict, the comma-separated multi-path pin machinery, the anti-rot
+# note — against otherwise-identical gate code, without adding another test seam
+# to the shipped script.
+#
+# PF-1046 inverted the harness. It used to sed-SWAP the real gate's sole live
+# entry, which coupled every waiver test to whatever advisory the tree happened
+# to be waiving that week: relocking the dependency (the outcome the gate exists
+# to produce) broke the suite. The gate now ships an EMPTY allowlist, so the
+# harness INSERTS a synthetic entry instead. The fixtures still use a real
+# advisory id (GHSA-mh99-v99m-4gvg, brace-expansion — relocked away in PF-1045)
+# purely because a realistic id/title/path triple makes the fixtures readable;
+# nothing about the gate's behavior depends on that particular id, and nothing
+# breaks the next time the tree's dependency graph moves.
+#
+# Four sanity checks abort the whole suite loudly rather than let a variant
+# silently test the unmodified gate: the anchor must exist, the insertion must
+# land exactly once (line count +1), the inserted entry must be readable back,
+# and the real allowlist must have been empty to begin with (a future waiver
+# would otherwise leave the variant testing a TWO-entry array while every
+# assertion below assumes one).
+#
+# The result comes back through the GATE_VARIANT global, NOT stdout, and that is
+# load-bearing rather than stylistic. `v="$(make_gate_variant ...)"` runs the
+# function in a SUBSHELL, where `exit 1` unwinds only that subshell: the
+# diagnostic is captured into `$v` instead of printed, `$v` becomes a path that
+# does not exist, and the suite continues, reporting every downstream case as a
+# `127` command-not-found rather than naming the real cause once. Measured
+# exactly that while mutation-testing this harness. Writing to a global keeps the
+# abort in the caller's shell; diagnostics go to stderr so nothing can capture
+# them either.
+ALLOWLIST_ANCHOR='ALLOWED_ADVISORIES=('
+GATE_VARIANT=''
 make_gate_variant() {
-  local name="$1" entry="$2"
-  sed "s|$REAL_ENTRY|$entry|" "$SCRIPT" > "$FIX/$name"
-  grep -qF "$entry" "$FIX/$name" \
-    || { echo "make_gate_variant: sed anchor missed for $name — did the real ALLOWED_ADVISORIES entry change?"; exit 1; }
-  if [ "$entry" != "$REAL_ENTRY" ] && grep -qF "$REAL_ENTRY" "$FIX/$name"; then
-    echo "make_gate_variant: real entry still present in $name — substitution did not take"; exit 1
+  local name="$1" entry="$2" real_entries before after
+  GATE_VARIANT=''
+  real_entries="$(grep -cE '^[[:space:]]*"GHSA-' "$SCRIPT" || true)"
+  if [ "$real_entries" != "0" ]; then
+    echo "make_gate_variant: the real gate's ALLOWED_ADVISORIES is no longer empty ($real_entries entry/entries)." >&2
+    echo "  A waiver was added back. This harness INSERTS a synthetic entry into an empty array," >&2
+    echo "  so every variant would now carry two entries and the single-waiver assertions below" >&2
+    echo "  would be testing something other than what they claim. Rework the harness deliberately." >&2
+    exit 1
   fi
-  echo "$FIX/$name"
+  grep -qxF "$ALLOWLIST_ANCHOR" "$SCRIPT" \
+    || { echo "make_gate_variant: anchor line '$ALLOWLIST_ANCHOR' not found in the gate — did the declaration change?" >&2; exit 1; }
+  awk -v anchor="$ALLOWLIST_ANCHOR" -v entry="  $entry" '
+    {print}
+    $0 == anchor && !inserted { print entry; inserted = 1 }
+  ' "$SCRIPT" > "$FIX/$name"
+  grep -qF "$entry" "$FIX/$name" \
+    || { echo "make_gate_variant: inserted entry not found in $name — insertion did not take" >&2; exit 1; }
+  before="$(wc -l < "$SCRIPT")"
+  after="$(wc -l < "$FIX/$name")"
+  if [ "$((after - before))" != "1" ]; then
+    echo "make_gate_variant: expected exactly one inserted line in $name, got $((after - before))" >&2; exit 1
+  fi
+  GATE_VARIANT="$FIX/$name"
 }
+
+# The gate variant that MOST cases below run against: the real gate plus one
+# waived advisory, pinned to the root brace-expansion path the fixtures use.
+# `run_gate`/`run_gate_root` target this rather than $SCRIPT, because the real
+# gate waives nothing and a waiver is the precondition for the WAIVED / pin /
+# anti-rot behavior under test. Cases that must observe the SHIPPED allowlist
+# (section 0 below, and the structural pins near the end) name $SCRIPT
+# explicitly.
+WAIVED_ID='GHSA-mh99-v99m-4gvg'
+WAIVED_PIN='node_modules/brace-expansion'
+make_gate_variant gate-waived.sh "\"$WAIVED_ID:$WAIVED_PIN\""
+WAIVED_GATE="$GATE_VARIANT"
 
 # The bash-runtime-error log run_gate_script appends to; swept at suite end.
 : > "$FIX/bash-errors.log"
 
-echo "=== check-npm-audit.sh contract ==="
+echo "=== shipped (empty) allowlist — the real gate, unmodified ==="
+# PF-1046 emptied ALLOWED_ADVISORIES. Everything below this section runs against
+# $WAIVED_GATE (one synthetic entry), so these four cases are the ONLY ones that
+# observe the gate exactly as it ships. Two things need proving:
+#
+#   (a) An empty array does not crash it. Under `set -u`, bash 3.2 — the macOS
+#       system bash, and what `#!/usr/bin/env bash` resolves to there — aborts on
+#       a plain "${ARR[@]}" expansion of an empty array. The gate reads the array
+#       at three sites, all now guarded with ${ARR[@]+"${ARR[@]}"}. Drop a guard
+#       and the abort happens inside a command substitution: the capture comes
+#       back empty and scores as WAIVED, so the gate fails OPEN with a green exit
+#       code. run_gate_script tees `unbound variable` into $FIX/bash-errors.log
+#       and the suite fails at the end on any hit, so this is caught even when
+#       the exit code happens to match.
+#   (b) With nothing waived, a high advisory BLOCKS. The waived-fixture cases
+#       further down all pass through a variant that re-adds a waiver, so
+#       without these the suite would never once assert what the shipped gate
+#       actually does to a real advisory.
+f="$(fixture shipped-clean.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{}}
+JSON
+)"
+res="$(run_gate_script "$SCRIPT" "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "shipped gate: clean report passes with an empty allowlist (exit 0)"; else fail "shipped gate should exit 0 on a clean report, got $rc — output: $out"; fi
+if ! grep -qF "unbound variable" <<<"$out"; then pass "shipped gate: empty allowlist does not trip bash 3.2 unbound-variable on any of the three array reads"; else fail "shipped gate: empty-array expansion crashed — a \${ARR[@]+\"\${ARR[@]}\"} guard is missing, and the crash fails OPEN"; fi
+
+f="$(fixture shipped-high.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{
+  "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
+    {"source":1,"name":"brace-expansion","title":"brace-expansion unbounded expansion DoS","url":"https://github.com/advisories/GHSA-mh99-v99m-4gvg","severity":"high","range":"<=5.0.7"}],
+    "nodes":["node_modules/brace-expansion"]}}}
+JSON
+)"
+res="$(run_gate_script "$SCRIPT" "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "shipped gate: a high advisory blocks — nothing is waived any more (exit 1)"; else fail "shipped gate should exit 1 on an unwaived high advisory, got $rc — is a waiver back in ALLOWED_ADVISORIES?"; fi
+if grep -qF "::error::non-allowlisted advisory" <<<"$out"; then pass "shipped gate: the block is reported as non-allowlisted, not as a pin violation"; else fail "shipped gate: expected the non-allowlisted ::error:: annotation — output: $out"; fi
+
+echo ""
+echo "=== check-npm-audit.sh contract (gate + one synthetic waiver) ==="
 
 # --- 1. Clean report → exit 0 -------------------------------------------------
 f="$(fixture clean.json <<'JSON'
@@ -779,19 +884,22 @@ echo "=== allowlist entry format + multi-path pins (gate variants) ==="
 # The pre-PF-1009 entry format. A bare id would silently mean "no pinned paths"
 # — every location unexpected, or worse, format-dependent behavior. Malformed
 # entries are a config error: fail closed, never guess.
-v="$(make_gate_variant gate-bare-id.sh '"GHSA-mh99-v99m-4gvg"')"
+make_gate_variant gate-bare-id.sh '"GHSA-mh99-v99m-4gvg"'
+v="$GATE_VARIANT"
 res="$(run_gate_script "$v" "cat $FIX/clean.json")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "2" ]; then pass "bare-id allowlist entry fails closed (exit 2)"; else fail "bare-id entry should exit 2, got $rc"; fi
 if grep -qF "malformed ALLOWED_ADVISORIES" <<<"$out"; then pass "bare-id entry names the malformed-allowlist error"; else fail "malformed-allowlist message missing for bare-id entry"; fi
 
 # --- 13. Empty-path allowlist entry ("id:") → fail-closed (exit 2) ------------
-v="$(make_gate_variant gate-empty-path.sh '"GHSA-mh99-v99m-4gvg:"')"
+make_gate_variant gate-empty-path.sh '"GHSA-mh99-v99m-4gvg:"'
+v="$GATE_VARIANT"
 res="$(run_gate_script "$v" "cat $FIX/clean.json")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "2" ]; then pass "empty-path allowlist entry fails closed (exit 2)"; else fail "empty-path entry should exit 2, got $rc"; fi
 if grep -qF "malformed ALLOWED_ADVISORIES" <<<"$out"; then pass "empty-path entry names the malformed-allowlist error"; else fail "malformed-allowlist message missing for empty-path entry"; fi
 
 # --- 14. Multi-path pin, id at exactly those paths → WAIVED, exit 0 -----------
-v="$(make_gate_variant gate-multi.sh '"GHSA-mh99-v99m-4gvg:node_modules/brace-expansion,node_modules/vendored/brace-expansion"')"
+make_gate_variant gate-multi.sh '"GHSA-mh99-v99m-4gvg:node_modules/brace-expansion,node_modules/vendored/brace-expansion"'
+v="$GATE_VARIANT"
 f="$(fixture multi-pinned.json <<'JSON'
 {"auditReportVersion":2,"vulnerabilities":{
   "brace-expansion":{"name":"brace-expansion","severity":"high","via":[
@@ -817,31 +925,44 @@ if grep -qF "node_modules/extra/node_modules/brace-expansion" <<<"$out"; then pa
 
 echo ""
 echo "=== gate script hardening (structural) ==="
-# The allowlist must contain exactly the one documented advisory — a structural
-# pin so a future edit cannot silently broaden it (a too-wide allowlist is a
-# silent gate-disable, the F25/#8617 failure mode).
-if grep -qF 'GHSA-mh99-v99m-4gvg' "$SCRIPT"; then
-  pass "allowlist documents the brace-expansion advisory by id"
-else
-  fail "allowlist is missing the documented brace-expansion advisory id"
-fi
-# The pruned esbuild waivers must STAY pruned from ALLOWED_ADVISORIES — their
-# advisories left every workspace, and a lingering entry is dead-weight gate
-# surface. The ids may appear in prose (the gate's History note), so scope the
-# check to the array body between `ALLOWED_ADVISORIES=(` and its closing `)`.
-# The cut is anchored at column 0, so indenting the declaration by ONE space
-# yields zero lines — and the pin below then printed its affirmative PASS from
-# an empty body (measured 211/0, with the waiver re-added it stayed vacuous).
+# EVERY pruned waiver must STAY pruned — a lingering entry is dead-weight gate
+# surface, and a re-added one is a silent gate-disable (the F25/#8617 failure
+# mode). All three ids below were relocked away and removed: the two esbuild
+# advisories with the drizzle-kit @esbuild-kit/* cohort (PF-1002/#9007), and
+# brace-expansion once upstream backported 1.1.17 (PF-1045 relocked, PF-1046
+# pruned).
+#
+# The ids all appear in prose (the gate's History note explains each removal), so
+# scope the check to the array body between `ALLOWED_ADVISORIES=(` and its
+# closing `)`. The cut is anchored at column 0, so indenting the declaration by
+# ONE space yields zero lines — and this pin then printed its affirmative PASS
+# from an empty body (measured 211/0; with a waiver re-added it stayed vacuous).
 # That is the failure mode this file's own round-13 note calls "strictly worse
-# than a false positive". Every job- and step-level cut here already fails
-# closed on an empty block; this one now does too.
+# than a false positive". Hence the fail-closed empty-body branch, which the
+# now-empty allowlist makes load-bearing rather than theoretical: the body is a
+# lone comment line, so ANY drift in the declaration's shape (collapsing it to a
+# one-line `ALLOWED_ADVISORIES=()`, dropping the placeholder comment) empties the
+# cut, and the pin must fail rather than affirm.
 allowlist_body="$(awk '/^ALLOWED_ADVISORIES=\(/{f=1;next} f && /^\)/{exit} f' "$SCRIPT")"
 if [ -z "$allowlist_body" ]; then
   fail "the ALLOWED_ADVISORIES body cut read nothing — the column-0 anchor no longer matches the declaration, so the pruned-waiver pin below would affirm from an empty body"
 elif grep -qF 'GHSA-gv7w-rqvm-qjhr' <<<"$allowlist_body" || grep -qF 'GHSA-g7r4-m6w7-qqqr' <<<"$allowlist_body"; then
   fail "pruned esbuild waiver still present in ALLOWED_ADVISORIES (advisories are gone from every workspace)"
+elif grep -qF 'GHSA-mh99-v99m-4gvg' <<<"$allowlist_body"; then
+  fail "the pruned brace-expansion waiver is back in ALLOWED_ADVISORIES — it is relockable (1.1.17+/5.0.8+), so relock instead of re-waiving"
 else
-  pass "stale esbuild waivers stay pruned from ALLOWED_ADVISORIES"
+  pass "every pruned waiver stays pruned from ALLOWED_ADVISORIES (esbuild ×2, brace-expansion)"
+fi
+# ...and the allowlist ships EMPTY. Not a style preference: an entry is a hole in
+# the gate, and the tree's whole waiver history is entries that were justified as
+# un-relockable and then quietly stopped being so. A new entry must be a
+# deliberate, reviewed act — which is what failing here forces. If you are adding
+# a genuinely un-relockable waiver, update this pin in the same commit and say in
+# the PR body why a relock is impossible.
+if [ "$(grep -cE '^[[:space:]]*"GHSA-' "$SCRIPT" || true)" = "0" ]; then
+  pass "ALLOWED_ADVISORIES ships with zero waivers"
+else
+  fail "ALLOWED_ADVISORIES has gained a waiver entry — try relocking first ('npm view <pkg> versions' against the advisory's patched range); if it is genuinely un-relockable, update this pin deliberately"
 fi
 # The gate must FAIL CLOSED — `exit 2` on tooling error must exist in the script.
 if grep -qE 'exit 2' "$SCRIPT"; then
@@ -1745,14 +1866,15 @@ STEPS_EOF
     fail "security job does not run scripts/check-npm-audit.sh . (root workspace) in any executable line of its own block — root devDeps and packages*/apps* go unaudited"
   fi
 
-  # The raw, un-allowlisted gate must be FULLY replaced — if a stray
-  # `npm audit --audit-level=high` survives it will fail on the un-relockable
-  # brace-expansion advisory (GHSA-mh99-v99m-4gvg, the gate's sole live
-  # waiver) and re-wedge the pipeline. Comments are stripped: the gate's own
-  # rationale comment legitimately names the old command in prose, and only
-  # an EXECUTABLE occurrence re-wedges the pipeline.
+  # The raw, un-allowlisted gate must be FULLY replaced. With the allowlist now
+  # empty a stray `npm audit --audit-level=high` would behave identically TODAY —
+  # which is exactly why this pin matters: the difference only shows up on the day
+  # an un-relockable high lands, and then a raw command has no waiver seam and
+  # wedges the pipeline until someone disables the gate outright. Comments are
+  # stripped: the gate's own rationale comment legitimately names the old command
+  # in prose, and only an EXECUTABLE occurrence can wedge anything.
   if grep -qF 'npm audit --audit-level=high' <<<"$qg_exec"; then
-    fail "a raw 'npm audit --audit-level=high' still exists in an executable line — it will fail on the un-relockable brace-expansion advisory"
+    fail "a raw 'npm audit --audit-level=high' still exists in an executable line — it has no waiver seam and wedges the pipeline on the first un-relockable high"
   else
     pass "no raw 'npm audit --audit-level=high' remains in an executable line (fully replaced by the gate)"
   fi
@@ -2951,7 +3073,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=472
+readonly SELF_EXEC_EXPECTED_DROP=481
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3063,6 +3185,8 @@ readonly opener_shape_read
 suite_openers="$(grep -E "$opener_shape_fixture|$opener_shape_read" "$SELF" | sed 's/[<][<]/@@/g')"
 readonly suite_openers
 IFS= read -r -d '' expected_openers <<'STEPS_EOF' || true
+f="$(fixture shipped-clean.json @@'JSON'
+f="$(fixture shipped-high.json @@'JSON'
 f="$(fixture clean.json @@'JSON'
 f="$(fixture waived.json @@'JSON'
 f="$(fixture block-high.json @@'JSON'
