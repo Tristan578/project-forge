@@ -10,10 +10,23 @@
 # for every other advisory at or above the fail threshold, AND hard for the same
 # id reappearing at a node_modules path it was never waived for.
 #
-# History: the original occupants were two esbuild advisories under drizzle-kit's
-# deprecated @esbuild-kit/* chain (GHSA-gv7w-rqvm-qjhr, GHSA-g7r4-m6w7-qqqr),
-# pruned once the gate's anti-rot note reported them gone from every workspace.
-# The current occupant is brace-expansion (see ALLOWED_ADVISORIES below).
+# History: THE ALLOWLIST IS CURRENTLY EMPTY — every advisory ever waived here was
+# eventually relocked away, and each waiver was pruned once the gate's anti-rot
+# note reported it gone. First went two esbuild advisories under drizzle-kit's
+# deprecated @esbuild-kit/* chain (GHSA-gv7w-rqvm-qjhr, GHSA-g7r4-m6w7-qqqr,
+# pruned in PF-1002/#9007 when that cohort left the tree). Then brace-expansion
+# (GHSA-mh99-v99m-4gvg), waived on the premise that it was "patched ONLY in 5.0.8,
+# no 1.x backport exists" — which made the root copy under the minimatch@3 /
+# eslint-9 lint toolchain un-relockable. Upstream then shipped 1.1.17; PF-1045
+# relocked the root copy to 1.1.18 inside its existing "^1.1.7" range with no
+# eslint-major migration, and PF-1046 pruned the entry.
+#
+# The lesson that generalizes: "un-relockable" is a claim about a moment, not a
+# property of the dependency. It expires silently the day upstream backports, and
+# nothing re-checks it — the gate keeps waiving and stays green. So ALWAYS try a
+# relock before adding an entry, and re-check the premise of any entry that is
+# still here (the anti-rot note only fires once the advisory is gone entirely,
+# which is strictly later than the moment it became fixable).
 #
 # LOCATION PINNING (PF-1009 / #9026): an id-only allowlist is a hole wider than
 # it looks. PF-1002/#9007 relocked the two NESTED brace-expansion copies (under
@@ -76,29 +89,27 @@ set -uo pipefail
 # separates the id from its pinned path list; multiple pinned paths (if an
 # advisory is legitimately un-relockable at more than one location) are
 # comma-separated. GHSA ids and node_modules paths never contain `:` or `,`.
+# EMPTY IS THE CORRECT STEADY STATE — see the History note above for why the
+# three former occupants were pruned rather than carried. Do NOT add an entry
+# back "to get the pipeline green": try relocking FIRST (`npm view <pkg>
+# versions` against the advisory's patched range). Every waiver ever added here
+# was justified as un-relockable and every one of them stopped being so; that is
+# the base rate. An entry is warranted only once a relock is proven impossible.
+#
+# The empty array is expanded through the `${ARR[@]+"${ARR[@]}"}` guard at all
+# three read sites below: under `set -u`, bash 3.2 (the macOS system bash, which
+# `#!/usr/bin/env bash` resolves to) aborts on a plain `"${ARR[@]}"` expansion of
+# an empty array. Unguarded, the abort happens INSIDE a command substitution, so
+# the crashed capture reads as an empty result — which the caller scores as
+# WAIVED. A crash that fails OPEN is exactly what this gate must not do; the
+# suite greps every gate run for `unbound variable` to keep it that way.
+#
+# Keep the declaration's `(` and `)` at column 0 on their own lines: the suite
+# cuts the array body with a column-0-anchored awk range to scope its
+# pruned-waiver assertions to entries rather than prose, and fails closed if the
+# cut reads nothing.
 ALLOWED_ADVISORIES=(
-  # brace-expansion: unbounded expansion -> OOM DoS.
-  #
-  # STALE AS OF 2026-08-03 — THE REMOVAL PATH THIS WAIVER WAS WAITING ON ARRIVED.
-  # The original justification ("patched ONLY in 5.0.8, no 1.x backport exists")
-  # is no longer true: upstream shipped 1.1.17 for this advisory, so the root
-  # brace-expansion@1.1.x under the minimatch@3 / eslint-9 lint toolchain is NO
-  # LONGER un-relockable. It relocks inside the existing "^1.1.7" range with no
-  # eslint-major migration — PF-1045 relocked it to 1.1.18 (which also clears the
-  # newer GHSA-rgw5-rvv9-x895) and the whole graph now audits with zero high
-  # advisories, so this entry currently waives nothing and the gate emits its
-  # anti-rot note for it.
-  #
-  # It is kept ONLY because pruning it is not a one-line delete: the hardened
-  # suite (scripts/__tests__/check-npm-audit.test.sh) pins this id as present,
-  # sed-anchors its variant harness on this exact entry literal, and would need
-  # empty-array guards for bash 3.2. Tracked for removal in PF-1046 (#9072).
-  #
-  # PINNED to the root copy ONLY — the two nested 5.0.x copies (under glob/,
-  # @typescript-eslint/typescript-estree/) are expected to stay patched; either
-  # reappearing there is a regression (see LOCATION PINNING above), not this
-  # waiver.
-  "GHSA-mh99-v99m-4gvg:node_modules/brace-expansion"
+  # (no waivers in effect)
 )
 
 # Severities that BLOCK when not allowlisted — mirrors the prior gate's
@@ -119,7 +130,7 @@ fi
 # Every allowlist entry MUST carry a pinned path — a bare id (or an empty path)
 # would silently degrade this back to the id-only gate that missed the #9016
 # regression, so a malformed entry is a config error, not a wider waiver.
-for entry in "${ALLOWED_ADVISORIES[@]}"; do
+for entry in ${ALLOWED_ADVISORIES[@]+"${ALLOWED_ADVISORIES[@]}"}; do
   case "$entry" in
     ?*:?*) ;;
     *)
@@ -158,7 +169,7 @@ fi
 # an allowlisted id, or returns 1 (nothing echoed) if the id is not allowlisted.
 pinned_paths_for() {
   local id="$1" entry
-  for entry in "${ALLOWED_ADVISORIES[@]}"; do
+  for entry in ${ALLOWED_ADVISORIES[@]+"${ALLOWED_ADVISORIES[@]}"}; do
     if [ "${entry%%:*}" = "$id" ]; then
       printf '%s' "${entry#*:}"
       return 0
@@ -339,7 +350,7 @@ done <<<"$rows"
 # Anti-rot: a waived id that no longer appears is dead weight (the advisory was
 # fixed/relocked). Informational only — never fail on absence, or a future cleanup
 # that removes the vuln would be blocked by its own stale allowlist entry.
-for entry in "${ALLOWED_ADVISORIES[@]}"; do
+for entry in ${ALLOWED_ADVISORIES[@]+"${ALLOWED_ADVISORIES[@]}"}; do
   a="${entry%%:*}"
   case " $seen_allowed " in
     *" $a "*) ;;
