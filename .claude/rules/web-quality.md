@@ -4,6 +4,7 @@ paths:
   - "web/**"
   - "packages/**"
   - "apps/**"
+  - "mcp-server/**"
 ---
 
 # Web Code Quality & Patterns
