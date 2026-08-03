@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import {
+  buildPlayContentSecurityPolicy,
+  isPlayPath,
+  playCspOptionsFromEnv,
+} from '@/lib/security/csp';
 
 /**
  * Allowed origins for API requests in production.
@@ -56,6 +61,86 @@ function handleCors(req: NextRequest): NextResponse | null {
   return null;
 }
 
+/**
+ * Request headers a client must never be able to supply — see {@link startResponse}.
+ *
+ * `content-security-policy-report-only` is on this list because Next.js reads the
+ * nonce from EITHER CSP header (`app-render.js`: `headers['content-security-policy']
+ * || headers['content-security-policy-report-only']`). Stripping only the enforcing
+ * one would let a caller smuggle a nonce of their choosing through the report-only
+ * variant and have Next stamp it onto every framework script.
+ */
+const CLIENT_SPOOFABLE_HEADERS = [
+  'x-nonce',
+  'content-security-policy',
+  'content-security-policy-report-only',
+] as const;
+
+/**
+ * Create the `NextResponse.next()` that every non-short-circuiting path returns,
+ * applying the per-request CSP nonce on `/play` (PF-1018, #9038).
+ *
+ * ## Why the nonce is set here and not in `next.config.ts`
+ *
+ * A static `headers()` rule cannot carry a per-request value. `/play` previously
+ * got a policy with neither a nonce nor `'unsafe-inline'`, which blocked all of
+ * Next.js's inline hydration bootstrap and left every published game blank. The
+ * proxy is the only place that can mint a nonce per request.
+ *
+ * Both layers write `Content-Security-Policy` on `/play` and WHICH ONE THE
+ * BROWSER SEES IS NOT VERIFIED on Vercel — see the "two writers" section of
+ * `lib/security/csp.ts` for what is and is not known. Treat the nonce here as
+ * hardening that may or may not be the effective policy, never as a proven
+ * removal of `'unsafe-inline'` from `/play`. The bound that IS guaranteed: the
+ * static fallback is the same site-wide policy every other page already ships,
+ * so the worst case is parity, not a regression, and the blank-page failure
+ * above cannot recur under either writer.
+ *
+ * The nonce is written to the forwarded REQUEST as both `x-nonce` (read by page
+ * code to nonce its own inline `<script>`) and `Content-Security-Policy` (read
+ * by Next.js, which stamps the nonce onto its framework and bootstrap scripts).
+ *
+ * Both of those headers are stripped from client-supplied input on every path
+ * the proxy runs on, not just `/play` — otherwise a caller could hand the app a
+ * nonce of their choosing. The `config.matcher` below excludes extension-suffixed
+ * paths, which would have skipped a user-chosen game slug ending in `.html`/`.js`
+ * (a legal `[slug]` match that renders a real HTML document); the explicit
+ * `/play/:path*` entry there closes that, so every `/play` URL is stripped and
+ * nonce-stamped. The strip is defense-in-depth regardless: a browser cannot be
+ * induced to send a custom `Content-Security-Policy` request header cross-origin.
+ *
+ * Requests carrying neither header (i.e. all normal traffic outside `/play`)
+ * skip the rewrite entirely rather than pay for a header copy.
+ */
+function startResponse(req: NextRequest): NextResponse {
+  const isPlay = isPlayPath(req.nextUrl.pathname);
+  const hasSpoofed = CLIENT_SPOOFABLE_HEADERS.some((h) => req.headers.has(h));
+  if (!isPlay && !hasSpoofed) return NextResponse.next();
+
+  const requestHeaders = new Headers(req.headers);
+  for (const header of CLIENT_SPOOFABLE_HEADERS) requestHeaders.delete(header);
+  if (!isPlay) return NextResponse.next({ request: { headers: requestHeaders } });
+
+  // `btoa`, not `Buffer` — this runs in the Edge runtime, where a bare global
+  // `Buffer` is NOT guaranteed. Next's Edge sandbox only exposes Buffer through
+  // the `node:buffer` NativeModuleMap; the bare global came from a webpack
+  // `ProvidePlugin` that Turbopack (the Next 16 production default) never runs.
+  // A ReferenceError here would 500 every published game, so use the primitive
+  // the Edge runtime actually documents. `randomUUID()` is ASCII, so `btoa` is
+  // safe on it without a latin1 conversion step.
+  const nonce = btoa(crypto.randomUUID());
+  // Spread the shared env derivation rather than re-listing the fields: the
+  // static rule in `next.config.ts` builds its policy from the same call, so the
+  // nonce is provably the ONLY difference between the two writers of this header.
+  const csp = buildPlayContentSecurityPolicy({ ...playCspOptionsFromEnv(), nonce });
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('content-security-policy', csp);
+
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  response.headers.set('Content-Security-Policy', csp);
+  return response;
+}
+
 function addSecurityHeaders(response: NextResponse, req: NextRequest): NextResponse {
   const origin = req.headers.get('origin');
   const { pathname } = req.nextUrl;
@@ -77,11 +162,18 @@ function addSecurityHeaders(response: NextResponse, req: NextRequest): NextRespo
 /**
  * Non-Clerk passthrough middleware for CI/E2E.
  * Applies CORS + security headers but skips authentication.
+ *
+ * Exported for the same reason as {@link applyAuthDecision}: this is the branch
+ * `buildProxy()` selects whenever Clerk keys are absent or malformed, which is
+ * exactly the configuration the DB-less E2E gate runs under. Reaching it through
+ * the live `proxy` export is impossible in unit tests (the key check runs once at
+ * module load), so without a direct export the `/play` nonce would be proven only
+ * on the Clerk path and could silently regress on the one CI actually exercises.
  */
-function passthroughMiddleware(req: NextRequest): NextResponse {
+export function passthroughMiddleware(req: NextRequest): NextResponse {
   const corsResponse = handleCors(req);
   if (corsResponse) return corsResponse;
-  return addSecurityHeaders(NextResponse.next(), req);
+  return addSecurityHeaders(startResponse(req), req);
 }
 
 /**
@@ -199,7 +291,7 @@ export async function applyAuthDecision(
     }
   }
 
-  return addSecurityHeaders(NextResponse.next(), req);
+  return addSecurityHeaders(startResponse(req), req);
 }
 
 /**
@@ -247,5 +339,14 @@ export const config = {
     '/((?!_next|monitoring|engine-pkg-webgl2|engine-pkg-webgpu|[^?]*\\.(?:html?|css|js|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
     // Always run for API routes
     '/(api|trpc)/:path*',
+    // Always run for /play. The extension allowlist in the first entry excludes
+    // any path whose last segment ends in `.html`/`.js`/`.css`/... — but a game
+    // slug is user-controlled, so `/play/<user>/game.html` is a legal `[slug]`
+    // match that renders a real HTML document. Without this entry it would skip
+    // the proxy entirely: no header stripping and no nonce. Must stay in sync
+    // with PLAY_ROUTE_SOURCE in lib/security/csp.ts — Next.js requires the
+    // matcher to be statically analyzable, so the literal cannot be imported.
+    // proxy.test.ts pins the two to the same value.
+    '/play/:path*',
   ],
 };
