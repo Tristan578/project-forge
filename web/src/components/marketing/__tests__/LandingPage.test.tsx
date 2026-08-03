@@ -5,6 +5,7 @@
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, within } from '@/test/utils/componentTestUtils';
+import { RENDERED_TEXT_CLAIMS } from '@/test/utils/socialProofPatterns';
 import LandingPage from '../LandingPage';
 
 vi.mock('next/cache', () => ({
@@ -178,20 +179,42 @@ describe('LandingPage', () => {
     expect(grid?.className).toContain('lg:grid-cols-3');
   });
 
-  it('renders testimonials social proof section', () => {
+  /**
+   * PF-1020. The page used to carry three named testimonials with job titles
+   * and a "Join thousands of creators" line, on a product whose own primary CTA
+   * is "Join the Waitlist" — invented endorsements for a user base that does
+   * not exist. These guards replace the tests that asserted that content was
+   * present; they are the AC that it never comes back.
+   *
+   * Deliberately structural rather than string-matching on the removed names: a
+   * quote attributed to a DIFFERENT invented person would pass a name check and
+   * still be the same violation.
+   */
+  it('publishes no attributed endorsement', () => {
+    // A testimonial is a quotation attributed to a person. No blockquote, no
+    // figure/figcaption pair — nothing on the page makes that shape.
+    expect(document.querySelectorAll('blockquote')).toHaveLength(0);
+    expect(document.querySelectorAll('figcaption')).toHaveLength(0);
     expect(
-      screen.getByRole('heading', { name: /trusted by game creators/i })
-    ).toBeDefined();
+      screen.queryByRole('heading', { name: /trusted by|loved by|what .* say/i })
+    ).toBeNull();
   });
 
-  it('renders testimonials with realistic content (not placeholders)', () => {
-    // Should have figure/blockquote elements with real quotes
-    const blockquotes = document.querySelectorAll('blockquote');
-    expect(blockquotes.length).toBeGreaterThanOrEqual(3);
-    // Each blockquote should have meaningful text, not "placeholder"
-    for (const bq of blockquotes) {
-      expect(bq.textContent?.toLowerCase()).not.toContain('placeholder');
-    }
+  /**
+   * Shared with the source-level scan in
+   * `src/app/__tests__/public-social-proof.test.ts`. These two suites once held
+   * hand-copied twins of the same regexes and drifted within a single commit —
+   * the source copy was widened, this one was not, so it simultaneously missed
+   * "Join thousands of INDIE creators" and false-fired on "creators,
+   * developers" (a bare `[\d,]+` matches the comma). Importing is what keeps
+   * them honest.
+   */
+  it.each(RENDERED_TEXT_CLAIMS)('claims no $label', ({ pattern, label }) => {
+    const text = document.body.textContent ?? '';
+    expect(
+      text,
+      `${label} found in the rendered landing page. Remove the claim — do not loosen this pattern.`
+    ).not.toMatch(pattern);
   });
 
   it('renders the AI showcase section', () => {

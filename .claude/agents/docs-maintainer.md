@@ -25,7 +25,7 @@ Read `~/.claude/projects/-Users-tristannolan-project-forge/memory/project_lesson
 | Area | Key Files | What to Check |
 |------|-----------|---------------|
 | Project README | `README.md` | Feature claims match reality, test count current, build commands work |
-| Claude instructions | `CLAUDE.md`, `.claude/CLAUDE.md` | MCP count (345), dev URLs, phase roadmap, skill list accuracy |
+| Claude instructions | `CLAUDE.md`, `.claude/CLAUDE.md` | MCP count (count `mcp-server/manifest/commands.json` — never trust a doc snapshot), dev URLs, skill list accuracy |
 | Rules reference | `.claude/rules/*.md` | File paths exist, API patterns current, version numbers match |
 | Testing docs | `TESTING.md` | Dev URL, test count, build commands, manual test cases |
 | User-facing docs | `docs/content/` | Served by `/api/docs` route, title/section extraction works |

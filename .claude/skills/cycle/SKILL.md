@@ -52,7 +52,7 @@ If any check fails, fix immediately before proceeding.
 
 After verification passes, update project context files:
 - **New pitfalls/API quirks?** → Add to `.claude/rules/*.md`
-- **Phase completed?** → Update Phase Roadmap in `.claude/CLAUDE.md`
+- **Milestone completed?** → Move its tickets on the taskboard; update the feature claims in `README.md` if a user-visible capability shipped. There is deliberately no phase list in `.claude/CLAUDE.md` — a hand-maintained status summary rots and the taskboard is the live source
 - **MCP commands changed?** → Update count in `MEMORY.md` and `CLAUDE.md`
 - **New ECS components or libraries?** → Update `rules/file-map.md`, `rules/bevy-api.md`, `rules/library-apis.md`
 - **New EntitySnapshot fields?** → Update `rules/entity-snapshot.md`

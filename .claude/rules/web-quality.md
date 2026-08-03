@@ -1,3 +1,12 @@
+---
+description: ESLint zero-warning rules, React patterns, Next.js constraints, README update triggers
+paths:
+  - "web/**"
+  - "packages/**"
+  - "apps/**"
+  - "mcp-server/**"
+---
+
 # Web Code Quality & Patterns
 
 ## ESLint (Zero Warnings Enforced)
