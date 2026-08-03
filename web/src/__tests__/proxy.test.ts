@@ -29,10 +29,10 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { NextRequest } from 'next/server';
 import { createRouteMatcher } from '@clerk/nextjs/server';
 
-import { buildPublicRoutes, applyAuthDecision, passthroughMiddleware } from '../proxy';
+import { buildPublicRoutes, applyAuthDecision, passthroughMiddleware, config } from '../proxy';
 // isPlayPath lives with the route source it is derived from; the proxy imports it
 // from there so the nonce minter and the static rule cannot disagree on scope.
-import { isPlayPath } from '@/lib/security/csp';
+import { isPlayPath, PLAY_ROUTE_SOURCE } from '@/lib/security/csp';
 
 vi.mock('server-only', () => ({}));
 
@@ -205,6 +205,17 @@ describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
     expect(isPlayPath('/play/user_abc/my-game')).toBe(true);
     expect(isPlayPath('/playground')).toBe(false);
     expect(isPlayPath('/community/play')).toBe(false);
+  });
+
+  it('runs the proxy on EVERY /play URL, including extension-suffixed slugs', () => {
+    // The first matcher entry excludes any path ending in an allowlisted
+    // extension (.html/.js/.css/...). A game slug is user-controlled, so
+    // `/play/<user>/game.html` is a legal [slug] match that renders a real HTML
+    // document — without an explicit /play entry it would skip the proxy
+    // entirely: no header stripping, no nonce. Next.js requires the matcher to
+    // be statically analyzable, so the literal cannot be imported; this pins the
+    // duplicate to PLAY_ROUTE_SOURCE so the two cannot drift.
+    expect(config.matcher).toContain(PLAY_ROUTE_SOURCE);
   });
 
   it('emits a response CSP that authorizes inline scripts by nonce', async () => {

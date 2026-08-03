@@ -85,8 +85,16 @@ const CLIENT_SPOOFABLE_HEADERS = [
  * A static `headers()` rule cannot carry a per-request value. `/play` previously
  * got a policy with neither a nonce nor `'unsafe-inline'`, which blocked all of
  * Next.js's inline hydration bootstrap and left every published game blank. The
- * proxy is the only place that can mint a nonce per request; its header wins
- * over the `next.config.ts` rule for the same key, which remains as a fail-safe.
+ * proxy is the only place that can mint a nonce per request.
+ *
+ * Both layers write `Content-Security-Policy` on `/play` and WHICH ONE THE
+ * BROWSER SEES IS NOT VERIFIED on Vercel — see the "two writers" section of
+ * `lib/security/csp.ts` for what is and is not known. Treat the nonce here as
+ * hardening that may or may not be the effective policy, never as a proven
+ * removal of `'unsafe-inline'` from `/play`. The bound that IS guaranteed: the
+ * static fallback is the same site-wide policy every other page already ships,
+ * so the worst case is parity, not a regression, and the blank-page failure
+ * above cannot recur under either writer.
  *
  * The nonce is written to the forwarded REQUEST as both `x-nonce` (read by page
  * code to nonce its own inline `<script>`) and `Content-Security-Policy` (read
@@ -94,13 +102,12 @@ const CLIENT_SPOOFABLE_HEADERS = [
  *
  * Both of those headers are stripped from client-supplied input on every path
  * the proxy runs on, not just `/play` — otherwise a caller could hand the app a
- * nonce of their choosing. ("Every path the proxy runs on", not every URL: the
- * `config.matcher` below excludes extension-suffixed paths, so a request for
- * e.g. `/play/<user>/<slug>.js` — a legal `[slug]` match — is neither stripped
- * nor nonce-stamped. It falls back to the static `next.config.ts` rule, which
- * carries `'unsafe-inline'` and therefore still renders. The strip is
- * defense-in-depth regardless: a browser cannot be induced to send a custom
- * `Content-Security-Policy` request header cross-origin.)
+ * nonce of their choosing. The `config.matcher` below excludes extension-suffixed
+ * paths, which would have skipped a user-chosen game slug ending in `.html`/`.js`
+ * (a legal `[slug]` match that renders a real HTML document); the explicit
+ * `/play/:path*` entry there closes that, so every `/play` URL is stripped and
+ * nonce-stamped. The strip is defense-in-depth regardless: a browser cannot be
+ * induced to send a custom `Content-Security-Policy` request header cross-origin.
  *
  * Requests carrying neither header (i.e. all normal traffic outside `/play`)
  * skip the rewrite entirely rather than pay for a header copy.
@@ -332,5 +339,14 @@ export const config = {
     '/((?!_next|monitoring|engine-pkg-webgl2|engine-pkg-webgpu|[^?]*\\.(?:html?|css|js|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
     // Always run for API routes
     '/(api|trpc)/:path*',
+    // Always run for /play. The extension allowlist in the first entry excludes
+    // any path whose last segment ends in `.html`/`.js`/`.css`/... — but a game
+    // slug is user-controlled, so `/play/<user>/game.html` is a legal `[slug]`
+    // match that renders a real HTML document. Without this entry it would skip
+    // the proxy entirely: no header stripping and no nonce. Must stay in sync
+    // with PLAY_ROUTE_SOURCE in lib/security/csp.ts — Next.js requires the
+    // matcher to be statically analyzable, so the literal cannot be imported.
+    // proxy.test.ts pins the two to the same value.
+    '/play/:path*',
   ],
 };

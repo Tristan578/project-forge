@@ -11,8 +11,22 @@ hydration never ran, leaving every published game stuck on a blank/loading page.
 failed silently — nothing threw server-side.
 
 `/play` is dynamically rendered, so it can carry a real per-request nonce. The proxy
-now mints one, forwards it to the page, and emits the matching policy; `'unsafe-inline'`
-stays dropped. The Clerk Frontend API host is derived from the publishable key rather
+now mints one, forwards it to the page, and emits the matching policy.
+
+Scope note: this does not yet prove `'unsafe-inline'` is gone from `/play` in
+production. `next.config.ts` also emits a static rule for that header — including a
+global `/:path*` rule that already carries `'unsafe-inline'` site-wide — and which
+writer the browser sees on Vercel is unverified (preview deployments sit behind SSO,
+which redirects before middleware runs, so it could not be measured). The guaranteed
+bound is that `/play` either runs the nonce policy or runs the same inline posture as
+every other page — parity, never a regression — and cannot lose both, which is what
+caused the blank page. Measuring the real winner is tracked separately.
+
+The proxy also now runs on every `/play` URL: the matcher's static-file extension
+exclusion previously skipped a user-chosen game slug ending in `.html`/`.js`/`.css`,
+which rendered a real HTML document with no nonce and no header stripping.
+
+The Clerk Frontend API host is derived from the publishable key rather
 than hardcoded, so dev and production instances both resolve correctly, and the decoded
 value is validated as a bare hostname before it reaches the header.
 

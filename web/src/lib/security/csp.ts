@@ -236,21 +236,30 @@ export interface PlayCspOptions {
  * `next.config.ts` emits this policy statically and cannot carry a per-request
  * nonce, so that call omits it and gets `'unsafe-inline'`. That means `/play` has
  * two writers for one header key: this static rule and the proxy's nonce-bearing
- * response header.
+ * response header. (Three rules, two writers — `buildCspRouteRules` also emits the
+ * global `'/:path*'` rule, which matches `/play` and already carries
+ * `'unsafe-inline'` site-wide. Deleting the play-specific static rule would
+ * therefore NOT make the proxy the sole writer; that needs a negative lookahead on
+ * the global source, a change to the policy governing every page.)
  *
  * Which one wins is verified only for the self-hosted/dev router, where the proxy
  * wins (`resolve-routes.js` orders `fsChecker.headers` before `middleware`, and
  * `router-server.js` re-`setHeader`s in that order). Vercel routes through its own
- * edge layer, so that proof does NOT transfer — treat the winner there as unknown
- * until observed on a real deployment:
+ * edge layer, so that proof does NOT transfer — the winner there is UNKNOWN, and
+ * as of PF-1018 it is also unmeasured: preview deployments sit behind Vercel SSO,
+ * which 302s to `vercel.com/sso-api` before middleware runs, so no application
+ * header is observable. Measure it on the first deployment that is not SSO-gated
+ * (tracked separately — see the PF-1018 PR):
  *
  *     curl -sI https://<deployment>/play/<userId>/<slug> | grep -i content-security-policy
  *
- * This is deliberately not load-bearing. Both outcomes are safe: the proxy's
- * policy is the nonce-based one, and this static one degrades to the same inline
- * posture the rest of the site already runs. What must never happen is `/play`
- * ending up with NEITHER a nonce nor `'unsafe-inline'` — that is the blank-page
- * regression above — so neither writer may emit a policy without one of the two.
+ * Until that observation lands, do NOT describe `/play` as nonce-hardened. State
+ * the bound instead: the nonce is applied when the proxy's header is the effective
+ * one, and when it is not, `/play` runs the same `'unsafe-inline'` posture as every
+ * other page on the site. Worst case is parity, never a regression. What must never
+ * happen is `/play` ending up with NEITHER a nonce nor `'unsafe-inline'` — that is
+ * the blank-page regression above — so neither writer may emit a policy without one
+ * of the two.
  */
 export function buildPlayContentSecurityPolicy({
   engineCdn = '',
