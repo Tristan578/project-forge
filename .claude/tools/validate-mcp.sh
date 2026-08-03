@@ -22,17 +22,30 @@ echo "=== SpawnForge MCP Validation (mode: $MODE) ==="
 # 1. Manifest sync check (always runs)
 echo ""
 echo "--- Manifest Sync ---"
+# THREE copies exist: the canonical source plus one per deploy root. A Next.js
+# build cannot import above its rootDirectory, so web/ and apps/docs/ each need
+# their own copy (PF-1019). Checking only the web copy reports SUCCESS on a tree
+# where the docs copy has silently drifted.
 MCP_MANIFEST="$PROJECT_ROOT/mcp-server/manifest/commands.json"
 WEB_MANIFEST="$PROJECT_ROOT/web/src/data/commands.json"
+DOCS_MANIFEST="$PROJECT_ROOT/apps/docs/data/commands.json"
 
-if [ -f "$MCP_MANIFEST" ] && [ -f "$WEB_MANIFEST" ]; then
-  if diff -q "$MCP_MANIFEST" "$WEB_MANIFEST" > /dev/null 2>&1; then
-    pass "MCP and web manifests are in sync"
+if [ -f "$MCP_MANIFEST" ] && [ -f "$WEB_MANIFEST" ] && [ -f "$DOCS_MANIFEST" ]; then
+  MANIFEST_DRIFT=""
+  if ! diff -q "$MCP_MANIFEST" "$WEB_MANIFEST" > /dev/null 2>&1; then
+    MANIFEST_DRIFT="web/src/data/commands.json"
+  fi
+  if ! diff -q "$MCP_MANIFEST" "$DOCS_MANIFEST" > /dev/null 2>&1; then
+    MANIFEST_DRIFT="${MANIFEST_DRIFT:+$MANIFEST_DRIFT, }apps/docs/data/commands.json"
+  fi
+
+  if [ -z "$MANIFEST_DRIFT" ]; then
+    pass "MCP manifest is in sync with both copies (web + docs)"
   else
-    fail "MCP manifest out of sync with web/src/data/commands.json — copy mcp-server/manifest/commands.json to web/src/data/"
+    fail "MCP manifest out of sync with: $MANIFEST_DRIFT — copy mcp-server/manifest/commands.json to each drifted destination"
   fi
 else
-  warn "One or both manifest files missing"
+  warn "One or more of the three manifest files is missing"
 fi
 
 # 2. Command count
@@ -41,8 +54,12 @@ echo "--- Command Count ---"
 CMD_COUNT="?"
 CAT_COUNT="?"
 if [ -f "$MCP_MANIFEST" ]; then
-  CMD_COUNT=$(python3 -c "import json; data=json.load(open('$MCP_MANIFEST')); print(sum(len(cat.get('commands',[])) for cat in data.get('categories',[])))" 2>/dev/null || echo "?")
-  CAT_COUNT=$(python3 -c "import json; data=json.load(open('$MCP_MANIFEST')); print(len(data.get('categories',[])))" 2>/dev/null || echo "?")
+  # The manifest is a FLAT list: {"version", "commands": [...], "resources": [...]}.
+  # Each command carries its own "category" — there is no top-level "categories"
+  # key, so summing over one silently reported "0 across 0" on a healthy manifest.
+  # Paths go through argv, never interpolated into the program text.
+  CMD_COUNT=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(len(d.get("commands",[])))' "$MCP_MANIFEST" 2>/dev/null || echo "?")
+  CAT_COUNT=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(len({c.get("category") for c in d.get("commands",[])}))' "$MCP_MANIFEST" 2>/dev/null || echo "?")
   echo "  Commands: $CMD_COUNT across $CAT_COUNT categories"
 fi
 

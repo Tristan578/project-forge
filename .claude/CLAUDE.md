@@ -60,7 +60,7 @@ runtime = []                                 # Strips editor-only systems for ex
 
 **Zero tolerance for lint errors AND warnings.** See `.claude/rules/web-quality.md` for details.
 
-Key: `_` prefix for unused params, no `useRef.current` during render, no blanket `eslint-disable`, keep `mcp-server/manifest/commands.json` synced to `web/src/data/commands.json`.
+Key: `_` prefix for unused params, no `useRef.current` during render, no blanket `eslint-disable`, keep `mcp-server/manifest/commands.json` synced to BOTH copies (`web/src/data/commands.json` and `apps/docs/data/commands.json` — one per deploy root).
 
 ## Phase Roadmap
 

@@ -23,7 +23,7 @@ SpawnForge is built by humans AND AI agents working in parallel across 5+ IDE to
 - `.claude/CLAUDE.md` phase roadmap must reflect actual completion state
 - `.claude/rules/*.md` must match current code patterns (not aspirational)
 - `docs/known-limitations.md` must be verified against actual implementation
-- MCP manifest files must be in sync (`mcp-server/manifest/commands.json` = `web/src/data/commands.json`)
+- All THREE MCP manifest copies must be in sync — `mcp-server/manifest/commands.json` (source) = `web/src/data/commands.json` = `apps/docs/data/commands.json` (one copy per deploy root)
 
 ### 2. Tooling Consistency
 - All validation scripts in `.claude/tools/` must be runnable and produce useful output
@@ -46,7 +46,7 @@ A feature meets quality standards when:
 | **Architecture** | Bridge isolation enforced, sandwich maintained | `bash .claude/tools/validate-rust.sh check` |
 | **Tests Exist** | New functions have tests, coverage doesn't regress | `bash .claude/tools/validate-tests.sh coverage` |
 | **Docs Updated** | Known-limitations, README, rules files current | `bash .claude/tools/validate-docs.sh` |
-| **Manifests Synced** | MCP manifests identical in both locations | `bash .claude/tools/validate-mcp.sh sync` |
+| **Manifests Synced** | MCP manifest identical in all 3 locations | `bash .claude/tools/validate-mcp.sh sync` |
 
 #### Definition of Done (DoD)
 A ticket can be moved to `done` only when:
