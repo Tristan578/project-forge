@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import LandingPage from './(marketing)/page';
+import LandingPage from '@/components/marketing/LandingPage';
 
 export const metadata: Metadata = {
   title: 'SpawnForge - AI-Powered Game Creation Platform',

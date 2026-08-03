@@ -12,6 +12,34 @@ import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
  * Desktop Chromium only, using mobile emulation (not real devices).
  */
 
+/**
+ * PF-1017: the editor must clip to the viewport rather than grow a document
+ * scrollbar.
+ *
+ * `<ViewportLock>` uses `h-dvh`, not `h-screen`, because `100vh` resolves to the
+ * LARGE viewport on mobile browsers (URL bar retracted) — a `100vh` box in
+ * normal flow overflows the visual viewport by the browser-chrome height and
+ * makes the whole editor document-scrollable. A global `body { overflow: hidden }`
+ * used to mask that; it was removed because it killed scrolling on every public
+ * page, so nothing masks it now.
+ *
+ * Caveat, deliberately not oversold: Chromium's device emulation has no
+ * retracting URL bar, so `innerHeight` here already IS the large viewport and
+ * this cannot reproduce the mobile-Safari case. It is a real tripwire for the
+ * general "editor grew a document scrollbar" regression, which is strictly more
+ * than the zero coverage that existed before.
+ */
+async function expectViewportContained(page: import('@playwright/test').Page) {
+  const { scrollHeight, clientHeight } = await page.evaluate(() => ({
+    scrollHeight: document.documentElement.scrollHeight,
+    clientHeight: document.documentElement.clientHeight,
+  }));
+  // 1px tolerance for sub-pixel layout rounding.
+  expect(scrollHeight, 'editor overflowed the viewport vertically').toBeLessThanOrEqual(
+    clientHeight + 1
+  );
+}
+
 // ---------------------------------------------------------------------------
 // iPhone 14 (390x844)
 // ---------------------------------------------------------------------------
@@ -28,6 +56,10 @@ test.describe('iPhone 14 Viewport (390x844) @ui @dev', () => {
     const box = await body.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.width).toBeGreaterThanOrEqual(390);
+  });
+
+  test('editor does not become document-scrollable', async ({ page }) => {
+    await expectViewportContained(page);
   });
 
   test('mobile toolbar appears in compact layout', async ({ page }) => {
@@ -76,6 +108,10 @@ test.describe('Pixel 7 Viewport (412x915) @ui @dev', () => {
     const box = await body.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.width).toBeGreaterThanOrEqual(412);
+  });
+
+  test('editor does not become document-scrollable', async ({ page }) => {
+    await expectViewportContained(page);
   });
 
   test('mobile toolbar appears in compact layout', async ({ page }) => {

@@ -166,59 +166,77 @@ export class WasmErrorBoundary extends Component<Props, State> {
       const hasBackup = hasLocalStorageBackup || this.state.hasIndexedDBBackup;
 
       return (
-        <div className="flex h-screen w-full items-center justify-center bg-zinc-950 p-4">
-          <div className="max-w-md rounded-lg bg-zinc-900 p-6 shadow-lg">
-            <div className="mb-4 flex items-center gap-3">
-              <AlertTriangle className="h-8 w-8 text-red-500" />
-              <h1 className="text-xl font-bold text-white">
-                Engine Error
-              </h1>
-            </div>
-
-            <p className="mb-4 text-sm text-zinc-300">
-              The game engine encountered an unexpected error and needs to restart.
-            </p>
-
-            {hasBackup && (
-              <div className="mb-4 rounded bg-blue-900/30 p-3 text-sm text-blue-300">
-                <p className="font-semibold">Auto-save detected</p>
-                <p className="mt-1 text-xs">
-                  Your work was automatically saved before the crash.
-                </p>
+        // Two boxes, not one. The scroll container must NOT also be the
+        // centering container: `justify-content: center` distributes overflow
+        // to BOTH sides of a flex container, so once the content is taller than
+        // the box its top sits at a negative offset that `scrollTop: 0` cannot
+        // reach — the heading and the restore options become permanently
+        // invisible. Outer box scrolls; inner box centres.
+        //
+        // h-full, not h-screen: this renders inside <ViewportLock> (h-dvh
+        // overflow-hidden), where a 100vh box overflows the dynamic viewport on
+        // mobile and gets clipped. overflow-y-auto so a tall recovery panel
+        // (backup-restore options, diagnostics) stays reachable instead of
+        // being cut off by the lock.
+        //
+        // `min-h-full` on the inner box makes centring apply only while the
+        // content fits; taller content grows the box downward and scrolls
+        // normally from the top.
+        <div className="h-full w-full overflow-y-auto bg-zinc-950">
+          <div className="flex min-h-full w-full items-center justify-center p-4">
+            <div className="max-w-md rounded-lg bg-zinc-900 p-6 shadow-lg">
+              <div className="mb-4 flex items-center gap-3">
+                <AlertTriangle className="h-8 w-8 text-red-500" />
+                <h1 className="text-xl font-bold text-white">
+                  Engine Error
+                </h1>
               </div>
-            )}
 
-            <div className="flex flex-col gap-2">
-              {hasBackup ? (
+              <p className="mb-4 text-sm text-zinc-300">
+                The game engine encountered an unexpected error and needs to restart.
+              </p>
+
+              {hasBackup && (
+                <div className="mb-4 rounded bg-blue-900/30 p-3 text-sm text-blue-300">
+                  <p className="font-semibold">Auto-save detected</p>
+                  <p className="mt-1 text-xs">
+                    Your work was automatically saved before the crash.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2">
+                {hasBackup ? (
+                  <button
+                    onClick={this.handleRestore}
+                    className="flex items-center justify-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    Restore & Reload Engine
+                  </button>
+                ) : null}
+
                 <button
-                  onClick={this.handleRestore}
-                  className="flex items-center justify-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+                  onClick={this.handleReload}
+                  className="flex items-center justify-center gap-2 rounded bg-zinc-700 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-600 transition-colors"
                 >
                   <RefreshCw className="h-4 w-4" />
-                  Restore & Reload Engine
+                  Reload Engine
                 </button>
-              ) : null}
+              </div>
 
-              <button
-                onClick={this.handleReload}
-                className="flex items-center justify-center gap-2 rounded bg-zinc-700 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-600 transition-colors"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Reload Engine
-              </button>
+              {process.env.NODE_ENV === 'development' && this.state.error && (
+                <details className="mt-4 rounded bg-zinc-950 p-3">
+                  <summary className="cursor-pointer text-xs font-semibold text-zinc-400">
+                    Technical Details
+                  </summary>
+                  <pre className="mt-2 max-h-40 overflow-auto text-xs text-red-400">
+                    {this.state.error.toString()}
+                    {this.state.errorInfo?.componentStack}
+                  </pre>
+                </details>
+              )}
             </div>
-
-            {process.env.NODE_ENV === 'development' && this.state.error && (
-              <details className="mt-4 rounded bg-zinc-950 p-3">
-                <summary className="cursor-pointer text-xs font-semibold text-zinc-400">
-                  Technical Details
-                </summary>
-                <pre className="mt-2 max-h-40 overflow-auto text-xs text-red-400">
-                  {this.state.error.toString()}
-                  {this.state.errorInfo?.componentStack}
-                </pre>
-              </details>
-            )}
           </div>
         </div>
       );
