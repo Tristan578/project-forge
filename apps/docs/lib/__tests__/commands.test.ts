@@ -164,19 +164,46 @@ describe('readCommandsManifest', () => {
     });
   });
 
-  describe('error recovery', () => {
-    it('returns safe empty result when the manifest file does not exist', async () => {
+  /**
+   * These two tests previously asserted the OPPOSITE — that an unreadable
+   * manifest "returns safe empty result". That assertion is what let PF-1019
+   * ship: the manifest path pointed outside the Vercel deploy root, every read
+   * threw, the catch turned it into `{ publicCount: 0 }`, and a test certified
+   * that as correct. The docs site rendered zero commands and no signal
+   * reached anyone.
+   *
+   * The requirement inverted, so the tests invert with it. This is not
+   * weakening a guard: an empty docs build is never a valid outcome, and these
+   * replacements are strictly stronger — they pin the failure mode AND assert
+   * the message names the offending path, which is the part that makes the
+   * next occurrence diagnosable instead of silent.
+   */
+  describe('unreadable manifest is fatal', () => {
+    it('throws, naming the path, when the manifest file does not exist', async () => {
       fsSpy.mockImplementation((_filePath: unknown, _enc: unknown) => {
         throw new Error('ENOENT: no such file');
       });
 
       const { readCommandsManifest } = await import('../commands.js');
-      const result = await readCommandsManifest();
 
-      expect(result).toEqual({ categories: [], scopes: [], publicCount: 0 });
+      await expect(readCommandsManifest()).rejects.toThrow(
+        /Cannot read the MCP commands manifest at .*commands\.json/,
+      );
     });
 
-    it('returns safe empty result when the manifest contains invalid JSON', async () => {
+    it('explains the deploy-root constraint that caused this', async () => {
+      fsSpy.mockImplementation((_filePath: unknown, _enc: unknown) => {
+        throw new Error('ENOENT: no such file');
+      });
+
+      const { readCommandsManifest } = await import('../commands.js');
+
+      // The failure is only actionable if it says WHY a path that works
+      // locally fails on Vercel.
+      await expect(readCommandsManifest()).rejects.toThrow(/deploy root/);
+    });
+
+    it('throws when the manifest contains invalid JSON', async () => {
       fsSpy.mockImplementation((filePath: unknown, _enc: unknown) => {
         if (String(filePath).endsWith('commands.json')) {
           return '{ not valid json }';
@@ -185,9 +212,25 @@ describe('readCommandsManifest', () => {
       });
 
       const { readCommandsManifest } = await import('../commands.js');
-      const result = await readCommandsManifest();
 
-      expect(result).toEqual({ categories: [], scopes: [], publicCount: 0 });
+      await expect(readCommandsManifest()).rejects.toThrow(
+        /Cannot read the MCP commands manifest/,
+      );
+    });
+
+    it('preserves the underlying error as `cause`', async () => {
+      const underlying = new Error('ENOENT: no such file');
+      fsSpy.mockImplementation((_filePath: unknown, _enc: unknown) => {
+        throw underlying;
+      });
+
+      const { readCommandsManifest } = await import('../commands.js');
+
+      // Without the cause chain the real fs error is lost and the build log
+      // shows only our wrapper.
+      await expect(readCommandsManifest()).rejects.toMatchObject({
+        cause: underlying,
+      });
     });
   });
 });

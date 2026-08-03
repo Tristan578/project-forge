@@ -212,7 +212,8 @@ Adding a new ECS component touches files across the full stack. The minimum requ
 10. `web/src/components/chat/ToolCallCard.tsx` — display label
 11. `mcp-server/manifest/commands.json` — MCP commands
 12. `web/src/data/commands.json` — exact copy of #11 (kept in sync)
-13. `TESTING.md` — manual test cases
+13. `apps/docs/data/commands.json` — exact copy of #11 (kept in sync)
+14. `TESTING.md` — manual test cases
 
 The full checklist is in `.claude/CLAUDE.md` under "New Component / Command Checklist."
 
@@ -222,7 +223,22 @@ The full checklist is in `.claude/CLAUDE.md` under "New Component / Command Chec
 
 ### MCP manifest sync
 
-`mcp-server/manifest/commands.json` and `web/src/data/commands.json` must stay identical. The Next.js build cannot import outside `web/`, so the manifest is copied. After editing either file, copy to the other.
+THREE copies of the manifest must stay byte-identical:
+
+| Path | Role |
+|------|------|
+| `mcp-server/manifest/commands.json` | canonical source — edit this one |
+| `web/src/data/commands.json` | copy for the `web/` deploy root |
+| `apps/docs/data/commands.json` | copy for the `apps/docs/` deploy root |
+
+A Next.js build cannot import above its Vercel `rootDirectory`, so each deploy root needs its own copy — `apps/docs` deploys with `rootDirectory: apps/docs`, and anything above that path resolves locally but is absent on Vercel. After editing the source, copy it to BOTH destinations:
+
+```bash
+cp mcp-server/manifest/commands.json web/src/data/commands.json
+cp mcp-server/manifest/commands.json apps/docs/data/commands.json
+```
+
+Verify with `bash .claude/tools/validate-mcp.sh sync`. `apps/docs/scripts/check-manifest-sync.ts` enforces this in CI against both copies.
 
 ---
 

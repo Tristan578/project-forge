@@ -33,8 +33,8 @@ CI runs `npx eslint --max-warnings 0`. Fix immediately, never defer.
 - **No setState in effects** — Use `useMemo` or `useState` prev-value for derived state
 
 ## Next.js Constraints
-- **Import boundary:** Production builds CANNOT import outside `web/`. Shared data must be copied into `web/src/data/`
-- **MCP manifest dual location:** Source at `mcp-server/manifest/commands.json`, copy at `web/src/data/commands.json` — keep in sync
+- **Import boundary:** A production build CANNOT import above its Vercel `rootDirectory` (`web/` for the app, `apps/docs/` for the docs site). Shared data must be copied inside each deploy root
+- **MCP manifest — THREE copies:** source at `mcp-server/manifest/commands.json`, copies at `web/src/data/commands.json` and `apps/docs/data/commands.json` (one per deploy root). All three must stay identical; `apps/docs/scripts/check-manifest-sync.ts` enforces it in CI and `bash .claude/tools/validate-mcp.sh sync` checks it locally
 - **Turbopack:** Next.js 16 uses Turbopack by default for both dev and build. Dev uses `--webpack` flag for compatibility. Build uses Turbopack (default)
 - **Proxy file:** Next.js 16 renames `middleware.ts` → `proxy.ts`. Export `proxy` function, not `middleware`
 - **Root layout force-dynamic:** Root layout has `export const dynamic = "force-dynamic"` to prevent prerender failures when Clerk keys are missing in CI

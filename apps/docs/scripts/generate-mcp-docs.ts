@@ -55,6 +55,16 @@ interface CommandManifest {
 export interface GenerateResult {
   generatedCount: number;
   errors: string[];
+  /**
+   * The manifest itself could not be read or parsed, so NOTHING could be
+   * generated. Distinct from the per-command entries in `errors`, which are
+   * partial-generation failures the build deliberately tolerates. A fatal
+   * result must fail the build: `apps/docs/lib/commands.ts` reads the same
+   * manifest at request time, and the docs layout is `force-dynamic`, so an
+   * unreadable manifest that slips past the build becomes a 500 for every
+   * visitor to /mcp instead of a red deploy.
+   */
+  fatal?: boolean;
 }
 
 // ---- Exports (for tests) ----
@@ -249,6 +259,7 @@ export function generateMcpDocs(manifestPath: string, outputDir: string): Genera
     return {
       generatedCount: 0,
       errors: [`Failed to read manifest: ${manifestPath} — ${err}`],
+      fatal: true,
     };
   }
 
@@ -256,6 +267,7 @@ export function generateMcpDocs(manifestPath: string, outputDir: string): Genera
     return {
       generatedCount: 0,
       errors: [`Manifest missing .commands array: ${manifestPath}`],
+      fatal: true,
     };
   }
 
@@ -312,6 +324,21 @@ if (isMainModule) {
   }
 
   console.log(`Generated ${result.generatedCount} MCP command pages.`);
+
+  // The manifest was unreadable — this is the build-time gate. Without it the
+  // build goes green with zero pages and the failure resurfaces as a runtime
+  // 500 from `lib/commands.ts` on a `force-dynamic` route, i.e. in front of
+  // readers rather than in front of the deploy.
+  if (result.fatal) {
+    console.error(
+      `Fatal: the MCP commands manifest at ${manifestPath} could not be read. ` +
+        `It must exist inside the deploy root (rootDirectory: apps/docs) — a ` +
+        `path above apps/docs/ resolves locally but not on Vercel. ` +
+        `Run scripts/check-manifest-sync.ts to verify the in-root copy.`,
+    );
+    process.exit(1);
+  }
+
   if (result.errors.length > 0) {
     console.warn(`${result.errors.length} commands had generation errors (non-fatal).`);
     // Don't exit(1) — partial generation is acceptable for deployment.

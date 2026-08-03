@@ -116,7 +116,7 @@ EditorLayout, SceneHierarchy, InspectorPanel, MaterialInspector, LightInspector,
 - `db/` — Drizzle + Neon client, DB schema
 
 ### MCP Server (`mcp-server/`)
-- `manifest/commands.json` — 350 commands across 41 categories
+- `manifest/commands.json` — 351 commands across 41 categories (measured: `bash .claude/tools/validate-mcp.sh sync`)
 - `src/manifest.test.ts` — Schema validation (update `validCategories` when adding categories)
 - `src/docs/` — Doc loader, BM25 search, MCP resource/tool registration
 
@@ -170,10 +170,10 @@ Fumadocs-based docs site for the SpawnForge platform API and MCP command referen
 - `CommandFilter.tsx` — Accessible faceted filter for the MCP command index. Accepts `categories`, `scopes`, `totalCommands`, optional `visibleCount` + `onFilterChange`. Uses `role="group"`, native checkboxes, and `aria-live="polite"` status region.
 
 ### `apps/docs/lib/` — Shared docs-site utilities
-- `commands.ts` — `readCommandsManifest()`: reads `mcp-server/manifest/commands.json`, returns `{ categories, scopes, publicCount }` for public commands only. Scope prefixes extracted via `/^([a-z_]+)_/` regex.
+- `commands.ts` — `readCommandsManifest()`: reads `apps/docs/data/commands.json` (override with `MANIFEST_PATH`), returns `{ categories, scopes, publicCount }` for public commands only. Scope prefixes extracted via `/^([a-z_]+)_/` regex. **The path must stay inside the deploy root** — `rootDirectory: apps/docs`, so anything above `apps/docs/` resolves locally and is absent on Vercel (PF-1019). An unreadable manifest THROWS; it must never degrade to a zero-command build.
 
 ### `apps/docs/scripts/` — Build-time Node scripts
-- `check-manifest-sync.ts` — Asserts `mcp-server/manifest/commands.json` matches `web/src/data/commands.json`
+- `check-manifest-sync.ts` — Asserts the canonical `mcp-server/manifest/commands.json` matches BOTH copies: `web/src/data/commands.json` and `apps/docs/data/commands.json`. THREE copies exist; adding a fourth without registering it here is how the docs copy silently drifted (PF-1019)
 - `ci-gate-check.ts` — CI gate: fails if public command count drops below threshold
 - `generate-mcp-docs.ts` — Generates MDX pages from the MCP command manifest
 - `__tests__/` — Vitest unit tests for each script (environment: node)

@@ -142,6 +142,36 @@ describe('generateMcpDocs', () => {
     expect(result.errors[0]).toMatch(/failed to read/i);
   });
 
+  // `fatal` is what makes the CLI exit 1 and fail the Vercel build. Without it
+  // the build goes green with zero pages and the unreadable manifest resurfaces
+  // as a runtime 500 from lib/commands.ts on the force-dynamic /mcp route.
+  it('marks an unreadable manifest fatal', () => {
+    const result = generateMcpDocs(path.join(tmpDir, 'does-not-exist.json'), outputDir);
+
+    expect(result.fatal).toBe(true);
+    expect(result.generatedCount).toBe(0);
+  });
+
+  it('marks a malformed manifest fatal', () => {
+    fs.writeFileSync(manifestPath, 'not valid json {{{');
+    expect(generateMcpDocs(manifestPath, outputDir).fatal).toBe(true);
+  });
+
+  it('marks a manifest with no .commands array fatal', () => {
+    fs.writeFileSync(manifestPath, JSON.stringify({ notCommands: [] }));
+    const result = generateMcpDocs(manifestPath, outputDir);
+
+    expect(result.fatal).toBe(true);
+    expect(result.errors[0]).toMatch(/missing \.commands/i);
+  });
+
+  // Partial-generation errors are deliberately tolerated — only a manifest-level
+  // failure is fatal, so a single bad command must never fail the whole deploy.
+  it('does not mark a readable manifest fatal', () => {
+    fs.writeFileSync(manifestPath, makeManifest([publicCommand]));
+    expect(generateMcpDocs(manifestPath, outputDir).fatal).toBeFalsy();
+  });
+
   it('returns zero count when all commands are internal', () => {
     fs.writeFileSync(manifestPath, makeManifest([internalCommand]));
     const result = generateMcpDocs(manifestPath, outputDir);
