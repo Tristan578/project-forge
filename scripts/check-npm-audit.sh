@@ -77,16 +77,27 @@ set -uo pipefail
 # advisory is legitimately un-relockable at more than one location) are
 # comma-separated. GHSA ids and node_modules paths never contain `:` or `,`.
 ALLOWED_ADVISORIES=(
-  # brace-expansion: unbounded expansion -> OOM DoS. Patched ONLY in 5.0.8 (no
-  # 1.x/2.x backport exists). The 5.0.x copies relock to 5.0.8, but the root
-  # brace-expansion@1.1.x (lockfile dev:true) sits under the minimatch@3 /
-  # eslint-9 lint toolchain, which pins "^1.1.7" — un-relockable without an
-  # eslint-major migration. Non-exploitable here: input is our own lint globs,
-  # never attacker-controlled. Remove when the eslint/minimatch@3 cohort exits
-  # the tree (eslint 10) or a 1.x backport ships. PINNED to the root copy ONLY —
-  # the two nested 5.0.x copies (under glob/, @typescript-eslint/typescript-estree/)
-  # are expected to stay patched; either reappearing there is a regression (see
-  # LOCATION PINNING above), not this waiver.
+  # brace-expansion: unbounded expansion -> OOM DoS.
+  #
+  # STALE AS OF 2026-08-03 — THE REMOVAL PATH THIS WAIVER WAS WAITING ON ARRIVED.
+  # The original justification ("patched ONLY in 5.0.8, no 1.x backport exists")
+  # is no longer true: upstream shipped 1.1.17 for this advisory, so the root
+  # brace-expansion@1.1.x under the minimatch@3 / eslint-9 lint toolchain is NO
+  # LONGER un-relockable. It relocks inside the existing "^1.1.7" range with no
+  # eslint-major migration — PF-1045 relocked it to 1.1.18 (which also clears the
+  # newer GHSA-rgw5-rvv9-x895) and the whole graph now audits with zero high
+  # advisories, so this entry currently waives nothing and the gate emits its
+  # anti-rot note for it.
+  #
+  # It is kept ONLY because pruning it is not a one-line delete: the hardened
+  # suite (scripts/__tests__/check-npm-audit.test.sh) pins this id as present,
+  # sed-anchors its variant harness on this exact entry literal, and would need
+  # empty-array guards for bash 3.2. Tracked for removal in PF-1046 (#9072).
+  #
+  # PINNED to the root copy ONLY — the two nested 5.0.x copies (under glob/,
+  # @typescript-eslint/typescript-estree/) are expected to stay patched; either
+  # reappearing there is a regression (see LOCATION PINNING above), not this
+  # waiver.
   "GHSA-mh99-v99m-4gvg:node_modules/brace-expansion"
 )
 
