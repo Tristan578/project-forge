@@ -7,7 +7,7 @@ import dynamic from 'next/dynamic';
 
 const EditorLayout = dynamic(
   () => import('@/components/editor/EditorLayout').then((m) => m.EditorLayout),
-  { ssr: false, loading: () => (<div className="flex h-screen items-center justify-center bg-zinc-950"><div className="text-zinc-400">Loading editor...</div></div>) }
+  { ssr: false, loading: () => (<div className="flex h-full items-center justify-center bg-zinc-950"><div className="text-zinc-400">Loading editor...</div></div>) }
 );
 import { useEditorStore } from '@/stores/editorStore';
 import { trackProjectOpen } from '@/lib/workspace/recentProjects';
@@ -64,8 +64,8 @@ export default function EditorPage() {
     fetchProject();
   }, [projectId, router, setProjectId, loadScene, setSceneName, setLastCloudSave]);
 
-  if (loading) return (<div className="flex h-screen items-center justify-center bg-zinc-950"><div className="text-zinc-400">Loading project...</div></div>);
-  if (error) return (<div className="flex h-screen items-center justify-center bg-zinc-950"><div className="text-center"><div className="mb-2 text-red-400">{error}</div><button onClick={() => router.push('/dashboard')} className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:opacity-90">Back to Dashboard</button></div></div>);
+  if (loading) return (<div className="flex h-full items-center justify-center bg-zinc-950"><div className="text-zinc-400">Loading project...</div></div>);
+  if (error) return (<div className="flex h-full items-center justify-center bg-zinc-950"><div className="text-center"><div className="mb-2 text-red-400">{error}</div><button onClick={() => router.push('/dashboard')} className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:opacity-90">Back to Dashboard</button></div></div>);
 
   return (
     <EditorErrorBoundary>

@@ -26,6 +26,13 @@ export default defineConfig({
       // vitest.config.ts, never in the workspace gate.
       'src/__tests__/**/*.test.ts',
       'src/__tests__/**/*.test.tsx',
+      // Same gap one directory deeper: src/app/__tests__ (public-scroll,
+      // robots, sitemap, opengraph-image, globals-reduced-motion) matched
+      // neither this config nor vitest.config.jsdom.ts (src/components +
+      // src/hooks only), so five suites ran ONLY under the standalone
+      // vitest.config.ts. They are filesystem/metadata assertions — no DOM.
+      'src/app/__tests__/**/*.test.ts',
+      'src/app/__tests__/**/*.test.tsx',
       // Unit tests for standalone build/provisioning scripts (not under
       // src/) — mirrors the same glob in vitest.config.ts so these run
       // under the workspace gate too, not just the standalone config.

@@ -134,7 +134,7 @@ export function DashboardLayout({ initialProjects }: DashboardLayoutProps = {}) 
 
   return (
     <>
-      <div className="flex h-screen flex-col bg-zinc-950">
+      <div className="flex h-dvh flex-col bg-zinc-950">
         {/* Header */}
         <header className="flex items-center justify-between border-b border-zinc-700 bg-zinc-900 px-6 py-4">
           <h1 className="text-2xl font-bold text-zinc-200">

@@ -52,8 +52,20 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
-  overflow: hidden;
 }
+
+/*
+ * Do NOT add `overflow: hidden` to `html` or `body` here.
+ *
+ * When `html` is `overflow: visible`, an `overflow` on `body` propagates to the
+ * VIEWPORT rather than clipping the body box. A global `body { overflow: hidden }`
+ * therefore removed the scrollbar and disabled wheel/trackpad scrolling on every
+ * public page — while `window.scrollTo()` kept working, which is why automated
+ * checks never caught it (PF-1017).
+ *
+ * The editor is the only surface that must own the full viewport. It locks
+ * scrolling at its own route segment via <ViewportLock>, not globally.
+ */
 
 #game-canvas {
   display: block;

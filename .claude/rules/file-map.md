@@ -87,6 +87,13 @@
 ### Editor Components (`components/editor/`)
 EditorLayout, SceneHierarchy, InspectorPanel, MaterialInspector, LightInspector, PhysicsInspector, AudioInspector, ParticleInspector, TerrainInspector, AudioMixerPanel, SceneSettings, InputBindingsPanel, ScriptEditorPanel, PlayControls, SceneToolbar, ExportDialog, AssetPanel, Sidebar, CanvasArea, ContextMenu, Vec3Input, AnimationInspector, DrawerPanel, MobileToolbar, WelcomeModal, KeyboardShortcutsPanel
 
+### Layout Components (`components/layout/`)
+- `ViewportLock.tsx` — `h-dvh overflow-hidden` wrapper applied by `app/editor/layout.tsx` and `app/dev/layout.tsx`. The editor's full-viewport scroll lock lives here, scoped to those route segments; it must NEVER move back to a global `html`/`body` rule (PF-1017 — see `rules/gotchas.md` → UI & Frontend)
+
+### Marketing Components (`components/marketing/`)
+- `LandingPage.tsx` — the `/` landing page body (`'use cache'` + `cacheLife('days')`), rendered by `app/page.tsx`
+- `AiShowcaseSection.tsx`, `Breadcrumbs.tsx`
+
 ### Key Hooks
 - `useEngine.ts` — WASM loading singleton (WebGPU detect, fallback)
 - `useEngineEvents.ts` — Event delegation hub (~85 lines), delegates to `hooks/events/` domain handlers

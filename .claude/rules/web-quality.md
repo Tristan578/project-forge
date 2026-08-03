@@ -29,6 +29,7 @@ CI runs `npx eslint --max-warnings 0`. Fix immediately, never defer.
 - **Turbopack:** Next.js 16 uses Turbopack by default for both dev and build. Dev uses `--webpack` flag for compatibility. Build uses Turbopack (default)
 - **Proxy file:** Next.js 16 renames `middleware.ts` → `proxy.ts`. Export `proxy` function, not `middleware`
 - **Root layout force-dynamic:** Root layout has `export const dynamic = "force-dynamic"` to prevent prerender failures when Clerk keys are missing in CI
+- **Two files resolving to the same route silently drop one — including its layout.** Route groups are stripped from the URL, so `app/(marketing)/page.tsx` and `app/page.tsx` BOTH resolve to `/`. Next.js 16 compiles both (visible in `.next/server/app-paths-manifest.json`), picks one — `/page` won — and emits no error. The loser's `layout.tsx` never wraps anything, which is how the landing page lost its only scroll wrapper (PF-1017 / #9037). Before adding a route group whose index maps to an existing path, grep `web/src/app` for a colliding `page.*`. Guarded repo-wide by `web/src/app/__tests__/public-scroll.test.ts`, which walks every `page.{tsx,ts,jsx,js,mdx}` under `app/`, collapses route-group segments, and fails on any URL path claimed twice at any depth.
 
 ## README Update Guide
 Update README.md when: phases completed, MCP command count changes, libraries added, prerequisites change, structure changes, build process changes. Commit alongside feature code.
