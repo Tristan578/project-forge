@@ -1,3 +1,11 @@
+---
+description: Bevy 0.18 API, 0.16->0.18 migration, ECS limits, library-specific patterns
+paths:
+  - "engine/**"
+  - "**/*.rs"
+  - "**/Cargo.toml"
+---
+
 # Bevy 0.18 API & ECS Patterns
 
 ## Migration from 0.16 to 0.18

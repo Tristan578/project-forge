@@ -20,7 +20,7 @@ SpawnForge is built by humans AND AI agents working in parallel across 5+ IDE to
 
 ### 1. Documentation Freshness
 - Cross-IDE configs (`.cursorrules`, `GEMINI.md`, `AGENTS.md`, `.github/copilot-instructions.md`) must reference the same skills, tools, and patterns
-- `.claude/CLAUDE.md` phase roadmap must reflect actual completion state
+- `README.md` feature claims must reflect actual completion state (`.claude/CLAUDE.md` deliberately carries no status summary — see `.claude/skills/docs/SKILL.md`)
 - `.claude/rules/*.md` must match current code patterns (not aspirational)
 - `docs/known-limitations.md` must be verified against actual implementation
 - MCP manifest files must be in sync (`mcp-server/manifest/commands.json` = `web/src/data/commands.json`)

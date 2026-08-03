@@ -326,7 +326,7 @@ A retired ID may legitimately survive in exactly two places, and nowhere else:
 |----------|----------|
 | [README.md](README.md) | Feature overview, project structure, tech stack |
 | [TESTING.md](TESTING.md) | Manual test cases for all shipped features |
-| [.claude/CLAUDE.md](.claude/CLAUDE.md) | Full project constitution: architecture rules, workflow rules, phase roadmap, component checklist |
+| [.claude/CLAUDE.md](.claude/CLAUDE.md) | Full project constitution: architecture rules, workflow rules, code-quality policy, on-demand skills |
 | [.claude/SANDBOX.md](.claude/SANDBOX.md) | Agent permission posture: what is auto-approved, the two off-limits config files (and why), how a human changes them |
 | [.claude/rules/bevy-api.md](.claude/rules/bevy-api.md) | Bevy 0.18 API patterns, 0.16→0.18 migration notes |
 | [.claude/rules/entity-snapshot.md](.claude/rules/entity-snapshot.md) | EntityType, EntitySnapshot, history system |

@@ -54,8 +54,8 @@ Every document should be scannable in 30 seconds, complete in 5 minutes, and pre
 
 ### .claude/CLAUDE.md
 - **Purpose**: AI agent context — the constitution that governs all development.
-- **Update when**: Phases complete, workflow rules change, new libraries added.
-- **Never remove**: Phase roadmap entries (mark as DONE, don't delete).
+- **Update when**: Workflow rules change, new libraries added, an architecture rule shifts.
+- **Never add**: A project-status or phase summary. It is always-loaded context that goes stale the week it is written — milestone status belongs on the taskboard, shipped capabilities in `README.md`.
 
 ### .claude/rules/*.md
 - **Purpose**: Specific technical patterns agents must follow.

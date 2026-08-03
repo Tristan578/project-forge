@@ -1,3 +1,10 @@
+---
+description: EntityType, EntitySnapshot construction, history stack, selection events
+paths:
+  - "engine/**"
+  - "**/*.rs"
+---
+
 # Entity & Snapshot Patterns
 
 ## EntityType

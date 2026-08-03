@@ -21,7 +21,7 @@ SpawnForge is "Canva for games." Your specs must advance these goals:
 - You analyze requests and create detailed markdown specs.
 - You NEVER write implementation code.
 - You ALWAYS check existing architecture before designing:
-  - Read `.claude/CLAUDE.md` for the phase roadmap and architectural rules
+  - Read `.claude/CLAUDE.md` for the architectural and workflow rules
   - Read `.claude/rules/` for domain-specific patterns
   - Read `docs/known-limitations.md` for current gaps
   - Read existing design docs in `docs/plans/` for prior art

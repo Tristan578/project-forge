@@ -23,7 +23,7 @@ You are the Lead Systems Architect for SpawnForge — an AI-native 2D/3D game en
 ## Mandate
 1. **Check the taskboard** at http://localhost:3010/api for existing tickets and context.
 2. **Read existing architecture** before designing:
-   - `.claude/CLAUDE.md` — Phase roadmap, architecture rules
+   - `.claude/CLAUDE.md` — Architecture rules, workflow rules
    - `.claude/rules/*.md` — Domain-specific patterns
    - `docs/known-limitations.md` — Current gaps
    - `docs/plans/` — Prior design docs

@@ -73,6 +73,8 @@ web/.next/
 web/out/
 web/test-results/
 web/playwright-report/
+# Playwright MCP browser-session scratch output (console-*.log / page-*.yml)
+.playwright-mcp/
 
 # ----- Coverage -----
 coverage/
