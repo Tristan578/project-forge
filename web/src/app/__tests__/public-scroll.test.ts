@@ -252,3 +252,36 @@ describe('PF-1017: the editor keeps its full-viewport scroll lock', () => {
     expect(readFileSync(file, 'utf-8')).not.toMatch(/className="[^"]*\bh-screen\b/);
   });
 });
+
+describe('PF-1017: full-viewport surfaces OUTSIDE the editor size to the dynamic viewport', () => {
+  /**
+   * These roots are NOT inside <ViewportLock> — they live on ordinary
+   * document-scrolling routes. The global `body { overflow: hidden }` used to
+   * mask their `100vh` sizing by clipping the document; now that the global
+   * rule is gone (it broke every public page), a `100vh` root is genuinely
+   * taller than the mobile visual viewport by the browser-chrome height.
+   *
+   * The symptom is not a clipped box but a REDUNDANT one: a document scrollbar
+   * wrapped around a surface that already scrolls internally, so the page can
+   * be dragged up and down on top of its own scroll region and the bottom of
+   * the surface (dashboard footer, game canvas) sits below the fold.
+   *
+   * `h-dvh` / `min-h-dvh` is the visual viewport and needs no outer clip.
+   */
+  const FULL_VIEWPORT_SURFACES = [
+    'src/components/dashboard/DashboardLayout.tsx',
+    'src/components/play/GamePlayer.tsx',
+  ];
+
+  it.each(FULL_VIEWPORT_SURFACES)('%s sizes to dvh, not vh', (rel) => {
+    const file = join(REPO_ROOT, 'web', rel);
+    expect(existsSync(file), `${rel} moved — update FULL_VIEWPORT_SURFACES`).toBe(true);
+    const src = readFileSync(file, 'utf-8');
+    // `\b` treats `-` as a boundary, so this also catches `min-h-screen`.
+    expect(src).not.toMatch(/className="[^"]*\bh-screen\b/);
+    // Assert the replacement is actually present rather than only asserting the
+    // absence of `h-screen` — a root that dropped viewport sizing altogether
+    // would pass a negative-only check while collapsing to content height.
+    expect(src).toMatch(/className="[^"]*\bmin-h-dvh\b|className="[^"]*\bh-dvh\b/);
+  });
+});

@@ -29,31 +29,44 @@ export class EditorErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
+        // Two boxes, not one. The scroll container must NOT also be the
+        // centering container: `justify-content: center` distributes overflow
+        // to BOTH sides of a flex container, so once the content is taller than
+        // the box its top sits at a negative offset that `scrollTop: 0` cannot
+        // reach — the heading and the start of the stack trace become
+        // permanently invisible. Outer box scrolls; inner box centres.
+        //
         // h-full, not h-screen: this renders inside <ViewportLock> (h-dvh
         // overflow-hidden), where a 100vh box overflows the dynamic viewport on
         // mobile and gets clipped. overflow-y-auto because the expanded stack
         // trace below can exceed the viewport — without it the lock would clip
         // the recovery buttons out of reach on the one screen that needs them.
-        <div className="flex h-full w-full items-center justify-center overflow-y-auto bg-zinc-950 p-4">
-          <div className="max-w-md rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
-            <div className="mb-4 flex items-center gap-3">
-              <AlertTriangle className="h-8 w-8 shrink-0 text-red-500" />
-              <h1 className="text-xl font-bold text-white">Something went wrong</h1>
-            </div>
-            <p className="mb-4 text-sm text-zinc-300">The editor encountered an unexpected error. You can try reloading the page or return to the dashboard.</p>
-            {process.env.NODE_ENV === 'development' && this.state.error && (
-              <details className="mb-4 rounded border border-zinc-700 bg-zinc-950 p-3">
-                <summary className="cursor-pointer text-xs font-semibold text-zinc-400">Technical Details</summary>
-                <pre className="mt-2 max-h-40 overflow-auto text-xs text-red-400">{this.state.error.toString()}{this.state.errorInfo?.componentStack}</pre>
-              </details>
-            )}
-            <div className="flex flex-col gap-2">
-              <button onClick={this.handleReload} className="flex items-center justify-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <RefreshCw className="h-4 w-4" />Reload Editor
-              </button>
-              <button onClick={this.handleBackToDashboard} className="flex items-center justify-center gap-2 rounded bg-zinc-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <ArrowLeft className="h-4 w-4" />Back to Dashboard
-              </button>
+        //
+        // `min-h-full` on the inner box makes centring apply only while the
+        // content fits; taller content grows the box downward and scrolls
+        // normally from the top.
+        <div className="h-full w-full overflow-y-auto bg-zinc-950">
+          <div className="flex min-h-full w-full items-center justify-center p-4">
+            <div className="max-w-md rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
+              <div className="mb-4 flex items-center gap-3">
+                <AlertTriangle className="h-8 w-8 shrink-0 text-red-500" />
+                <h1 className="text-xl font-bold text-white">Something went wrong</h1>
+              </div>
+              <p className="mb-4 text-sm text-zinc-300">The editor encountered an unexpected error. You can try reloading the page or return to the dashboard.</p>
+              {process.env.NODE_ENV === 'development' && this.state.error && (
+                <details className="mb-4 rounded border border-zinc-700 bg-zinc-950 p-3">
+                  <summary className="cursor-pointer text-xs font-semibold text-zinc-400">Technical Details</summary>
+                  <pre className="mt-2 max-h-40 overflow-auto text-xs text-red-400">{this.state.error.toString()}{this.state.errorInfo?.componentStack}</pre>
+                </details>
+              )}
+              <div className="flex flex-col gap-2">
+                <button onClick={this.handleReload} className="flex items-center justify-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <RefreshCw className="h-4 w-4" />Reload Editor
+                </button>
+                <button onClick={this.handleBackToDashboard} className="flex items-center justify-center gap-2 rounded bg-zinc-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <ArrowLeft className="h-4 w-4" />Back to Dashboard
+                </button>
+              </div>
             </div>
           </div>
         </div>
