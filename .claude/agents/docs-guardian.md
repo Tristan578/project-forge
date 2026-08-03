@@ -100,7 +100,7 @@ is outdated — APIs change without warning.
 
 **Review checklist:**
 - [ ] `README.md` — feature claims match reality, commands work, counts current
-- [ ] `CLAUDE.md` — MCP command count, phase roadmap, dev URLs, skill list accurate
+- [ ] `CLAUDE.md` — MCP command count, dev URLs, skill list accurate
 - [ ] `.claude/CLAUDE.md` — architecture diagram, library versions, gotchas list current
 - [ ] `CONTRIBUTING.md` — setup instructions work, PR process accurate
 - [ ] `TESTING.md` — test commands work, coverage numbers current
