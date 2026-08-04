@@ -36,6 +36,7 @@ import {
 import { isQstashConfigured, publishGenerationCallback } from '@/lib/qstash/client';
 import type { AsyncGenerationType } from '@/lib/generate/pollProviderStatus';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
+import { withGenerationMetrics } from '@/lib/monitoring/generationMetrics';
 
 /** Default initial delay before the first durable generation callback (PF-906). */
 const DEFAULT_CALLBACK_DELAY_SECONDS = 30;
@@ -294,13 +295,19 @@ export function createGenerationHandler<TParams, TResult>(
     });
   };
 
-  return async (request: NextRequest): Promise<NextResponse> => {
+  // Business metrics (PF-1053) wrap the whole handler so EVERY exit path — the
+  // early 401/403/429 returns included — emits one sample. `mctx` is filled in
+  // as provider/cost/tier resolve; it is read only after this function returns,
+  // so a request rejected before step 6 simply omits those facets. The wrapper
+  // fails open and returns the response by identity.
+  return withGenerationMetrics(route, async (request: NextRequest, mctx): Promise<NextResponse> => {
     // 1. Authenticate
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
 
     const userId = authResult.ctx.user.id;
     const tier = authResult.ctx.user.tier;
+    mctx.tier = tier;
 
     // 1b. BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
     // token deduction, so a blocked bot never spends either budget.
@@ -384,6 +391,9 @@ export function createGenerationHandler<TParams, TResult>(
       captureException(err, { route, action: 'resolve_billing_params' });
       return NextResponse.json({ error: 'Internal pricing error' }, { status: 500 });
     }
+    mctx.provider = resolvedProvider;
+    mctx.operation = resolvedOperation;
+    mctx.tokenCost = tokenCost;
 
     // 6b. Provider kill switch (PF-971 / #8952). Checked immediately after the
     // provider resolves and BEFORE any cache lookup or token deduction, so a
@@ -507,5 +517,5 @@ export function createGenerationHandler<TParams, TResult>(
       captureException(err, { route });
       return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
     }
-  };
+  });
 }

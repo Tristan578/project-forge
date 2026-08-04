@@ -1,6 +1,11 @@
 import * as Sentry from '@sentry/nextjs';
 import { registerBotIdProtection } from '@/lib/security/botIdClient';
-import { configureSentryFingerprinting, scrubSentryEvent, scrubSentryLog } from '@/lib/monitoring/sentryConfig';
+import {
+  configureSentryFingerprinting,
+  scrubSentryEvent,
+  scrubSentryLog,
+  scrubSentryMetric,
+} from '@/lib/monitoring/sentryConfig';
 
 const DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -61,6 +66,11 @@ if (DSN) {
     // pipeline so a stray Sentry.logger.* call can't leak secrets/PII (see
     // sentry.server.config.ts for the full rationale).
     beforeSendLog: scrubSentryLog,
+    // Metrics are a THIRD pipeline, and `enableMetrics` defaults to ON — the SDK
+    // stamps user.id/email/name onto every metric, so this hook is what keeps
+    // them inside the F03/F04 posture (see sentry.server.config.ts for the full
+    // rationale).
+    beforeSendMetric: scrubSentryMetric,
 
     integrations: [
       Sentry.browserTracingIntegration(),

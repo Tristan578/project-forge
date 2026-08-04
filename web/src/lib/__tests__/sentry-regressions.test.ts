@@ -519,6 +519,77 @@ describe('Sentry Logs scrubber gap: enableLogs requires beforeSendLog: scrubSent
 });
 
 // ---------------------------------------------------------------------------
+// PF-1053: Sentry Metrics scrubber gap — metrics are ON BY DEFAULT
+// ---------------------------------------------------------------------------
+
+describe('PF-1053: Sentry Metrics require beforeSendMetric: scrubSentryMetric', () => {
+  /**
+   * Metrics are a THIRD delivery pipeline, independent of both `beforeSend`
+   * (scrubSentryEvent) and `beforeSendLog` (scrubSentryLog). Two facts make the
+   * scrubber load-bearing rather than precautionary:
+   *
+   *   1. `enableMetrics` DEFAULTS TO TRUE (@sentry/core options.d.ts) — unlike
+   *      logs, there is no opt-in line to grep for. Any `Sentry.metrics.*` call
+   *      anywhere in the tree ships immediately.
+   *   2. The SDK auto-attaches the active scope's `user.id`, `user.email`, and
+   *      `user.name` to EVERY metric (@sentry/core metrics/internal.js) —
+   *      i.e. metrics carry PII by construction, not by developer error.
+   *
+   * So the requirement is unconditional: every init that could emit a metric —
+   * all three — must route metrics through the scrubber.
+   */
+  const CONFIG_FILES = [
+    'sentry.server.config.ts',
+    'sentry.edge.config.ts',
+    'instrumentation-client.ts',
+  ] as const;
+
+  function stripComments(src: string): string {
+    return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  }
+
+  async function readConfig(file: string): Promise<string> {
+    const fs = await import('fs');
+    const path = await import('path');
+    const raw = fs.readFileSync(path.resolve(process.cwd(), file), 'utf-8');
+    return stripComments(raw);
+  }
+
+  it.each(CONFIG_FILES)(
+    '%s wires beforeSendMetric: scrubSentryMetric',
+    async (file) => {
+      const content = await readConfig(file);
+      expect(
+        content,
+        `${file} does not route Sentry Metrics through scrubSentryMetric — metrics are enabled by default and the SDK attaches user.email/user.name to every one`,
+      ).toContain('beforeSendMetric: scrubSentryMetric');
+    },
+  );
+
+  it.each(CONFIG_FILES)(
+    '%s uses the top-level beforeSendMetric, not the deprecated _experiments form',
+    async (file) => {
+      const content = await readConfig(file);
+      // `_experiments.beforeSendMetric` still works but is @deprecated in
+      // @sentry/core 10.x; the top-level option wins when both are present, so a
+      // future removal of the experimental key would silently unhook the scrubber.
+      expect(content).not.toContain('_experiments');
+    },
+  );
+
+  it('keeps the requirement honest: no config silently opts out of metrics', async () => {
+    // The pin above is unconditional because metrics default ON. If a future
+    // edit set `enableMetrics: false` somewhere, the scrubber assertion for that
+    // file would become busywork rather than protection — surface that here
+    // instead of letting the two drift apart unnoticed.
+    const optedOut = await Promise.all(
+      CONFIG_FILES.map(async (f) => (await readConfig(f)).includes('enableMetrics: false')),
+    );
+    expect(optedOut.filter(Boolean)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // PF-967 (#8956): Sentry feedback widget config must stay pinned
 // ---------------------------------------------------------------------------
 

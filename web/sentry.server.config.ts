@@ -1,6 +1,11 @@
 import * as Sentry from '@sentry/nextjs';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';
-import { configureSentryFingerprinting, scrubSentryEvent, scrubSentryLog } from '@/lib/monitoring/sentryConfig';
+import {
+  configureSentryFingerprinting,
+  scrubSentryEvent,
+  scrubSentryLog,
+  scrubSentryMetric,
+} from '@/lib/monitoring/sentryConfig';
 
 const DSN = process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -69,6 +74,13 @@ if (DSN) {
     // scrubSentryLog closes that channel so a stray log call can't ship a
     // prompt/BYOK key/PII unredacted. Keep this wired wherever enableLogs is on.
     beforeSendLog: scrubSentryLog,
+    // Metrics (PF-1053) are a THIRD pipeline, touched by neither beforeSend nor
+    // beforeSendLog — and unlike logs they are ON BY DEFAULT (`enableMetrics`
+    // defaults to true), so there is no opt-in line gating them. The SDK also
+    // stamps the active scope's user.id/user.email/user.name onto every metric,
+    // so this hook is what keeps metrics inside the F03/F04 posture rather than
+    // a new PII egress path. Pinned by sentry-regressions.test.ts.
+    beforeSendMetric: scrubSentryMetric,
 
     integrations: [
       // CPU profiling via the native V8 CpuProfiler addon (@sentry/profiling-node).

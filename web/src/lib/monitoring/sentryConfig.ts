@@ -429,6 +429,58 @@ function scrubLog<T extends { message?: unknown; attributes?: Record<string, unk
  */
 export const scrubSentryLog = scrubLog;
 
+/**
+ * Scrub a Sentry Metric before transmission (PF-1053).
+ *
+ * Metrics are a THIRD delivery pipeline, independent of both `beforeSend`
+ * (→ {@link scrubEvent}) and `beforeSendLog` (→ {@link scrubLog}). Two SDK facts
+ * make this hook load-bearing rather than precautionary:
+ *
+ *   - `enableMetrics` **defaults to `true`**, so unlike logs there is no opt-in
+ *     line gating the pipeline — any `Sentry.metrics.*` call ships immediately.
+ *   - the SDK copies the active scope's user onto EVERY metric as `user.id`,
+ *     `user.email`, and `user.name` (from `username`). Metrics therefore carry
+ *     PII by construction, not by developer error.
+ *
+ * `user.email` is already caught by {@link SENSITIVE_KEY_RE}; `user.name` and
+ * `user.username` are not (the regex matches `email`, not `name`), so they are
+ * redacted explicitly — the same gap {@link scrubLog} closes. `user.id` is kept
+ * for correlation, consistent with {@link scrubEvent} and {@link scrubLog}.
+ *
+ * The metric `name` is scrubbed too: names are developer-authored, but a
+ * template literal can fold a user identifier into one, and names ride the same
+ * envelope as attributes. `value`, `type`, and `unit` are never touched — they
+ * are numeric/enumerated and carry no free text.
+ *
+ * Mutates in place and returns the same metric (generic so it stays a drop-in
+ * for Sentry's `beforeSendMetric`, typed `(metric: Metric) => Metric | null`,
+ * without importing the non-exported `Metric` type).
+ */
+function scrubMetric<T extends { name?: unknown; attributes?: Record<string, unknown> }>(
+  metric: T,
+): T {
+  if (typeof metric.name === 'string') {
+    // `scrubString` returns a plain `string`; the cast restores the caller's
+    // (possibly branded) name type — required, not redundant.
+    metric.name = scrubString(metric.name) as T['name'];
+  }
+  if (metric.attributes) {
+    const attrs = deepScrub(metric.attributes) as Record<string, unknown>;
+    for (const key of ['user.name', 'user.username']) {
+      if (key in attrs) attrs[key] = REDACTED;
+    }
+    metric.attributes = attrs as T['attributes'];
+  }
+  return metric;
+}
+
+/**
+ * `beforeSendMetric` hook for every Sentry.init. Re-exported under a stable name
+ * so the init files import a single symbol (mirrors {@link scrubSentryEvent} and
+ * {@link scrubSentryLog}).
+ */
+export const scrubSentryMetric = scrubMetric;
+
 // Export helpers for unit testing
 export {
   fingerprintEvent,

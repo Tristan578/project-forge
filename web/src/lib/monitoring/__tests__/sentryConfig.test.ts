@@ -22,6 +22,7 @@ import {
   isGenerationError,
   scrubEvent,
   scrubSentryLog,
+  scrubSentryMetric,
   scrubString,
   deepScrub,
 } from '../sentryConfig';
@@ -738,5 +739,103 @@ describe('scrubSentryLog', () => {
     expect(attrs['user.username']).toBe('[REDACTED]');
     expect(attrs['user.email']).toBe('[REDACTED]'); // sensitive key → redacted by deepScrub
     expect(attrs['user.id']).toBe('u_123'); // kept for correlation, as in scrubEvent
+  });
+});
+
+// ---------------------------------------------------------------------------
+// scrubSentryMetric — beforeSendMetric hook (PF-1053)
+// Sentry Metrics travel a THIRD pipeline, independent of both beforeSend
+// (scrubEvent) and beforeSendLog (scrubLog), and the SDK auto-attaches the
+// active scope's user.id / user.email / user.name to every metric.
+// ---------------------------------------------------------------------------
+
+describe('scrubSentryMetric', () => {
+  it('redacts the SDK-attached user.email / user.name / user.username attributes but keeps user.id', () => {
+    // metrics/internal.js copies scope user fields onto every metric:
+    //   user.id, user.email, user.name (from `username`).
+    // user.email is caught by the sensitive-key regex; user.name / user.username
+    // are not, so they must be redacted explicitly — same gap scrubLog closes.
+    const out = scrubSentryMetric({
+      name: 'generation.request',
+      type: 'counter',
+      value: 1,
+      attributes: {
+        'user.id': 'u_123',
+        'user.email': 'nolantj@live.com',
+        'user.name': 'tristan_nolan',
+        'user.username': 'tristan_nolan',
+      },
+    });
+    const attrs = out.attributes as Record<string, unknown>;
+    expect(attrs['user.email']).toBe('[REDACTED]');
+    expect(attrs['user.name']).toBe('[REDACTED]');
+    expect(attrs['user.username']).toBe('[REDACTED]');
+    expect(attrs['user.id']).toBe('u_123'); // kept for correlation, as in scrubEvent/scrubLog
+  });
+
+  it('redacts sensitive keys and secret-looking values in metric attributes', () => {
+    const out = scrubSentryMetric({
+      name: 'generation.request',
+      type: 'counter',
+      value: 1,
+      attributes: {
+        apiKey: 'sk-ant-api03-AbCdEf0123456789xyz',
+        note: 'retried from 10.0.0.1',
+        prompt: 'contact nolantj@live.com',
+      },
+    });
+    const attrs = out.attributes as Record<string, string>;
+    expect(attrs.apiKey).toBe('[REDACTED]'); // sensitive key → value redacted wholesale
+    expect(attrs.note).toBe('retried from [REDACTED_IP]');
+    expect(attrs.prompt).toBe('contact [REDACTED_EMAIL]');
+  });
+
+  it('scrubs a secret interpolated into the metric NAME', () => {
+    // A metric name is developer-authored, but nothing stops a template literal
+    // from folding a user identifier into it. Names ride the same envelope as
+    // attributes, so they get the same treatment.
+    const out = scrubSentryMetric({
+      name: 'generation.request.nolantj@live.com',
+      type: 'counter',
+      value: 1,
+    });
+    // The email pattern's local part legitimately includes dots, so the whole
+    // dotted prefix is consumed — assert the SECURITY property (no address
+    // survives, and the redaction marker is present) rather than pinning how
+    // greedy the match happens to be.
+    expect(out.name).not.toContain('nolantj');
+    expect(out.name).not.toContain('live.com');
+    expect(out.name).toContain('[REDACTED_EMAIL]');
+  });
+
+  it('never alters the numeric value, type, or unit', () => {
+    const out = scrubSentryMetric({
+      name: 'generation.duration',
+      type: 'distribution',
+      value: 1234.5,
+      unit: 'millisecond',
+      attributes: { route: '/api/generate/image' },
+    });
+    expect(out.value).toBe(1234.5);
+    expect(out.type).toBe('distribution');
+    expect(out.unit).toBe('millisecond');
+    expect((out.attributes as Record<string, string>).route).toBe('/api/generate/image');
+  });
+
+  it('leaves a clean metric untouched and returns the same object (mutates in place)', () => {
+    const input = { name: 'generation.request', type: 'counter' as const, value: 1 };
+    const out = scrubSentryMetric(input);
+    expect(out).toBe(input); // same reference — drop-in for Sentry's beforeSendMetric
+    expect(out.name).toBe('generation.request');
+  });
+
+  it('tolerates a metric with no attributes', () => {
+    // Typed with an optional `attributes` so the assertion below is about the
+    // VALUE being absent, not about the property missing from an inferred
+    // literal type.
+    const input: { name: string; type: string; value: number; attributes?: Record<string, unknown> } =
+      { name: 'generation.request', type: 'counter', value: 1 };
+    const out = scrubSentryMetric(input);
+    expect(out.attributes).toBeUndefined();
   });
 });
