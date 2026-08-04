@@ -76,7 +76,11 @@ jobs:
           # ORTHOGONAL to any-code (like hooks): the gate is a ~30s self-contained
           # check, so a manifest-only change pays only this gate, not the full
           # quality-gates fan-out.
-          echo "$CHANGED" | grep -qE '(^|/)package\.json$|^package-lock\.json$' && deps=true
+          # The gate SCRIPT is in the trigger too (same convention as the agentic,
+          # ghaw and api gates): a PR that edits check-lockfile-sync.sh otherwise
+          # changes the gate without ever running it, so a regression in the gate
+          # ships green and is only discovered by the next manifest PR.
+          echo "$CHANGED" | grep -qE '(^|/)package\.json$|^package-lock\.json$|^scripts/check-lockfile-sync\.sh$' && deps=true
           # Cross-provider agentic-config drift gate (scripts/check-agentic-sync.sh).
           # Fires on the single source of truth (tools/agentic-sync/), the
           # per-provider instruction files it injects facts into, the gate script

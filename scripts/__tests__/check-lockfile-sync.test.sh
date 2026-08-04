@@ -48,8 +48,10 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 
 # Build a throwaway git repo containing a committed root package-lock.json.
 # Echoes the repo path. Caller is responsible for rm -rf.
+# $1 (optional) is the JSON value for package.json's "overrides" key; the
+# consistency stage derives its exclusion set from it.
 make_repo() {
-  local repo
+  local repo overrides="${1:-}"
   repo="$(mktemp -d)"
   (
     cd "$repo" || exit 1
@@ -57,17 +59,42 @@ make_repo() {
     git config user.email t@t.t
     git config user.name t
     printf '{\n  "name": "root",\n  "lockfileVersion": 3,\n  "packages": {}\n}\n' > package-lock.json
-    printf '{\n  "name": "root"\n}\n' > package.json
+    if [ -n "$overrides" ]; then
+      printf '{\n  "name": "root",\n  "overrides": %s\n}\n' "$overrides" > package.json
+    else
+      printf '{\n  "name": "root"\n}\n' > package.json
+    fi
     git add -A
     git commit -qm init
   )
   echo "$repo"
 }
 
+# Write a stub `npm ls --json` report into $1 carrying the given problem
+# strings, and echo the consistency-stub command that emits it. Staging the
+# JSON as a file (rather than inlining it in the stub string) keeps arbitrary
+# problem text out of the eval'd command line.
+# Usage: stub="$(ls_report "$repo" 'invalid: foo@1.0.0 /p' 'missing: bar@2.0.0, required by baz')"
+ls_report() {
+  local repo="$1"; shift
+  jq -nc '{name: "root", version: "0.0.0", problems: $ARGS.positional}' --args "$@" > "$repo/.ls-report.json"
+  echo 'cat .ls-report.json'
+}
+
 # Run the gate inside $repo with a given regenerate stub; echo "<exit>|<output>".
+# $3 stubs the stage-1 consistency command and defaults to a problem-free `npm
+# ls --json` report (healthy lockfile) so the stage-2 cases below stay focused
+# on regen behaviour. The default must be VALID JSON, not `true`: the gate
+# fail-closes (exit 2) on output it cannot parse, so a silent stub would abort
+# every stage-2 case before it reached the code under test. Both seams MUST be
+# injected on every run — leaving stage 1 unset would fall through to the real
+# `npm ls`, which needs npm on PATH and a resolvable dependency graph, and the
+# throwaway repo has neither.
+CLEAN_LS_REPORT='printf "{\"name\":\"root\",\"problems\":[]}"'
 run_gate() {
-  local repo="$1" regen="$2" out rc
-  out="$(cd "$repo" && LOCKFILE_REGEN_CMD="$regen" bash "$SCRIPT" 2>&1)"
+  local repo="$1" regen="$2" consistency="${3:-$CLEAN_LS_REPORT}" out rc
+  out="$(cd "$repo" \
+    && LOCKFILE_REGEN_CMD="$regen" LOCKFILE_CONSISTENCY_CMD="$consistency" bash "$SCRIPT" 2>&1)"
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
@@ -145,6 +172,161 @@ if [ "$rc" = "1" ]; then pass "missing lockfile fails (exit 1)"; else fail "miss
 if grep -qi "not found" <<<"$out"; then pass "missing lockfile has clear message"; else fail "missing lockfile message missing"; fi
 rm -rf "$repo"
 
+# --- 6. Stage 1: internally inconsistent lockfile → exit 1 + clear message ----
+# THE BLIND SPOT THIS STAGE CLOSES (#9070, PF-1049). Stage 2 regenerates and
+# diffs, which catches a MISSING relock but NOT an internally INCONSISTENT
+# lockfile: one whose workspace entries record the NEW dependency range while
+# the resolved package nodes still carry the OLD version. npm reads the recorded
+# ranges, concludes the manifests are already satisfied, and re-resolves
+# nothing — so the regeneration is a no-op, `git diff --quiet` passes, and the
+# gate reports "in sync" on a lockfile that makes `npm ci` fail with EUSAGE.
+# That shipped: web/ and apps/docs/ moved to @playwright/test ^1.62.1, the
+# lockfile recorded ^1.62.1, its resolved nodes stayed at 1.62.0, every gate was
+# green, and only Vercel's frozen `npm ci` caught it.
+#
+# The stub reproduces the exact edge that shipped: @playwright/test resolved to
+# 1.62.0 while web/ requires ^1.62.1.
+repo="$(make_repo)"
+stub="$(ls_report "$repo" 'invalid: @playwright/test@1.62.0 /r/web/node_modules/@playwright/test')"
+res="$(run_gate "$repo" "true" "$stub")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "internally inconsistent lockfile fails (exit 1)"; else fail "inconsistent lockfile should exit 1, got $rc"; fi
+if grep -qi "internally inconsistent" <<<"$out"; then pass "inconsistency has a clear, distinct message"; else fail "inconsistency message missing (indistinguishable from plain drift)"; fi
+if grep -q "@playwright/test@1.62.0" <<<"$out"; then pass "inconsistency surfaces the offending edge verbatim"; else fail "inconsistency swallowed the underlying diagnostic — un-actionable failure"; fi
+# The remediation MUST NOT be a bare `npm install --package-lock-only`: that is
+# precisely the command that no-ops against this state (it was tried three ways
+# on #9070 and changed nothing). A gate that prints a fix which cannot work
+# sends the next person down the same dead end, so pin the honest guidance.
+if grep -qi "will NOT repair" <<<"$out"; then pass "inconsistency warns that a plain relock will not fix it"; else fail "inconsistency remediation omits the 'plain relock no-ops' warning"; fi
+if grep -q "jq" <<<"$out"; then pass "inconsistency prints the node-deletion remediation that actually works"; else fail "inconsistency remediation missing the drop-stale-nodes recipe"; fi
+if (cd "$repo" && git diff --quiet -- package-lock.json); then
+  pass "consistency check is non-destructive (clean working tree)"
+else
+  fail "consistency stage mutated the lockfile"
+fi
+rm -rf "$repo"
+
+# --- 7. Stage ORDER: consistency runs before regeneration --------------------
+# Order is load-bearing, not cosmetic. Stage 2 mutates package-lock.json in
+# place, so a consistency check running after it would inspect the REGENERATED
+# file rather than the committed one — measuring npm's own output instead of
+# what the PR actually ships, i.e. exactly the no-op that hid the bug. Prove the
+# ordering behaviourally: fail stage 1 and assert the regen stub never ran.
+repo="$(make_repo)"
+stub="$(ls_report "$repo" 'invalid: @playwright/test@1.62.0 /r/web/node_modules/@playwright/test')"
+res="$(run_gate "$repo" 'touch REGEN_RAN' "$stub")"
+rc="${res%%|*}"
+if [ "$rc" = "1" ]; then pass "stage-1 failure short-circuits the gate (exit 1)"; else fail "stage-1 failure should exit 1, got $rc"; fi
+if [ -e "$repo/REGEN_RAN" ]; then
+  fail "regeneration ran despite a stage-1 failure — consistency is checked against the REGENERATED lockfile, not the committed one"
+else
+  pass "consistency is checked against the pristine committed lockfile (regen not yet run)"
+fi
+rm -rf "$repo"
+
+# --- 8. Zero problems → stage 1 passes through to stage 2 --------------------
+repo="$(make_repo)"
+stub="$(ls_report "$repo")"
+res="$(run_gate "$repo" "true" "$stub")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "problem-free report passes stage 1 (exit 0)"; else fail "problem-free report should exit 0, got $rc"; fi
+if grep -qi "in sync" <<<"$out"; then pass "problem-free report reaches the stage-2 success message"; else fail "problem-free report did not proceed past stage 1"; fi
+rm -rf "$repo"
+
+# --- 8b. `overrides` are NOT drift: npm's exit code is unusable here ---------
+# THE CALIBRATION THAT MAKES THIS GATE SURVIVABLE. An `overrides` entry
+# deliberately forces a version outside a declared range, and npm reports every
+# such edge as `invalid` — the real repo's HEALTHY lockfile yields 8 of them
+# (postcss, @clerk/shared, sharp, undici, esbuild, dompurify, js-cookie, ws) and
+# a permanent `npm ls` exit 1. A gate keyed on that exit code, or on a text
+# match for /invalid/, is red on every single PR — and a permanently-red gate
+# gets deleted, not fixed. The verdict must be the problem set MINUS the
+# override-forced packages. Mutation-provable: key the gate on npm's exit code
+# and this case goes red.
+repo="$(make_repo '{"postcss": ">=8.5.18", "next": {"sharp": "^0.35.0"}}')"
+stub="$(ls_report "$repo" \
+  'invalid: postcss@8.5.23 /r/node_modules/postcss' \
+  'invalid: sharp@0.35.3 /r/node_modules/sharp')"
+res="$(run_gate "$repo" "true" "$stub")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "override-forced 'invalid' edges are not reported as drift (exit 0)"; else fail "override-forced edges failed the gate (got $rc) — gate would be red on every PR"; fi
+if grep -qi "in sync" <<<"$out"; then pass "override-only problems pass through to stage 2"; else fail "override-only problems did not reach stage 2"; fi
+rm -rf "$repo"
+
+# --- 8c. A NESTED override excludes the child, and only the child ------------
+# `{"next": {"sharp": "..."}}` forces sharp, NOT next. Excluding the parent key
+# would blind the gate to genuine drift on `next` itself. Assert the parent is
+# still reportable while the child is excluded.
+repo="$(make_repo '{"next": {"sharp": "^0.35.0"}}')"
+stub="$(ls_report "$repo" \
+  'invalid: sharp@0.35.3 /r/node_modules/sharp' \
+  'invalid: next@16.0.1 /r/node_modules/next')"
+res="$(run_gate "$repo" "true" "$stub")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "nested override does not exempt its PARENT package (exit 1)"; else fail "nested override key exempted the parent too (got $rc) — real drift on 'next' would be invisible"; fi
+if grep -q 'next@16.0.1' <<<"$out"; then pass "the parent's offending edge is reported"; else fail "parent edge not reported"; fi
+if grep -q 'sharp@0.35.3' <<<"$out"; then fail "nested-override child 'sharp' was reported as drift"; else pass "nested-override child is excluded"; fi
+rm -rf "$repo"
+
+# --- 8d. Fail CLOSED on unusable output, and on an unparseable problem -------
+# A consistency command that emits no JSON (npm crashed, wrong flags, empty) is
+# a TOOLING failure, not a pass. Exit 2 distinguishes it from a real finding so
+# a broken runner can't be mistaken for a clean lockfile.
+repo="$(make_repo)"
+res="$(run_gate "$repo" "true" 'printf "npm error code ENOENT\n"')"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "2" ]; then pass "non-JSON consistency output fails closed (exit 2)"; else fail "non-JSON output should exit 2 (tooling error), got $rc"; fi
+if grep -qi "parseable JSON" <<<"$out"; then pass "non-JSON output names the tooling failure"; else fail "non-JSON failure message missing"; fi
+rm -rf "$repo"
+
+# An unrecognized problem STRING (a future npm format change) must be KEPT as a
+# finding, never silently dropped. This is the fail-open trap in the parse: jq's
+# `capture(...)?` yields EMPTY, and `(empty) as $x | body` iterates zero times,
+# so a bare `?` makes the problem vanish. Mutation-provable: revert the gate's
+# `[... capture(...)?] | first` to a bare `capture(...)?` and this case goes red.
+repo="$(make_repo '{"postcss": ">=8.5.18"}')"
+stub="$(ls_report "$repo" 'SOMETHING NPM HAS NOT INVENTED YET')"
+res="$(run_gate "$repo" "true" "$stub")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "unparseable problem string is kept as a finding (exit 1, fails closed)"; else fail "unparseable problem was silently dropped (got $rc) — gate fails OPEN on an npm format change"; fi
+if grep -q "SOMETHING NPM HAS NOT INVENTED YET" <<<"$out"; then pass "unparseable problem is surfaced verbatim"; else fail "unparseable problem not surfaced"; fi
+rm -rf "$repo"
+
+# No root package.json means the overrides exclusion set cannot be derived. The
+# tempting shortcut — treat a missing manifest as "no overrides" — silently
+# converts every override-forced edge into a false finding, so it must fail
+# closed instead.
+repo="$(mktemp -d)"
+( cd "$repo" && git init -q && git config user.email t@t.t && git config user.name t \
+    && printf '{\n  "name": "root",\n  "lockfileVersion": 3,\n  "packages": {}\n}\n' > package-lock.json \
+    && git add -A && git commit -qm init )
+res="$(run_gate "$repo" "true")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "2" ]; then pass "missing root package.json fails closed (exit 2)"; else fail "missing manifest should exit 2, got $rc"; fi
+if grep -qi "overrides" <<<"$out"; then pass "missing manifest names the exclusion set it could not derive"; else fail "missing-manifest message does not explain why the manifest is needed"; fi
+rm -rf "$repo"
+
+# --- 9. Consistency stage failure is distinguishable from regen failure -------
+# The three failure classes (inconsistent lockfile / stale lockfile / npm broke)
+# need different fixes, so they must not collapse into one message. Assert the
+# stage-1 failure does NOT claim drift and does NOT claim the command failed.
+repo="$(make_repo)"
+stub="$(ls_report "$repo" 'invalid: @playwright/test@1.62.0 /r/web/node_modules/@playwright/test')"
+res="$(run_gate "$repo" "true" "$stub")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "stage-1 failure exits 1"; else fail "stage-1 failure should exit 1, got $rc"; fi
+if grep -qi "drift detected" <<<"$out"; then
+  fail "stage-1 failure is mislabelled as lockfile drift — sends the reader to the wrong fix"
+else
+  pass "stage-1 failure is not mislabelled as drift"
+fi
+if grep -qi "regeneration command failed" <<<"$out"; then
+  fail "stage-1 failure is mislabelled as a regeneration failure"
+else
+  pass "stage-1 failure is not mislabelled as a regen-command failure"
+fi
+rm -rf "$repo"
+
 echo ""
 echo "=== ci.yml integration wiring ==="
 # A standalone path-filtered workflow cannot be a SAFE required check: a PR that
@@ -181,6 +363,16 @@ if [ -f "$CI_YML" ]; then
     pass "ci-gate deps detection regex keys on package.json (any depth) + root lockfile"
   else
     fail "ci-gate deps=true line does not key on package.json/lockfile changes"
+  fi
+
+  # The gate's OWN script must be in the trigger (same convention as the agentic,
+  # ghaw and api gates). Without it a PR that edits check-lockfile-sync.sh changes
+  # the gate without ever running it, so a regression in the gate ships green and
+  # surfaces only on the next unrelated manifest PR.
+  if grep -qF '^scripts/check-lockfile-sync\.sh$' <<<"$deps_line"; then
+    pass "ci-gate deps trigger includes the gate script itself (a gate edit exercises the gate)"
+  else
+    fail "ci-gate deps=true line omits scripts/check-lockfile-sync.sh — the gate is not run by PRs that modify it"
   fi
 
   # The ci-gate "No relevant changes — downstream jobs will be skipped" diagnostic
@@ -256,6 +448,17 @@ if [ -f "$CI_YML" ]; then
     fail "lockfile-sync job exposes the LOCKFILE_REGEN_CMD test seam in an executable line — gate can be no-op'd into a false pass"
   else
     pass "lockfile-sync job does not wire the LOCKFILE_REGEN_CMD test seam (gate cannot be bypassed via job env)"
+  fi
+
+  # SECURITY: identical rule for stage 1's seam. `env: LOCKFILE_CONSISTENCY_CMD:
+  # 'true'` would make the gate skip the consistency check entirely and fall
+  # straight through to the stage-2 diff — restoring the exact blind spot that
+  # let #9070 ship green. Same comment-strip rationale as above (the prose in
+  # this suite and the job's doc comment legitimately name the variable).
+  if grep -v '^[[:space:]]*#' <<<"$ls_block" | grep -q 'LOCKFILE_CONSISTENCY_CMD'; then
+    fail "lockfile-sync job exposes the LOCKFILE_CONSISTENCY_CMD test seam in an executable line — the consistency stage can be no-op'd into a false pass"
+  else
+    pass "lockfile-sync job does not wire the LOCKFILE_CONSISTENCY_CMD test seam (consistency stage cannot be bypassed via job env)"
   fi
 
   # ci-success's needs: list is the required-check surface. Pull the block from
@@ -380,6 +583,28 @@ if grep -E '^(REGEN_CMD|BASE_REGEN)=' "$SCRIPT" | grep -q -- '--ignore-scripts';
   pass "default regen command runs with --ignore-scripts (no PR lifecycle scripts in CI)"
 else
   fail "default regen command is missing --ignore-scripts — a PR package.json script could run in CI"
+fi
+
+# #6 — the DEFAULT consistency command must resolve from the lockfile ALONE.
+# Without --package-lock-only, `npm ls` reads node_modules and reports the
+# INSTALLED tree — which on a warm CI cache can satisfy every edge while the
+# committed lockfile is still inconsistent (the same false green a warm local
+# `npm ci` gives: "up to date in 1s"). The flag is what makes stage 1 measure
+# the artifact under review rather than the runner's disk, and it is also what
+# keeps the stage offline and free of node_modules writes.
+if grep -E '^(CONSISTENCY_CMD|BASE_CONSISTENCY)=' "$SCRIPT" | grep -q -- '--package-lock-only'; then
+  pass "default consistency command runs with --package-lock-only (resolves from the lockfile, not node_modules)"
+else
+  fail "default consistency command is missing --package-lock-only — it would grade the installed tree, not the committed lockfile"
+fi
+
+# #6 — the consistency stage must be single-sourced through BASE_CONSISTENCY for
+# the same reason as BASE_REGEN: so what the gate runs and what it reports can
+# never drift apart, and so the seam has exactly one default to audit.
+if grep -qE '^BASE_CONSISTENCY=' "$SCRIPT"; then
+  pass "gate defines a single-sourced BASE_CONSISTENCY"
+else
+  fail "gate has no BASE_CONSISTENCY — the consistency command has no single source"
 fi
 
 # #5 — the human remediation hint and the actual regen command single-source from
