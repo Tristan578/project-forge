@@ -29,6 +29,7 @@ import {
   classifyGenerationOutcome,
   recordGenerationMetrics,
   withGenerationMetrics,
+  GENERATION_OUTCOMES,
   GENERATION_REQUEST_METRIC,
   GENERATION_DURATION_METRIC,
   GENERATION_TOKENS_METRIC,
@@ -51,7 +52,7 @@ describe('classifyGenerationOutcome', () => {
   it.each([
     [200, 'success'],
     [201, 'success'],
-    [401, 'unauthenticated'],
+    [401, 'signed_out'],
     [403, 'bot_blocked'],
     [429, 'rate_limited'],
     [402, 'insufficient_tokens'],
@@ -73,6 +74,56 @@ describe('classifyGenerationOutcome', () => {
   it('treats any unmapped 5xx as an error', () => {
     expect(classifyGenerationOutcome(502)).toBe('error');
     expect(classifyGenerationOutcome(504)).toBe('error');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Outcome vocabulary — must survive Sentry's server-side data scrubber
+// ---------------------------------------------------------------------------
+
+/**
+ * Substrings that Sentry's default server-side data scrubber redacts when they
+ * appear in a metric ATTRIBUTE VALUE, replacing the whole value with
+ * `[Filtered]`. The project has `dataScrubberDefaults: true` (and no custom
+ * field list), so this is not something the SDK config can opt out of.
+ *
+ * Derived empirically against the live project rather than from documentation:
+ * of the candidates probed, `auth`/`authorization`/`unauth`/`authenticated`/
+ * `reauth`/`password`/`passwd`/`secret`/`credentials`/`apikey`/`privatekey` were
+ * all returned as `[Filtered]`, while `token`, `session`, `anonymous`,
+ * `no_session`, `insufficient_tokens`, `out_of_credits`, `bot_blocked`,
+ * `rate_limited`, `provider_unavailable`, `success` and `error` all survived
+ * intact. Note `token`/`session` are NOT triggers on their own.
+ */
+const SENTRY_SCRUBBED_VALUE_RE = /auth|passw(or)?d|secret|credential|api[_-]?key|private[_-]?key/i;
+
+describe('GENERATION_OUTCOMES vocabulary', () => {
+  it('contains no value that Sentry redacts to [Filtered]', () => {
+    // `outcome` is THE alerting dimension. A scrubbed value is not merely ugly —
+    // it collapses that bucket into an unqueryable `[Filtered]` facet, so an
+    // alert on it can never fire. This shipped once: 401 was `unauthenticated`,
+    // and every 401 sample landed in Sentry as `outcome: [Filtered]`.
+    const scrubbed = GENERATION_OUTCOMES.filter((o) => SENTRY_SCRUBBED_VALUE_RE.test(o));
+    expect(scrubbed).toEqual([]);
+  });
+
+  it('has a guard regex that actually matches the value that shipped broken', () => {
+    // Without this, gutting the regex above would make the guard vacuously pass.
+    expect(SENTRY_SCRUBBED_VALUE_RE.test('unauthenticated')).toBe(true);
+    expect(SENTRY_SCRUBBED_VALUE_RE.test('signed_out')).toBe(false);
+  });
+
+  it('lists every outcome classifyGenerationOutcome can return', () => {
+    // The guard is only as complete as this array — an outcome reachable from
+    // the classifier but missing here would never be checked.
+    const reachable = new Set(
+      [200, 201, 400, 401, 402, 403, 409, 415, 422, 429, 500, 502, 503, 504].map(
+        classifyGenerationOutcome,
+      ),
+    );
+    for (const outcome of reachable) {
+      expect(GENERATION_OUTCOMES).toContain(outcome);
+    }
   });
 });
 

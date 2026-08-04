@@ -26,16 +26,29 @@ export const GENERATION_TOKENS_METRIC = 'generation.tokens_charged';
  * spike in `provider_unavailable` is an upstream incident, a spike in
  * `insufficient_tokens` is a billing/UX signal, and neither should be buried in
  * an undifferentiated "non-200" bucket.
+ *
+ * NAMING CONSTRAINT: Sentry's server-side data scrubber runs over metric
+ * ATTRIBUTE VALUES, not just keys, and replaces any value containing one of its
+ * default sensitive substrings with `[Filtered]` before the value is ever
+ * indexed. `dataScrubberDefaults` is on for this project, so no SDK-side option
+ * turns it off. The obvious name for 401 — `unauthenticated` — contains `auth`
+ * and shipped as an unqueryable `[Filtered]` bucket; hence `signed_out`.
+ * `GENERATION_OUTCOMES` exists so a test can iterate the vocabulary and pin
+ * this, since a scrubbed value is invisible in code review and silently
+ * un-alertable in production.
  */
-export type GenerationOutcome =
-  | 'success'
-  | 'unauthenticated'
-  | 'bot_blocked'
-  | 'rate_limited'
-  | 'insufficient_tokens'
-  | 'rejected'
-  | 'provider_unavailable'
-  | 'error';
+export const GENERATION_OUTCOMES = [
+  'success',
+  'signed_out',
+  'bot_blocked',
+  'rate_limited',
+  'insufficient_tokens',
+  'rejected',
+  'provider_unavailable',
+  'error',
+] as const;
+
+export type GenerationOutcome = (typeof GENERATION_OUTCOMES)[number];
 
 /**
  * Mutable per-request context. The handler resolves provider/operation/cost/tier
@@ -55,7 +68,7 @@ const STATUS_OUTCOMES: Record<number, GenerationOutcome> = {
   200: 'success',
   201: 'success',
   400: 'rejected',
-  401: 'unauthenticated',
+  401: 'signed_out',
   402: 'insufficient_tokens',
   403: 'bot_blocked',
   422: 'rejected',
