@@ -40,11 +40,14 @@ export const GENERATION_TOKENS_METRIC = 'generation.tokens_charged';
 export const GENERATION_OUTCOMES = [
   'success',
   'signed_out',
+  'banned',
   'bot_blocked',
   'rate_limited',
   'insufficient_tokens',
   'rejected',
+  'content_rejected',
   'provider_unavailable',
+  'degraded',
   'error',
 ] as const;
 
@@ -71,6 +74,24 @@ export interface GenerationMetricsContext {
    */
   tokenCost?: number;
   tier?: string;
+  /**
+   * Overrides the status-derived outcome when the caller knows something the
+   * status code cannot express.
+   *
+   * HTTP status is a lossy classifier here, and it is lossy in exactly the
+   * places that matter most: three distinct gates return 403 or 503 through
+   * this handler. Without an override, ban-evasion volume is recorded as bot
+   * traffic, and the Neon circuit breaker opening pages on-call as an upstream
+   * AI-provider incident. Likewise a 422 from the content-safety blocklist —
+   * the most security-relevant rejection on this surface — is indistinguishable
+   * from a client sending a malformed body.
+   *
+   * Set this at the branch that KNOWS the cause; {@link classifyGenerationOutcome}
+   * remains the fallback for every branch that doesn't. Any value used here must
+   * be in {@link GENERATION_OUTCOMES}, which is what the scrub-pattern test
+   * iterates.
+   */
+  outcome?: GenerationOutcome;
 }
 
 const STATUS_OUTCOMES: Record<number, GenerationOutcome> = {
@@ -115,7 +136,7 @@ export function recordGenerationMetrics({
   cache?: string;
 }): void {
   try {
-    const outcome = classifyGenerationOutcome(status);
+    const outcome = ctx.outcome ?? classifyGenerationOutcome(status);
 
     // Built by assignment rather than an object literal so unresolved fields are
     // ABSENT, not present-and-undefined: Sentry would otherwise render a junk

@@ -259,6 +259,49 @@ describe('recordGenerationMetrics', () => {
     recordGenerationMetrics({ route: '/api/generate/image', status: 200, durationMs: 5, ctx: {} });
     expect(find(GENERATION_TOKENS_METRIC)).toHaveLength(0);
   });
+
+  it.each([
+    // Each pair is a case where the status is genuinely ambiguous on this route,
+    // and the classifier's answer is the WRONG one of the two.
+    ['banned' as const, 403, 'bot_blocked'],
+    ['degraded' as const, 503, 'provider_unavailable'],
+    ['content_rejected' as const, 422, 'rejected'],
+  ])('honours ctx.outcome=%s on a %i, which the classifier would call %s', (outcome, status, derived) => {
+    expect(classifyGenerationOutcome(status)).toBe(derived);
+
+    recordGenerationMetrics({
+      route: '/api/generate/image',
+      status,
+      durationMs: 5,
+      ctx: { outcome },
+    });
+
+    // Both metrics share one attribute object, so the override has to reach the
+    // duration series too — alerting on latency by outcome is the point.
+    expect(find(GENERATION_REQUEST_METRIC)[0].options?.attributes?.outcome).toBe(outcome);
+    expect(find(GENERATION_DURATION_METRIC)[0].options?.attributes?.outcome).toBe(outcome);
+    // The status itself is still recorded verbatim — the override reclassifies
+    // the business outcome, it does not rewrite the HTTP response.
+    expect(find(GENERATION_REQUEST_METRIC)[0].options?.attributes?.status).toBe(status);
+  });
+
+  it('falls back to the classifier when no override is set', () => {
+    recordGenerationMetrics({ route: '/api/generate/image', status: 403, durationMs: 5, ctx: {} });
+    expect(find(GENERATION_REQUEST_METRIC)[0].options?.attributes?.outcome).toBe('bot_blocked');
+  });
+
+  it('gates the tokens metric on the OVERRIDDEN outcome, not the 2xx status', () => {
+    // Guards the ordering inside recordGenerationMetrics: if the tokens branch
+    // read classifyGenerationOutcome(status) directly instead of the resolved
+    // outcome, a caller that overrode a 200 to a non-success would still bill it.
+    recordGenerationMetrics({
+      route: '/api/generate/image',
+      status: 200,
+      durationMs: 5,
+      ctx: { outcome: 'degraded', tokenCost: 40 },
+    });
+    expect(find(GENERATION_TOKENS_METRIC)).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

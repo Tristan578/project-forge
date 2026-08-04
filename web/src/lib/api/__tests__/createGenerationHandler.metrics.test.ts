@@ -95,6 +95,7 @@ import { checkBotIdGate } from '@/lib/security/botId';
 import { cachedGenerate } from '@/lib/api/responseCache';
 import { isQstashConfigured } from '@/lib/qstash/client';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import {
   GENERATION_REQUEST_METRIC,
   GENERATION_DURATION_METRIC,
@@ -110,6 +111,7 @@ const mockCachedGenerate = vi.mocked(cachedGenerate);
 const mockBotIdGate = vi.mocked(checkBotIdGate);
 const mockConfigured = vi.mocked(isQstashConfigured);
 const mockProviderKilled = vi.mocked(isProviderKilled);
+const mockSanitize = vi.mocked(sanitizePrompt);
 
 const TOKEN_COST = 40;
 
@@ -173,6 +175,7 @@ describe('createGenerationHandler — business metrics wiring (PF-1053)', () => 
     mockBotIdGate.mockResolvedValue(null);
     mockConfigured.mockReturnValue(false);
     mockProviderKilled.mockReturnValue(false);
+    mockSanitize.mockImplementation((p: string) => ({ safe: true, filtered: p }));
     mockCachedGenerate.mockImplementation(
       async (_op: string, _params: unknown, factory: () => Promise<unknown>) => ({
         result: (await factory()) as never,
@@ -324,6 +327,93 @@ describe('createGenerationHandler — business metrics wiring (PF-1053)', () => 
       outcome: 'bot_blocked',
       status: 403,
       tier: 'pro',
+    });
+  });
+
+  it('separates a BANNED account from bot traffic, though both return 403', async () => {
+    // Two different gates on this route return 403. Left to the status
+    // classifier they collapse into one `bot_blocked` bucket, and ban-evasion
+    // volume becomes unqueryable — hidden inside what reads as bot noise.
+    mockAuth.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: 'Account banned', code: 'ACCOUNT_BANNED' }, { status: 403 }),
+    });
+
+    const res = await uncachedHandler(makeRequest());
+
+    expect(res.status).toBe(403);
+    expect(attributesOf(GENERATION_REQUEST_METRIC)).toEqual({
+      route: '/api/generate/test',
+      outcome: 'banned',
+      status: 403,
+    });
+  });
+
+  it('separates a DEGRADED auth path from a provider outage, though both return 503', async () => {
+    // authenticateRequest returns 503 when the DB/user-sync path is degraded —
+    // a Neon circuit-breaker signal. Reported as `provider_unavailable` it pages
+    // on-call for an upstream AI incident that is not happening.
+    mockAuth.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: 'Service degraded', code: 'SERVICE_DEGRADED' }, { status: 503 }),
+    });
+
+    const res = await uncachedHandler(makeRequest());
+
+    expect(res.status).toBe(503);
+    expect(attributesOf(GENERATION_REQUEST_METRIC)).toEqual({
+      route: '/api/generate/test',
+      outcome: 'degraded',
+      status: 503,
+    });
+  });
+
+  it('separates a content-safety rejection from a schema rejection, though both return 422', async () => {
+    // The blocklist/injection screen is the most security-relevant rejection on
+    // this surface. Bucketed with malformed-body 422s, blocklist probing across
+    // the 12 routes is invisible.
+    mockSanitize.mockReturnValue({ safe: false, reason: 'Blocked content' });
+
+    const res = await uncachedHandler(makeRequest());
+
+    expect(res.status).toBe(422);
+    expect(attributesOf(GENERATION_REQUEST_METRIC)).toEqual({
+      route: '/api/generate/test',
+      outcome: 'content_rejected',
+      status: 422,
+      tier: 'pro',
+    });
+    expect(samples(GENERATION_TOKENS_METRIC)).toHaveLength(0);
+  });
+
+  it('still reports a schema rejection as the generic rejected bucket', async () => {
+    // The counterpart to the test above: the override must not leak onto the
+    // branch it was introduced to distinguish itself FROM.
+    const res = await uncachedHandler(
+      new NextRequest('http://localhost:3000/api/generate/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'x' }),
+      }),
+    );
+
+    expect(res.status).toBe(422);
+    expect(attributesOf(GENERATION_REQUEST_METRIC)).toMatchObject({
+      outcome: 'rejected',
+      status: 422,
+    });
+  });
+
+  it('classifies a killed provider as provider_unavailable with the provider facet intact', async () => {
+    mockProviderKilled.mockReturnValue(true);
+
+    const res = await uncachedHandler(makeRequest());
+
+    expect(res.status).toBe(503);
+    expect(attributesOf(GENERATION_REQUEST_METRIC)).toMatchObject({
+      outcome: 'provider_unavailable',
+      status: 503,
+      provider: 'elevenlabs',
     });
   });
 

@@ -303,7 +303,18 @@ export function createGenerationHandler<TParams, TResult>(
   return withGenerationMetrics(route, async (request: NextRequest, mctx): Promise<NextResponse> => {
     // 1. Authenticate
     const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
+    if (!authResult.ok) {
+      // Status alone is a lossy classifier for this branch: authenticateRequest
+      // returns 403 for a BANNED account (which the classifier would file under
+      // bot_blocked, hiding ban-evasion volume inside bot traffic) and 503 when
+      // the user-sync path is degraded — a Neon circuit-breaker signal that the
+      // classifier would file under provider_unavailable, paging on-call for an
+      // AI-provider incident that isn't happening. Name the real cause here; 401
+      // and anything else fall through to classifyGenerationOutcome().
+      if (authResult.response.status === 403) mctx.outcome = 'banned';
+      else if (authResult.response.status === 503) mctx.outcome = 'degraded';
+      return authResult.response;
+    }
 
     const userId = authResult.ctx.user.id;
     const tier = authResult.ctx.user.tier;
@@ -312,7 +323,13 @@ export function createGenerationHandler<TParams, TResult>(
     // 1b. BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
     // token deduction, so a blocked bot never spends either budget.
     const botIdResponse = await checkBotIdGate();
-    if (botIdResponse) return botIdResponse;
+    if (botIdResponse) {
+      // Stated explicitly rather than inferred from the 403: the auth branch
+      // above now also returns 403 for a ban, so the status no longer maps to a
+      // single cause on this route.
+      mctx.outcome = 'bot_blocked';
+      return botIdResponse;
+    }
 
     // 2a. Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
     const aggRl = await aggregateGenerationRateLimit(userId);
@@ -363,6 +380,11 @@ export function createGenerationHandler<TParams, TResult>(
         if (typeof value === 'string' && value.length > 0) {
           const safety = sanitizePrompt(value);
           if (!safety.safe) {
+            // The blocklist/injection screen is the most security-relevant
+            // rejection on this surface, and its 422 is indistinguishable from a
+            // schema validation failure to the status classifier. Separate the
+            // buckets so blocklist probing across the 12 routes is queryable.
+            mctx.outcome = 'content_rejected';
             return NextResponse.json(
               { error: safety.reason ?? 'Content rejected by safety filter' },
               { status: 422 }
@@ -414,6 +436,9 @@ export function createGenerationHandler<TParams, TResult>(
       // (PF-967 / #8956), distinct from the exception-tracking captureException
       // calls elsewhere in this file.
       sentryLogger.warn('provider kill switch tripped', { route, provider: resolvedProvider });
+      // Stated explicitly rather than inferred from the 503, which the auth
+      // branch above now also returns for a degraded DB.
+      mctx.outcome = 'provider_unavailable';
       return NextResponse.json(
         { error: PROVIDER_UNAVAILABLE_MESSAGE(resolvedProvider) },
         { status: 503 }
