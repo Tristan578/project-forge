@@ -70,6 +70,49 @@ make_repo() {
   echo "$repo"
 }
 
+# Build a throwaway git repo whose committed lockfile carries package nodes with
+# platform metadata (os/cpu/libc) — the shape some npm versions rewrite. Echoes
+# the repo path; caller is responsible for rm -rf.
+make_repo_platform() {
+  local repo
+  repo="$(mktemp -d)"
+  (
+    cd "$repo" || exit 1
+    git init -q
+    git config user.email t@t.t
+    git config user.name t
+    jq -n '{
+      name: "root",
+      lockfileVersion: 3,
+      packages: {
+        "": {name: "root"},
+        "node_modules/@img/sharp-linux-x64": {
+          version: "0.34.1", resolved: "https://r/a.tgz", integrity: "sha512-a",
+          cpu: ["x64"], os: ["linux"], libc: ["glibc"]
+        },
+        "node_modules/@next/swc-linux-x64-musl": {
+          version: "16.0.1", resolved: "https://r/b.tgz", integrity: "sha512-b",
+          cpu: ["x64"], os: ["linux"], libc: ["musl"]
+        }
+      }
+    }' > package-lock.json
+    printf '{\n  "name": "root"\n}\n' > package.json
+    git add -A
+    git commit -qm init
+  )
+  echo "$repo"
+}
+
+# Stage a jq filter as a FILE in $1 and echo a regen stub that applies it to the
+# lockfile. Staging the program (rather than inlining it in the stub string)
+# keeps quoting out of the eval'd command line — same rationale as ls_report.
+# Usage: stub="$(jq_regen "$repo" 'del(.packages[].libc)')"
+jq_regen() {
+  local repo="$1" filter="$2"
+  printf '%s\n' "$filter" > "$repo/.filter.jq"
+  echo 'jq -f .filter.jq package-lock.json > .regen.json && mv .regen.json package-lock.json'
+}
+
 # Write a stub `npm ls --json` report into $1 carrying the given problem
 # strings, and echo the consistency-stub command that emits it. Staging the
 # JSON as a file (rather than inlining it in the stub string) keeps arbitrary
@@ -325,6 +368,125 @@ if grep -qi "regeneration command failed" <<<"$out"; then
 else
   pass "stage-1 failure is not mislabelled as a regen-command failure"
 fi
+rm -rf "$repo"
+
+# --- 10. Toolchain artifact: platform-metadata-only rewrite is NOT drift ------
+# THE FALSE ACCUSATION THIS CLOSES. `npm install --package-lock-only` rewrites
+# platform metadata on the Linux-only optional native bindings on SOME npm
+# versions: npm 11.10.0 (bundled with Node 25) drops the "libc" field from 34
+# nodes in this repo's lockfile, while npm 11.16.0 (bundled with Node 24, which
+# .node-version pins) preserves it. Measured three ways on one macOS host — and
+# npm 11.16.0 run under Node 25 produces ZERO drift — so the variable is the npm
+# VERSION, not the OS and not the Node version.
+#
+# Reported as drift, that is a false accusation with an unactionable remedy: the
+# printed fix ("npm install --package-lock-only") is the very command that
+# produced it, so re-running reproduces the identical diff forever. It must be
+# classified as a tooling error (exit 2, the house fail-closed convention) and
+# name the real cause.
+repo="$(make_repo_platform)"
+stub="$(jq_regen "$repo" 'del(.packages[].libc)')"
+res="$(run_gate "$repo" "$stub")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "2" ]; then pass "platform-metadata-only rewrite fails closed as a tooling error (exit 2)"; else fail "metadata-only rewrite should exit 2 (tooling error), got $rc"; fi
+if grep -qi "artifact" <<<"$out"; then pass "artifact case names itself as a toolchain artifact"; else fail "artifact case does not identify itself as a toolchain artifact"; fi
+# The whole point is that this must NOT read as contributor drift. Pin the
+# absence of the accusation, not just the presence of the new message: a gate
+# that printed both would still send the reader to the wrong fix first.
+if grep -qi "drift detected" <<<"$out"; then
+  fail "artifact case is mislabelled as lockfile drift — blames the contributor for a toolchain rewrite"
+else
+  pass "artifact case is not mislabelled as contributor drift"
+fi
+if grep -qi "package.json was changed without regenerating" <<<"$out"; then
+  fail "artifact case prints the false 'you forgot to relock' accusation"
+else
+  pass "artifact case omits the false 'you forgot to relock' accusation"
+fi
+if grep -q "npm running here" <<<"$out"; then pass "artifact case reports the npm version actually running"; else fail "artifact case does not name the running npm version — the one variable that matters"; fi
+if grep -qF ".node-version" <<<"$out"; then pass "artifact case points at the .node-version pin"; else fail "artifact case does not reference .node-version"; fi
+if (cd "$repo" && git diff --quiet -- package-lock.json); then
+  pass "artifact case is non-destructive (lockfile restored)"
+else
+  fail "artifact case left the lockfile mutated"
+fi
+rm -rf "$repo"
+
+# --- 10b. The classifier must NOT swallow real drift -------------------------
+# Each of these mutations survives stripping os/cpu/libc, so each must still take
+# the exit-1 contributor-drift path. This is the mutation-provable guard on the
+# classifier: widen it to ignore anything else (e.g. `version`) and these go red.
+#
+# `integrity` pins the tarball, so a given version can never legitimately change
+# its own platform metadata — which is exactly why stripping those three keys is
+# safe and why every real resolution change shows up here.
+for spec in \
+  'version bump|.packages["node_modules/@img/sharp-linux-x64"].version = "0.34.2"' \
+  'resolved-URL change|.packages["node_modules/@img/sharp-linux-x64"].resolved = "https://r/c.tgz"' \
+  'integrity change|.packages["node_modules/@img/sharp-linux-x64"].integrity = "sha512-c"' \
+  'node added|.packages["node_modules/brand-new"] = {version: "1.0.0"}' \
+  'node removed|del(.packages["node_modules/@next/swc-linux-x64-musl"])' \
+  'top-level field change|.lockfileVersion = 2'
+do
+  label="${spec%%|*}"; filter="${spec#*|}"
+  repo="$(make_repo_platform)"
+  stub="$(jq_regen "$repo" "$filter")"
+  res="$(run_gate "$repo" "$stub")"
+  rc="${res%%|*}"; out="${res#*|}"
+  if [ "$rc" = "1" ]; then pass "real drift ($label) still fails as drift (exit 1)"; else fail "real drift ($label) should exit 1, got $rc — classifier is swallowing genuine drift"; fi
+  if grep -qi "drift detected" <<<"$out"; then pass "real drift ($label) is reported as drift"; else fail "real drift ($label) not reported as drift"; fi
+  rm -rf "$repo"
+done
+
+# --- 10c. Artifact noise must not MASK co-occurring real drift ----------------
+# The realistic case on a contributor's machine: a genuine manifest bump AND the
+# local npm's metadata rewrite land in the same regeneration. The verdict must be
+# exit 1 (there is real drift to fix); the artifact branch only fires when there
+# is nothing else. A classifier that checked "did any platform metadata change?"
+# instead of "is anything left after stripping it?" would fail open right here.
+repo="$(make_repo_platform)"
+stub="$(jq_regen "$repo" 'del(.packages[].libc) | .packages["node_modules/@img/sharp-linux-x64"].version = "0.34.2"')"
+res="$(run_gate "$repo" "$stub")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "metadata noise does not mask co-occurring real drift (exit 1)"; else fail "real drift was masked by platform-metadata noise (got $rc) — gate fails OPEN"; fi
+if grep -qi "drift detected" <<<"$out"; then pass "mixed case is reported as drift"; else fail "mixed case not reported as drift"; fi
+# Diagnosability: the reader is staring at a diff whose bulk is toolchain noise,
+# so the report has to say which part is signal or they will chase the wrong one.
+if grep -qi "platform metadata" <<<"$out"; then pass "mixed case flags the toolchain noise inside the diff"; else fail "mixed case does not warn that part of the diff is toolchain noise"; fi
+rm -rf "$repo"
+
+# --- 10d. A pure reformat is not drift either --------------------------------
+# Semantically identical output that merely serializes differently is the same
+# class of non-signal: nothing about the manifests changed. It must not be
+# reported as contributor drift.
+# `jq -c` re-serializes compactly: every byte of the file changes while not one
+# value does. (A plain `jq .` would be byte-identical to the fixture and prove
+# nothing — the gate would never even reach the diff branch.)
+repo="$(make_repo_platform)"
+res="$(run_gate "$repo" 'jq -c . package-lock.json > .regen.json && mv .regen.json package-lock.json')"
+rc="${res%%|*}"; out="${res#*|}"
+# Vacuity guard: exit 0 means the gate reported "in sync", i.e. the stub left no
+# textual diff and the classifier was never reached. That would make the
+# assertion below pass for the wrong reason, so catch it explicitly.
+if [ "$rc" = "0" ]; then
+  fail "reformat stub produced no textual diff — this case never exercised the classifier"
+elif [ "$rc" != "1" ]; then
+  pass "a semantics-preserving reformat is not reported as contributor drift"
+else
+  fail "a semantics-preserving reformat was reported as drift (exit 1)"
+fi
+if grep -qi "drift detected" <<<"$out"; then fail "reformat mislabelled as drift"; else pass "reformat is not mislabelled as drift"; fi
+rm -rf "$repo"
+
+# --- 10e. Unclassifiable input falls back to the conservative drift report ----
+# If the regenerated file is not parseable JSON, the classifier cannot prove the
+# difference is benign — so it must NOT reach the artifact branch. Falling back
+# to exit 1 keeps the pre-existing conservative behaviour rather than inventing a
+# third verdict for a case that is a genuine problem either way.
+repo="$(make_repo_platform)"
+res="$(run_gate "$repo" 'printf "not json at all\n" > package-lock.json')"
+rc="${res%%|*}"
+if [ "$rc" = "1" ]; then pass "unparseable regenerated lockfile falls back to the drift report (exit 1)"; else fail "unparseable regenerated lockfile should exit 1, got $rc — classifier must not pass it as an artifact"; fi
 rm -rf "$repo"
 
 echo ""
