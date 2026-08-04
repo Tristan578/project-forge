@@ -54,11 +54,13 @@ export const GENERATION_OUTCOMES = [
 export type GenerationOutcome = (typeof GENERATION_OUTCOMES)[number];
 
 /**
- * Mutable per-request context. The handler resolves provider/operation/cost/tier
- * partway through its own body (after auth, rate limiting, and validation), so
- * the wrapper hands it this object to fill in and reads it back only AFTER the
- * handler returns. A request rejected early simply leaves fields unset, and
- * unset fields are omitted from the metric rather than shipped as `undefined`.
+ * Mutable per-request context. Each facet becomes known at a different point in
+ * the handler's body, so the wrapper hands it this object to fill in and reads
+ * it back only AFTER the handler returns. `tier` is set immediately after auth,
+ * so it is present on nearly every sample; provider/operation/tokenCost resolve
+ * during generation itself and are therefore absent on every pre-generation
+ * rejection. Unset fields are omitted from the metric rather than shipped as
+ * `undefined`.
  */
 export interface GenerationMetricsContext {
   provider?: string;

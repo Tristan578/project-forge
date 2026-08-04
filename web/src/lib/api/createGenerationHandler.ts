@@ -297,9 +297,12 @@ export function createGenerationHandler<TParams, TResult>(
 
   // Business metrics (PF-1053) wrap the whole handler so EVERY exit path — the
   // early 401/403/429 returns included — emits one sample. `mctx` is filled in
-  // as provider/cost/tier resolve; it is read only after this function returns,
-  // so a request rejected before step 6 simply omits those facets. The wrapper
-  // fails open and returns the response by identity.
+  // as each facet resolves and is read only after this function returns, so a
+  // request rejected before a given step simply omits that facet: `tier` lands
+  // right after auth (step 1) and is therefore present on almost every sample,
+  // while provider/operation/tokenCost resolve during generation and are absent
+  // on every pre-generation rejection. The wrapper fails open and returns the
+  // response by identity.
   return withGenerationMetrics(route, async (request: NextRequest, mctx): Promise<NextResponse> => {
     // 1. Authenticate
     const authResult = await authenticateRequest();

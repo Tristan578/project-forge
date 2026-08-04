@@ -44,10 +44,15 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@spawnforge/ui"],
-  // @sentry/profiling-node ships a native V8 CpuProfiler .node addon. Turbopack
-  // cannot bundle a native binary, and this package is NOT in Next.js's built-in
-  // server-external-packages.json allowlist (verified — do not assume it is), so
-  // the entry has to be explicit or the server build fails on it.
+  // @sentry/profiling-node ships a native V8 CpuProfiler .node addon, which
+  // Turbopack cannot bundle. Next 16.2.12 ALREADY externalizes it by default —
+  // it is listed under "Native Node.js addons" in
+  // node_modules/next/dist/lib/server-external-packages.jsonc — so this entry is
+  // redundant TODAY and is kept deliberately, not because the build needs it:
+  // Next's built-in list is an implementation detail that has churned before,
+  // and the failure mode when an entry silently leaves it is an opaque native-
+  // binary bundling error at build time. Declaring it here makes the requirement
+  // survive a Next upgrade. Pinned by sentry-regressions.test.ts.
   serverExternalPackages: ["@sentry/profiling-node"],
   compress: true,
   // This is a top-level config option that gates the experimental caching

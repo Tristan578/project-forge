@@ -532,8 +532,13 @@ describe('PF-1053: Sentry Metrics require beforeSendMetric: scrubSentryMetric', 
    *      logs, there is no opt-in line to grep for. Any `Sentry.metrics.*` call
    *      anywhere in the tree ships immediately.
    *   2. The SDK auto-attaches the active scope's `user.id`, `user.email`, and
-   *      `user.name` to EVERY metric (@sentry/core metrics/internal.js) —
-   *      i.e. metrics carry PII by construction, not by developer error.
+   *      `user.name` to EVERY metric — unconditionally, and BEFORE the hook
+   *      runs (@sentry/core `metrics/internal.js` → `_enrichMetricAttributes`).
+   *      `dataCollection.userInfo: false` does NOT gate this; it is read at
+   *      envelope time and governs server-side IP inference only. So
+   *      beforeSendMetric is the only place the stamping can be removed.
+   *      Nothing calls `Sentry.setUser()` in web/src today, so this is
+   *      defense-in-depth against the first caller, not a live leak.
    *
    * So the requirement is unconditional: every init that could emit a metric —
    * all three — must route metrics through the scrubber.
@@ -677,10 +682,12 @@ describe('Sentry profiling config must stay pinned', () => {
    *      `@sentry/nextjs` (Sentry ships them as a matched pair; a skew fails
    *      silently at load).
    *   2. `@sentry/profiling-node` must be externalized from the server bundle —
-   *      it is a native `.node` addon and it is NOT in Next's built-in
-   *      `serverExternalPackages` default list (verified against
-   *      next/dist/lib/server-external-packages.json), so without an explicit
-   *      entry Turbopack tries to bundle it.
+   *      it is a native `.node` addon Turbopack cannot bundle. Next 16.2.12
+   *      already externalizes it by default (it is listed under "Native Node.js
+   *      addons" in next/dist/lib/server-external-packages.jsonc), so the
+   *      explicit entry is redundant TODAY and is pinned here precisely because
+   *      that built-in list is an implementation detail: if a Next upgrade drops
+   *      the entry, the only symptom is an opaque native-binary bundling error.
    *   3. Browser profiling is gated behind the `Document-Policy: js-profiling`
    *      response header. Without it the JS Self-Profiling API is unavailable
    *      and `browserProfilingIntegration()` no-ops even in Chromium.
@@ -830,7 +837,7 @@ describe('Sentry profiling config must stay pinned', () => {
     const config = await readSource('next.config.ts');
     expect(
       config,
-      '@sentry/profiling-node ships a native .node addon and is NOT in Next\'s built-in serverExternalPackages defaults — without an explicit entry the bundler tries to bundle it and the integration fails to load',
+      '@sentry/profiling-node ships a native .node addon Turbopack cannot bundle. Next currently externalizes it by default, so this explicit entry is deliberate redundancy: it keeps the requirement declared here if a Next upgrade ever drops it from server-external-packages.jsonc, where the only symptom would be an opaque native-binary bundling error',
     ).toContain('serverExternalPackages');
     expect(config).toContain('"@sentry/profiling-node"');
   });

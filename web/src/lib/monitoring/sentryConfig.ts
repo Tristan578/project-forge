@@ -439,8 +439,18 @@ export const scrubSentryLog = scrubLog;
  *   - `enableMetrics` **defaults to `true`**, so unlike logs there is no opt-in
  *     line gating the pipeline — any `Sentry.metrics.*` call ships immediately.
  *   - the SDK copies the active scope's user onto EVERY metric as `user.id`,
- *     `user.email`, and `user.name` (from `username`). Metrics therefore carry
- *     PII by construction, not by developer error.
+ *     `user.email`, and `user.name` (from `username`) — unconditionally, and
+ *     BEFORE this hook runs (`_enrichMetricAttributes` in @sentry/core's
+ *     `metrics/internal.js`). `dataCollection.userInfo: false` does not gate
+ *     it; that flag is read later, at envelope time, and governs server-side IP
+ *     inference only. So a scope user reaches metrics by construction, not by
+ *     developer error, and this hook is the only place it can be removed.
+ *
+ * Nothing populates that scope user today — there is no `Sentry.setUser()` call
+ * in web/src — so this is defense-in-depth against the first one rather than a
+ * live leak. That is precisely why it must be wired now: adding `setUser()`
+ * later would start shipping identity on every metric with nothing else in the
+ * path to notice.
  *
  * `user.email` is already caught by {@link SENSITIVE_KEY_RE}; `user.name` and
  * `user.username` are not (the regex matches `email`, not `name`), so they are

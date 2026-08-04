@@ -746,7 +746,9 @@ describe('scrubSentryLog', () => {
 // scrubSentryMetric — beforeSendMetric hook (PF-1053)
 // Sentry Metrics travel a THIRD pipeline, independent of both beforeSend
 // (scrubEvent) and beforeSendLog (scrubLog), and the SDK auto-attaches the
-// active scope's user.id / user.email / user.name to every metric.
+// active scope's user.id / user.email / user.name to every metric before this
+// hook runs. No Sentry.setUser() exists in web/src today, so these cases pin
+// the behaviour that protects the first one added.
 // ---------------------------------------------------------------------------
 
 describe('scrubSentryMetric', () => {

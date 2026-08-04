@@ -76,10 +76,20 @@ if (DSN) {
     beforeSendLog: scrubSentryLog,
     // Metrics (PF-1053) are a THIRD pipeline, touched by neither beforeSend nor
     // beforeSendLog — and unlike logs they are ON BY DEFAULT (`enableMetrics`
-    // defaults to true), so there is no opt-in line gating them. The SDK also
-    // stamps the active scope's user.id/user.email/user.name onto every metric,
-    // so this hook is what keeps metrics inside the F03/F04 posture rather than
-    // a new PII egress path. Pinned by sentry-regressions.test.ts.
+    // defaults to true), so there is no opt-in line gating them.
+    //
+    // The SDK copies the active scope's user.id / user.email / user.name onto
+    // EVERY metric's attributes, unconditionally, BEFORE this hook runs
+    // (@sentry/core `_enrichMetricAttributes`, called from
+    // `_INTERNAL_captureMetric`). `dataCollection.userInfo: false` above does
+    // NOT gate that: it is read later, at envelope time, and only controls
+    // server-side IP INFERENCE. So beforeSendMetric is the only place that
+    // stamping can be removed.
+    //
+    // Today nothing populates it — there is no `Sentry.setUser()` call anywhere
+    // in web/src — so the hook is defense-in-depth against the first one, which
+    // would otherwise silently start shipping identity on every metric with no
+    // other control in the path. Pinned by sentry-regressions.test.ts.
     beforeSendMetric: scrubSentryMetric,
 
     integrations: [

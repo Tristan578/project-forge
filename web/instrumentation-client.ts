@@ -39,6 +39,14 @@ if (DSN) {
     // response header (next.config.ts) or the API is unavailable and the
     // integration no-ops with no error. Chromium-only; other engines simply
     // produce no profiles. Both pinned by sentry-regressions.test.ts.
+    //
+    // LOCAL DEV: the 1.0 rate only applies if a DSN is present — this whole
+    // init is gated on `if (DSN)`, so a checkout without NEXT_PUBLIC_SENTRY_DSN
+    // never starts the profiler at all. If you HAVE pulled a DSN locally and
+    // are profiling the WebGPU render loop in Chrome DevTools, the JS
+    // Self-Profiling sampler competes with DevTools' own; unset
+    // NEXT_PUBLIC_SENTRY_DSN for that session rather than editing this rate,
+    // which is pinned non-zero on every branch.
     profileSessionSampleRate: IS_PROD ? 0.1 : 1.0,
     profileLifecycle: 'trace',
 
