@@ -25,12 +25,20 @@ trap 'rm -rf "$TMP"' EXIT
 PASS=0
 FAIL=0
 
-# run_hook <command-string>  → sets HOOK_EXIT and HOOK_OUT
+# run_hook <command-string>  → sets HOOK_EXIT, HOOK_OUT (both streams), HOOK_ERR
+# (stderr alone). The harness surfaces STDERR on exit 2, so a block whose reason
+# went to stdout reaches the caller as "No stderr output" — a mute block.
 run_hook() {
-  local cmd="$1" payload
+  local cmd="$1" payload errfile
   payload=$(jq -nc --arg c "$cmd" '{tool_input: {command: $c}}')
-  HOOK_OUT=$(printf '%s' "$payload" | bash "$HOOK" 2>&1)
+  errfile="$TMP/stderr.$$"
+  HOOK_OUT=$(printf '%s' "$payload" | bash "$HOOK" 2>"$errfile")
   HOOK_EXIT=$?
+  HOOK_ERR=$(cat "$errfile")
+  # Everything the caller must SEE has to be on stderr; fold it in so the
+  # existing check_out assertions keep reading the full user-visible text.
+  HOOK_OUT="$HOOK_OUT$HOOK_ERR"
+  rm -f "$errfile"
 }
 
 check() {
@@ -41,6 +49,18 @@ check() {
   else
     FAIL=$((FAIL + 1))
     echo "FAIL: $desc (expected exit $expected, got $HOOK_EXIT)"
+  fi
+}
+
+# check_err <desc>  → assert the block reason reached STDERR, not just stdout
+check_err() {
+  local desc="$1"
+  if [ -n "$HOOK_ERR" ]; then
+    PASS=$((PASS + 1))
+    echo "ok: $desc"
+  else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: $desc (nothing on stderr — the caller sees a mute block)"
   fi
 }
 
@@ -174,6 +194,37 @@ check "--body-file with a missing value blocked" 2
 # =============================================================================
 run_hook "gh pr create --title 'Closes #123 in title' $MS --body-file $NOLINK_BODY"
 check "inline 'Closes #NNNN' elsewhere in the command does not satisfy a linkless body file" 2
+
+# =============================================================================
+# A --title that MENTIONS the flag must not be mistaken for the flag itself.
+# Found live: this hook's own PR was titled "read --body-file so the PR metadata
+# check is satisfiable", and first-occurrence extraction pulled the path 'so'
+# out of the title, then blocked on it. Scan every occurrence and take the first
+# one that names a readable file; fall back to the first occurrence so a command
+# with NO usable path still fails closed.
+# =============================================================================
+run_hook "gh pr create --title 'read --body-file so the check is satisfiable' $MS --body-file $GOOD_BODY"
+check "--body-file mentioned in --title does not shadow the real flag" 0
+
+run_hook "gh pr create --title 'read --body-file so the check is satisfiable' $MS --body-file $NOLINK_BODY"
+check "title mention + linkless real body file still blocks" 2
+check_out "title-mention case names the REAL file, not the title word" "nolink-body.md"
+
+run_hook "gh pr create --title 'about --body-file handling' $MS --body 'inline. Closes #123'"
+check "title mention with NO real --body-file falls back to fail-closed" 2
+
+# =============================================================================
+# A block the caller cannot see is a block with no stated reason. The harness
+# surfaces STDERR on exit 2; a reason written only to stdout arrives as
+# "No stderr output". Hit live on this hook's own PR.
+# =============================================================================
+run_hook "gh pr create --title t $MS --body 'summary with no link'"
+check "mute-block guard: missing-Closes still blocks" 2
+check_err "block reason is written to stderr, not just stdout"
+
+run_hook "gh pr create --title t --body-file $GOOD_BODY"
+check "mute-block guard: missing-milestone still blocks" 2
+check_err "missing-milestone reason is written to stderr"
 
 # =============================================================================
 # Fail-safe on malformed stdin: the hook must not propagate a jq error.

@@ -26,22 +26,40 @@ fi
 # NO value returns 0 with an empty path so the caller can reject it rather than
 # silently falling back to the command-string check.
 #
+# EVERY occurrence is scanned, not just the first, and the first one naming a
+# readable file wins. This hook cannot parse shell quoting, so a --title that
+# merely MENTIONS the flag looks identical to the flag itself — and that is not
+# hypothetical: this hook's own PR was titled "read --body-file so the PR
+# metadata check is satisfiable", and taking the first occurrence extracted the
+# path 'so' from the title and blocked on it. Falling back to the first
+# occurrence when nothing is readable keeps the fail-closed behavior intact.
+#
 # The path is only ever used as a quoted argument — never eval'd, never spliced
 # into a composed command line — so a path containing shell metacharacters is
 # inert here.
 extract_body_file() {
-  local cmd="$1" rest first
-  if [[ "$cmd" =~ (^|[[:space:]])(--body-file|-F)([=[:space:]]+|$) ]]; then
+  local cmd="$1" rest cand first_val="" found=0
+  # Each pass consumes through the matched flag, so `cmd` strictly shrinks and
+  # the loop always terminates.
+  while [[ "$cmd" =~ (^|[[:space:]])(--body-file|-F)([=[:space:]]+|$) ]]; do
     rest="${cmd#*"${BASH_REMATCH[0]}"}"
-  else
-    return 1
-  fi
-  case "$rest" in
-    \"*) first="${rest#\"}"; first="${first%%\"*}" ;;
-    \'*) first="${rest#\'}"; first="${first%%\'*}" ;;
-    *)   first="${rest%%[[:space:]]*}" ;;
-  esac
-  printf '%s' "$first"
+    case "$rest" in
+      \"*) cand="${rest#\"}"; cand="${cand%%\"*}" ;;
+      \'*) cand="${rest#\'}"; cand="${cand%%\'*}" ;;
+      *)   cand="${rest%%[[:space:]]*}" ;;
+    esac
+    if [ "$found" -eq 0 ]; then
+      first_val="$cand"
+      found=1
+    fi
+    if [ -n "$cand" ] && [ -f "$cand" ] && [ -r "$cand" ]; then
+      printf '%s' "$cand"
+      return 0
+    fi
+    cmd="$rest"
+  done
+  [ "$found" -eq 1 ] || return 1
+  printf '%s' "$first_val"
 }
 
 ERRORS=()
@@ -74,6 +92,11 @@ if ! grep -qE '\-\-milestone' <<<"$COMMAND"; then
 fi
 
 if [[ ${#ERRORS[@]} -gt 0 ]]; then
+  # Feedback must go to STDERR — the harness surfaces stderr on exit 2, so a
+  # reason written to stdout reaches the caller as "No stderr output" and the
+  # block arrives with no stated reason. Same convention as
+  # block-main-commits.sh. Hit live on this hook's own PR.
+  {
   echo "================================================================"
   echo "  PR METADATA CHECK — MISSING REQUIRED FIELDS"
   echo "================================================================"
@@ -96,6 +119,7 @@ if [[ ${#ERRORS[@]} -gt 0 ]]; then
   echo "    S4: SEO & GEO Foundation"
   echo "    Post-Launch Vision"
   echo "================================================================"
+  } >&2
   exit 2
 fi
 
