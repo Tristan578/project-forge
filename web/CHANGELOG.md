@@ -1,5 +1,208 @@
 # web
 
+## 0.5.0
+
+### Minor Changes
+
+- [#8992](https://github.com/Tristan578/project-forge/pull/8992) [`fd5e6d0`](https://github.com/Tristan578/project-forge/commit/fd5e6d07b1832649407745ee2f8787b8587a2b57) Thanks [@Tristan578](https://github.com/Tristan578)! - feat(billing): shadow-mode Stripe billing-meter usage reporting (PF-977/PF-978, [#8969](https://github.com/Tristan578/project-forge/issues/8969)/[#8970](https://github.com/Tristan578/project-forge/issues/8970))
+
+  Adds infrastructure for reporting confirmed generation token usage to a Stripe
+  billing meter (`generation_tokens`), gated behind `BILLING_METERS_ENABLED`
+  (default off, dormant). No metered Price is attached in this rollout — this
+  is usage reporting only and never changes what a customer is charged.
+
+  - `web/scripts/provision-billing-meter.ts` — one-time, idempotent, owner-run
+    script to create the Stripe meter in a given mode (test/live). Not run by
+    any build/deploy step.
+  - `web/src/lib/billing/meterEvents.ts` — `reportGenerationUsage()`, a
+    fire-and-forget reporter with claim-before-emit semantics against two new
+    additive/nullable `token_usage` columns (`meter_attempted_at`,
+    `metered_at`) added via `web/drizzle/0009_token_usage_meter_columns.sql`.
+    Skips BYOK usage, unmetered rows, and no-ops entirely when the flag is off.
+  - Runbook: `docs/guides/billing-meters-setup.md`.
+
+  Wiring the reporter into `createGenerationHandler`'s request path is a
+  separate follow-up ticket (spec slice 3) — not included here.
+
+- [#8967](https://github.com/Tristan578/project-forge/pull/8967) [`c352a0e`](https://github.com/Tristan578/project-forge/commit/c352a0e5e8124b032fc041fdeeb7564a4e1bbdd8) Thanks [@Tristan578](https://github.com/Tristan578)! - feat: bot protection, PostHog feature flags, AI Gateway tagging, and Sentry observability expansion (PF-975 [#8948](https://github.com/Tristan578/project-forge/issues/8948), PF-971 [#8952](https://github.com/Tristan578/project-forge/issues/8952), PF-969 [#8954](https://github.com/Tristan578/project-forge/issues/8954), PF-967 [#8956](https://github.com/Tristan578/project-forge/issues/8956))
+
+  - **Bot protection (PF-975):** Vercel BotID verification gates every `/api/generate/*` route (via `createGenerationHandler`) and the Stripe checkout route, running before rate-limiting and token/payment spend.
+  - **PostHog feature flags (PF-971):** a safe-subset local flag evaluator (`web/src/lib/flags/posthogFlags.ts`) supports full rollout, 0% rollout, or a single `tier` exact-match filter, evaluated with zero network I/O. Wires a `deep-generation-tier` override into the existing Opus deep-tier gate and per-provider kill switches (`provider-kill-switch-<provider>`) into `createGenerationHandler`. Fully dormant unless `POSTHOG_PERSONAL_API_KEY` + `NEXT_PUBLIC_POSTHOG_KEY` are set.
+  - **AI Gateway request tagging (PF-969):** gateway-routed chat requests carry `providerOptions.gateway.{user,tags}` for per-user cost attribution in the AI Gateway dashboard.
+  - **Sentry observability expansion (PF-967):** a DSN-gated `sentryLogger` wrapper (`web/src/lib/monitoring/sentry-server.ts`) forwards structured `Sentry.logger.*` calls at high-signal, low-volume lifecycle points — provider kill-switch trips, token refunds, Stripe webhook release-claim double failures, and the durable QStash generation-callback terminal states (completed/failed/timeout). Also adds `Sentry.feedbackIntegration` to the client widget. `enableLogs: true` was already set in all three Sentry init files prior to this batch — no change needed there.
+
+### Patch Changes
+
+- [#8926](https://github.com/Tristan578/project-forge/pull/8926) [`e9000be`](https://github.com/Tristan578/project-forge/commit/e9000be63907270ab2afc8f52b502e564c69dcbd) Thanks [@dependabot](https://github.com/apps/dependabot)! - chore(deps): bump npm minor-and-patch group (30 updates, [#8926](https://github.com/Tristan578/project-forge/issues/8926))
+
+  Routine minor/patch dependency group update. Runtime deps in `web`: `@ai-sdk/anthropic` 4.0.8→4.0.12, `@ai-sdk/gateway` 4.0.12→4.0.16, `@ai-sdk/mcp` 2.0.7→2.0.10, `@ai-sdk/react` 4.0.16→4.0.23, `@anthropic-ai/sdk` 0.110→0.111, `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` 3.1079→3.1085, `@clerk/nextjs` 7.5.12→7.5.17, `@sentry/nextjs` 10.63→10.65, `@xyflow/react` 12.11.1→12.11.2, `next-intl` 4.13.1→4.13.2, `posthog-js` 1.396.6→1.399.3, `stripe` 22.3.0→22.3.1. Tooling/dev deps: Storybook 10.4.6→10.5.0 (react, react-vite, addon-a11y, addon-docs, core), `vite` 8.1.3→8.1.4, `@vitest/coverage-v8` 4.1.9→4.1.10, `turbo` 2.10.3→2.10.5 (root), `eslint` 9.39.4→9.39.5, `tsx` 4.23.0→4.23.1, `@types/node` 26.1.0→26.1.1, `fumadocs-core`/`fumadocs-ui` 16.10.7→16.11.4 in `apps/docs`. Dependabot resolved and relocked the single root lockfile from the repo root, so no manual lockfile intervention was needed.
+
+- [#8964](https://github.com/Tristan578/project-forge/pull/8964) [`7f665d4`](https://github.com/Tristan578/project-forge/commit/7f665d437936ad3d17c7d398c27cec575f777700) Thanks [@dependabot](https://github.com/apps/dependabot)! - chore(deps): bump npm minor-and-patch group (30 updates, [#8964](https://github.com/Tristan578/project-forge/issues/8964))
+
+  Routine minor/patch dependency group update. Runtime deps in `web`: `@ai-sdk/anthropic` 4.0.12→4.0.16, `@ai-sdk/gateway` 4.0.16→4.0.23, `@ai-sdk/mcp` 2.0.10→2.0.15, `@ai-sdk/provider-utils` 5.0.7→5.0.11, `@ai-sdk/react` 4.0.23→4.0.34, `ai` 7.0.22→7.0.31, `@anthropic-ai/sdk` 0.111.0→0.112.3, `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` 3.1085→3.1090, `@clerk/nextjs` 7.5.17→7.5.20, `@sentry/nextjs` 10.65.0→10.67.0, `@upstash/qstash` 2.11.1→2.11.2, `lucide-react` 1.24→1.25, `posthog-js` 1.399.3→1.404.1, `stripe` 22.3.1→22.3.2 (ApiVersion literal unchanged — tsc gate green), `svix` 1.96.1→1.98.0, `ws` 8.21.0→8.21.1. Tooling/dev deps: Storybook 10.5.0→10.5.3, `vite` 8.1.4→8.1.5, Tailwind 4.3.2→4.3.3, `@changesets/cli` 2.31.0→2.31.1, `portless` 0.15.1→0.15.4, `fumadocs-core`/`fumadocs-ui` 16.11.4→16.11.5 in `apps/docs`.
+
+  Manual fix on top of the Dependabot bump: `@clerk/nextjs` 7.5.20 requires `@clerk/shared` ^4.25.5 (it imports `isAutoProxyDisabledFromEnvironment`, added after 4.23.0), but the root-override security floor `@clerk/shared: ^4.22.1` kept the lockfile's single hoisted copy at 4.23.0 — npm does not re-resolve an already-pinned transitive when only its override range changes, so the Turbopack build failed with a missing export while Lockfile Sync stayed green. Raised the override floor to `^4.25.5` and relocked the root lockfile on Node 24 (only the `@clerk/shared` version/resolved/integrity lines changed; regen verified byte-stable).
+
+- [#9070](https://github.com/Tristan578/project-forge/pull/9070) [`5aba801`](https://github.com/Tristan578/project-forge/commit/5aba8017711f3ad0e1057c571a9317a51e3e11ea) Thanks [@dependabot](https://github.com/apps/dependabot)! - chore(deps): bump npm minor-and-patch group (25 updates, [#9070](https://github.com/Tristan578/project-forge/issues/9070))
+
+  Routine minor/patch dependency group update. Runtime deps in `web`: `@ai-sdk/anthropic` 4.0.21→4.0.26, `@ai-sdk/gateway` 4.0.28→4.0.35, `@ai-sdk/mcp` 2.0.16→2.0.21, `@ai-sdk/react` 4.0.40→4.0.49, `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` 3.1096→3.1101, `@clerk/nextjs` 7.6.1→7.6.4, `@sentry/nextjs` 10.68.0→10.69.0, `@upstash/redis` 1.38.0→1.38.1, `acorn` 8.17.0→8.18.0, `lucide-react` 1.27.0→1.28.0, `posthog-js` 1.407.3→1.409.5, `stripe` 22.3.2→22.4.0. Tooling/dev deps: `@playwright/test` 1.62.0→1.62.1, `jsdom` 30.0.0→30.0.1, `portless` 0.15.4→0.15.5, `@types/react` 19.2.17→19.2.18, `@types/react-dom` →19.2.4, `turbo` 2.10.7→2.10.8 (root), `vite` 8.1.5→8.2.0 + `@vitejs/plugin-react` 6.0.4→6.0.5 in `apps/design`, `fumadocs-core`/`fumadocs-ui` 16.13.0→16.14.0 in `apps/docs`.
+
+  Manual fix on top of the Dependabot bump: stripe-node 22.4.0 rolls its pinned `ApiVersion` literal from `2026-06-24.dahlia` to `2026-07-29.dahlia`, and the SDK types reject any other value — so the hardcoded string had to move in lockstep across `web/src/lib/billing/stripe-client.ts` plus the three billing route tests that assert it (`status`, `portal`, `checkout`), or `tsc --noEmit` fails and cascades into every build- and E2E-dependent job. The `invoice.parent.subscription_details.subscription` / top-level `invoice.subscription` dual read in the Stripe webhook route is deliberately unchanged: the Dashboard webhook endpoint carries its own API version, so both shapes must still be read. Verified unused across `web/src` and `mcp-server/src`: the only two removals in 22.4.0 (`proof_of_registration`, `dynamic_tax_rates`).
+
+- [#9053](https://github.com/Tristan578/project-forge/pull/9053) [`7c32690`](https://github.com/Tristan578/project-forge/commit/7c326903f3e2421f44ef2cccb3dc233839743817) Thanks [@Tristan578](https://github.com/Tristan578)! - fix(web): restore scrolling on every public page (PF-1017, [#9037](https://github.com/Tristan578/project-forge/issues/9037))
+
+  Two independent defects each removed scrolling from every logged-out page, and
+  both failed silently — `window.scrollTo()` kept working, so nothing threw and
+  no automated check noticed.
+
+  - `globals.css` set `body { overflow: hidden }`. With `html` at `overflow:
+visible`, an overflow on `body` propagates to the VIEWPORT rather than
+    clipping the body box, so the scrollbar and wheel/trackpad input died
+    document-wide. The rule was load-bearing for the editor only, so it moves to
+    a new `<ViewportLock>` applied at the `/editor` and `/dev` route segments
+    instead of globally. `ViewportLock` is a static `h-dvh overflow-hidden`
+    box, deliberately not `position: fixed` — a fixed element establishes a
+    stacking context and would re-scope every `z-index` inside the editor
+    relative to body-level portals (toasts, dialogs). It uses `h-dvh` rather
+    than `h-screen` because `100vh` is the _large_ viewport on mobile browsers,
+    so a `100vh` box would overflow the visual viewport by the browser-chrome
+    height and make the editor document-scrollable — something the old global
+    rule had been masking. `EditorLayout`'s two roots move to `h-dvh` to match.
+  - `app/(marketing)/page.tsx` and `app/page.tsx` both resolved to `/`. Next.js
+    compiled both and `/page` won, so the route group's layout — which held the
+    only scroll wrapper — never wrapped anything. The landing page moves to
+    `components/marketing/LandingPage.tsx` and the dead `(marketing)` group is
+    removed, leaving exactly one file routed to `/`.
+
+  `web/src/app/__tests__/public-scroll.test.ts` adds structural guards for both
+  defects plus the editor's viewport lock. The assertions are structural because
+  the failure mode is: the rendered markup is correct in jsdom, which has no
+  viewport to clip. The guards cover every `html`/`body` rule in `globals.css` and
+  in the `@import`ed `@spawnforge/ui` token sheet, the `<body className>` in the
+  root layout, and every `page.*` under `app/` at any depth — failing on any URL
+  path claimed twice, not just `/`.
+
+  Those CSS guards walk brace depth rather than matching line-anchored regexes, so
+  a rule nested inside `@media (max-width: …)` is caught too — a media query gates
+  the cascade, it does not suppress it, so a nested `body { overflow: hidden }`
+  reintroduces the bug on mobile while a top-level-only guard stays green. The
+  extractor is itself pinned against a synthetic stylesheet, which is what guards
+  the token sheet: that file legitimately has no `html`/`body` rules today, so
+  "found more than zero rules in every real file" is not an assertion that can be
+  made there.
+
+  `web/e2e/tests/mobile-viewport.spec.ts` gains a document-scroll containment
+  assertion at both emulated mobile viewports. Chromium has no retracting URL bar,
+  so it cannot reproduce the mobile-Safari large-viewport case — it is a tripwire
+  for the general "editor grew a document scrollbar" regression, where there was
+  previously none.
+
+  That directory also had no coverage in the local workspace gate: `src/app/__tests__`
+  matched neither `vitest.config.node.ts` nor `vitest.config.jsdom.ts`, so five
+  suites ran only under the standalone `vitest.config.ts`. The node config's globs
+  now include it.
+
+- [#8991](https://github.com/Tristan578/project-forge/pull/8991) [`a5c38ae`](https://github.com/Tristan578/project-forge/commit/a5c38aef707062b5a26ad2f33b0817a0392128da) Thanks [@Tristan578](https://github.com/Tristan578)! - Add graph_nodes and graph_edges tables (Drizzle schema + migration) for graph-based retrieval. Schema-only phase — no extraction, ingest, or query-time retrieval logic yet.
+
+- [#9059](https://github.com/Tristan578/project-forge/pull/9059) [`a05486e`](https://github.com/Tristan578/project-forge/commit/a05486eb63b7a59e8058b73e01d6ab8dfec9fc90) Thanks [@Tristan578](https://github.com/Tristan578)! - Fix published games rendering blank at `/play/*` (PF-1018).
+
+  The `/play` Content-Security-Policy set `script-src 'self' 'wasm-unsafe-eval'` with
+  neither a nonce nor `'unsafe-inline'`. Next.js bootstraps App Router hydration with
+  inline `<script>` tags, so every one of them was blocked: the server HTML painted and
+  hydration never ran, leaving every published game stuck on a blank/loading page. It
+  failed silently — nothing threw server-side.
+
+  `/play` is dynamically rendered, so it can carry a real per-request nonce. The proxy
+  now mints one, forwards it to the page, and emits the matching policy.
+
+  Scope note: this does not yet prove `'unsafe-inline'` is gone from `/play` in
+  production. `next.config.ts` also emits a static rule for that header — including a
+  global `/:path*` rule that already carries `'unsafe-inline'` site-wide — and which
+  writer the browser sees on Vercel is unverified (preview deployments sit behind SSO,
+  which redirects before middleware runs, so it could not be measured). The guaranteed
+  bound is that `/play` either runs the nonce policy or runs the same inline posture as
+  every other page — parity, never a regression — and cannot lose both, which is what
+  caused the blank page. Measuring the real winner is tracked separately.
+
+  The proxy also now runs on every `/play` URL: the matcher's static-file extension
+  exclusion previously skipped a user-chosen game slug ending in `.html`/`.js`/`.css`,
+  which rendered a real HTML document with no nonce and no header stripping.
+
+  The Clerk Frontend API host is derived from the publishable key rather
+  than hardcoded, so dev and production instances both resolve correctly, and the decoded
+  value is validated as a bare hostname before it reaches the header.
+
+  Client-supplied `x-nonce`, `Content-Security-Policy` and `Content-Security-Policy-Report-Only`
+  request headers are stripped on every route, so a caller cannot hand the app a nonce of
+  their choosing — Next.js reads the nonce from either CSP header name.
+
+  Also fixes a related dev-server breakage on the 12 eval-free content routes: Next.js's
+  Fast Refresh runtime evaluates a string, which threw during module execution and aborted
+  hydration under `npm run dev`. `'unsafe-eval'` is now admitted for the dev server only,
+  gated on `NODE_ENV === 'development'`; production builds are unchanged.
+
+- [#9066](https://github.com/Tristan578/project-forge/pull/9066) [`a35edaa`](https://github.com/Tristan578/project-forge/commit/a35edaa306447bc63be97cd8c5ff61493c0e7094) Thanks [@Tristan578](https://github.com/Tristan578)! - fix(marketing): remove fabricated testimonials and the user-count claim from the landing page (PF-1020, [#9040](https://github.com/Tristan578/project-forge/issues/9040))
+
+  SpawnForge is waitlist-only — every CTA on the page reads "Join the Waitlist" — yet the page published three named endorsements with invented job titles and a "Join thousands of creators" line. Both described users who do not exist.
+
+  - Deletes the `testimonials` data array and the entire social-proof section.
+  - Replaces the two tests that asserted the content was present with structural guards: no `blockquote`/`figcaption` endorsement markup, no "trusted by"/"loved by" heading, and no unverifiable population claim anywhere in the rendered text.
+
+- [#9073](https://github.com/Tristan578/project-forge/pull/9073) [`53f447d`](https://github.com/Tristan578/project-forge/commit/53f447d6ee251d83b298f562683447d853acf551) Thanks [@Tristan578](https://github.com/Tristan578)! - fix(deps): relock brace-expansion to 1.1.18 / 5.0.9 and fast-uri to 3.1.5 — clears three high advisories and retires the last npm-audit waiver's premise
+
+  The `Quality Gates / Rust Security Audit` npm-audit gate (`scripts/check-npm-audit.sh`) went red repo-wide. This was not caused by any PR's diff — the advisory database is evaluated at run time, so every open PR fails the same gate on re-run while their existing greens predate the publication.
+
+  Two advisories fired on `brace-expansion`:
+
+  - **GHSA-rgw5-rvv9-x895** (high, newly published, NOT allowlisted): DoS via unbounded intermediate arrays, bypassing the CVE-2026-14257 mitigation. Patched at 1.1.18 / 2.1.4 / 3.0.6 / 5.0.9.
+  - **GHSA-mh99-v99m-4gvg** (high, allowlisted) reported outside its pinned location — the [#9016](https://github.com/Tristan578/project-forge/issues/9016) regression class the location pinning from PF-1009 exists to catch. Patched at 1.1.17 / 5.0.8.
+
+  A third advisory published while this fix was being verified, on a different package — the same live-database class, and the reason the gate went red again on a re-run with no diff change:
+
+  - **GHSA-7p8r-x3mc-p8w7** (high, newly published, NOT allowlisted): `fast-uri` host confusion via a backslash authority introducer. Patched at 2.4.4 / 3.1.5 / 4.1.2. The tree carries exactly one node at 3.1.4; it relocks to 3.1.5 inside its existing range (three lines, one node).
+
+  Fixed with a scoped relock under Node 24 (`npm update brace-expansion --package-lock-only`): the root copy moves 1.1.16 → 1.1.18 and both nested copies (under `glob/` and `@typescript-eslint/typescript-estree/`) move 5.0.8 → 5.0.9. Nine insertions and nine deletions, touching only those three nodes — no platform-native entries dropped and no pinned roots floated.
+
+  The relock also invalidates the premise of the gate's sole remaining waiver. Its justification claimed the advisory was "patched ONLY in 5.0.8 (no 1.x/2.x backport exists)", which made the root `brace-expansion@1.1.x` under the minimatch@3 / eslint-9 lint toolchain un-relockable. Upstream shipped 1.1.17, so that is no longer true: the root copy relocks inside its existing `^1.1.7` range with no eslint-major migration. The waiver's comment is corrected in place to record this — the entry now waives nothing and the gate emits its anti-rot note for it in every workspace. Deleting the entry is deliberately left to a follow-up (PF-1046) because the hardened self-defense suite pins the id as present, sed-anchors its variant harness on the exact entry literal, and would need empty-array guards for bash 3.2 on macOS.
+
+  Verified after both relocks: `npm audit --json` reports zero vulnerabilities at every severity across the whole graph; `scripts/check-npm-audit.sh` exits 0 for `web`, `mcp-server`, and the repo root, each printing the anti-rot note; `scripts/__tests__/check-npm-audit.test.sh` passes in full; `scripts/check-lockfile-sync.sh` passes against the committed lockfile; `npm ci` and `scripts/check-native-bindings.sh` verified under Node 24.
+
+- [#9074](https://github.com/Tristan578/project-forge/pull/9074) [`1a8224c`](https://github.com/Tristan578/project-forge/commit/1a8224c2d8de9a70c8dc89e3a059d25bf549285e) Thanks [@Tristan578](https://github.com/Tristan578)! - fix(deps): relock ip-address to 10.4.0 — clears GHSA-mwp4-54f8-5fhr (SSRF / trust-boundary bypass)
+
+  `GHSA-mwp4-54f8-5fhr` (high) was published while [#9073](https://github.com/Tristan578/project-forge/issues/9073) was in flight and immediately re-reddened the `Quality Gates / Rust Security Audit` gate, this time in the `mcp-server` workspace: `ip-address`'s `Address4` decodes leading-zero octets as decimal while OS resolvers decode them as octal, so a value like `0177.0.0.1` can be validated as one address and resolved as another — an SSRF and trust-boundary bypass. Vulnerable at `<= 10.3.0`, patched at 10.3.1.
+
+  Scoped relock under Node 24 (`npm update ip-address --package-lock-only`): the single node moves 10.2.0 → 10.4.0 inside its existing range. Three lines, one node, no platform-native entries dropped.
+
+  This is the fourth high advisory to fire in a single afternoon (after `GHSA-rgw5-rvv9-x895` and `GHSA-mh99-v99m-4gvg` on brace-expansion and `GHSA-7p8r-x3mc-p8w7` on fast-uri, all fixed in [#9073](https://github.com/Tristan578/project-forge/issues/9073)). The gate evaluates the advisory database at run time, so a green `Rust Security Audit` only certifies the moment it ran — it is not a durable property of the commit. A PR whose checks predate a publication is not "still green"; it is unverified against the current database.
+
+  Verified: `scripts/check-npm-audit.sh` exits 0 for `web`, `mcp-server`, and the repo root; `scripts/check-lockfile-sync.sh` passes against the committed lockfile; `npm ci` and `scripts/check-native-bindings.sh` verified under Node 24.
+
+- [#9007](https://github.com/Tristan578/project-forge/pull/9007) [`e1f0f05`](https://github.com/Tristan578/project-forge/commit/e1f0f05a876f2ab6ad3e00b6617a6e456c4b833d) Thanks [@Tristan578](https://github.com/Tristan578)! - fix(deps): clear npm-audit gate — postcss floor 8.5.18 and brace-expansion 5.0.8; waive the un-relockable brace-expansion 1.x by id
+
+  Two source advisories were blocking the `Quality Gates / Rust Security Audit` npm-audit gate (`scripts/check-npm-audit.sh`) at high severity.
+
+  - **postcss**: override floor raised `>=8.5.10` → `>=8.5.18` (root + web manifests, including the `next`-scoped override); the lockfile resolves to 8.5.23. The already-pinned in-range 8.5.16 node does not move on a plain relock, so the bump is applied with `npm update postcss --package-lock-only` — the committed lockfile is a fixed point of the Lockfile Sync gate's regeneration.
+  - **brace-expansion** (GHSA-mh99-v99m-4gvg, unbounded-expansion OOM DoS): patched ONLY in 5.0.8 — no 1.x/2.x backport exists. The two relockable 5.0.7 copies (under `glob` and `@typescript-eslint/typescript-estree`) move to 5.0.8. The root 1.1.16 copy is dev-only and pinned `^1.1.7` by the minimatch@3/eslint-9 lint toolchain — un-relockable without an eslint-major migration and non-exploitable here (input is our own lint globs) — so it is waived by advisory id in `ALLOWED_ADVISORIES` with justification and removal path (eslint 10 or a 1.x backport).
+  - The two stale esbuild waivers (GHSA-gv7w-rqvm-qjhr, GHSA-g7r4-m6w7-qqqr) are pruned — the gate's anti-rot notes reported them gone from every workspace. The hermetic test suite (`scripts/__tests__/check-npm-audit.test.sh`) is migrated to the new allowlist occupant and now pins that the esbuild ids stay pruned.
+
+  Root lockfile relocked on Node 24; both audit gates (`web` and `mcp-server`) pass exit 0 with exactly one WAIVED line in `web`; `scripts/check-lockfile-sync.sh` passes against the committed lockfile; `npm ci` integrity verified under Node 24.
+
+- [#8998](https://github.com/Tristan578/project-forge/pull/8998) [`97391b7`](https://github.com/Tristan578/project-forge/commit/97391b7680aa416789805db47dfdfa5c90701df3) Thanks [@Tristan578](https://github.com/Tristan578)! - fix(deps): clear npm-audit gate — sharp 0.34→0.35 (CVE) and fast-uri 3.1.3→3.1.4
+
+  Two source advisories were blocking the `Quality Gates / Rust Security Audit` npm-audit gate (`scripts/check-npm-audit.sh`) at high severity, which in turn blocks the merge train.
+
+  - **sharp**: next's optional transitive was pinned at 0.34.5 (vulnerable). `overrides` alone cannot bump it — npm drops an optional dep to `undefined` when an override forces a range its parent doesn't satisfy. Fix: declare `sharp: ^0.35.0` as a direct root **devDependency** (forces 0.35.x into the tree, reproducible via `--package-lock-only`) plus an `overrides.next.sharp: ^0.35.0` so next's optional range realigns and dedupes to the single hoisted 0.35.3 node instead of keeping a stray 0.34.5 copy. devDependency is semantically correct: on Vercel, next image optimization runs Vercel-side, so sharp is build/dev-time only and `npm ci --omit=dev` pruning it in prod is harmless. Verified: sharp → 0.35.3, zero stray 0.34.x nodes; sharp ships prebuilt `@img/sharp-<platform>` binaries so this adds no compile step.
+  - **fast-uri**: overridden to `^3.1.4` (NOT `>=3.1.4`, which overshoots to 4.1.1 and violates ajv's `^3.0.1`). Resolves to 3.1.4.
+
+  Root lockfile relocked on Node 24 with the CI-exact `npm install --package-lock-only --ignore-scripts --no-audit --no-fund` (idempotent; the diff touches only sharp/@img/fast-uri nodes — no unrelated drift). Both audit gates (`web` and `mcp-server`) now pass exit 0; `npm ci` integrity verified under Node 24.
+
+- [#9003](https://github.com/Tristan578/project-forge/pull/9003) [`983d0b5`](https://github.com/Tristan578/project-forge/commit/983d0b5d1efeef1cef925eb028c05e2d28e8165f) Thanks [@Tristan578](https://github.com/Tristan578)! - fix(security): remediate all 10 open Dependabot alerts + the CodeQL alert, and add a scheduled gate so alert debt can't silently accumulate again (PF-1000)
+
+  - **next 16.2.10 → 16.2.11** (`web`): clears 9 Dependabot alerts — SSRF (GHSA-89xv-2m56-2m9x, GHSA-p9j2-gv94-2wf4), middleware bypass (GHSA-6gpp-xcg3-4w24), DoS (GHSA-m99w-x7hq-7vfj), plus mediums.
+  - **@hono/node-server override ^1.19.13 → ^2.0.5** (mcp-server, transitive via `@modelcontextprotocol/sdk`): clears GHSA-frvp-7c67-39w9 (Windows serve-static path traversal). The SDK only imports `getRequestListener`, which v2 retains with dual ESM/CJS exports; peer `hono ^4` is satisfied by the pinned 4.12.31. Relock required deleting the stale SDK subtree lock nodes first — npm neither re-resolves an already-pinned transitive on an override change, nor (after deleting only the package's own node) re-adds it.
+  - **tools/agentic-sync/sync.mjs**: CodeQL js/incomplete-multi-character-sanitization — comment stripping now runs to a fixed point, so spliced-together bytes (`<!<!-- x -->--`) can no longer smuggle a live `<!-- AGENTIC-SYNC:END -->` sentinel through a single-pass replace.
+  - **New scheduled gate** (`scripts/check-security-alerts.sh` + `.github/workflows/security-alerts.yml`): daily + on-demand check that fails while any open Dependabot or code-scanning alert exists (GHSA allowlist mirrors the npm-audit gate's two dev-only esbuild waivers; fails closed on tooling errors). Scheduled rather than PR-blocking because repo-level alerts only close after the fixing PR merges.
+
 ## 0.4.2
 
 ### Patch Changes

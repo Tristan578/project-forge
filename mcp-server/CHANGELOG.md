@@ -1,5 +1,20 @@
 # @project-forge/mcp-server
 
+## 0.2.1
+
+### Patch Changes
+
+- [#8995](https://github.com/Tristan578/project-forge/pull/8995) [`7371343`](https://github.com/Tristan578/project-forge/commit/7371343a8c7ac2e5052b0c585d4ea89fca4e9e30) Thanks [@dependabot](https://github.com/apps/dependabot)! - chore(deps): bump the `hono` security-pin override 4.12.26→4.12.31 ([#8995](https://github.com/Tristan578/project-forge/issues/8995))
+
+  Dependabot's bump only edited the root `package.json` override; npm does not re-resolve an already-pinned transitive when only its override changes, so the lockfile kept `hono` at 4.12.26 while Lockfile Sync stayed green (same class as the `@clerk/shared` case in [#8964](https://github.com/Tristan578/project-forge/issues/8964)). Relocked on Node 24 via `npm update hono --package-lock-only` — only the `hono` version/resolved/integrity lines changed, regen verified byte-stable. `hono` reaches the tree through `@modelcontextprotocol/sdk` (mcp-server).
+
+- [#9003](https://github.com/Tristan578/project-forge/pull/9003) [`983d0b5`](https://github.com/Tristan578/project-forge/commit/983d0b5d1efeef1cef925eb028c05e2d28e8165f) Thanks [@Tristan578](https://github.com/Tristan578)! - fix(security): remediate all 10 open Dependabot alerts + the CodeQL alert, and add a scheduled gate so alert debt can't silently accumulate again (PF-1000)
+
+  - **next 16.2.10 → 16.2.11** (`web`): clears 9 Dependabot alerts — SSRF (GHSA-89xv-2m56-2m9x, GHSA-p9j2-gv94-2wf4), middleware bypass (GHSA-6gpp-xcg3-4w24), DoS (GHSA-m99w-x7hq-7vfj), plus mediums.
+  - **@hono/node-server override ^1.19.13 → ^2.0.5** (mcp-server, transitive via `@modelcontextprotocol/sdk`): clears GHSA-frvp-7c67-39w9 (Windows serve-static path traversal). The SDK only imports `getRequestListener`, which v2 retains with dual ESM/CJS exports; peer `hono ^4` is satisfied by the pinned 4.12.31. Relock required deleting the stale SDK subtree lock nodes first — npm neither re-resolves an already-pinned transitive on an override change, nor (after deleting only the package's own node) re-adds it.
+  - **tools/agentic-sync/sync.mjs**: CodeQL js/incomplete-multi-character-sanitization — comment stripping now runs to a fixed point, so spliced-together bytes (`<!<!-- x -->--`) can no longer smuggle a live `<!-- AGENTIC-SYNC:END -->` sentinel through a single-pass replace.
+  - **New scheduled gate** (`scripts/check-security-alerts.sh` + `.github/workflows/security-alerts.yml`): daily + on-demand check that fails while any open Dependabot or code-scanning alert exists (GHSA allowlist mirrors the npm-audit gate's two dev-only esbuild waivers; fails closed on tooling errors). Scheduled rather than PR-blocking because repo-level alerts only close after the fixing PR merges.
+
 ## 0.2.0
 
 ### Minor Changes
