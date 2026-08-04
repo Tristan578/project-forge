@@ -196,7 +196,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       if (!customerId) break;
 
       // v22 (dahlia) nests subscription under invoice.parent; pre-dahlia uses top-level invoice.subscription.
-      // Keep both reads until Dashboard webhook endpoint is confirmed on 2026-06-24.dahlia.
+      // Keep both reads until Dashboard webhook endpoint is confirmed on 2026-07-29.dahlia.
       const subField = invoice.parent?.subscription_details?.subscription
         ?? (invoice as unknown as { subscription?: string | { id: string } | null }).subscription
         ?? null;

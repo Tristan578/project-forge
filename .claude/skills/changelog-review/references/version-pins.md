@@ -6,11 +6,11 @@ Documenting why specific dependencies are pinned and what must be audited before
 
 ## JavaScript / Node
 
-### stripe — `22.3.0`, API version `2026-06-24.dahlia`
+### stripe — `22.4.0`, API version `2026-07-29.dahlia`
 
 **Upgraded from** `^20.4.1` in PR #8136 (v21 `decimal_string` and v22 callback/ES6-class changes were non-issues — all amounts use integer cents, no callbacks, ESM imports). Bumped `22.2.x → 22.3.0` in the 2026-06-27 changelog-review wave.
 
-**ApiVersion moves in lockstep with the SDK.** stripe-node pins an `ApiVersion` literal (`22.3.0` → `2026-06-24.dahlia`); the hardcoded string must stay in sync across FIVE sites. Four are code, where a mismatch breaks `tsc`: `web/src/lib/billing/stripe-client.ts` (single source) plus the 3 billing route tests (`checkout`/`portal`/`status`). The fifth is the `web/src/app/api/stripe/webhook/route.ts` comment — it must track the literal but does not affect compilation.
+**ApiVersion moves in lockstep with the SDK.** stripe-node pins an `ApiVersion` literal (`22.4.0` → `2026-07-29.dahlia`); the hardcoded string must stay in sync across FIVE sites. Four are code, where a mismatch breaks `tsc`: `web/src/lib/billing/stripe-client.ts` (single source) plus the 3 billing route tests (`checkout`/`portal`/`status`). The fifth is the `web/src/app/api/stripe/webhook/route.ts` comment — it must track the literal but does not affect compilation.
 
 **Before future upgrades:**
 1. Check for new `apiVersion` string — update `web/src/lib/billing/stripe-client.ts` (single source)
@@ -84,7 +84,7 @@ Documenting why specific dependencies are pinned and what must be audited before
 
 | Dependency | Current | Upgrade Risk | Recommended Action |
 |-----------|---------|-------------|-------------------|
-| `stripe` | 22.3.0 | LOW | Centralized in `stripe-client.ts`, check apiVersion string |
+| `stripe` | 22.4.0 | LOW | Centralized in `stripe-client.ts`, check apiVersion string |
 | `wasm-bindgen` | =0.2.108 | HIGH (CLI must match) | Only upgrade as a coordinated Rust+CLI change |
 | `next` | 16.x | MEDIUM | Check migration guide, test E2E |
 | `bevy` | 0.18 | HIGH (API churn) | Only on planned engine upgrade sprint |
