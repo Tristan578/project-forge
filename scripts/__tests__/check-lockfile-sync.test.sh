@@ -365,6 +365,16 @@ if [ -f "$CI_YML" ]; then
     fail "ci-gate deps=true line does not key on package.json/lockfile changes"
   fi
 
+  # The gate's OWN script must be in the trigger (same convention as the agentic,
+  # ghaw and api gates). Without it a PR that edits check-lockfile-sync.sh changes
+  # the gate without ever running it, so a regression in the gate ships green and
+  # surfaces only on the next unrelated manifest PR.
+  if grep -qF '^scripts/check-lockfile-sync\.sh$' <<<"$deps_line"; then
+    pass "ci-gate deps trigger includes the gate script itself (a gate edit exercises the gate)"
+  else
+    fail "ci-gate deps=true line omits scripts/check-lockfile-sync.sh — the gate is not run by PRs that modify it"
+  fi
+
   # The ci-gate "No relevant changes — downstream jobs will be skipped" diagnostic
   # must account for `deps`. A manifest-only PR (e.g. a Dependabot web/ bump) sets
   # any_code=false, hooks=false, but deps=true — the lockfile-sync gate DOES run.
