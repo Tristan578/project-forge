@@ -64,6 +64,14 @@ describe('classifyGenerationOutcome', () => {
     expect(classifyGenerationOutcome(status)).toBe(expected);
   });
 
+  it('treats any unmapped 2xx as a success', () => {
+    // 202/204 are the realistic ones here — an async provider handoff and a
+    // no-content variant. Falling through to `error` would invent a phantom
+    // error rate out of requests that worked.
+    expect(classifyGenerationOutcome(202)).toBe('success');
+    expect(classifyGenerationOutcome(204)).toBe('success');
+  });
+
   it('treats any unmapped 4xx as a client rejection, not a server error', () => {
     // A future validation branch returning 409/415 must not pollute the error
     // rate — outcome is the alerting dimension.
@@ -107,10 +115,47 @@ describe('GENERATION_OUTCOMES vocabulary', () => {
     expect(scrubbed).toEqual([]);
   });
 
-  it('has a guard regex that actually matches the value that shipped broken', () => {
-    // Without this, gutting the regex above would make the guard vacuously pass.
-    expect(SENTRY_SCRUBBED_VALUE_RE.test('unauthenticated')).toBe(true);
-    expect(SENTRY_SCRUBBED_VALUE_RE.test('signed_out')).toBe(false);
+  it.each([
+    'unauthenticated',
+    'auth',
+    'authorization',
+    'unauth',
+    'reauth',
+    'password',
+    'passwd',
+    'secret',
+    'credentials',
+    'apikey',
+    'api_key',
+    'private_key',
+  ])('guard regex matches the measured-scrubbed value %s', (value) => {
+    // Anti-vacuity. Without this the regex could be gutted — to `/^$/`, or
+    // narrowed to `/^unauthenticated$/` around the single value that shipped
+    // broken — and the guard above would pass on an empty result set while
+    // catching nothing. Every value here was returned as `[Filtered]` by the
+    // live project, so each is a real trigger the guard has to keep covering.
+    expect(SENTRY_SCRUBBED_VALUE_RE.test(value)).toBe(true);
+  });
+
+  it.each([
+    'signed_out',
+    'token',
+    'session',
+    'no_session',
+    'anonymous',
+    'insufficient_tokens',
+    'bot_blocked',
+    'rate_limited',
+    'provider_unavailable',
+    'success',
+    'error',
+  ])('guard regex leaves the measured-safe value %s alone', (value) => {
+    // The other half of anti-vacuity: a regex widened until it matches
+    // everything would make the guard above unsatisfiable rather than
+    // meaningful. `token` and `session` are the load-bearing cases — both look
+    // sensitive and both were measured to survive ingest intact, so a guard
+    // that flags them is over-broad, not cautious.
+    expect(SENTRY_SCRUBBED_VALUE_RE.test(value)).toBe(false);
   });
 
   it('lists every outcome classifyGenerationOutcome can return', () => {
@@ -261,6 +306,37 @@ describe('withGenerationMetrics', () => {
     );
     await wrapped({} as never);
     expect(find(GENERATION_REQUEST_METRIC)[0].options?.attributes).toMatchObject({ cache: 'HIT' });
+  });
+
+  it('still records metrics when the response has no usable headers object', async () => {
+    // Not hypothetical: a route can return a mock/proxy Response-like object in
+    // tests, and some runtimes hand back objects whose `headers` getter throws.
+    // Reading X-Cache is a nice-to-have facet — it must never be able to cost us
+    // the request metric, which is the thing alerts hang off.
+    const hostile = {
+      status: 200,
+      get headers(): Headers {
+        throw new Error('no headers here');
+      },
+    } as unknown as Response;
+
+    const wrapped = withGenerationMetrics('/api/generate/image', async () => hostile);
+
+    await expect(wrapped({} as never)).resolves.toBe(hostile);
+    const attrs = find(GENERATION_REQUEST_METRIC)[0].options?.attributes ?? {};
+    expect(attrs).toMatchObject({ outcome: 'success', status: 200 });
+    expect(attrs).not.toHaveProperty('cache');
+  });
+
+  it('omits the cache facet when the response carries no X-Cache header', async () => {
+    // `headers.get` returns null, not undefined — without the `?? undefined`
+    // this ships a literal `cache: null` facet.
+    const wrapped = withGenerationMetrics(
+      '/api/generate/image',
+      async () => new Response('{}', { status: 200 }),
+    );
+    await wrapped({} as never);
+    expect(find(GENERATION_REQUEST_METRIC)[0].options?.attributes).not.toHaveProperty('cache');
   });
 
   it('records an error outcome and RE-THROWS when the handler throws', async () => {

@@ -701,6 +701,39 @@ describe('Sentry profiling config must stay pinned', () => {
     return stripComments(fs.readFileSync(path.resolve(process.cwd(), file), 'utf-8'));
   }
 
+  /**
+   * Assert `profileSessionSampleRate` is present AND that every rate it can
+   * resolve to is non-zero.
+   *
+   * A bare `toContain('profileSessionSampleRate')` pins only the key name, which
+   * makes the pin vacuous against the exact regression it names: the SDK default
+   * is 0, so `profileSessionSampleRate: 0` — or `IS_PROD ? 0 : 1.0`, which
+   * disables profiling in production only — leaves the substring intact and the
+   * test green while collecting nothing. Both configs assign a ternary, so every
+   * numeric literal in the assignment is a rate this build can actually use and
+   * each one has to be checked.
+   */
+  function expectNonZeroProfileSampleRate(source: string, label: string): void {
+    const match = source.match(/profileSessionSampleRate:\s*([^,\n]+)/);
+    expect(
+      match,
+      `${label}: profileSessionSampleRate must be assigned — it defaults to 0, so profiling enabled without it collects nothing, silently`,
+    ).not.toBeNull();
+
+    const rates = (match![1].match(/\d+(?:\.\d+)?/g) ?? []).map(Number);
+    expect(
+      rates.length,
+      `${label}: profileSessionSampleRate must resolve to numeric literals this test can verify, got "${match![1].trim()}"`,
+    ).toBeGreaterThan(0);
+
+    for (const rate of rates) {
+      expect(
+        rate,
+        `${label}: profileSessionSampleRate resolves to ${rate} on at least one branch of "${match![1].trim()}" — a zero rate is indistinguishable from profiling being off`,
+      ).toBeGreaterThan(0);
+    }
+  }
+
   it('pins @sentry/profiling-node to the same declared range as @sentry/nextjs', async () => {
     const fs = await import('fs');
     const path = await import('path');
@@ -711,11 +744,15 @@ describe('Sentry profiling config must stay pinned', () => {
     const nextjsRange = pkg.dependencies?.['@sentry/nextjs'];
     const profilingRange = pkg.dependencies?.['@sentry/profiling-node'];
 
-    expect(nextjsRange, '@sentry/nextjs must be a declared dependency').toBeTruthy();
+    // Shape-asserted, not merely truthy: a non-string or a garbage value would
+    // satisfy toBeTruthy() while telling us nothing about what npm will install.
+    expect(nextjsRange, '@sentry/nextjs must be a declared dependency').toMatch(
+      /^[\^~]?\d+\.\d+\.\d+/,
+    );
     expect(
       profilingRange,
       '@sentry/profiling-node must be a declared dependency — nodeProfilingIntegration is imported from it',
-    ).toBeTruthy();
+    ).toMatch(/^[\^~]?\d+\.\d+\.\d+/);
     expect(
       profilingRange,
       'the two ranges must be IDENTICAL strings so npm can never resolve them to different versions — Sentry ships @sentry/nextjs and @sentry/profiling-node as a matched pair and a skew fails silently at load',
@@ -737,11 +774,16 @@ describe('Sentry profiling config must stay pinned', () => {
     const nextjs = lock.packages['node_modules/@sentry/nextjs']?.version;
     const profiling = lock.packages['node_modules/@sentry/profiling-node']?.version;
 
-    expect(nextjs, '@sentry/nextjs must be present in the root lockfile').toBeTruthy();
+    // Exact-version shape, not truthiness — a lockfile node must carry a
+    // concrete resolved version, and asserting that is what makes the
+    // equality check below meaningful.
+    expect(nextjs, '@sentry/nextjs must be present in the root lockfile').toMatch(
+      /^\d+\.\d+\.\d+/,
+    );
     expect(
       profiling,
       '@sentry/profiling-node must be present in the root lockfile — a manifest entry without a locked node means npm ci installs nothing',
-    ).toBeTruthy();
+    ).toMatch(/^\d+\.\d+\.\d+/);
     expect(
       profiling,
       `lockfile skew: @sentry/nextjs resolves to ${nextjs} but @sentry/profiling-node resolves to ${profiling} — mismatched versions make nodeProfilingIntegration fail silently`,
@@ -767,19 +809,13 @@ describe('Sentry profiling config must stay pinned', () => {
       server,
       'profileLifecycle must be "trace" so profiles auto-attach to sampled spans; without it profiling stays in manual mode and collects nothing',
     ).toContain("profileLifecycle: 'trace'");
-    expect(
-      server,
-      'profileSessionSampleRate defaults to 0 — profiling enabled without it collects nothing, silently',
-    ).toContain('profileSessionSampleRate');
+    expectNonZeroProfileSampleRate(server, 'sentry.server.config.ts');
   });
 
   it('registers browserProfilingIntegration AFTER browserTracingIntegration', async () => {
     const client = await readSource('instrumentation-client.ts');
     expect(client).toContain('browserProfilingIntegration');
-    expect(
-      client,
-      'profileSessionSampleRate defaults to 0 — browser profiling enabled without it collects nothing, silently',
-    ).toContain('profileSessionSampleRate');
+    expectNonZeroProfileSampleRate(client, 'instrumentation-client.ts');
 
     const tracingAt = client.indexOf('browserTracingIntegration');
     const profilingAt = client.indexOf('browserProfilingIntegration');

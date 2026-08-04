@@ -393,7 +393,15 @@ export function createGenerationHandler<TParams, TResult>(
     }
     mctx.provider = resolvedProvider;
     mctx.operation = resolvedOperation;
-    mctx.tokenCost = tokenCost;
+    // NOTE: mctx.tokenCost is deliberately NOT set here. `generation.tokens_charged`
+    // means tokens ACTUALLY charged, and at this point nothing has been. It is set
+    // only where a platform deduction really happens — immediately after
+    // resolveApiKey returns a usageId. That marker is what distinguishes a real
+    // charge from the two paths that resolve a cost but never spend it: a cache HIT
+    // (6c re-serves a prior result without invoking the factory at all) and BYOK
+    // (resolver.ts returns no usageId when the user supplies their own key).
+    // Setting it here billed both to the metric, overstating consumption by the
+    // entire cached-traffic volume and diverging from the Stripe billing meter.
 
     // 6b. Provider kill switch (PF-971 / #8952). Checked immediately after the
     // provider resolves and BEFORE any cache lookup or token deduction, so a
@@ -430,6 +438,8 @@ export function createGenerationHandler<TParams, TResult>(
             const resolved = await resolveApiKey(userId, resolvedProvider, tokenCost, resolvedOperation, metadata);
             const apiKey = resolved.key;
             const usageId = resolved.usageId;
+            // Charged for real (see the note at mctx.provider) — cache MISS only.
+            if (usageId !== undefined) mctx.tokenCost = tokenCost;
 
             try {
               const generated = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost });
@@ -484,6 +494,8 @@ export function createGenerationHandler<TParams, TResult>(
       const resolved = await resolveApiKey(userId, resolvedProvider, tokenCost, resolvedOperation, metadata);
       apiKey = resolved.key;
       usageId = resolved.usageId;
+      // Charged for real (see the note at mctx.provider) — uncached path.
+      if (usageId !== undefined) mctx.tokenCost = tokenCost;
     } catch (err) {
       if (err instanceof ApiKeyError) {
         return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });

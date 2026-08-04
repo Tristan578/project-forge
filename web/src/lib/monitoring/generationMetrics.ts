@@ -60,6 +60,15 @@ export type GenerationOutcome = (typeof GENERATION_OUTCOMES)[number];
 export interface GenerationMetricsContext {
   provider?: string;
   operation?: string;
+  /**
+   * Tokens ACTUALLY charged — set by the caller only once a platform deduction
+   * has really occurred, never merely once a cost has been computed. Two success
+   * paths resolve a cost and then spend nothing: a cache HIT (the prior result is
+   * re-served without invoking the provider factory) and BYOK (the user supplies
+   * their own key, so no platform balance moves). Leaving this unset on those
+   * paths is what keeps `generation.tokens_charged` reconcilable against the
+   * Stripe `generation_tokens` billing meter.
+   */
   tokenCost?: number;
   tier?: string;
 }
