@@ -178,6 +178,10 @@ rm -f "$consistency_log"
 # engines floor, malformed manifest) is surfaced in the gate log instead of
 # being swallowed — a silent "regeneration command failed" is un-actionable.
 regen_log="$(mktemp)"
+# Declared before the trap below so the single EXIT handler covers both tmpfiles.
+# It stays empty unless the classifier further down actually creates it; `rm -f`
+# on an empty operand is a silent no-op, so the trap is safe either way.
+committed_lock=""
 # Clean up the tmpfile on EVERY exit path. The explicit TERM/INT handlers are not
 # redundant with the EXIT trap: the regeneration is a multi-second `npm install`,
 # and if CI cancels the job it sends SIGTERM mid-eval. On the Linux runner (bash
@@ -186,7 +190,7 @@ regen_log="$(mktemp)"
 # handler's `exit` is what triggers the EXIT trap. (check-ci-success.sh uses an
 # EXIT-only trap by contrast — its work is sub-second, so its signal window is
 # negligible; here the long npm window makes the signal handlers worth the lines.)
-trap 'rm -f "$regen_log"' EXIT
+trap 'rm -f "$regen_log" "$committed_lock"' EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 if ! eval "$REGEN_CMD" >"$regen_log" 2>&1; then
@@ -203,6 +207,94 @@ if git diff --quiet -- "$LOCKFILE"; then
   exit 0
 fi
 
+# --- Stage 3: classify the difference ----------------------------------------
+# The regenerated lockfile differs from the committed one. Before blaming the
+# contributor, rule out a TOOLCHAIN artifact: some npm versions rewrite platform
+# metadata on the Linux-only optional native bindings. Measured on one macOS host
+# against this repo's clean main:
+#
+#   npm 11.10.0 (bundled with Node 25.6.1)  -> 34 nodes lose their "libc" field
+#   npm 11.16.0 (bundled with Node 24.18.0) -> zero drift
+#   npm 11.16.0 run UNDER Node 25.6.1       -> zero drift
+#
+# The third row is the control that isolates the variable: same OS, same Node,
+# only npm swapped, drift gone. So this is npm-VERSION skew — not a macOS
+# artifact and not a Node-version artifact. CI resolves npm from .node-version
+# (Node 24) and never sees it; a contributor on a newer Node does, on every run.
+#
+# Reported as drift that is a false accusation with an unactionable remedy: the
+# printed fix IS the command that produced it, so re-running reproduces the
+# identical diff forever.
+#
+# WHY THIS CANNOT MASK REAL DRIFT. A manifest change makes npm re-resolve, which
+# adds or removes package nodes or changes version/resolved/integrity — all of
+# which survive stripping os/cpu/libc. And `integrity` pins the exact tarball, so
+# a given version can never legitimately change its own platform metadata. A
+# difference that vanishes under the strip therefore carries no information about
+# whether the lockfile matches the manifests. The classifier is also strictly
+# additive: everything it does not positively prove benign takes the pre-existing
+# exit-1 path, including any input it cannot parse.
+#
+# `git show :$LOCKFILE` (the INDEX, not HEAD) is the right baseline because
+# `git diff -- $LOCKFILE` above compares worktree against index.
+classification=""
+committed_lock="$(mktemp)"
+if git show ":$LOCKFILE" >"$committed_lock" 2>/dev/null && [ -s "$committed_lock" ]; then
+  classification="$(jq -rn --slurpfile a "$committed_lock" --slurpfile b "$LOCKFILE" '
+    def strip_platform:
+      if (.packages | type) == "object"
+      then .packages |= with_entries(
+             .value |= (if type == "object" then del(.os, .cpu, .libc) else . end))
+      else . end;
+    def platform_view:
+      [ (.packages // {}) | to_entries[]
+        | {k: .key, os: (.value.os? // null), cpu: (.value.cpu? // null), libc: (.value.libc? // null)} ];
+    ($a[0] | strip_platform) as $na
+    | ($b[0] | strip_platform) as $nb
+    | if $na == $nb then "artifact"
+      elif ($a[0] | platform_view) != ($b[0] | platform_view) then "drift-with-platform-noise"
+      else "drift"
+      end
+  ' 2>/dev/null)" || classification=""
+fi
+
+if [ "$classification" = "artifact" ]; then
+  npm_version="$(npm --version 2>/dev/null)"
+  [ -n "$npm_version" ] || npm_version="unknown"
+  pinned_node="$(tr -d '[:space:]' < .node-version 2>/dev/null)"
+  [ -n "$pinned_node" ] || pinned_node="unknown"
+
+  echo "::error::Lockfile regeneration produced a TOOLCHAIN artifact — this run cannot judge the lockfile."
+  echo ""
+  echo "The regenerated $LOCKFILE is identical to the committed one except for"
+  echo "platform metadata (os / cpu / libc) on optional native bindings. No package"
+  echo "node was added, removed or re-resolved, and no version, resolved URL or"
+  echo "integrity hash changed — so this difference says nothing about whether the"
+  echo "lockfile matches the manifests. It is the local npm rewriting fields that a"
+  echo "different npm preserves."
+  echo ""
+  echo "    npm running here:             $npm_version"
+  echo "    Node pinned by .node-version: $pinned_node"
+  echo ""
+  echo "Measured: npm 11.10.0 (bundled with Node 25) drops the \"libc\" field from the"
+  echo "Linux-only native bindings; npm 11.16.0 (bundled with Node 24) preserves it."
+  echo "Re-running '$BASE_REGEN' under the same npm"
+  echo "reproduces this forever, which is why it must not be reported as drift."
+  echo ""
+  echo "Fix: regenerate under the Node/npm this repo pins, from the repo root —"
+  echo ""
+  echo "    nvm use          # or fnm use / volta pin — anything honouring .node-version"
+  echo "    $BASE_REGEN"
+  echo ""
+  echo "If this fired in CI, the runner's npm no longer matches .node-version: fix"
+  echo "the pin. Never commit the rewritten lockfile to silence it."
+  echo ""
+  echo "Platform-metadata difference (first 40 lines):"
+  git --no-pager diff -- "$LOCKFILE" | head -40
+  git checkout -- "$LOCKFILE" 2>/dev/null || true
+  exit 2
+fi
+
 # Drift: report with remediation, then restore the committed lockfile so the
 # gate leaves no mutation behind (it is a check, not a fix).
 echo "::error::Lockfile drift detected — $LOCKFILE does not match the package manifests."
@@ -214,6 +306,15 @@ echo ""
 echo "Fix: from the repo root, run"
 echo "    $BASE_REGEN"
 echo "then commit the updated package-lock.json."
+if [ "$classification" = "drift-with-platform-noise" ]; then
+  # Real drift AND the toolchain rewrite landed in the same regeneration. Say so:
+  # the reader is about to scan a diff whose bulk may be noise, and without this
+  # they will chase the wrong lines.
+  echo ""
+  echo "Note: part of the diff below is platform metadata (os / cpu / libc) rewritten"
+  echo "by the local npm, which is NOT drift — see .node-version. The substantive"
+  echo "changes (added/removed nodes, version, resolved, integrity) are the real ones."
+fi
 echo ""
 echo "Drift (first 40 lines):"
 git --no-pager diff -- "$LOCKFILE" | head -40
