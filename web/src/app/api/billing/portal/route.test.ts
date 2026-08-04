@@ -118,7 +118,7 @@ describe('POST /api/billing/portal', () => {
     const { POST } = await import('./route');
     await POST(makeReq());
 
-    expect(capturedStripeOpts.value?.apiVersion).toBe('2026-06-24.dahlia');
+    expect(capturedStripeOpts.value?.apiVersion).toBe('2026-07-29.dahlia');
   });
 
   it('pins the portal configuration id from STRIPE_PORTAL_CONFIGURATION_ID', async () => {
