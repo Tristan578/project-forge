@@ -24,6 +24,19 @@ if (DSN) {
       return IS_PROD ? 0.1 : 1.0;
     },
 
+    // PROFILING (PF-1053) — browser CPU profiles via the JS Self-Profiling API.
+    // Same semantics as the server: 'trace' lifecycle ties profiling to the
+    // sampled transactions the tracesSampler above produces, and the session
+    // rate (evaluated ONCE at init, not per transaction) gates eligibility.
+    // Non-zero is load-bearing — the default is 0, i.e. silently off.
+    //
+    // Browser profiling additionally needs the `Document-Policy: js-profiling`
+    // response header (next.config.ts) or the API is unavailable and the
+    // integration no-ops with no error. Chromium-only; other engines simply
+    // produce no profiles. Both pinned by sentry-regressions.test.ts.
+    profileSessionSampleRate: IS_PROD ? 0.1 : 1.0,
+    profileLifecycle: 'trace',
+
     // Tunnel handled by tunnelRoute in next.config.ts (bypasses ad-blockers)
 
     // SECURITY (audit 2026-05-30, F03/F04): no default PII; scrub residual
@@ -51,6 +64,12 @@ if (DSN) {
 
     integrations: [
       Sentry.browserTracingIntegration(),
+      // ORDER IS LOAD-BEARING: browserProfilingIntegration must be registered
+      // AFTER browserTracingIntegration. Profiles attach to transactions the
+      // tracing integration creates; registered first, it has nothing to hook
+      // and produces no profiles — with no error to signal it. Pinned by an
+      // index-order assertion in sentry-regressions.test.ts.
+      Sentry.browserProfilingIntegration(),
       // maskAllText: true prevents BYOK API keys and other sensitive input
       // values from being visible in Sentry session replays (#8001).
       Sentry.replayIntegration({ maskAllText: true, blockAllMedia: false }),

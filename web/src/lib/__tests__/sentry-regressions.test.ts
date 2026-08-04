@@ -588,3 +588,152 @@ describe('PF-967: Sentry feedback widget config must stay pinned', () => {
     ).toContain('aria-label="Cookie consent"');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Sentry profiling: every prerequisite is silent when missing
+// ---------------------------------------------------------------------------
+
+describe('Sentry profiling config must stay pinned', () => {
+  /**
+   * Profiling has an unusual failure mode: EVERY prerequisite fails SILENTLY.
+   * A version skew, a missing header, a bundled native addon, or an unset
+   * sample rate each produce zero profiles, zero errors, and zero log lines —
+   * the feature simply never reports and nothing tells you why. These pins turn
+   * each silent prerequisite into a red test.
+   *
+   * The four independent prerequisites:
+   *   1. `@sentry/profiling-node` must resolve to the SAME version as
+   *      `@sentry/nextjs` (Sentry ships them as a matched pair; a skew fails
+   *      silently at load).
+   *   2. `@sentry/profiling-node` must be externalized from the server bundle —
+   *      it is a native `.node` addon and it is NOT in Next's built-in
+   *      `serverExternalPackages` default list (verified against
+   *      next/dist/lib/server-external-packages.json), so without an explicit
+   *      entry Turbopack tries to bundle it.
+   *   3. Browser profiling is gated behind the `Document-Policy: js-profiling`
+   *      response header. Without it the JS Self-Profiling API is unavailable
+   *      and `browserProfilingIntegration()` no-ops even in Chromium.
+   *   4. `profileSessionSampleRate` must be set wherever profiling is enabled —
+   *      it defaults to 0, i.e. profiling on with nothing ever collected.
+   *
+   * Plus one hard constraint: the Edge runtime cannot load native addons, so
+   * `nodeProfilingIntegration` must never appear in the edge config.
+   */
+
+  function stripComments(src: string): string {
+    return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  }
+
+  async function readSource(file: string): Promise<string> {
+    const fs = await import('fs');
+    const path = await import('path');
+    return stripComments(fs.readFileSync(path.resolve(process.cwd(), file), 'utf-8'));
+  }
+
+  it('pins @sentry/profiling-node to the same declared range as @sentry/nextjs', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const pkg = JSON.parse(
+      fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf-8'),
+    ) as { dependencies?: Record<string, string> };
+
+    const nextjsRange = pkg.dependencies?.['@sentry/nextjs'];
+    const profilingRange = pkg.dependencies?.['@sentry/profiling-node'];
+
+    expect(nextjsRange, '@sentry/nextjs must be a declared dependency').toBeTruthy();
+    expect(
+      profilingRange,
+      '@sentry/profiling-node must be a declared dependency — nodeProfilingIntegration is imported from it',
+    ).toBeTruthy();
+    expect(
+      profilingRange,
+      'the two ranges must be IDENTICAL strings so npm can never resolve them to different versions — Sentry ships @sentry/nextjs and @sentry/profiling-node as a matched pair and a skew fails silently at load',
+    ).toBe(nextjsRange);
+  });
+
+  it('resolves both Sentry packages to the same version in the root lockfile', async () => {
+    // The manifest ranges matching is necessary but not sufficient: the ranges
+    // are carets, so the LOCKFILE is what decides the installed pair. A relock
+    // that floated one node and not the other is exactly the silent skew this
+    // guards. Single-root-lockfile monorepo — the lockfile lives at the repo
+    // root, one level above web/.
+    const fs = await import('fs');
+    const path = await import('path');
+    const lock = JSON.parse(
+      fs.readFileSync(path.resolve(process.cwd(), '..', 'package-lock.json'), 'utf-8'),
+    ) as { packages: Record<string, { version?: string }> };
+
+    const nextjs = lock.packages['node_modules/@sentry/nextjs']?.version;
+    const profiling = lock.packages['node_modules/@sentry/profiling-node']?.version;
+
+    expect(nextjs, '@sentry/nextjs must be present in the root lockfile').toBeTruthy();
+    expect(
+      profiling,
+      '@sentry/profiling-node must be present in the root lockfile — a manifest entry without a locked node means npm ci installs nothing',
+    ).toBeTruthy();
+    expect(
+      profiling,
+      `lockfile skew: @sentry/nextjs resolves to ${nextjs} but @sentry/profiling-node resolves to ${profiling} — mismatched versions make nodeProfilingIntegration fail silently`,
+    ).toBe(nextjs);
+  });
+
+  it('never loads nodeProfilingIntegration in the Edge runtime', async () => {
+    const edge = await readSource('sentry.edge.config.ts');
+    expect(
+      edge,
+      'the Edge runtime cannot load native addons — nodeProfilingIntegration must never appear in sentry.edge.config.ts',
+    ).not.toContain('nodeProfilingIntegration');
+    expect(
+      edge,
+      '@sentry/profiling-node must never be imported into the Edge bundle',
+    ).not.toContain('@sentry/profiling-node');
+  });
+
+  it('wires nodeProfilingIntegration with a sample rate in the Node runtime', async () => {
+    const server = await readSource('sentry.server.config.ts');
+    expect(server).toContain('nodeProfilingIntegration');
+    expect(
+      server,
+      'profileLifecycle must be "trace" so profiles auto-attach to sampled spans; without it profiling stays in manual mode and collects nothing',
+    ).toContain("profileLifecycle: 'trace'");
+    expect(
+      server,
+      'profileSessionSampleRate defaults to 0 — profiling enabled without it collects nothing, silently',
+    ).toContain('profileSessionSampleRate');
+  });
+
+  it('registers browserProfilingIntegration AFTER browserTracingIntegration', async () => {
+    const client = await readSource('instrumentation-client.ts');
+    expect(client).toContain('browserProfilingIntegration');
+    expect(
+      client,
+      'profileSessionSampleRate defaults to 0 — browser profiling enabled without it collects nothing, silently',
+    ).toContain('profileSessionSampleRate');
+
+    const tracingAt = client.indexOf('browserTracingIntegration');
+    const profilingAt = client.indexOf('browserProfilingIntegration');
+    expect(tracingAt).toBeGreaterThanOrEqual(0);
+    expect(
+      profilingAt,
+      'browserProfilingIntegration must be listed AFTER browserTracingIntegration — registered before it, profileSessionSampleRate is silently ignored',
+    ).toBeGreaterThan(tracingAt);
+  });
+
+  it('externalizes the native profiling addon from the server bundle', async () => {
+    const config = await readSource('next.config.ts');
+    expect(
+      config,
+      '@sentry/profiling-node ships a native .node addon and is NOT in Next\'s built-in serverExternalPackages defaults — without an explicit entry the bundler tries to bundle it and the integration fails to load',
+    ).toContain('serverExternalPackages');
+    expect(config).toContain('"@sentry/profiling-node"');
+  });
+
+  it('serves the Document-Policy header browser profiling requires', async () => {
+    const config = await readSource('next.config.ts');
+    expect(
+      config,
+      'the JS Self-Profiling API is gated behind `Document-Policy: js-profiling` — without the header browserProfilingIntegration no-ops silently, even in Chromium',
+    ).toContain('Document-Policy');
+    expect(config).toContain('js-profiling');
+  });
+});

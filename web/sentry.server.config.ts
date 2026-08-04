@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/nextjs';
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
 import { configureSentryFingerprinting, scrubSentryEvent, scrubSentryLog } from '@/lib/monitoring/sentryConfig';
 
 const DSN = process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN;
@@ -16,6 +17,22 @@ if (DSN) {
       if (name?.includes('/api/')) return IS_PROD ? 0.2 : 1.0;
       return IS_PROD ? 0.1 : 1.0;
     },
+
+    // PROFILING (PF-1053) — CPU profiles for the Node runtime, captured by
+    // `nodeProfilingIntegration` below.
+    //
+    // `profileLifecycle: 'trace'` ties profiling to the sampling decisions the
+    // `tracesSampler` above already makes: the profiler runs only while a
+    // sampled transaction is in flight, so profile volume tracks trace volume
+    // instead of becoming an independent cost axis. `profileSessionSampleRate`
+    // then decides what fraction of *processes* are eligible to profile at all;
+    // it is evaluated ONCE at `Sentry.init()`, not per transaction.
+    //
+    // This rate MUST be non-zero: it defaults to 0, which silently disables
+    // profiling entirely while every other setting still looks correct. That
+    // silent-zero default is pinned by sentry-regressions.test.ts.
+    profileSessionSampleRate: IS_PROD ? 0.1 : 1.0,
+    profileLifecycle: 'trace',
 
     // SECURITY (audit 2026-05-30, F03/F04): do NOT capture stack-frame locals
     // (they can hold decrypted BYOK provider keys and prompts) and do NOT send
@@ -54,6 +71,14 @@ if (DSN) {
     beforeSendLog: scrubSentryLog,
 
     integrations: [
+      // CPU profiling via the native V8 CpuProfiler addon (@sentry/profiling-node).
+      // NODE RUNTIME ONLY — this must never be added to sentry.edge.config.ts:
+      // the Edge runtime cannot load a native .node addon, so importing it there
+      // breaks the whole Edge bundle rather than degrading gracefully.
+      // The addon also has to be listed in `serverExternalPackages` (next.config.ts)
+      // so Turbopack leaves it external instead of trying to bundle the binary.
+      // Both constraints are pinned by sentry-regressions.test.ts.
+      nodeProfilingIntegration(),
       // Captures AI token usage, model IDs, latency, and errors for every
       // Anthropic SDK call made from server-side route handlers. Input/output
       // recording is disabled in production to avoid capturing PII.
