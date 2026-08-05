@@ -36,6 +36,7 @@ import {
 import { isQstashConfigured, publishGenerationCallback } from '@/lib/qstash/client';
 import type { AsyncGenerationType } from '@/lib/generate/pollProviderStatus';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
+import { withGenerationMetrics } from '@/lib/monitoring/generationMetrics';
 
 /** Default initial delay before the first durable generation callback (PF-906). */
 const DEFAULT_CALLBACK_DELAY_SECONDS = 30;
@@ -294,18 +295,44 @@ export function createGenerationHandler<TParams, TResult>(
     });
   };
 
-  return async (request: NextRequest): Promise<NextResponse> => {
+  // Business metrics (PF-1053) wrap the whole handler so EVERY exit path — the
+  // early 401/403/429 returns included — emits one sample. `mctx` is filled in
+  // as each facet resolves and is read only after this function returns, so a
+  // request rejected before a given step simply omits that facet: `tier` lands
+  // right after auth (step 1) and is therefore present on almost every sample,
+  // while provider/operation/tokenCost resolve during generation and are absent
+  // on every pre-generation rejection. The wrapper fails open and returns the
+  // response by identity.
+  return withGenerationMetrics(route, async (request: NextRequest, mctx): Promise<NextResponse> => {
     // 1. Authenticate
     const authResult = await authenticateRequest();
-    if (!authResult.ok) return authResult.response;
+    if (!authResult.ok) {
+      // Status alone is a lossy classifier for this branch: authenticateRequest
+      // returns 403 for a BANNED account (which the classifier would file under
+      // bot_blocked, hiding ban-evasion volume inside bot traffic) and 503 when
+      // the user-sync path is degraded — a Neon circuit-breaker signal that the
+      // classifier would file under provider_unavailable, paging on-call for an
+      // AI-provider incident that isn't happening. Name the real cause here; 401
+      // and anything else fall through to classifyGenerationOutcome().
+      if (authResult.response.status === 403) mctx.outcome = 'banned';
+      else if (authResult.response.status === 503) mctx.outcome = 'degraded';
+      return authResult.response;
+    }
 
     const userId = authResult.ctx.user.id;
     const tier = authResult.ctx.user.tier;
+    mctx.tier = tier;
 
     // 1b. BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
     // token deduction, so a blocked bot never spends either budget.
     const botIdResponse = await checkBotIdGate();
-    if (botIdResponse) return botIdResponse;
+    if (botIdResponse) {
+      // Stated explicitly rather than inferred from the 403: the auth branch
+      // above now also returns 403 for a ban, so the status no longer maps to a
+      // single cause on this route.
+      mctx.outcome = 'bot_blocked';
+      return botIdResponse;
+    }
 
     // 2a. Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
     const aggRl = await aggregateGenerationRateLimit(userId);
@@ -356,6 +383,11 @@ export function createGenerationHandler<TParams, TResult>(
         if (typeof value === 'string' && value.length > 0) {
           const safety = sanitizePrompt(value);
           if (!safety.safe) {
+            // The blocklist/injection screen is the most security-relevant
+            // rejection on this surface, and its 422 is indistinguishable from a
+            // schema validation failure to the status classifier. Separate the
+            // buckets so blocklist probing across the 12 routes is queryable.
+            mctx.outcome = 'content_rejected';
             return NextResponse.json(
               { error: safety.reason ?? 'Content rejected by safety filter' },
               { status: 422 }
@@ -384,6 +416,17 @@ export function createGenerationHandler<TParams, TResult>(
       captureException(err, { route, action: 'resolve_billing_params' });
       return NextResponse.json({ error: 'Internal pricing error' }, { status: 500 });
     }
+    mctx.provider = resolvedProvider;
+    mctx.operation = resolvedOperation;
+    // NOTE: mctx.tokenCost is deliberately NOT set here. `generation.tokens_charged`
+    // means tokens ACTUALLY charged, and at this point nothing has been. It is set
+    // only where a platform deduction really happens — immediately after
+    // resolveApiKey returns a usageId. That marker is what distinguishes a real
+    // charge from the two paths that resolve a cost but never spend it: a cache HIT
+    // (6c re-serves a prior result without invoking the factory at all) and BYOK
+    // (resolver.ts returns no usageId when the user supplies their own key).
+    // Setting it here billed both to the metric, overstating consumption by the
+    // entire cached-traffic volume and diverging from the Stripe billing meter.
 
     // 6b. Provider kill switch (PF-971 / #8952). Checked immediately after the
     // provider resolves and BEFORE any cache lookup or token deduction, so a
@@ -396,6 +439,9 @@ export function createGenerationHandler<TParams, TResult>(
       // (PF-967 / #8956), distinct from the exception-tracking captureException
       // calls elsewhere in this file.
       sentryLogger.warn('provider kill switch tripped', { route, provider: resolvedProvider });
+      // Stated explicitly rather than inferred from the 503, which the auth
+      // branch above now also returns for a degraded DB.
+      mctx.outcome = 'provider_unavailable';
       return NextResponse.json(
         { error: PROVIDER_UNAVAILABLE_MESSAGE(resolvedProvider) },
         { status: 503 }
@@ -420,6 +466,8 @@ export function createGenerationHandler<TParams, TResult>(
             const resolved = await resolveApiKey(userId, resolvedProvider, tokenCost, resolvedOperation, metadata);
             const apiKey = resolved.key;
             const usageId = resolved.usageId;
+            // Charged for real (see the note at mctx.provider) — cache MISS only.
+            if (usageId !== undefined) mctx.tokenCost = tokenCost;
 
             try {
               const generated = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost });
@@ -474,6 +522,8 @@ export function createGenerationHandler<TParams, TResult>(
       const resolved = await resolveApiKey(userId, resolvedProvider, tokenCost, resolvedOperation, metadata);
       apiKey = resolved.key;
       usageId = resolved.usageId;
+      // Charged for real (see the note at mctx.provider) — uncached path.
+      if (usageId !== undefined) mctx.tokenCost = tokenCost;
     } catch (err) {
       if (err instanceof ApiKeyError) {
         return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
@@ -507,5 +557,5 @@ export function createGenerationHandler<TParams, TResult>(
       captureException(err, { route });
       return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
     }
-  };
+  });
 }

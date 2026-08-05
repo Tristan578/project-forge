@@ -114,6 +114,7 @@ EditorLayout, SceneHierarchy, InspectorPanel, MaterialInspector, LightInspector,
 - `tokens/` — Token balance/deduction
 - `keys/` — BYOK key resolution, AES-256-GCM encryption
 - `db/` — Drizzle + Neon client, DB schema
+- `monitoring/` — Sentry wiring shared by all three runtime configs. `sentryConfig.ts` owns the scrubbers (`scrubSentryEvent` / `scrubSentryLog` / `scrubSentryMetric` — three independent pipelines, all three must stay wired) plus fingerprinting; `sentry-server.ts` owns `sentryLogger`; `generationMetrics.ts` owns the `/api/generate/*` business metrics and the `GENERATION_OUTCOMES` vocabulary (PF-1053 — values must dodge Sentry's server-side value scrubber)
 
 ### MCP Server (`mcp-server/`)
 - `manifest/commands.json` — 351 commands across 41 categories (measured: `bash .claude/tools/validate-mcp.sh sync`)

@@ -34,10 +34,26 @@ const securityHeaders = [
     key: "Permissions-Policy",
     value: "camera=(), microphone=(), geolocation=()",
   },
+  // Enables the JS Self-Profiling API that Sentry's browserProfilingIntegration
+  // (instrumentation-client.ts) samples. WITHOUT this header the API is simply
+  // absent from the page and the integration no-ops — no console error, no
+  // Sentry warning, just an empty profile stream. Chromium-only by design;
+  // other engines ignore the header. Pinned by sentry-regressions.test.ts.
+  { key: "Document-Policy", value: "js-profiling" },
 ];
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@spawnforge/ui"],
+  // @sentry/profiling-node ships a native V8 CpuProfiler .node addon, which
+  // Turbopack cannot bundle. Next 16.2.12 ALREADY externalizes it by default —
+  // it is listed under "Native Node.js addons" in
+  // node_modules/next/dist/lib/server-external-packages.jsonc — so this entry is
+  // redundant TODAY and is kept deliberately, not because the build needs it:
+  // Next's built-in list is an implementation detail that has churned before,
+  // and the failure mode when an entry silently leaves it is an opaque native-
+  // binary bundling error at build time. Declaring it here makes the requirement
+  // survive a Next upgrade. Pinned by sentry-regressions.test.ts.
+  serverExternalPackages: ["@sentry/profiling-node"],
   compress: true,
   // This is a top-level config option that gates the experimental caching
   // a build error: "Error: Caching is not enabled in the current environment."

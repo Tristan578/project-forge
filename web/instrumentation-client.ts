@@ -1,6 +1,11 @@
 import * as Sentry from '@sentry/nextjs';
 import { registerBotIdProtection } from '@/lib/security/botIdClient';
-import { configureSentryFingerprinting, scrubSentryEvent, scrubSentryLog } from '@/lib/monitoring/sentryConfig';
+import {
+  configureSentryFingerprinting,
+  scrubSentryEvent,
+  scrubSentryLog,
+  scrubSentryMetric,
+} from '@/lib/monitoring/sentryConfig';
 
 const DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -23,6 +28,27 @@ if (DSN) {
       if (name?.includes('/api/')) return IS_PROD ? 0.2 : 1.0;
       return IS_PROD ? 0.1 : 1.0;
     },
+
+    // PROFILING (PF-1053) — browser CPU profiles via the JS Self-Profiling API.
+    // Same semantics as the server: 'trace' lifecycle ties profiling to the
+    // sampled transactions the tracesSampler above produces, and the session
+    // rate (evaluated ONCE at init, not per transaction) gates eligibility.
+    // Non-zero is load-bearing — the default is 0, i.e. silently off.
+    //
+    // Browser profiling additionally needs the `Document-Policy: js-profiling`
+    // response header (next.config.ts) or the API is unavailable and the
+    // integration no-ops with no error. Chromium-only; other engines simply
+    // produce no profiles. Both pinned by sentry-regressions.test.ts.
+    //
+    // LOCAL DEV: the 1.0 rate only applies if a DSN is present — this whole
+    // init is gated on `if (DSN)`, so a checkout without NEXT_PUBLIC_SENTRY_DSN
+    // never starts the profiler at all. If you HAVE pulled a DSN locally and
+    // are profiling the WebGPU render loop in Chrome DevTools, the JS
+    // Self-Profiling sampler competes with DevTools' own; unset
+    // NEXT_PUBLIC_SENTRY_DSN for that session rather than editing this rate,
+    // which is pinned non-zero on every branch.
+    profileSessionSampleRate: IS_PROD ? 0.1 : 1.0,
+    profileLifecycle: 'trace',
 
     // Tunnel handled by tunnelRoute in next.config.ts (bypasses ad-blockers)
 
@@ -48,9 +74,20 @@ if (DSN) {
     // pipeline so a stray Sentry.logger.* call can't leak secrets/PII (see
     // sentry.server.config.ts for the full rationale).
     beforeSendLog: scrubSentryLog,
+    // Metrics are a THIRD pipeline, and `enableMetrics` defaults to ON — the SDK
+    // stamps user.id/email/name onto every metric, so this hook is what keeps
+    // them inside the F03/F04 posture (see sentry.server.config.ts for the full
+    // rationale).
+    beforeSendMetric: scrubSentryMetric,
 
     integrations: [
       Sentry.browserTracingIntegration(),
+      // ORDER IS LOAD-BEARING: browserProfilingIntegration must be registered
+      // AFTER browserTracingIntegration. Profiles attach to transactions the
+      // tracing integration creates; registered first, it has nothing to hook
+      // and produces no profiles — with no error to signal it. Pinned by an
+      // index-order assertion in sentry-regressions.test.ts.
+      Sentry.browserProfilingIntegration(),
       // maskAllText: true prevents BYOK API keys and other sensitive input
       // values from being visible in Sentry session replays (#8001).
       Sentry.replayIntegration({ maskAllText: true, blockAllMedia: false }),
