@@ -2,10 +2,9 @@ import './globals.css';
 import type { ReactNode } from 'react';
 import type { Metadata } from 'next';
 import { ClerkProvider } from '@clerk/nextjs';
+import { DOCS_URL } from '../lib/site';
 
 export const dynamic = 'force-dynamic';
-
-const DOCS_URL = process.env.NEXT_PUBLIC_DOCS_URL ?? 'https://docs.spawnforge.ai';
 
 export const metadata: Metadata = {
   metadataBase: new URL(DOCS_URL),

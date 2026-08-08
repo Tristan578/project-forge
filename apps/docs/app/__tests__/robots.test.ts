@@ -45,4 +45,19 @@ describe('docs robots', () => {
     const homepage = sitemap()[0].url;
     expect(advertised).toBe(`${homepage}/sitemap.xml`);
   });
+
+  /**
+   * `metadataBase` resolves every canonical and OpenGraph URL the site emits, so
+   * a layout that reintroduced its own literal could point canonical tags at a
+   * different origin than robots.txt and the sitemap agree on — with nothing
+   * failing. Reading it off the exported metadata catches that regardless of how
+   * the layout spells the constant.
+   */
+  it('resolves canonical URLs against the same origin', async () => {
+    const { metadata } = await import('../layout');
+    const base = metadata.metadataBase;
+    expect(base).toBeTruthy();
+
+    expect(new URL(base!).origin).toBe(new URL(sitemap()[0].url).origin);
+  });
 });
