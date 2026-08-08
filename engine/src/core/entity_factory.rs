@@ -3586,3 +3586,125 @@ mod terrain_drain_tests {
         );
     }
 }
+
+/// Round-trip coverage for the terrain half of a scene save/load.
+///
+/// The scene exporter builds an `EntitySnapshot` per entity and `spawn_from_snapshot`
+/// rebuilds from it. These tests pin what a terrain snapshot MUST carry, because the
+/// failure mode when it does not is silent: the entity comes back with the right name
+/// and the right `EntityType::Terrain`, just as a flat 2x2 plane.
+#[cfg(test)]
+mod terrain_snapshot_round_trip_tests {
+    use super::{spawn_from_snapshot, EntitySnapshot, EntityType, TransformSnapshot};
+    use crate::core::terrain::{generate_heightmap, TerrainData, TerrainEnabled, TerrainMeshData};
+    use bevy::prelude::*;
+
+    fn terrain_config() -> TerrainData {
+        TerrainData {
+            resolution: 8,
+            size: 7.0,
+            seed: 4242,
+            height_scale: 12.5,
+            ..Default::default()
+        }
+    }
+
+    fn base_snapshot() -> EntitySnapshot {
+        EntitySnapshot::new(
+            "terrain-1".to_string(),
+            EntityType::Terrain,
+            "Terrain".to_string(),
+            TransformSnapshot {
+                position: [1.0, 2.0, 3.0],
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: [1.0, 1.0, 1.0],
+            },
+        )
+    }
+
+    /// Runs `spawn_from_snapshot` against a minimal World and returns it.
+    fn restore(snapshot: EntitySnapshot) -> World {
+        let mut world = World::new();
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(
+            move |mut commands: Commands,
+                  mut meshes: ResMut<Assets<Mesh>>,
+                  mut materials: ResMut<Assets<StandardMaterial>>| {
+                spawn_from_snapshot(&mut commands, &mut meshes, &mut materials, &snapshot);
+            },
+        );
+        schedule.run(&mut world);
+        world
+    }
+
+    #[test]
+    fn a_snapshot_carrying_both_terrain_fields_restores_the_terrain_exactly() {
+        let config = terrain_config();
+        let mesh_data = TerrainMeshData {
+            heights: generate_heightmap(&config),
+            resolution: config.resolution,
+            size: config.size,
+        };
+
+        let mut snapshot = base_snapshot();
+        snapshot.terrain_data = Some(config.clone());
+        snapshot.terrain_mesh_data = Some(mesh_data.clone());
+
+        let mut world = restore(snapshot);
+
+        let mut query =
+            world.query::<(&TerrainData, &TerrainMeshData, &TerrainEnabled, &Transform)>();
+        let (restored_config, restored_mesh, _, transform) = query
+            .iter(&world)
+            .next()
+            .expect("a terrain snapshot must restore a terrain entity");
+
+        assert_eq!(*restored_config, config, "the noise config must survive");
+        assert_eq!(
+            restored_mesh.heights, mesh_data.heights,
+            "the sculpted heightmap must survive verbatim — regenerating it from the \
+             noise config would silently discard every sculpt stroke",
+        );
+        assert_eq!(restored_mesh.resolution, 8);
+        assert_eq!(restored_mesh.size, 7.0);
+        assert_eq!(transform.translation, Vec3::new(1.0, 2.0, 3.0));
+    }
+
+    /// The failure this pins down: an exporter that omits `terrain_mesh_data`
+    /// produces a snapshot that restores as a FLAT PLANE with no terrain
+    /// components at all — and reports no error at any layer.
+    #[test]
+    fn a_snapshot_missing_the_mesh_data_degrades_to_a_flat_plane() {
+        let mut snapshot = base_snapshot();
+        snapshot.terrain_data = Some(terrain_config());
+        snapshot.terrain_mesh_data = None;
+
+        let mut world = restore(snapshot);
+
+        let mut terrain_query = world.query::<&TerrainMeshData>();
+        assert_eq!(
+            terrain_query.iter(&world).count(),
+            0,
+            "this is the data loss: no heightmap comes back",
+        );
+        let mut enabled_query = world.query::<&TerrainEnabled>();
+        assert_eq!(enabled_query.iter(&world).count(), 0);
+        let mut config_query = world.query::<&TerrainData>();
+        assert_eq!(
+            config_query.iter(&world).count(),
+            0,
+            "the noise config is dropped too, so the terrain cannot even be regenerated",
+        );
+
+        // The entity itself still exists and still claims to be a terrain, which is
+        // exactly why the loss is invisible in the UI.
+        let mut type_query = world.query::<&EntityType>();
+        assert_eq!(
+            type_query.iter(&world).next().copied(),
+            Some(EntityType::Terrain),
+        );
+    }
+}

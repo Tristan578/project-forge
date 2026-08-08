@@ -34,6 +34,7 @@ use crate::core::{
     scripting::ScriptData,
     selection::{Selection, SelectionChangedEvent},
     shader_effects::ShaderEffectData,
+    terrain::{TerrainData, TerrainMeshData},
 };
 
 use super::events;
@@ -67,7 +68,9 @@ pub(super) fn apply_scene_export(
     audio_export_query: Query<(&EntityId, Option<&AudioData>)>,
     particle_export_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_lod_query: Query<(&EntityId, Option<&ShaderEffectData>, Option<&LodData>)>,
-    csg_procedural_joint_query: Query<(&EntityId, Option<&CsgMeshData>, Option<&ProceduralMeshData>, Option<&JointData>, Option<&GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
+    // Terrain rides on this existing tuple rather than a new query param: this
+    // system is already at the 16-param ECS limit, and the tuple limit is 15.
+    csg_procedural_joint_query: Query<(&EntityId, Option<&CsgMeshData>, Option<&ProceduralMeshData>, Option<&JointData>, Option<&GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>, Option<&TerrainData>, Option<&TerrainMeshData>)>,
     child_eid_query: Query<(Option<&ChildOf>, &EntityId)>,
 ) {
     if pending.scene_export_requests.is_empty() {
@@ -120,11 +123,11 @@ pub(super) fn apply_scene_export(
             .map(|(_, sed, ld)| (sed.cloned(), ld.cloned()))
             .unwrap_or((None, None));
 
-        // Look up csg + procedural mesh + joint + game component + game camera data from combined query
-        let (csg_mesh_data, procedural_mesh_data, joint_data, game_components, game_camera_data, active_game_camera) = csg_procedural_joint_query.iter()
-            .find(|(ceid, _, _, _, _, _, _)| ceid.0 == eid.0)
-            .map(|(_, cmd, pmd, jd, gc, gcd, agc)| (cmd.cloned(), pmd.cloned(), jd.cloned(), gc.cloned(), gcd.cloned(), agc.is_some()))
-            .unwrap_or((None, None, None, None, None, false));
+        // Look up csg + procedural mesh + joint + game component + game camera + terrain data from combined query
+        let (csg_mesh_data, procedural_mesh_data, joint_data, game_components, game_camera_data, active_game_camera, terrain_data, terrain_mesh_data) = csg_procedural_joint_query.iter()
+            .find(|(ceid, _, _, _, _, _, _, _, _)| ceid.0 == eid.0)
+            .map(|(_, cmd, pmd, jd, gc, gcd, agc, td, tmd)| (cmd.cloned(), pmd.cloned(), jd.cloned(), gc.cloned(), gcd.cloned(), agc.is_some(), td.cloned(), tmd.cloned()))
+            .unwrap_or((None, None, None, None, None, false, None, None));
 
         let mut snap = HistEntitySnapshot::new(
             eid.0.clone(),
@@ -150,6 +153,12 @@ pub(super) fn apply_scene_export(
         snap.game_components = game_components;
         snap.game_camera_data = game_camera_data;
         snap.active_game_camera = active_game_camera;
+
+        // Without BOTH of these a saved terrain reloads as a flat 2x2 plane with no
+        // terrain components — see `terrain_snapshot_round_trip_tests` in
+        // `core::entity_factory`, which pins both arms of that fallback.
+        snap.terrain_data = terrain_data;
+        snap.terrain_mesh_data = terrain_mesh_data;
 
         snap.lod_data = lod_data;
 
