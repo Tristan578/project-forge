@@ -30,7 +30,7 @@ export interface PlayEngineRuntime {
  * `webgpu` build and fail at init — bounded by the caller's deadline, but a
  * fallback would be better. Tracked separately.
  */
-export async function loadPlayEngine(): Promise<PlayEngineRuntime> {
+async function instantiate(): Promise<PlayEngineRuntime> {
   const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
   const basePath = `/engine-pkg-${hasWebGPU ? 'webgpu' : 'webgl2'}/`;
 
@@ -40,4 +40,46 @@ export async function loadPlayEngine(): Promise<PlayEngineRuntime> {
   await wasm.default(`${basePath}forge_engine_bg.wasm`);
 
   return wasm as unknown as PlayEngineRuntime;
+}
+
+/**
+ * In-flight/settled latch. `null` means "no load has been started, or the last
+ * one failed".
+ */
+let loadLatch: Promise<PlayEngineRuntime> | null = null;
+
+/**
+ * Load the engine at most once per page.
+ *
+ * The caller bounds this with a deadline, and a deadline does NOT cancel the
+ * work it gave up on — `withTimeout` races a timer against the promise, it
+ * cannot abort a dynamic `import()` or a wasm-bindgen instantiation. So a
+ * timeout leaves the previous attempt still running, and the retry it offers
+ * would otherwise call `wasm.default()` a second time on the same glue module
+ * while the first instantiation is still in flight: two WASM instances racing
+ * to overwrite the module-level binding the exports close over, at double the
+ * memory. The latch makes the retry *join* the attempt already running and
+ * grant it another deadline's worth of time, rather than starting a rival one.
+ *
+ * A rejection clears the latch — that attempt produced no instance, so the next
+ * call must genuinely retry. Fulfilment is cached forever: wasm-bindgen's init
+ * is not idempotent, so there must never be a second one.
+ *
+ * `useEngine.loadWasm()` carries the same latch for the editor (PF-585); this
+ * is deliberately a separate copy rather than a shared import, because `/play`
+ * is the public bundle and must not pull in the editor's engine graph.
+ */
+export function loadPlayEngine(): Promise<PlayEngineRuntime> {
+  if (loadLatch) return loadLatch;
+
+  const attempt = instantiate();
+  loadLatch = attempt;
+
+  attempt.catch(() => {
+    // Guarded so a late rejection can't clear a latch that has already been
+    // replaced by a newer attempt.
+    if (loadLatch === attempt) loadLatch = null;
+  });
+
+  return attempt;
 }
