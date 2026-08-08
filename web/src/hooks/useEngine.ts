@@ -5,6 +5,7 @@ import { addBreadcrumb, captureException, setTag } from '@/lib/monitoring/sentry
 import { showError } from '@/lib/toast';
 import { fetchWasmWithMetrics } from '@/lib/monitoring/cdnAnalytics';
 import { GPU_INIT_TIMEOUT_MS, WASM_FETCH_TIMEOUT_MS } from '@/lib/config/timeouts';
+import { withTimeout } from '@/lib/async/withTimeout';
 
 /** Loading progress state exported for UI components to display progress feedback. */
 export type LoadingPhase = 'idle' | 'detecting' | 'downloading' | 'initializing' | 'ready' | 'error';
@@ -193,18 +194,9 @@ function emitEvent(phase: InitPhase, message?: string, error?: string) {
   emitStatusEvent(event);
 }
 
-/** Race a promise against a timeout. Rejects with a descriptive error on timeout. */
-export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${ms}ms`));
-    }, ms);
-    promise.then(
-      (val) => { clearTimeout(timer); resolve(val); },
-      (err) => { clearTimeout(timer); reject(err); },
-    );
-  });
-}
+// Re-exported from a leaf module so the public /play bundle can bound its own
+// engine init without importing this hook's dependency graph.
+export { withTimeout } from '@/lib/async/withTimeout';
 
 /** Detect whether the browser supports WebGPU. */
 function detectWebGPU(): boolean {

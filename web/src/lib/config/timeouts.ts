@@ -60,6 +60,23 @@ export const WASM_FETCH_TIMEOUT_MS = 60_000;
 /** Global engine status timeout (covers GPU + WASM + first frame) */
 export const ENGINE_GLOBAL_TIMEOUT_MS = 30_000;
 
+/**
+ * Deadline for the published-game metadata fetch on `/play`.
+ *
+ * Bounds the "Loading game..." spinner. Deliberately much shorter than the
+ * engine budget: this is a single JSON round-trip to our own API, so anything
+ * approaching the engine's 30s means the request is not coming back.
+ */
+export const PLAY_GAME_FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * Settle delay between `load_scene` and entering play mode on `/play`.
+ *
+ * Bevy needs a frame or two to finish spawning the loaded scene before the
+ * `play` command is meaningful.
+ */
+export const PLAY_ENGINE_SETTLE_MS = 500;
+
 // ---------------------------------------------------------------------------
 // API / Server timeouts
 // ---------------------------------------------------------------------------

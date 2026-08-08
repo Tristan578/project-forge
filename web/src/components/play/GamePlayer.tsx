@@ -2,9 +2,17 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Maximize, Minimize, Loader2 } from 'lucide-react';
+import { ArrowLeft, Maximize, Minimize, Loader2, RotateCw } from 'lucide-react';
 import { ShareButtons } from './ShareButtons';
 import { RemixButton } from './RemixButton';
+import { withTimeout } from '@/lib/async/withTimeout';
+import { loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
+import { captureException } from '@/lib/monitoring/sentry-client';
+import {
+  ENGINE_GLOBAL_TIMEOUT_MS,
+  PLAY_GAME_FETCH_TIMEOUT_MS,
+  PLAY_ENGINE_SETTLE_MS,
+} from '@/lib/config/timeouts';
 
 const CANVAS_ID = 'play-canvas';
 
@@ -24,19 +32,16 @@ interface GamePlayerProps {
   isAuthenticated?: boolean;
 }
 
-type WasmRuntime = {
-  init_engine: (canvasId: string) => void;
-  handle_command: (command: string, payload: unknown) => unknown;
-  set_event_callback: (callback: (event: unknown) => void) => void;
-};
-
 export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayerProps) {
   const [gameData, setGameData] = useState<GameData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [engineState, setEngineState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [engineState, setEngineState] = useState<'idle' | 'loading' | 'ready'>('idle');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [clickToStart, setClickToStart] = useState(false);
+  // Only offered when the failure happened BEFORE init_engine ran. Re-entering
+  // init_engine on an already-initialized Bevy app is not a supported restart.
+  const [canRetry, setCanRetry] = useState(false);
   // shareUrl must be captured after mount — window.location.href is undefined
   // during SSR, so reading it at render time causes a hydration mismatch
   // (server: '', client: actual URL). An empty string also throws in addUtm's
@@ -45,6 +50,25 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
 
   const containerRef = useRef<HTMLDivElement>(null);
   const initStartedRef = useRef(false);
+  // Set once init_engine has been handed the canvas — from that point the Bevy
+  // app owns it and a retry would double-initialize.
+  const engineOwnsCanvasRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset on mount, not just on unmount: StrictMode double-mounts in dev, and a
+  // latch that only ever sets `true` would leave the second mount permanently
+  // cancelled — the engine would never report ready locally.
+  useEffect(() => {
+    cancelledRef.current = false;
+    return () => {
+      cancelledRef.current = true;
+      if (settleTimerRef.current !== null) {
+        clearTimeout(settleTimerRef.current);
+        settleTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setShareUrl(window.location.href);
@@ -52,9 +76,20 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
 
   // Fetch game data from the API
   useEffect(() => {
+    // Bounded so a stalled request can't leave "Loading game..." spinning
+    // forever. Aborting on unmount also stops the setState-after-unmount path.
+    const controller = new AbortController();
+    const deadline = setTimeout(
+      () => controller.abort(new Error('timeout')),
+      PLAY_GAME_FETCH_TIMEOUT_MS,
+    );
+
     async function fetchGame() {
       try {
-        const res = await fetch(`/api/play/${encodeURIComponent(userId)}/${encodeURIComponent(slug)}`);
+        const res = await fetch(
+          `/api/play/${encodeURIComponent(userId)}/${encodeURIComponent(slug)}`,
+          { signal: controller.signal },
+        );
         if (!res.ok) {
           const data = await res.json().catch(() => ({ error: 'Failed to load game' }));
           setError(data.error || 'Game not found');
@@ -65,13 +100,33 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
         setGameData(data.game);
         setLoading(false);
         setClickToStart(true);
-      } catch {
+      } catch (err) {
+        // An abort raised by unmount must not paint an error over a gone view;
+        // an abort raised by the deadline must.
+        if (controller.signal.aborted && cancelledRef.current) return;
+        if (controller.signal.aborted) {
+          const timeoutErr = new Error(
+            `Loading this game took longer than ${PLAY_GAME_FETCH_TIMEOUT_MS / 1000}s`,
+          );
+          captureException(timeoutErr, { surface: 'play', phase: 'fetch', userId, slug });
+          setError(timeoutErr.message);
+          setLoading(false);
+          return;
+        }
+        void err;
         setError('Network error -- could not load game');
         setLoading(false);
+      } finally {
+        clearTimeout(deadline);
       }
     }
 
     fetchGame();
+
+    return () => {
+      clearTimeout(deadline);
+      controller.abort();
+    };
   }, [userId, slug]);
 
   // Initialize the WASM engine and start the game
@@ -82,17 +137,16 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
     setEngineState('loading');
 
     try {
-      const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
-      const variant = hasWebGPU ? 'webgpu' : 'webgl2';
-      const basePath = `/engine-pkg-${variant}/`;
-
-      // Load the WASM module
-      const wasm = await import(
-        /* webpackIgnore: true */ `${basePath}forge_engine.js`
+      // ONE deadline across the whole sequence. Bounding each await separately
+      // would let a slow-but-not-hung load spend the full budget twice over and
+      // leave "Starting engine..." on screen for double the intended time.
+      const runtime: PlayEngineRuntime = await withTimeout(
+        loadPlayEngine(),
+        ENGINE_GLOBAL_TIMEOUT_MS,
+        'Game engine load',
       );
-      await wasm.default(`${basePath}forge_engine_bg.wasm`);
 
-      const runtime = wasm as unknown as WasmRuntime;
+      if (cancelledRef.current) return;
 
       // Set up event callback for input state tracking
       runtime.set_event_callback(function (eventPayload: unknown) {
@@ -111,7 +165,9 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
         }
       });
 
-      // Initialize the engine with the canvas
+      // Initialize the engine with the canvas. Past this point Bevy owns the
+      // canvas, so a retry is no longer safe.
+      engineOwnsCanvasRef.current = true;
       runtime.init_engine(CANVAS_ID);
 
       // Load scene data
@@ -131,18 +187,46 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
       }
 
       // Start play mode after a short delay for the engine to settle
-      setTimeout(() => {
+      settleTimerRef.current = setTimeout(() => {
+        settleTimerRef.current = null;
+        if (cancelledRef.current) return;
         runtime.handle_command('play', '{}');
         setEngineState('ready');
-      }, 500);
+      }, PLAY_ENGINE_SETTLE_MS);
     } catch (err) {
-      console.error('[SpawnForge Play] Engine init failed:', err);
-      setEngineState('error');
+      if (cancelledRef.current) return;
+
+      const failure = err instanceof Error ? err : new Error(String(err));
+      // Kept alongside captureException: the Sentry client no-ops silently when
+      // NEXT_PUBLIC_SENTRY_DSN is unset, which is every local dev run.
+      console.error('[SpawnForge Play] Engine init failed:', failure);
+      captureException(failure, {
+        surface: 'play',
+        phase: 'engine-init',
+        userId,
+        slug,
+        engineOwnsCanvas: engineOwnsCanvasRef.current,
+      });
+
+      // Back to 'idle': the only overlays keyed off engineState are the
+      // "Starting engine..." spinner and the click-to-start button, and the
+      // error branch early-returns before either renders.
+      setEngineState('idle');
+      // A retry re-runs init_engine, which is not safe once Bevy has taken the
+      // canvas — so only offer it for failures that happened before that point.
+      setCanRetry(!engineOwnsCanvasRef.current);
       setError(
-        err instanceof Error ? err.message : 'Failed to initialize game engine'
+        failure.message || 'Failed to initialize game engine'
       );
     }
-  }, [gameData]);
+  }, [gameData, userId, slug]);
+
+  const retryEngine = useCallback(() => {
+    initStartedRef.current = false;
+    setCanRetry(false);
+    setError(null);
+    void initEngine();
+  }, [initEngine]);
 
   // Fullscreen toggle
   const toggleFullscreen = useCallback(() => {
@@ -179,13 +263,24 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
               : 'Something Went Wrong'}
           </h1>
           <p className="mb-6 text-sm text-zinc-400">{error}</p>
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 rounded bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700"
-          >
-            <ArrowLeft size={14} />
-            Back to SpawnForge
-          </Link>
+          <div className="flex items-center justify-center gap-2">
+            {canRetry && (
+              <button
+                onClick={retryEngine}
+                className="inline-flex items-center gap-2 rounded bg-zinc-700 px-4 py-2 text-sm text-zinc-100 hover:bg-zinc-600"
+              >
+                <RotateCw size={14} />
+                Try again
+              </button>
+            )}
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 rounded bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700"
+            >
+              <ArrowLeft size={14} />
+              Back to SpawnForge
+            </Link>
+          </div>
         </div>
       </div>
     );
