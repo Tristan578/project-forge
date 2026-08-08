@@ -394,7 +394,24 @@ if [ -f "$CI_YML" ]; then
   # *introduces* the `if: false` if that PR touches no gh-aw surface. That
   # introducing PR does edit ci.yml, though, so it sets needs-ci=true and runs
   # THIS suite — and this assertion catches the constant-false at introduction.
-  ghaw_if="$(grep -E '^[[:space:]]+if:' <<<"$ghaw_block")"
+  #
+  # Containment alone is NOT enough, and it fails green. GitHub's YAML parser
+  # keeps the LAST of two duplicate keys, so APPENDING a second job-level
+  # `if: false` leaves the original needs-ghaw line byte-identical and still
+  # matching the greps below, while the job that actually runs is gated on a
+  # constant false. On the `pull_request` path GitHub runs the PR's OWN workflow
+  # file, so the mutation takes effect in the very run that should have caught
+  # it. Count the key at ITS OWN indent level first (4 spaces = job level; a
+  # deeper-indented step `if:` is legitimate and must not be counted) and
+  # require exactly one. actionlint flags duplicate keys, but it is not wired
+  # into this repo's CI — this pin is the backstop (#9031).
+  ghaw_if_count="$(grep -cE '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$ghaw_block" || true)"
+  if [ "$ghaw_if_count" -ne 1 ]; then
+    fail "ghaw-lock-sync job has $ghaw_if_count job-level if: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended constant-false if: unwires the gate while the original if: line still greps as present)"
+  else
+    pass "ghaw-lock-sync job has exactly 1 job-level if: key (a duplicate cannot shadow the pin below)"
+  fi
+  ghaw_if="$(grep -E '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$ghaw_block")"
   if grep -qF 'needs-ghaw' <<<"$ghaw_if" && grep -qF "== 'true'" <<<"$ghaw_if"; then
     pass "ghaw-lock-sync job if: keys on needs-ghaw == 'true' (a constant if:false is caught here)"
   else
@@ -406,6 +423,33 @@ if [ -f "$CI_YML" ]; then
   # `<<<"$ci"` match would still PASS if the actual `run: bash …` line were
   # deleted from THIS job while a comment elsewhere kept the token alive — a
   # false green with the gate no longer invoked.
+  #
+  # …and scope the invocation pin to the gate's own STEP block, with the same
+  # duplicate-key count as the job-level `if:` above. Appending a second `run:`
+  # to this step replaces the command under last-key-wins while the original
+  # `run: bash scripts/check-ghaw-lock-sync.sh` line stays present and satisfies
+  # a containment grep — the step is dead and every pin on it reads green.
+  ghaw_step="$(awk '
+    !f && /^      - name:/ && index($0, "Reject drift between gh-aw sources and their compiled") {f=1; print; next}
+    f && /^      - /{exit}
+    f && !/^        / && !/^[[:space:]]*$/{exit}
+    f {print}
+  ' <<<"$ghaw_block")"
+  if [ -z "$ghaw_step" ]; then
+    fail "ghaw-lock-sync job has no step named 'Reject drift between gh-aw sources and their compiled .lock.yml' — the step cut read nothing, so the run: count and invocation pins below would pass vacuously"
+  else
+    ghaw_run_count="$(grep -cE '^[[:space:]]*["'"'"']?run["'"'"']?[[:space:]]*:' <<<"$ghaw_step" || true)"
+    if [ "$ghaw_run_count" -ne 1 ]; then
+      fail "ghaw-lock-sync gate step has $ghaw_run_count run: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended run: silently replaces the gate invocation while the original run: line still greps as present)"
+    else
+      pass "ghaw-lock-sync gate step has exactly 1 run: key"
+    fi
+    if grep -qE '^[[:space:]]*run: bash scripts/check-ghaw-lock-sync\.sh[[:space:]]*$' <<<"$ghaw_step"; then
+      pass "ghaw-lock-sync job runs scripts/check-ghaw-lock-sync.sh as that step's whole run: line"
+    else
+      fail "ghaw-lock-sync gate step does not run 'bash scripts/check-ghaw-lock-sync.sh' as its whole run: line — neutered, rewritten, or comment-suffixed"
+    fi
+  fi
   if grep -qF 'run: bash scripts/check-ghaw-lock-sync.sh' <<<"$ghaw_block"; then
     pass "ghaw-lock-sync job runs scripts/check-ghaw-lock-sync.sh"
   else

@@ -198,6 +198,39 @@ if [ -f "$CI_YML" ]; then
     else
       fail "ci.yml job ${job} does not invoke scripts/check-native-bindings.sh — gate unwired"
     fi
+
+    # Containment alone is NOT enough, and it fails green. GitHub's YAML parser
+    # keeps the LAST of two duplicate keys, so APPENDING a second `run:` to this
+    # step replaces the command under last-key-wins while the ORIGINAL
+    # `run: bash scripts/check-native-bindings.sh` line stays byte-present and
+    # still satisfies the containment grep above — the gate is dead and the pin
+    # reads green. Measured live against ci.yml's build-nextjs step (#9031). On
+    # the `pull_request` path GitHub runs the PR's OWN workflow file, so the
+    # mutation takes effect in the very run that should have caught it.
+    # actionlint flags duplicate keys, but it is not wired into this repo's CI —
+    # this count is the backstop. Scope it to the gate's STEP block so a
+    # legitimate `run:` in a sibling step is not counted.
+    step_block="$(awk '
+      !f && /^      - name:/ && index($0, "Assert native swc binding survived npm ci") {f=1; print; next}
+      f && /^      - /{exit}
+      f && !/^        / && !/^[[:space:]]*$/{exit}
+      f {print}
+    ' <<<"$job_block")"
+    if [ -z "$step_block" ]; then
+      fail "ci.yml job ${job} has no step named 'Assert native swc binding survived npm ci' — the step cut read nothing, so the run: count below would pass vacuously"
+    else
+      run_count="$(grep -cE '^[[:space:]]*["'"'"']?run["'"'"']?[[:space:]]*:' <<<"$step_block" || true)"
+      if [ "$run_count" -ne 1 ]; then
+        fail "ci.yml job ${job} native-bindings step has $run_count run: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended run: silently replaces the gate invocation while the original run: line still greps as present)"
+      else
+        pass "ci.yml job ${job} native-bindings step has exactly 1 run: key"
+      fi
+      if grep -qE '^[[:space:]]*run: bash scripts/check-native-bindings\.sh[[:space:]]*$' <<<"$step_block"; then
+        pass "ci.yml job ${job} runs the gate as that step's whole run: line"
+      else
+        fail "ci.yml job ${job} native-bindings step does not run 'bash scripts/check-native-bindings.sh' as its whole run: line — neutered, rewritten, or comment-suffixed"
+      fi
+    fi
   done
 
   # 15. No continue-on-error may shadow any gate invocation — it would swallow

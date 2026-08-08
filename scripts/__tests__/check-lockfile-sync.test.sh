@@ -572,7 +572,25 @@ if [ -f "$CI_YML" ]; then
   # does edit ci.yml, though, so it sets needs-ci=true and runs THIS suite — and
   # this assertion catches the constant-false at introduction time, closing the
   # window the anti-tamper alone leaves open.
-  ls_if="$(grep -E '^[[:space:]]+if:' <<<"$ls_block")"
+  #
+  # Containment alone is NOT enough, and it is not enough in a way that reads
+  # green. GitHub's YAML parser keeps the LAST of two duplicate keys, so
+  # APPENDING a second job-level `if: false` leaves the original needs-deps line
+  # byte-identical and still matching the greps below, while the job that
+  # actually runs is gated on a constant false. On the `pull_request` path
+  # GitHub runs the PR's OWN workflow file, so the mutation takes effect in the
+  # very run that should have caught it. Count the key at ITS OWN indent level
+  # first (4 spaces = job level; a deeper-indented step `if:` is legitimate and
+  # must not be counted) and require exactly one. actionlint flags duplicate
+  # keys, but it is not wired into this repo's CI — this pin is the backstop
+  # (#9031).
+  ls_if_count="$(grep -cE '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$ls_block" || true)"
+  if [ "$ls_if_count" -ne 1 ]; then
+    fail "lockfile-sync job has $ls_if_count job-level if: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended constant-false if: unwires the gate while the original if: line still greps as present)"
+  else
+    pass "lockfile-sync job has exactly 1 job-level if: key (a duplicate cannot shadow the pin below)"
+  fi
+  ls_if="$(grep -E '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$ls_block")"
   if grep -qF 'needs-deps' <<<"$ls_if" && grep -qF "== 'true'" <<<"$ls_if"; then
     pass "lockfile-sync job if: keys on needs-deps == 'true' (a constant if:false is caught here)"
   else
@@ -584,6 +602,33 @@ if [ -f "$CI_YML" ]; then
   # `<<<"$ci"` match would still PASS if the actual `run: bash …` line were deleted
   # from THIS job while a comment/shellcheck-list mention elsewhere kept the token
   # alive — a false green with the gate no longer invoked.
+  #
+  # …and scope the invocation pin to the gate's own STEP block, with the same
+  # duplicate-key count as the job-level `if:` above. Appending a second `run:`
+  # to this step replaces the command under last-key-wins while the original
+  # `run: bash scripts/check-lockfile-sync.sh` line stays present and satisfies
+  # a containment grep — the step is dead and every pin on it reads green.
+  ls_step="$(awk '
+    !f && /^      - name:/ && index($0, "Check root lockfile is in sync with the manifests") {f=1; print; next}
+    f && /^      - /{exit}
+    f && !/^        / && !/^[[:space:]]*$/{exit}
+    f {print}
+  ' <<<"$ls_block")"
+  if [ -z "$ls_step" ]; then
+    fail "lockfile-sync job has no step named 'Check root lockfile is in sync with the manifests' — the step cut read nothing, so the run: count and invocation pins below would pass vacuously"
+  else
+    ls_run_count="$(grep -cE '^[[:space:]]*["'"'"']?run["'"'"']?[[:space:]]*:' <<<"$ls_step" || true)"
+    if [ "$ls_run_count" -ne 1 ]; then
+      fail "lockfile-sync gate step has $ls_run_count run: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended run: silently replaces the gate invocation while the original run: line still greps as present)"
+    else
+      pass "lockfile-sync gate step has exactly 1 run: key"
+    fi
+    if grep -qE '^[[:space:]]*run: bash scripts/check-lockfile-sync\.sh[[:space:]]*$' <<<"$ls_step"; then
+      pass "lockfile-sync job runs scripts/check-lockfile-sync.sh as that step's whole run: line"
+    else
+      fail "lockfile-sync gate step does not run 'bash scripts/check-lockfile-sync.sh' as its whole run: line — neutered, rewritten, or comment-suffixed"
+    fi
+  fi
   if grep -qF 'run: bash scripts/check-lockfile-sync.sh' <<<"$ls_block"; then
     pass "lockfile-sync job runs scripts/check-lockfile-sync.sh"
   else

@@ -423,3 +423,88 @@ Each new FAIL line was red-verified by mutation before this shipped: dropping
 WASM to the production R2 bucket behind `engine.spawnforge.ai` with
 `needs: [build-wasm]` and no security gate. Same class of defect, different
 needs-graph; deliberately not folded in here.
+
+---
+
+## Sibling suites: the duplicate-key count pin (#9031)
+
+The rounds above hardened one suite. The **class** of defect they kept finding —
+a containment grep that stays green because the neutered line is still
+byte-present — is not specific to `check-npm-audit.test.sh`. GitHub's YAML parser
+keeps the **last** of two duplicate keys, so *appending* a second `run:` or a
+second job-level `if:` silently replaces the effective value while the original
+line remains in the file, satisfying any `grep -qF`. On the `pull_request` path
+GitHub runs the PR's **own** workflow file, so such a mutation takes effect in
+the very run that should have caught it. `actionlint` flags duplicate keys but is
+not wired into this repo's CI, so the suites are the only backstop.
+
+The canonical answer is the **count pin**: materialize the block into a variable,
+`grep -c` the key anchored to its indent level, require exactly `1`, and emit a
+FAIL naming the consequence. The reference implementation is
+`check-npm-audit.test.sh`'s `step_block()` helper plus the count at its
+`expected exactly 1` assertions.
+
+### Where the idiom now applies
+
+| Suite | Job / step pinned | Keys counted |
+|-------|-------------------|--------------|
+| `check-lockfile-sync.test.sh` | `lockfile-sync`, step *Check root lockfile is in sync with the manifests* | job-level `if:`, step `run:` |
+| `check-openapi-route-sync.test.sh` | `openapi-route-sync`, step *Check OpenAPI spec is valid and in sync with API routes* | job-level `if:`, step `run:` |
+| `check-ghaw-lock-sync.test.sh` | `ghaw-lock-sync`, step *Reject drift between gh-aw sources and their compiled …* | job-level `if:`, step `run:` |
+| `check-native-bindings.test.sh` | all four next-build jobs, step *Assert native swc binding survived npm ci* | step `run:` (per job) |
+| `check-ci-success.test.sh` | `design-internal-gate`, step *Test @spawnforge/ui* | job-level `if:`, step `run:` |
+
+Each pin was red-verified by mutating the real `.github/workflows/ci.yml` —
+appending a duplicate `if: false` at job level and a duplicate `run: 'true'` in
+the gate step — and confirming the suite fails on **that** assertion, not an
+unrelated one carrying it. The pre-existing containment checks stay green under
+both mutations, which is the whole point.
+
+### Already covered — confirmed, not fixed
+
+These sites were audited in the same pass and already pin exactly-once or
+whole-line, so they were deliberately **left alone**. Re-deriving that each time
+is the expensive part; the inventory is the deliverable.
+
+- `check-ci-success.test.sh` — the `check_triggered` anti-tamper-map assertions
+  use whole-file `grep -Ec … -ge 1` with an explanatory SIGPIPE comment.
+- `check-lockfile-sync.test.sh` — the ci-gate `needs-deps` output pins already
+  use an exact-line-set comparison, which a duplicate cannot satisfy.
+- `check-native-bindings.test.sh` — the `NATIVE_BINDINGS_*` seam scan and the
+  `continue-on-error` shadow check are whole-file counts, not containment.
+- `check-actions-pinned.test.sh` and `check-changeset-packages.test.sh` — their
+  workflow assertions match full pinned SHAs / full package lists, which are not
+  re-introducible by an appended duplicate.
+
+### Two constraints that shaped the implementation
+
+**Anchor the indent.** Job-level keys sit at exactly 4 spaces. An any-indent
+`if:` count false-fails on `design-internal-gate`, which carries a *legitimate*
+step-level `if: steps.ui-cache-design.outputs.cache-hit != 'true'` at 8 spaces.
+Step `run:` counts must therefore be scoped to a step cut, not to the job block.
+
+**The step cut needs three guards, not one.** The reference `step_block()` stops
+only at the next `^      - `. Three of the five gate steps are the **last** step
+in their job, where the next line is the following job's 2-space comment header.
+The shape used here adds a second terminator — any non-blank line not indented
+8 spaces — so the cut ends at the job boundary too:
+
+```bash
+awk '
+  !f && /^      - name:/ && index($0, "<step name>") {f=1; print; next}
+  f && /^      - /{exit}
+  f && !/^        / && !/^[[:space:]]*$/{exit}
+  f {print}
+' <<<"$job_block"
+```
+
+An empty cut is a **FAIL**, not a skip — otherwise a renamed step makes every
+count below it pass vacuously.
+
+### Why the idiom is duplicated per suite rather than shared
+
+A shared helper file would have to enter `ci.yml`'s shellcheck list, which
+reddens `check-npm-audit.test.sh`'s `expected_steps_3` exact-line-set pin and
+triggers the full lockstep described in "Round 32: the filter's INPUT". Five
+copies of eight lines is the cheaper trade. Each copy names its own job and step
+in the FAIL text, which is what makes a red run actionable.
