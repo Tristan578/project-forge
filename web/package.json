@@ -113,6 +113,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.2.12",
+    "fengari": "^0.1.5",
     "jsdom": "^30.0.1",
     "portless": "^0.15.5",
     "tailwindcss": "^4",
