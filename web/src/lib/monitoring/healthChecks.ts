@@ -16,6 +16,7 @@ import 'server-only';
 import { getMetrics, DEGRADED_AVG_THRESHOLD_MS } from '@/lib/db/queryMonitor';
 import { dbCircuitBreaker } from '@/lib/db/circuitBreaker';
 import { DB_PROVIDER } from '@/lib/config/providers';
+import { HEALTH_CACHE_TTL_MS } from '@/lib/config/timeouts';
 
 export type ServiceStatus = 'healthy' | 'degraded' | 'down';
 
@@ -713,4 +714,59 @@ export async function runAllHealthChecks(): Promise<HealthReport> {
     environment: env,
     version: commit.slice(0, 8),
   };
+}
+
+/**
+ * Module-level cache for `runAllHealthChecks()`.
+ *
+ * `runAllHealthChecks()` fans out to ten concurrent outbound probes — the
+ * database, Stripe, Upstash, the engine CDN, Clerk, Anthropic, Sentry, R2 and
+ * the generation factory. Any unauthenticated surface that calls it directly
+ * turns one inbound request into ten outbound ones, which is an amplification
+ * vector for us AND for every upstream we probe.
+ *
+ * Server Components cannot use `rateLimitPublicRoute()` (it needs a
+ * `NextRequest`), so the cache IS the guard for `/health`. Two layers:
+ *
+ * - a TTL cache, so a burst of requests inside `HEALTH_CACHE_TTL_MS` costs one
+ *   fan-out, and
+ * - in-flight promise dedup, so N *concurrent* cold requests also cost one
+ *   fan-out rather than N. Without the second layer a cold cache under
+ *   concurrency is exactly as amplifying as no cache at all.
+ *
+ * A rejection is never cached and clears the in-flight slot, so a transient
+ * failure does not pin the surface into an error state for the whole TTL. Every
+ * check above catches its own errors, so `runAllHealthChecks()` does not reject
+ * today — the `.finally` is there so a future check that stops being defensive
+ * cannot wedge the cache permanently.
+ */
+let cachedHealthReport: { report: HealthReport; expiresAt: number } | null = null;
+let inFlightHealthReport: Promise<HealthReport> | null = null;
+
+export async function getCachedHealthReport(): Promise<HealthReport> {
+  const cached = cachedHealthReport;
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.report;
+  }
+  if (inFlightHealthReport) {
+    return inFlightHealthReport;
+  }
+
+  const pending = runAllHealthChecks()
+    .then((report) => {
+      cachedHealthReport = { report, expiresAt: Date.now() + HEALTH_CACHE_TTL_MS };
+      return report;
+    })
+    .finally(() => {
+      inFlightHealthReport = null;
+    });
+
+  inFlightHealthReport = pending;
+  return pending;
+}
+
+/** Test seam — clears both the TTL cache and any in-flight fan-out. */
+export function resetCachedHealthReport(): void {
+  cachedHealthReport = null;
+  inFlightHealthReport = null;
 }

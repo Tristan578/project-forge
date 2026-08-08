@@ -33,6 +33,10 @@ import { buildPublicRoutes, applyAuthDecision, passthroughMiddleware, config } f
 // isPlayPath lives with the route source it is derived from; the proxy imports it
 // from there so the nonce minter and the static rule cannot disagree on scope.
 import { isPlayPath, PLAY_ROUTE_SOURCE } from '@/lib/security/csp';
+// The declared public surface. Shared with public-social-proof.test.ts so the
+// two guards cannot disagree about which routes are meant to be reachable
+// without a session.
+import { PUBLIC_PAGE_ROUTES } from '@/test/utils/publicSurface';
 
 vi.mock('server-only', () => ({}));
 
@@ -88,6 +92,43 @@ describe('proxy public-route matcher (real Clerk matcher)', () => {
     // Pin the trailing (.*) — any future sub-path (e.g. /api/waitlist/confirm)
     // must stay public too; an exact-match tightening would silently 401 it.
     expect(isPublic('/api/waitlist/confirm')).toBe(true);
+  });
+
+  /**
+   * The gap #9060 was filed for: five page routes rendered for anonymous
+   * visitors by design — `/docs`, `/health`, `/robots.txt`, `/sitemap.xml`,
+   * `/opengraph-image` — and every one of them was redirected to sign-in
+   * because nothing listed them here. A page needs no auth code of its own to
+   * be protected; the proxy's default is to protect, so an omission IS the bug.
+   */
+  it.each(PUBLIC_PAGE_ROUTES)('treats the declared public page route %s as public (#9060)', (route) => {
+    expect(
+      isPublic(route),
+      `${route} is declared public in publicSurface.ts but buildPublicRoutes() does not match it — anonymous visitors get redirected to sign-in. Add it to buildPublicRoutes(), do not delete the declaration.`,
+    ).toBe(true);
+  });
+
+  it('exposes the crawler and unfurler surfaces (#9060)', () => {
+    // `.txt`/`.xml` are NOT in the matcher's static-extension exclusion list,
+    // so these genuinely reach Clerk — which is why /llms.txt already had to be
+    // listed, and why these three did too.
+    expect(isPublic('/robots.txt')).toBe(true);
+    expect(isPublic('/sitemap.xml')).toBe(true);
+    expect(isPublic('/opengraph-image')).toBe(true);
+    // The pricing segment owns its own OG image; a bare '/pricing' pattern
+    // matched the page but not the image.
+    expect(isPublic('/pricing/opengraph-image')).toBe(true);
+  });
+
+  it('does not widen the public surface past the declared routes (#9060)', () => {
+    // Regression guard on the fix itself: `(.*)` suffixes are easy to over-apply.
+    // These four are authenticated surfaces and must stay protected.
+    for (const route of ['/dashboard', '/settings', '/editor', '/admin']) {
+      expect(isPublic(route), `${route} must not be public`).toBe(false);
+    }
+    // The `(.*)` suffixes are meant to cover sub-paths of the segment.
+    expect(isPublic('/health/detail')).toBe(true);
+    expect(isPublic('/docs/getting-started')).toBe(true);
   });
 
   it('only exposes the /dev auth-bypass route when includeDev (non-production) (#7915)', () => {

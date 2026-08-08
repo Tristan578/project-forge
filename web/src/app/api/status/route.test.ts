@@ -89,7 +89,7 @@ describe('GET /api/status', () => {
 
     // Mock health checks to return predictable results for all service names
     vi.doMock('@/lib/monitoring/healthChecks', () => ({
-      runAllHealthChecks: vi.fn().mockResolvedValue({
+      getCachedHealthReport: vi.fn().mockResolvedValue({
         overall: 'healthy',
         timestamp: '2026-03-16T12:00:00.000Z',
         services: [
@@ -126,7 +126,7 @@ describe('GET /api/status', () => {
     vi.resetModules();
 
     vi.doMock('@/lib/monitoring/healthChecks', () => ({
-      runAllHealthChecks: vi.fn().mockResolvedValue({
+      getCachedHealthReport: vi.fn().mockResolvedValue({
         overall: 'down',
         timestamp: '2026-03-16T12:00:00.000Z',
         services: [
@@ -161,7 +161,7 @@ describe('GET /api/status', () => {
     vi.resetModules();
 
     vi.doMock('@/lib/monitoring/healthChecks', () => ({
-      runAllHealthChecks: vi.fn().mockResolvedValue({
+      getCachedHealthReport: vi.fn().mockResolvedValue({
         overall: 'down',
         timestamp: '2026-03-16T12:00:00.000Z',
         services: [
@@ -190,7 +190,7 @@ describe('GET /api/status', () => {
     vi.resetModules();
 
     vi.doMock('@/lib/monitoring/healthChecks', () => ({
-      runAllHealthChecks: vi.fn().mockResolvedValue({
+      getCachedHealthReport: vi.fn().mockResolvedValue({
         overall: 'degraded',
         timestamp: '2026-03-16T12:00:00.000Z',
         services: [
@@ -219,7 +219,7 @@ describe('GET /api/status', () => {
     vi.resetModules();
 
     vi.doMock('@/lib/monitoring/healthChecks', () => ({
-      runAllHealthChecks: vi.fn().mockResolvedValue({
+      getCachedHealthReport: vi.fn().mockResolvedValue({
         overall: 'healthy',
         timestamp: '2026-03-16T12:00:00.000Z',
         services: [
@@ -252,7 +252,7 @@ describe('GET /api/status', () => {
 
     // Only provide health data for one service
     vi.doMock('@/lib/monitoring/healthChecks', () => ({
-      runAllHealthChecks: vi.fn().mockResolvedValue({
+      getCachedHealthReport: vi.fn().mockResolvedValue({
         overall: 'healthy',
         timestamp: '2026-03-16T12:00:00.000Z',
         services: [
@@ -303,7 +303,7 @@ describe('GET /api/status', () => {
     }));
 
     vi.doMock('@/lib/monitoring/healthChecks', () => ({
-      runAllHealthChecks: vi.fn().mockResolvedValue({
+      getCachedHealthReport: vi.fn().mockResolvedValue({
         overall: 'healthy',
         timestamp: fixedTimestamp,
         services: [

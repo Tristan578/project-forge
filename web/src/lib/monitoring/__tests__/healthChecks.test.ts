@@ -663,4 +663,70 @@ describe('healthChecks', () => {
       expect(report.overall).toBe('down');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // getCachedHealthReport
+  // ---------------------------------------------------------------------------
+  //
+  // `runAllHealthChecks()` builds a fresh report object on every invocation, so
+  // object identity is a faithful proxy for "did we fan out again?" — a returned
+  // reference that is `toBe` the previous one could only have come from the
+  // cache, and a distinct one could only have come from a second fan-out.
+  describe('getCachedHealthReport', () => {
+    it('serves a second call inside the TTL from cache, without a second fan-out', async () => {
+      vi.resetModules();
+      const { getCachedHealthReport } = await import('@/lib/monitoring/healthChecks');
+
+      const first = await getCachedHealthReport();
+      const second = await getCachedHealthReport();
+
+      expect(second).toBe(first);
+    });
+
+    it('collapses CONCURRENT cold calls into a single fan-out', async () => {
+      vi.resetModules();
+      const { getCachedHealthReport } = await import('@/lib/monitoring/healthChecks');
+
+      // Both calls start before either resolves, so the TTL cache alone cannot
+      // help here — only the in-flight promise dedup can. Without it, a cold
+      // cache under concurrency amplifies exactly as much as no cache at all.
+      const [first, second] = await Promise.all([
+        getCachedHealthReport(),
+        getCachedHealthReport(),
+      ]);
+
+      expect(second).toBe(first);
+    });
+
+    it('fans out again once the TTL has elapsed', async () => {
+      vi.resetModules();
+      const { getCachedHealthReport } = await import('@/lib/monitoring/healthChecks');
+      const { HEALTH_CACHE_TTL_MS } = await import('@/lib/config/timeouts');
+
+      let clock = Date.now();
+      const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+      try {
+        const first = await getCachedHealthReport();
+        clock += HEALTH_CACHE_TTL_MS + 1;
+        const second = await getCachedHealthReport();
+
+        expect(second).not.toBe(first);
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
+
+    it('resetCachedHealthReport() drops the cached report', async () => {
+      vi.resetModules();
+      const { getCachedHealthReport, resetCachedHealthReport } = await import(
+        '@/lib/monitoring/healthChecks'
+      );
+
+      const first = await getCachedHealthReport();
+      resetCachedHealthReport();
+      const second = await getCachedHealthReport();
+
+      expect(second).not.toBe(first);
+    });
+  });
 });
