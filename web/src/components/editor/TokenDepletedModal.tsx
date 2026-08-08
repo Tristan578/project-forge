@@ -4,13 +4,7 @@ import { useCallback } from 'react';
 import { AlertCircle, ArrowUpCircle, CreditCard, Key } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useUserStore } from '@/stores/userStore';
-
-const TIER_LABELS: Record<string, string> = {
-  starter: 'Starter',
-  hobbyist: 'Hobbyist',
-  creator: 'Creator',
-  pro: 'Pro',
-};
+import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
 
 /**
  * Modal shown when the user has 0 tokens and attempts to send an AI message.
@@ -21,7 +15,7 @@ export function TokenDepletedModal() {
   const setShowModal = useChatStore((s) => s.setShowTokenDepletedModal);
   const tier = useUserStore((s) => s.tier);
 
-  const tierLabel = TIER_LABELS[tier] ?? tier;
+  const tierLabel = TIER_DISPLAY_NAMES[tier] ?? tier;
 
   const handleUpgrade = useCallback(() => {
     setShowModal(false);
