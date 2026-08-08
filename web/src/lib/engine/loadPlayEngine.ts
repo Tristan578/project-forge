@@ -28,7 +28,7 @@ export interface PlayEngineRuntime {
  * than the editor's hardened `probeWebGPU()` adapter request. A browser that
  * exposes `navigator.gpu` but fails to hand out an adapter will pick the
  * `webgpu` build and fail at init — bounded by the caller's deadline, but a
- * fallback would be better. Tracked separately.
+ * fallback would be better. Tracked in #9127 (PF-1078).
  */
 async function instantiate(): Promise<PlayEngineRuntime> {
   const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
