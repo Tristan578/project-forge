@@ -264,12 +264,33 @@ export const CHAT_BACKENDS: readonly ChatBackendDescriptor[] = [
 export const CHAT_BACKEND_ENV_VARS: readonly string[] = CHAT_BACKENDS.flatMap((b) => b.envVars);
 
 /**
+ * Whether this process is running on a Vercel runtime, and can therefore rely
+ * on OIDC auto-auth instead of an explicit gateway key.
+ *
+ * Vercel sets BOTH `VERCEL=1` and `VERCEL_ENV=<production|preview|development>`,
+ * but they are not interchangeable in practice: `vercel env pull` writes only
+ * `VERCEL_ENV` into `.env.local`, so a local or CI process can legitimately
+ * carry one without the other. Either alone means the runtime is Vercel's.
+ *
+ * This exists because three call sites answered the question independently and
+ * two of them accepted only `VERCEL`, while the backend that actually serves
+ * the traffic (`lib/providers/backends/vercelGateway.ts`) accepted either. In a
+ * `VERCEL_ENV`-only environment the gateway served chat while the health check
+ * and `/api/capabilities` reported no configured backend — a false "AI is
+ * down", which is the exact class of drift this module exists to prevent. Add
+ * no fourth literal: import this.
+ */
+export function isVercelRuntime(): boolean {
+  return Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
+}
+
+/**
  * The highest-priority chat backend that is configured in this environment, or
  * null when none is. On Vercel, OIDC auto-auth means the AI Gateway needs no
  * explicit key — mirroring `app/api/capabilities/route.ts`.
  */
 export function resolveConfiguredChatBackend(): ChatBackendDescriptor | null {
-  const onVercel = Boolean(process.env.VERCEL);
+  const onVercel = isVercelRuntime();
   for (const backend of CHAT_BACKENDS) {
     if (backend.vercelOidc && onVercel) return backend;
     if (backend.envVars.some((envVar) => Boolean(process.env[envVar]))) return backend;

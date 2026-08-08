@@ -5,6 +5,7 @@ import {
   PLATFORM_KEY_ENV,
   GATEWAY_KEY_ENV,
   CHAT_BACKEND_ENV_VARS,
+  isVercelRuntime,
 } from '@/lib/config/providers';
 
 /**
@@ -111,8 +112,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
   const capabilities: CapabilityStatus[] = allCapabilities.map((cap) => {
     const envVars = CAPABILITY_KEY_MAP[cap];
     // On Vercel, AI Gateway uses OIDC auto-auth (no explicit key needed for chat/embedding)
-    const vercelOidc =
-      Boolean(process.env.VERCEL) && envVars.includes(GATEWAY_KEY_ENV.vercelGateway);
+    const vercelOidc = isVercelRuntime() && envVars.includes(GATEWAY_KEY_ENV.vercelGateway);
     const isAvailable = vercelOidc || envVars.some((envVar) => Boolean(process.env[envVar]));
 
     const status: CapabilityStatus = {
