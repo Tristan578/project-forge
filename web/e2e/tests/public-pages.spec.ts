@@ -7,12 +7,15 @@ import { test, expect } from '@playwright/test';
  * These pages are critical for customer acquisition and legal compliance.
  */
 test.describe('Public Pages @ui', () => {
+  // These tests used to be skipped whenever NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY was
+  // absent, on the premise that /pricing needs Clerk. It does not, in two
+  // independent places: PricingPage defines its own `useAuthSafe()` that returns
+  // `{ isSignedIn: false }` without calling any Clerk hook when the key is missing
+  // or malformed, and app/layout.tsx skips the <ClerkProvider> wrapper unless the
+  // key starts with pk_test_/pk_live_. So the page renders fully in CI and these
+  // assertions were being silently skipped rather than kept honest.
   test.describe('Pricing Page', () => {
-    // PricingPage uses useAuth() from Clerk — skip if Clerk is not configured
-    const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-
     test('renders with all four pricing tiers', async ({ page }) => {
-      test.skip(!hasClerk, 'Pricing page requires Clerk (useAuth hook)');
       await page.goto('/pricing');
       await page.waitForLoadState('domcontentloaded');
 
@@ -26,7 +29,6 @@ test.describe('Public Pages @ui', () => {
     });
 
     test('displays correct pricing for each tier', async ({ page }) => {
-      test.skip(!hasClerk, 'Pricing page requires Clerk (useAuth hook)');
       await page.goto('/pricing');
       await page.waitForLoadState('domcontentloaded');
 
@@ -37,7 +39,6 @@ test.describe('Public Pages @ui', () => {
     });
 
     test('Creator tier is marked as recommended', async ({ page }) => {
-      test.skip(!hasClerk, 'Pricing page requires Clerk (useAuth hook)');
       await page.goto('/pricing');
       await page.waitForLoadState('domcontentloaded');
 
@@ -45,17 +46,19 @@ test.describe('Public Pages @ui', () => {
     });
 
     test('each tier has a CTA button', async ({ page }) => {
-      test.skip(!hasClerk, 'Pricing page requires Clerk (useAuth hook)');
       await page.goto('/pricing');
       await page.waitForLoadState('domcontentloaded');
 
-      await expect(page.getByRole('button', { name: 'Get Started' })).toBeVisible();
+      // The Free tier's CTA is signed-in-dependent: PricingPage renders
+      // "Get Started" only when isSignedIn, and "Join the Waitlist" otherwise.
+      // These specs run unauthenticated, so the waitlist label is the correct
+      // expectation — asserting "Get Started" here was never satisfiable.
+      await expect(page.getByRole('button', { name: 'Join the Waitlist' })).toBeVisible();
       const subscribeButtons = page.getByRole('button', { name: 'Subscribe' });
       expect(await subscribeButtons.count()).toBe(3);
     });
 
     test('feature lists contain real content per tier', async ({ page }) => {
-      test.skip(!hasClerk, 'Pricing page requires Clerk (useAuth hook)');
       await page.goto('/pricing');
       await page.waitForLoadState('domcontentloaded');
 
@@ -66,7 +69,6 @@ test.describe('Public Pages @ui', () => {
     });
 
     test('has sign-in navigation link', async ({ page }) => {
-      test.skip(!hasClerk, 'Pricing page requires Clerk (useAuth hook)');
       await page.goto('/pricing');
       await page.waitForLoadState('domcontentloaded');
 
