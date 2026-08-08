@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useEditorStore, type GizmoMode } from '@/stores/editorStore';
 import { AddEntityMenu } from './AddEntityMenu';
+import { spawnEntityWithFeedback } from './spawnFeedback';
 
 interface MobileToolbarProps {
   onToggleLeft: () => void;
@@ -57,7 +58,7 @@ export function MobileToolbar({ onToggleLeft, onToggleRight }: MobileToolbarProp
           </button>
         ))}
         <div className="mx-1 h-6 w-px bg-zinc-700" />
-        <AddEntityMenu onSpawn={(type) => spawnEntity(type)} />
+        <AddEntityMenu onSpawn={(type) => spawnEntityWithFeedback(spawnEntity, type)} />
       </div>
 
       {/* Right: inspector toggle */}

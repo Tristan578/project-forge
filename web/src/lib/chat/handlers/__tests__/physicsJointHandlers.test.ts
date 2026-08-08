@@ -436,6 +436,26 @@ describe('spawn_terrain', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it('returns the spawned entityId so follow-up commands can target it', async () => {
+    const { result } = await invokeHandler(physicsJointHandlers, 'spawn_terrain', {});
+    const data = result.result as { entityId: string };
+    expect(data.entityId).toBe('terrain-1');
+  });
+
+  it('reports failure when the engine is not ready instead of claiming success', async () => {
+    // `spawnTerrain` returns undefined when nothing was dispatched. Reporting
+    // success there tells the model a terrain exists when none does, and it
+    // then aims sculpt/update commands at an id that names nothing.
+    const { result } = await invokeHandler(
+      physicsJointHandlers,
+      'spawn_terrain',
+      {},
+      { spawnTerrain: vi.fn(() => undefined) }
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not ready');
+  });
 });
 
 // ===========================================================================

@@ -218,8 +218,19 @@ export const physicsJointHandlers: Record<string, ToolHandler> = {
       args,
     );
     if (p.error) return p.error;
-    ctx.store.spawnTerrain(p.data);
-    return { success: true, result: { message: 'Terrain spawned' } };
+    const entityId = ctx.store.spawnTerrain(p.data);
+    if (!entityId) {
+      // `spawnTerrain` returns undefined only when the engine has not finished
+      // loading and nothing was dispatched. Reporting success there tells the
+      // model a terrain exists when none does, and it then targets follow-up
+      // sculpt/reparent commands at nothing. Same contract as `spawn_entity`
+      // in `transformHandlers` (#8748).
+      return { success: false, error: 'Cannot spawn terrain: the engine is not ready yet' };
+    }
+    // `entityId` must be returned, not just used internally: a chat-driven
+    // "make a terrain and then sculpt it" sequence has nothing to chain on
+    // otherwise, and `update_terrain` / `sculpt_terrain` both require an id.
+    return { success: true, result: { message: 'Terrain spawned', entityId } };
   },
 
   update_terrain: async (args, ctx) => {

@@ -3,7 +3,10 @@
 use bevy::math::Vec3;
 use serde::Deserialize;
 use crate::core::csg::CsgOperation;
-use crate::core::terrain::{terrain_data_rejection, NoiseType, TerrainData, TerrainDataPatch};
+use crate::core::terrain::{
+    terrain_data_rejection, NoiseType, TerrainData, TerrainDataPatch, MAX_TERRAIN_RESOLUTION,
+    MIN_TERRAIN_RESOLUTION,
+};
 use crate::core::pending::procedural::{
     queue_csg_from_bridge, queue_terrain_spawn_from_bridge, queue_terrain_update_from_bridge,
     queue_terrain_sculpt_from_bridge, queue_extrude_from_bridge, queue_lathe_from_bridge,
@@ -158,12 +161,14 @@ fn handle_spawn_terrain(payload: serde_json::Value) -> super::CommandResult {
         td.seed = v;
     }
     if let Some(v) = data.resolution {
-        td.resolution = match v {
-            0..=48 => 32,
-            49..=96 => 64,
-            97..=192 => 128,
-            _ => 256,
-        };
+        // Honour the requested resolution verbatim. This used to snap into
+        // `{32, 64, 128, 256}`, which pre-empted the range check below: a
+        // `resolution: 100000` became 256 and the spawn reported success, so
+        // `terrain_data_rejection`'s resolution arm was unreachable from this
+        // handler despite its doc-comment promising exactly the opposite. The
+        // snapping also capped the engine at 256 while the mesh builder and the
+        // validator both accept up to `MAX_TERRAIN_RESOLUTION` (1024).
+        td.resolution = v;
     }
     if let Some(v) = data.size {
         td.size = v.max(1.0);
@@ -216,6 +221,19 @@ fn handle_update_terrain(payload: serde_json::Value) -> super::CommandResult {
     reject_non_finite("update_terrain", "heightScale", data.height_scale)?;
     reject_non_finite("update_terrain", "size", data.size)?;
 
+    // The drain re-validates the merged config, but by then the command has
+    // already answered `Ok` and the only trace of the refusal is a console warn.
+    // Screen the one field the caller can put out of range here so the failure
+    // reaches whoever asked for it.
+    if let Some(v) = data.resolution {
+        if !(MIN_TERRAIN_RESOLUTION..=MAX_TERRAIN_RESOLUTION).contains(&v) {
+            return Err(format!(
+                "Invalid update_terrain payload: resolution {} is outside the supported range {}..={}",
+                v, MIN_TERRAIN_RESOLUTION, MAX_TERRAIN_RESOLUTION,
+            ));
+        }
+    }
+
     // A PATCH, not a replace: carry only what the caller actually sent, so the
     // drain can overlay it on the entity's live config. Building a full
     // TerrainData from ::default() here meant nudging one field silently reset
@@ -232,12 +250,7 @@ fn handle_update_terrain(payload: serde_json::Value) -> super::CommandResult {
         amplitude: data.amplitude,
         height_scale: data.height_scale,
         seed: data.seed,
-        resolution: data.resolution.map(|v| match v {
-            0..=48 => 32,
-            49..=96 => 64,
-            97..=192 => 128,
-            _ => 256,
-        }),
+        resolution: data.resolution,
         size: data.size.map(|v| v.max(1.0)),
     };
 
@@ -588,17 +601,79 @@ mod terrain_command_tests {
         assert_eq!(patch.size, Some(80.0));
     }
 
-    /// The clamps must survive the move to a patch, or the update path becomes
-    /// the way to sneak past limits the spawn path enforces.
+    /// The octaves clamp must survive the move to a patch, or the update path
+    /// becomes the way to sneak past a limit the spawn path enforces.
     #[test]
-    fn update_terrain_still_clamps_octaves_and_snaps_resolution() {
+    fn update_terrain_still_clamps_octaves() {
         let pending = queue(
             "update_terrain",
-            json!({ "entityId": "terrain-1", "octaves": 99, "resolution": 100000 }),
+            json!({ "entityId": "terrain-1", "octaves": 99 }),
         );
-        let patch = &pending.terrain_updates[0].patch;
-        assert_eq!(patch.octaves, Some(8));
-        assert_eq!(patch.resolution, Some(256));
+        assert_eq!(pending.terrain_updates[0].patch.octaves, Some(8));
+    }
+
+    /// Resolution is REJECTED, not snapped. It used to be bucketed into
+    /// `{32, 64, 128, 256}` on both terrain paths, which meant a caller asking
+    /// for 100000 got a 256-grid and a success response — the exact silent
+    /// substitution `terrain_data_rejection` was written to prevent, defeated
+    /// before that function ever ran.
+    #[test]
+    fn update_terrain_rejects_a_resolution_outside_the_supported_range() {
+        for resolution in [
+            MIN_TERRAIN_RESOLUTION - 1,
+            0,
+            MAX_TERRAIN_RESOLUTION + 1,
+            100000,
+        ] {
+            let err = reject(
+                "update_terrain",
+                json!({ "entityId": "terrain-1", "resolution": resolution }),
+            );
+            assert!(
+                err.contains("outside the supported range"),
+                "resolution {resolution} must be refused, got: {err}",
+            );
+        }
+    }
+
+    /// The counterpart: an in-range resolution reaches the patch unchanged
+    /// rather than being rounded to the nearest legacy bucket.
+    #[test]
+    fn update_terrain_carries_an_in_range_resolution_verbatim() {
+        for resolution in [MIN_TERRAIN_RESOLUTION, 100, 513, MAX_TERRAIN_RESOLUTION] {
+            let pending = queue(
+                "update_terrain",
+                json!({ "entityId": "terrain-1", "resolution": resolution }),
+            );
+            assert_eq!(
+                pending.terrain_updates[0].patch.resolution,
+                Some(resolution),
+            );
+        }
+    }
+
+    /// Same contract on the spawn path, where the out-of-range refusal comes
+    /// from `terrain_data_rejection` rather than an inline check.
+    #[test]
+    fn spawn_terrain_rejects_a_resolution_outside_the_supported_range() {
+        for resolution in [0, 1, MAX_TERRAIN_RESOLUTION + 1, 100000] {
+            let err = reject("spawn_terrain", json!({ "resolution": resolution }));
+            assert!(
+                err.contains("outside the supported range"),
+                "resolution {resolution} must be refused, got: {err}",
+            );
+        }
+    }
+
+    #[test]
+    fn spawn_terrain_carries_an_in_range_resolution_verbatim() {
+        for resolution in [MIN_TERRAIN_RESOLUTION, 100, 513, MAX_TERRAIN_RESOLUTION] {
+            let pending = queue("spawn_terrain", json!({ "resolution": resolution }));
+            assert_eq!(
+                pending.terrain_spawn_requests[0].terrain_data.resolution,
+                resolution,
+            );
+        }
     }
 
     // === non-finite payload rejection ===
