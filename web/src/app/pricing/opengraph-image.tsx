@@ -1,6 +1,9 @@
 import { ImageResponse } from 'next/og';
+import { TIER_PLANS } from '@/lib/billing/tierPlans';
 
-export const alt = 'SpawnForge Pricing — Free, Starter, Pro, and Studio Plans';
+// This route runs on the Edge runtime, so `tierPlans` must stay a pure
+// constants module — it is, deliberately.
+export const alt = `SpawnForge Pricing — ${TIER_PLANS.map((p) => p.name).join(', ')} Plans`;
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
@@ -60,25 +63,35 @@ export default function Image() {
         </div>
 
         <div style={{ display: 'flex', gap: 24 }}>
-          {(['Free', '$9/mo', '$29/mo', '$99/mo'] as const).map((price, i) => (
-            <div
-              key={i}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                padding: '20px 28px',
-                borderRadius: 12,
-                background: i === 2 ? 'rgba(249, 115, 22, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                border: i === 2 ? '2px solid rgba(249, 115, 22, 0.5)' : '1px solid rgba(255, 255, 255, 0.1)',
-              }}
-            >
-              <div style={{ fontSize: 14, color: 'rgba(255, 255, 255, 0.5)', marginBottom: 4 }}>
-                {(['Free', 'Starter', 'Pro', 'Studio'] as const)[i]}
+          {TIER_PLANS.map((plan) => {
+            // The share card is the first price a lot of people see. It used to
+            // hardcode its own names and prices, and advertised a $99 "Pro" plan
+            // that the pricing page sold as "Creator" for $29.
+            const highlighted = plan.key === 'creator';
+            return (
+              <div
+                key={plan.key}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  padding: '20px 28px',
+                  borderRadius: 12,
+                  background: highlighted ? 'rgba(249, 115, 22, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                  border: highlighted
+                    ? '2px solid rgba(249, 115, 22, 0.5)'
+                    : '1px solid rgba(255, 255, 255, 0.1)',
+                }}
+              >
+                <div style={{ fontSize: 14, color: 'rgba(255, 255, 255, 0.5)', marginBottom: 4 }}>
+                  {plan.name}
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: '#ffffff' }}>
+                  {`${plan.price}/mo`}
+                </div>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: '#ffffff' }}>{price}</div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     ),

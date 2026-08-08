@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import type { TokenConfig, TierConfig, CreditTransaction } from '@/lib/db/schema';
+import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
 
 interface UserStats {
   totalUsers: number;
@@ -168,19 +169,22 @@ export function AdminDashboard() {
             </div>
             <div>
               <div className="text-3xl font-bold text-green-400">{data.userStats.starterCount}</div>
-              <div className="text-sm text-zinc-400">Starter</div>
+              {/* Labelled by plan name, not by billing key: the `starter` key is
+                  the FREE plan, while the plan sold as "Starter" is `hobbyist`.
+                  Reading these counts by key inverts two of the four columns. */}
+              <div className="text-sm text-zinc-400">{TIER_DISPLAY_NAMES.starter}</div>
             </div>
             <div>
               <div className="text-3xl font-bold text-yellow-400">{data.userStats.hobbyistCount}</div>
-              <div className="text-sm text-zinc-400">Hobbyist</div>
+              <div className="text-sm text-zinc-400">{TIER_DISPLAY_NAMES.hobbyist}</div>
             </div>
             <div>
               <div className="text-3xl font-bold text-orange-400">{data.userStats.creatorCount}</div>
-              <div className="text-sm text-zinc-400">Creator</div>
+              <div className="text-sm text-zinc-400">{TIER_DISPLAY_NAMES.creator}</div>
             </div>
             <div>
               <div className="text-3xl font-bold text-purple-400">{data.userStats.proCount}</div>
-              <div className="text-sm text-zinc-400">Pro</div>
+              <div className="text-sm text-zinc-400">{TIER_DISPLAY_NAMES.pro}</div>
             </div>
           </div>
         </div>

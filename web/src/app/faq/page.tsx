@@ -1,5 +1,12 @@
 import type { Metadata } from 'next';
 import { cacheLife, cacheTag } from 'next/cache';
+import {
+  getTierPlan,
+  countLabel,
+  PROJECT_LIMITS,
+  PUBLISH_LIMITS,
+} from '@/lib/billing/tierPlans';
+import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
 
 export const metadata: Metadata = {
   title: 'FAQ — SpawnForge',
@@ -13,6 +20,14 @@ export const metadata: Metadata = {
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
 
+// The pricing answer is generated, not written. Hand-written, it named plans by
+// their internal billing keys ("Hobbyist", "Pro"), quoted a $99 top tier the
+// pricing cards sold at $79, and promised free-tier AI chat that `/api/chat`
+// rejects outright.
+const FREE = getTierPlan('starter');
+const ENTRY = getTierPlan('hobbyist');
+const TOP = getTierPlan('pro');
+
 const faqs = [
   {
     question: 'What is SpawnForge?',
@@ -22,7 +37,7 @@ const faqs = [
   {
     question: 'Is SpawnForge free?',
     answer:
-      'Yes. SpawnForge offers a free Starter tier with AI chat (limited), 1 published game, community templates, and basic export. Paid plans start at $9/month (Hobbyist) with unlimited AI chat and asset generation, up to $99/month (Pro) with team collaboration and API access.',
+      `Yes. The ${FREE.name} tier includes the full editor, local export, ${countLabel(PROJECT_LIMITS.starter, 'cloud project', 'cloud projects')}, and ${countLabel(PUBLISH_LIMITS.starter, 'published game', 'published games')} — everything except the AI features. AI starts on the ${ENTRY.name} plan at ${ENTRY.price}/month, which adds AI chat, asset generation, and bring-your-own-key support. Plans go up to ${TOP.price}/month (${TOP.name}), which reaches the platform AI keys without needing a token balance.`,
   },
   {
     question: 'What browsers does SpawnForge support?',
@@ -47,7 +62,7 @@ const faqs = [
   {
     question: 'What is MCP for game development?',
     answer:
-      'MCP (Model Context Protocol) is the command interface between the AI and the game engine. SpawnForge exposes 350 MCP commands across 41 categories — from spawning entities and applying materials to configuring physics, audio, animation, scripting, and game components. This gives the AI precise, fine-grained control over every aspect of game creation.',
+      `MCP (Model Context Protocol) is the command interface between the AI and the game engine. SpawnForge exposes ${MCP_COMMAND_COUNT} MCP commands across ${MCP_CATEGORY_COUNT} categories — from spawning entities and applying materials to configuring physics, audio, animation, scripting, and game components. This gives the AI precise, fine-grained control over every aspect of game creation.`,
   },
   {
     question: 'How does SpawnForge compare to Unity or Godot?',

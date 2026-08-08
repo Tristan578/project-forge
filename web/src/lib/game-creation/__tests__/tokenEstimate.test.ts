@@ -18,6 +18,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import type { OrchestratorGDD } from '@/lib/game-creation/types';
 import { buildPlan } from '@/lib/game-creation/planBuilder';
+import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
 
 // Ensure the SYSTEM_REGISTRY side-effects are loaded
 import '@/lib/game-creation/systems';
@@ -221,11 +222,13 @@ describe('Token Estimation (U5)', () => {
       expect(plan.tokenEstimate.warningMessage).toBeUndefined();
     });
 
-    it('userTier in estimate reflects the tier label format', () => {
+    it('names the plan the user can actually buy, not the billing key', () => {
       const gdd = makeMinimalGdd();
       const plan = buildPlan(gdd, 'proj-1', 'pro', 10_000);
 
-      expect(plan.tokenEstimate.userTier).toBe('Pro tier');
+      // This read "Pro tier" — the capitalized `pro` key. No pricing card sells
+      // a "Pro" plan; the tier is called Studio everywhere a user can see it.
+      expect(plan.tokenEstimate.userTier).toBe(`${TIER_DISPLAY_NAMES.pro} tier`);
     });
   });
 

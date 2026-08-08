@@ -1,3 +1,5 @@
+import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
+
 export default function SpawnForgeBrowserAiGameEngine() {
   return (
     <>
@@ -10,7 +12,8 @@ export default function SpawnForgeBrowserAiGameEngine() {
       <h2>What is SpawnForge?</h2>
       <p>
         SpawnForge is an AI-native 2D/3D game engine built for the browser. It combines a
-        Bevy-based Rust/WebAssembly rendering engine with a React visual editor and 350 MCP
+        Bevy-based Rust/WebAssembly rendering engine with a React visual editor and{' '}
+        {MCP_COMMAND_COUNT} MCP
         (Model Context Protocol) commands. You can create games through natural language
         descriptions, visual scripting, or traditional code.
       </p>
@@ -41,9 +44,10 @@ export default function SpawnForgeBrowserAiGameEngine() {
         everything from scene generation to asset creation.
       </p>
 
-      <h2>350 MCP Commands</h2>
+      <h2>{MCP_COMMAND_COUNT} MCP Commands</h2>
       <p>
-        The Model Context Protocol (MCP) server exposes 350 commands across 41 categories. Any
+        The Model Context Protocol (MCP) server exposes {MCP_COMMAND_COUNT} commands across{' '}
+        {MCP_CATEGORY_COUNT} categories. Any
         MCP-compatible agent or LLM can create scenes, configure physics, write game scripts, and
         export finished games — all without touching the UI.
       </p>

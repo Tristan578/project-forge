@@ -16,11 +16,13 @@ import {
   ArrowRight,
   Check,
   Minus,
+  X,
   Zap,
   Shield,
   Gamepad2,
 } from 'lucide-react';
 import { AiShowcaseSection } from '@/components/marketing/AiShowcaseSection';
+import { TIER_PLANS, isExclusionFeature, type TierKey } from '@/lib/billing/tierPlans';
 
 /* ------------------------------------------------------------------ */
 /*  Data                                                               */
@@ -176,72 +178,34 @@ interface PricingTier {
   price: string;
   period: string;
   description: string;
-  features: string[];
+  features: readonly string[];
   cta: string;
   highlighted: boolean;
 }
 
-const pricingTiers: PricingTier[] = [
-  {
-    name: 'Starter',
-    price: '$0',
-    period: '/month',
-    description: 'Free forever. Reserve your spot for launch.',
-    features: [
-      'AI chat (limited)',
-      '1 published game',
-      'Community templates',
-      'Basic export',
-    ],
-    cta: 'Join the Waitlist',
-    highlighted: false,
-  },
-  {
-    name: 'Hobbyist',
-    price: '$9',
-    period: '/month',
-    description: 'For creators building their portfolio.',
-    features: [
-      'Everything in Starter',
-      'Unlimited AI chat',
-      '5 published games',
-      'Asset generation',
-      'Priority support',
-    ],
-    cta: 'Join the Waitlist',
-    highlighted: false,
-  },
-  {
-    name: 'Creator',
-    price: '$29',
-    period: '/month',
-    description: 'For indie developers shipping real games.',
-    features: [
-      'Everything in Hobbyist',
-      'Unlimited published games',
-      'Custom domain',
-      'Advanced AI tools',
-      'Remove branding',
-    ],
-    cta: 'Join the Waitlist',
-    highlighted: true,
-  },
-  {
-    name: 'Pro',
-    price: '$99',
-    period: '/month',
-    description: 'For studios building at scale.',
-    features: [
-      'Everything in Creator',
-      'Team collaboration',
-      'API access',
-      'Dedicated support',
-      'Custom integrations',
-    ],
-    cta: 'Join the Waitlist',
-    highlighted: false,
-  },
-];
+/**
+ * Positioning copy only — who a plan is for, never what it includes. The
+ * feature list and the price come from `TIER_PLANS`, because this page used to
+ * carry its own: it named plans "Hobbyist" and "Pro" (internal billing keys
+ * that appear on no pricing card), charged $99 for a plan the pricing page
+ * sells at $79, and listed five features that no code path implements.
+ */
+const TIER_PITCH: Record<TierKey, string> = {
+  starter: 'Free forever. Reserve your spot for launch.',
+  hobbyist: 'For creators building their portfolio.',
+  creator: 'For indie developers shipping real games.',
+  pro: 'For studios building at scale.',
+};
+
+const pricingTiers: PricingTier[] = TIER_PLANS.map((plan) => ({
+  name: plan.name,
+  price: plan.price,
+  period: '/month',
+  description: TIER_PITCH[plan.key],
+  features: plan.features,
+  cta: 'Join the Waitlist',
+  highlighted: plan.key === 'creator',
+}));
 
 const navLinks = [
   { href: '#features', label: 'Features' },
@@ -573,10 +537,17 @@ export default async function LandingPage() {
                       key={feat}
                       className="flex items-start gap-2 text-sm text-zinc-300"
                     >
-                      <Check
-                        className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400"
-                        aria-hidden="true"
-                      />
+                      {isExclusionFeature(feat) ? (
+                        <X
+                          className="mt-0.5 h-4 w-4 shrink-0 text-red-400"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <Check
+                          className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400"
+                          aria-hidden="true"
+                        />
+                      )}
                       {feat}
                     </li>
                   ))}

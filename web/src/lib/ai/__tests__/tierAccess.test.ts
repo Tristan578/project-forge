@@ -195,11 +195,14 @@ describe('getRequiredTier', () => {
 // ---------------------------------------------------------------------------
 
 describe('TIER_LABELS', () => {
-  it('provides human-readable labels for all tiers', () => {
-    expect(TIER_LABELS.starter).toBe('Starter');
-    expect(TIER_LABELS.hobbyist).toBe('Hobbyist');
+  it('labels every tier with the plan name shown on /pricing', () => {
+    // These strings go straight into upsell copy ("Requires <label> tier"), so
+    // they have to name a plan the user can actually go and buy. `Hobbyist`
+    // and `Pro` were internal billing keys that appear on no pricing card.
+    expect(TIER_LABELS.starter).toBe('Free');
+    expect(TIER_LABELS.hobbyist).toBe('Starter');
     expect(TIER_LABELS.creator).toBe('Creator');
-    expect(TIER_LABELS.pro).toBe('Pro');
+    expect(TIER_LABELS.pro).toBe('Studio');
   });
 });
 

@@ -4,6 +4,7 @@ import { useAuth } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
 import { Check, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { TIER_PLANS, isExclusionFeature, type TierKey } from '@/lib/billing/tierPlans';
 
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '';
 const hasClerk = clerkKey.startsWith('pk_test_') || clerkKey.startsWith('pk_live_');
@@ -13,6 +14,31 @@ function useAuthSafe() {
   // eslint-disable-next-line react-hooks/rules-of-hooks
   return useAuth();
 }
+
+/**
+ * Per-card presentation. Names, prices, and feature bullets all come from
+ * `TIER_PLANS` — only the styling and the "Recommended" flag live here, because
+ * those are the only things about a card that aren't a factual claim.
+ */
+const CARD_STYLES: Record<TierKey, { card: string; button: string; recommended?: boolean }> = {
+  starter: {
+    card: 'border border-zinc-800',
+    button: 'bg-zinc-800 hover:bg-zinc-700',
+  },
+  hobbyist: {
+    card: 'border border-zinc-800',
+    button: 'bg-blue-600 hover:bg-blue-700',
+  },
+  creator: {
+    card: 'relative border-2 border-purple-600',
+    button: 'bg-purple-600 hover:bg-purple-700',
+    recommended: true,
+  },
+  pro: {
+    card: 'border border-yellow-600',
+    button: 'bg-yellow-600 hover:bg-yellow-700',
+  },
+};
 
 export function PricingPage() {
   const { isSignedIn } = useAuthSafe();
@@ -43,7 +69,15 @@ export function PricingPage() {
       }
 
       const { url } = await res.json();
-      window.location.href = url;
+      if (typeof url !== 'string' || url.length === 0) {
+        // A 200 with no session URL is a Stripe-side failure the route did not
+        // catch. Navigating anyway sends the user to `/undefined`.
+        toast.error('Checkout failed. Please try again in a moment.');
+        return;
+      }
+      // `assign()` rather than `href =`: assigning to a property of a global is
+      // an external mutation the React compiler rejects (react-hooks/immutability).
+      window.location.assign(url);
     } catch (err) {
       console.error('Checkout error:', err);
       toast.error('Checkout failed. Please check your connection and try again.');
@@ -95,140 +129,51 @@ export function PricingPage() {
       {/* Pricing cards */}
       <div className="mx-auto max-w-7xl px-6 pb-24">
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-          {/* Free */}
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-6">
-            <h3 className="mb-2 text-xl font-bold">Free</h3>
-            <div className="mb-4">
-              <span className="text-4xl font-bold">$0</span>
-              <span className="text-zinc-400">/mo</span>
-            </div>
-            <button
-              onClick={handleGetStarted}
-              className="mb-6 w-full rounded bg-zinc-800 py-2 text-sm font-medium hover:bg-zinc-700"
-            >
-              {isSignedIn ? 'Get Started' : 'Join the Waitlist'}
-            </button>
-            <ul className="space-y-3 text-sm">
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>1 project</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>50 entities per project</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <X size={16} className="mt-0.5 shrink-0 text-red-500" />
-                <span>No AI features</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>Local save only</span>
-              </li>
-            </ul>
-          </div>
+          {TIER_PLANS.map((plan) => {
+            const style = CARD_STYLES[plan.key];
+            const isFree = plan.key === 'starter';
 
-          {/* Starter */}
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-6">
-            <h3 className="mb-2 text-xl font-bold">Starter</h3>
-            <div className="mb-4">
-              <span className="text-4xl font-bold">$9</span>
-              <span className="text-zinc-400">/mo</span>
-            </div>
-            <button
-              onClick={() => handleSubscribe('hobbyist')}
-              className="mb-6 w-full rounded bg-blue-600 py-2 text-sm font-medium hover:bg-blue-700"
-            >
-              Subscribe
-            </button>
-            <ul className="space-y-3 text-sm">
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>10 projects</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>500 entities per project</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>BYOK AI (your API keys)</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>Cloud save</span>
-              </li>
-            </ul>
-          </div>
-
-          {/* Creator (Recommended) */}
-          <div className="relative rounded-lg border-2 border-purple-600 bg-zinc-900 p-6">
-            <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-purple-600 px-3 py-1 text-xs font-medium">
-              Recommended
-            </div>
-            <h3 className="mb-2 text-xl font-bold">Creator</h3>
-            <div className="mb-4">
-              <span className="text-4xl font-bold">$29</span>
-              <span className="text-zinc-400">/mo</span>
-            </div>
-            <button
-              onClick={() => handleSubscribe('creator')}
-              className="mb-6 w-full rounded bg-purple-600 py-2 text-sm font-medium hover:bg-purple-700"
-            >
-              Subscribe
-            </button>
-            <ul className="space-y-3 text-sm">
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>50 projects</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>2000 entities per project</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>BYOK AI + MCP</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>Game export</span>
-              </li>
-            </ul>
-          </div>
-
-          {/* Studio */}
-          <div className="rounded-lg border border-yellow-600 bg-zinc-900 p-6">
-            <h3 className="mb-2 text-xl font-bold">Studio</h3>
-            <div className="mb-4">
-              <span className="text-4xl font-bold">$79</span>
-              <span className="text-zinc-400">/mo</span>
-            </div>
-            <button
-              onClick={() => handleSubscribe('pro')}
-              className="mb-6 w-full rounded bg-yellow-600 py-2 text-sm font-medium hover:bg-yellow-700"
-            >
-              Subscribe
-            </button>
-            <ul className="space-y-3 text-sm">
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>Unlimited projects</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>10,000 entities per project</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>Platform AI keys</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
-                <span>5,000 tokens/mo included</span>
-              </li>
-            </ul>
-          </div>
+            return (
+              <div
+                key={plan.key}
+                data-testid={`pricing-card-${plan.key}`}
+                className={`rounded-lg bg-zinc-900 p-6 ${style.card}`}
+              >
+                {style.recommended && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-purple-600 px-3 py-1 text-xs font-medium">
+                    Recommended
+                  </div>
+                )}
+                <h3 className="mb-2 text-xl font-bold">{plan.name}</h3>
+                <div className="mb-4">
+                  <span className="text-4xl font-bold">{plan.price}</span>
+                  <span className="text-zinc-400">/mo</span>
+                </div>
+                <button
+                  onClick={
+                    isFree
+                      ? handleGetStarted
+                      : () => handleSubscribe(plan.key as 'hobbyist' | 'creator' | 'pro')
+                  }
+                  className={`mb-6 w-full rounded py-2 text-sm font-medium ${style.button}`}
+                >
+                  {isFree ? (isSignedIn ? 'Get Started' : 'Join the Waitlist') : 'Subscribe'}
+                </button>
+                <ul className="space-y-3 text-sm">
+                  {plan.features.map((feature) => (
+                    <li key={feature} className="flex items-start gap-2">
+                      {isExclusionFeature(feature) ? (
+                        <X size={16} className="mt-0.5 shrink-0 text-red-500" />
+                      ) : (
+                        <Check size={16} className="mt-0.5 shrink-0 text-green-500" />
+                      )}
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

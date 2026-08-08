@@ -2,21 +2,31 @@ import type { Metadata } from 'next';
 import { cacheLife, cacheTag } from 'next/cache';
 import { PricingPage } from '@/components/pricing/PricingPage';
 import { Breadcrumbs } from '@/components/marketing/Breadcrumbs';
+import { TIER_PLANS, tierSummary } from '@/lib/billing/tierPlans';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
 
+// Every plan name and price comes from TIER_PLANS. Restating them here is what
+// let this page advertise a $99 tier that the cards below sold for $79, and
+// name plans ("Hobbyist", "Pro") that appear on no card at all.
+const planSummaries = TIER_PLANS.map(tierSummary).join(', ');
+
 export const metadata: Metadata = {
   title: 'Pricing — SpawnForge',
-  description: 'SpawnForge pricing plans — Free, Starter ($9/mo), Creator ($29/mo), and Studio ($79/mo). AI-powered game creation for every budget.',
+  description: `SpawnForge pricing plans — ${planSummaries}. AI-powered game creation for every budget.`,
   alternates: { canonical: '/pricing' },
   openGraph: {
     title: 'Pricing — SpawnForge',
-    description: 'SpawnForge pricing plans — Free, Starter ($9/mo), Creator ($29/mo), and Studio ($79/mo).',
+    description: `SpawnForge pricing plans — ${planSummaries}.`,
   },
 };
 
 // Static pricing JSON-LD — safe constant with no user input.
 // JSON.stringify output is safe for script[type=application/ld+json].
+//
+// Structured data is a machine-readable copy of the offer, so it has to say
+// exactly what the cards say. Each offer's description is the plan's own
+// feature list, which is derived from the limits the server enforces.
 const pricingJsonLd = JSON.stringify({
   '@context': 'https://schema.org',
   '@type': 'WebPage',
@@ -29,40 +39,17 @@ const pricingJsonLd = JSON.stringify({
     operatingSystem: 'Web Browser',
     offers: {
       '@type': 'AggregateOffer',
-      lowPrice: '0',
-      highPrice: '79',
+      lowPrice: String(Math.min(...TIER_PLANS.map((p) => p.priceCents)) / 100),
+      highPrice: String(Math.max(...TIER_PLANS.map((p) => p.priceCents)) / 100),
       priceCurrency: 'USD',
-      offerCount: 4,
-      offers: [
-        {
-          '@type': 'Offer',
-          name: 'Free',
-          price: '0',
-          priceCurrency: 'USD',
-          description: 'AI chat (limited), 1 published game, community templates, basic export',
-        },
-        {
-          '@type': 'Offer',
-          name: 'Starter',
-          price: '9',
-          priceCurrency: 'USD',
-          description: 'Unlimited AI chat, 5 published games, asset generation, priority support',
-        },
-        {
-          '@type': 'Offer',
-          name: 'Creator',
-          price: '29',
-          priceCurrency: 'USD',
-          description: 'Unlimited publishing, custom domain, advanced AI tools, remove branding',
-        },
-        {
-          '@type': 'Offer',
-          name: 'Studio',
-          price: '79',
-          priceCurrency: 'USD',
-          description: 'Team collaboration, API access, dedicated support, custom integrations',
-        },
-      ],
+      offerCount: TIER_PLANS.length,
+      offers: TIER_PLANS.map((plan) => ({
+        '@type': 'Offer',
+        name: plan.name,
+        price: String(plan.priceCents / 100),
+        priceCurrency: 'USD',
+        description: plan.features.join(', '),
+      })),
     },
   },
 });

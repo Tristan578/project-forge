@@ -5,6 +5,7 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, projects, gameTags } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { moderateContent } from '@/lib/moderation/contentFilter';
+import { PUBLISH_LIMITS } from '@/lib/projects/limits';
 import { logger } from '@/lib/logging/logger';
 import { extractRequestId } from '@/lib/logging/requestContext';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -98,9 +99,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Check tier publish limits
-  const tierLimits: Record<string, number> = { starter: 1, hobbyist: 3, creator: 10, pro: 100 };
-  const maxPublished = tierLimits[user.tier] ?? 1;
+  // Check tier publish limits. An unrecognized tier falls back to the free
+  // tier's allowance — never to a more generous one.
+  const maxPublished = PUBLISH_LIMITS[user.tier as keyof typeof PUBLISH_LIMITS] ?? PUBLISH_LIMITS.starter;
   const existingPublished = await queryWithResilience(() => getDb().select({ id: publishedGames.id })
     .from(publishedGames)
     .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.status, 'published'))));

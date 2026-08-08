@@ -1,20 +1,22 @@
 import type { Metadata } from 'next';
 import { cacheLife, cacheTag } from 'next/cache';
 
+import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
+
 export const metadata: Metadata = {
   title: 'About — SpawnForge',
-  description: 'SpawnForge is an AI-native browser-based 2D/3D game creation platform. Rust/WASM engine, WebGPU rendering, 350 MCP commands, visual scripting.',
+  description: `SpawnForge is an AI-native browser-based 2D/3D game creation platform. Rust/WASM engine, WebGPU rendering, ${MCP_COMMAND_COUNT} MCP commands, visual scripting.`,
   alternates: { canonical: '/about' },
   openGraph: {
     title: 'About SpawnForge',
-    description: 'AI-native browser-based game engine — Rust/WASM, WebGPU, 350 MCP commands.',
+    description: `AI-native browser-based game engine — Rust/WASM, WebGPU, ${MCP_COMMAND_COUNT} MCP commands.`,
   },
 };
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
 
 const stats = [
-  { label: 'MCP Commands', value: '350', detail: 'across 41 categories' },
+  { label: 'MCP Commands', value: String(MCP_COMMAND_COUNT), detail: `across ${MCP_CATEGORY_COUNT} categories` },
   { label: 'Visual Script Nodes', value: '73', detail: 'drag-and-drop logic' },
   { label: 'Material Presets', value: '56', detail: 'PBR materials' },
   { label: 'AI Modules', value: '25+', detail: 'specialized agents' },
@@ -31,7 +33,7 @@ const aboutJsonLd = JSON.stringify({
     applicationCategory: ['GameApplication', 'DeveloperApplication'],
     operatingSystem: 'Web Browser',
     description:
-      'AI-native browser-based 2D and 3D game creation platform. Rust engine compiled to WASM with WebGPU rendering, 350 MCP commands, and visual scripting.',
+      `AI-native browser-based 2D and 3D game creation platform. Rust engine compiled to WASM with WebGPU rendering, ${MCP_COMMAND_COUNT} MCP commands, and visual scripting.`,
   },
 });
 
@@ -89,8 +91,8 @@ export default async function AboutPage() {
             via the wasm-bindgen bridge; events flow back through callbacks.
           </p>
           <p>
-            <strong className="text-white">AI:</strong> Multi-agent orchestration with 350 MCP
-            commands across 41 categories. AI generates 3D models, textures, sound effects,
+            <strong className="text-white">AI:</strong> Multi-agent orchestration with{' '}
+            {MCP_COMMAND_COUNT} MCP commands across {MCP_CATEGORY_COUNT} categories. AI generates 3D models, textures, sound effects,
             music, and voice — then uses MCP commands to place and configure them in the scene.
           </p>
         </div>
@@ -155,8 +157,8 @@ export default async function AboutPage() {
           </p>
           <p>
             Where other tools add AI as an afterthought, SpawnForge was built AI-first. The
-            entire engine is controllable through 350 MCP commands, making it the most
-            AI-accessible game engine available. AI is not a feature — it is the primary
+            entire engine is controllable through {MCP_COMMAND_COUNT} MCP commands, making it the
+            most AI-accessible game engine available. AI is not a feature — it is the primary
             creation interface.
           </p>
         </div>

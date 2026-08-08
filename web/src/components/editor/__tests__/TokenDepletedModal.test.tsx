@@ -129,12 +129,14 @@ describe('TokenDepletedModal', () => {
     expect(backdrop).toBeInTheDocument();
   });
 
-  it('displays tier labels for all tiers', () => {
+  it('names the plan the user is actually on, not the internal billing key', () => {
+    // The free tier is keyed `starter`, which is also the public name of the
+    // paid $9 plan. Rendering the key told a free user they were on "Starter".
     const tierCases: Array<['starter' | 'hobbyist' | 'creator' | 'pro', string]> = [
-      ['starter', 'Starter'],
-      ['hobbyist', 'Hobbyist'],
+      ['starter', 'Free'],
+      ['hobbyist', 'Starter'],
       ['creator', 'Creator'],
-      ['pro', 'Pro'],
+      ['pro', 'Studio'],
     ];
 
     for (const [tier, label] of tierCases) {

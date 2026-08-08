@@ -21,6 +21,7 @@ import type {
 } from './types';
 import { FALLBACK_SCHEMA } from './types';
 import { SYSTEM_REGISTRY } from './systems';
+import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
 
 // --- Topological sort for system dependency ordering ---
 // Ensures systems are processed after their dependsOn categories.
@@ -422,7 +423,9 @@ export function buildPlan(
   const totalVarianceHigh = Math.round(totalEstimated + totalAbsVariance);
   const totalVarianceLow = Math.round(Math.max(0, totalEstimated - totalAbsVariance));
 
-  const tierLabel = `${userTier.charAt(0).toUpperCase() + userTier.slice(1)} tier`;
+  // Capitalizing the internal key produced "Hobbyist tier" / "Pro tier" — names
+  // that appear on no plan the user can buy. `hobbyist` sells as "Starter".
+  const tierLabel = `${TIER_DISPLAY_NAMES[userTier]} tier`;
   const pctOfBalance =
     tokenBalance > 0 ? Math.round((totalEstimated / tokenBalance) * 100) : 100;
 

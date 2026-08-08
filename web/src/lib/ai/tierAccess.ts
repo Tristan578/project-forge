@@ -111,10 +111,12 @@ export function getRequiredTier(panelId: string): Tier | null {
   return PANEL_TIER_REQUIREMENTS[panelId] ?? null;
 }
 
-/** Human-readable display label for each tier. */
-export const TIER_LABELS: Record<Tier, string> = {
-  starter: 'Starter',
-  hobbyist: 'Hobbyist',
-  creator: 'Creator',
-  pro: 'Pro',
-};
+/**
+ * Human-readable display label for each tier.
+ *
+ * Re-exported from the billing source of truth rather than restated. These
+ * strings appear in upsell copy ("Requires <label> tier"), so a label that
+ * doesn't match a plan on `/pricing` sends the user looking for a product that
+ * does not exist — which is exactly what `Hobbyist` and `Pro` used to do.
+ */
+export { TIER_DISPLAY_NAMES as TIER_LABELS } from '@/lib/billing/tierPlans';

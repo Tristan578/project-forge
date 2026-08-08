@@ -62,10 +62,14 @@ test.describe('Public Pages @ui', () => {
       await page.goto('/pricing');
       await page.waitForLoadState('domcontentloaded');
 
-      await expect(page.getByText('1 project')).toBeVisible();
+      // These strings are generated from TIER_PLANS, which derives them from
+      // PROJECT_LIMITS / PUBLISH_LIMITS / TIER_MONTHLY_TOKENS. They previously
+      // asserted hand-written copy that the server never enforced: "1 project"
+      // when the free tier gets 3, and "5,000 tokens" when Studio grants 3,000.
+      await expect(page.getByText('3 cloud projects')).toBeVisible();
       await expect(page.getByText('No AI features')).toBeVisible();
-      await expect(page.getByText('Unlimited projects')).toBeVisible();
-      await expect(page.getByText(/5,000 tokens/)).toBeVisible();
+      await expect(page.getByText('Unlimited cloud projects')).toBeVisible();
+      await expect(page.getByText(/3,000 AI tokens\/month/)).toBeVisible();
     });
 
     test('has sign-in navigation link', async ({ page }) => {

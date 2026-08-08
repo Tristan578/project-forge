@@ -10,6 +10,7 @@ import messages from "@/i18n/messages/en.json";
 import { Toaster } from "sonner";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 import { SITE_URL } from "@/lib/constants";
+import { MCP_COMMAND_COUNT } from "@/lib/mcp/manifestStats";
 import "./globals.css";
 
 // Lazy-load analytics and consent providers — they rely on browser APIs
@@ -76,7 +77,7 @@ const jsonLdString = JSON.stringify([
       "AI-powered game creation from natural language prompts",
       "2D and 3D game engine (Rust/WASM, WebGPU + WebGL2)",
       "Visual scripting with 73 node types",
-      "350 MCP commands for AI-assisted editing",
+      `${MCP_COMMAND_COUNT} MCP commands for AI-assisted editing`,
       "One-click browser game publishing",
       "Real-time physics simulation (Rapier)",
       "AI asset generation (3D models, textures, audio, music)",

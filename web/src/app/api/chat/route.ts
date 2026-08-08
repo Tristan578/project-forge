@@ -31,6 +31,7 @@ import { DEEP_GEN_SURFACES, type DeepGenSurface } from '@/lib/ai/surfaces';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
 import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
+import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
 import { isPremiumModel, AI_MODEL_DEEP, AI_MODEL_PRIMARY } from '@/lib/ai/models';
 import { isDeepTierEnabled } from '@/lib/ai/deepTier';
 import { resolveChatRoute } from '@/lib/providers/resolveChat';
@@ -113,7 +114,7 @@ async function getDocsEntries(): Promise<DocEntry[]> {
 const SYSTEM_PROMPT = `You are an expert game creation assistant for SpawnForge, an AI-powered 3D game engine that runs in the browser. You help users create games by orchestrating scene setup, materials, physics, scripting, audio, and more through MCP commands.
 
 ## What You Can Do
-You have access to 350 MCP commands across 41 categories. Key categories include:
+You have access to ${MCP_COMMAND_COUNT} MCP commands across ${MCP_CATEGORY_COUNT} categories. Key categories include:
 - **scene**: spawn_entity, delete_entities, duplicate_entity, rename_entity, set_parent, get_scene_graph
 - **materials**: update_material (PBR: baseColor, metallic, roughness, emissive, textures, alpha modes, clearcoat, transmission)
 - **lighting**: update_light, set_ambient_light (point, directional, spot lights with shadows)
