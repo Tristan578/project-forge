@@ -131,7 +131,9 @@ CD_YML="$REPO_ROOT/.github/workflows/cd.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "gate script not found: $SCRIPT"; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "jq is required to run these tests"; exit 1; }
@@ -170,6 +172,7 @@ run_gate_script() {
   grep -E 'unbound variable|bad substitution|syntax error' <<<"$out" >> "$FIX/bash-errors.log" || true
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_gate_script
 
 # Same, against the gate under test WITH one synthetic waiver in its allowlist
 # ($WAIVED_GATE, built below). The shipped gate waives nothing, so the WAIVED /
@@ -179,15 +182,18 @@ run_gate_script() {
 run_gate() {
   run_gate_script "$WAIVED_GATE" "$1"
 }
+readonly -f run_gate
 
 # Same, but invoked with the ROOT workspace arg (`.`) — the invocation shape
 # quality-gates.yml/cd.yml use for the repo-root audit (PF-1010 / #9029).
 run_gate_root() {
   run_gate_script "$WAIVED_GATE" "$1" .
 }
+readonly -f run_gate_root
 
 # Helper: write a fixture file, echo its absolute path.
 fixture() { local name="$1"; cat > "$FIX/$name"; echo "$FIX/$name"; }
+readonly -f fixture
 
 # Build a gate-script VARIANT whose only byte difference from the real gate is
 # ONE INSERTED ALLOWED_ADVISORIES entry ($2 must include its surrounding double
@@ -250,6 +256,7 @@ make_gate_variant() {
   fi
   GATE_VARIANT="$FIX/$name"
 }
+readonly -f make_gate_variant
 
 # The gate variant that MOST cases below run against: the real gate plus one
 # waived advisory, pinned to the root brace-expansion path the fixtures use.
@@ -808,6 +815,7 @@ make_npm_shim() {
     "cat '$1'" > "$NPM_SHIM_DIR/npm"
   chmod +x "$NPM_SHIM_DIR/npm"
 }
+readonly -f make_npm_shim
 
 # Deliberately does NOT set NPM_AUDIT_CMD — and unsets any inherited value, so
 # a developer running this suite with the seam exported still exercises the
@@ -820,6 +828,7 @@ run_gate_default_cmd() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_gate_default_cmd
 
 res="$(run_gate_default_cmd "$FIX/clean.json")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "0" ]; then pass "the default audit command (seam unset) actually runs, and passes a clean report (exit 0)"; else fail "default audit command on a clean report should exit 0, got $rc — output: $out"; fi
@@ -1117,6 +1126,7 @@ assert_job_key_lines() { # $1 = comment-stripped workflow, $2 = label, $3 = expe
   fi
   pass "$2: the 2-space lines inside jobs: are exactly the $(grep -c '' <<<"$actual") expected job keys (nothing can truncate or over-run a block cut)"
 }
+readonly -f assert_job_key_lines
 
 # The job-key enumeration above is anchored at `jobs:` and runs to EOF. What
 # makes that sound is the set of COLUMN-0 lines — and leaving THAT set inferred
@@ -1145,6 +1155,7 @@ assert_top_level_keys() { # $1 = comment-stripped workflow, $2 = label, $3 = exp
   fi
   pass "$2: the column-0 keys are exactly the $(grep -c '' <<<"$actual") expected top-level keys with jobs last (the job-key enumeration cannot be ended early from inside a job body)"
 }
+readonly -f assert_top_level_keys
 
 # The two enumerations above bound the region AT and BELOW `jobs:`. Nothing
 # bounded the region ABOVE it. assert_top_level_keys reads column-0 lines only,
@@ -1212,6 +1223,7 @@ assert_preamble_lines() { # $1 = comment-stripped workflow, $2 = label, $3 = exp
   fi
   pass "$2: the lines above jobs: are exactly the $(grep -c '' <<<"$actual") expected preamble lines (no workflow-level env:/permissions: entry can be added, however its key is spelled)"
 }
+readonly -f assert_preamble_lines
 
 # One level deeper, the same defect again: the pins INSIDE each cut job block --
 # the 4-space job-level keys -- match by literal bytes through a `["']?` class.
@@ -1315,6 +1327,7 @@ assert_job_level_keys() { # $1 = cut job block, $2 = label, $3 = expected 4-spac
   fi
   pass "$2: the job-level keys are exactly the $(grep -c '' <<<"$actual") expected keys (no key below can be respelled or duplicated past the pins on it)"
 }
+readonly -f assert_job_level_keys
 
 step_block() { # $1 = comment-stripped job block, $2 = step-name needle (fixed string)
   awk -v needle="$2" '
@@ -1323,6 +1336,7 @@ step_block() { # $1 = comment-stripped job block, $2 = step-name needle (fixed s
     f {print}
   ' <<<"$1"
 }
+readonly -f step_block
 
 # The STEP-level twin of assert_job_level_keys, and it exists for the same
 # measured reason one layer down. Every pin inside a cut STEP block -- the
@@ -1439,6 +1453,7 @@ $delta"
   fi
   pass "$2: the step-level lines are exactly the $(grep -c '' <<<"$actual") expected lines (no key can be respelled or duplicated, and no scalar extended by a continuation, past the pins on it)"
 }
+readonly -f assert_step_level_keys
 
 # Round 23. The continuation class recurs at JOB level, and round 22's scope
 # decision -- step level only -- did not survive being measured.
@@ -1503,6 +1518,7 @@ $delta"
   fi
   pass "$2: the block is exactly the $(grep -c '' <<<"$actual") expected lines (nothing can be appended to it, inserted into it or rewritten inside it past the pins on it)"
 }
+readonly -f assert_block_lines_exact
 
 # $1 = comment-stripped job block, $2 = label, $3 = expected verbatim lines.
 # Cuts that job's `steps:` list and pins it line-for-line. The cut ends at the
@@ -1554,6 +1570,7 @@ assert_steps_block() {
   blk="$(awk "/^    [\"']?steps[\"']?[[:space:]]*:/{f=1;print;next} f && \$0 != \"\" && !/^      /{exit} f{print}" <<<"$1")"
   assert_block_lines_exact "$blk" "$2" "$3" "the per-step pins cover only the steps they NAME, so a step added beside them -- or a one-line edit to an unpinned sibling such as \`npm ci\` -- runs arbitrary code before the first audit while every named step stays byte-identical" "$site"
 }
+readonly -f assert_steps_block
 
 # The three workspace invocations every security job must carry, by EXACT step
 # name — anchoring on the name both scopes the tamper checks and forces the
@@ -1619,6 +1636,7 @@ assert_audit_steps_untampered() {
     fi
   done
 }
+readonly -f assert_audit_steps_untampered
 
 echo ""
 echo "=== quality-gates.yml integration wiring ==="
@@ -3779,6 +3797,7 @@ count_bare_mentions() {
     }
     END { print c + 0 }'
 }
+readonly -f count_bare_mentions
 
 # Every case below is a regression probe, not an illustration: each corresponds
 # to a spelling that was, or would be, miscounted. `zz_probe` is deliberately
@@ -3788,6 +3807,7 @@ cm_case() { # $1 label, $2 expected, $3 corpus
   cm_got="$(count_bare_mentions zz_probe <<<"$3")"
   [ "$cm_got" = "$2" ] || cm_bad="$cm_bad ${1}(want ${2} got ${cm_got})"
 }
+readonly -f cm_case
 # shellcheck disable=SC2016  # the corpora are literal source text, not expansions
 {
 cm_case bare-assign        1 'zz_probe=1'
@@ -3833,7 +3853,12 @@ fi
 # residual this cannot close: a NEW pin variable added later with neither a
 # `readonly` nor a list entry is unprotected -- no assertion can know about a
 # variable that does not exist yet.
-ro_decls="$(sed -n 's/^[[:space:]]*readonly[[:space:]]\{1,\}//p' <<<"$SELF_EXEC")"
+#
+# `readonly -f` freezes a FUNCTION, not a pin variable. Those lines get their own
+# drift check below, so they are dropped here rather than polluting this set with
+# a bare `-f` token and a function name.
+ro_var_lines="$(grep -vE '^[[:space:]]*readonly[[:space:]]+-f[[:space:]]' <<<"$SELF_EXEC" || true)"
+ro_decls="$(sed -n 's/^[[:space:]]*readonly[[:space:]]\{1,\}//p' <<<"$ro_var_lines")"
 ro_names="$(tr ' ' '\n' <<<"$ro_decls")"
 ro_bare=""
 while IFS= read -r ro_line; do
@@ -3847,6 +3872,46 @@ assert_block_lines_exact "$declared_ro" \
   "the set of readonly-declared names (drift check against the probed list)" \
   "$expected_ro" \
   "the probed list and the declarations have drifted apart -- a pin variable carries one without the other, so either the probe silently covers nothing or a declared name is never probed"
+
+# Same treatment for CALLABLES. Every function this file defines is frozen with a
+# `readonly -f` on the line after its definition, because a function is a hop the
+# pins above do not cover: they prove what $SELF_EXEC contains, and a function is
+# resolved by NAME at call time. One inserted redefinition rebinds it. The
+# stealthiest target is a function the evidence flows through -- rebinding
+# count_bare_mentions between its own self-test and the loop that consumes it
+# makes every pin report the count it wants, so the suite scores byte-identical
+# to a clean run while the audit gate is fully degated. A rebound `fail` is the
+# cruder version of the same move. This is the file's own "pin every hop" lesson
+# applied to callables: a self-test proves a DEFINITION, not the binding the
+# consumer later resolves.
+# Honest bound, same as the variable drift check above: removing BOTH a
+# definition and its freeze shrinks both sides and still matches. The effect
+# probe below is what proves a surviving freeze is in force.
+defined_fns_raw="$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)()[[:space:]]*{.*$/\1/p' <<<"$SELF_EXEC")"
+frozen_fns_raw="$(sed -n 's/^[[:space:]]*readonly[[:space:]]\{1,\}-f[[:space:]]\{1,\}//p' <<<"$SELF_EXEC")"
+defined_fns="$(sort -u <<<"$defined_fns_raw")"
+frozen_fns="$(sort -u <<<"$frozen_fns_raw")"
+assert_block_lines_exact "$frozen_fns" \
+  "the set of readonly -f frozen functions (drift check against the functions defined)" \
+  "$defined_fns" \
+  "a function is defined without a matching 'readonly -f' freeze, or a freeze names a function that no longer exists -- an unfrozen function can be rebound by a single inserted line, which silently degates every assertion whose evidence passes through it"
+
+# Effect probe. The drift check above only compares two lists of file text; this
+# proves a freeze BINDS in the running shell. The fake prints a marker, so if the
+# freeze holds bash refuses the redefinition and the call reaches the real
+# function -- the marker can never appear. The positive half keeps the assertion
+# non-vacuous: the capture must ALSO show the refusal and the real function's own
+# output, so an empty capture from some unrelated breakage fails instead of
+# passing. Runs inside a command substitution, so the attempted redefinition
+# cannot escape into the rest of the suite either way.
+fn_freeze_probe="$( { pass() { echo "FN-FREEZE-FAKE-BOUND"; }; pass "fn-freeze effect probe"; } 2>&1 )"
+if [[ "$fn_freeze_probe" == *"FN-FREEZE-FAKE-BOUND"* ]]; then
+  fail "a 'readonly -f' freeze does not bind: redefining pass() inside the probe replaced it and the fake ran, so every function in this suite is rebindable by one inserted line despite the declarations"
+elif [[ "$fn_freeze_probe" == *"readonly function"* && "$fn_freeze_probe" == *"fn-freeze effect probe"* ]]; then
+  pass "'readonly -f' actually binds at runtime (a redefinition is refused and the real function still runs, not merely declared frozen in the file text)"
+else
+  fail "the 'readonly -f' effect probe was inconclusive -- expected both the shell's readonly-function refusal and the real pass() output, got: ${fn_freeze_probe}"
+fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then

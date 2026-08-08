@@ -675,10 +675,98 @@ names the variable cannot be a direct write. It does not catch an indirect one: 
 literally.) It raises cost; it does not prove impossibility. Same register as the
 `check-ci-success.sh` anti-tamper language.
 
+It also did not, as first cut, cover **redefinition** — the counter is a
+function, and a function is resolved by name at call time. Round 40 closes that.
+
 ### What did not change
 
-Net assertion delta is **+1**: the count assertion replaced round 36's, and the
-counter self-test is new. Clean `main` measures **228 PASS / 0 FAIL**; the fix
-branch measures **229 PASS / 0 FAIL**. No heredoc payload was added, so
+The count assertion replaced round 36's, and the counter self-test is new. This
+round's cut measured **229 PASS / 0 FAIL** against clean `main`'s **228**. No
+heredoc payload was added, so `SELF_EXEC_EXPECTED_DROP` is untouched.
+
+## Round 40 (PF-1015 / #9034): a function is a hop, and it was unpinned
+
+Round 39 extracted the counter into `count_bare_mentions()` and asserted its
+semantics against a synthetic corpus. That extraction introduced a **late-bound,
+unpinned hop**, and the security review measured the consequence: a one-line
+function redefinition inserted *after* the self-test and *before* the consuming
+loop rebinds the name. The self-test runs against the real definition and passes;
+the loop then calls the fake, which returns each pin's own `pin_want`.
+
+| tree | PASS | FAIL | exit |
+|---|---|---|---|
+| clean (round 39 cut) | 229 | 0 | 0 |
+| degated, no neuter | 228 | 1 | 1 |
+| **degated + bare write + counter redefined after the self-test** | **229** | **0** | **0** |
+
+Byte-identical to clean, with all three npm audits degated. This is the file's
+own round 30/31 lesson — *evidence produced upstream of a consumer does not bind
+the consumer; pin every hop* — applied to callables. A self-test proves a
+DEFINITION; it says nothing about the binding the consumer later resolves.
+
+The same review noted the pre-existing floor: **no** function in the suite was
+redefinition-protected, so `fail() { :; }` inserted at line 135 on the degated
+tree measured **228 PASS / 0 FAIL, exit 0**. The new finding did not lower the
+attacker's floor — it was already one line and universal — but it was strictly
+stealthier (229 vs 228, i.e. no missing assertion to notice).
+
+### The fix: `readonly -f`, on every function, at its own definition
+
+All 20 functions the suite defines carry a `readonly -f <name>` on the line
+immediately after their closing brace. Measured behaviour in bash 3.2 (the macOS
+system shell): redefining a frozen function prints `bash: f: readonly function`,
+returns 1, and **the fake never binds** — the real function still runs. The suite
+runs under `set -uo pipefail` with no `-e`, so the refusal does not abort; as with
+the variable pins, the work is done by **value preservation**, not detection.
+
+Two constraints shaped the placement:
+
+- `readonly -f` **cannot pre-declare** an undefined function (`readonly: g: not a
+  function`), so a single freeze block at the end of the file is impossible — an
+  attacker would simply define-then-get-frozen. Every freeze must follow its own
+  definition.
+- The existing `readonly`-declaration drift check split on spaces, so
+  `readonly -f name` injected both `-f` and the function name into the variable
+  set and broke `assert_block_lines_exact` against `PIN_INPUTS`. The scan is now
+  split: `readonly -f` lines are filtered out of the variable check and get their
+  own drift assertion (the set of frozen names must equal the set of functions
+  defined in `$SELF_EXEC`).
+
+### The drift check is not the proof — the effect probe is
+
+Comparing two lists of file text proves the declarations are consistent, not that
+they bind. So a probe attempts, inside a command substitution, to redefine
+`pass()` with a fake that prints `FN-FREEZE-FAKE-BOUND`, then calls it. The
+assertion requires the capture to contain **neither** that marker **and** both
+the shell's `readonly function` refusal **and** the real `pass()` output — the
+positive half is what stops an empty capture from some unrelated breakage
+scoring as a pass.
+
+### Measured
+
+| tree | PASS | FAIL | exit |
+|---|---|---|---|
+| clean, this branch | 231 | 0 | 0 |
+| degated, no neuter | 230 | 1 | 1 |
+| degated + bare write | 230 | 1 | 1 — `=4(want 3)` |
+| **degated + bare write + counter redefined** (the finding) | **230** | **1** | **1** |
+| **degated + `fail() { :; }`** (the pre-existing floor) | **230** | **1** | **1** |
+
+Both bypasses now report the degate.
+
+### Honest bound
+
+This freezes the functions **this file** defines. It does not extend to the other
+~17 bash suites under `scripts/__tests__/`, which remain rebindable by one
+inserted line — that sweep is tracked separately rather than scope-crept here. It
+does not close `declare -n` aliasing or `eval` on a runtime-assembled name (round
+39's bound still stands). And a NEW function added later without a freeze is
+unprotected until the drift check notices it — which it will, because the check
+is defined the other way round: every definition must have a freeze.
+
+### What did not change
+
+Net assertion delta over the round 39 cut is **+2** (function-freeze drift, plus
+the effect probe): **231 PASS / 0 FAIL**. No heredoc payload was added, so
 `SELF_EXEC_EXPECTED_DROP` is untouched. Shellcheck clean. All 18
-`scripts/__tests__/*.test.sh` suites pass.
+`scripts/__tests__/*.test.sh` suites pass. No workflow file was touched.
