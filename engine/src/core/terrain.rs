@@ -310,10 +310,80 @@ pub fn sculpt_heightmap(
                 continue;
             }
 
-            // Smooth falloff (cosine)
-            let falloff = ((1.0 - dist / radius) * std::f32::consts::FRAC_PI_2).cos();
+            // Smooth falloff (cosine): 1.0 at the brush centre decaying to 0.0
+            // at the rim. `dist / radius` — NOT `1.0 - dist / radius`, which is
+            // the same curve reflected and gives the centre zero strength and
+            // the rim full strength, i.e. a raise brush that carves a ring.
+            let falloff = ((dist / radius) * std::f32::consts::FRAC_PI_2).cos();
             let falloff = falloff * falloff; // Squared for smoother edges
             heights[gz as usize * res + gx as usize] += strength * falloff;
         }
+    }
+}
+
+#[cfg(test)]
+mod sculpt_tests {
+    use super::*;
+
+    /// An 8x8 grid over 7.0 world units: `step` is exactly 1.0, so grid cell
+    /// `(x, z)` sits at world `(-3.5 + x, -3.5 + z)`.
+    const RES: u32 = 8;
+    const SIZE: f32 = 7.0;
+
+    fn flat() -> Vec<f32> {
+        vec![0.0f32; (RES * RES) as usize]
+    }
+
+    /// The brush must be strongest at its centre and weaken outward. Shipping
+    /// the inverse (nothing at the centre, full strength at the rim) turns every
+    /// raise into a crater ring, which is what this pins.
+    #[test]
+    fn sculpt_falloff_is_strongest_at_the_centre() {
+        let mut heights = flat();
+        // Centre on cell (3,3) => world (-0.5, -0.5), radius 2.0.
+        sculpt_heightmap(&mut heights, RES, SIZE, [-0.5, -0.5], 2.0, 5.0);
+
+        let centre = heights[3 * RES as usize + 3];
+        let one_out = heights[3 * RES as usize + 4]; // dist 1.0
+        let two_out = heights[3 * RES as usize + 5]; // dist 2.0 (at the rim)
+
+        assert!(
+            (centre - 5.0).abs() < 1e-4,
+            "the brush centre must receive full strength, got {centre}",
+        );
+        assert!(
+            one_out > 0.0 && one_out < centre,
+            "falloff must decrease outward: centre {centre}, one_out {one_out}",
+        );
+        assert!(
+            two_out < one_out,
+            "falloff must keep decreasing to the rim: one_out {one_out}, two_out {two_out}",
+        );
+        assert!(
+            two_out.abs() < 1e-4,
+            "the rim must receive ~zero strength, got {two_out}",
+        );
+    }
+
+    #[test]
+    fn sculpt_leaves_everything_outside_the_radius_untouched() {
+        let mut heights = flat();
+        sculpt_heightmap(&mut heights, RES, SIZE, [-3.5, -3.5], 1.5, 5.0);
+
+        // (2,2) is inside the square scan box but outside the circle (dist ~2.12).
+        assert_eq!(heights[2 * RES as usize + 2], 0.0);
+        // (7,7) is far outside the scan box entirely.
+        assert_eq!(heights[7 * RES as usize + 7], 0.0);
+    }
+
+    #[test]
+    fn sculpt_lowers_with_negative_strength() {
+        let mut heights = flat();
+        sculpt_heightmap(&mut heights, RES, SIZE, [-0.5, -0.5], 2.0, -5.0);
+        let centre = heights[3 * RES as usize + 3];
+        assert!(
+            (centre + 5.0).abs() < 1e-4,
+            "negative strength must lower the centre by the full strength, got {centre}",
+        );
     }
 }
