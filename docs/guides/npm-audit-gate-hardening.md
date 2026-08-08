@@ -216,7 +216,7 @@ The same round covered three reachable gate branches no case had ever reached, a
 
 Round 36 is round 34's own fix audited, and the lesson is narrow and sharp: **`readonly X` on the line after `X=…` freezes the value the line before it produced, so the window it appears to close is one line wide, not zero.** One inserted line between the two rewrites the value before it is frozen, and BOTH halves of round 34's guard then report green — the variable really is readonly (the effect probe passes, holding the wrong value) and the declaration text is unchanged (the drift check passes) — while the pin compares a block to itself. Measured on a replica against a real violation (ci.yml's `needs-any-code` output falsified to the literal `'false'`, which degates all three npm audits on the PR path): clean 212/0 exit 0, violation alone 211/1 exit 1, violation plus one inserted assignment line **212/0 exit 0, byte-identical to clean**. The honest bound the seat stated and the fix does not overclaim: the window is decisive only for pins that are the SOLE backstop on a fact — the same insertion against two other pin inputs left a step-removal violation red — and the ci-gate outputs pin is exactly such a backstop, the only thing pinning the VALUE of `needs-any-code`.
 
-The obvious fix — collapse to `readonly X="$(…)"` — is available only to the command-substitution half; a heredoc pin cannot assign and freeze in one statement, and routing it through a helper RELOCATES the window into the helper rather than removing it. So the fix pins a different property, which is the transferable part: every pin input is assigned exactly once, which makes a SECOND assignment site illegitimate BY CONSTRUCTION regardless of where it sits or how it is spelled. The suite now counts assignment sites per pin input and fails on anything but one, derived from the enrolment list so it grows with that list instead of needing an assertion per pin. That converts the attack from "insert one subtle line" into "replace the real assignment" — and for a heredoc pin, replacing it means writing the forged expected value into the payload in plain sight. Post-fix the third scenario is 211/1 exit 1: only the count assertion fires, because the rewrite still masks the violation pin it targets. Red is the contract; the message names the variable and its count.
+The obvious fix — collapse to `readonly X="$(…)"` — is available only to the command-substitution half; a heredoc pin cannot assign and freeze in one statement, and routing it through a helper RELOCATES the window into the helper rather than removing it. So the fix pins a different property, which is the transferable part: every pin input is assigned exactly once, which makes a SECOND assignment site illegitimate BY CONSTRUCTION regardless of where it sits. The suite now counts assignment sites per pin input and fails on anything but one, derived from the enrolment list so it grows with that list instead of needing an assertion per pin. That converts the attack from "insert one subtle line" into "replace the real assignment" — and for a heredoc pin, replacing it means writing the forged expected value into the payload in plain sight. **This entry originally read "regardless of where it sits *or how it is spelled*", and that half was false — see Round 39, which measured five other spellings straight through the round-36 count.** The property is the right one; the round-36 implementation of it was not general. Post-fix the third scenario is 211/1 exit 1: only the count assertion fires, because the rewrite still masks the violation pin it targets. Red is the contract; the message names the variable and its count.
 
 One implementation detail is worth more than it looks, because the check FAILED ON ITS OWN FIXTURE first and was fixed by measurement rather than by reasoning: the count must be taken over the FILTERED copy, not the raw file. The round-32 opener-set pin's expected payload carries a de-fanged copy of every `IFS= read` opener line, so a raw-file count reports 2 for all eleven heredoc pins. A round-34-style enrolment gap surfaced in the same seat — one pin input that was neither `readonly` nor enrolled, exactly the residual round 34's own comment predicted, materialising one commit later — and the count check is the mechanism answer to that class rather than a one-off correction. Not claimed, and stated in the file rather than left to inference: the drift check's own inputs remain unpinned hops, and one of them is loop-accumulated so it can never be `readonly` at all.
 
@@ -508,3 +508,265 @@ reddens `check-npm-audit.test.sh`'s `expected_steps_3` exact-line-set pin and
 triggers the full lockstep described in "Round 32: the filter's INPUT". Five
 copies of eight lines is the cheaper trade. Each copy names its own job and step
 in the FAIL text, which is what makes a red run actionable.
+
+---
+
+## Round 39 (PF-1015 / #9034): counting a WRITE, not an assignment spelling
+
+Round 38 declared itself the last round, and the addendum above declined the
+Round 39 name on purpose. This section takes it, and the justification has to be
+stated rather than assumed, because Round 38's closing lesson was **"budget
+rounds against the size of the shipped change, not the size of the suite around
+it — finding a real defect in round N is not evidence that round N was worth its
+cost."** That lesson still holds. What makes this round different from a
+self-generated one is the defect's position: it is a **live degating path on the
+sole backstop for `needs-any-code`**, filed as its own P1 ticket, not a false
+green in a guard that another pin also covers. Round 38's own architect finding
+established that `needs-any-code` is what decides whether the three npm audits
+run at all. A pin protecting that value is exactly the pin whose vacuity is
+worth one more round.
+
+### The defect
+
+Round 36 (labelled `ROUND 35` in the suite — **the in-file `ROUND` labels lag
+this log by one from round 35 onward, and this log is the authority**) closed the
+one-line insertion window by requiring exactly one assignment site per pin input.
+The property is right. The implementation identified an assignment site with a
+regex over the two spellings the file happens to use:
+
+```
+^\s*(readonly\s+)?X=   |   ^\s*IFS= read -r -d '' X\s
+```
+
+`declare X=`, `typeset X=`, `local X=`, `export X=`, `declare -r X=`,
+`printf -v X`, `mapfile`/`readarray X`, `X+=`, `let X=`, `(( X = ))` and
+`eval "X=v"` all write the variable and none of them matched. So the window round
+36 was added to close was still one line wide in every spelling but two.
+
+Measured against a clean replica of `origin/main`, with ci.yml's ci-gate
+`needs-any-code` output hardcoded to `'false'` — which degates all three npm
+audits on the PR path — and the neuter line inserted immediately before
+`  readonly expected_ci_gate_outputs`:
+
+| Scenario | Pre-fix | Post-fix |
+|---|---|---|
+| clean control | 228 / 0, exit 0 | 228 / 0, exit 0 |
+| degated, no neuter | 227 / 1, exit 1 | 227 / 1, exit 1 |
+| + `declare` neuter | **228 / 0, exit 0** | 227 / 1, exit 1 |
+| + `export` neuter | **228 / 0, exit 0** | 227 / 1, exit 1 |
+| + `typeset` neuter | **228 / 0, exit 0** | 227 / 1, exit 1 |
+| + `printf -v` neuter | **228 / 0, exit 0** | 227 / 1, exit 1 |
+| + `eval` neuter | **228 / 0, exit 0** | 227 / 1, exit 1 |
+| + bare `X="$Y"` neuter | 227 / 1, exit 1 | 227 / 1, exit 1 |
+
+Five spellings scored byte-identical to the clean control while the gate
+deciding whether the audits run was hardcoded off. Only the bare form — one of
+the two round 36 modelled — was caught.
+
+The post-fix column above is the **first cut** of the fix, at 228 assertions.
+Review found three defects in it (next section but one); the shipped
+implementation adds one assertion, so its own baselines are **229 / 0** clean
+and **228 / 1** degated-without-neuter. Its re-measured matrix is below.
+
+### The fix, and why it is not a fourth pattern widening
+
+Adding `declare|typeset|local|export|printf -v|…` to the alternation is the
+treadmill rounds 29, 31 and 34 each measured their way off, and round 31's
+recorded lesson names the exit: **stop modelling a language construct with a
+convenient byte pattern.** There is no finite list — `declare -gr`, an alias, a
+`{ ... }` group, tomorrow's builtin.
+
+The grammar-independent invariant is that every DIRECT write, whatever keyword
+carries it, **spells the variable's bare name**. So the check counts MENTIONS of
+the name rather than shapes of assignment. Occurrences behind `$` or `${` are
+reads and are excluded. Expected count is **three** — the `PIN_INPUTS` list
+entry, the assignment site, the `readonly` line — **minus one for the collapsed
+`readonly X=<value>` form**, which fuses assignment and freeze. Collapsed is
+*detected* at runtime (`grep -qE '^[[:space:]]*readonly[[:space:]]+X='`) rather
+than enumerated, so converting a pin to that form updates its own expectation
+and touches nothing else.
+
+### The corpus, and the two defects the first implementation shipped
+
+The first cut of this check ran over a new comment-stripped copy (`SELF_CODE`)
+and identified a mention with `grep -oE "(^|[^A-Za-z0-9_\$\{])X([^A-Za-z0-9_]|$)"`.
+Review measured three defects in that pair, all of them silent and all of them
+in the false-PASS direction. All three are fixed; the record is here because
+each was invisible in the suite's own output — **228 PASS / 0 FAIL either way.**
+
+**The strip was an executable blind region.** "First non-blank byte is `#`" is
+bash's comment grammar only in **command position**. The same bytes inside an
+already-open double-quoted string are data, and a later `eval` can execute them.
+Measured: a two-line insertion that parks the write on a `#`-leading
+continuation line and evals it back out scored a clean **228 PASS / 0 FAIL**
+against a ci-gate `needs-any-code` hardcoded to `'false'`, and shellcheck had
+nothing to say about it. The strip is therefore gone: `SELF_CODE` is deleted and
+the count runs over `$SELF_EXEC`, the same corpus every other pin in this file
+uses. What made that possible is not a better parser but a convention this file
+already keeps — a pin's name written in prose or inside a `fail`/`pass` string
+carries its `$` sigil. Fifteen comment lines were re-spelled to honour it. A
+bare name anywhere outside a pin's three sites inflates that name's count and
+reddens the check: a false FAIL, never a false PASS, and the remedy is one
+keystroke. (Counting over `$SELF_EXEC` rather than the *raw file* is a separate,
+older constraint, recorded in round 32: the opener-set pin's expected payload
+carries a de-fanged copy of every `IFS= read` opener line, so a raw-file count
+over-reports every heredoc pin and the check fails on its own fixture.)
+
+**`\{` is not a bash escape sequence.** In a double-quoted string `\$` yields a
+literal `$`, but the backslash before `{` **survives** — and it lands inside the
+bracket expression, where it is literal. So `[^A-Za-z0-9_\$\{]` silently
+excluded `\` from the legal-prefix set, and `declare \X=v` — which bash executes
+as a plain assignment (verified on macOS bash 3.2.57) — stopped being counted.
+Measured green against the same degated ci-gate, in three spellings.
+
+**`grep -o` consumes the trailing delimiter it matched**, so two mentions one
+byte apart collapse into a single match. Measured: `/usr/bin/grep -oE` on
+`  declare zz_probe zz_probe=1` returns **1** where the correct answer is 2 — an
+undercount, i.e. an error in the direction that turns a red gate green.
+
+The fix for both regex defects is to stop encoding neighbour bytes in a bracket
+class at all. `count_bare_mentions()` is an awk loop that reads the two
+neighbour bytes **by index** and advances one byte past each hit, so it has
+neither failure mode. Note the awk classes carry no backslashes — `$` and `{`
+are literal inside brackets in awk — which is the whole lesson, restated in the
+fix.
+
+Re-measured on the same degated replica, neuter inserted immediately before
+`  readonly expected_ci_gate_outputs`, against the **final** implementation —
+every spelling blocks, and the count it reports names why:
+
+| neuter | shipped implementation |
+|---|---|
+| bare `X="$Y"` | 227 / 1, exit 1 — `=4(want 3)` |
+| `declare` / `export` / `typeset` | 227 / 1, exit 1 — `=4(want 3)` |
+| `printf -v` / `eval` | 227 / 1, exit 1 — `=4(want 3)` |
+| `declare \X` / `export \X` / `printf -v \X` | 227 / 1, exit 1 — `=4(want 3)` |
+| adjacent declaration | 227 / 1, exit 1 — `=5(want 3)` |
+| comment-strip `eval` | 227 / 1, exit 1 — `=4(want 3)` |
+
+### The counter is asserted directly, on a synthetic corpus
+
+Both regex defects made the *live* count too low, and neither was visible in the
+suite's output. Exercising the counter only through the live corpus can never
+catch that, because the live corpus is the thing whose count is in question. So
+`count_bare_mentions` is a function, and eleven cases assert its semantics
+against a `zz_probe` name that is deliberately not a pin: bare, `declare`,
+backslash-prefixed, adjacent mentions, `$`-read, `${}`-read, suffix substring,
+prefix substring, comment line, `readonly` freeze, `printf -v`. Each case is a
+regression probe for a spelling that was, or would be, miscounted — not an
+illustration.
+
+Proven non-vacuous by mutating the counter four ways: reintroducing the
+backslash exclusion fails `backslash-assign(want 1 got 0)`; dropping the `$`
+exclusion fails `dollar-read(want 0 got 1)`; dropping the after-check fails
+`suffix-substring(want 0 got 1)`. The fourth — advancing `p` past the whole
+match instead of one byte — is *not* caught, and is recorded here rather than
+papered over: index-based counting is insensitive to that advance, because a
+shared single-byte delimiter is still found at the correct offset. The
+`adjacent-mentions` case remains honest regardless; it is the probe for the
+`grep -o` defect above, which it does catch.
+
+### Honest bound
+
+This catches every direct spelling **by construction** — a write that never
+names the variable cannot be a direct write. It does not catch an indirect one: a
+`declare -n` alias, or `eval` on a name assembled at runtime. (The measured
+`eval "X=$Y"` case *is* caught, because that spelling names the variable
+literally.) It raises cost; it does not prove impossibility. Same register as the
+`check-ci-success.sh` anti-tamper language.
+
+It also did not, as first cut, cover **redefinition** — the counter is a
+function, and a function is resolved by name at call time. Round 40 closes that.
+
+### What did not change
+
+The count assertion replaced round 36's, and the counter self-test is new. This
+round's cut measured **229 PASS / 0 FAIL** against clean `main`'s **228**. No
+heredoc payload was added, so `SELF_EXEC_EXPECTED_DROP` is untouched.
+
+## Round 40 (PF-1015 / #9034): a function is a hop, and it was unpinned
+
+Round 39 extracted the counter into `count_bare_mentions()` and asserted its
+semantics against a synthetic corpus. That extraction introduced a **late-bound,
+unpinned hop**, and the security review measured the consequence: a one-line
+function redefinition inserted *after* the self-test and *before* the consuming
+loop rebinds the name. The self-test runs against the real definition and passes;
+the loop then calls the fake, which returns each pin's own `pin_want`.
+
+| tree | PASS | FAIL | exit |
+|---|---|---|---|
+| clean (round 39 cut) | 229 | 0 | 0 |
+| degated, no neuter | 228 | 1 | 1 |
+| **degated + bare write + counter redefined after the self-test** | **229** | **0** | **0** |
+
+Byte-identical to clean, with all three npm audits degated. This is the file's
+own round 30/31 lesson — *evidence produced upstream of a consumer does not bind
+the consumer; pin every hop* — applied to callables. A self-test proves a
+DEFINITION; it says nothing about the binding the consumer later resolves.
+
+The same review noted the pre-existing floor: **no** function in the suite was
+redefinition-protected, so `fail() { :; }` inserted at line 135 on the degated
+tree measured **228 PASS / 0 FAIL, exit 0**. The new finding did not lower the
+attacker's floor — it was already one line and universal — but it was strictly
+stealthier (229 vs 228, i.e. no missing assertion to notice).
+
+### The fix: `readonly -f`, on every function, at its own definition
+
+All 20 functions the suite defines carry a `readonly -f <name>` on the line
+immediately after their closing brace. Measured behaviour in bash 3.2 (the macOS
+system shell): redefining a frozen function prints `bash: f: readonly function`,
+returns 1, and **the fake never binds** — the real function still runs. The suite
+runs under `set -uo pipefail` with no `-e`, so the refusal does not abort; as with
+the variable pins, the work is done by **value preservation**, not detection.
+
+Two constraints shaped the placement:
+
+- `readonly -f` **cannot pre-declare** an undefined function (`readonly: g: not a
+  function`), so a single freeze block at the end of the file is impossible — an
+  attacker would simply define-then-get-frozen. Every freeze must follow its own
+  definition.
+- The existing `readonly`-declaration drift check split on spaces, so
+  `readonly -f name` injected both `-f` and the function name into the variable
+  set and broke `assert_block_lines_exact` against `PIN_INPUTS`. The scan is now
+  split: `readonly -f` lines are filtered out of the variable check and get their
+  own drift assertion (the set of frozen names must equal the set of functions
+  defined in `$SELF_EXEC`).
+
+### The drift check is not the proof — the effect probe is
+
+Comparing two lists of file text proves the declarations are consistent, not that
+they bind. So a probe attempts, inside a command substitution, to redefine
+`pass()` with a fake that prints `FN-FREEZE-FAKE-BOUND`, then calls it. The
+assertion requires the capture to contain **neither** that marker **and** both
+the shell's `readonly function` refusal **and** the real `pass()` output — the
+positive half is what stops an empty capture from some unrelated breakage
+scoring as a pass.
+
+### Measured
+
+| tree | PASS | FAIL | exit |
+|---|---|---|---|
+| clean, this branch | 231 | 0 | 0 |
+| degated, no neuter | 230 | 1 | 1 |
+| degated + bare write | 230 | 1 | 1 — `=4(want 3)` |
+| **degated + bare write + counter redefined** (the finding) | **230** | **1** | **1** |
+| **degated + `fail() { :; }`** (the pre-existing floor) | **230** | **1** | **1** |
+
+Both bypasses now report the degate.
+
+### Honest bound
+
+This freezes the functions **this file** defines. It does not extend to the other
+~17 bash suites under `scripts/__tests__/`, which remain rebindable by one
+inserted line — that sweep is tracked separately (#9123) rather than scope-crept here. It
+does not close `declare -n` aliasing or `eval` on a runtime-assembled name (round
+39's bound still stands). And a NEW function added later without a freeze is
+unprotected until the drift check notices it — which it will, because the check
+is defined the other way round: every definition must have a freeze.
+
+### What did not change
+
+Net assertion delta over the round 39 cut is **+2** (function-freeze drift, plus
+the effect probe): **231 PASS / 0 FAIL**. No heredoc payload was added, so
+`SELF_EXEC_EXPECTED_DROP` is untouched. Shellcheck clean. All 18
+`scripts/__tests__/*.test.sh` suites pass. No workflow file was touched.

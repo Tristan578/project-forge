@@ -71,7 +71,7 @@
 # spelling-independent by construction: an inserted line is unexpected whatever
 # it spells. The cost is deliberate churn -- adding a job or bumping an action
 # reddens the suite until the expected set is updated, which is the prompt, not
-# a defect. See ROUND 33 above expected_steps_1 for the routine trigger.
+# a defect. See ROUND 33 above $expected_steps_1 for the routine trigger.
 #
 # WHY EACH PIN EXISTS
 # -------------------
@@ -131,7 +131,9 @@ CD_YML="$REPO_ROOT/.github/workflows/cd.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "gate script not found: $SCRIPT"; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "jq is required to run these tests"; exit 1; }
@@ -170,6 +172,7 @@ run_gate_script() {
   grep -E 'unbound variable|bad substitution|syntax error' <<<"$out" >> "$FIX/bash-errors.log" || true
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_gate_script
 
 # Same, against the gate under test WITH one synthetic waiver in its allowlist
 # ($WAIVED_GATE, built below). The shipped gate waives nothing, so the WAIVED /
@@ -179,15 +182,18 @@ run_gate_script() {
 run_gate() {
   run_gate_script "$WAIVED_GATE" "$1"
 }
+readonly -f run_gate
 
 # Same, but invoked with the ROOT workspace arg (`.`) — the invocation shape
 # quality-gates.yml/cd.yml use for the repo-root audit (PF-1010 / #9029).
 run_gate_root() {
   run_gate_script "$WAIVED_GATE" "$1" .
 }
+readonly -f run_gate_root
 
 # Helper: write a fixture file, echo its absolute path.
 fixture() { local name="$1"; cat > "$FIX/$name"; echo "$FIX/$name"; }
+readonly -f fixture
 
 # Build a gate-script VARIANT whose only byte difference from the real gate is
 # ONE INSERTED ALLOWED_ADVISORIES entry ($2 must include its surrounding double
@@ -250,6 +256,7 @@ make_gate_variant() {
   fi
   GATE_VARIANT="$FIX/$name"
 }
+readonly -f make_gate_variant
 
 # The gate variant that MOST cases below run against: the real gate plus one
 # waived advisory, pinned to the root brace-expansion path the fixtures use.
@@ -808,6 +815,7 @@ make_npm_shim() {
     "cat '$1'" > "$NPM_SHIM_DIR/npm"
   chmod +x "$NPM_SHIM_DIR/npm"
 }
+readonly -f make_npm_shim
 
 # Deliberately does NOT set NPM_AUDIT_CMD — and unsets any inherited value, so
 # a developer running this suite with the seam exported still exercises the
@@ -820,6 +828,7 @@ run_gate_default_cmd() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_gate_default_cmd
 
 res="$(run_gate_default_cmd "$FIX/clean.json")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "0" ]; then pass "the default audit command (seam unset) actually runs, and passes a clean report (exit 0)"; else fail "default audit command on a clean report should exit 0, got $rc — output: $out"; fi
@@ -1117,6 +1126,7 @@ assert_job_key_lines() { # $1 = comment-stripped workflow, $2 = label, $3 = expe
   fi
   pass "$2: the 2-space lines inside jobs: are exactly the $(grep -c '' <<<"$actual") expected job keys (nothing can truncate or over-run a block cut)"
 }
+readonly -f assert_job_key_lines
 
 # The job-key enumeration above is anchored at `jobs:` and runs to EOF. What
 # makes that sound is the set of COLUMN-0 lines — and leaving THAT set inferred
@@ -1145,6 +1155,7 @@ assert_top_level_keys() { # $1 = comment-stripped workflow, $2 = label, $3 = exp
   fi
   pass "$2: the column-0 keys are exactly the $(grep -c '' <<<"$actual") expected top-level keys with jobs last (the job-key enumeration cannot be ended early from inside a job body)"
 }
+readonly -f assert_top_level_keys
 
 # The two enumerations above bound the region AT and BELOW `jobs:`. Nothing
 # bounded the region ABOVE it. assert_top_level_keys reads column-0 lines only,
@@ -1212,6 +1223,7 @@ assert_preamble_lines() { # $1 = comment-stripped workflow, $2 = label, $3 = exp
   fi
   pass "$2: the lines above jobs: are exactly the $(grep -c '' <<<"$actual") expected preamble lines (no workflow-level env:/permissions: entry can be added, however its key is spelled)"
 }
+readonly -f assert_preamble_lines
 
 # One level deeper, the same defect again: the pins INSIDE each cut job block --
 # the 4-space job-level keys -- match by literal bytes through a `["']?` class.
@@ -1315,6 +1327,7 @@ assert_job_level_keys() { # $1 = cut job block, $2 = label, $3 = expected 4-spac
   fi
   pass "$2: the job-level keys are exactly the $(grep -c '' <<<"$actual") expected keys (no key below can be respelled or duplicated past the pins on it)"
 }
+readonly -f assert_job_level_keys
 
 step_block() { # $1 = comment-stripped job block, $2 = step-name needle (fixed string)
   awk -v needle="$2" '
@@ -1323,6 +1336,7 @@ step_block() { # $1 = comment-stripped job block, $2 = step-name needle (fixed s
     f {print}
   ' <<<"$1"
 }
+readonly -f step_block
 
 # The STEP-level twin of assert_job_level_keys, and it exists for the same
 # measured reason one layer down. Every pin inside a cut STEP block -- the
@@ -1439,6 +1453,7 @@ $delta"
   fi
   pass "$2: the step-level lines are exactly the $(grep -c '' <<<"$actual") expected lines (no key can be respelled or duplicated, and no scalar extended by a continuation, past the pins on it)"
 }
+readonly -f assert_step_level_keys
 
 # Round 23. The continuation class recurs at JOB level, and round 22's scope
 # decision -- step level only -- did not survive being measured.
@@ -1503,6 +1518,7 @@ $delta"
   fi
   pass "$2: the block is exactly the $(grep -c '' <<<"$actual") expected lines (nothing can be appended to it, inserted into it or rewritten inside it past the pins on it)"
 }
+readonly -f assert_block_lines_exact
 
 # $1 = comment-stripped job block, $2 = label, $3 = expected verbatim lines.
 # Cuts that job's `steps:` list and pins it line-for-line. The cut ends at the
@@ -1554,6 +1570,7 @@ assert_steps_block() {
   blk="$(awk "/^    [\"']?steps[\"']?[[:space:]]*:/{f=1;print;next} f && \$0 != \"\" && !/^      /{exit} f{print}" <<<"$1")"
   assert_block_lines_exact "$blk" "$2" "$3" "the per-step pins cover only the steps they NAME, so a step added beside them -- or a one-line edit to an unpinned sibling such as \`npm ci\` -- runs arbitrary code before the first audit while every named step stays byte-identical" "$site"
 }
+readonly -f assert_steps_block
 
 # The three workspace invocations every security job must carry, by EXACT step
 # name — anchoring on the name both scopes the tamper checks and forces the
@@ -1619,6 +1636,7 @@ assert_audit_steps_untampered() {
     fi
   done
 }
+readonly -f assert_audit_steps_untampered
 
 echo ""
 echo "=== quality-gates.yml integration wiring ==="
@@ -3036,7 +3054,7 @@ SELF="${BASH_SOURCE[0]}"
 # line -- a comment, or the same token inside an ordinary string -- open a
 # swallow that hides executable lines from both locks, and an opener whose
 # terminator never appears alone would swallow to EOF. That is a weakening, not a
-# scoping, and it was live here: the comment above the expected_steps_1 fixture
+# scoping, and it was live here: the comment above the $expected_steps_1 fixture
 # spells that fixture's own delimiter while explaining why the fixtures avoid
 # command substitution, and a naive filter hid the 39 lines after it -- including
 # a real opener -- from both locks.
@@ -3144,11 +3162,11 @@ fi
 # ROUND 31. The pin further down proves the FILTER's text. This one proves the
 # filter's OUTPUT is what the two hygiene locks actually scan. They read
 # `$SELF_EXEC`, one assignment downstream of the pinned variable, and THAT HOP
-# WAS UNPINNED: a single `SELF_EXEC="pinned-scope-removed"` inserted after the
+# WAS UNPINNED: a single hardcoded write to $SELF_EXEC inserted after the
 # assignment above measured 194 PASS / 0 FAIL, `bash -n` clean, with a planted
 # hygiene violation executing at runtime and both affirmative pin lines still
 # printing -- the `-z` arm is satisfied by any non-empty string, and
-# `SELF_EXEC_DIAG` is computed separately from the real filter so it stays empty.
+# $SELF_EXEC_DIAG is computed separately from the real filter so it stays empty.
 # The lesson, which is why round 30's fix did not cover this: a pin protects the
 # link it NAMES, not the link the evidence flows through, so pin every hop
 # between a pinned artifact and its consumer.
@@ -3170,7 +3188,7 @@ else
 fi
 
 # ROUND 30. The self-check above is VACUOUS against a reversion of the filter
-# ITSELF. `SELF_EXEC_DIAG` is populated only from what the awk program writes to
+# ITSELF. $SELF_EXEC_DIAG is populated only from what the awk program writes to
 # stderr, so a program carrying no stderr-writing logic can never populate it,
 # for ANY input -- the `elif` arm is structurally unreachable the moment the
 # filter regresses to the pre-round-27 naive form, and the only defense left is
@@ -3190,8 +3208,8 @@ fi
 # rather than on what it pins.
 #
 # ROUND 31 changed WHAT is pinned, not how much. Round 30 cut the block out of
-# the FILE at column 0 (`/^SELF_EXEC_FILTER='$/`), guarded by a column-0
-# `grep -cE "^SELF_EXEC_FILTER="` count. Column 0 is not bash's assignment
+# the FILE at column 0 (an anchored match on the $SELF_EXEC_FILTER opener),
+# guarded by a column-0 opener count. Column 0 is not bash's assignment
 # grammar: a leading space, a leading tab, `declare `, `typeset `, and a `: ; `
 # separator all assign, and all five measured 194 PASS / 0 FAIL with a naive
 # filter in force and a planted hygiene violation executing, while the column-0
@@ -3243,7 +3261,7 @@ assert_block_lines_exact "$SELF_EXEC_FILTER" "the suite's executable-line filter
 #
 # The volume pin below catches that mutation as written (it drops 330, not 326)
 # -- but only as arithmetic, and arithmetic is compensable. Re-measured at
-# 2efd084c: the same insertion PLUS a one-line bump of SELF_EXEC_EXPECTED_DROP
+# 2efd084c: the same insertion PLUS a one-line bump of $SELF_EXEC_EXPECTED_DROP
 # to 330 is GREEN 194/0 with the violation still executing, and a JSON fixture
 # reformatted four lines shorter would compensate without touching any pin at
 # all. So pin the LINES instead -- the ninth application of the exact-line-set
@@ -3587,10 +3605,10 @@ assert_steps_block "${ci_gate_block:-}" "ci.yml ci-gate job steps:" "${expected_
 #
 #   scenario                                            pre-fix        post-fix
 #   O1  extra real heredoc opener, NO neuter            197/1 RED      197/1 RED
-#   O2  same + suite_openers="$expected_openers"        198/0 GREEN    197/1 RED
-#   O3  same + expected_openers="$suite_openers"        198/0 GREEN    197/1 RED
+#   O2  same + $expected_openers -> $suite_openers       198/0 GREEN    197/1 RED
+#   O3  same + $suite_openers -> $expected_openers       198/0 GREEN    197/1 RED
 #   G1  ci-gate needs-any-code falsified, NO neuter     197/1 RED      197/1 RED
-#   G2  same + ci_gate_outputs_blk=<expected>           198/0 GREEN    197/1 RED
+#   G2  same + <expected> -> $ci_gate_outputs_blk        198/0 GREEN    197/1 RED
 #
 # O1/G1 are the controls that make the neuter the whole ingredient. G2 is the
 # severe one: it hardcodes ci-gate's needs-any-code output to 'false', which
@@ -3601,7 +3619,7 @@ assert_steps_block "${ci_gate_block:-}" "ci.yml ci-gate job steps:" "${expected_
 # Fixed by marking every pin input `readonly`, which under `set -uo pipefail`
 # with no `-e` is fail-closed BY PRESERVATION rather than by detection: a later
 # assignment errors, does not abort, and THE ORIGINAL VALUE SURVIVES. Round 31
-# established that precedent for SELF_EXEC_FILTER; this generalizes it to every
+# established that precedent for $SELF_EXEC_FILTER; this generalizes it to every
 # variable a pin reads on either side.
 #
 # `readonly` is then verified BY EFFECT, not by text. A pin on the spelling of
@@ -3668,8 +3686,9 @@ fi
 # genuinely readonly (the effect probe passes, holding the wrong value) and the
 # declaration text is unchanged (the drift check passes), so both halves of the
 # round-34 guard report green while the pin compares a block to itself.
-# Measured: `expected_ci_gate_outputs="$ci_gate_outputs_blk"` inserted before
-# its `readonly` is 211 PASS / 0 FAIL, byte-identical to clean, against a
+# Measured: a bare write of $ci_gate_outputs_blk into
+# $expected_ci_gate_outputs before its `readonly` is 211 PASS / 0 FAIL,
+# byte-identical to clean, against a
 # violation that is 210/1 without it -- and that pin is the SOLE backstop on the
 # VALUE of `needs-any-code`, the single trigger degating all three npm audits on
 # the PR path.
@@ -3678,29 +3697,151 @@ fi
 # command-substitution half; a heredoc pin cannot assign and freeze in one
 # statement, and routing it through a helper relocates the window into the
 # helper rather than removing it. So close it by COUNT. Every pin input is
-# assigned exactly once in this file (measured, all 29), which makes a SECOND
-# assignment site -- wherever it sits, in either spelling below -- not a
-# legitimate one by construction. That converts the attack from "insert one
-# subtle line" into "replace the real assignment", and for a heredoc pin
-# replacing it means writing the forged expected value into the payload in
-# plain sight. Like every pin here it raises cost rather than proving
-# impossibility; the count is what makes the cheap version red.
+# written exactly once in this file, which makes a SECOND write -- wherever it
+# sits -- not a legitimate one by construction. That converts the attack from
+# "insert one subtle line" into "replace the real assignment", and for a
+# heredoc pin replacing it means writing the forged expected value into the
+# payload in plain sight.
 #
-# Count over $SELF_EXEC, not the raw file: the opener-set pin's own expected
-# payload carries a de-fanged copy of every `IFS= read` opener line, so a
-# raw-file count reports 2 for all eleven heredoc pins (measured) and the check
-# would fail on its own fixture. The filter drops heredoc payload and is itself
-# pinned by body and by volume above.
+# ROUND 39. The ROUND 35 block directly above is the hardening guide's round-36
+# entry: the in-file ROUND labels lag the guide's round log by one from there
+# on, and the guide is the authority on round numbers. That block implemented
+# the count by matching two assignment SPELLINGS with a regex -- the two this
+# file happens to use -- and the exploit is one line in a third.
+# `declare X=`, `typeset X=`, `local X=`, `export X=`,
+# `declare -r X=`, `printf -v X`, `mapfile`/`readarray X`, `X+=`, `let X=`,
+# `(( X = ))` and `eval "X=v"` all write the variable and none of them matched.
+# Measured against a clean replica of origin/main:
+# a `declare` write of $ci_gate_outputs_blk into $expected_ci_gate_outputs,
+# inserted before its `readonly`, scored 228 PASS / 0 FAIL, byte-identical to
+# the clean control,
+# against a hardcoded ci-gate needs-any-code that is 227/1 without it -- the
+# same neuter round 35 was added to stop, in a spelling its regex did not know.
+#
+# Widening the pattern a fourth time is the treadmill rounds 29, 31 and 34 each
+# measured their way off, and round 31's recorded lesson names the exit: stop
+# modelling a language construct with a convenient byte pattern, and assert on
+# something grammar-independent. Every DIRECT write, whatever keyword carries
+# it, spells the variable's BARE NAME -- so count MENTIONS of the name instead
+# of shapes of assignment. Occurrences behind `$` or `${` are reads, not
+# writes, and are excluded.
+#
+# Each pin is mentioned exactly three times: its entry in the $PIN_INPUTS list,
+# its assignment site, and its `readonly` line. The one exception is the
+# collapsed form (`readonly X=<value>`, available to a pin whose value is a
+# literal or a command substitution), which fuses the last two into one line
+# and so is mentioned twice -- detected here rather than listed, so converting
+# a pin to the collapsed form updates its own expectation and nothing else.
+#
+# The honest bound: this catches every direct spelling by construction, because
+# a write that never names the variable cannot be a direct write. It does not
+# catch an indirect one -- a `declare -n` alias, or `eval` on a name assembled
+# at runtime. Like every pin here it raises cost rather than proving
+# impossibility; what it does is make the cheap version red no matter which
+# keyword it is written with.
+#
+# Count over $SELF_EXEC -- the same corpus every other pin in this file uses --
+# rather than the raw file or a comment-stripped copy of it.
+#
+# Not the raw file, because the opener-set pin's own expected payload carries a
+# de-fanged copy of every `IFS= read` opener line, so a raw-file count
+# over-reports every heredoc pin and the check would fail on its own fixture.
+# The filter drops heredoc payload and is itself pinned by body and by volume
+# above.
+#
+# Not a comment-stripped copy, because a strip creates a region this count
+# cannot see, and "first non-blank byte is `#`" is bash's comment grammar only
+# in COMMAND position -- the same bytes inside an already-open quoted string are
+# data a later `eval` can execute. Measured: a two-line insertion that parks the
+# write on a `#`-leading continuation line and evals it back out scored a clean
+# 228 PASS / 0 FAIL against a hardcoded ci-gate needs-any-code, and shellcheck
+# had nothing to say about it. Counting the whole executable text has no such
+# region, at the price of one convention -- which is the convention this file
+# already keeps: a pin's name written in prose or inside a `fail`/`pass` string
+# carries its `$` sigil. A bare name anywhere outside the three sites below
+# inflates that name's count and reddens this check: a false FAIL, never a false
+# PASS, and the remedy is one keystroke.
+#
+# Neighbour bytes are inspected by index, not encoded in a regex bracket class.
+# The class is where the last two defects of this check lived. `\{` is not a
+# bash escape sequence, so writing the class as `[^A-Za-z0-9_\$\{]` leaves the
+# backslash inside the brackets where it is literal -- silently excluding `\`
+# from the legal-prefix set, so `declare \X=v`, which bash executes as a plain
+# assignment (verified on macOS bash 3.2.57), stopped being counted and scored a
+# clean 228/0 against a hardcoded ci-gate output. And `grep -o` consumes the
+# trailing delimiter it matched, so two mentions one byte apart collapse into a
+# single match -- an undercount, i.e. an error in the false-PASS direction.
+# Indexing has neither failure mode: it reads the two neighbour bytes directly
+# and advances one byte past each hit. Note the awk classes below carry no
+# backslashes at all, `$` and `{` being literal inside brackets -- that is the
+# whole lesson, restated in the fix.
+#
+# It is a function so its semantics are asserted directly, on a synthetic
+# corpus, immediately below. Both defects above were silent: each made the live
+# count too LOW, which is the direction that turns a red gate green, and neither
+# was visible in the suite's own output -- 228/0 either way. Exercising the
+# counter only through the live corpus can never catch that, because the live
+# corpus is the thing whose count is in question.
+# shellcheck disable=SC2016  # awk program text: $0 is awk's, not the shell's
+count_bare_mentions() {
+  awk -v n="$1" '
+    {
+      s = $0; p = 1
+      while ((i = index(substr(s, p), n)) > 0) {
+        a = p + i - 1; b = a + length(n)
+        before = (a > 1) ? substr(s, a - 1, 1) : ""
+        after  = (b <= length(s)) ? substr(s, b, 1) : ""
+        if (before !~ /[A-Za-z0-9_${]/ && after !~ /[A-Za-z0-9_]/) c++
+        p = a + 1
+      }
+    }
+    END { print c + 0 }'
+}
+readonly -f count_bare_mentions
+
+# Every case below is a regression probe, not an illustration: each corresponds
+# to a spelling that was, or would be, miscounted. `zz_probe` is deliberately
+# not a pin name, so these fixtures do not perturb the live count above.
+cm_bad=""
+cm_case() { # $1 label, $2 expected, $3 corpus
+  cm_got="$(count_bare_mentions zz_probe <<<"$3")"
+  [ "$cm_got" = "$2" ] || cm_bad="$cm_bad ${1}(want ${2} got ${cm_got})"
+}
+readonly -f cm_case
+# shellcheck disable=SC2016  # the corpora are literal source text, not expansions
+{
+cm_case bare-assign        1 'zz_probe=1'
+cm_case declare-assign     1 '  declare zz_probe=1'
+cm_case backslash-assign   1 '  declare \zz_probe=1'
+cm_case adjacent-mentions  2 '  declare zz_probe zz_probe=1'
+cm_case dollar-read        0 '  x="$zz_probe"'
+cm_case brace-read         0 '  x="${zz_probe}"'
+cm_case suffix-substring   0 '  zz_probely=1'
+cm_case prefix-substring   0 '  my_zz_probe=1'
+cm_case comment-line       1 '# zz_probe is named here'
+cm_case readonly-freeze    1 '  readonly zz_probe'
+cm_case printf-v           1 '  printf -v zz_probe "%s" "$x"'
+}
+if [ -n "$cm_bad" ]; then
+  fail "the pin-write counter miscounts a known spelling, so the assertion below is weaker than it reads (case(want got)):$cm_bad"
+else
+  pass "pin-write counter counts every direct spelling and no read: backslash-prefixed, adjacent, \$-read, \${}-read, substring, comment, printf -v"
+fi
+
 pin_multi=""
 while IFS= read -r pin_v; do
   [ -n "$pin_v" ] || continue
-  n_assign="$(grep -cE "^[[:space:]]*(readonly[[:space:]]+)?${pin_v}=|^[[:space:]]*IFS= read -r -d '' ${pin_v}[[:space:]]" <<<"$SELF_EXEC" || true)"
-  [ "$n_assign" = "1" ] || pin_multi="$pin_multi ${pin_v}=${n_assign}"
+  n_mention="$(count_bare_mentions "$pin_v" <<<"$SELF_EXEC")"
+  pin_want=3
+  if grep -qE "^[[:space:]]*readonly[[:space:]]+${pin_v}=" <<<"$SELF_EXEC"; then
+    pin_want=2
+  fi
+  [ "$n_mention" = "$pin_want" ] || pin_multi="$pin_multi ${pin_v}=${n_mention}(want ${pin_want})"
 done <<<"$PIN_INPUTS"
 if [ -n "$pin_multi" ]; then
-  fail "pin-input variable(s) are assigned other than exactly once, so the value a pin reads is not the one this file shows at its assignment site (name=count):$pin_multi"
+  fail "pin-input variable(s) are named other than exactly once outside their list entry and readonly, so the value a pin reads is not the one this file shows at its assignment site. Budget is three bare mentions per name (list entry, assignment, readonly), two for the collapsed 'readonly X=' form; a mention in prose or in a message string must carry its sigil (name=found(want)):$pin_multi"
 else
-  pass "every pin-input variable has exactly one assignment site (no inserted line can rewrite one before its readonly freezes it)"
+  pass "every pin-input variable is written exactly once, in any assignment spelling (no inserted line can rewrite one before its readonly freezes it)"
 fi
 
 # Cross-check the probed list against the declarations actually in the file.
@@ -3712,7 +3853,12 @@ fi
 # residual this cannot close: a NEW pin variable added later with neither a
 # `readonly` nor a list entry is unprotected -- no assertion can know about a
 # variable that does not exist yet.
-ro_decls="$(sed -n 's/^[[:space:]]*readonly[[:space:]]\{1,\}//p' <<<"$SELF_EXEC")"
+#
+# `readonly -f` freezes a FUNCTION, not a pin variable. Those lines get their own
+# drift check below, so they are dropped here rather than polluting this set with
+# a bare `-f` token and a function name.
+ro_var_lines="$(grep -vE '^[[:space:]]*readonly[[:space:]]+-f[[:space:]]' <<<"$SELF_EXEC" || true)"
+ro_decls="$(sed -n 's/^[[:space:]]*readonly[[:space:]]\{1,\}//p' <<<"$ro_var_lines")"
 ro_names="$(tr ' ' '\n' <<<"$ro_decls")"
 ro_bare=""
 while IFS= read -r ro_line; do
@@ -3726,6 +3872,46 @@ assert_block_lines_exact "$declared_ro" \
   "the set of readonly-declared names (drift check against the probed list)" \
   "$expected_ro" \
   "the probed list and the declarations have drifted apart -- a pin variable carries one without the other, so either the probe silently covers nothing or a declared name is never probed"
+
+# Same treatment for CALLABLES. Every function this file defines is frozen with a
+# `readonly -f` on the line after its definition, because a function is a hop the
+# pins above do not cover: they prove what $SELF_EXEC contains, and a function is
+# resolved by NAME at call time. One inserted redefinition rebinds it. The
+# stealthiest target is a function the evidence flows through -- rebinding
+# count_bare_mentions between its own self-test and the loop that consumes it
+# makes every pin report the count it wants, so the suite scores byte-identical
+# to a clean run while the audit gate is fully degated. A rebound `fail` is the
+# cruder version of the same move. This is the file's own "pin every hop" lesson
+# applied to callables: a self-test proves a DEFINITION, not the binding the
+# consumer later resolves.
+# Honest bound, same as the variable drift check above: removing BOTH a
+# definition and its freeze shrinks both sides and still matches. The effect
+# probe below is what proves a surviving freeze is in force.
+defined_fns_raw="$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)()[[:space:]]*{.*$/\1/p' <<<"$SELF_EXEC")"
+frozen_fns_raw="$(sed -n 's/^[[:space:]]*readonly[[:space:]]\{1,\}-f[[:space:]]\{1,\}//p' <<<"$SELF_EXEC")"
+defined_fns="$(sort -u <<<"$defined_fns_raw")"
+frozen_fns="$(sort -u <<<"$frozen_fns_raw")"
+assert_block_lines_exact "$frozen_fns" \
+  "the set of readonly -f frozen functions (drift check against the functions defined)" \
+  "$defined_fns" \
+  "a function is defined without a matching 'readonly -f' freeze, or a freeze names a function that no longer exists -- an unfrozen function can be rebound by a single inserted line, which silently degates every assertion whose evidence passes through it"
+
+# Effect probe. The drift check above only compares two lists of file text; this
+# proves a freeze BINDS in the running shell. The fake prints a marker, so if the
+# freeze holds bash refuses the redefinition and the call reaches the real
+# function -- the marker can never appear. The positive half keeps the assertion
+# non-vacuous: the capture must ALSO show the refusal and the real function's own
+# output, so an empty capture from some unrelated breakage fails instead of
+# passing. Runs inside a command substitution, so the attempted redefinition
+# cannot escape into the rest of the suite either way.
+fn_freeze_probe="$( { pass() { echo "FN-FREEZE-FAKE-BOUND"; }; pass "fn-freeze effect probe"; } 2>&1 )"
+if [[ "$fn_freeze_probe" == *"FN-FREEZE-FAKE-BOUND"* ]]; then
+  fail "a 'readonly -f' freeze does not bind: redefining pass() inside the probe replaced it and the fake ran, so every function in this suite is rebindable by one inserted line despite the declarations"
+elif [[ "$fn_freeze_probe" == *"readonly function"* && "$fn_freeze_probe" == *"fn-freeze effect probe"* ]]; then
+  pass "'readonly -f' actually binds at runtime (a redefinition is refused and the real function still runs, not merely declared frozen in the file text)"
+else
+  fail "the 'readonly -f' effect probe was inconclusive -- expected both the shell's readonly-function refusal and the real pass() output, got: ${fn_freeze_probe}"
+fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
