@@ -205,67 +205,6 @@ describe('healthChecks', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // checkErrorTracking
-  // ---------------------------------------------------------------------------
-  describe('checkErrorTracking', () => {
-    it('returns degraded when DSN not configured', async () => {
-      vi.resetModules();
-      const { checkErrorTracking } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkErrorTracking();
-      expect(result.status).toBe('degraded');
-      expect(result.error).toContain('not configured');
-    });
-
-    it('returns healthy when NEXT_PUBLIC_SENTRY_DSN is set', async () => {
-      vi.resetModules();
-      vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://abc@sentry.io/123');
-      const { checkErrorTracking } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkErrorTracking();
-      expect(result.status).toBe('healthy');
-    });
-
-    it('returns healthy when SENTRY_DSN fallback is set', async () => {
-      vi.resetModules();
-      vi.stubEnv('SENTRY_DSN', 'https://abc@sentry.io/123');
-      const { checkErrorTracking } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkErrorTracking();
-      expect(result.status).toBe('healthy');
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // checkAssetStorage
-  // ---------------------------------------------------------------------------
-  describe('checkAssetStorage', () => {
-    it('returns down when no R2 vars configured', async () => {
-      vi.resetModules();
-      const { checkAssetStorage } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkAssetStorage();
-      expect(result.status).toBe('down');
-    });
-
-    it('returns degraded when only some R2 vars are present', async () => {
-      vi.resetModules();
-      vi.stubEnv('CLOUDFLARE_ACCOUNT_ID', 'acct_abc');
-      const { checkAssetStorage } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkAssetStorage();
-      expect(result.status).toBe('degraded');
-      expect(result.error).toContain('partially configured');
-    });
-
-    it('returns healthy when all R2 vars are present', async () => {
-      vi.resetModules();
-      vi.stubEnv('CLOUDFLARE_ACCOUNT_ID', 'acct_abc');
-      vi.stubEnv('R2_ACCESS_KEY_ID', 'key123');
-      vi.stubEnv('R2_SECRET_ACCESS_KEY', 'secret456');
-      vi.stubEnv('R2_BUCKET_NAME', 'spawnforge-assets');
-      const { checkAssetStorage } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkAssetStorage();
-      expect(result.status).toBe('healthy');
-    });
-  });
-
-  // ---------------------------------------------------------------------------
   // checkRateLimiting
   // ---------------------------------------------------------------------------
   describe('checkRateLimiting', () => {
@@ -345,33 +284,73 @@ describe('healthChecks', () => {
   // checkAiProviders
   // ---------------------------------------------------------------------------
   describe('checkAiProviders', () => {
-    it('returns down when no provider keys configured', async () => {
+    it('returns down when no chat backend is configured', async () => {
       vi.resetModules();
+      vi.stubEnv('VERCEL', '');
       const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
       const result = await checkAiProviders();
       expect(result.status).toBe('down');
-      expect(result.details?.configuredCount).toBe(0);
+      expect(result.details?.chatBackend).toBeNull();
+      expect(result.details?.chatBackendConfigured).toBe(false);
+      expect(result.error).toContain('No chat backend is configured');
     });
 
-    it('returns degraded when some provider keys configured', async () => {
+    it('returns healthy on the gateway key alone, with zero generation keys set', async () => {
       vi.resetModules();
-      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-abc');
-      const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkAiProviders();
-      expect(result.status).toBe('degraded');
-      expect(result.details?.configuredCount).toBe(1);
-    });
-
-    it('returns healthy when all provider keys configured', async () => {
-      vi.resetModules();
-      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-abc');
-      vi.stubEnv('MESHY_API_KEY', 'meshy_abc');
-      vi.stubEnv('ELEVENLABS_API_KEY', 'el_abc');
-      vi.stubEnv('SUNO_API_KEY', 'suno_abc');
+      vi.stubEnv('VERCEL', '');
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
       const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
       const result = await checkAiProviders();
       expect(result.status).toBe('healthy');
-      expect(result.details?.configuredCount).toBe(4);
+      expect(result.details?.chatBackend).toBe('vercel-gateway');
+      // Generation keys are an informational facet only — they never move status.
+      expect(result.details?.generationConfiguredCount).toBe(0);
+      expect(result.error).toBeUndefined();
+    });
+
+    it('returns healthy via Vercel OIDC with no explicit key at all', async () => {
+      vi.resetModules();
+      vi.stubEnv('VERCEL', '1');
+      const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkAiProviders();
+      expect(result.status).toBe('healthy');
+      expect(result.details?.chatBackend).toBe('vercel-gateway');
+    });
+
+    it('reports platform generation keys without changing status', async () => {
+      vi.resetModules();
+      vi.stubEnv('VERCEL', '');
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
+      vi.stubEnv('PLATFORM_MESHY_KEY', 'meshy_abc');
+      vi.stubEnv('PLATFORM_ELEVENLABS_KEY', 'el_abc');
+      const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkAiProviders();
+      expect(result.status).toBe('healthy');
+      expect(result.details?.generationConfiguredCount).toBe(2);
+      const providers = result.details?.generationProviders as Record<string, boolean>;
+      expect(providers.meshy).toBe(true);
+      expect(providers.elevenlabs).toBe(true);
+      expect(providers.suno).toBe(false);
+    });
+
+    it('stays down when generation keys are set but no chat backend is', async () => {
+      vi.resetModules();
+      vi.stubEnv('VERCEL', '');
+      vi.stubEnv('PLATFORM_MESHY_KEY', 'meshy_abc');
+      const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkAiProviders();
+      expect(result.status).toBe('down');
+      expect(result.details?.generationConfiguredCount).toBe(1);
+    });
+
+    it('falls back to the direct Anthropic backend when only that key is set', async () => {
+      vi.resetModules();
+      vi.stubEnv('VERCEL', '');
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-abc');
+      const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkAiProviders();
+      expect(result.status).toBe('healthy');
+      expect(result.details?.chatBackend).toBe('direct');
     });
   });
 
@@ -460,56 +439,80 @@ describe('healthChecks', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // checkAnthropic
+  // checkChatBackend
   // ---------------------------------------------------------------------------
-  describe('checkAnthropic', () => {
-    it('returns degraded when ANTHROPIC_API_KEY not set', async () => {
+  describe('checkChatBackend', () => {
+    it('returns degraded when no chat backend is configured', async () => {
       vi.resetModules();
-      const { checkAnthropic } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkAnthropic();
-      expect(result.name).toBe('Anthropic');
+      vi.stubEnv('VERCEL', '');
+      const { checkChatBackend } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkChatBackend();
+      expect(result.name).toBe('Chat Backend');
       expect(result.status).toBe('degraded');
-      expect(result.error).toContain('ANTHROPIC_API_KEY not configured');
+      expect(result.error).toContain('No chat backend is configured');
       expect(result.details?.configured).toBe(false);
     });
 
-    it('returns healthy when key is set and api.anthropic.com responds', async () => {
+    it('probes the gateway host — not api.anthropic.com — when the gateway is configured', async () => {
       vi.resetModules();
+      vi.stubEnv('VERCEL', '');
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
+
+      const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const { checkChatBackend } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkChatBackend();
+
+      expect(result.status).toBe('healthy');
+      expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+      expect(result.details?.configured).toBe(true);
+      expect(result.details?.backend).toBe('vercel-gateway');
+      expect(mockFetch).toHaveBeenCalledWith('https://ai-gateway.vercel.sh/v1', {
+        method: 'HEAD',
+      });
+    });
+
+    it('probes api.anthropic.com when the direct backend is the one resolved', async () => {
+      vi.resetModules();
+      vi.stubEnv('VERCEL', '');
       vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test');
 
       const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
       vi.stubGlobal('fetch', mockFetch);
 
-      const { checkAnthropic } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkAnthropic();
+      const { checkChatBackend } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkChatBackend();
 
       expect(result.status).toBe('healthy');
-      expect(result.latencyMs).toBeGreaterThanOrEqual(0);
-      expect(result.details?.configured).toBe(true);
+      expect(result.details?.backend).toBe('direct');
+      expect(mockFetch).toHaveBeenCalledWith('https://api.anthropic.com', { method: 'HEAD' });
     });
 
     it('accepts 4xx responses as healthy (host is reachable)', async () => {
       vi.resetModules();
-      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test');
+      vi.stubEnv('VERCEL', '');
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
 
       const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 401 });
       vi.stubGlobal('fetch', mockFetch);
 
-      const { checkAnthropic } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkAnthropic();
+      const { checkChatBackend } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkChatBackend();
 
       expect(result.status).toBe('healthy');
     });
 
-    it('returns degraded when api.anthropic.com returns 5xx', async () => {
+    it('returns degraded when the backend host returns 5xx', async () => {
       vi.resetModules();
-      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test');
+      vi.stubEnv('VERCEL', '');
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
 
       const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 503 });
       vi.stubGlobal('fetch', mockFetch);
 
-      const { checkAnthropic } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkAnthropic();
+      const { checkChatBackend } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkChatBackend();
 
       expect(result.status).toBe('degraded');
       expect(result.error).toContain('503');
@@ -517,13 +520,14 @@ describe('healthChecks', () => {
 
     it('returns degraded when fetch throws', async () => {
       vi.resetModules();
-      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test');
+      vi.stubEnv('VERCEL', '');
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
 
       const mockFetch = vi.fn().mockRejectedValue(new Error('DNS failure'));
       vi.stubGlobal('fetch', mockFetch);
 
-      const { checkAnthropic } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkAnthropic();
+      const { checkChatBackend } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkChatBackend();
 
       expect(result.status).toBe('degraded');
       expect(result.error).toBe('DNS failure');
@@ -596,7 +600,7 @@ describe('healthChecks', () => {
 
     it('returns degraded when only some R2 vars are present', async () => {
       vi.resetModules();
-      vi.stubEnv('CLOUDFLARE_ACCOUNT_ID', 'acct_abc');
+      vi.stubEnv('ASSET_R2_ACCOUNT_ID', 'acct_abc');
       const { checkCloudflareR2 } = await import('@/lib/monitoring/healthChecks');
       const result = await checkCloudflareR2();
       expect(result.status).toBe('degraded');
@@ -607,10 +611,10 @@ describe('healthChecks', () => {
 
     it('returns healthy when all R2 vars are present', async () => {
       vi.resetModules();
-      vi.stubEnv('CLOUDFLARE_ACCOUNT_ID', 'acct_abc');
-      vi.stubEnv('R2_ACCESS_KEY_ID', 'key123');
-      vi.stubEnv('R2_SECRET_ACCESS_KEY', 'secret456');
-      vi.stubEnv('R2_BUCKET_NAME', 'spawnforge-assets');
+      vi.stubEnv('ASSET_R2_ACCOUNT_ID', 'acct_abc');
+      vi.stubEnv('ASSET_R2_ACCESS_KEY_ID', 'key123');
+      vi.stubEnv('ASSET_R2_SECRET_ACCESS_KEY', 'secret456');
+      vi.stubEnv('ASSET_BUCKET_NAME', 'spawnforge-assets');
       const { checkCloudflareR2 } = await import('@/lib/monitoring/healthChecks');
       const result = await checkCloudflareR2();
       expect(result.status).toBe('healthy');
@@ -623,14 +627,26 @@ describe('healthChecks', () => {
 
     it('returns degraded when 3 of 4 vars are present', async () => {
       vi.resetModules();
-      vi.stubEnv('CLOUDFLARE_ACCOUNT_ID', 'acct_abc');
-      vi.stubEnv('R2_ACCESS_KEY_ID', 'key123');
-      vi.stubEnv('R2_SECRET_ACCESS_KEY', 'secret456');
-      // R2_BUCKET_NAME missing
+      vi.stubEnv('ASSET_R2_ACCOUNT_ID', 'acct_abc');
+      vi.stubEnv('ASSET_R2_ACCESS_KEY_ID', 'key123');
+      vi.stubEnv('ASSET_R2_SECRET_ACCESS_KEY', 'secret456');
+      // ASSET_BUCKET_NAME missing
       const { checkCloudflareR2 } = await import('@/lib/monitoring/healthChecks');
       const result = await checkCloudflareR2();
       expect(result.status).toBe('degraded');
       expect(result.details?.bucketNameConfigured).toBe(false);
+    });
+
+    it('reads the same env names `lib/storage/r2.ts` writes to', async () => {
+      // The whole point of PF-1054: the check and the only real R2 consumer must
+      // agree on the namespace, or the status page grades variables nothing sets.
+      const { ASSET_STORAGE_ENV } = await import('@/lib/config/assetStorage');
+      expect(ASSET_STORAGE_ENV).toEqual({
+        accountId: 'ASSET_R2_ACCOUNT_ID',
+        accessKeyId: 'ASSET_R2_ACCESS_KEY_ID',
+        secretAccessKey: 'ASSET_R2_SECRET_ACCESS_KEY',
+        bucketName: 'ASSET_BUCKET_NAME',
+      });
     });
   });
 
@@ -644,6 +660,7 @@ describe('healthChecks', () => {
       // Minimal mocks: DB neon needs a mock even with no DATABASE_URL
       vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'test');
       vi.stubEnv('VERCEL_GIT_COMMIT_SHA', 'abcdef1234');
+      vi.stubEnv('VERCEL', '');
 
       const { runAllHealthChecks } = await import('@/lib/monitoring/healthChecks');
       const report = await runAllHealthChecks();
@@ -657,6 +674,9 @@ describe('healthChecks', () => {
 
     it('overall is down when DB is unavailable and no keys configured', async () => {
       vi.resetModules();
+      // VERCEL must be explicitly cleared: OIDC auto-auth would otherwise resolve
+      // a chat backend with no key set and make "AI Providers" healthy.
+      vi.stubEnv('VERCEL', '');
       const { runAllHealthChecks } = await import('@/lib/monitoring/healthChecks');
       const report = await runAllHealthChecks();
       // No DATABASE_URL → DB is degraded, but Stripe/AI are down → overall is down

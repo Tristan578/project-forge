@@ -40,7 +40,7 @@ const allHealthyServices: ServiceHealth[] = [
   makeService('Engine CDN', 'healthy'),
   makeService('AI Providers', 'healthy'),
   makeService('Clerk', 'healthy'),          // checkClerk() → 'Clerk'
-  makeService('Anthropic', 'healthy'),       // checkAnthropic() → 'Anthropic'
+  makeService('Chat Backend', 'healthy'),   // checkChatBackend() → 'Chat Backend'
   makeService('Sentry', 'healthy'),          // checkSentry() → 'Sentry'
   makeService('Cloudflare R2', 'healthy'),   // checkCloudflareR2() → 'Cloudflare R2'
 ];

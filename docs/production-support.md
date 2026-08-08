@@ -75,7 +75,7 @@ Vercel Edge (CDN, routing, headers)
   |       +---> Meshy / ElevenLabs / Suno  -- AI asset generation
   |       |
   |       +---> Cloudflare R2          -- asset upload/download (S3 API)
-  |       |       (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME)
+  |       |       (ASSET_R2_ACCESS_KEY_ID, ASSET_R2_SECRET_ACCESS_KEY, ASSET_BUCKET_NAME)
   |       |
   |       +---> Upstash Redis          -- distributed rate limiting
   |       |       (UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN)
@@ -323,7 +323,7 @@ curl -sI --max-time 5 https://api.anthropic.com | head -3
 curl -sS https://spawnforge.ai/api/health | python3 -c "
 import sys, json; data = json.load(sys.stdin)
 for s in data['services']:
-    if 'AI' in s.get('name','') or 'Anthropic' in s.get('name',''):
+    if 'AI' in s.get('name','') or 'Chat Backend' in s.get('name',''):
         print(f\"{s['name']}: {s['status']}\")
 "
 
@@ -628,13 +628,13 @@ Source of truth: `web/src/lib/config/validateEnv.ts` (`OPTIONAL_VARS`). App degr
 | `NEXT_PUBLIC_ENGINE_CDN_URL` | WASM CDN | (empty, uses local `/public/`) |
 | `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | Sentry | (empty, errors untracked) |
 | `NEXT_PUBLIC_POSTHOG_KEY` | PostHog analytics | (empty) |
-| `CLOUDFLARE_ACCOUNT_ID` | R2 asset storage | (empty) |
-| `MESHY_API_KEY` | Meshy 3D gen | (empty) |
-| `ELEVENLABS_API_KEY` | ElevenLabs audio | (empty) |
-| `SUNO_API_KEY` | Suno music | (empty) |
-| `R2_ACCESS_KEY_ID` | R2 auth | (empty) |
-| `R2_SECRET_ACCESS_KEY` | R2 auth | (empty) |
-| `R2_BUCKET_NAME` | R2 bucket | (empty) |
+| `ASSET_R2_ACCOUNT_ID` | R2 asset storage | (empty) |
+| `PLATFORM_MESHY_KEY` | Meshy 3D gen | (empty) |
+| `PLATFORM_ELEVENLABS_KEY` | ElevenLabs audio | (empty) |
+| `PLATFORM_SUNO_KEY` | Suno music | (empty) |
+| `ASSET_R2_ACCESS_KEY_ID` | R2 auth | (empty) |
+| `ASSET_R2_SECRET_ACCESS_KEY` | R2 auth | (empty) |
+| `ASSET_BUCKET_NAME` | R2 bucket | (empty) |
 
 ---
 

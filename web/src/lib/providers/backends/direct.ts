@@ -8,6 +8,7 @@
  */
 
 import type { ProviderBackend, ProviderCapability } from '../types';
+import { PLATFORM_KEY_ENV, getPlatformKeyEnvVar } from '@/lib/config/providers';
 
 /** All capabilities — direct backend is the universal catch-all */
 const ALL_CAPABILITIES: ReadonlyArray<ProviderCapability> = [
@@ -40,24 +41,15 @@ const CAPABILITY_ENV_MAP: Record<ProviderCapability, string> = {
   bg_removal: 'PLATFORM_REMOVEBG_KEY',
 };
 
-/** Maps a named direct provider to its environment variable */
-const DIRECT_PROVIDER_ENV: Record<string, string> = {
-  anthropic: 'ANTHROPIC_API_KEY',
-  openai: 'PLATFORM_OPENAI_KEY',
-  meshy: 'PLATFORM_MESHY_KEY',
-  hyper3d: 'PLATFORM_HYPER3D_KEY',
-  elevenlabs: 'PLATFORM_ELEVENLABS_KEY',
-  suno: 'PLATFORM_SUNO_KEY',
-  replicate: 'PLATFORM_REPLICATE_KEY',
-  removebg: 'PLATFORM_REMOVEBG_KEY',
-};
-
 /**
  * Get the platform key for a named provider.
  * Returns the key string or null if not configured.
+ *
+ * The provider -> env-var table lives in `@/lib/config/providers`; this file
+ * carried a value-identical private copy until PF-1054.
  */
 export function getDirectProviderKey(provider: string): string | null {
-  const envVar = DIRECT_PROVIDER_ENV[provider];
+  const envVar = getPlatformKeyEnvVar(provider);
   if (!envVar) return null;
   return process.env[envVar] ?? null;
 }
@@ -82,7 +74,7 @@ export const directBackend: ProviderBackend = {
 
   isConfigured(): boolean {
     // Configured if any platform key is set
-    return Object.values(DIRECT_PROVIDER_ENV).some(
+    return Object.values(PLATFORM_KEY_ENV).some(
       (envVar) => Boolean(process.env[envVar])
     );
   },
@@ -90,7 +82,7 @@ export const directBackend: ProviderBackend = {
   getApiKey(): string {
     // Return Anthropic key as the primary key for general use;
     // callers should use getDirectProviderKey() for specific providers
-    return process.env.ANTHROPIC_API_KEY ?? '';
+    return process.env[PLATFORM_KEY_ENV.anthropic] ?? '';
   },
 
   getEndpoint(): string {

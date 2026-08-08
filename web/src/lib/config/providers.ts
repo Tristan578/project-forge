@@ -152,6 +152,120 @@ export const BACKEND_TO_PROVIDER: Partial<Record<BackendId, ProviderName>> = {
 };
 
 // ---------------------------------------------------------------------------
+// Provider -> platform API key environment variable
+// ---------------------------------------------------------------------------
+
+/**
+ * The environment variable holding SpawnForge's own (non-BYOK) API key for
+ * each provider. `lib/keys/resolver.ts` reads these to resolve a platform key,
+ * and `lib/providers/backends/direct.ts` reads them to decide whether the
+ * direct backend can serve a capability.
+ *
+ * The namespace is `PLATFORM_<PROVIDER>_KEY` for everything except Anthropic,
+ * which predates the convention and stayed `ANTHROPIC_API_KEY`.
+ *
+ * This lived in three places before PF-1054, and the copy in
+ * `lib/monitoring/healthChecks.ts` had drifted to a set of names
+ * (`MESHY_API_KEY`, `ELEVENLABS_API_KEY`, `SUNO_API_KEY`) that nothing else in
+ * the tree reads and no environment sets — so the public status page reported a
+ * permanent "AI Assistant: outage" against a working install.
+ */
+export const PLATFORM_KEY_ENV = {
+  anthropic: 'ANTHROPIC_API_KEY',
+  meshy: 'PLATFORM_MESHY_KEY',
+  hyper3d: 'PLATFORM_HYPER3D_KEY',
+  elevenlabs: 'PLATFORM_ELEVENLABS_KEY',
+  suno: 'PLATFORM_SUNO_KEY',
+  openai: 'PLATFORM_OPENAI_KEY',
+  replicate: 'PLATFORM_REPLICATE_KEY',
+  removebg: 'PLATFORM_REMOVEBG_KEY',
+} as const satisfies Record<string, string>;
+
+export type PlatformKeyProvider = keyof typeof PLATFORM_KEY_ENV;
+
+/**
+ * Env-var name for a provider, or null when the provider has no platform key.
+ * Callers that hold a plain `string` (rather than a narrowed provider union)
+ * should use this instead of indexing PLATFORM_KEY_ENV directly.
+ */
+export function getPlatformKeyEnvVar(provider: string): string | null {
+  return Object.prototype.hasOwnProperty.call(PLATFORM_KEY_ENV, provider)
+    ? PLATFORM_KEY_ENV[provider as PlatformKeyProvider]
+    : null;
+}
+
+// ---------------------------------------------------------------------------
+// Chat backends
+// ---------------------------------------------------------------------------
+
+export interface ChatBackendDescriptor {
+  id: BackendId;
+  /** Human-readable name, used in health reporting */
+  name: string;
+  /** Any one of these being present means the backend is configured */
+  envVars: readonly string[];
+  /** Host to probe for reachability — never a billable endpoint */
+  probeUrl: string;
+  /** Vercel's OIDC auto-auth can stand in for an explicit key */
+  vercelOidc?: boolean;
+}
+
+/**
+ * Chat backends in the same priority order `lib/providers/registry.ts` tries
+ * them, so `resolveConfiguredChatBackend()` names the backend that would
+ * actually serve a request.
+ *
+ * Deliberately a static table rather than a call into the registry: the
+ * registry consults live circuit-breaker and provider-health state, which makes
+ * it unsafe to call from a health check (the check would grade recent traffic
+ * rather than configuration, and would feed its own verdict back into that
+ * state).
+ */
+export const CHAT_BACKENDS: readonly ChatBackendDescriptor[] = [
+  {
+    id: 'vercel-gateway',
+    name: 'Vercel AI Gateway',
+    envVars: ['AI_GATEWAY_API_KEY'],
+    probeUrl: 'https://ai-gateway.vercel.sh/v1',
+    vercelOidc: true,
+  },
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    envVars: ['OPENROUTER_API_KEY'],
+    probeUrl: 'https://openrouter.ai/api/v1',
+  },
+  {
+    id: 'github-models',
+    name: 'GitHub Models',
+    envVars: ['GITHUB_MODELS_PAT'],
+    probeUrl: 'https://models.inference.ai.azure.com',
+  },
+  {
+    id: 'direct',
+    name: 'Anthropic (direct)',
+    envVars: [PLATFORM_KEY_ENV.anthropic],
+    probeUrl: 'https://api.anthropic.com',
+  },
+];
+
+export const CHAT_BACKEND_ENV_VARS: readonly string[] = CHAT_BACKENDS.flatMap((b) => b.envVars);
+
+/**
+ * The highest-priority chat backend that is configured in this environment, or
+ * null when none is. On Vercel, OIDC auto-auth means the AI Gateway needs no
+ * explicit key — mirroring `app/api/capabilities/route.ts`.
+ */
+export function resolveConfiguredChatBackend(): ChatBackendDescriptor | null {
+  const onVercel = Boolean(process.env.VERCEL);
+  for (const backend of CHAT_BACKENDS) {
+    if (backend.vercelOidc && onVercel) return backend;
+    if (backend.envVars.some((envVar) => Boolean(process.env[envVar]))) return backend;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Image generation constraints (per provider)
 // ---------------------------------------------------------------------------
 

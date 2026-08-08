@@ -5,8 +5,14 @@
  * charge per call (Stripe, etc.) we only validate config presence.
  * For services that are safe to ping (DB, CDN) we perform real checks.
  *
- * Individual service checks for Clerk, Anthropic, Sentry, and Cloudflare R2
- * use a 3-second timeout to keep the health endpoint responsive.
+ * Individual service checks for Clerk, the chat backend, Sentry, and Cloudflare
+ * R2 use a 3-second timeout to keep the health endpoint responsive.
+ *
+ * Every environment variable a check reads comes from a shared constants module
+ * (`@/lib/config/providers`, `@/lib/config/assetStorage`) rather than a literal
+ * here. Before PF-1054 this file carried its own copy of both namespaces, both
+ * had drifted to names nothing else in the tree reads, and the result was two
+ * permanent false outages on the public status page.
  *
  * The database check additionally consults the query monitor: if the average
  * query time over the last 5 minutes exceeds DEGRADED_AVG_THRESHOLD_MS (1 s),
@@ -15,7 +21,13 @@
 import 'server-only';
 import { getMetrics, DEGRADED_AVG_THRESHOLD_MS } from '@/lib/db/queryMonitor';
 import { dbCircuitBreaker } from '@/lib/db/circuitBreaker';
-import { DB_PROVIDER } from '@/lib/config/providers';
+import {
+  DB_PROVIDER,
+  PLATFORM_KEY_ENV,
+  resolveConfiguredChatBackend,
+  type PlatformKeyProvider,
+} from '@/lib/config/providers';
+import { ASSET_STORAGE_ENV } from '@/lib/config/assetStorage';
 import { HEALTH_CACHE_TTL_MS } from '@/lib/config/timeouts';
 
 export type ServiceStatus = 'healthy' | 'degraded' | 'down';
@@ -38,7 +50,7 @@ export interface HealthReport {
 }
 
 const TIMEOUT_MS = 5_000;
-/** Tighter timeout for lightweight connectivity checks (Clerk, Anthropic, Sentry, R2) */
+/** Tighter timeout for lightweight connectivity checks (Clerk, chat backend, Sentry, R2) */
 const SERVICE_TIMEOUT_MS = 3_000;
 
 /**
@@ -181,74 +193,6 @@ export async function checkPayments(): Promise<ServiceHealth> {
   };
 }
 
-/**
- * @deprecated Use `checkSentry()` instead. This function returns `'Error Tracking (Sentry)'`
- * which does NOT match the canonical name used by `runAllHealthChecks()`. Kept for backwards
- * compatibility only — it is NOT called by `runAllHealthChecks()`. (PF-739)
- */
-export async function checkErrorTracking(): Promise<ServiceHealth> {
-  const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN ?? process.env.SENTRY_DSN;
-
-  if (!dsn) {
-    return {
-      name: 'Error Tracking (Sentry)',
-      status: 'degraded',
-      latencyMs: 0,
-      lastChecked: new Date().toISOString(),
-      error: 'NEXT_PUBLIC_SENTRY_DSN not configured — errors will not be tracked',
-    };
-  }
-
-  return {
-    name: 'Error Tracking (Sentry)',
-    status: 'healthy',
-    latencyMs: 0,
-    lastChecked: new Date().toISOString(),
-    details: { configured: true },
-  };
-}
-
-/**
- * @deprecated Use `checkCloudflareR2()` instead. This function returns `'Asset Storage (R2)'`
- * which does NOT match the canonical name used by `runAllHealthChecks()`. Kept for backwards
- * compatibility only — it is NOT called by `runAllHealthChecks()`. (PF-739)
- */
-export async function checkAssetStorage(): Promise<ServiceHealth> {
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-  const bucketName = process.env.R2_BUCKET_NAME;
-
-  const allConfigured = !!(accountId && accessKeyId && secretAccessKey && bucketName);
-  const anyConfigured = !!(accountId || accessKeyId || secretAccessKey || bucketName);
-
-  if (!allConfigured) {
-    return {
-      name: 'Asset Storage (R2)',
-      status: anyConfigured ? 'degraded' : 'down',
-      latencyMs: 0,
-      lastChecked: new Date().toISOString(),
-      error: anyConfigured
-        ? 'R2 partially configured — some vars missing'
-        : 'R2 not configured',
-      details: {
-        accountIdConfigured: !!accountId,
-        accessKeyConfigured: !!accessKeyId,
-        secretKeyConfigured: !!secretAccessKey,
-        bucketNameConfigured: !!bucketName,
-      },
-    };
-  }
-
-  return {
-    name: 'Asset Storage (R2)',
-    status: 'healthy',
-    latencyMs: 0,
-    lastChecked: new Date().toISOString(),
-    details: { configured: true, bucket: bucketName },
-  };
-}
-
 export async function checkRateLimiting(): Promise<ServiceHealth> {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -317,42 +261,43 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
   }
 }
 
+/**
+ * Configuration check behind the public "AI Assistant" service.
+ *
+ * Status is decided by the CHAT backend alone, because that is what the public
+ * name describes and what every user of the assistant depends on. A chat
+ * backend resolving (including via Vercel OIDC, which needs no explicit key) is
+ * healthy; none resolving is down.
+ *
+ * Platform generation keys are reported as an informational facet only and
+ * never move the status: they are per-capability, users can supply their own
+ * (BYOK), and `/api/capabilities` already reports availability per feature. An
+ * unset PLATFORM_MESHY_KEY does not mean the AI assistant is unavailable.
+ */
 export async function checkAiProviders(): Promise<ServiceHealth> {
-  const providers: Record<string, boolean> = {
-    anthropic: !!process.env.ANTHROPIC_API_KEY,
-    meshy: !!process.env.MESHY_API_KEY,
-    elevenlabs: !!process.env.ELEVENLABS_API_KEY,
-    suno: !!process.env.SUNO_API_KEY,
-  };
+  const backend = resolveConfiguredChatBackend();
 
-  const configuredCount = Object.values(providers).filter(Boolean).length;
-  const totalCount = Object.keys(providers).length;
-
-  let status: ServiceStatus = 'healthy';
-  if (configuredCount === 0) {
-    status = 'down';
-  } else if (configuredCount < totalCount) {
-    status = 'degraded';
-  }
-
-  const unconfigured = Object.entries(providers)
-    .filter(([, configured]) => !configured)
-    .map(([name]) => name);
+  const generationProviders = Object.fromEntries(
+    (Object.keys(PLATFORM_KEY_ENV) as PlatformKeyProvider[]).map((provider) => [
+      provider,
+      Boolean(process.env[PLATFORM_KEY_ENV[provider]]),
+    ]),
+  );
+  const generationConfiguredCount = Object.values(generationProviders).filter(Boolean).length;
 
   return {
     name: 'AI Providers',
-    status,
+    status: backend ? 'healthy' : 'down',
     latencyMs: 0,
     lastChecked: new Date().toISOString(),
     details: {
-      configured: providers,
-      configuredCount,
-      totalCount,
+      chatBackend: backend?.id ?? null,
+      chatBackendConfigured: Boolean(backend),
+      generationProviders,
+      generationConfiguredCount,
+      generationTotalCount: Object.keys(generationProviders).length,
     },
-    error:
-      unconfigured.length > 0
-        ? `Missing providers: ${unconfigured.join(', ')}`
-        : undefined,
+    error: backend ? undefined : 'No chat backend is configured',
   };
 }
 
@@ -415,54 +360,62 @@ export async function checkClerk(): Promise<ServiceHealth> {
 }
 
 /**
- * Check Anthropic API availability via a HEAD request to api.anthropic.com.
- * Does NOT call a billable endpoint — only checks connectivity and key presence.
- * Uses a 3-second timeout.
- * Status: healthy = key present + host reachable,
- *         degraded = key absent or host unreachable.
+ * Reachability check for whichever chat backend this environment would actually
+ * use, via a HEAD request to that backend's host.
+ *
+ * Before PF-1054 this probed `api.anthropic.com` unconditionally and keyed off
+ * `ANTHROPIC_API_KEY`. Production routes chat through the Vercel AI Gateway, so
+ * the check measured a path production never takes and graded a key it never
+ * sets.
+ *
+ * Does NOT call a billable endpoint — only connectivity. Uses a 3-second
+ * timeout. Status: healthy = a backend is configured and its host is reachable,
+ *                 degraded = no backend configured, or the host is unreachable.
  */
-export async function checkAnthropic(): Promise<ServiceHealth> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+export async function checkChatBackend(): Promise<ServiceHealth> {
+  const backend = resolveConfiguredChatBackend();
 
-  if (!apiKey) {
+  if (!backend) {
     return {
-      name: 'Anthropic',
+      name: 'Chat Backend',
       status: 'degraded',
       latencyMs: 0,
       lastChecked: new Date().toISOString(),
-      error: 'ANTHROPIC_API_KEY not configured',
+      error: 'No chat backend is configured',
       details: { configured: false },
     };
   }
 
+  const details = { configured: true, backend: backend.id, backendName: backend.name };
+
   try {
-    // HEAD request to the base API host — no tokens consumed, just connectivity.
+    // HEAD request to the backend host — no tokens consumed, just connectivity.
     const { latencyMs } = await timed(() =>
       withTimeout(
-        fetch('https://api.anthropic.com', { method: 'HEAD' }).then((res) => {
+        fetch(backend.probeUrl, { method: 'HEAD' }).then((res) => {
           // Any HTTP response (including 4xx) means the host is reachable.
           if (res.status >= 500) {
-            throw new Error(`Anthropic API returned ${res.status}`);
+            throw new Error(`${backend.name} returned ${res.status}`);
           }
         }),
         SERVICE_TIMEOUT_MS,
       ),
     );
     return {
-      name: 'Anthropic',
+      name: 'Chat Backend',
       status: 'healthy',
       latencyMs,
       lastChecked: new Date().toISOString(),
-      details: { configured: true },
+      details,
     };
   } catch (err) {
     return {
-      name: 'Anthropic',
+      name: 'Chat Backend',
       status: 'degraded',
       latencyMs: 0,
       lastChecked: new Date().toISOString(),
       error: err instanceof Error ? err.message : String(err),
-      details: { configured: true },
+      details,
     };
   }
 }
@@ -513,15 +466,20 @@ export async function checkSentry(): Promise<ServiceHealth> {
  * Check Cloudflare R2 bucket configuration.
  * Validates all required env vars are present. No actual bucket call — S3 API
  * calls are expensive and slow. A config check is sufficient for health monitoring.
+ *
+ * The names come from `ASSET_STORAGE_ENV`, the same constants `lib/storage/r2.ts`
+ * reads to construct its client, so this can never again grade a namespace
+ * nothing writes.
+ *
  * Status: healthy = all 4 vars present,
  *         degraded = some vars present (partial config),
  *         down = no R2 vars at all.
  */
 export async function checkCloudflareR2(): Promise<ServiceHealth> {
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-  const bucketName = process.env.R2_BUCKET_NAME;
+  const accountId = process.env[ASSET_STORAGE_ENV.accountId];
+  const accessKeyId = process.env[ASSET_STORAGE_ENV.accessKeyId];
+  const secretAccessKey = process.env[ASSET_STORAGE_ENV.secretAccessKey];
+  const bucketName = process.env[ASSET_STORAGE_ENV.bucketName];
 
   const allConfigured = !!(accountId && accessKeyId && secretAccessKey && bucketName);
   const anyConfigured = !!(accountId || accessKeyId || secretAccessKey || bucketName);
@@ -698,7 +656,7 @@ export async function runAllHealthChecks(): Promise<HealthReport> {
     checkEngineCdn(),
     checkAiProviders(),
     checkClerk(),
-    checkAnthropic(),
+    checkChatBackend(),
     checkSentry(),
     checkCloudflareR2(),
     checkGenerationFactory(),

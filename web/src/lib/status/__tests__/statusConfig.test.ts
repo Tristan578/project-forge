@@ -16,7 +16,7 @@ const KNOWN_HEALTH_CHECK_NAMES = new Set([
   'Engine CDN',
   'AI Providers',
   'Clerk',
-  'Anthropic',
+  'Chat Backend',
   'Sentry',
   'Cloudflare R2',
 ]);
