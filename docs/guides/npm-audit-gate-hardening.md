@@ -758,7 +758,7 @@ Both bypasses now report the degate.
 
 This freezes the functions **this file** defines. It does not extend to the other
 ~17 bash suites under `scripts/__tests__/`, which remain rebindable by one
-inserted line — that sweep is tracked separately rather than scope-crept here. It
+inserted line — that sweep is tracked separately (#9123) rather than scope-crept here. It
 does not close `declare -n` aliasing or `eval` on a runtime-assembled name (round
 39's bound still stands). And a NEW function added later without a freeze is
 unprotected until the drift check notices it — which it will, because the check
