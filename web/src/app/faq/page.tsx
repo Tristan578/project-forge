@@ -6,6 +6,7 @@ import {
   PROJECT_LIMITS,
   PUBLISH_LIMITS,
 } from '@/lib/billing/tierPlans';
+import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
 
 export const metadata: Metadata = {
   title: 'FAQ — SpawnForge',
@@ -61,7 +62,7 @@ const faqs = [
   {
     question: 'What is MCP for game development?',
     answer:
-      'MCP (Model Context Protocol) is the command interface between the AI and the game engine. SpawnForge exposes 351 MCP commands across 41 categories — from spawning entities and applying materials to configuring physics, audio, animation, scripting, and game components. This gives the AI precise, fine-grained control over every aspect of game creation.',
+      `MCP (Model Context Protocol) is the command interface between the AI and the game engine. SpawnForge exposes ${MCP_COMMAND_COUNT} MCP commands across ${MCP_CATEGORY_COUNT} categories — from spawning entities and applying materials to configuring physics, audio, animation, scripting, and game components. This gives the AI precise, fine-grained control over every aspect of game creation.`,
   },
   {
     question: 'How does SpawnForge compare to Unity or Godot?',

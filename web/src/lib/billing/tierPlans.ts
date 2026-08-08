@@ -158,3 +158,31 @@ export function getTierPlan(key: TierKey): TierPlan {
 export function tierSummary(plan: TierPlan): string {
   return `${plan.name} (${plan.price}/mo)`;
 }
+
+/** The plans a user actually pays for, ascending. */
+export const PAID_TIER_PLANS: readonly TierPlan[] = TIER_PLANS.filter(
+  (plan) => plan.priceCents > 0,
+);
+
+/**
+ * Every paid plan named with its price, e.g.
+ * `$9/mo Starter, $29/mo Creator, $79/mo Studio`.
+ *
+ * For comparison prose that has to enumerate the ladder. Written by hand, this
+ * is where the `$29/mo Pro` (no such plan) and `$99/mo Studio` (charged $79)
+ * copy came from.
+ */
+export function paidPlansSentence(): string {
+  return PAID_TIER_PLANS.map((plan) => `${plan.price}/mo ${plan.name}`).join(', ');
+}
+
+/**
+ * The paid range as a span, e.g. `$9-$79/mo`. Collapses to a single price if
+ * there is ever only one paid plan.
+ */
+export function paidPriceRange(): string {
+  const first = PAID_TIER_PLANS[0];
+  const last = PAID_TIER_PLANS[PAID_TIER_PLANS.length - 1];
+  if (!first || !last) return 'free';
+  return first === last ? `${first.price}/mo` : `${first.price}-${last.price}/mo`;
+}

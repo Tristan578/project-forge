@@ -3,6 +3,11 @@ import { cacheLife, cacheTag } from 'next/cache';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+// Both pricing rows quoted a $9-$99 range; the top plan is $79. Derived so a
+// price change cannot leave a competitor page behind.
+import { paidPriceRange } from '@/lib/billing/tierPlans';
+import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
+
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
 
 interface FeatureRow {
@@ -31,10 +36,10 @@ const competitors: Record<string, CompetitorData> = {
       { feature: 'Setup', spawnforge: 'Open browser, start creating', competitor: 'Download installer, create project, configure build settings' },
       { feature: 'Language', spawnforge: 'Natural language + visual scripting', competitor: 'C# (Unity-specific APIs)' },
       { feature: 'Web Export', spawnforge: 'Native — games run in browser by default', competitor: 'WebGL build target (large bundles, long compile)' },
-      { feature: 'AI Assistance', spawnforge: '25+ AI modules, 350 MCP commands', competitor: 'Unity Muse (limited, separate subscription)' },
+      { feature: 'AI Assistance', spawnforge: `25+ AI modules, ${MCP_COMMAND_COUNT} MCP commands`, competitor: 'Unity Muse (limited, separate subscription)' },
       { feature: 'Rendering', spawnforge: 'WebGPU + WebGL2 auto-detect', competitor: 'WebGL 2.0 (no WebGPU export)' },
       { feature: 'Physics', spawnforge: 'Built-in 2D + 3D (Rapier)', competitor: 'PhysX (3D), Box2D (2D)' },
-      { feature: 'Pricing', spawnforge: 'Free tier available, $9-$99/mo', competitor: 'Free tier, $399-$2040/yr for pro features' },
+      { feature: 'Pricing', spawnforge: `Free tier available, ${paidPriceRange()}`, competitor: 'Free tier, $399-$2040/yr for pro features' },
       { feature: 'Collaboration', spawnforge: 'Browser-based, share via URL', competitor: 'Desktop-only, requires version control setup' },
       { feature: 'Learning Curve', spawnforge: 'Minutes to first game', competitor: 'Weeks to months for proficiency' },
       { feature: 'Publish', spawnforge: 'One-click publish to spawnforge.ai', competitor: 'Manual hosting or platform-specific submission' },
@@ -54,7 +59,7 @@ const competitors: Record<string, CompetitorData> = {
       { feature: 'AI Assistance', spawnforge: '25+ AI modules integrated in editor', competitor: 'No built-in AI features' },
       { feature: 'Rendering', spawnforge: 'WebGPU + WebGL2', competitor: 'Vulkan, OpenGL, software renderer' },
       { feature: 'Physics', spawnforge: 'Rapier 2D + 3D', competitor: 'Godot Physics or Jolt (3D)' },
-      { feature: 'Pricing', spawnforge: 'Free tier, $9-$99/mo for more', competitor: 'Completely free and open source' },
+      { feature: 'Pricing', spawnforge: `Free tier, ${paidPriceRange()} for more`, competitor: 'Completely free and open source' },
       { feature: 'Scene System', spawnforge: 'Hierarchy + AI-managed components', competitor: 'Node tree with inheritance' },
       { feature: 'Asset Pipeline', spawnforge: 'AI texture/model generation', competitor: 'Manual import workflow' },
       { feature: 'Community', spawnforge: 'Built-in game gallery + sharing', competitor: 'Asset Library, forums, Discord' },
@@ -86,7 +91,7 @@ const competitors: Record<string, CompetitorData> = {
     description:
       'Compare SpawnForge to Rosebud AI for AI-powered game creation. See how a production engine with MCP commands compares to an AI code generator.',
     positioning:
-      'Rosebud AI generates simple browser games from text prompts, outputting raw HTML/JS code. SpawnForge is a full production engine — you get a visual editor, physics, audio, particles, skeletal animation, and 350 MCP commands for AI-driven workflows, not just generated code.',
+      `Rosebud AI generates simple browser games from text prompts, outputting raw HTML/JS code. SpawnForge is a full production engine — you get a visual editor, physics, audio, particles, skeletal animation, and ${MCP_COMMAND_COUNT} MCP commands for AI-driven workflows, not just generated code.`,
     features: [
       { feature: 'Engine', spawnforge: 'Full Bevy/WASM engine (WebGPU)', competitor: 'Generated HTML5/JavaScript' },
       { feature: 'AI Approach', spawnforge: 'AI assists within a real engine', competitor: 'AI generates entire game code' },
@@ -94,7 +99,7 @@ const competitors: Record<string, CompetitorData> = {
       { feature: 'Physics', spawnforge: 'Rapier 2D + 3D with inspector', competitor: 'Basic collision (code-generated)' },
       { feature: 'Audio', spawnforge: 'Spatial audio, mixer, bus system', competitor: 'Basic audio playback' },
       { feature: 'Particles', spawnforge: 'GPU particles (WebGPU), 9 presets', competitor: 'CSS/Canvas-based effects' },
-      { feature: 'MCP Integration', spawnforge: '350 commands across 41 categories', competitor: 'No MCP support' },
+      { feature: 'MCP Integration', spawnforge: `${MCP_COMMAND_COUNT} commands across ${MCP_CATEGORY_COUNT} categories`, competitor: 'No MCP support' },
       { feature: 'Animation', spawnforge: 'Skeletal + GLTF + keyframe', competitor: 'CSS/JS animations' },
       { feature: 'Customization', spawnforge: 'Edit AI output in visual editor', competitor: 'Edit generated source code' },
       { feature: 'Scalability', spawnforge: 'Complex 3D scenes, ECS architecture', competitor: 'Simple 2D games' },

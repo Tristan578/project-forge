@@ -39,25 +39,82 @@ const SRC_DIR = resolve(__dirname, '../..');
 
 /**
  * Every surface that states a plan name, a price, or a tier limit to the
- * public. Adding a sixth without adding it here is how the class reopens, so
+ * public. Adding an eighth without adding it here is how the class reopens, so
  * the list is deliberately explicit rather than a glob.
  */
 const PUBLIC_SURFACES = [
   'app/pricing/page.tsx',
   'app/pricing/opengraph-image.tsx',
   'app/faq/page.tsx',
+  'app/compare/[competitor]/page.tsx',
+  'app/blog/content/spawnforge-vs-unity-vs-godot.tsx',
   'components/pricing/PricingPage.tsx',
   'components/marketing/LandingPage.tsx',
 ] as const;
 
+type PublicSurface = (typeof PUBLIC_SURFACES)[number];
+
+/**
+ * The comparison surfaces quote what OTHER engines charge, which is not ours to
+ * derive. Each allowance is enumerated per file rather than loosening the price
+ * regex, so a SpawnForge price added to one of these pages still fails: the
+ * scan only forgives the exact competitor figures listed here, and
+ * `the third-party price allowance stays honest` below fails on any entry that
+ * has stopped appearing in its file.
+ */
+const THIRD_PARTY_PRICES: Partial<Record<PublicSurface, readonly string[]>> = {
+  // Unity Plus/Pro seats, and GameMaker's export tier.
+  'app/compare/[competitor]/page.tsx': ['$399', '$2040', '$9.99'],
+  // Unity's revenue cap ($200K) and the same two Unity seat prices.
+  'app/blog/content/spawnforge-vs-unity-vs-godot.tsx': ['$200', '$399', '$2,040'],
+};
+
+/**
+ * Strip a line comment, but only when the `//` is genuinely outside a string.
+ *
+ * This was a regex that stripped any `//` not preceded by `:` or a word
+ * character — so a single space in front was enough to fool it, and
+ * `'50% off // ends soon'` silently truncated the rest of the line. Any price
+ * after such a `//` went unscanned, which is exactly the hole this file exists
+ * to close. Walking the line and tracking quote state costs a few lines and
+ * removes the class.
+ *
+ * The `:` guard is kept as well: quote state is tracked per line, so a
+ * continuation line of a multi-line template literal holding a `https://` URL
+ * has no opening quote to see, and would otherwise be truncated.
+ */
+const stripLineComment = (line: string): string => {
+  let quote: string | null = null;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '\\') {
+      i += 1;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+      continue;
+    }
+    if (ch === '/' && line[i + 1] === '/' && line[i - 1] !== ':') return line.slice(0, i);
+  }
+  return line;
+};
+
 /**
  * Comments are where these files explain which wrong price or key they used to
  * carry, so scanning them would make every surface fail for documenting its own
- * fix. Block comments go first; line comments are only stripped when the `//`
- * is not preceded by `:`, so a `https://` inside a string survives intact.
+ * fix. Block comments go first, then line comments per line.
  */
 const stripComments = (source: string) =>
-  source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\w])\/\/.*$/gm, '$1');
+  source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map(stripLineComment)
+    .join('\n');
 
 const read = (rel: string) => stripComments(readFileSync(resolve(SRC_DIR, rel), 'utf8'));
 
@@ -78,8 +135,13 @@ const UNIMPLEMENTED_CLAIMS = [
   'Unlimited AI chat',
 ];
 
-/** Extract every hardcoded dollar figure. `${` never matches — a digit must follow the `$`. */
-const quotedPrices = (source: string) => source.match(/\$\d[\d,]*/g) ?? [];
+/**
+ * Extract every hardcoded dollar figure. `${` never matches — a digit must
+ * follow the `$`. Cents are captured so GameMaker's `$9.99` reads as `$9.99`
+ * and needs its own allowance, rather than truncating to `$9` and passing as
+ * one of ours by coincidence.
+ */
+const quotedPrices = (source: string) => source.match(/\$\d[\d,]*(?:\.\d+)?/g) ?? [];
 
 describe('the scanners themselves catch a violation', () => {
   // Every surface currently derives its prices, so the scan below finds zero
@@ -90,9 +152,46 @@ describe('the scanners themselves catch a violation', () => {
     expect(quotedPrices('`${plan.price}/mo`')).toEqual([]);
   });
 
+  it('reads cents rather than truncating to the dollars', () => {
+    expect(quotedPrices('competitor: $9.99/mo for exports')).toEqual(['$9.99']);
+  });
+
   it('flags a capitalized internal billing key', () => {
     expect(/\bHobbyist\b/.test('the Hobbyist tier')).toBe(true);
     expect(/\bHobbyist\b/.test("getTierPlan('hobbyist')")).toBe(false);
+  });
+});
+
+describe('stripComments hides only what a comment says', () => {
+  // Everything below the scan depends on this: over-strip and a real price
+  // disappears from every assertion, silently, while the suite stays green.
+  it('drops a whole-line comment and a trailing one', () => {
+    expect(stripComments('// we used to charge $99\nconst a = 1;')).toBe('\nconst a = 1;');
+    expect(stripComments('const a = 1; // was $99')).toBe('const a = 1; ');
+  });
+
+  it('drops a block comment', () => {
+    expect(stripComments('/* charged $99\n   for years */const a = 1;')).toBe('const a = 1;');
+  });
+
+  it('keeps a price that follows a // inside a string literal', () => {
+    // The regex this replaced stripped any `//` not preceded by `:` or a word
+    // character, so the space in front of these slashes was enough to erase
+    // the price after them and hide it from the scan entirely.
+    const line = "const copy = 'half off // limited', price = '$99';";
+    expect(quotedPrices(stripComments(line))).toEqual(['$99']);
+  });
+
+  it('keeps a URL, inside a string and on a template-literal continuation line', () => {
+    expect(stripComments("const u = 'https://x.test/$99';")).toContain('https://x.test/$99');
+    expect(stripComments('  see https://x.test for $99')).toContain('https://x.test for $99');
+  });
+
+  it('confines an unbalanced apostrophe to its own line', () => {
+    // JSX prose is not JavaScript: `don't` opens a quote that never closes. A
+    // whole-source scanner would swallow every price until the next `'`.
+    const source = "<p>don't miss it</p>\nconst price = '$99'; // was $199";
+    expect(quotedPrices(stripComments(source))).toEqual(['$99']);
   });
 });
 
@@ -106,8 +205,12 @@ describe('public pricing copy stays in step with what the code enforces', () => 
 
     it('states no price the billing module does not charge', () => {
       const allowed = new Set(TIER_KEYS.map((t) => formatPrice(TIER_PRICE_CENTS[t])));
+      const thirdParty = new Set(THIRD_PARTY_PRICES[rel] ?? []);
       for (const price of quotedPrices(source)) {
-        expect(allowed.has(price), `${rel} quotes ${price}`).toBe(true);
+        expect(
+          allowed.has(price) || thirdParty.has(price),
+          `${rel} quotes ${price}`
+        ).toBe(true);
       }
     });
 
@@ -121,6 +224,18 @@ describe('public pricing copy stays in step with what the code enforces', () => 
     it.each(UNIMPLEMENTED_CLAIMS)('does not sell %s', (claim) => {
       expect(source.includes(claim), `${rel} sells "${claim}"`).toBe(false);
     });
+  });
+
+  it('the third-party price allowance stays honest', () => {
+    // An allowance is a hole in the scan. Once the figure it was opened for is
+    // gone, the hole is not — it silently forgives that price for anything
+    // added to the file later, including one of ours.
+    for (const [rel, prices] of Object.entries(THIRD_PARTY_PRICES)) {
+      const source = read(rel);
+      for (const price of prices) {
+        expect(source.includes(price), `${rel} no longer quotes ${price}`).toBe(true);
+      }
+    }
   });
 
   it('renders exclusions with a negative marker on every surface that lists features', () => {

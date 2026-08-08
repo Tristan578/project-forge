@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import LandingPage from '@/components/marketing/LandingPage';
+import { MCP_COMMAND_COUNT } from '@/lib/mcp/manifestStats';
 
 export const metadata: Metadata = {
   title: 'SpawnForge - AI-Powered Game Creation Platform',
@@ -9,7 +10,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'SpawnForge - Create Games with AI',
     description:
-      'The AI-native browser-based game engine. 350 MCP commands, visual scripting, one-click publish.',
+      `The AI-native browser-based game engine. ${MCP_COMMAND_COUNT} MCP commands, visual scripting, one-click publish.`,
     type: 'website',
   },
 };

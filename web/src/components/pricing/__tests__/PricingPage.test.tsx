@@ -265,6 +265,62 @@ describe('PricingPage', () => {
       });
     });
 
+    it('sends the user to the Stripe session URL on success', async () => {
+      // `assign()` rather than `href =` — assigning to a property of a global
+      // is an external mutation the React compiler rejects. Asserting on the
+      // method keeps that constraint from being silently reverted.
+      const assignMock = vi.fn();
+      // jsdom marks Location#assign non-configurable and non-writable, so
+      // vi.spyOn cannot redefine it. The `location` slot on `window` IS
+      // configurable, so replacing the whole object is what works.
+      // `vi.unstubAllGlobals()` in afterEach puts the real one back.
+      vi.stubGlobal('location', { ...window.location, assign: assignMock });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() =>
+          Promise.resolve(
+            new Response(JSON.stringify({ url: 'https://checkout.stripe.test/c/pay/cs_test_1' }), {
+              status: 200,
+            }),
+          ),
+        ),
+      );
+      await renderSignedIn();
+
+      fireEvent.click(screen.getAllByText('Subscribe')[0]);
+
+      await waitFor(() => {
+        expect(assignMock).toHaveBeenCalledWith('https://checkout.stripe.test/c/pay/cs_test_1');
+      });
+      expect(toastErrorMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['omits the url entirely', {}],
+      ['returns a null url', { url: null }],
+      ['returns an empty url', { url: '' }],
+    ])('toasts and stays put when a 200 %s', async (_case, body) => {
+      // A 200 with no session URL is a Stripe-side failure the route did not
+      // catch. Navigating on it sends the user to `/undefined` — a dead page
+      // that reads as "checkout is broken" with no way back.
+      const assignMock = vi.fn();
+      vi.stubGlobal('location', { ...window.location, assign: assignMock });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() => Promise.resolve(new Response(JSON.stringify(body), { status: 200 }))),
+      );
+      await renderSignedIn();
+
+      fireEvent.click(screen.getAllByText('Subscribe')[0]);
+
+      await waitFor(() => {
+        expect(toastErrorMock).toHaveBeenCalledWith(
+          'Checkout failed. Please try again in a moment.',
+        );
+      });
+      expect(assignMock).not.toHaveBeenCalled();
+    });
+
     it('toasts a connection message when fetch itself rejects', async () => {
       vi.stubGlobal(
         'fetch',

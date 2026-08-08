@@ -1,3 +1,21 @@
+import {
+  PROJECT_LIMITS,
+  countLabel,
+  paidPlansSentence,
+} from '@/lib/billing/tierPlans';
+import { MCP_COMMAND_COUNT } from '@/lib/mcp/manifestStats';
+
+// The free tier previously read "Yes, with AI credits". It has never had any:
+// /api/chat rejects the `starter` key outright. What it does get is the editor
+// and cloud storage, so that is what this says. The paid column is generated
+// from TIER_PLANS — hand-written, it claimed a "$29/mo Pro" plan that does not
+// exist and a $99 Studio that is charged at $79.
+const freeTierSummary = `Yes — full editor, ${countLabel(
+  PROJECT_LIMITS.starter,
+  'cloud project',
+  'cloud projects',
+)}, no AI`;
+
 export default function SpawnForgeVsUnityVsGodot() {
   return (
     <>
@@ -39,7 +57,8 @@ export default function SpawnForgeVsUnityVsGodot() {
 
       <h2>AI Integration</h2>
       <p>
-        <strong>SpawnForge:</strong> 25+ AI modules built into the editor from day one. 350 MCP
+        <strong>SpawnForge:</strong> 25+ AI modules built into the editor from day one.{' '}
+        {MCP_COMMAND_COUNT} MCP
         commands let any LLM drive the full engine. AI generates 3D models, textures, sound
         effects, voice lines, and music. The chat panel executes multi-turn compound actions.
       </p>
@@ -94,8 +113,8 @@ export default function SpawnForgeVsUnityVsGodot() {
         <tbody>
           <tr className="border-b border-zinc-800">
             <td className="py-2 pr-4 text-orange-400">SpawnForge</td>
-            <td className="py-2 pr-4 text-zinc-300">Yes, with AI credits</td>
-            <td className="py-2 text-zinc-300">$9/mo Starter, $29/mo Pro, $99/mo Studio</td>
+            <td className="py-2 pr-4 text-zinc-300">{freeTierSummary}</td>
+            <td className="py-2 text-zinc-300">{paidPlansSentence()}</td>
           </tr>
           <tr className="border-b border-zinc-800">
             <td className="py-2 pr-4 text-zinc-300">Unity</td>
@@ -123,7 +142,8 @@ export default function SpawnForgeVsUnityVsGodot() {
         Store, and a huge professional community. <strong>Godot</strong> has a passionate
         open-source community, active forums, and a growing asset library. <strong>SpawnForge
         </strong> is newer but offers a built-in community gallery for sharing and discovering
-        games, plus 350 MCP commands that make the engine accessible to AI agents and tools.
+        games, plus {MCP_COMMAND_COUNT} MCP commands that make the engine accessible to AI agents
+        and tools.
       </p>
 
       <h2>When to Choose Each Engine</h2>
