@@ -3585,6 +3585,169 @@ mod terrain_drain_tests {
              is why an explicit refcount-blind remove is unnecessary AND unsafe",
         );
     }
+
+    // === undo / redo of UndoableAction::TerrainChange ===
+    //
+    // The drains push this action; nothing in the suite ever executed it. Its
+    // undo arm restores THREE things that can each be wrong independently — the
+    // noise config, the heightmap, and the rendered mesh — and a partial restore
+    // is invisible in the inspector (which reads the config) or in the viewport
+    // (which reads the mesh), but never in both at once.
+
+    fn undo(world: &mut World) {
+        crate::core::history::queue_undo_from_bridge();
+        run_system!(world, super::apply_undo_requests);
+    }
+
+    fn redo(world: &mut World) {
+        crate::core::history::queue_redo_from_bridge();
+        run_system!(world, super::apply_redo_requests);
+    }
+
+    fn config_of(world: &mut World) -> TerrainData {
+        let mut query = world.query::<&TerrainData>();
+        query
+            .iter(world)
+            .next()
+            .expect("expected exactly one terrain entity")
+            .clone()
+    }
+
+    /// Vertex count of whatever mesh the entity's `Mesh3d` currently names.
+    /// Panics if the handle is dangling, which is the whole point: a restore
+    /// that leaves `Mesh3d` pointing at a freed asset renders as nothing.
+    fn live_mesh_vertex_count(world: &mut World) -> usize {
+        let handle = mesh_handle_of(world);
+        world
+            .resource::<Assets<Mesh>>()
+            .get(&handle)
+            .expect("Mesh3d must name a LIVE mesh asset after undo/redo")
+            .count_vertices()
+    }
+
+    #[test]
+    fn undoing_an_update_restores_the_config_the_heightmap_and_the_mesh() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+        let before_heights = heights_of(&mut world);
+        let before_config = config_of(&mut world);
+
+        queue_update(
+            &mut world,
+            "terrain-1",
+            TerrainDataPatch {
+                seed: Some(999),
+                height_scale: Some(40.0),
+                ..Default::default()
+            },
+        );
+        let after_heights = heights_of(&mut world);
+        assert_ne!(before_heights, after_heights, "sanity: the update changed something");
+
+        undo(&mut world);
+
+        assert_eq!(
+            config_of(&mut world),
+            before_config,
+            "undo must restore the WHOLE previous config, not just the fields the \
+             patch happened to name",
+        );
+        assert_eq!(
+            heights_of(&mut world),
+            before_heights,
+            "undo must restore the pre-change heightmap — leaving the new one \
+             makes the inspector and the viewport disagree",
+        );
+        assert_eq!(
+            live_mesh_vertex_count(&mut world),
+            8 * 8,
+            "undo must rebuild the render mesh from the restored heightmap",
+        );
+    }
+
+    #[test]
+    fn redoing_an_update_reapplies_the_config_the_heightmap_and_the_mesh() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+
+        queue_update(
+            &mut world,
+            "terrain-1",
+            TerrainDataPatch {
+                seed: Some(999),
+                height_scale: Some(40.0),
+                ..Default::default()
+            },
+        );
+        let after_config = config_of(&mut world);
+        let after_heights = heights_of(&mut world);
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert_eq!(config_of(&mut world), after_config, "redo must reapply the new config");
+        assert_eq!(
+            heights_of(&mut world),
+            after_heights,
+            "redo must reapply the new heightmap",
+        );
+        assert_eq!(live_mesh_vertex_count(&mut world), 8 * 8);
+    }
+
+    /// Undo then redo then undo again. The redo arm re-pushes onto the undo
+    /// stack, so a bug that pushes the WRONG side of the action (or drops it)
+    /// only shows on the second undo.
+    #[test]
+    fn undo_redo_undo_lands_back_on_the_original_terrain() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+        let before_heights = heights_of(&mut world);
+        let before_config = config_of(&mut world);
+
+        queue_update(
+            &mut world,
+            "terrain-1",
+            TerrainDataPatch { seed: Some(999), ..Default::default() },
+        );
+
+        undo(&mut world);
+        redo(&mut world);
+        undo(&mut world);
+
+        assert_eq!(config_of(&mut world), before_config);
+        assert_eq!(heights_of(&mut world), before_heights);
+    }
+
+    /// A sculpt records the same action type, but its `old_terrain` and
+    /// `new_terrain` are IDENTICAL (sculpting edits the heightmap, not the noise
+    /// config). An undo arm that only restored the config would score green on
+    /// the update tests above and still lose every brush stroke.
+    #[test]
+    fn undoing_a_sculpt_restores_the_pre_sculpt_heightmap() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+        let before_heights = heights_of(&mut world);
+
+        queue_sculpt(&mut world, "terrain-1", [0.0, 0.0], 5.0);
+        let sculpted = heights_of(&mut world);
+        assert_ne!(before_heights, sculpted, "sanity: the sculpt moved vertices");
+
+        undo(&mut world);
+
+        assert_eq!(
+            heights_of(&mut world),
+            before_heights,
+            "undo must restore the pre-sculpt heightmap",
+        );
+        assert_eq!(
+            live_mesh_vertex_count(&mut world),
+            8 * 8,
+            "undo must rebuild the render mesh, not just the data component",
+        );
+
+        redo(&mut world);
+        assert_eq!(heights_of(&mut world), sculpted, "redo must reapply the brush stroke");
+    }
 }
 
 /// Round-trip coverage for the terrain half of a scene save/load.
