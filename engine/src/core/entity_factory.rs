@@ -59,7 +59,7 @@ impl EntityNameCounter {
 /// admit — interior NUL bytes (`\0`, not stripped by `str::trim`) and unbounded
 /// blobs — while staying decoupled from any single id format. A rejected id
 /// falls back to the engine-generated UUID, so the spawn still succeeds.
-fn is_valid_override_id(id: &str) -> bool {
+pub(crate) fn is_valid_override_id(id: &str) -> bool {
     // `len()` is the UTF-8 byte length on purpose: this is a storage/DoS bound on
     // the string we copy into the `EntityId`, so bytes (not grapheme count) is the
     // right unit. Do not swap to `chars().count()`. The control-char check is

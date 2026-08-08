@@ -19,6 +19,11 @@ pub struct TerrainSpawnRequest {
     pub name: Option<String>,
     pub position: Option<bevy::math::Vec3>,
     pub terrain_data: TerrainData,
+    /// Caller-supplied `EntityId` override, validated by
+    /// `entity_factory::is_valid_override_id` before it is honored. Spawn-only:
+    /// `TerrainUpdate`/`TerrainSculpt` address an entity that already exists, so
+    /// they carry `entity_id` instead.
+    pub id: Option<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -83,6 +83,11 @@ fn handle_csg(payload: serde_json::Value, operation: CsgOperation) -> super::Com
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SpawnTerrainPayload {
+    /// Optional caller-supplied entity id, so JS can reference the new terrain
+    /// synchronously instead of waiting for the async SELECTION_CHANGED
+    /// round-trip. Validated engine-side; a malformed value is ignored and the
+    /// spawn falls back to a generated UUID.
+    id: Option<String>,
     name: Option<String>,
     position: Option<[f32; 3]>,
     noise_type: Option<String>,
@@ -138,6 +143,7 @@ fn handle_spawn_terrain(payload: serde_json::Value) -> super::CommandResult {
         name: data.name,
         position: data.position.map(|p| Vec3::new(p[0], p[1], p[2])),
         terrain_data: td,
+        id: data.id,
     };
 
     if queue_terrain_spawn_from_bridge(request) {
@@ -166,8 +172,11 @@ fn handle_update_terrain(payload: serde_json::Value) -> super::CommandResult {
     let data: UpdateTerrainPayload = serde_json::from_value(payload)
         .map_err(|e| format!("Invalid update_terrain payload: {}", e))?;
 
-    // Build a full TerrainData from partial payload with defaults.
-    // The apply system will merge with existing component data.
+    // Build a full TerrainData from the partial payload, defaulting anything the
+    // caller omitted. NOTE: this is a REPLACE, not a merge — the request carries
+    // no way to distinguish "omitted" from "explicitly set to the default", so
+    // `apply_terrain_updates` swaps the whole component. Callers that mean to
+    // change one field must send the full config.
     let mut td = TerrainData::default();
     if let Some(ref nt) = data.noise_type {
         td.noise_type = match nt.as_str() {
