@@ -16,14 +16,49 @@
  * `provider_unavailable` metrics bucket, which is what it actually is.
  *
  * Both arguments MUST be static literals authored in our code. Never
- * interpolate a provider response into either one.
+ * interpolate a provider response into either one. The two unions below are how
+ * that is enforced rather than merely asked for: a `string` parameter accepts a
+ * provider field just as happily as a literal, and it also let the message
+ * catalogue drift — a test constructed `('Texture', 'texture maps')` and got
+ * `"Texture generation produced no texture maps"`, while the texture status
+ * route has always said `"…produced no maps"`. Same condition, two sentences,
+ * neither one wrong enough to notice.
  */
+
+/**
+ * What was being generated, capitalised. One entry per generating surface.
+ *
+ * A runtime array rather than a bare union so `__tests__/emptyArtifactError.test.ts`
+ * can iterate it against the sentences the `*／status` routes and
+ * `pollProviderStatus` already ship — the drift this file exists to stop is only
+ * visible by comparing the two catalogues, which a compile-time-only type can't do.
+ */
+export const GENERATION_TYPE_LABELS = [
+  'Pixel art',
+  'Sprite',
+  'Sprite sheet',
+  'Tileset',
+  'Texture',
+  'Skybox',
+  'Model',
+  'Music',
+] as const;
+
+export type GenerationTypeLabel = (typeof GENERATION_TYPE_LABELS)[number];
+
+/**
+ * The artifact that never arrived. Deliberately short: these are the exact nouns
+ * the `*／status` routes already use, so the two paths to the same failure
+ * (submit-time throw, poll-time empty result) read identically to the user.
+ */
+export const ARTIFACT_LABELS = ['image', 'maps', 'audio', 'file'] as const;
+
+export type ArtifactLabel = (typeof ARTIFACT_LABELS)[number];
+
 export class EmptyArtifactError extends Error {
   constructor(
-    /** What was being generated, capitalised: `'Pixel art'`, `'Texture'`. */
-    readonly generationType: string,
-    /** The artifact that never arrived: `'image'`, `'texture maps'`, `'audio'`. */
-    readonly artifact: string
+    readonly generationType: GenerationTypeLabel,
+    readonly artifact: ArtifactLabel
   ) {
     super(`${generationType} generation produced no ${artifact}`);
     this.name = 'EmptyArtifactError';

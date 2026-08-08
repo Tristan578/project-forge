@@ -47,6 +47,14 @@ export const GENERATION_OUTCOMES = [
   'rejected',
   'content_rejected',
   'provider_unavailable',
+  /**
+   * The provider answered 200 and delivered nothing (`EmptyArtifactError`).
+   * Its own bucket rather than folded into `provider_unavailable`, even though
+   * both return 503: an outage alert that also fires on empty artifacts cannot
+   * distinguish "the provider is down" from "the provider is up and returning
+   * junk", which are different pages for different people.
+   */
+  'empty_artifact',
   'degraded',
   'error',
 ] as const;

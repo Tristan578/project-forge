@@ -189,7 +189,12 @@ describe('POST /api/generate/pixel-art', () => {
   // `id` was read as an OpenAI success — fabricated `pxart-openai-<timestamp>`
   // jobId, `status: 'completed'`, HTTP 201, tokens charged, nothing delivered.
   describe('provider succeeds but delivers no artifact', () => {
-    const EXPECTED = 'Pixel art generation produced no image';
+    // The refund clause is appended by createGenerationHandler, and only when a
+    // platform deduction was actually reversed — which it is on every case here
+    // (usage-abc). Asserting the whole sentence keeps the user-visible promise
+    // pinned alongside the artifact naming.
+    const EXPECTED =
+      'Pixel art generation produced no image. Your tokens have been refunded — please try again.';
 
     it('replicate: returns 503 naming the missing artifact instead of a fake completed job', async () => {
       pixelArtClientMock.generate.mockResolvedValue({});
