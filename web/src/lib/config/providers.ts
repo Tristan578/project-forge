@@ -194,6 +194,18 @@ export function getPlatformKeyEnvVar(provider: string): string | null {
     : null;
 }
 
+/**
+ * Env-var names for the multi-model routers, which front several providers at
+ * once rather than mapping 1:1 to one. Kept beside `PLATFORM_KEY_ENV` so every
+ * consumer — the chat-backend table below, `/api/capabilities`, the health
+ * check — names them from one place.
+ */
+export const GATEWAY_KEY_ENV = {
+  vercelGateway: 'AI_GATEWAY_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+  githubModels: 'GITHUB_MODELS_PAT',
+} as const satisfies Record<string, string>;
+
 // ---------------------------------------------------------------------------
 // Chat backends
 // ---------------------------------------------------------------------------
@@ -225,20 +237,20 @@ export const CHAT_BACKENDS: readonly ChatBackendDescriptor[] = [
   {
     id: 'vercel-gateway',
     name: 'Vercel AI Gateway',
-    envVars: ['AI_GATEWAY_API_KEY'],
+    envVars: [GATEWAY_KEY_ENV.vercelGateway],
     probeUrl: 'https://ai-gateway.vercel.sh/v1',
     vercelOidc: true,
   },
   {
     id: 'openrouter',
     name: 'OpenRouter',
-    envVars: ['OPENROUTER_API_KEY'],
+    envVars: [GATEWAY_KEY_ENV.openrouter],
     probeUrl: 'https://openrouter.ai/api/v1',
   },
   {
     id: 'github-models',
     name: 'GitHub Models',
-    envVars: ['GITHUB_MODELS_PAT'],
+    envVars: [GATEWAY_KEY_ENV.githubModels],
     probeUrl: 'https://models.inference.ai.azure.com',
   },
   {

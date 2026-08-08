@@ -8,7 +8,11 @@
  */
 
 import type { ProviderBackend, ProviderCapability } from '../types';
-import { PLATFORM_KEY_ENV, getPlatformKeyEnvVar } from '@/lib/config/providers';
+import {
+  PLATFORM_KEY_ENV,
+  getPlatformKeyEnvVar,
+  type PlatformKeyProvider,
+} from '@/lib/config/providers';
 
 /** All capabilities — direct backend is the universal catch-all */
 const ALL_CAPABILITIES: ReadonlyArray<ProviderCapability> = [
@@ -25,20 +29,26 @@ const ALL_CAPABILITIES: ReadonlyArray<ProviderCapability> = [
 ];
 
 /**
- * Maps capability to the environment variable holding the platform key.
- * For capabilities that need multiple providers, the primary one is listed.
+ * Maps capability to the provider that serves it directly. For capabilities
+ * that could use several providers, the primary one is listed.
+ *
+ * Keyed on provider rather than on the env-var name so the env names have a
+ * single source (`PLATFORM_KEY_ENV`) and a typo here fails `tsc` instead of
+ * silently reading an unset variable. Before PF-1054 this table held its own
+ * hardcoded copy of the names, which is exactly the drift that put two
+ * permanent false outages on the status page.
  */
-const CAPABILITY_ENV_MAP: Record<ProviderCapability, string> = {
-  chat: 'ANTHROPIC_API_KEY',
-  embedding: 'PLATFORM_OPENAI_KEY',
-  image: 'PLATFORM_OPENAI_KEY',
-  model3d: 'PLATFORM_MESHY_KEY',
-  texture: 'PLATFORM_MESHY_KEY',
-  sfx: 'PLATFORM_ELEVENLABS_KEY',
-  voice: 'PLATFORM_ELEVENLABS_KEY',
-  music: 'PLATFORM_SUNO_KEY',
-  sprite: 'PLATFORM_REPLICATE_KEY',
-  bg_removal: 'PLATFORM_REMOVEBG_KEY',
+const CAPABILITY_PROVIDER_MAP: Record<ProviderCapability, PlatformKeyProvider> = {
+  chat: 'anthropic',
+  embedding: 'openai',
+  image: 'openai',
+  model3d: 'meshy',
+  texture: 'meshy',
+  sfx: 'elevenlabs',
+  voice: 'elevenlabs',
+  music: 'suno',
+  sprite: 'replicate',
+  bg_removal: 'removebg',
 };
 
 /**
@@ -63,7 +73,7 @@ export function isDirectProviderConfigured(provider: string): boolean {
 
 /** Get the primary API key for a capability via the direct path */
 function getKeyForCapability(capability: ProviderCapability): string {
-  const envVar = CAPABILITY_ENV_MAP[capability];
+  const envVar = PLATFORM_KEY_ENV[CAPABILITY_PROVIDER_MAP[capability]];
   return process.env[envVar] ?? '';
 }
 
