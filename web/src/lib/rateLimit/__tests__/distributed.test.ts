@@ -204,9 +204,12 @@ describe('distributedRateLimit — Upstash path', () => {
     expect(evalUrl).toBe('https://redis.upstash.io/eval');
   });
 
-  it('never adds a phantom entry on deny (no ZADD in deny path)', async () => {
-    // The Lua script only calls ZADD when count < limit.
-    // On deny, the entry is never written — nothing to clean up.
+  it('issues no cleanup round-trip on deny', async () => {
+    // `fetch` is mocked, so the Lua body travels as an opaque string and its
+    // ZADD branch is never executed here — this asserts only that the caller
+    // makes a single EVAL and no follow-up ZREM. The claim that the deny path
+    // writes nothing is proven by executing the script itself, in
+    // `slidingWindowScript.lua.test.ts`.
     mockFetch.mockResolvedValue(makeEvalResponse(false, 10));
 
     const result = await distributedRateLimit('no-phantom-key', 10, 60);

@@ -51,8 +51,14 @@ const REDIS_KEY_PREFIX = '@spawnforge/ratelimit';
  * ARGV[5] = windowSeconds (TTL for EXPIRE)
  *
  * Returns {allowed (0|1), count} as a two-element array.
+ *
+ * Exported so `__tests__/slidingWindowScript.lua.test.ts` can execute this exact
+ * source in a real Lua VM. Every other test in this directory mocks `fetch` and
+ * therefore asserts what we *send* to Redis, never what Redis *does* with it —
+ * the boundary arithmetic below (`<` vs `<=`, the `tonumber` coercions) is only
+ * observable by running it. Do not inline a copy in the test.
  */
-const SLIDING_WINDOW_SCRIPT = `
+export const SLIDING_WINDOW_SCRIPT = `
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
 local count = redis.call('ZCARD', KEYS[1])
 if count < tonumber(ARGV[2]) then
