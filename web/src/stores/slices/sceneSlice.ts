@@ -44,7 +44,7 @@ export interface SceneSlice {
    * guard on the result. Do NOT read `primaryId` after calling this; it is not
    * updated until the engine emits SELECTION_CHANGED.
    */
-  spawnTerrain: (terrainData?: Partial<TerrainDataState>) => string | undefined;
+  spawnTerrain: (terrainData?: Partial<TerrainDataState>, name?: string) => string | undefined;
   updateTerrain: (entityId: string, terrainData: TerrainDataState) => void;
   sculptTerrain: (entityId: string, position: [number, number], radius: number, strength: number) => void;
   setTerrainData: (entityId: string, data: TerrainDataState) => void;
@@ -127,7 +127,7 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
     const state = get();
     set({ defaultTransition: { ...state.defaultTransition, ...config } });
   },
-  spawnTerrain: (terrainData) => {
+  spawnTerrain: (terrainData, name) => {
     // Mirror of `spawnEntity`: generate the id client-side and hand it to the
     // engine, which overrides the spawned entity's EntityId to match (a
     // malformed value is ignored engine-side and falls back to a generated
@@ -137,7 +137,10 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
     // reference that every follow-up command targets in vain.
     if (!dispatchCommand) return undefined;
     const id = crypto.randomUUID();
-    dispatchCommand('spawn_terrain', { ...(terrainData || {}), id });
+    // `id` and `name` stay AFTER the spread on purpose: `terrainData` can carry
+    // LLM-authored keys, and an `id` inside it must never be able to override
+    // the one generated here (the returned id would then name no entity).
+    dispatchCommand('spawn_terrain', { ...(terrainData || {}), id, name });
     return id;
   },
   updateTerrain: (entityId, terrainData) => {

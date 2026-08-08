@@ -507,7 +507,13 @@ describe('compoundHandlers', () => {
       }, {
         spawnEntity: vi.fn(() => 'root-1'),
         spawnTerrain: vi.fn(() => 'terrain-1'),
-        // primaryId deliberately left null: the handler must NOT depend on it.
+        // A NON-null primaryId that is deliberately the WRONG answer. Leaving it
+        // null only proves the handler doesn't crash without it; a mutant that
+        // went back to reading the store would then yield `undefined` and fail
+        // for the wrong reason. With a real-looking stale value, the pre-fix
+        // code reparents to 'stale-selection' and the assertion below names
+        // exactly what regressed.
+        primaryId: 'stale-selection',
       });
 
       expect(store.spawnTerrain).toHaveBeenCalledWith({ size: 64 });

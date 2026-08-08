@@ -7,7 +7,7 @@
  */
 
 import { StateCreator } from 'zustand';
-import type { SceneGraph, SceneNode, EntityType } from './types';
+import type { SceneGraph, SceneNode, EntityType, TerrainDataState } from './types';
 
 /** Partial node properties that may be changed in-place. */
 export interface SceneNodeChanges {
@@ -96,7 +96,10 @@ export const createSceneGraphSlice: StateCreator<
     primaryId: string | null;
     primaryName: string | null;
     primaryTransform: unknown | null;
-    spawnTerrain: () => string | undefined;
+    spawnTerrain: (
+      terrainData?: Partial<TerrainDataState>,
+      name?: string,
+    ) => string | undefined;
   },
   [],
   [],
@@ -260,8 +263,11 @@ export const createSceneGraphSlice: StateCreator<
     if (type === 'terrain') {
       // Terrain goes through the separate `spawn_terrain` engine pipeline, but
       // it now honors a caller-supplied id just like `spawn_entity` does, so
-      // forward the id instead of swallowing it.
-      return get().spawnTerrain();
+      // forward the id instead of swallowing it. `name` must be forwarded too —
+      // it is a real parameter of the engine's `spawn_terrain` payload, and
+      // dropping it here silently renamed every caller's terrain to the
+      // engine's auto-generated "Terrain (n)".
+      return get().spawnTerrain(undefined, name);
     }
     // The engine's `apply_spawn_requests` only spawns the primitive mesh/light
     // types in SPAWNABLE_ENTITY_TYPES via the spawn_entity command. Every other
