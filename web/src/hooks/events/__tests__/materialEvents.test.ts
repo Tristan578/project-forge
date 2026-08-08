@@ -185,18 +185,23 @@ describe('handleMaterialEvent', () => {
   // happily while the engine emitted a completely different, flattened shape that
   // this handler could never read. Both halves now assert against the same file:
   // `engine/src/core/terrain.rs` -> `terrain_changed_wire_contract_tests`.
+  //
+  // The event NAME comes from the fixture too, not a literal here. A rename on
+  // either side used to be silent in both directions: the engine kept emitting,
+  // this `switch` fell through to its default, and the inspector just never
+  // updated.
   it('TERRAIN_CHANGED: stores the config the engine actually emits', () => {
     const result = handleMaterialEvent(
-      'TERRAIN_CHANGED',
-      terrainChangedFixture,
+      terrainChangedFixture.event,
+      terrainChangedFixture.payload,
       mockSetGet.set,
       mockSetGet.get
     );
 
     expect(result).toBe(true);
     expect(actions.setTerrainData).toHaveBeenCalledWith(
-      terrainChangedFixture.entityId,
-      terrainChangedFixture.terrainData
+      terrainChangedFixture.payload.entityId,
+      terrainChangedFixture.payload.terrainData
     );
   });
 
@@ -204,7 +209,12 @@ describe('handleMaterialEvent', () => {
   // still pass if the handler read some other key that happened to be undefined
   // on both. Pin the value itself: a real config, never undefined.
   it('TERRAIN_CHANGED: does not store undefined when the config is nested', () => {
-    handleMaterialEvent('TERRAIN_CHANGED', terrainChangedFixture, mockSetGet.set, mockSetGet.get);
+    handleMaterialEvent(
+      terrainChangedFixture.event,
+      terrainChangedFixture.payload,
+      mockSetGet.set,
+      mockSetGet.get
+    );
 
     const [, stored] = actions.setTerrainData.mock.calls[0];
     expect(stored).toBeDefined();

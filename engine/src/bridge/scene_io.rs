@@ -156,9 +156,15 @@ pub(super) fn apply_scene_export(
 
         // Without BOTH of these a saved terrain reloads as a flat 2x2 plane with no
         // terrain components — see `terrain_snapshot_round_trip_tests` in
-        // `core::entity_factory`, which pins both arms of that fallback.
-        snap.terrain_data = terrain_data;
-        snap.terrain_mesh_data = terrain_mesh_data;
+        // `core::entity_factory`, which pins both arms of that fallback. The
+        // assignment lives in `core::entity_factory::apply_terrain_to_snapshot`
+        // so it is reachable from a native test; this module is wasm32-only and
+        // nothing inside it is ever compiled by `cargo test`.
+        entity_factory::apply_terrain_to_snapshot(
+            &mut snap,
+            terrain_data.as_ref(),
+            terrain_mesh_data.as_ref(),
+        );
 
         snap.lod_data = lod_data;
 

@@ -67,6 +67,38 @@ pub(crate) fn is_valid_override_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && !id.chars().any(|c| c.is_control())
 }
 
+/// Maximum characters of a caller-supplied id rendered into a log line.
+const LOG_ID_MAX_CHARS: usize = 64;
+
+/// Render a caller-supplied entity id safely for a log message.
+///
+/// `update_terrain` / `sculpt_terrain` accept an arbitrary `entity_id` string —
+/// unlike `spawn_terrain`, they never pass it through
+/// [`is_valid_override_id`], because they only ever compare it against existing
+/// ids. On the miss path that raw string reached `tracing::warn!` verbatim, so a
+/// caller could embed newlines to forge additional log lines (log injection) or
+/// megabytes of text to bloat the log stream. Neither is reachable from the
+/// editor UI today, which is why this is a hardening measure rather than a live
+/// exploit — but the values are caller-controlled and the miss path is trivially
+/// reachable by looping on a nonexistent id.
+///
+/// Control characters become `?` (the whole class, so `\n`, `\r` and NUL are all
+/// covered) and the result is truncated to [`LOG_ID_MAX_CHARS`] **characters** —
+/// `char` boundaries, not bytes, so a multi-byte id can never be split mid-scalar.
+/// A truncated value is marked with a trailing `…` so a bounded id and a clipped
+/// one are distinguishable in the log.
+pub(crate) fn log_safe_id(id: &str) -> String {
+    let mut out: String = id
+        .chars()
+        .take(LOG_ID_MAX_CHARS)
+        .map(|c| if c.is_control() { '?' } else { c })
+        .collect();
+    if id.chars().nth(LOG_ID_MAX_CHARS).is_some() {
+        out.push('…');
+    }
+    out
+}
+
 /// System that processes pending spawn requests.
 pub fn apply_spawn_requests(
     mut pending: ResMut<PendingCommands>,
@@ -298,7 +330,7 @@ pub fn apply_terrain_updates(
         else {
             tracing::warn!(
                 "Dropped terrain update: no entity with id {}",
-                update.entity_id,
+                log_safe_id(&update.entity_id),
             );
             continue;
         };
@@ -353,9 +385,33 @@ pub fn apply_terrain_updates(
 /// `sculpt.position` is a WORLD-space `[x, z]` — that is what every other
 /// position in the command API means, and it is the only thing a caller who
 /// picked a point off the viewport can supply. `terrain::sculpt_heightmap`
-/// indexes the grid in terrain-LOCAL space, so the entity's translation is
-/// subtracted here. Without that subtraction, sculpting a terrain that had ever
-/// been moved edited the wrong cells (or silently missed the grid entirely).
+/// indexes the grid in terrain-LOCAL space, so the world point is converted
+/// here. Without that conversion, sculpting a terrain that had ever been moved
+/// edited the wrong cells (or silently missed the grid entirely).
+///
+/// The conversion inverts the full `GlobalTransform` affine, not just the
+/// translation, and it must be `GlobalTransform` rather than `Transform` for
+/// two reasons:
+///
+/// - `Transform` is LOCAL. `core::reparent` inserts `ChildOf` without rebasing
+///   the child's transform, so once a terrain has a parent its `Transform` is
+///   no longer its world pose. `create_level_layout` parents the terrain ground
+///   under the level root, which makes that the common case, not the exotic one.
+/// - Rotation and scale are real. `bridge/core_systems` applies gizmo rotation
+///   and scale to any entity by id with no terrain exclusion, and
+///   `build_terrain_mesh`/`sculpt_heightmap` both index a grid laid out in the
+///   entity's local frame. Subtracting only the translation puts the brush on
+///   the transposed cell for a Y-rotated terrain and at the wrong radius for a
+///   scaled one — silently, since `sculpt_heightmap` clamps to the grid.
+///
+/// The world point is lifted to the terrain origin's height (`translation().y`)
+/// because the command carries only `[x, z]`. That is exact for translation,
+/// Y-rotation, scale and parenting; a terrain tilted about X or Z would need a
+/// real ray/plane intersection, which the 2D command shape cannot express.
+///
+/// `GlobalTransform` propagates in `PostUpdate`, so a pose written this frame
+/// is visible on the next one — the same one-frame budget the rest of the
+/// editor already runs on.
 pub fn apply_terrain_sculpts(
     mut pending: ResMut<PendingCommands>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -365,28 +421,31 @@ pub fn apply_terrain_sculpts(
         &terrain::TerrainData,
         &mut terrain::TerrainMeshData,
         &mut Mesh3d,
-        &Transform,
+        &GlobalTransform,
     )>,
 ) {
     for sculpt in pending.terrain_sculpts.drain(..) {
         // Same drop-don't-record contract as `apply_terrain_updates`.
-        let Some((_, terrain_data, mut mesh_data, mut mesh3d, transform)) = terrain_query
+        let Some((_, terrain_data, mut mesh_data, mut mesh3d, global)) = terrain_query
             .iter_mut()
             .find(|(id, _, _, _, _)| id.0 == sculpt.entity_id)
         else {
             tracing::warn!(
                 "Dropped terrain sculpt: no entity with id {}",
-                sculpt.entity_id,
+                log_safe_id(&sculpt.entity_id),
             );
             continue;
         };
 
         let old_mesh_data = mesh_data.clone();
 
-        let local_position = [
-            sculpt.position[0] - transform.translation.x,
-            sculpt.position[1] - transform.translation.z,
-        ];
+        let world_point = Vec3::new(
+            sculpt.position[0],
+            global.translation().y,
+            sculpt.position[1],
+        );
+        let local_point = global.affine().inverse().transform_point3(world_point);
+        let local_position = [local_point.x, local_point.z];
 
         let mut heights = mesh_data.heights.clone();
         terrain::sculpt_heightmap(
@@ -1258,6 +1317,30 @@ fn spawn_spot_light_with_id(
     )).id();
 
     (entity, entity_id_str, pos)
+}
+
+/// Copy an entity's terrain components onto the snapshot the scene exporter is
+/// building.
+///
+/// Both halves are required. `TerrainMeshData` alone reloads a heightmap the
+/// user can no longer regenerate or sculpt (the noise config is gone);
+/// `TerrainData` alone reloads a terrain whose saved sculpting is lost. With
+/// neither, `spawn_from_snapshot` falls through to its flat 2x2 plane arm and
+/// the entity comes back with the right name and the right `EntityType::Terrain`
+/// — which is exactly why the loss is invisible in the UI.
+///
+/// This lives in `core/` rather than inline in `bridge/scene_io.rs` because the
+/// bridge is `wasm32`-only: a `#[cfg(test)]` module there never compiles under
+/// native `cargo test`, so an assignment made only at the bridge call site
+/// cannot be covered by any test that actually runs. See
+/// `terrain_snapshot_export_tests` below.
+pub fn apply_terrain_to_snapshot(
+    snapshot: &mut EntitySnapshot,
+    terrain_data: Option<&terrain::TerrainData>,
+    terrain_mesh_data: Option<&terrain::TerrainMeshData>,
+) {
+    snapshot.terrain_data = terrain_data.cloned();
+    snapshot.terrain_mesh_data = terrain_mesh_data.cloned();
 }
 
 /// Spawn an entity from a snapshot (for undo/redo).
@@ -2628,18 +2711,20 @@ mod spawn_id_tests {
 #[cfg(test)]
 mod terrain_drain_tests {
     use super::{
-        apply_terrain_sculpts, apply_terrain_spawn_requests, apply_terrain_updates, HistoryStack,
-        UndoableAction,
+        apply_terrain_sculpts, apply_terrain_spawn_requests, apply_terrain_updates, log_safe_id,
+        HistoryStack, UndoableAction, LOG_ID_MAX_CHARS,
     };
     use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
     use crate::core::pending_commands::{
         EntityType, PendingCommands, TerrainSculpt, TerrainSpawnRequest, TerrainUpdate,
     };
     use crate::core::terrain::{
-        generate_heightmap, rebuild_terrain_mesh, TerrainData, TerrainDataPatch, TerrainEnabled,
-        TerrainMeshData,
+        TerrainData, TerrainDataPatch, TerrainEnabled, TerrainMeshData,
     };
     use bevy::prelude::*;
+    use bevy::transform::systems::{
+        mark_dirty_trees, propagate_parent_transforms, sync_simple_transforms,
+    };
 
     /// A terrain small enough to reason about by hand: an 8x8 grid over 7.0
     /// world units, so `step` is exactly 1.0 and grid cell `(x, z)` sits at
@@ -2661,6 +2746,13 @@ mod terrain_drain_tests {
         world.insert_resource(Assets::<Mesh>::default());
         world.insert_resource(Assets::<StandardMaterial>::default());
         world.insert_resource(HistoryStack::default());
+        // `apply_terrain_sculpts` reads `GlobalTransform`, which Bevy only
+        // auto-inserts as IDENTITY -- nothing propagates it unless the transform
+        // systems run, and `mark_dirty_trees` / `propagate_parent_transforms`
+        // both need this resource. Without it every sculpt test would silently
+        // assert against an identity pose and could not tell `Transform` from
+        // `GlobalTransform`.
+        world.insert_resource(StaticTransformOptimizations::default());
         world
     }
 
@@ -2674,6 +2766,21 @@ mod terrain_drain_tests {
             schedule.add_systems($system);
             schedule.run($world);
         }};
+    }
+
+    /// Bring every `GlobalTransform` up to date, exactly as `TransformPlugin`
+    /// does in `PostUpdate`. The order is load-bearing and mirrors
+    /// `TransformPlugin::build`.
+    fn propagate_transforms(world: &mut World) {
+        run_system!(
+            world,
+            (
+                mark_dirty_trees,
+                propagate_parent_transforms,
+                sync_simple_transforms,
+            )
+                .chain()
+        );
     }
 
     fn queue_spawn(world: &mut World, request: TerrainSpawnRequest) {
@@ -2750,6 +2857,9 @@ mod terrain_drain_tests {
                 radius: 1.5,
                 strength,
             });
+        // The real editor propagates transforms every frame; a sculpt landing on
+        // a stale `GlobalTransform` is not a case the drain system can see.
+        propagate_transforms(world);
         run_system!(world, apply_terrain_sculpts);
     }
 
@@ -3234,6 +3344,126 @@ mod terrain_drain_tests {
         );
     }
 
+    /// `name` is a real public parameter of the `spawn_terrain` command
+    /// (`core/commands/procedural.rs`) and is exposed on the MCP surface, but the
+    /// shared `spawn_request()` helper always passes `None` — so the `Some` arm
+    /// of the `unwrap_or_else` was never executed and a mutant that ignored
+    /// `request.name` entirely passed the whole suite.
+    #[test]
+    fn spawn_honours_a_caller_supplied_name() {
+        let mut world = base_world();
+        queue_spawn(
+            &mut world,
+            TerrainSpawnRequest {
+                name: Some("Ridge".to_string()),
+                ..spawn_request(Some("terrain-1"), None)
+            },
+        );
+
+        let mut query = world.query::<&EntityName>();
+        let names: Vec<String> = query.iter(&world).map(|n| n.0.clone()).collect();
+        assert_eq!(names, vec!["Ridge".to_string()]);
+    }
+
+    /// The other arm, so the two are distinguishable: without a name the entity
+    /// takes the generated counter name rather than an empty string.
+    #[test]
+    fn spawn_without_a_name_uses_the_generated_counter_name() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+
+        let mut query = world.query::<&EntityName>();
+        let names: Vec<String> = query.iter(&world).map(|n| n.0.clone()).collect();
+        assert_eq!(names, vec!["Terrain".to_string()]);
+    }
+
+    /// `Transform` is LOCAL, and `core::reparent` inserts `ChildOf` without
+    /// rebasing it — so a parented terrain's `Transform` is no longer its world
+    /// pose. This is not an exotic case: `create_level_layout` parents the
+    /// terrain ground under the level root on every generated level, which makes
+    /// the parented terrain the COMMON one. Reading `Transform` here put every
+    /// subsequent sculpt on the wrong grid cell.
+    #[test]
+    fn sculpt_on_a_parented_terrain_uses_the_world_pose() {
+        let mut world = base_world();
+        // Terrain at the local origin, so `Transform` alone says "centred on 0".
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+        let before = heights_of(&mut world);
+
+        // Parent it under an entity at (10, 0, 10). The terrain's own Transform
+        // is untouched — only its GlobalTransform moves.
+        let parent = world
+            .spawn(Transform::from_translation(Vec3::new(10.0, 0.0, 10.0)))
+            .id();
+        let terrain = {
+            let mut query = world.query::<(Entity, &EntityId)>();
+            query
+                .iter(&world)
+                .find(|(_, id)| id.0 == "terrain-1")
+                .map(|(e, _)| e)
+                .expect("terrain entity")
+        };
+        world.entity_mut(terrain).insert(ChildOf(parent));
+
+        // Cell (0,0) of a terrain whose WORLD centre is (10, 10) sits at
+        // (6.5, 6.5). Under the pre-fix local read it sat at (-3.5, -3.5).
+        queue_sculpt(&mut world, "terrain-1", [6.5, 6.5], 5.0);
+
+        let delta = heights_of(&mut world)[0] - before[0];
+        assert!(
+            (delta - 5.0).abs() < 1e-3,
+            "a brush over cell (0,0) of a terrain parented to (10,0,10) must raise \
+             that cell by the full strength, raised {delta}",
+        );
+    }
+
+    /// Rotation is real: `bridge/core_systems` applies gizmo rotation to any
+    /// entity by id with no terrain exclusion, while `build_terrain_mesh` and
+    /// `sculpt_heightmap` both index a grid laid out in the entity's LOCAL
+    /// frame. Subtracting only the translation puts the brush on the transposed
+    /// cell — silently, because `sculpt_heightmap` clamps its scan to the grid.
+    #[test]
+    fn sculpt_on_a_rotated_terrain_hits_the_rotated_cell() {
+        use std::f32::consts::FRAC_PI_2;
+
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+        let before = heights_of(&mut world);
+
+        let terrain = {
+            let mut query = world.query::<(Entity, &EntityId)>();
+            query
+                .iter(&world)
+                .find(|(_, id)| id.0 == "terrain-1")
+                .map(|(e, _)| e)
+                .expect("terrain entity")
+        };
+        world
+            .entity_mut(terrain)
+            .insert(Transform::from_rotation(Quat::from_rotation_y(FRAC_PI_2)));
+
+        // A +90 deg yaw maps local (x, z) -> world (z, -x). Local cell (0,0) at
+        // local (-3.5, -3.5) therefore lands at world (-3.5, 3.5).
+        queue_sculpt(&mut world, "terrain-1", [-3.5, 3.5], 5.0);
+        let after = heights_of(&mut world);
+
+        let delta = after[0] - before[0];
+        assert!(
+            (delta - 5.0).abs() < 1e-3,
+            "a brush at the ROTATED world position of cell (0,0) must raise that \
+             cell by the full strength, raised {delta}",
+        );
+
+        // And the naive translation-only answer must NOT have been sculpted:
+        // world (-3.5, 3.5) read as a local coordinate is cell (0, 7).
+        let naive = 7 * 8;
+        assert!(
+            (after[naive] - before[naive]).abs() < 1e-3,
+            "the cell the translation-only conversion would have hit must be \
+             untouched, or the rotation was ignored",
+        );
+    }
+
     /// The mesh must be rebuilt from the SCULPTED heights, not the pre-stroke
     /// ones — otherwise the stored heightmap and the rendered surface diverge and
     /// the sculpt is invisible until some later edit happens to rebuild.
@@ -3346,6 +3576,52 @@ mod terrain_drain_tests {
                 .terrain_sculpts
                 .is_empty(),
             "the request must be drained, not left to retry every frame",
+        );
+    }
+
+    // === log rendering of caller-supplied ids ===
+
+    /// The miss paths above log the id they failed to match, and that id is
+    /// caller-supplied and never validated (unlike a spawn override id). A raw
+    /// newline there would forge an additional log line.
+    #[test]
+    fn a_logged_id_has_its_control_characters_replaced() {
+        assert_eq!(
+            log_safe_id("a\nWARN forged line\r\0b"),
+            "a?WARN forged line??b",
+        );
+    }
+
+    /// Truncation is by `char`, not byte, so a multi-byte id can never be split
+    /// mid-scalar — and the ellipsis makes a clipped id distinguishable from one
+    /// that merely happens to end at the bound.
+    #[test]
+    fn a_logged_id_is_truncated_at_the_character_bound() {
+        let long = "é".repeat(LOG_ID_MAX_CHARS + 10);
+        let rendered = log_safe_id(&long);
+        assert_eq!(rendered.chars().count(), LOG_ID_MAX_CHARS + 1);
+        assert!(rendered.ends_with('…'));
+        assert_eq!(
+            rendered.chars().take(LOG_ID_MAX_CHARS).collect::<String>(),
+            "é".repeat(LOG_ID_MAX_CHARS),
+        );
+    }
+
+    /// The boundary itself: exactly `LOG_ID_MAX_CHARS` is NOT truncated, so the
+    /// marker never appears on an id that was rendered in full.
+    #[test]
+    fn a_logged_id_at_exactly_the_bound_is_not_marked_truncated() {
+        let exact = "x".repeat(LOG_ID_MAX_CHARS);
+        assert_eq!(log_safe_id(&exact), exact);
+    }
+
+    /// The ordinary case must pass through byte-for-byte — a sanitizer that
+    /// mangled normal ids would make every real warning unreadable.
+    #[test]
+    fn a_logged_id_that_is_already_safe_is_unchanged() {
+        assert_eq!(
+            log_safe_id("6f9619ff-8b86-d011-b42d-00c04fc964ff"),
+            "6f9619ff-8b86-d011-b42d-00c04fc964ff",
         );
     }
 
@@ -3868,6 +4144,214 @@ mod terrain_snapshot_round_trip_tests {
         assert_eq!(
             type_query.iter(&world).next().copied(),
             Some(EntityType::Terrain),
+        );
+    }
+}
+
+/// Coverage for the export half of a scene save.
+///
+/// `terrain_snapshot_round_trip_tests` above pins what `spawn_from_snapshot`
+/// does with a snapshot that carries terrain. These pin that the exporter
+/// actually PUTS the terrain there — the failure this branch fixes was silent
+/// in exactly that gap: every load-side test passed while the saved file
+/// carried no terrain at all.
+#[cfg(test)]
+mod terrain_snapshot_export_tests {
+    use super::{apply_terrain_to_snapshot, EntitySnapshot, EntityType, TransformSnapshot};
+    use crate::core::terrain::{TerrainData, TerrainMeshData};
+
+    fn blank_snapshot() -> EntitySnapshot {
+        EntitySnapshot::new(
+            "terrain-1".to_string(),
+            EntityType::Terrain,
+            "Terrain".to_string(),
+            TransformSnapshot {
+                position: [0.0; 3],
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: [1.0; 3],
+            },
+        )
+    }
+
+    #[test]
+    fn both_terrain_components_are_copied_onto_the_snapshot() {
+        let data = TerrainData { resolution: 8, size: 7.0, seed: 4242, ..Default::default() };
+        let mesh = TerrainMeshData { resolution: 8, size: 7.0, heights: vec![0.5; 8 * 8] };
+
+        let mut snap = blank_snapshot();
+        apply_terrain_to_snapshot(&mut snap, Some(&data), Some(&mesh));
+
+        assert_eq!(
+            snap.terrain_data.as_ref(),
+            Some(&data),
+            "the noise config was dropped — the reloaded terrain cannot be regenerated",
+        );
+        assert_eq!(
+            snap.terrain_mesh_data.as_ref(),
+            Some(&mesh),
+            "the heightmap was dropped — every sculpt stroke is lost on save",
+        );
+    }
+
+    /// The overwhelming majority of entities are not terrain, and the exporter
+    /// runs this for all of them. Writing `Some(default())` there would give
+    /// every cube a terrain component on reload.
+    #[test]
+    fn a_non_terrain_entity_gets_neither_component() {
+        let mut snap = blank_snapshot();
+        apply_terrain_to_snapshot(&mut snap, None, None);
+
+        assert!(snap.terrain_data.is_none());
+        assert!(snap.terrain_mesh_data.is_none());
+    }
+
+    /// A terrain that has never been sculpted has config but no baked heightmap,
+    /// and vice versa is reachable from an older save. Neither arm may be
+    /// promoted to a default.
+    #[test]
+    fn each_component_is_carried_independently() {
+        let data = TerrainData::default();
+        let mut config_only = blank_snapshot();
+        apply_terrain_to_snapshot(&mut config_only, Some(&data), None);
+        assert!(config_only.terrain_data.is_some());
+        assert!(config_only.terrain_mesh_data.is_none());
+
+        let mesh = TerrainMeshData { resolution: 4, size: 2.0, heights: vec![1.0; 16] };
+        let mut mesh_only = blank_snapshot();
+        apply_terrain_to_snapshot(&mut mesh_only, None, Some(&mesh));
+        assert!(mesh_only.terrain_data.is_none());
+        assert!(mesh_only.terrain_mesh_data.is_some());
+    }
+
+    /// The tests above only mean anything if the exporter still calls the helper.
+    /// `bridge/scene_io.rs` is wasm32-only, so this reads its source text — the
+    /// same constraint (and the same weakness) as
+    /// `bridge_registration_pin_tests`.
+    #[test]
+    fn the_scene_exporter_calls_the_helper() {
+        const SCENE_IO_SRC: &str = include_str!("../bridge/scene_io.rs");
+        assert!(
+            SCENE_IO_SRC.contains("entity_factory::apply_terrain_to_snapshot("),
+            "the scene exporter no longer populates terrain on the snapshot; saved terrain \
+             reloads as a flat 2x2 plane and nothing else fails",
+        );
+    }
+}
+
+/// Source pin for the bridge-side registration of the terrain pipeline.
+///
+/// `engine/src/lib.rs` gates `pub mod bridge` behind
+/// `#[cfg(target_arch = "wasm32")]`, so a `#[cfg(test)]` module inside
+/// `bridge/` never compiles under native `cargo test` — it matches zero tests
+/// and reports green while covering nothing. There is no `wasm_bindgen_test`
+/// harness anywhere in this repo either. Reading the source text is therefore
+/// the only way to pin the registration natively.
+///
+/// This is deliberately a weak test: it proves the identifiers are present, in
+/// the required relative order, inside one chained `add_systems` call — NOT
+/// that the schedule Bevy actually builds is correct. It exists because the
+/// alternative is zero coverage of the single line that makes every terrain
+/// command reach an entity. Delete `apply_terrain_spawn_requests` from that
+/// tuple and every test in `terrain_drain_tests` still passes while live
+/// terrain creation silently becomes a no-op again — which is precisely the
+/// bug this work fixes.
+#[cfg(test)]
+mod bridge_registration_pin_tests {
+    /// `include_str!` rather than a runtime read on purpose: if `bridge/mod.rs`
+    /// is moved or renamed, that is a compile error here instead of a test that
+    /// quietly stops covering the boundary.
+    const BRIDGE_SRC: &str = include_str!("../bridge/mod.rs");
+
+    /// The five systems that carry a terrain command from the pending queue to
+    /// the JS shell, in the order they MUST run. `collect_terrain_changes`
+    /// reads `Changed<TerrainData>`, so it has to run after the three drains
+    /// that write it; `emit_terrain_changes` drains what it collected.
+    const TERRAIN_PIPELINE: [&str; 5] = [
+        "entity_factory::apply_terrain_spawn_requests",
+        "entity_factory::apply_terrain_updates",
+        "entity_factory::apply_terrain_sculpts",
+        "core::terrain::collect_terrain_changes",
+        "procedural::emit_terrain_changes",
+    ];
+
+    /// Byte offset of `needle`, asserting it appears exactly once. Uniqueness is
+    /// load-bearing: with two occurrences the ordering assertion below would be
+    /// comparing whichever pair `find` happened to reach first.
+    fn sole_offset(needle: &str) -> usize {
+        let first = BRIDGE_SRC.find(needle).unwrap_or_else(|| {
+            panic!(
+                "`{needle}` is not registered in bridge/mod.rs — the terrain command it \
+                 serves is accepted, acknowledged, and silently dropped",
+            )
+        });
+        assert!(
+            BRIDGE_SRC[first + needle.len()..].find(needle).is_none(),
+            "`{needle}` appears more than once in bridge/mod.rs; this pin assumes a single \
+             registration site",
+        );
+        first
+    }
+
+    #[test]
+    fn every_terrain_pipeline_system_is_registered() {
+        for needle in TERRAIN_PIPELINE {
+            sole_offset(needle);
+        }
+    }
+
+    #[test]
+    fn terrain_pipeline_systems_are_registered_in_execution_order() {
+        let offsets: Vec<usize> = TERRAIN_PIPELINE.iter().map(|n| sole_offset(n)).collect();
+        for window in offsets.windows(2) {
+            assert!(
+                window[0] < window[1],
+                "terrain pipeline systems are registered out of order — a collector that runs \
+                 before its drains emits the change one frame late, or never",
+            );
+        }
+    }
+
+    /// Order in the source only implies order at runtime because the whole tuple
+    /// is `.chain()`ed. Split across two `add_systems` calls, or with the
+    /// `.chain()` dropped, Bevy is free to run them in any order.
+    #[test]
+    fn terrain_pipeline_is_registered_as_one_chained_call() {
+        let first = sole_offset(TERRAIN_PIPELINE[0]);
+        let last = sole_offset(TERRAIN_PIPELINE[4]);
+
+        assert!(
+            !BRIDGE_SRC[first..last].contains("add_systems"),
+            "the terrain pipeline is split across more than one `add_systems` call, so \
+             `.chain()` no longer orders it end to end",
+        );
+
+        // Everything from the last system up to the next registration belongs to
+        // this one call.
+        let tail = &BRIDGE_SRC[last..];
+        let call_end = tail.find("add_systems").unwrap_or(tail.len());
+        let call = &tail[..call_end];
+
+        assert!(
+            call.contains(".chain()"),
+            "the terrain pipeline tuple is not `.chain()`ed — Bevy may run the collector \
+             before the drains that feed it",
+        );
+        assert!(
+            call.contains("in_set(EditorSystemSet)"),
+            "the terrain pipeline is not confined to `EditorSystemSet`, so terrain edits \
+             would keep applying in Play mode",
+        );
+    }
+
+    /// `collect_terrain_changes` takes `ResMut<TerrainChangeEvents>`. Without the
+    /// resource initialised, that is a missing-resource panic at run time, not a
+    /// compile error.
+    #[test]
+    fn the_terrain_change_events_resource_is_initialised() {
+        assert!(
+            BRIDGE_SRC.contains("init_resource::<core::terrain::TerrainChangeEvents>()"),
+            "TerrainChangeEvents is never initialised; `collect_terrain_changes` panics on \
+             the first frame it runs",
         );
     }
 }

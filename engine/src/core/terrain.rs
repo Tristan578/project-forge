@@ -153,7 +153,7 @@ pub struct TerrainEnabled;
 
 /// Serializable heightmap data for terrain entities.
 /// Stored in EntitySnapshot for undo/redo and save/load.
-#[derive(Debug, Clone, Serialize, Deserialize, Component)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Component)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrainMeshData {
     /// Raw height values, row-major (resolution * resolution entries).
@@ -218,11 +218,22 @@ fn sample_noise<N: NoiseFn<f64, 2>>(noise: &N, heights: &mut [f32], data: &Terra
 /// loop computes `(res - 1) * (res - 1)` in `usize`, so `resolution` below 2
 /// underflows, and `rebuild_terrain_mesh` feeds this straight from a
 /// deserialized `.forge` file on every scene load, undo and redo.
+///
+/// The UPPER bound is load-bearing for the same reason and is easy to miss:
+/// `usize` is 32-bit on `wasm32`, the shipped target, and `[profile.release]`
+/// does not enable `overflow-checks`. So `res * res` WRAPS silently — a
+/// `resolution` of 65536 makes `vertex_count` 0, the `heights.len()` guard
+/// passes for any heightmap at all, and `heights[z * res + x]` then indexes far
+/// out of bounds. A 64-bit native test cannot reproduce the wrap, so both the
+/// explicit `MAX_TERRAIN_RESOLUTION` check and the `checked_mul` below exist:
+/// the first is what native tests can assert on, the second is what makes the
+/// arithmetic correct on any width.
 pub fn build_terrain_mesh(heights: &[f32], resolution: u32, size: f32) -> Mesh {
     let res = resolution as usize;
-    let vertex_count = res * res;
+    let vertex_count = res.checked_mul(res);
     if resolution < MIN_TERRAIN_RESOLUTION
-        || heights.len() < vertex_count
+        || resolution > MAX_TERRAIN_RESOLUTION
+        || vertex_count.is_none_or(|n| heights.len() < n)
         || !size.is_finite()
         || size <= 0.0
     {
@@ -238,6 +249,8 @@ pub fn build_terrain_mesh(heights: &[f32], resolution: u32, size: f32) -> Mesh {
         empty.insert_indices(Indices::U32(Vec::new()));
         return empty;
     }
+    // Guarded above: `None` took the early-return branch.
+    let vertex_count = vertex_count.unwrap_or(0);
     let half_size = size / 2.0;
     let step = size / (res as f32 - 1.0);
 
@@ -402,6 +415,7 @@ pub fn sculpt_heightmap(
     // rebuild and makes the terrain silently disappear — so refuse the inputs
     // that produce one instead of writing it.
     if resolution < MIN_TERRAIN_RESOLUTION
+        || resolution > MAX_TERRAIN_RESOLUTION
         || !size.is_finite()
         || size <= 0.0
         || !radius.is_finite()
@@ -414,7 +428,12 @@ pub fn sculpt_heightmap(
     }
 
     let res = resolution as usize;
-    if heights.len() < res * res {
+    // `res * res` wraps on 32-bit `usize` (the wasm32 target ships without
+    // `overflow-checks`), and a wrapped 0 makes this length check vacuous for
+    // any heightmap — see `build_terrain_mesh` for the full note. The
+    // `MAX_TERRAIN_RESOLUTION` bound above already forecloses it; `checked_mul`
+    // keeps the arithmetic correct independent of that constant's value.
+    if res.checked_mul(res).is_none_or(|n| heights.len() < n) {
         // A truncated heightmap (hand-edited scene file) would index out of
         // bounds below.
         return;
@@ -652,6 +671,58 @@ mod build_terrain_mesh_guard_tests {
         }
     }
 
+    /// The UPPER bound, which the guard was missing. `usize` is 32-bit on
+    /// `wasm32` and the release profile sets no `overflow-checks`, so
+    /// `res * res` wraps: at 65536 the product is exactly 0, the
+    /// `heights.len()` check passes for ANY heightmap, and the position loop
+    /// then reads ~4 billion elements past the end.
+    ///
+    /// A 64-bit native test cannot reproduce the wrap itself — `65536 * 65536`
+    /// fits comfortably in a 64-bit `usize`. What it CAN pin is that the
+    /// resolution is rejected before the arithmetic matters, which is the
+    /// property that holds on both widths. The heightmap passed here is
+    /// deliberately generous (larger than any 64-bit product check would need
+    /// to fail on) so the test can only pass via the resolution bound.
+    #[test]
+    fn an_out_of_range_resolution_is_rejected_before_the_vertex_count_can_wrap() {
+        for resolution in [MAX_TERRAIN_RESOLUTION + 1, 4096, 65536, u32::MAX] {
+            let mesh = build_terrain_mesh(&[0.0f32; 1024], resolution, 10.0);
+            assert_eq!(
+                vertex_count(&mesh),
+                0,
+                "resolution {resolution} is above MAX_TERRAIN_RESOLUTION and must \
+                 yield an empty mesh",
+            );
+        }
+    }
+
+    /// The bound must not have been tightened past the values the editor and
+    /// the validator both accept — `MAX_TERRAIN_RESOLUTION` itself still builds.
+    #[test]
+    fn the_maximum_resolution_itself_still_builds() {
+        let res = MAX_TERRAIN_RESOLUTION as usize;
+        let heights = vec![0.0f32; res * res];
+        let mesh = build_terrain_mesh(&heights, MAX_TERRAIN_RESOLUTION, 10.0);
+        assert_eq!(vertex_count(&mesh), res * res);
+    }
+
+    /// Same wrap, same reasoning, on the sculpt path — which writes into the
+    /// slice rather than reading it, so an unbounded resolution there is a
+    /// memory *write* out of bounds.
+    #[test]
+    fn sculpt_rejects_an_out_of_range_resolution() {
+        for resolution in [MAX_TERRAIN_RESOLUTION + 1, 65536, u32::MAX] {
+            let mut heights = vec![0.0f32; 1024];
+            sculpt_heightmap(&mut heights, resolution, 10.0, [0.0, 0.0], 5.0, 1.0);
+            assert_eq!(
+                heights,
+                vec![0.0f32; 1024],
+                "resolution {resolution} is above MAX_TERRAIN_RESOLUTION and must \
+                 leave the heightmap untouched",
+            );
+        }
+    }
+
     /// A heightmap shorter than `resolution^2` indexes out of bounds in the
     /// position loop. Same source: deserialized scene data.
     #[test]
@@ -858,6 +929,16 @@ impl TerrainChangeEvents {
     }
 }
 
+/// The event name the bridge emits terrain config changes under.
+///
+/// The name is half of the contract — a payload of the right shape delivered
+/// under the wrong name is just as invisible to the web handler's `switch` as a
+/// malformed payload, and neither side can see the other's spelling. It lives
+/// here beside the payload struct, and for the same reason: `bridge/events.rs`
+/// is `wasm32`-only, so a constant declared there could not be compared against
+/// the shared fixture by any test that actually runs.
+pub const TERRAIN_CHANGED_EVENT: &str = "TERRAIN_CHANGED";
+
 /// The exact wire shape of a `TERRAIN_CHANGED` event payload.
 ///
 /// This lives in `core`, not in `bridge`, for one reason: `bridge` is compiled
@@ -1014,6 +1095,17 @@ mod terrain_changed_wire_contract_tests {
         serde_json::from_str(FIXTURE).expect("terrainChanged.json is not valid JSON")
     }
 
+    /// The fixture is an envelope — `{ event, payload }` — because the event NAME
+    /// is half of the contract. A correctly-shaped payload delivered under a name
+    /// the web handler's `switch` does not list is exactly as invisible as a
+    /// malformed one, and no test on either side could see that before.
+    fn fixture_payload() -> serde_json::Value {
+        fixture()
+            .get("payload")
+            .cloned()
+            .expect("terrainChanged.json must carry a `payload` key")
+    }
+
     /// Both halves of the bridge are pinned to one file, so the engine cannot
     /// change what it emits without failing here, and the web handler cannot
     /// change what it reads without failing its own test against the same bytes.
@@ -1024,8 +1116,51 @@ mod terrain_changed_wire_contract_tests {
 
         assert_eq!(
             serde_json::to_value(&payload).expect("payload must serialize"),
-            fixture(),
+            fixture_payload(),
             "TERRAIN_CHANGED payload drifted from the fixture the web handler is tested against"
+        );
+    }
+
+    /// The name the engine emits under must be the name the web test dispatches.
+    /// A rename on either side is silent today: the engine keeps emitting, the
+    /// handler's `switch` falls through to its default, and the inspector simply
+    /// never updates.
+    #[test]
+    fn the_event_name_matches_the_shared_fixture() {
+        assert_eq!(
+            fixture().get("event").and_then(serde_json::Value::as_str),
+            Some(TERRAIN_CHANGED_EVENT),
+            "the event name drifted from the fixture the web handler dispatches",
+        );
+    }
+
+    /// `bridge/events.rs` is wasm32-only, so nothing above proves the emitter
+    /// actually uses the constant — it could go back to a literal and every test
+    /// here would still pass. Same source-pin technique (and same weakness) as
+    /// `entity_factory`'s `bridge_registration_pin_tests`.
+    #[test]
+    fn the_emitter_uses_the_shared_constant() {
+        const EVENTS_SRC: &str = include_str!("../bridge/events.rs");
+
+        // Scoped to the function body rather than the whole file: a match anywhere
+        // in a 900-line module would pass even if this emitter had gone back to a
+        // literal. Bounded by the next `pub fn` so the slice cannot run away.
+        let after_fn = EVENTS_SRC
+            .split_once("pub fn emit_terrain_changed(")
+            .expect("bridge/events.rs no longer defines emit_terrain_changed")
+            .1;
+        let body = after_fn.split_once("\npub fn ").map_or(after_fn, |(b, _)| b);
+
+        assert!(
+            body.contains("TERRAIN_CHANGED_EVENT"),
+            "emit_terrain_changed no longer emits under TERRAIN_CHANGED_EVENT; the constant \
+             the tests above pin is not what ships",
+        );
+        // A stray literal beside the constant would mean the two can drift again.
+        assert!(
+            !body.contains("\"TERRAIN_CHANGED\""),
+            "emit_terrain_changed reintroduced a bare event-name literal; it must go through \
+             TERRAIN_CHANGED_EVENT so the fixture pin above is binding",
         );
     }
 
@@ -1064,7 +1199,7 @@ mod terrain_changed_wire_contract_tests {
     /// still satisfy a web test written against the same typo.
     #[test]
     fn fixture_deserializes_back_into_terrain_data() {
-        let parsed: TerrainData = serde_json::from_value(fixture()["terrainData"].clone())
+        let parsed: TerrainData = serde_json::from_value(fixture_payload()["terrainData"].clone())
             .expect("fixture terrainData must deserialize into TerrainData");
         assert_eq!(parsed, TerrainData::default());
     }
