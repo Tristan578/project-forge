@@ -572,6 +572,13 @@ impl Plugin for SelectionPlugin {
                     mesh_ops::apply_array_requests,
                     mesh_ops::apply_combine_requests,
                 ).in_set(EditorSystemSet))
+                // Terrain create/edit. Separate `add_systems` call rather than
+                // growing the tuple above, to stay clear of the tuple limit.
+                .add_systems(Update, (
+                    entity_factory::apply_terrain_spawn_requests,
+                    entity_factory::apply_terrain_updates,
+                    entity_factory::apply_terrain_sculpts,
+                ).in_set(EditorSystemSet))
                 .add_systems(Update, (
                     physics::apply_debug_physics_toggle,
                     physics::apply_create_joint_requests,

@@ -161,6 +161,245 @@ pub fn apply_spawn_requests(
 }
 
 // ---------------------------------------------------------------------------
+// Terrain — the consumers for `PendingCommands::terrain_*`
+// ---------------------------------------------------------------------------
+
+/// Smallest grid a terrain mesh can be built from.
+///
+/// `terrain::build_terrain_mesh` divides by `resolution - 1` and sizes its index
+/// buffer from `(resolution - 1)^2` computed in `usize`, so `resolution == 0`
+/// underflows (a capacity-overflow panic, which in WASM takes the whole engine
+/// down) and `resolution == 1` divides by zero into a NaN mesh. The command
+/// layer already clamps to 32/64/128/256, so this only guards a caller that
+/// bypasses it — but the failure mode is bad enough to refuse explicitly.
+const MIN_TERRAIN_RESOLUTION: u32 = 2;
+
+/// Build the material every terrain entity shares, matching the `EntityType::Terrain`
+/// arm of `spawn_from_snapshot` so a spawn/undo/redo round-trip is lossless.
+fn terrain_material() -> StandardMaterial {
+    StandardMaterial {
+        base_color: Color::srgb(0.5, 0.5, 0.5),
+        ..default()
+    }
+}
+
+/// Swap `Mesh3d`'s handle for a freshly built mesh and release the superseded
+/// one. The old mesh had exactly one owner (this component — snapshots store
+/// `TerrainMeshData`, never a handle), so removing it explicitly is safe and
+/// keeps `Assets<Mesh>` from growing by one entry per edit for the lifetime of
+/// the session.
+fn swap_terrain_mesh(meshes: &mut Assets<Mesh>, mesh3d: &mut Mesh3d, mesh: Mesh) {
+    let superseded = std::mem::replace(&mut mesh3d.0, meshes.add(mesh));
+    meshes.remove(&superseded);
+}
+
+/// System that processes pending terrain spawn requests.
+///
+/// Without this the `spawn_terrain` command queued a request that nothing ever
+/// read, so live terrain creation was a no-op.
+pub fn apply_terrain_spawn_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut name_counter: Local<EntityNameCounter>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for request in pending.terrain_spawn_requests.drain(..) {
+        let terrain_data = request.terrain_data;
+        if terrain_data.resolution < MIN_TERRAIN_RESOLUTION {
+            tracing::warn!(
+                "Rejected terrain spawn: resolution {} is below the minimum of {}",
+                terrain_data.resolution,
+                MIN_TERRAIN_RESOLUTION,
+            );
+            continue;
+        }
+
+        let name = request
+            .name
+            .unwrap_or_else(|| name_counter.next_name(EntityType::Terrain));
+
+        // Same override contract as `apply_spawn_requests`: honor a plausible
+        // caller id verbatim so JS can address the terrain synchronously, and
+        // fall back to the engine-generated UUID for anything else. A malformed
+        // id costs the caller its handle, never the spawn.
+        let entity_id = match request.id.as_deref().map(str::trim) {
+            Some(id) if is_valid_override_id(id) => id.to_string(),
+            _ => EntityId::default().0,
+        };
+
+        let position = request.position.unwrap_or(Vec3::ZERO);
+        let mesh_data = terrain::TerrainMeshData {
+            heights: terrain::generate_heightmap(&terrain_data),
+            resolution: terrain_data.resolution,
+            size: terrain_data.size,
+        };
+        let mesh = terrain::rebuild_terrain_mesh(&mesh_data);
+
+        // Component set is byte-for-byte the `EntityType::Terrain` arm of
+        // `spawn_from_snapshot`, so undo/redo of this spawn round-trips.
+        commands.spawn((
+            EntityType::Terrain,
+            EntityId::new(&entity_id),
+            EntityName::new(&name),
+            EntityVisible(true),
+            terrain_data.clone(),
+            mesh_data.clone(),
+            TerrainEnabled,
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(materials.add(terrain_material())),
+            Transform::from_translation(position),
+        ));
+
+        // Undo rebuilds the mesh from the snapshot, so it needs BOTH the noise
+        // config and the computed heightmap — a snapshot missing either
+        // degrades to the flat fallback plane in `spawn_from_snapshot`.
+        let mut snapshot = EntitySnapshot::new(
+            entity_id,
+            EntityType::Terrain,
+            name,
+            TransformSnapshot {
+                position: [position.x, position.y, position.z],
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: [1.0, 1.0, 1.0],
+            },
+        );
+        snapshot.terrain_data = Some(terrain_data);
+        snapshot.terrain_mesh_data = Some(mesh_data);
+        history.push(UndoableAction::Spawn { snapshot });
+    }
+}
+
+/// System that processes pending terrain noise-config updates.
+///
+/// The request carries a complete replacement `TerrainData` (see
+/// `handle_update_terrain`), so the heightmap is regenerated from scratch.
+pub fn apply_terrain_updates(
+    mut pending: ResMut<PendingCommands>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut history: ResMut<HistoryStack>,
+    mut terrain_query: Query<(
+        &EntityId,
+        &mut terrain::TerrainData,
+        &mut terrain::TerrainMeshData,
+        &mut Mesh3d,
+    )>,
+) {
+    for update in pending.terrain_updates.drain(..) {
+        if update.terrain_data.resolution < MIN_TERRAIN_RESOLUTION {
+            tracing::warn!(
+                "Rejected terrain update: resolution {} is below the minimum of {}",
+                update.terrain_data.resolution,
+                MIN_TERRAIN_RESOLUTION,
+            );
+            continue;
+        }
+
+        // An id matching nothing is dropped, not retried and not recorded: a
+        // history entry that restores nothing would make the user's next undo
+        // appear to do nothing at all.
+        let Some((_, mut terrain_data, mut mesh_data, mut mesh3d)) = terrain_query
+            .iter_mut()
+            .find(|(id, _, _, _)| id.0 == update.entity_id)
+        else {
+            tracing::warn!(
+                "Dropped terrain update: no entity with id {}",
+                update.entity_id,
+            );
+            continue;
+        };
+
+        let old_terrain = terrain_data.clone();
+        let old_mesh_data = mesh_data.clone();
+
+        let new_mesh_data = terrain::TerrainMeshData {
+            heights: terrain::generate_heightmap(&update.terrain_data),
+            resolution: update.terrain_data.resolution,
+            size: update.terrain_data.size,
+        };
+        swap_terrain_mesh(
+            &mut meshes,
+            &mut mesh3d,
+            terrain::rebuild_terrain_mesh(&new_mesh_data),
+        );
+
+        *terrain_data = update.terrain_data.clone();
+        *mesh_data = new_mesh_data.clone();
+
+        history.push(UndoableAction::TerrainChange {
+            entity_id: update.entity_id,
+            old_terrain,
+            new_terrain: update.terrain_data,
+            old_mesh_data,
+            new_mesh_data,
+        });
+    }
+}
+
+/// System that processes pending terrain sculpt strokes.
+///
+/// A sculpt edits the heightmap in place and leaves the noise config alone, so
+/// the recorded `TerrainChange` carries an identical `TerrainData` either side.
+pub fn apply_terrain_sculpts(
+    mut pending: ResMut<PendingCommands>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut history: ResMut<HistoryStack>,
+    mut terrain_query: Query<(
+        &EntityId,
+        &terrain::TerrainData,
+        &mut terrain::TerrainMeshData,
+        &mut Mesh3d,
+    )>,
+) {
+    for sculpt in pending.terrain_sculpts.drain(..) {
+        // Same drop-don't-record contract as `apply_terrain_updates`.
+        let Some((_, terrain_data, mut mesh_data, mut mesh3d)) = terrain_query
+            .iter_mut()
+            .find(|(id, _, _, _)| id.0 == sculpt.entity_id)
+        else {
+            tracing::warn!(
+                "Dropped terrain sculpt: no entity with id {}",
+                sculpt.entity_id,
+            );
+            continue;
+        };
+
+        let old_mesh_data = mesh_data.clone();
+
+        let mut heights = mesh_data.heights.clone();
+        terrain::sculpt_heightmap(
+            &mut heights,
+            mesh_data.resolution,
+            mesh_data.size,
+            sculpt.position,
+            sculpt.radius,
+            sculpt.strength,
+        );
+        let new_mesh_data = terrain::TerrainMeshData {
+            heights,
+            resolution: mesh_data.resolution,
+            size: mesh_data.size,
+        };
+        swap_terrain_mesh(
+            &mut meshes,
+            &mut mesh3d,
+            terrain::rebuild_terrain_mesh(&new_mesh_data),
+        );
+
+        *mesh_data = new_mesh_data.clone();
+
+        history.push(UndoableAction::TerrainChange {
+            entity_id: sculpt.entity_id,
+            old_terrain: terrain_data.clone(),
+            new_terrain: terrain_data.clone(),
+            old_mesh_data,
+            new_mesh_data,
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Shared helpers for delete & duplicate — pre-indexed O(1) lookups
 // ---------------------------------------------------------------------------
 
@@ -2353,5 +2592,569 @@ mod spawn_id_tests {
             "oversized id must fall back to a UUID-v4, got {:?}",
             ids[0],
         );
+    }
+}
+
+#[cfg(test)]
+mod terrain_drain_tests {
+    use super::{
+        apply_terrain_sculpts, apply_terrain_spawn_requests, apply_terrain_updates, HistoryStack,
+        UndoableAction,
+    };
+    use crate::core::entity_id::EntityId;
+    use crate::core::pending_commands::{
+        EntityType, PendingCommands, TerrainSculpt, TerrainSpawnRequest, TerrainUpdate,
+    };
+    use crate::core::terrain::{TerrainData, TerrainEnabled, TerrainMeshData};
+    use bevy::prelude::*;
+
+    /// A terrain small enough to reason about by hand: an 8x8 grid over 7.0
+    /// world units, so `step` is exactly 1.0 and grid cell `(x, z)` sits at
+    /// world `(-3.5 + x, -3.5 + z)`.
+    fn small_terrain(seed: u32) -> TerrainData {
+        TerrainData {
+            resolution: 8,
+            size: 7.0,
+            seed,
+            ..Default::default()
+        }
+    }
+
+    /// Minimal World carrying exactly the resources the three drain systems read.
+    /// Mirrors the proven `spawn_id_tests` harness.
+    fn base_world() -> World {
+        let mut world = World::new();
+        world.insert_resource(PendingCommands::default());
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        world.insert_resource(HistoryStack::default());
+        world
+    }
+
+    /// Run a single system once through a Schedule, which also flushes the
+    /// deferred `Commands` so spawned entities are queryable afterwards.
+    /// A macro rather than a generic fn so it needs no naming of Bevy's
+    /// `IntoScheduleConfigs` marker types.
+    macro_rules! run_system {
+        ($world:expr, $system:expr) => {{
+            let mut schedule = Schedule::default();
+            schedule.add_systems($system);
+            schedule.run($world);
+        }};
+    }
+
+    fn queue_spawn(world: &mut World, request: TerrainSpawnRequest) {
+        world
+            .resource_mut::<PendingCommands>()
+            .terrain_spawn_requests
+            .push(request);
+        run_system!(world, apply_terrain_spawn_requests);
+    }
+
+    fn spawn_request(id: Option<&str>, position: Option<Vec3>) -> TerrainSpawnRequest {
+        TerrainSpawnRequest {
+            name: None,
+            position,
+            terrain_data: small_terrain(7),
+            id: id.map(str::to_string),
+        }
+    }
+
+    /// Every `EntityId` string currently in the world.
+    fn entity_ids(world: &mut World) -> Vec<String> {
+        let mut query = world.query::<&EntityId>();
+        query.iter(world).map(|id| id.0.clone()).collect()
+    }
+
+    /// Drain the undo stack (oldest first). `pop_undo` is the only public reader.
+    fn drain_history(world: &mut World) -> Vec<UndoableAction> {
+        let mut history = world.resource_mut::<HistoryStack>();
+        let mut actions = Vec::new();
+        while let Some(action) = history.pop_undo() {
+            actions.push(action);
+        }
+        actions.reverse();
+        actions
+    }
+
+    fn heights_of(world: &mut World) -> Vec<f32> {
+        let mut query = world.query::<&TerrainMeshData>();
+        let data = query
+            .iter(world)
+            .next()
+            .expect("expected exactly one terrain entity");
+        data.heights.clone()
+    }
+
+    fn mesh_handle_of(world: &mut World) -> Handle<Mesh> {
+        let mut query = world.query::<&Mesh3d>();
+        query
+            .iter(world)
+            .next()
+            .expect("expected a Mesh3d on the terrain entity")
+            .0
+            .clone()
+    }
+
+    // === spawn: id resolution ===
+
+    /// The core contract: a well-formed caller id becomes the entity's
+    /// `EntityId` byte-for-byte, so JS can address the new terrain synchronously.
+    #[test]
+    fn spawn_writes_valid_override_id_verbatim() {
+        let mut world = base_world();
+        let supplied = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+        queue_spawn(&mut world, spawn_request(Some(supplied), None));
+
+        assert_eq!(
+            entity_ids(&mut world),
+            vec![supplied.to_string()],
+            "a valid supplied id must be written to the terrain's EntityId verbatim",
+        );
+    }
+
+    /// No id supplied -> engine-generated UUID-v4 (36 chars).
+    #[test]
+    fn spawn_without_id_generates_uuid() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(None, None));
+
+        let ids = entity_ids(&mut world);
+        assert_eq!(ids.len(), 1, "exactly one terrain entity should spawn");
+        assert_eq!(
+            ids[0].len(),
+            36,
+            "fallback EntityId should be a UUID-v4, got {:?}",
+            ids[0],
+        );
+    }
+
+    /// A malformed id must never reach the entity AND must never cost the
+    /// spawn: empty, interior-NUL and oversized all fall back to a fresh UUID.
+    #[test]
+    fn spawn_with_malformed_id_still_spawns_with_generated_uuid() {
+        let oversized = "a".repeat(65);
+        let cases: [(&str, &str); 3] = [
+            ("empty", ""),
+            ("interior NUL", "ab\u{0}cd"),
+            ("oversized", oversized.as_str()),
+        ];
+
+        for (label, supplied) in cases {
+            let mut world = base_world();
+            queue_spawn(&mut world, spawn_request(Some(supplied), None));
+
+            let ids = entity_ids(&mut world);
+            assert_eq!(
+                ids.len(),
+                1,
+                "{label} id must still spawn exactly one terrain entity",
+            );
+            assert_ne!(
+                ids[0], supplied,
+                "{label} id must never be written into the EntityId",
+            );
+            assert_eq!(
+                ids[0].len(),
+                36,
+                "{label} id must fall back to a UUID-v4, got {:?}",
+                ids[0],
+            );
+        }
+    }
+
+    // === spawn: components & transform ===
+
+    #[test]
+    fn spawn_attaches_the_full_terrain_component_set() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(None, None));
+
+        let mut query =
+            world.query::<(&EntityType, &TerrainData, &TerrainMeshData, &TerrainEnabled, &Mesh3d)>();
+        let (entity_type, terrain_data, mesh_data, _, _) = query
+            .iter(&world)
+            .next()
+            .expect("terrain entity must carry EntityType, TerrainData, TerrainMeshData, TerrainEnabled and Mesh3d");
+
+        assert_eq!(*entity_type, EntityType::Terrain);
+        assert_eq!(terrain_data.resolution, 8);
+        assert_eq!(mesh_data.resolution, 8);
+        assert_eq!(mesh_data.size, 7.0);
+        assert_eq!(
+            mesh_data.heights.len(),
+            8 * 8,
+            "heightmap must hold resolution * resolution samples",
+        );
+    }
+
+    #[test]
+    fn spawn_applies_supplied_position() {
+        let mut world = base_world();
+        queue_spawn(
+            &mut world,
+            spawn_request(None, Some(Vec3::new(1.0, 2.0, 3.0))),
+        );
+
+        let mut query = world.query::<&Transform>();
+        let transform = query.iter(&world).next().expect("terrain needs a Transform");
+        assert_eq!(transform.translation, Vec3::new(1.0, 2.0, 3.0));
+    }
+
+    #[test]
+    fn spawn_without_position_lands_at_origin() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(None, None));
+
+        let mut query = world.query::<&Transform>();
+        let transform = query.iter(&world).next().expect("terrain needs a Transform");
+        assert_eq!(transform.translation, Vec3::ZERO);
+    }
+
+    /// Undo of a terrain spawn goes through `spawn_from_snapshot`, which can only
+    /// rebuild the mesh when the snapshot carries BOTH the noise config and the
+    /// computed heightmap. A snapshot missing either silently degrades to a flat
+    /// 1x1 plane on redo, so both are asserted.
+    #[test]
+    fn spawn_pushes_one_history_entry_carrying_terrain_and_mesh_data() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+
+        let actions = drain_history(&mut world);
+        assert_eq!(actions.len(), 1, "exactly one history entry per spawn");
+        match &actions[0] {
+            UndoableAction::Spawn { snapshot } => {
+                assert_eq!(snapshot.entity_id, "terrain-1");
+                assert_eq!(snapshot.entity_type, EntityType::Terrain);
+                let terrain_data = snapshot
+                    .terrain_data
+                    .as_ref()
+                    .expect("snapshot must carry TerrainData");
+                assert_eq!(terrain_data.resolution, 8);
+                let mesh_data = snapshot
+                    .terrain_mesh_data
+                    .as_ref()
+                    .expect("snapshot must carry TerrainMeshData");
+                assert_eq!(mesh_data.heights.len(), 8 * 8);
+            }
+            other => panic!("expected UndoableAction::Spawn, got {other:?}"),
+        }
+    }
+
+    // === update ===
+
+    #[test]
+    fn update_regenerates_heights_and_records_old_and_new() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+        let before = heights_of(&mut world);
+        let old_handle = mesh_handle_of(&mut world);
+        let _ = drain_history(&mut world);
+
+        let new_data = TerrainData {
+            height_scale: 40.0,
+            ..small_terrain(999)
+        };
+        world
+            .resource_mut::<PendingCommands>()
+            .terrain_updates
+            .push(TerrainUpdate {
+                entity_id: "terrain-1".to_string(),
+                terrain_data: new_data.clone(),
+            });
+        run_system!(&mut world, apply_terrain_updates);
+
+        let after = heights_of(&mut world);
+        assert_ne!(
+            before, after,
+            "changing the noise config must regenerate the heightmap",
+        );
+
+        let mut query = world.query::<&TerrainData>();
+        let live = query.iter(&world).next().expect("terrain still exists");
+        assert_eq!(live.seed, 999, "the new TerrainData must replace the old");
+        assert_eq!(live.height_scale, 40.0);
+
+        assert_ne!(
+            mesh_handle_of(&mut world),
+            old_handle,
+            "the Mesh3d handle must point at the rebuilt mesh",
+        );
+        assert_eq!(
+            world.resource::<Assets<Mesh>>().len(),
+            1,
+            "the superseded mesh must be released, not leaked in Assets<Mesh>",
+        );
+
+        let actions = drain_history(&mut world);
+        assert_eq!(actions.len(), 1, "exactly one history entry per update");
+        match &actions[0] {
+            UndoableAction::TerrainChange {
+                entity_id,
+                old_terrain,
+                new_terrain,
+                old_mesh_data,
+                new_mesh_data,
+            } => {
+                assert_eq!(entity_id, "terrain-1");
+                assert_eq!(old_terrain.seed, 7, "old config must be preserved for undo");
+                assert_eq!(new_terrain.seed, 999);
+                assert_eq!(old_mesh_data.heights, before);
+                assert_eq!(new_mesh_data.heights, after);
+                assert_ne!(
+                    old_mesh_data.heights, new_mesh_data.heights,
+                    "undo needs the pre-change heightmap, not a copy of the new one",
+                );
+            }
+            other => panic!("expected UndoableAction::TerrainChange, got {other:?}"),
+        }
+    }
+
+    /// An update naming an entity that does not exist is dropped. It must not
+    /// panic, must not touch the terrain that IS present, and — deliberately —
+    /// must not push a history entry: an undo that restores nothing would make
+    /// the next real Ctrl+Z a no-op from the user's point of view.
+    #[test]
+    fn update_with_unknown_entity_id_is_a_silent_no_op() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+        let before = heights_of(&mut world);
+        let _ = drain_history(&mut world);
+
+        world
+            .resource_mut::<PendingCommands>()
+            .terrain_updates
+            .push(TerrainUpdate {
+                entity_id: "does-not-exist".to_string(),
+                terrain_data: small_terrain(999),
+            });
+        run_system!(&mut world, apply_terrain_updates);
+
+        assert_eq!(
+            heights_of(&mut world),
+            before,
+            "an unmatched update must not mutate any terrain",
+        );
+        assert!(
+            drain_history(&mut world).is_empty(),
+            "an unmatched update must not push a no-op history entry",
+        );
+        assert!(
+            world
+                .resource::<PendingCommands>()
+                .terrain_updates
+                .is_empty(),
+            "the request must be drained, not left to retry every frame",
+        );
+    }
+
+    // === sculpt ===
+
+    /// Grid geometry (resolution 8, size 7.0 => step 1.0): the brush is centred
+    /// on cell (0,0) at world (-3.5,-3.5) with radius 1.5.
+    ///   - cell (0,0), dist 0.0   -> full strength
+    ///   - cell (1,0), dist 1.0   -> partial, strictly less than the centre
+    ///   - cell (2,2), dist ~2.12 -> outside the radius, untouched
+    ///   - cell (7,7)             -> far outside the brush box, untouched
+    #[test]
+    fn sculpt_raises_inside_the_radius_and_leaves_the_outside_untouched() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+        let before = heights_of(&mut world);
+
+        world
+            .resource_mut::<PendingCommands>()
+            .terrain_sculpts
+            .push(TerrainSculpt {
+                entity_id: "terrain-1".to_string(),
+                position: [-3.5, -3.5],
+                radius: 1.5,
+                strength: 5.0,
+            });
+        run_system!(&mut world, apply_terrain_sculpts);
+        let after = heights_of(&mut world);
+
+        let centre = after[0] - before[0];
+        let neighbour = after[1] - before[1];
+
+        assert!(
+            centre > 0.0,
+            "the brush centre must move in the direction of strength, moved {centre}",
+        );
+        assert!(
+            (centre - 5.0).abs() < 1e-3,
+            "the brush centre must receive full strength, got {centre}",
+        );
+        assert!(
+            neighbour > 0.0,
+            "a cell inside the radius must move in the direction of strength, moved {neighbour}",
+        );
+        assert!(
+            neighbour < centre,
+            "falloff must decrease outward: centre {centre}, neighbour {neighbour}",
+        );
+        assert_eq!(
+            after[2 * 8 + 2],
+            before[2 * 8 + 2],
+            "a cell outside the radius (but inside the brush bounding box) must be untouched",
+        );
+        assert_eq!(
+            after[7 * 8 + 7],
+            before[7 * 8 + 7],
+            "a cell far outside the brush must be untouched",
+        );
+    }
+
+    #[test]
+    fn sculpt_lowers_when_strength_is_negative() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+        let before = heights_of(&mut world);
+
+        world
+            .resource_mut::<PendingCommands>()
+            .terrain_sculpts
+            .push(TerrainSculpt {
+                entity_id: "terrain-1".to_string(),
+                position: [-3.5, -3.5],
+                radius: 1.5,
+                strength: -5.0,
+            });
+        run_system!(&mut world, apply_terrain_sculpts);
+        let after = heights_of(&mut world);
+
+        assert!(
+            after[0] < before[0],
+            "negative strength must lower the brush centre",
+        );
+    }
+
+    /// A sculpt changes only the heightmap, never the noise config, so the
+    /// history entry carries an unchanged TerrainData either side and a changed
+    /// mesh either side.
+    #[test]
+    fn sculpt_pushes_terrain_change_with_unchanged_config_and_changed_mesh() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+        let before = heights_of(&mut world);
+        let old_handle = mesh_handle_of(&mut world);
+        let _ = drain_history(&mut world);
+
+        world
+            .resource_mut::<PendingCommands>()
+            .terrain_sculpts
+            .push(TerrainSculpt {
+                entity_id: "terrain-1".to_string(),
+                position: [-3.5, -3.5],
+                radius: 1.5,
+                strength: 5.0,
+            });
+        run_system!(&mut world, apply_terrain_sculpts);
+
+        assert_ne!(
+            mesh_handle_of(&mut world),
+            old_handle,
+            "the Mesh3d handle must point at the resculpted mesh",
+        );
+        assert_eq!(
+            world.resource::<Assets<Mesh>>().len(),
+            1,
+            "the superseded mesh must be released, not leaked in Assets<Mesh>",
+        );
+
+        let actions = drain_history(&mut world);
+        assert_eq!(actions.len(), 1, "exactly one history entry per sculpt");
+        match &actions[0] {
+            UndoableAction::TerrainChange {
+                entity_id,
+                old_terrain,
+                new_terrain,
+                old_mesh_data,
+                new_mesh_data,
+            } => {
+                assert_eq!(entity_id, "terrain-1");
+                assert_eq!(
+                    old_terrain.seed, new_terrain.seed,
+                    "a sculpt must not alter the noise config",
+                );
+                assert_eq!(old_mesh_data.heights, before);
+                assert_ne!(
+                    old_mesh_data.heights, new_mesh_data.heights,
+                    "the sculpt must be recorded as a heightmap change",
+                );
+            }
+            other => panic!("expected UndoableAction::TerrainChange, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sculpt_with_unknown_entity_id_is_a_silent_no_op() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+        let before = heights_of(&mut world);
+        let _ = drain_history(&mut world);
+
+        world
+            .resource_mut::<PendingCommands>()
+            .terrain_sculpts
+            .push(TerrainSculpt {
+                entity_id: "does-not-exist".to_string(),
+                position: [-3.5, -3.5],
+                radius: 1.5,
+                strength: 5.0,
+            });
+        run_system!(&mut world, apply_terrain_sculpts);
+
+        assert_eq!(
+            heights_of(&mut world),
+            before,
+            "an unmatched sculpt must not mutate any terrain",
+        );
+        assert!(
+            drain_history(&mut world).is_empty(),
+            "an unmatched sculpt must not push a no-op history entry",
+        );
+        assert!(
+            world
+                .resource::<PendingCommands>()
+                .terrain_sculpts
+                .is_empty(),
+            "the request must be drained, not left to retry every frame",
+        );
+    }
+
+    // === degenerate resolution ===
+
+    /// `build_terrain_mesh` computes `(resolution - 1)^2` quads in `usize`, so a
+    /// resolution below 2 underflows and panics — which in WASM takes the whole
+    /// engine down. The command layer clamps to 32/64/128/256, so this only
+    /// guards a non-JS caller, but the failure mode is severe enough to pin.
+    #[test]
+    fn spawn_with_degenerate_resolution_is_rejected_without_panicking() {
+        for resolution in [0u32, 1u32] {
+            let mut world = base_world();
+            world
+                .resource_mut::<PendingCommands>()
+                .terrain_spawn_requests
+                .push(TerrainSpawnRequest {
+                    name: None,
+                    position: None,
+                    terrain_data: TerrainData {
+                        resolution,
+                        ..small_terrain(7)
+                    },
+                    id: None,
+                });
+            run_system!(&mut world, apply_terrain_spawn_requests);
+
+            assert!(
+                entity_ids(&mut world).is_empty(),
+                "resolution {resolution} must not spawn a degenerate terrain",
+            );
+            assert!(
+                drain_history(&mut world).is_empty(),
+                "a rejected spawn must not push history",
+            );
+        }
     }
 }
