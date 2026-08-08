@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { X, Wand2, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useUserStore } from '@/stores/userStore';
 import { PALETTES, type PaletteId } from '@/lib/generate/palettes';
@@ -29,7 +30,17 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
   const [style, setStyle] = useState<(typeof STYLES)[number]>('character');
   const [dithering, setDithering] = useState<string>('none');
   const [ditheringIntensity, setDitheringIntensity] = useState(0.5);
-  const { execute, cancel, isLoading: isSubmitting, error } = useAIGeneration();
+  // Every sibling Generate*Dialog toasts on failure; this one only rendered the
+  // message inline, inside a `max-h-[90vh] overflow-y-auto` body. A user who had
+  // scrolled to the footer to click Generate could get no feedback at all — and
+  // the empty-artifact 503 carries the refund disclosure, so a missed message is
+  // a user who thinks they were charged for nothing.
+  const {
+    execute,
+    cancel,
+    isLoading: isSubmitting,
+    error,
+  } = useAIGeneration({ onError: (msg) => toast.error(msg) });
 
   const tokenBalance = useUserStore((s) => s.tokenBalance?.total ?? 0);
   const addJob = useGenerationStore((s) => s.addJob);
@@ -210,9 +221,16 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
             )}
           </div>
 
-          {/* Error */}
+          {/* Error. `role="alert"` because the dialog stays open on failure and
+              nothing moves focus — without it the message is inserted silently
+              and a screen-reader user is left waiting on a request that already
+              failed. It also carries the refund disclosure: the 503 for a
+              provider that returned no artifact says whether tokens came back. */}
           {error && (
-            <div className="text-xs text-red-400 bg-red-900/20 border border-red-800 rounded p-2">
+            <div
+              role="alert"
+              className="text-xs text-red-400 bg-red-900/20 border border-red-800 rounded p-2"
+            >
               {error}
             </div>
           )}
