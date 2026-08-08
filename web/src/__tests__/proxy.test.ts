@@ -144,9 +144,12 @@ describe('proxy public-route matcher (real Clerk matcher)', () => {
    * (`'/x' + '/x/(.*)'`) that closes it — measured against the real matcher,
    * which is what this file imports.
    *
-   * Scope note: the ~18 pre-existing `X(.*)` entries in buildPublicRoutes()
-   * have the same shape and are tracked separately — converting them is a
-   * distinct change with its own blast radius, not a drive-by in this PR.
+   * Scope note: the pre-existing bare `X(.*)` entries in buildPublicRoutes()
+   * have the same shape and are tracked separately in #9109 — converting them
+   * is a distinct change with its own blast radius, not a drive-by here. (An
+   * earlier revision of this comment guessed "~18"; the measured count is
+   * higher, which is exactly why the audit is its own ticket rather than a
+   * number maintained by hand in a comment.)
    */
   it.each([
     '/healthz',
