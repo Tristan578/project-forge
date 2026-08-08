@@ -1,8 +1,7 @@
 import type { MetadataRoute } from 'next';
 import { readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-
-const DOCS_URL = process.env.NEXT_PUBLIC_DOCS_URL ?? 'https://docs.spawnforge.ai';
+import { DOCS_URL } from '../lib/site';
 
 export interface MdxEntry {
   path: string;
