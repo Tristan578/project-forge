@@ -673,6 +673,21 @@ describe('healthChecks', () => {
   // reference that is `toBe` the previous one could only have come from the
   // cache, and a distinct one could only have come from a second fan-out.
   describe('getCachedHealthReport', () => {
+    // These are the only tests in this file that drive the REAL
+    // `runAllHealthChecks()` end to end, so they are the only ones that would
+    // otherwise make real outbound calls — on a populated dev machine that
+    // means opening a Neon connection and sending the live CLERK_SECRET_KEY to
+    // api.clerk.com just to run the suite. Stub the network and clear the DB
+    // URL so the fan-out stays entirely in-process; identity, not content, is
+    // what these assertions read.
+    beforeEach(() => {
+      vi.stubEnv('DATABASE_URL', '');
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
+      );
+    });
+
     it('serves a second call inside the TTL from cache, without a second fan-out', async () => {
       vi.resetModules();
       const { getCachedHealthReport } = await import('@/lib/monitoring/healthChecks');
@@ -727,6 +742,111 @@ describe('healthChecks', () => {
       const second = await getCachedHealthReport();
 
       expect(second).not.toBe(first);
+    });
+
+    it('peekCachedHealthReport() serves a live report and stops at the TTL', async () => {
+      vi.resetModules();
+      const { getCachedHealthReport, peekCachedHealthReport } = await import(
+        '@/lib/monitoring/healthChecks'
+      );
+      const { HEALTH_CACHE_TTL_MS } = await import('@/lib/config/timeouts');
+
+      let clock = Date.now();
+      const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+      try {
+        // Cold: peek never fans out, so it has nothing to hand back.
+        expect(peekCachedHealthReport()).toBeNull();
+
+        const report = await getCachedHealthReport();
+        expect(peekCachedHealthReport()).toBe(report);
+
+        clock += HEALTH_CACHE_TTL_MS + 1;
+        // Expired. Peek is the free fast path in front of the fan-out budget,
+        // and it never refreshes — so an unchecked expiry would pin /health and
+        // /api/health to one report forever, not merely serve it a bit late.
+        expect(peekCachedHealthReport()).toBeNull();
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
+
+    // A fan-out detached by `resetCachedHealthReport()` is still running; a
+    // newer one now owns the cache slot. Both the `.then` write and the
+    // `.finally` clear are identity-guarded so the detached one cannot land on
+    // top of the newer one — a stale report stamped with a full fresh TTL, or a
+    // live in-flight promise evicted out from under its joiners.
+    it('does not let a detached fan-out clobber the one that replaced it', async () => {
+      vi.resetModules();
+
+      // Force at least one probe. Every fetching check is env-gated, and in a
+      // bare test env they all short-circuit before touching `fetch` — the
+      // gates below would then never fill and this test would pass vacuously.
+      // The engine-CDN probe is the safe one to enable: a fake URL, not a
+      // secret-shaped key like the ones `checkClerk` needs.
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', 'https://cdn.invalid/');
+
+      const gates: Array<() => void> = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(
+          () =>
+            new Promise<Response>((resolve) => {
+              gates.push(() => resolve(new Response(null, { status: 200 })));
+            }),
+        ),
+      );
+
+      const { getCachedHealthReport, peekCachedHealthReport, resetCachedHealthReport } =
+        await import('@/lib/monitoring/healthChecks');
+
+      // Each check awaits before it reaches `fetch`, so the probes are not all
+      // issued synchronously. Wait on the observable effect — a gate landing —
+      // rather than on a fixed delay.
+      const probesIssued = () => vi.waitFor(() => expect(gates.length).toBeGreaterThan(0));
+
+      const a = getCachedHealthReport();
+      await probesIssued();
+      // Count-agnostic: collect whatever this fan-out issued rather than
+      // hardcoding a probe count that a new check would silently invalidate.
+      const aGates = gates.splice(0);
+
+      // Detach A. A newer fan-out claims the slot while A is still settling.
+      resetCachedHealthReport();
+      const b = getCachedHealthReport();
+      await probesIssued();
+      const bGates = gates.splice(0);
+
+      // Land the DETACHED fan-out first — the whole point of the race. `a` IS
+      // the chained promise, so awaiting it runs both handlers to completion.
+      aGates.forEach((release) => release());
+      const reportA = await a;
+
+      // Write guard: A lost the slot, so its report must not be cached. An
+      // unconditional write would serve the OLDER report for a full fresh TTL.
+      expect(peekCachedHealthReport()).toBeNull();
+
+      // Finally guard: B still owns the slot and is still in flight, so a
+      // caller arriving now must join it rather than start a third fan-out.
+      //
+      // This is a negative — "no probe was issued" — and the probes are only
+      // reachable through several awaits, so it is only meaningful once the
+      // task queue has been yielded to. `vi.waitFor` cannot express it (it
+      // would pass on its first tick, before a third fan-out could show up)
+      // and neither can promise identity: `getCachedHealthReport` is `async`,
+      // so `return inFlightHealthReport` wraps the joined promise in a fresh
+      // one and identity is not observable from here. A macrotask boundary is
+      // load-bearing, not a sleep — dropping either identity guard in the
+      // dedup turns the assertion below red, which is what pins it.
+      const c = getCachedHealthReport();
+      // eslint-disable-next-line no-restricted-syntax -- see above: this is a queue yield, not a sleep
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(gates).toHaveLength(0);
+
+      bGates.forEach((release) => release());
+      const reportB = await b;
+
+      expect(await c).toBe(reportB);
+      expect(reportB).not.toBe(reportA);
     });
   });
 });

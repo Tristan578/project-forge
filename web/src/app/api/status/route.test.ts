@@ -3,6 +3,19 @@ import type { NextRequest } from 'next/server';
 
 vi.mock('server-only', () => ({}));
 
+// The route charges a shared fan-out budget before it will pay for the four
+// outbound probes a cold report costs. Default it to permissive so the mapping
+// tests below exercise the report path; the budget's own behaviour is asserted
+// in the two dedicated tests at the bottom of this file.
+vi.mock('@/lib/monitoring/healthFanoutBudget', () => ({
+  checkHealthFanoutBudget: vi.fn().mockResolvedValue({
+    allowed: true,
+    remaining: 29,
+    // Fixed far-future epoch — `Date.now()` is unavailable in a hoisted factory.
+    resetAt: 4102444800000,
+  }),
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -89,6 +102,9 @@ describe('GET /api/status', () => {
 
     // Mock health checks to return predictable results for all service names
     vi.doMock('@/lib/monitoring/healthChecks', () => ({
+      // A mock factory replaces the WHOLE module, so every export the route
+      // imports has to be here — an omitted one is `undefined` at the call site.
+      peekCachedHealthReport: vi.fn(() => null),
       getCachedHealthReport: vi.fn().mockResolvedValue({
         overall: 'healthy',
         timestamp: '2026-03-16T12:00:00.000Z',
@@ -126,6 +142,9 @@ describe('GET /api/status', () => {
     vi.resetModules();
 
     vi.doMock('@/lib/monitoring/healthChecks', () => ({
+      // A mock factory replaces the WHOLE module, so every export the route
+      // imports has to be here — an omitted one is `undefined` at the call site.
+      peekCachedHealthReport: vi.fn(() => null),
       getCachedHealthReport: vi.fn().mockResolvedValue({
         overall: 'down',
         timestamp: '2026-03-16T12:00:00.000Z',
@@ -161,6 +180,9 @@ describe('GET /api/status', () => {
     vi.resetModules();
 
     vi.doMock('@/lib/monitoring/healthChecks', () => ({
+      // A mock factory replaces the WHOLE module, so every export the route
+      // imports has to be here — an omitted one is `undefined` at the call site.
+      peekCachedHealthReport: vi.fn(() => null),
       getCachedHealthReport: vi.fn().mockResolvedValue({
         overall: 'down',
         timestamp: '2026-03-16T12:00:00.000Z',
@@ -190,6 +212,9 @@ describe('GET /api/status', () => {
     vi.resetModules();
 
     vi.doMock('@/lib/monitoring/healthChecks', () => ({
+      // A mock factory replaces the WHOLE module, so every export the route
+      // imports has to be here — an omitted one is `undefined` at the call site.
+      peekCachedHealthReport: vi.fn(() => null),
       getCachedHealthReport: vi.fn().mockResolvedValue({
         overall: 'degraded',
         timestamp: '2026-03-16T12:00:00.000Z',
@@ -219,6 +244,9 @@ describe('GET /api/status', () => {
     vi.resetModules();
 
     vi.doMock('@/lib/monitoring/healthChecks', () => ({
+      // A mock factory replaces the WHOLE module, so every export the route
+      // imports has to be here — an omitted one is `undefined` at the call site.
+      peekCachedHealthReport: vi.fn(() => null),
       getCachedHealthReport: vi.fn().mockResolvedValue({
         overall: 'healthy',
         timestamp: '2026-03-16T12:00:00.000Z',
@@ -252,6 +280,9 @@ describe('GET /api/status', () => {
 
     // Only provide health data for one service
     vi.doMock('@/lib/monitoring/healthChecks', () => ({
+      // A mock factory replaces the WHOLE module, so every export the route
+      // imports has to be here — an omitted one is `undefined` at the call site.
+      peekCachedHealthReport: vi.fn(() => null),
       getCachedHealthReport: vi.fn().mockResolvedValue({
         overall: 'healthy',
         timestamp: '2026-03-16T12:00:00.000Z',
@@ -276,6 +307,8 @@ describe('GET /api/status', () => {
     vi.resetModules();
 
     vi.doMock('@/lib/rateLimit', () => ({
+      getClientIp: vi.fn(() => '1.2.3.4'),
+      rateLimitResponse: vi.fn(),
       rateLimitPublicRoute: vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ error: 'Too many requests. Please try again later.' }), {
           status: 429,
@@ -299,10 +332,15 @@ describe('GET /api/status', () => {
     const fixedTimestamp = '2026-03-16T12:34:56.000Z';
 
     vi.doMock('@/lib/rateLimit', () => ({
+      getClientIp: vi.fn(() => '1.2.3.4'),
+      rateLimitResponse: vi.fn(),
       rateLimitPublicRoute: vi.fn().mockResolvedValue(null),
     }));
 
     vi.doMock('@/lib/monitoring/healthChecks', () => ({
+      // A mock factory replaces the WHOLE module, so every export the route
+      // imports has to be here — an omitted one is `undefined` at the call site.
+      peekCachedHealthReport: vi.fn(() => null),
       getCachedHealthReport: vi.fn().mockResolvedValue({
         overall: 'healthy',
         timestamp: fixedTimestamp,
@@ -319,5 +357,72 @@ describe('GET /api/status', () => {
     const body = await res.json();
 
     expect(body.generatedAt).toBe(fixedTimestamp);
+  });
+
+  it('serves a live shared-cache report without spending fan-out budget', async () => {
+    vi.resetModules();
+
+    const checkHealthFanoutBudget = vi.fn();
+    const getCachedHealthReport = vi.fn();
+
+    vi.doMock('@/lib/monitoring/healthFanoutBudget', () => ({ checkHealthFanoutBudget }));
+    vi.doMock('@/lib/monitoring/healthChecks', () => ({
+      getCachedHealthReport,
+      peekCachedHealthReport: vi.fn(() => ({
+        overall: 'healthy',
+        timestamp: '2026-03-16T12:00:00.000Z',
+        services: [
+          { name: 'Database (Neon)', status: 'healthy', latencyMs: 5, lastChecked: '2026-03-16T12:00:00.000Z' },
+        ],
+        environment: 'test',
+        version: 'abcd1234',
+      })),
+    }));
+
+    const { GET } = await import('./route');
+    const res = await GET(makeRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.services[0].id).toBe('database');
+    // A report we already hold costs no outbound probes, so it must not consume
+    // an allowance it never spent — nor start a fresh fan-out.
+    expect(checkHealthFanoutBudget).not.toHaveBeenCalled();
+    expect(getCachedHealthReport).not.toHaveBeenCalled();
+  });
+
+  it('returns an honest 429 when the fan-out budget is exhausted', async () => {
+    vi.resetModules();
+
+    const getCachedHealthReport = vi.fn();
+
+    // A `vi.doMock` registration persists for the rest of the file, and earlier
+    // tests here stub `@/lib/rateLimit`. Restore the real module so the 429 this
+    // asserts on is the one `rateLimitResponse()` actually builds.
+    vi.doMock('@/lib/rateLimit', async () => ({
+      ...(await vi.importActual<typeof import('@/lib/rateLimit')>('@/lib/rateLimit')),
+    }));
+    vi.doMock('@/lib/monitoring/healthFanoutBudget', () => ({
+      checkHealthFanoutBudget: vi.fn().mockResolvedValue({
+        allowed: false,
+        remaining: 0,
+        resetAt: 4102444800000,
+      }),
+    }));
+    vi.doMock('@/lib/monitoring/healthChecks', () => ({
+      getCachedHealthReport,
+      peekCachedHealthReport: vi.fn(() => null),
+    }));
+
+    const { GET } = await import('./route');
+    const res = await GET(makeRequest());
+
+    // 429 rather than the degraded shell the /health page renders: a machine
+    // consumer is better served by being told when to come back.
+    expect(res.status).toBe(429);
+    expect(res.headers.get('X-RateLimit-Remaining')).toBe('0');
+    expect(res.headers.get('Retry-After')).not.toBeNull();
+    // The four outbound probes are exactly what the budget exists to withhold.
+    expect(getCachedHealthReport).not.toHaveBeenCalled();
   });
 });

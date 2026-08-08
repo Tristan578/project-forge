@@ -235,13 +235,28 @@ function isValidIpFormat(ip: string): boolean {
  * 4. 'unknown' — fallback when no trustworthy IP is available.
  */
 export function getClientIp(req: NextRequest): string {
+  return getClientIpFromHeaders(req.headers);
+}
+
+/**
+ * The same extraction, against a bare `Headers` rather than a `NextRequest`.
+ *
+ * Server Components have no `NextRequest` — they read `await headers()` — so
+ * without this they cannot reach the hardened path and end up hand-rolling
+ * `x-forwarded-for.split(',')[0]`, which skips the unforgeable Vercel header,
+ * skips format validation, and keys a shared Redis namespace on raw client
+ * input. Widening the parameter is the fix; every rule above still applies.
+ *
+ * Typed structurally (only `.get()` is ever called) so any `Headers`-like works.
+ */
+export function getClientIpFromHeaders(headers: Pick<Headers, 'get'>): string {
   // Primary: Vercel's own header is set by the Vercel edge and cannot be forged by clients
-  const vercelIp = req.headers.get('x-vercel-forwarded-for');
+  const vercelIp = headers.get('x-vercel-forwarded-for');
   if (vercelIp && isValidIpFormat(vercelIp.split(',')[0].trim())) {
     return vercelIp.split(',')[0].trim();
   }
 
-  const forwarded = req.headers.get('x-forwarded-for');
+  const forwarded = headers.get('x-forwarded-for');
   if (forwarded) {
     const parts = forwarded.split(',').map(s => s.trim()).filter(Boolean);
     const candidate = parts[0];
@@ -254,7 +269,7 @@ export function getClientIp(req: NextRequest): string {
     }
   }
 
-  const realIp = req.headers.get('x-real-ip');
+  const realIp = headers.get('x-real-ip');
   if (realIp && isValidIpFormat(realIp)) {
     return realIp;
   }

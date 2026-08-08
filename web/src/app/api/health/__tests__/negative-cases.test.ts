@@ -13,19 +13,35 @@ import { NextRequest } from 'next/server';
 // Mocks
 // ---------------------------------------------------------------------------
 
-const mockRunAllHealthChecks = vi.fn();
+const mockGetCachedHealthReport = vi.fn();
+const mockPeekCachedHealthReport = vi.fn();
 const mockComputeCriticalStatus = vi.fn();
 const mockSanitizeForPublic = vi.fn();
 
 vi.mock('@/lib/monitoring/healthChecks', () => ({
-  runAllHealthChecks: (...args: unknown[]) => mockRunAllHealthChecks(...args),
+  getCachedHealthReport: (...args: unknown[]) => mockGetCachedHealthReport(...args),
+  // The route peeks before spending fan-out budget. Defaulting to "no live
+  // cache" keeps every case below on the path that actually exercises the
+  // route; the fan-out budget block overrides it to cover the hit path.
+  peekCachedHealthReport: (...args: unknown[]) => mockPeekCachedHealthReport(...args),
   computeCriticalStatus: (...args: unknown[]) => mockComputeCriticalStatus(...args),
   sanitizeForPublic: (...args: unknown[]) => mockSanitizeForPublic(...args),
 }));
 
+// A `vi.mock` factory replaces the WHOLE module, so every export the route
+// reaches for has to be listed — an omitted one is `undefined` at the call site,
+// not a pass-through to the real implementation.
 const mockRateLimitPublicRoute = vi.fn();
+const mockRateLimitResponse = vi.fn();
 vi.mock('@/lib/rateLimit', () => ({
   rateLimitPublicRoute: (...args: unknown[]) => mockRateLimitPublicRoute(...args),
+  getClientIp: () => '1.2.3.4',
+  rateLimitResponse: (...args: unknown[]) => mockRateLimitResponse(...args),
+}));
+
+const mockCheckHealthFanoutBudget = vi.fn();
+vi.mock('@/lib/monitoring/healthFanoutBudget', () => ({
+  checkHealthFanoutBudget: (...args: unknown[]) => mockCheckHealthFanoutBudget(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -64,11 +80,24 @@ describe('GET /api/health — negative cases', () => {
     vi.clearAllMocks();
     vi.resetModules();
 
-    // Default: no rate limit
+    // Default: no rate limit, and fan-out budget available
     mockRateLimitPublicRoute.mockResolvedValue(null);
+    mockRateLimitResponse.mockImplementation((_remaining: number, resetAt: number) => {
+      const retryAfter = Math.max(0, Math.ceil((resetAt - Date.now()) / 1000));
+      return new Response(JSON.stringify({ error: 'Too many requests' }), {
+        status: 429,
+        headers: { 'Retry-After': String(retryAfter) },
+      });
+    });
+    mockPeekCachedHealthReport.mockReturnValue(null);
+    mockCheckHealthFanoutBudget.mockResolvedValue({
+      allowed: true,
+      remaining: 29,
+      resetAt: Date.now() + 60_000,
+    });
 
     // Default: healthy checks
-    mockRunAllHealthChecks.mockResolvedValue(makeHealthReport());
+    mockGetCachedHealthReport.mockResolvedValue(makeHealthReport());
     mockComputeCriticalStatus.mockReturnValue('healthy');
     mockSanitizeForPublic.mockImplementation((services: Array<{ status: string }>) =>
       services.map((s) => ({ ...s }))
@@ -108,7 +137,7 @@ describe('GET /api/health — negative cases', () => {
       );
 
       await GET(makeReq());
-      expect(mockRunAllHealthChecks).not.toHaveBeenCalled();
+      expect(mockGetCachedHealthReport).not.toHaveBeenCalled();
     });
 
     it('rate limits by IP address (different IPs are independent)', async () => {
@@ -128,13 +157,61 @@ describe('GET /api/health — negative cases', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Fan-out budget
+  // -------------------------------------------------------------------------
+  describe('fan-out budget', () => {
+    it('serves a live shared-cache report without spending budget', async () => {
+      resetHealthCache();
+      mockPeekCachedHealthReport.mockReturnValue(makeHealthReport());
+
+      const res = await GET(makeReq());
+
+      // The budget bounds the four OUTBOUND probes, not the act of reading a
+      // report we already hold. Charging on a hit would let a warm cache burn
+      // an allowance it never consumed.
+      expect(res.status).toBe(200);
+      expect(mockCheckHealthFanoutBudget).not.toHaveBeenCalled();
+      expect(mockGetCachedHealthReport).not.toHaveBeenCalled();
+    });
+
+    it('charges the budget once the shared cache misses', async () => {
+      resetHealthCache();
+      mockPeekCachedHealthReport.mockReturnValue(null);
+
+      await GET(makeReq());
+
+      // Keyed on the caller, and shared with the /health page — two buckets
+      // would not bound the fan-out, they would double it.
+      expect(mockCheckHealthFanoutBudget).toHaveBeenCalledWith('1.2.3.4');
+      expect(mockGetCachedHealthReport).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns an honest 429 when the fan-out budget is exhausted', async () => {
+      resetHealthCache();
+      mockPeekCachedHealthReport.mockReturnValue(null);
+      const resetAt = Date.now() + 45_000;
+      mockCheckHealthFanoutBudget.mockResolvedValue({ allowed: false, remaining: 0, resetAt });
+
+      const res = await GET(makeReq());
+
+      expect(res.status).toBe(429);
+      // Built from the budget's own numbers rather than a bare 429, so a
+      // monitoring tool learns when to come back instead of hammering.
+      expect(mockRateLimitResponse).toHaveBeenCalledWith(0, resetAt);
+      expect(res.headers.get('Retry-After')).toBe('45');
+      // And the whole point: no probes are paid for on the way out.
+      expect(mockGetCachedHealthReport).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Service degradation (503)
   // -------------------------------------------------------------------------
   describe('service degradation', () => {
     it('returns 503 when critical services are down', async () => {
       resetHealthCache();
       mockComputeCriticalStatus.mockReturnValue('down');
-      mockRunAllHealthChecks.mockResolvedValue(
+      mockGetCachedHealthReport.mockResolvedValue(
         makeHealthReport({
           services: [
             { name: 'Database (Neon)', status: 'down', latencyMs: 0, lastChecked: new Date().toISOString(), error: 'Connection refused' },
@@ -151,7 +228,7 @@ describe('GET /api/health — negative cases', () => {
     it('returns database=unavailable when DB service is down', async () => {
       resetHealthCache();
       mockComputeCriticalStatus.mockReturnValue('down');
-      mockRunAllHealthChecks.mockResolvedValue(
+      mockGetCachedHealthReport.mockResolvedValue(
         makeHealthReport({
           services: [
             { name: 'Database (Neon)', status: 'down', latencyMs: 0, lastChecked: new Date().toISOString() },
@@ -168,7 +245,7 @@ describe('GET /api/health — negative cases', () => {
     it('returns 200 when non-critical services are degraded', async () => {
       resetHealthCache();
       mockComputeCriticalStatus.mockReturnValue('degraded');
-      mockRunAllHealthChecks.mockResolvedValue(
+      mockGetCachedHealthReport.mockResolvedValue(
         makeHealthReport({
           services: [
             { name: 'Sentry', status: 'degraded', latencyMs: 2000, lastChecked: new Date().toISOString() },
@@ -210,10 +287,10 @@ describe('GET /api/health — negative cases', () => {
     it('does not call health checks on cached hit', async () => {
       resetHealthCache();
       await GET(makeReq());
-      mockRunAllHealthChecks.mockClear();
+      mockGetCachedHealthReport.mockClear();
 
       await GET(makeReq());
-      expect(mockRunAllHealthChecks).not.toHaveBeenCalled();
+      expect(mockGetCachedHealthReport).not.toHaveBeenCalled();
     });
   });
 
@@ -226,7 +303,7 @@ describe('GET /api/health — negative cases', () => {
       const services = [
         { name: 'Database (Neon)', status: 'down', latencyMs: 0, lastChecked: new Date().toISOString(), error: 'connection string: postgres://secret@host' },
       ];
-      mockRunAllHealthChecks.mockResolvedValue(makeHealthReport({ services }));
+      mockGetCachedHealthReport.mockResolvedValue(makeHealthReport({ services }));
       mockComputeCriticalStatus.mockReturnValue('down');
       mockSanitizeForPublic.mockReturnValue(
         services.map((s) => ({ ...s, error: undefined })),

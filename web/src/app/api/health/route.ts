@@ -1,24 +1,33 @@
 /**
  * GET /api/health — service health endpoint.
  *
- * Runs 8 checks (DB, Clerk, Stripe, Sentry, R2, Engine CDN, Upstash, Anthropic).
+ * Runs 10 checks (DB, Payments, Rate limiting, Engine CDN, AI providers, Clerk,
+ * Anthropic, Sentry, R2, generation factory), four of which make an outbound
+ * network call — see `runAllHealthChecks()` for which.
  * Only DB and Clerk failures produce HTTP 503 — all other services degrade gracefully.
  * Sensitive details are stripped from the public response; internal details are logged.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  runAllHealthChecks,
+  getCachedHealthReport,
+  peekCachedHealthReport,
   computeCriticalStatus,
   sanitizeForPublic,
   type ServiceHealth,
+  type HealthReport,
 } from '@/lib/monitoring/healthChecks';
-import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import { checkHealthFanoutBudget } from '@/lib/monitoring/healthFanoutBudget';
+import { getClientIp, rateLimitPublicRoute, rateLimitResponse } from '@/lib/rateLimit';
 import { logger } from '@/lib/logging/logger';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { HEALTH_CACHE_TTL_MS } from '@/lib/config/timeouts';
 
-/** Public status vocabulary — 'healthy' is remapped to 'up'. */
+/**
+ * Public status vocabulary for EACH SERVICE — 'healthy' is remapped to 'up'.
+ * The top-level `overall` field is deliberately NOT remapped; see the comment
+ * where it is assigned in the response body inside `GET` below.
+ */
 type PublicStatus = 'up' | 'degraded' | 'down';
 type PublicServiceHealth = Omit<ServiceHealth, 'status'> & { status: PublicStatus };
 
@@ -33,9 +42,15 @@ function normalizeStatus(s: ServiceHealth): PublicServiceHealth {
 }
 
 /**
- * Module-level response cache to reduce downstream service calls.
- * Health checks make 8 concurrent network requests; caching for 30s
- * reduces amplification factor when monitoring tools poll frequently.
+ * Module-level cache of the fully-shaped RESPONSE (body + HTTP status), which
+ * is a layer above the shared report cache inside `getCachedHealthReport()`.
+ * This one saves the normalize/sanitize/log work on a hit; that one saves the
+ * four outbound probes and is shared with every other health-reading surface.
+ *
+ * Neither is a rate limit — both are per-lambda-instance, so they bound one
+ * instance rather than the aggregate. The two bounds live in `GET` below:
+ * `rateLimitPublicRoute()` on raw request volume, and the shared fan-out
+ * budget on the outbound probes specifically.
  */
 interface CachedReport {
   body: Record<string, unknown>;
@@ -59,8 +74,15 @@ export function resetHealthCache(): void {
  * Only critical service failures (DB, Auth) trigger HTTP 503.
  * Sensitive error details are stripped from the public response.
  *
- * Rate limiting: 60 requests per minute per IP. Cached for 30 seconds to
- * reduce downstream amplification (1 request → 8 service checks).
+ * Two distinct bounds, because there are two distinct costs:
+ *
+ * 1. Raw request volume against a public JSON endpoint — 60 req/min per IP via
+ *    `rateLimitPublicRoute()`, in front of everything including the caches.
+ * 2. The outbound fan-out (1 uncached request → 4 outbound probes) — charged to
+ *    a budget SHARED with the `/health` page (`checkHealthFanoutBudget()`), and
+ *    consumed only after both caches miss, since a cached report costs nothing
+ *    to serve. Giving each surface its own bucket would not bound the fan-out,
+ *    it would double it.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   // Rate limit: 60 req/min per IP (generous for monitoring tools, blocks hammering)
@@ -80,7 +102,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  const report = await runAllHealthChecks();
+  // Shared with /api/status and the /health page, and in-flight deduped, so N
+  // concurrent cold requests cost one fan-out rather than N. A live cached
+  // report is free to serve, so it must not spend fan-out budget; only a miss
+  // — the caller that would actually pay for the four probes — is charged.
+  let report: HealthReport | null = peekCachedHealthReport();
+  if (report === null) {
+    const budget = await checkHealthFanoutBudget(getClientIp(req));
+    if (!budget.allowed) return rateLimitResponse(budget.remaining, budget.resetAt);
+    report = await getCachedHealthReport();
+  }
   const criticalStatus = computeCriticalStatus(report.services);
   const httpStatus = criticalStatus === 'down' ? 503 : 200;
 
@@ -125,6 +156,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     commit: commit.slice(0, 8),
     database: dbStatus,
     timestamp: report.timestamp,
+    // NOT normalized: `overall` keeps the internal vocabulary ('healthy' |
+    // 'degraded' | 'down') while each entry in `services` is remapped to 'up'.
+    // The asymmetry is the shipped contract — external consumers already read
+    // it this way — so a client consuming this payload must translate the
+    // per-service half and only that half (see `fromWireReport()` in
+    // HealthDashboard.tsx, which exists because this was missed once).
     overall: report.overall,
     version: report.version,
     services: publicServices,

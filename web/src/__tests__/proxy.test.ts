@@ -126,9 +126,40 @@ describe('proxy public-route matcher (real Clerk matcher)', () => {
     for (const route of ['/dashboard', '/settings', '/editor', '/admin']) {
       expect(isPublic(route), `${route} must not be public`).toBe(false);
     }
-    // The `(.*)` suffixes are meant to cover sub-paths of the segment.
+    // The subtree patterns are meant to cover sub-paths of the segment.
     expect(isPublic('/health/detail')).toBe(true);
     expect(isPublic('/docs/getting-started')).toBe(true);
+  });
+
+  /**
+   * Clerk's `createRouteMatcher` goes through `@clerk/shared`'s vendored
+   * pathToRegexp, NOT the tree's path-to-regexp 8.x (which rejects `(.*)`
+   * outright). In that vendored version `(.*)` is a bare SUFFIX wildcard with
+   * no path-segment boundary, so `'/health(.*)'` also matches `/healthz` and
+   * `/health-internal`.
+   *
+   * That is an auth hole opened by a spelling rather than by a decision: any
+   * future route that merely shares a prefix with a public one becomes public
+   * too, silently. These assertions pin the two-pattern form
+   * (`'/x' + '/x/(.*)'`) that closes it — measured against the real matcher,
+   * which is what this file imports.
+   *
+   * Scope note: the ~18 pre-existing `X(.*)` entries in buildPublicRoutes()
+   * have the same shape and are tracked separately — converting them is a
+   * distinct change with its own blast radius, not a drive-by in this PR.
+   */
+  it.each([
+    '/healthz',
+    '/health-internal',
+    '/healthcheck-admin',
+    '/docsecret',
+    '/pricingadmin',
+    '/opengraph-image-admin',
+  ])('does not leak the sibling-prefix route %s through a suffix wildcard', (route) => {
+    expect(
+      isPublic(route),
+      `${route} shares a prefix with a public route but is NOT that route. If this fails, a bare 'X(.*)' pattern has been reintroduced — use 'X' plus 'X/(.*)' instead.`,
+    ).toBe(false);
   });
 
   it('only exposes the /dev auth-bypass route when includeDev (non-production) (#7915)', () => {
