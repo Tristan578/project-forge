@@ -199,7 +199,10 @@ export function buildPublicRoutes({ includeDev }: { includeDev: boolean }): stri
     '/sign-up(.*)',
     '/api/auth/webhook(.*)',
     '/api/stripe/webhook(.*)',
-    '/pricing',
+    // `(.*)` rather than a bare `/pricing`: the segment also owns
+    // `/pricing/opengraph-image`, which crawlers and link unfurlers fetch
+    // without a session.
+    '/pricing(.*)',
     '/play(.*)',
     '/terms(.*)',
     '/privacy(.*)',
@@ -232,6 +235,20 @@ export function buildPublicRoutes({ includeDev }: { includeDev: boolean }): stri
     '/use-cases(.*)',
     '/changelog(.*)',
     '/blog(.*)',
+    // Public PAGE routes that shipped without a matching entry here (#9060).
+    // Each one renders for anonymous visitors by design, and each was being
+    // bounced to /sign-in instead.
+    '/docs(.*)',
+    // The status dashboard. Its fan-out is guarded by the shared TTL cache in
+    // healthChecks.ts, not by auth — a Server Component cannot rate-limit
+    // itself, and gating a status page behind a session defeats its purpose.
+    '/health(.*)',
+    // Crawler and unfurler surfaces. `.txt` and `.xml` are NOT in the matcher's
+    // static-extension exclusion list below, so these genuinely reach Clerk and
+    // genuinely need listing — that is why `/llms.txt` is already here.
+    '/robots.txt',
+    '/sitemap.xml',
+    '/opengraph-image(.*)',
   ];
   if (includeDev) {
     publicRoutes.push('/dev(.*)');

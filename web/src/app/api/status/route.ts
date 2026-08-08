@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from 'next/server';
-import { runAllHealthChecks } from '@/lib/monitoring/healthChecks';
+import { getCachedHealthReport } from '@/lib/monitoring/healthChecks';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import {
   mapHealthStatusToServiceStatus,
@@ -34,7 +34,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (rateLimitResult) return rateLimitResult;
 
   try {
-  const report = await runAllHealthChecks();
+  // Shared TTL cache: the rate limit above bounds one client, but this route is
+  // public and unauthenticated, so a distributed burst still fans out to ten
+  // upstream probes per request without it.
+  const report = await getCachedHealthReport();
 
   // Build a lookup map from health check name → health result for O(1) access
   const healthByName = new Map(report.services.map((s) => [s.name, s]));
