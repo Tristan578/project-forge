@@ -6,10 +6,15 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup, waitFor } from '@/test/utils/componentTestUtils';
 import { GeneratePixelArtDialog } from '../GeneratePixelArtDialog';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useUserStore } from '@/stores/userStore';
+import { toast } from 'sonner';
+
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
 
 vi.mock('@/stores/generationStore', () => ({
   useGenerationStore: vi.fn(() => ({})),
@@ -170,5 +175,72 @@ describe('GeneratePixelArtDialog', () => {
   it('should not show intensity slider when dithering is none', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
     expect(screen.queryByText(/Intensity:/)).toBeNull();
+  });
+
+  // ── Failure surfacing ─────────────────────────────────────────────────
+  //
+  // The 503 a provider-succeeded-with-no-artifact produces carries the refund
+  // disclosure in its body, so how this dialog surfaces a server error is a
+  // correctness question, not a polish one — a message the user never sees is
+  // a user who believes they were charged for nothing.
+
+  /** Drives a real failed submit through useAIGeneration (not mocked here). */
+  async function submitAgainst(body: unknown, status: number) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status,
+        json: async () => body,
+      }),
+    );
+    render(<GeneratePixelArtDialog {...defaultProps} />);
+    fireEvent.change(screen.getByPlaceholderText(/describe your pixel art/i), {
+      target: { value: 'a warrior knight with sword' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /generate/i }));
+  }
+
+  const EMPTY_ARTIFACT_503 =
+    'Pixel art generation produced no image. Your tokens have been refunded — please try again.';
+
+  it('announces a failed generation as an alert, verbatim', async () => {
+    await submitAgainst({ error: EMPTY_ARTIFACT_503 }, 503);
+
+    // getByRole('alert') rather than getByText: the dialog stays open and never
+    // moves focus, so without the role the message is inserted silently and a
+    // screen-reader user is left waiting on a request that already failed.
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(EMPTY_ARTIFACT_503);
+  });
+
+  it('also toasts the failure, since the dialog body scrolls', async () => {
+    await submitAgainst({ error: EMPTY_ARTIFACT_503 }, 503);
+
+    // Every sibling Generate*Dialog does this. Inline-only meant a user who had
+    // scrolled to the footer to click Generate could get no feedback at all.
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(EMPTY_ARTIFACT_503);
+    });
+  });
+
+  it('keeps the dialog open on failure so the message can be read', async () => {
+    const onClose = vi.fn();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: async () => ({ error: EMPTY_ARTIFACT_503 }),
+      }),
+    );
+    render(<GeneratePixelArtDialog isOpen={true} onClose={onClose} />);
+    fireEvent.change(screen.getByPlaceholderText(/describe your pixel art/i), {
+      target: { value: 'a warrior knight with sword' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /generate/i }));
+
+    await screen.findByRole('alert');
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

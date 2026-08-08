@@ -37,6 +37,8 @@ import { isQstashConfigured, publishGenerationCallback } from '@/lib/qstash/clie
 import type { AsyncGenerationType } from '@/lib/generate/pollProviderStatus';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
 import { withGenerationMetrics } from '@/lib/monitoring/generationMetrics';
+import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
+import { ErrorCode } from './errors';
 
 /** Default initial delay before the first durable generation callback (PF-906). */
 const DEFAULT_CALLBACK_DELAY_SECONDS = 30;
@@ -48,8 +50,39 @@ const DEFAULT_CALLBACK_DELAY_SECONDS = 30;
  * the caller. The full error goes only to Sentry via captureException; the
  * client gets this opaque string and a 500 (#8597). ApiKeyError messages are
  * exempt: they are deliberately user-facing guidance returned as 402, not 500.
+ * EmptyArtifactError is the second exemption — see {@link emptyArtifactResponse}.
  */
 const GENERIC_500_MESSAGE = 'Generation failed due to a server error. Please try again later.';
+
+/**
+ * A provider answered 200 and delivered nothing. Reported as 503 with the
+ * artifact-naming message rather than the generic 500, because:
+ *
+ * - the message is safe — `EmptyArtifactError` COMPOSES it from two static
+ *   nouns, so no provider text or server internal can reach the client through
+ *   it (the property that earns the exemption from GENERIC_500_MESSAGE);
+ * - "the upstream provider is degraded" is what actually happened, and 503
+ *   keeps it out of the generic error rate that pages someone.
+ *
+ * The metrics outcome is set to `empty_artifact` by the caller rather than left
+ * to derive from the 503, which would file it under `provider_unavailable`
+ * alongside real outages. Both 503s mean "try later" to the user and entirely
+ * different things to whoever is on call.
+ *
+ * `refunded` is passed rather than assumed. Both call sites refund before
+ * formatting, but only when a platform deduction actually happened — a BYOK
+ * request never charged anything, and a refund that itself throws is caught and
+ * reported. Promising a refund in any of those cases is a support ticket.
+ */
+function emptyArtifactResponse(err: EmptyArtifactError, refunded: boolean): NextResponse {
+  const message = refunded
+    ? `${err.message}. Your tokens have been refunded — please try again.`
+    : `${err.message}. Please try again.`;
+  return NextResponse.json(
+    { error: message, code: ErrorCode.SERVICE_UNAVAILABLE },
+    { status: 503 }
+  );
+}
 
 /**
  * Client-facing message when a provider is disabled via the PF-971 kill
@@ -455,6 +488,10 @@ export function createGenerationHandler<TParams, TResult>(
       // cachedGenerate returns (a cache HIT is a re-served prior result — no new
       // provider job, so nothing to poll).
       let cacheMiss: { result: TResult; usageId: string | undefined } | undefined;
+      // Set only by a refund that actually completed. The deduction happens
+      // inside the cachedGenerate closure, so the outer catch that formats the
+      // response cannot see it any other way.
+      let tokensRefunded = false;
       try {
         const cacheResult = await cachedGenerate<TResult>(
           resolvedOperation,
@@ -478,6 +515,7 @@ export function createGenerationHandler<TParams, TResult>(
               if (usageId) {
                 try {
                   await refundTokens(userId, usageId);
+                  tokensRefunded = true;
                   sentryLogger.info('token refund issued', { route, usageId });
                 } catch (refundErr) {
                   captureException(refundErr, { route, action: 'refund', usageId });
@@ -507,6 +545,18 @@ export function createGenerationHandler<TParams, TResult>(
       } catch (err) {
         if (err instanceof ApiKeyError) {
           return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+        }
+        if (err instanceof EmptyArtifactError) {
+          // The two nouns as structured extras, not just inside the message —
+          // Sentry groups on the message, so "which artifact" is only a
+          // searchable facet if it is sent as one.
+          captureException(err, {
+            route,
+            generationType: err.generationType,
+            artifact: err.artifact,
+          });
+          mctx.outcome = 'empty_artifact';
+          return emptyArtifactResponse(err, tokensRefunded);
         }
         captureException(err, { route });
         return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
@@ -545,14 +595,27 @@ export function createGenerationHandler<TParams, TResult>(
       }
       return NextResponse.json(result, { status: successStatus });
     } catch (err) {
-      // Refund tokens on provider failure
+      // Refund tokens on provider failure. Tracked rather than inferred from
+      // `usageId`: BYOK leaves it undefined (nothing was charged) and the refund
+      // itself can throw, and neither case may promise the user their tokens back.
+      let tokensRefunded = false;
       if (usageId) {
         try {
           await refundTokens(userId, usageId);
+          tokensRefunded = true;
           sentryLogger.info('token refund issued', { route, usageId });
         } catch (refundErr) {
           captureException(refundErr, { route, action: 'refund', usageId });
         }
+      }
+      if (err instanceof EmptyArtifactError) {
+        captureException(err, {
+          route,
+          generationType: err.generationType,
+          artifact: err.artifact,
+        });
+        mctx.outcome = 'empty_artifact';
+        return emptyArtifactResponse(err, tokensRefunded);
       }
       captureException(err, { route });
       return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });

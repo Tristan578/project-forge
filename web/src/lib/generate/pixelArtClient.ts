@@ -5,6 +5,7 @@ import 'server-only';
 import { REPLICATE_MODEL_SDXL } from '@/lib/ai/models';
 import { validateResourceId } from '@/lib/validation/resourceId';
 import { composeAbortSignal } from '@/lib/generate/abortComposition';
+import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 export type { PixelArtStyle } from '@/lib/config/providers';
 import type { PixelArtStyle } from '@/lib/config/providers';
 export type PixelArtProvider = 'openai' | 'replicate';
@@ -82,7 +83,14 @@ export class PixelArtClient {
     }
 
     const data = await response.json();
-    return { base64: data.data[0].b64_json };
+    // A 200 is not proof of an image. `data.data` absent/empty threw a raw
+    // TypeError; a present-but-empty `b64_json` was worse still — it flowed on
+    // as a real artifact and the route reported the job `completed`.
+    const base64 = data?.data?.[0]?.b64_json;
+    if (typeof base64 !== 'string' || base64.length === 0) {
+      throw new EmptyArtifactError('Pixel art', 'image');
+    }
+    return { base64 };
   }
 
   private async generateReplicate(prompt: string, _size: 512 | 1024, signal?: AbortSignal): Promise<ReplicateResult> {
@@ -111,6 +119,12 @@ export class PixelArtClient {
     }
 
     const data = await response.json();
+    // The reachable half of this defect: every in-repo caller resolves to
+    // replicate, and a 200 with no `id` used to become a fabricated jobId and a
+    // `completed` status at the route — tokens charged, nothing to poll.
+    if (typeof data?.id !== 'string' || data.id.length === 0) {
+      throw new EmptyArtifactError('Pixel art', 'image');
+    }
     return { predictionId: data.id, status: data.status };
   }
 

@@ -95,6 +95,11 @@ import { checkBotIdGate } from '@/lib/security/botId';
 import { cachedGenerate } from '@/lib/api/responseCache';
 import { isQstashConfigured } from '@/lib/qstash/client';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
+// Static, NOT a dynamic `await import()` inside a test: `beforeEach` calls
+// `vi.resetModules()`, so a dynamic import would hand back a fresh copy of the
+// module whose class is a different identity from the one the handler closed
+// over — `instanceof` would be false and the 503 mapping would look broken.
+import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 import { createGenerationHandler } from '../createGenerationHandler';
 
 const mockAuth = vi.mocked(authenticateRequest);
@@ -343,6 +348,105 @@ describe('createGenerationHandler', () => {
     expect(data.error).not.toContain('secret@host');
     expect(data.error).toBe(GENERIC_500);
     expect((mockCapture.mock.calls.at(-1)?.[0] as Error).message).toContain('postgres://secret@host');
+  });
+
+  // EmptyArtifactError is the second exemption from GENERIC_500_MESSAGE (after
+  // ApiKeyError). Its message is safe by construction — the class composes it
+  // from two static nouns the caller supplies, so provider text can never be
+  // laundered through it. This factory is a SPOF for all 12 generate routes, so
+  // the mapping is pinned on BOTH post-execute catch sites.
+  describe('EmptyArtifactError → 503 (provider succeeded, delivered nothing)', () => {
+    const emptyArtifactExecute = async () => {
+      throw new EmptyArtifactError('Texture', 'maps');
+    };
+
+    // The refund clause is CONDITIONAL — it is appended only when a platform
+    // deduction was really reversed. Both suffixes are pinned because promising
+    // a refund that never happened is a support ticket, and omitting one that
+    // did is a user who thinks they were charged for nothing.
+    const REFUNDED = 'Texture generation produced no maps. Your tokens have been refunded — please try again.';
+    const NOT_REFUNDED = 'Texture generation produced no maps. Please try again.';
+
+    it('maps to 503 with the artifact-naming message and refunds (uncached path)', async () => {
+      const handler = createGenerationHandler({
+        route: '/api/generate/test',
+        provider: 'elevenlabs',
+        operation: 'test_generation',
+        rateLimitKey: 'gen-test',
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: emptyArtifactExecute,
+      });
+
+      const res = await handler(makeRequest({ prompt: 'test prompt' }));
+      expect(res.status).toBe(503);
+      const data = await res.json();
+      expect(data.error).toBe(REFUNDED);
+      expect(data.code).toBe('SERVICE_UNAVAILABLE');
+      // A degraded provider is not the same signal as an unexpected server
+      // fault — it must not be reported as the generic 500.
+      expect(data.error).not.toBe(GENERIC_500);
+      expect(mockRefund).toHaveBeenCalledWith('user-1', 'usage-1');
+      // The two nouns must ride as structured extras, not only inside the
+      // message: Sentry groups on the message, so "which artifact" is a
+      // searchable facet only if it is sent as one.
+      expect(mockCapture).toHaveBeenCalledWith(
+        expect.any(EmptyArtifactError),
+        expect.objectContaining({ generationType: 'Texture', artifact: 'maps' }),
+      );
+    });
+
+    it('maps to 503 on the cached path too, and still refunds', async () => {
+      const handler = createGenerationHandler({
+        route: '/api/generate/test',
+        provider: 'elevenlabs',
+        operation: 'test_generation',
+        rateLimitKey: 'gen-test',
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        cacheKeyParams: (p) => ({ prompt: (p as { prompt: string }).prompt }),
+        execute: emptyArtifactExecute,
+      });
+
+      const res = await handler(makeRequest({ prompt: 'test prompt' }));
+      expect(res.status).toBe(503);
+      const data = await res.json();
+      expect(data.error).toBe(REFUNDED);
+      expect(data.code).toBe('SERVICE_UNAVAILABLE');
+      expect(mockRefund).toHaveBeenCalledWith('user-1', 'usage-1');
+    });
+
+    it('does not promise a refund on BYOK, where nothing was ever charged', async () => {
+      mockResolve.mockResolvedValue({ type: 'byok', key: 'user-key', metered: false });
+      const handler = createGenerationHandler({
+        route: '/api/generate/test',
+        provider: 'elevenlabs',
+        operation: 'test_generation',
+        rateLimitKey: 'gen-test',
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: emptyArtifactExecute,
+      });
+
+      const res = await handler(makeRequest({ prompt: 'test prompt' }));
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toBe(NOT_REFUNDED);
+      expect(mockRefund).not.toHaveBeenCalled();
+    });
+
+    it('does not promise a refund when the refund itself fails', async () => {
+      mockRefund.mockRejectedValueOnce(new Error('neon circuit breaker open'));
+      const handler = createGenerationHandler({
+        route: '/api/generate/test',
+        provider: 'elevenlabs',
+        operation: 'test_generation',
+        rateLimitKey: 'gen-test',
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: emptyArtifactExecute,
+      });
+
+      const res = await handler(makeRequest({ prompt: 'test prompt' }));
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toBe(NOT_REFUNDED);
+      expect(mockRefund).toHaveBeenCalled();
+    });
   });
 
   it('does not refund when usageId is undefined (BYOK)', async () => {
