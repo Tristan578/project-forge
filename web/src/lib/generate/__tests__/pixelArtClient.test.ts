@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('server-only', () => ({}));
 
 import { PixelArtClient, buildPixelArtPrompt } from '../pixelArtClient';
+import { EmptyArtifactError } from '../emptyArtifactError';
 
 describe('pixelArtClient', () => {
   beforeEach(() => {
@@ -146,6 +147,70 @@ describe('pixelArtClient', () => {
         style: 'prop',
         size: 1024,
       })).rejects.toThrow('Replicate API error 503');
+    });
+
+    // A 200 from the provider is not proof of an artifact. Every one of these
+    // used to flow onward as a success — the replicate cases became a
+    // fabricated jobId and a `completed` status at the route with the tokens
+    // already charged; the openai cases either threw a raw TypeError or handed
+    // back an empty string as if it were an image.
+    describe('provider answers 200 with no artifact', () => {
+      const EXPECTED = 'Pixel art generation produced no image';
+
+      const replicateCases: Array<[string, unknown]> = [
+        ['no id at all', { status: 'starting' }],
+        ['empty-string id', { id: '', status: 'starting' }],
+        ['non-string id', { id: 12345, status: 'starting' }],
+        ['null id', { id: null, status: 'starting' }],
+        ['empty body', {}],
+      ];
+
+      it.each(replicateCases)('replicate: rejects when the response has %s', async (_label, body) => {
+        vi.mocked(fetch).mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(body),
+        } as Response);
+
+        const client = new PixelArtClient('test-key', 'replicate');
+        const call = client.generate({ prompt: 'a sword', style: 'prop', size: 1024 });
+
+        await expect(call).rejects.toBeInstanceOf(EmptyArtifactError);
+        await expect(call).rejects.toThrow(EXPECTED);
+      });
+
+      const openaiCases: Array<[string, unknown]> = [
+        ['no data key', { created: 1 }],
+        ['empty data array', { data: [] }],
+        ['entry without b64_json', { data: [{ revised_prompt: 'x' }] }],
+        ['empty-string b64_json', { data: [{ b64_json: '' }] }],
+        ['null b64_json', { data: [{ b64_json: null }] }],
+        ['non-string b64_json', { data: [{ b64_json: 42 }] }],
+      ];
+
+      it.each(openaiCases)('openai: rejects when the response has %s', async (_label, body) => {
+        vi.mocked(fetch).mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(body),
+        } as Response);
+
+        const client = new PixelArtClient('test-key', 'openai');
+        const call = client.generate({ prompt: 'a knight', style: 'character', size: 1024 });
+
+        await expect(call).rejects.toBeInstanceOf(EmptyArtifactError);
+        await expect(call).rejects.toThrow(EXPECTED);
+      });
+
+      it('never leaks provider response text into the message', async () => {
+        vi.mocked(fetch).mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve({ detail: 'PLATFORM_REPLICATE_KEY is invalid' }),
+        } as Response);
+
+        const client = new PixelArtClient('test-key', 'replicate');
+        await expect(
+          client.generate({ prompt: 'a sword', style: 'prop', size: 1024 })
+        ).rejects.toThrow(new RegExp(`^${EXPECTED}$`));
+      });
     });
 
     it('getReplicateStatus returns status and output', async () => {

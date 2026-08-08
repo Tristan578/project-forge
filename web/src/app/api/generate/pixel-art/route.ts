@@ -5,6 +5,7 @@ import { PALETTES, getPalette, validateCustomPalette } from '@/lib/generate/pale
 import type { PaletteId } from '@/lib/generate/palettes';
 import { PixelArtClient } from '@/lib/generate/pixelArtClient';
 import type { PixelArtStyle, PixelArtProvider } from '@/lib/generate/pixelArtClient';
+import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 import { TOKEN_COSTS as PRICING } from '@/lib/tokens/pricing';
 import {
   PIXEL_ART_SIZES,
@@ -124,8 +125,31 @@ export const POST = createGenerationHandler<
       signal: ctx.abortSignal,
     });
 
-    const jobId = result.predictionId ?? `pxart-openai-${Date.now()}`;
-    const status = result.predictionId ? 'pending' : 'completed';
+    // Completion is derived from the artifact we are actually holding, never
+    // from the ABSENCE of a prediction id. The old `result.predictionId ? … : …`
+    // pair read a replicate response with no `id` as an OpenAI success: it
+    // fabricated a `pxart-openai-<timestamp>` jobId, reported `completed`, and
+    // returned 201 with the tokens charged and nothing delivered — the exact
+    // "users paid but received nothing" regression PF-837 exists to prevent.
+    //
+    // The client validates both fields too, so these throws are the backstop
+    // rather than the primary guard. That is deliberate: this branch is where
+    // the status was WRONGLY derived, so it is where correctness has to hold
+    // even if a future client stops validating.
+    let status: string;
+    let jobId: string;
+    if (params.resolvedProvider === 'replicate') {
+      if (!result.predictionId) throw new EmptyArtifactError('Pixel art', 'image');
+      status = 'pending';
+      jobId = result.predictionId;
+    } else {
+      if (!result.base64) throw new EmptyArtifactError('Pixel art', 'image');
+      status = 'completed';
+      // OpenAI answers inline — there is no provider job to poll, so this id
+      // exists only as a client-side key. randomUUID, not Date.now(): two
+      // submissions in the same millisecond would otherwise collide.
+      jobId = `pxart-openai-${crypto.randomUUID()}`;
+    }
 
     return {
       status,

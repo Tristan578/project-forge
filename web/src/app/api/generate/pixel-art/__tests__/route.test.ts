@@ -176,6 +176,72 @@ describe('POST /api/generate/pixel-art', () => {
     expect(data.base64).toBe('aGVsbG8=');
     expect(data.provider).toBe('openai');
     expect(data.tokenCost).toBe(20);
+    // The synthetic id is a client-side key only — OpenAI answers inline, so
+    // there is no provider job to poll. It must be a UUID, not `Date.now()`:
+    // two submissions in the same millisecond would otherwise collide.
+    expect(data.jobId).toMatch(
+      /^pxart-openai-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    );
+  });
+
+  // The defect this suite's PF-837 tests could not see: completion used to be
+  // derived from the ABSENCE of a predictionId, so a replicate response with no
+  // `id` was read as an OpenAI success — fabricated `pxart-openai-<timestamp>`
+  // jobId, `status: 'completed'`, HTTP 201, tokens charged, nothing delivered.
+  describe('provider succeeds but delivers no artifact', () => {
+    const EXPECTED = 'Pixel art generation produced no image';
+
+    it('replicate: returns 503 naming the missing artifact instead of a fake completed job', async () => {
+      pixelArtClientMock.generate.mockResolvedValue({});
+      const res = await POST(makeRequest(validBody));
+
+      expect(res.status).toBe(503);
+      const data = await res.json();
+      expect(data.error).toBe(EXPECTED);
+      expect(data.code).toBe('SERVICE_UNAVAILABLE');
+      // The old fabricated id must never appear on a failure.
+      expect(JSON.stringify(data)).not.toMatch(/pxart-openai-/);
+      expect(data.status).toBeUndefined();
+      expect(mockRefundTokens).toHaveBeenCalledWith('user-123', 'usage-abc');
+    });
+
+    it('replicate: treats an empty-string predictionId the same as a missing one', async () => {
+      pixelArtClientMock.generate.mockResolvedValue({ predictionId: '', status: 'starting' });
+      const res = await POST(makeRequest(validBody));
+
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toBe(EXPECTED);
+      expect(mockRefundTokens).toHaveBeenCalledWith('user-123', 'usage-abc');
+    });
+
+    it('openai: returns 503 when the response carries an empty base64', async () => {
+      pixelArtClientMock.generate.mockResolvedValue({ base64: '' });
+      const res = await POST(makeRequest({ ...validBody, provider: 'openai' }));
+
+      expect(res.status).toBe(503);
+      const data = await res.json();
+      expect(data.error).toBe(EXPECTED);
+      expect(data.code).toBe('SERVICE_UNAVAILABLE');
+      expect(mockRefundTokens).toHaveBeenCalledWith('user-123', 'usage-abc');
+    });
+
+    it('still reports the empty artifact to Sentry', async () => {
+      pixelArtClientMock.generate.mockResolvedValue({});
+      await POST(makeRequest(validBody));
+      expect(mockCaptureException).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({ route: '/api/generate/pixel-art' })
+      );
+    });
+
+    it('does not refund when there is no usageId', async () => {
+      mockResolveKey.mockResolvedValue({ type: 'byok', key: 'sk-test-key', metered: false });
+      pixelArtClientMock.generate.mockResolvedValue({});
+      const res = await POST(makeRequest(validBody));
+
+      expect(res.status).toBe(503);
+      expect(mockRefundTokens).not.toHaveBeenCalled();
+    });
   });
 
   it('refunds tokens and returns 500 when provider call fails (PF-837)', async () => {

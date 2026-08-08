@@ -37,6 +37,8 @@ import { isQstashConfigured, publishGenerationCallback } from '@/lib/qstash/clie
 import type { AsyncGenerationType } from '@/lib/generate/pollProviderStatus';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
 import { withGenerationMetrics } from '@/lib/monitoring/generationMetrics';
+import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
+import { ErrorCode } from './errors';
 
 /** Default initial delay before the first durable generation callback (PF-906). */
 const DEFAULT_CALLBACK_DELAY_SECONDS = 30;
@@ -48,8 +50,30 @@ const DEFAULT_CALLBACK_DELAY_SECONDS = 30;
  * the caller. The full error goes only to Sentry via captureException; the
  * client gets this opaque string and a 500 (#8597). ApiKeyError messages are
  * exempt: they are deliberately user-facing guidance returned as 402, not 500.
+ * EmptyArtifactError is the second exemption — see {@link emptyArtifactResponse}.
  */
 const GENERIC_500_MESSAGE = 'Generation failed due to a server error. Please try again later.';
+
+/**
+ * A provider answered 200 and delivered nothing. Reported as 503 with the
+ * artifact-naming message rather than the generic 500, because:
+ *
+ * - the message is safe — `EmptyArtifactError` COMPOSES it from two static
+ *   nouns, so no provider text or server internal can reach the client through
+ *   it (the property that earns the exemption from GENERIC_500_MESSAGE);
+ * - "the upstream provider is degraded" is what actually happened, and 503 is
+ *   what puts it in the `provider_unavailable` metrics bucket instead of
+ *   inflating the generic error rate that pages someone.
+ *
+ * Tokens are already refunded by the time this runs — both call sites refund
+ * before formatting.
+ */
+function emptyArtifactResponse(err: EmptyArtifactError): NextResponse {
+  return NextResponse.json(
+    { error: err.message, code: ErrorCode.SERVICE_UNAVAILABLE },
+    { status: 503 }
+  );
+}
 
 /**
  * Client-facing message when a provider is disabled via the PF-971 kill
@@ -509,6 +533,7 @@ export function createGenerationHandler<TParams, TResult>(
           return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
         }
         captureException(err, { route });
+        if (err instanceof EmptyArtifactError) return emptyArtifactResponse(err);
         return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
       }
     }
@@ -555,6 +580,7 @@ export function createGenerationHandler<TParams, TResult>(
         }
       }
       captureException(err, { route });
+      if (err instanceof EmptyArtifactError) return emptyArtifactResponse(err);
       return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
     }
   });
