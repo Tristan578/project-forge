@@ -62,6 +62,87 @@ impl Default for TerrainData {
     }
 }
 
+/// Smallest grid resolution that can produce a mesh. `build_terrain_mesh`
+/// computes `(res - 1) * (res - 1)` quads in `usize`, so anything below 2
+/// underflows; `sculpt_heightmap` divides by `res - 1` and would produce
+/// infinities. Every entry point validates against this.
+pub const MIN_TERRAIN_RESOLUTION: u32 = 2;
+
+/// Largest grid resolution accepted from a command payload. A heightmap is
+/// `resolution^2` f32s plus a mesh with `resolution^2` vertices and
+/// `6 * (resolution - 1)^2` indices, all inside the 32-bit WASM heap: 1024 is
+/// ~4 MB of heights and ~25 MB of mesh buffers, already generous. Without a
+/// cap, a single `spawn_terrain` with `resolution: 100000` allocates 40 GB and
+/// aborts the whole WASM instance, losing the user's unsaved scene.
+pub const MAX_TERRAIN_RESOLUTION: u32 = 1024;
+
+/// Returns `Some(reason)` when a terrain config cannot be turned into a mesh.
+///
+/// Rejects rather than clamps: a caller that asked for a 100000-vertex grid did
+/// not mean 1024, and silently substituting a different config makes the
+/// spawn/update look successful while producing terrain nobody asked for.
+///
+/// Non-finite floats are refused here rather than at the noise call because
+/// `f64::NAN` propagates through Fbm into every height, and a NaN vertex
+/// position makes the entire mesh vanish from the render with no error anywhere.
+pub fn terrain_data_rejection(data: &TerrainData) -> Option<String> {
+    if data.resolution < MIN_TERRAIN_RESOLUTION || data.resolution > MAX_TERRAIN_RESOLUTION {
+        return Some(format!(
+            "resolution {} is outside the supported range {}..={}",
+            data.resolution, MIN_TERRAIN_RESOLUTION, MAX_TERRAIN_RESOLUTION,
+        ));
+    }
+    if !data.size.is_finite() || data.size <= 0.0 {
+        return Some(format!("size {} must be finite and positive", data.size));
+    }
+    if !data.height_scale.is_finite() {
+        return Some(format!("height_scale {} must be finite", data.height_scale));
+    }
+    if !data.frequency.is_finite() {
+        return Some(format!("frequency {} must be finite", data.frequency));
+    }
+    if !data.amplitude.is_finite() {
+        return Some(format!("amplitude {} must be finite", data.amplitude));
+    }
+    None
+}
+
+/// A partial update to a [`TerrainData`]: every field is optional, and an
+/// omitted field keeps the entity's LIVE value.
+///
+/// The command layer used to build a whole `TerrainData` starting from
+/// `TerrainData::default()`, which made every update a REPLACE — nudging
+/// `height_scale` silently reset seed, resolution, size, octaves, frequency,
+/// amplitude and noise type to the defaults, regenerating completely different
+/// terrain.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TerrainDataPatch {
+    pub noise_type: Option<NoiseType>,
+    pub octaves: Option<u32>,
+    pub frequency: Option<f64>,
+    pub amplitude: Option<f64>,
+    pub height_scale: Option<f32>,
+    pub seed: Option<u32>,
+    pub resolution: Option<u32>,
+    pub size: Option<f32>,
+}
+
+impl TerrainDataPatch {
+    /// Overlay this patch onto a live config, returning the merged result.
+    pub fn merge_into(&self, base: &TerrainData) -> TerrainData {
+        TerrainData {
+            noise_type: self.noise_type.unwrap_or(base.noise_type),
+            octaves: self.octaves.unwrap_or(base.octaves),
+            frequency: self.frequency.unwrap_or(base.frequency),
+            amplitude: self.amplitude.unwrap_or(base.amplitude),
+            height_scale: self.height_scale.unwrap_or(base.height_scale),
+            seed: self.seed.unwrap_or(base.seed),
+            resolution: self.resolution.unwrap_or(base.resolution),
+            size: self.size.unwrap_or(base.size),
+        }
+    }
+}
+
 /// Marker component indicating this entity is an active terrain.
 /// Following the PhysicsEnabled/ParticleEnabled pattern.
 #[derive(Component, Debug, Clone, Copy)]
@@ -129,9 +210,31 @@ fn sample_noise<N: NoiseFn<f64, 2>>(noise: &N, heights: &mut [f32], data: &Terra
 
 /// Build a Bevy Mesh from heightmap data.
 /// Includes positions, normals (computed from gradient), and vertex colors.
+///
+/// Degenerate geometry yields an EMPTY mesh rather than panicking: the index
+/// loop computes `(res - 1) * (res - 1)` in `usize`, so `resolution` below 2
+/// underflows, and `rebuild_terrain_mesh` feeds this straight from a
+/// deserialized `.forge` file on every scene load, undo and redo.
 pub fn build_terrain_mesh(heights: &[f32], resolution: u32, size: f32) -> Mesh {
     let res = resolution as usize;
     let vertex_count = res * res;
+    if resolution < MIN_TERRAIN_RESOLUTION
+        || heights.len() < vertex_count
+        || !size.is_finite()
+        || size <= 0.0
+    {
+        let mut empty = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            bevy::asset::RenderAssetUsages::default(),
+        );
+        // Populate every attribute the normal path emits. A mesh missing
+        // ATTRIBUTE_POSITION is not a valid render input; an empty one is.
+        empty.insert_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32; 3]>::new());
+        empty.insert_attribute(Mesh::ATTRIBUTE_NORMAL, Vec::<[f32; 3]>::new());
+        empty.insert_attribute(Mesh::ATTRIBUTE_COLOR, Vec::<[f32; 4]>::new());
+        empty.insert_indices(Indices::U32(Vec::new()));
+        return empty;
+    }
     let half_size = size / 2.0;
     let step = size / (res as f32 - 1.0);
 
@@ -271,10 +374,19 @@ fn height_to_color(t: f32) -> [f32; 4] {
     }
 }
 
-/// Apply sculpting: modify heightmap at world-space position within radius.
-/// `position` is in local terrain space (x, z).
-/// `radius` is in world units.
-/// `strength` is positive (raise) or negative (lower).
+/// Apply sculpting: modify the heightmap around `position` within `radius`.
+///
+/// `position` is in TERRAIN-LOCAL space (x, z) — the caller subtracts the
+/// terrain entity's translation first. The whole command API speaks world
+/// space, so `apply_terrain_sculpts` does that conversion; taking world space
+/// here would mean the brush landed at the wrong spot on any terrain that is
+/// not sitting at the origin.
+///
+/// `radius` is in world units and must be finite and positive.
+/// `strength` is positive (raise) or negative (lower) and must be finite.
+///
+/// Degenerate inputs are a no-op rather than a panic or a poisoned heightmap:
+/// a `.forge` scene file and a JS command payload can both carry them.
 pub fn sculpt_heightmap(
     heights: &mut [f32],
     resolution: u32,
@@ -283,24 +395,56 @@ pub fn sculpt_heightmap(
     radius: f32,
     strength: f32,
 ) {
+    // A NaN height is unrecoverable — it propagates into every later mesh
+    // rebuild and makes the terrain silently disappear — so refuse the inputs
+    // that produce one instead of writing it.
+    if resolution < MIN_TERRAIN_RESOLUTION
+        || !size.is_finite()
+        || size <= 0.0
+        || !radius.is_finite()
+        || radius <= 0.0
+        || !strength.is_finite()
+        || !position[0].is_finite()
+        || !position[1].is_finite()
+    {
+        return;
+    }
+
     let res = resolution as usize;
+    if heights.len() < res * res {
+        // A truncated heightmap (hand-edited scene file) would index out of
+        // bounds below.
+        return;
+    }
+
     let half_size = size / 2.0;
     let step = size / (res as f32 - 1.0);
 
-    // Convert world position to grid coordinates
-    let cx = ((position[0] + half_size) / step).round() as i32;
-    let cz = ((position[1] + half_size) / step).round() as i32;
-    let grid_radius = (radius / step).ceil() as i32;
+    // Convert local position to grid coordinates.
+    let cx = ((position[0] + half_size) / step).round();
+    let cz = ((position[1] + half_size) / step).round();
+    let grid_radius = (radius / step).ceil();
 
-    for dz in -grid_radius..=grid_radius {
-        for dx in -grid_radius..=grid_radius {
-            let gx = cx + dx;
-            let gz = cz + dz;
+    // Clamp the scan box to the grid BEFORE iterating. The naive
+    // `-grid_radius..=grid_radius` sweep costs O((radius / step)^2), so a radius
+    // of 1e9 on a step-1.0 grid is ~6.3e18 iterations — an unkillable hang of
+    // the browser tab from a single unvalidated payload. Clamping makes the cost
+    // O(resolution^2) no matter what the caller asks for, with identical output:
+    // every cell the naive loop would have visited outside the grid was skipped
+    // by the bounds check anyway.
+    //
+    // The clamp is done in f32 (not i32) on purpose: `1e9_f32 as i32` saturates
+    // to i32::MAX, and `cx + dx` on the extremes would then overflow.
+    let last = (res - 1) as f32;
+    let x_start = (cx - grid_radius).clamp(0.0, last) as usize;
+    let x_end = (cx + grid_radius).clamp(0.0, last) as usize;
+    let z_start = (cz - grid_radius).clamp(0.0, last) as usize;
+    let z_end = (cz + grid_radius).clamp(0.0, last) as usize;
 
-            if gx < 0 || gx >= res as i32 || gz < 0 || gz >= res as i32 {
-                continue;
-            }
-
+    // A brush entirely off one side of the grid collapses to a single clamped
+    // cell, which the distance check below then rejects.
+    for gz in z_start..=z_end {
+        for gx in x_start..=x_end {
             // Calculate distance from center in world units
             let wx = -half_size + gx as f32 * step;
             let wz = -half_size + gz as f32 * step;
@@ -316,7 +460,7 @@ pub fn sculpt_heightmap(
             // the rim full strength, i.e. a raise brush that carves a ring.
             let falloff = ((dist / radius) * std::f32::consts::FRAC_PI_2).cos();
             let falloff = falloff * falloff; // Squared for smoother edges
-            heights[gz as usize * res + gx as usize] += strength * falloff;
+            heights[gz * res + gx] += strength * falloff;
         }
     }
 }
@@ -385,5 +529,294 @@ mod sculpt_tests {
             (centre + 5.0).abs() < 1e-4,
             "negative strength must lower the centre by the full strength, got {centre}",
         );
+    }
+
+    /// The scan cost must be bounded by the GRID, never by the caller's radius.
+    /// The naive `-grid_radius..=grid_radius` square is O((radius/step)^2), so a
+    /// radius of 1e9 on a step-1.0 grid is ~6.3e18 iterations — an unkillable
+    /// hang of the browser tab, reachable from an unvalidated payload.
+    ///
+    /// A wall-clock assertion is the only honest way to pin "terminates": the
+    /// pre-fix loop would blow any budget by many orders of magnitude.
+    #[test]
+    fn sculpt_with_an_enormous_radius_terminates_and_covers_the_whole_grid() {
+        let mut heights = flat();
+        let started = std::time::Instant::now();
+        sculpt_heightmap(&mut heights, RES, SIZE, [-0.5, -0.5], 1e9, 5.0);
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "an enormous radius must cost O(grid), not O(radius^2); took {elapsed:?}",
+        );
+        // radius >> the grid, so every cell is well inside the brush and the
+        // falloff is ~1.0 everywhere.
+        for (index, height) in heights.iter().enumerate() {
+            assert!(
+                (height - 5.0).abs() < 1e-2,
+                "cell {index} should be raised by ~5.0, got {height}",
+            );
+        }
+    }
+
+    /// The same bound must hold when the brush centre is far off-grid: clamping
+    /// has to happen on both ends of the scan range, not just the upper one.
+    #[test]
+    fn sculpt_far_off_grid_terminates_without_touching_anything() {
+        let mut heights = flat();
+        let started = std::time::Instant::now();
+        sculpt_heightmap(&mut heights, RES, SIZE, [-1e8, -1e8], 1e7, 5.0);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "an off-grid brush must not scan the space between it and the grid",
+        );
+        assert_eq!(heights, flat(), "a brush that misses the grid changes nothing");
+    }
+
+    /// NaN/inf anywhere in the inputs must be refused outright. `heights += NaN`
+    /// poisons a cell permanently: every later mesh rebuild emits NaN vertex
+    /// positions, so the terrain renders as nothing at all with no error.
+    #[test]
+    fn sculpt_with_non_finite_inputs_leaves_the_heightmap_untouched() {
+        let cases: [(&str, [f32; 2], f32, f32); 7] = [
+            ("NaN strength", [-0.5, -0.5], 2.0, f32::NAN),
+            ("inf strength", [-0.5, -0.5], 2.0, f32::INFINITY),
+            ("NaN radius", [-0.5, -0.5], f32::NAN, 5.0),
+            ("inf radius", [-0.5, -0.5], f32::INFINITY, 5.0),
+            ("NaN position", [f32::NAN, -0.5], 2.0, 5.0),
+            ("inf position", [-0.5, f32::INFINITY], 2.0, 5.0),
+            ("non-positive radius", [-0.5, -0.5], 0.0, 5.0),
+        ];
+
+        for (label, position, radius, strength) in cases {
+            let mut heights = flat();
+            sculpt_heightmap(&mut heights, RES, SIZE, position, radius, strength);
+            assert_eq!(
+                heights,
+                flat(),
+                "{label} must be refused, leaving the heightmap untouched",
+            );
+        }
+    }
+
+    /// A `resolution` below 2 makes `step` divide by zero, and a non-positive
+    /// `size` makes it zero — both turn every write into NaN. Terrain loaded
+    /// from a hand-edited `.forge` can carry either.
+    #[test]
+    fn sculpt_with_degenerate_geometry_is_a_no_op() {
+        for (label, resolution, size) in [
+            ("resolution 0", 0u32, SIZE),
+            ("resolution 1", 1u32, SIZE),
+            ("zero size", RES, 0.0f32),
+            ("negative size", RES, -7.0f32),
+            ("NaN size", RES, f32::NAN),
+        ] {
+            let mut heights = flat();
+            sculpt_heightmap(&mut heights, resolution, size, [-0.5, -0.5], 2.0, 5.0);
+            assert_eq!(heights, flat(), "{label} must be refused as a no-op");
+        }
+    }
+
+    /// A heightmap shorter than `resolution^2` (a truncated or hand-edited
+    /// `.forge`) must not index out of bounds.
+    #[test]
+    fn sculpt_with_a_short_heightmap_is_a_no_op() {
+        let mut heights = vec![0.0f32; 4];
+        sculpt_heightmap(&mut heights, RES, SIZE, [-0.5, -0.5], 2.0, 5.0);
+        assert_eq!(heights, vec![0.0f32; 4]);
+    }
+}
+
+#[cfg(test)]
+mod build_terrain_mesh_guard_tests {
+    use super::*;
+
+    fn vertex_count(mesh: &Mesh) -> usize {
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+            .expect("a terrain mesh must always carry positions")
+            .len()
+    }
+
+    /// `(res - 1) * (res - 1)` is computed in `usize`, so resolution 0 wraps to
+    /// `usize::MAX` and tries to reserve ~1.8e19 indices. `rebuild_terrain_mesh`
+    /// feeds this straight from a deserialized `.forge` file, so a hand-edited
+    /// or truncated scene crashes the engine on load.
+    #[test]
+    fn degenerate_resolution_yields_an_empty_mesh_instead_of_panicking() {
+        for resolution in [0u32, 1u32] {
+            let mesh = build_terrain_mesh(&[], resolution, 10.0);
+            assert_eq!(vertex_count(&mesh), 0, "resolution {resolution}");
+        }
+    }
+
+    /// A heightmap shorter than `resolution^2` indexes out of bounds in the
+    /// position loop. Same source: deserialized scene data.
+    #[test]
+    fn a_short_heightmap_yields_an_empty_mesh() {
+        let mesh = build_terrain_mesh(&[0.0; 3], 8, 10.0);
+        assert_eq!(vertex_count(&mesh), 0);
+    }
+
+    #[test]
+    fn degenerate_size_yields_an_empty_mesh() {
+        for size in [0.0f32, -5.0, f32::NAN] {
+            let mesh = build_terrain_mesh(&[0.0; 64], 8, size);
+            assert_eq!(vertex_count(&mesh), 0, "size {size}");
+        }
+    }
+
+    /// The guard must not swallow the healthy path.
+    #[test]
+    fn a_valid_heightmap_still_builds_a_full_mesh() {
+        let mesh = build_terrain_mesh(&[0.0; 64], 8, 7.0);
+        assert_eq!(vertex_count(&mesh), 64);
+    }
+
+    /// `rebuild_terrain_mesh` is the undo/redo/scene-load entry point, so the
+    /// guard has to hold through it too.
+    #[test]
+    fn rebuild_from_degenerate_mesh_data_is_safe() {
+        let mesh = rebuild_terrain_mesh(&TerrainMeshData {
+            heights: Vec::new(),
+            resolution: 0,
+            size: 10.0,
+        });
+        assert_eq!(vertex_count(&mesh), 0);
+    }
+}
+
+#[cfg(test)]
+mod terrain_data_validation_tests {
+    use super::*;
+
+    #[test]
+    fn a_default_terrain_config_is_accepted() {
+        assert_eq!(terrain_data_rejection(&TerrainData::default()), None);
+    }
+
+    /// Every rejection reason must actually fire — a validator whose arms are
+    /// unreachable is decoration.
+    #[test]
+    fn every_degenerate_field_is_rejected() {
+        let cases: [(&str, TerrainData); 9] = [
+            ("resolution 0", TerrainData { resolution: 0, ..Default::default() }),
+            ("resolution 1", TerrainData { resolution: 1, ..Default::default() }),
+            (
+                "resolution above the cap",
+                TerrainData { resolution: MAX_TERRAIN_RESOLUTION + 1, ..Default::default() },
+            ),
+            ("zero size", TerrainData { size: 0.0, ..Default::default() }),
+            ("negative size", TerrainData { size: -1.0, ..Default::default() }),
+            ("NaN size", TerrainData { size: f32::NAN, ..Default::default() }),
+            ("NaN height_scale", TerrainData { height_scale: f32::NAN, ..Default::default() }),
+            ("inf frequency", TerrainData { frequency: f64::INFINITY, ..Default::default() }),
+            ("NaN amplitude", TerrainData { amplitude: f64::NAN, ..Default::default() }),
+        ];
+
+        for (label, data) in cases {
+            assert!(
+                terrain_data_rejection(&data).is_some(),
+                "{label} must be rejected",
+            );
+        }
+    }
+
+    /// The cap exists so a caller cannot ask for a 100_000^2 heightmap and OOM
+    /// the WASM heap; the boundary itself must stay accepted.
+    #[test]
+    fn the_resolution_bounds_are_inclusive() {
+        assert_eq!(
+            terrain_data_rejection(&TerrainData {
+                resolution: MIN_TERRAIN_RESOLUTION,
+                ..Default::default()
+            }),
+            None,
+        );
+        assert_eq!(
+            terrain_data_rejection(&TerrainData {
+                resolution: MAX_TERRAIN_RESOLUTION,
+                ..Default::default()
+            }),
+            None,
+        );
+    }
+}
+
+#[cfg(test)]
+mod terrain_patch_tests {
+    use super::*;
+
+    fn base() -> TerrainData {
+        TerrainData {
+            noise_type: NoiseType::Value,
+            octaves: 3,
+            frequency: 0.11,
+            amplitude: 0.77,
+            height_scale: 12.5,
+            seed: 7,
+            resolution: 8,
+            size: 7.0,
+        }
+    }
+
+    /// The whole point of a patch: an omitted field keeps the LIVE value. The
+    /// previous "build a full struct from defaults" shape silently reset the
+    /// seven fields a caller did not mention.
+    #[test]
+    fn an_empty_patch_is_the_identity() {
+        let merged = TerrainDataPatch::default().merge_into(&base());
+        let original = base();
+        assert_eq!(merged.noise_type, original.noise_type);
+        assert_eq!(merged.octaves, original.octaves);
+        assert_eq!(merged.frequency, original.frequency);
+        assert_eq!(merged.amplitude, original.amplitude);
+        assert_eq!(merged.height_scale, original.height_scale);
+        assert_eq!(merged.seed, original.seed);
+        assert_eq!(merged.resolution, original.resolution);
+        assert_eq!(merged.size, original.size);
+    }
+
+    /// Setting one field must move exactly that field. Asserted per-field so a
+    /// merge arm wired to the wrong destination cannot hide.
+    #[test]
+    fn each_field_can_be_patched_in_isolation() {
+        let original = base();
+
+        let merged = TerrainDataPatch { height_scale: Some(40.0), ..Default::default() }
+            .merge_into(&original);
+        assert_eq!(merged.height_scale, 40.0);
+        assert_eq!(merged.seed, original.seed, "an unmentioned field must not move");
+        assert_eq!(merged.resolution, original.resolution);
+        assert_eq!(merged.size, original.size);
+        assert_eq!(merged.noise_type, original.noise_type);
+
+        let merged =
+            TerrainDataPatch { noise_type: Some(NoiseType::Simplex), ..Default::default() }
+                .merge_into(&original);
+        assert_eq!(merged.noise_type, NoiseType::Simplex);
+        assert_eq!(merged.height_scale, original.height_scale);
+
+        let merged = TerrainDataPatch { octaves: Some(6), ..Default::default() }.merge_into(&original);
+        assert_eq!(merged.octaves, 6);
+
+        let merged =
+            TerrainDataPatch { frequency: Some(0.5), ..Default::default() }.merge_into(&original);
+        assert_eq!(merged.frequency, 0.5);
+
+        let merged =
+            TerrainDataPatch { amplitude: Some(0.25), ..Default::default() }.merge_into(&original);
+        assert_eq!(merged.amplitude, 0.25);
+
+        let merged = TerrainDataPatch { seed: Some(999), ..Default::default() }.merge_into(&original);
+        assert_eq!(merged.seed, 999);
+
+        let merged =
+            TerrainDataPatch { resolution: Some(16), ..Default::default() }.merge_into(&original);
+        assert_eq!(merged.resolution, 16);
+        assert_eq!(merged.size, original.size);
+
+        let merged = TerrainDataPatch { size: Some(20.0), ..Default::default() }.merge_into(&original);
+        assert_eq!(merged.size, 20.0);
+        assert_eq!(merged.resolution, original.resolution);
     }
 }
