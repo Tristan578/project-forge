@@ -136,14 +136,51 @@ describe('sceneSlice', () => {
   });
 
   describe('terrain', () => {
-    it('should dispatch spawn_terrain', () => {
-      store.getState().spawnTerrain({ resolution: 256 } as never);
-      expect(mockDispatch).toHaveBeenCalledWith('spawn_terrain', { resolution: 256 });
+    it('should dispatch spawn_terrain with the caller config plus a generated id', () => {
+      const id = store.getState().spawnTerrain({ resolution: 256 } as never);
+      expect(id).toEqual(expect.any(String));
+      expect(mockDispatch).toHaveBeenCalledWith('spawn_terrain', { resolution: 256, id });
     });
 
     it('should dispatch spawn_terrain with empty params', () => {
-      store.getState().spawnTerrain();
-      expect(mockDispatch).toHaveBeenCalledWith('spawn_terrain', {});
+      const id = store.getState().spawnTerrain();
+      expect(mockDispatch).toHaveBeenCalledWith('spawn_terrain', { id });
+    });
+
+    // The whole point of generating the id client-side: the caller can target the
+    // new terrain immediately. `primaryId` is only written by the async
+    // SELECTION_CHANGED event, so anything that read it here saw null on a fresh
+    // scene and silently dropped the terrain (#8749).
+    it('should return the id it sent to the engine, synchronously', () => {
+      const id = store.getState().spawnTerrain();
+      const [, payload] = mockDispatch.mock.calls[0] as [string, { id: string }];
+      expect(payload.id).toBe(id);
+    });
+
+    // The engine only honors a well-formed override id; a malformed one is
+    // ignored and the entity gets a generated UUID instead, so the id we
+    // returned would name nothing.
+    it('should send a UUID the engine will accept as an override', () => {
+      const id = store.getState().spawnTerrain();
+      expect(id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      );
+    });
+
+    it('should give each terrain its own id', () => {
+      const first = store.getState().spawnTerrain();
+      const second = store.getState().spawnTerrain();
+      expect(first).not.toBe(second);
+    });
+
+    // Returning an id while nothing was dispatched would be a phantom reference
+    // that every follow-up command targets in vain.
+    it('should return undefined and dispatch nothing when the engine is not loaded', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const detached = createSliceStore(createSceneSlice);
+
+      expect(detached.getState().spawnTerrain()).toBeUndefined();
+      expect(mockDispatch).not.toHaveBeenCalled();
     });
 
     it('should dispatch update_terrain', () => {

@@ -831,28 +831,26 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
         if (useTerrain) {
           const terrainConfig = (ground.terrainConfig as Record<string, unknown>) ?? {};
-          ctx.store.spawnTerrain(terrainConfig);
-          // KNOWN BUG (#8749): terrain goes through the separate `spawn_terrain`
-          // engine pipeline, not `spawn_entity`/`apply_spawn_requests`, so
-          // `spawnTerrain` does not yet return an id and this `primaryId` read is
-          // the same stale-read defect #8748 fixed for the primitive path — on a
-          // fresh scene `groundId` is null and the terrain ground is silently
-          // dropped. Tracked + scoped in #8749 (extend `spawnTerrain` to return an
-          // id + add the engine-side EntityId override to the terrain path).
-          const groundId = ctx.store.primaryId;
+          // `spawnTerrain` now returns the id it handed the engine, so this is
+          // the same synchronous path the primitive branch uses. Reading
+          // `primaryId` here was the stale-read defect #8748 fixed for
+          // primitives: `primaryId` is only written by the async
+          // SELECTION_CHANGED event, so on a fresh scene it was still null and
+          // the terrain ground was silently dropped.
+          const groundId = ctx.store.spawnTerrain(terrainConfig);
           if (groundId) {
             nameToId['Ground'] = groundId;
             ctx.store.reparentEntity(groundId, rootId);
             results.push({ action: 'create terrain ground', success: true, entityId: groundId });
           } else {
-            // Until #8749 lands, the stale primaryId read above yields null on a
-            // fresh scene. Surface that as an explicit failure instead of
-            // silently omitting the ground op — otherwise the caller sees a
-            // compound result that falsely implies the terrain ground exists.
+            // `spawnTerrain` returns undefined only when the engine isn't loaded
+            // and nothing was dispatched. Surface that as an explicit failure
+            // instead of silently omitting the ground op — otherwise the caller
+            // sees a compound result that falsely implies the ground exists.
             results.push({
               action: 'create terrain ground',
               success: false,
-              error: 'terrain spawn id unavailable before #8749 — ground not parented',
+              error: 'terrain spawn failed — engine not ready, ground not created',
             });
           }
         } else {

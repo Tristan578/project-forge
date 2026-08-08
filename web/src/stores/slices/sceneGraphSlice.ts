@@ -44,10 +44,9 @@ export interface SceneGraphSlice {
    * Spawn a new entity. Returns the new entity's id **synchronously** so callers
    * can immediately target it (transform/material/physics/reparent) without
    * waiting for the async SELECTION_CHANGED round-trip. Returns `undefined` when
-   * no entity was spawned: the terrain path (handled by `spawnTerrain`), an
-   * entity type the engine does not spawn (see `SPAWNABLE_ENTITY_TYPES`), or when
-   * the engine isn't loaded yet (`dispatchCommand` is null). Callers MUST guard on
-   * the result. Do NOT read `primaryId` after calling this — it is not updated
+   * no entity was spawned: an entity type the engine does not spawn (see
+   * `SPAWNABLE_ENTITY_TYPES`), or when the engine isn't loaded yet
+   * (`dispatchCommand` is null). Callers MUST guard on the result. Do NOT read `primaryId` after calling this — it is not updated
    * until the engine emits SELECTION_CHANGED.
    */
   spawnEntity: (type: EntityType, name?: string) => string | undefined;
@@ -97,7 +96,7 @@ export const createSceneGraphSlice: StateCreator<
     primaryId: string | null;
     primaryName: string | null;
     primaryTransform: unknown | null;
-    spawnTerrain: () => void;
+    spawnTerrain: () => string | undefined;
   },
   [],
   [],
@@ -259,8 +258,10 @@ export const createSceneGraphSlice: StateCreator<
 
   spawnEntity: (type, name) => {
     if (type === 'terrain') {
-      get().spawnTerrain();
-      return undefined;
+      // Terrain goes through the separate `spawn_terrain` engine pipeline, but
+      // it now honors a caller-supplied id just like `spawn_entity` does, so
+      // forward the id instead of swallowing it.
+      return get().spawnTerrain();
     }
     // The engine's `apply_spawn_requests` only spawns the primitive mesh/light
     // types in SPAWNABLE_ENTITY_TYPES via the spawn_entity command. Every other
