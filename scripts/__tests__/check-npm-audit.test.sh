@@ -71,7 +71,7 @@
 # spelling-independent by construction: an inserted line is unexpected whatever
 # it spells. The cost is deliberate churn -- adding a job or bumping an action
 # reddens the suite until the expected set is updated, which is the prompt, not
-# a defect. See ROUND 33 above expected_steps_1 for the routine trigger.
+# a defect. See ROUND 33 above $expected_steps_1 for the routine trigger.
 #
 # WHY EACH PIN EXISTS
 # -------------------
@@ -3036,7 +3036,7 @@ SELF="${BASH_SOURCE[0]}"
 # line -- a comment, or the same token inside an ordinary string -- open a
 # swallow that hides executable lines from both locks, and an opener whose
 # terminator never appears alone would swallow to EOF. That is a weakening, not a
-# scoping, and it was live here: the comment above the expected_steps_1 fixture
+# scoping, and it was live here: the comment above the $expected_steps_1 fixture
 # spells that fixture's own delimiter while explaining why the fixtures avoid
 # command substitution, and a naive filter hid the 39 lines after it -- including
 # a real opener -- from both locks.
@@ -3144,11 +3144,11 @@ fi
 # ROUND 31. The pin further down proves the FILTER's text. This one proves the
 # filter's OUTPUT is what the two hygiene locks actually scan. They read
 # `$SELF_EXEC`, one assignment downstream of the pinned variable, and THAT HOP
-# WAS UNPINNED: a single `SELF_EXEC="pinned-scope-removed"` inserted after the
+# WAS UNPINNED: a single hardcoded write to $SELF_EXEC inserted after the
 # assignment above measured 194 PASS / 0 FAIL, `bash -n` clean, with a planted
 # hygiene violation executing at runtime and both affirmative pin lines still
 # printing -- the `-z` arm is satisfied by any non-empty string, and
-# `SELF_EXEC_DIAG` is computed separately from the real filter so it stays empty.
+# $SELF_EXEC_DIAG is computed separately from the real filter so it stays empty.
 # The lesson, which is why round 30's fix did not cover this: a pin protects the
 # link it NAMES, not the link the evidence flows through, so pin every hop
 # between a pinned artifact and its consumer.
@@ -3170,7 +3170,7 @@ else
 fi
 
 # ROUND 30. The self-check above is VACUOUS against a reversion of the filter
-# ITSELF. `SELF_EXEC_DIAG` is populated only from what the awk program writes to
+# ITSELF. $SELF_EXEC_DIAG is populated only from what the awk program writes to
 # stderr, so a program carrying no stderr-writing logic can never populate it,
 # for ANY input -- the `elif` arm is structurally unreachable the moment the
 # filter regresses to the pre-round-27 naive form, and the only defense left is
@@ -3190,8 +3190,8 @@ fi
 # rather than on what it pins.
 #
 # ROUND 31 changed WHAT is pinned, not how much. Round 30 cut the block out of
-# the FILE at column 0 (`/^SELF_EXEC_FILTER='$/`), guarded by a column-0
-# `grep -cE "^SELF_EXEC_FILTER="` count. Column 0 is not bash's assignment
+# the FILE at column 0 (an anchored match on the $SELF_EXEC_FILTER opener),
+# guarded by a column-0 opener count. Column 0 is not bash's assignment
 # grammar: a leading space, a leading tab, `declare `, `typeset `, and a `: ; `
 # separator all assign, and all five measured 194 PASS / 0 FAIL with a naive
 # filter in force and a planted hygiene violation executing, while the column-0
@@ -3243,7 +3243,7 @@ assert_block_lines_exact "$SELF_EXEC_FILTER" "the suite's executable-line filter
 #
 # The volume pin below catches that mutation as written (it drops 330, not 326)
 # -- but only as arithmetic, and arithmetic is compensable. Re-measured at
-# 2efd084c: the same insertion PLUS a one-line bump of SELF_EXEC_EXPECTED_DROP
+# 2efd084c: the same insertion PLUS a one-line bump of $SELF_EXEC_EXPECTED_DROP
 # to 330 is GREEN 194/0 with the violation still executing, and a JSON fixture
 # reformatted four lines shorter would compensate without touching any pin at
 # all. So pin the LINES instead -- the ninth application of the exact-line-set
@@ -3587,10 +3587,10 @@ assert_steps_block "${ci_gate_block:-}" "ci.yml ci-gate job steps:" "${expected_
 #
 #   scenario                                            pre-fix        post-fix
 #   O1  extra real heredoc opener, NO neuter            197/1 RED      197/1 RED
-#   O2  same + suite_openers="$expected_openers"        198/0 GREEN    197/1 RED
-#   O3  same + expected_openers="$suite_openers"        198/0 GREEN    197/1 RED
+#   O2  same + $expected_openers -> $suite_openers       198/0 GREEN    197/1 RED
+#   O3  same + $suite_openers -> $expected_openers       198/0 GREEN    197/1 RED
 #   G1  ci-gate needs-any-code falsified, NO neuter     197/1 RED      197/1 RED
-#   G2  same + ci_gate_outputs_blk=<expected>           198/0 GREEN    197/1 RED
+#   G2  same + <expected> -> $ci_gate_outputs_blk        198/0 GREEN    197/1 RED
 #
 # O1/G1 are the controls that make the neuter the whole ingredient. G2 is the
 # severe one: it hardcodes ci-gate's needs-any-code output to 'false', which
@@ -3601,7 +3601,7 @@ assert_steps_block "${ci_gate_block:-}" "ci.yml ci-gate job steps:" "${expected_
 # Fixed by marking every pin input `readonly`, which under `set -uo pipefail`
 # with no `-e` is fail-closed BY PRESERVATION rather than by detection: a later
 # assignment errors, does not abort, and THE ORIGINAL VALUE SURVIVES. Round 31
-# established that precedent for SELF_EXEC_FILTER; this generalizes it to every
+# established that precedent for $SELF_EXEC_FILTER; this generalizes it to every
 # variable a pin reads on either side.
 #
 # `readonly` is then verified BY EFFECT, not by text. A pin on the spelling of
@@ -3668,8 +3668,9 @@ fi
 # genuinely readonly (the effect probe passes, holding the wrong value) and the
 # declaration text is unchanged (the drift check passes), so both halves of the
 # round-34 guard report green while the pin compares a block to itself.
-# Measured: `expected_ci_gate_outputs="$ci_gate_outputs_blk"` inserted before
-# its `readonly` is 211 PASS / 0 FAIL, byte-identical to clean, against a
+# Measured: a bare write of $ci_gate_outputs_blk into
+# $expected_ci_gate_outputs before its `readonly` is 211 PASS / 0 FAIL,
+# byte-identical to clean, against a
 # violation that is 210/1 without it -- and that pin is the SOLE backstop on the
 # VALUE of `needs-any-code`, the single trigger degating all three npm audits on
 # the PR path.
@@ -3678,29 +3679,149 @@ fi
 # command-substitution half; a heredoc pin cannot assign and freeze in one
 # statement, and routing it through a helper relocates the window into the
 # helper rather than removing it. So close it by COUNT. Every pin input is
-# assigned exactly once in this file (measured, all 29), which makes a SECOND
-# assignment site -- wherever it sits, in either spelling below -- not a
-# legitimate one by construction. That converts the attack from "insert one
-# subtle line" into "replace the real assignment", and for a heredoc pin
-# replacing it means writing the forged expected value into the payload in
-# plain sight. Like every pin here it raises cost rather than proving
-# impossibility; the count is what makes the cheap version red.
+# written exactly once in this file, which makes a SECOND write -- wherever it
+# sits -- not a legitimate one by construction. That converts the attack from
+# "insert one subtle line" into "replace the real assignment", and for a
+# heredoc pin replacing it means writing the forged expected value into the
+# payload in plain sight.
 #
-# Count over $SELF_EXEC, not the raw file: the opener-set pin's own expected
-# payload carries a de-fanged copy of every `IFS= read` opener line, so a
-# raw-file count reports 2 for all eleven heredoc pins (measured) and the check
-# would fail on its own fixture. The filter drops heredoc payload and is itself
-# pinned by body and by volume above.
+# ROUND 39. The ROUND 35 block directly above is the hardening guide's round-36
+# entry: the in-file ROUND labels lag the guide's round log by one from there
+# on, and the guide is the authority on round numbers. That block implemented
+# the count by matching two assignment SPELLINGS with a regex -- the two this
+# file happens to use -- and the exploit is one line in a third.
+# `declare X=`, `typeset X=`, `local X=`, `export X=`,
+# `declare -r X=`, `printf -v X`, `mapfile`/`readarray X`, `X+=`, `let X=`,
+# `(( X = ))` and `eval "X=v"` all write the variable and none of them matched.
+# Measured against a clean replica of origin/main:
+# a `declare` write of $ci_gate_outputs_blk into $expected_ci_gate_outputs,
+# inserted before its `readonly`, scored 228 PASS / 0 FAIL, byte-identical to
+# the clean control,
+# against a hardcoded ci-gate needs-any-code that is 227/1 without it -- the
+# same neuter round 35 was added to stop, in a spelling its regex did not know.
+#
+# Widening the pattern a fourth time is the treadmill rounds 29, 31 and 34 each
+# measured their way off, and round 31's recorded lesson names the exit: stop
+# modelling a language construct with a convenient byte pattern, and assert on
+# something grammar-independent. Every DIRECT write, whatever keyword carries
+# it, spells the variable's BARE NAME -- so count MENTIONS of the name instead
+# of shapes of assignment. Occurrences behind `$` or `${` are reads, not
+# writes, and are excluded.
+#
+# Each pin is mentioned exactly three times: its entry in the $PIN_INPUTS list,
+# its assignment site, and its `readonly` line. The one exception is the
+# collapsed form (`readonly X=<value>`, available to a pin whose value is a
+# literal or a command substitution), which fuses the last two into one line
+# and so is mentioned twice -- detected here rather than listed, so converting
+# a pin to the collapsed form updates its own expectation and nothing else.
+#
+# The honest bound: this catches every direct spelling by construction, because
+# a write that never names the variable cannot be a direct write. It does not
+# catch an indirect one -- a `declare -n` alias, or `eval` on a name assembled
+# at runtime. Like every pin here it raises cost rather than proving
+# impossibility; what it does is make the cheap version red no matter which
+# keyword it is written with.
+#
+# Count over $SELF_EXEC -- the same corpus every other pin in this file uses --
+# rather than the raw file or a comment-stripped copy of it.
+#
+# Not the raw file, because the opener-set pin's own expected payload carries a
+# de-fanged copy of every `IFS= read` opener line, so a raw-file count
+# over-reports every heredoc pin and the check would fail on its own fixture.
+# The filter drops heredoc payload and is itself pinned by body and by volume
+# above.
+#
+# Not a comment-stripped copy, because a strip creates a region this count
+# cannot see, and "first non-blank byte is `#`" is bash's comment grammar only
+# in COMMAND position -- the same bytes inside an already-open quoted string are
+# data a later `eval` can execute. Measured: a two-line insertion that parks the
+# write on a `#`-leading continuation line and evals it back out scored a clean
+# 228 PASS / 0 FAIL against a hardcoded ci-gate needs-any-code, and shellcheck
+# had nothing to say about it. Counting the whole executable text has no such
+# region, at the price of one convention -- which is the convention this file
+# already keeps: a pin's name written in prose or inside a `fail`/`pass` string
+# carries its `$` sigil. A bare name anywhere outside the three sites below
+# inflates that name's count and reddens this check: a false FAIL, never a false
+# PASS, and the remedy is one keystroke.
+#
+# Neighbour bytes are inspected by index, not encoded in a regex bracket class.
+# The class is where the last two defects of this check lived. `\{` is not a
+# bash escape sequence, so writing the class as `[^A-Za-z0-9_\$\{]` leaves the
+# backslash inside the brackets where it is literal -- silently excluding `\`
+# from the legal-prefix set, so `declare \X=v`, which bash executes as a plain
+# assignment (verified on macOS bash 3.2.57), stopped being counted and scored a
+# clean 228/0 against a hardcoded ci-gate output. And `grep -o` consumes the
+# trailing delimiter it matched, so two mentions one byte apart collapse into a
+# single match -- an undercount, i.e. an error in the false-PASS direction.
+# Indexing has neither failure mode: it reads the two neighbour bytes directly
+# and advances one byte past each hit. Note the awk classes below carry no
+# backslashes at all, `$` and `{` being literal inside brackets -- that is the
+# whole lesson, restated in the fix.
+#
+# It is a function so its semantics are asserted directly, on a synthetic
+# corpus, immediately below. Both defects above were silent: each made the live
+# count too LOW, which is the direction that turns a red gate green, and neither
+# was visible in the suite's own output -- 228/0 either way. Exercising the
+# counter only through the live corpus can never catch that, because the live
+# corpus is the thing whose count is in question.
+# shellcheck disable=SC2016  # awk program text: $0 is awk's, not the shell's
+count_bare_mentions() {
+  awk -v n="$1" '
+    {
+      s = $0; p = 1
+      while ((i = index(substr(s, p), n)) > 0) {
+        a = p + i - 1; b = a + length(n)
+        before = (a > 1) ? substr(s, a - 1, 1) : ""
+        after  = (b <= length(s)) ? substr(s, b, 1) : ""
+        if (before !~ /[A-Za-z0-9_${]/ && after !~ /[A-Za-z0-9_]/) c++
+        p = a + 1
+      }
+    }
+    END { print c + 0 }'
+}
+
+# Every case below is a regression probe, not an illustration: each corresponds
+# to a spelling that was, or would be, miscounted. `zz_probe` is deliberately
+# not a pin name, so these fixtures do not perturb the live count above.
+cm_bad=""
+cm_case() { # $1 label, $2 expected, $3 corpus
+  cm_got="$(count_bare_mentions zz_probe <<<"$3")"
+  [ "$cm_got" = "$2" ] || cm_bad="$cm_bad ${1}(want ${2} got ${cm_got})"
+}
+# shellcheck disable=SC2016  # the corpora are literal source text, not expansions
+{
+cm_case bare-assign        1 'zz_probe=1'
+cm_case declare-assign     1 '  declare zz_probe=1'
+cm_case backslash-assign   1 '  declare \zz_probe=1'
+cm_case adjacent-mentions  2 '  declare zz_probe zz_probe=1'
+cm_case dollar-read        0 '  x="$zz_probe"'
+cm_case brace-read         0 '  x="${zz_probe}"'
+cm_case suffix-substring   0 '  zz_probely=1'
+cm_case prefix-substring   0 '  my_zz_probe=1'
+cm_case comment-line       1 '# zz_probe is named here'
+cm_case readonly-freeze    1 '  readonly zz_probe'
+cm_case printf-v           1 '  printf -v zz_probe "%s" "$x"'
+}
+if [ -n "$cm_bad" ]; then
+  fail "the pin-write counter miscounts a known spelling, so the assertion below is weaker than it reads (case(want got)):$cm_bad"
+else
+  pass "pin-write counter counts every direct spelling and no read: backslash-prefixed, adjacent, \$-read, \${}-read, substring, comment, printf -v"
+fi
+
 pin_multi=""
 while IFS= read -r pin_v; do
   [ -n "$pin_v" ] || continue
-  n_assign="$(grep -cE "^[[:space:]]*(readonly[[:space:]]+)?${pin_v}=|^[[:space:]]*IFS= read -r -d '' ${pin_v}[[:space:]]" <<<"$SELF_EXEC" || true)"
-  [ "$n_assign" = "1" ] || pin_multi="$pin_multi ${pin_v}=${n_assign}"
+  n_mention="$(count_bare_mentions "$pin_v" <<<"$SELF_EXEC")"
+  pin_want=3
+  if grep -qE "^[[:space:]]*readonly[[:space:]]+${pin_v}=" <<<"$SELF_EXEC"; then
+    pin_want=2
+  fi
+  [ "$n_mention" = "$pin_want" ] || pin_multi="$pin_multi ${pin_v}=${n_mention}(want ${pin_want})"
 done <<<"$PIN_INPUTS"
 if [ -n "$pin_multi" ]; then
-  fail "pin-input variable(s) are assigned other than exactly once, so the value a pin reads is not the one this file shows at its assignment site (name=count):$pin_multi"
+  fail "pin-input variable(s) are named other than exactly once outside their list entry and readonly, so the value a pin reads is not the one this file shows at its assignment site. Budget is three bare mentions per name (list entry, assignment, readonly), two for the collapsed 'readonly X=' form; a mention in prose or in a message string must carry its sigil (name=found(want)):$pin_multi"
 else
-  pass "every pin-input variable has exactly one assignment site (no inserted line can rewrite one before its readonly freezes it)"
+  pass "every pin-input variable is written exactly once, in any assignment spelling (no inserted line can rewrite one before its readonly freezes it)"
 fi
 
 # Cross-check the probed list against the declarations actually in the file.
