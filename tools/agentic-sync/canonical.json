@@ -24,7 +24,7 @@
     "coverageThresholds": {
       "statements": 81,
       "branches": 71,
-      "functions": 75,
+      "functions": 76,
       "lines": 82
     },
     "quickValidation": "cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run"
