@@ -26,7 +26,10 @@ impl Default for NoiseType {
 
 /// Configuration for procedural terrain generation.
 /// Stored as ECS component on terrain entities.
-#[derive(Debug, Clone, Component, Serialize, Deserialize)]
+/// `PartialEq` is load-bearing, not cosmetic: `apply_terrain_updates` compares the
+/// merged config against the live one so a no-op update does not cost the user an
+/// undo press.
+#[derive(Debug, Clone, PartialEq, Component, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrainData {
     /// Noise algorithm to use

@@ -1,7 +1,7 @@
 //! CSG, terrain, and procedural mesh pending commands.
 
 use super::PendingCommands;
-use crate::core::terrain::TerrainData;
+use crate::core::terrain::{TerrainData, TerrainDataPatch};
 
 // === Request Structs ===
 
@@ -29,7 +29,12 @@ pub struct TerrainSpawnRequest {
 #[derive(Debug, Clone)]
 pub struct TerrainUpdate {
     pub entity_id: String,
-    pub terrain_data: TerrainData,
+    /// Only the fields the caller actually sent. Merged onto the entity's LIVE
+    /// `TerrainData` by the drain, so an omitted field keeps its current value.
+    /// Carrying a full `TerrainData` here made every update a wholesale replace:
+    /// the request could not distinguish "omitted" from "explicitly the default",
+    /// so changing one field silently reset the other seven.
+    pub patch: TerrainDataPatch,
 }
 
 #[derive(Debug, Clone)]

@@ -164,16 +164,6 @@ pub fn apply_spawn_requests(
 // Terrain — the consumers for `PendingCommands::terrain_*`
 // ---------------------------------------------------------------------------
 
-/// Smallest grid a terrain mesh can be built from.
-///
-/// `terrain::build_terrain_mesh` divides by `resolution - 1` and sizes its index
-/// buffer from `(resolution - 1)^2` computed in `usize`, so `resolution == 0`
-/// underflows (a capacity-overflow panic, which in WASM takes the whole engine
-/// down) and `resolution == 1` divides by zero into a NaN mesh. The command
-/// layer already clamps to 32/64/128/256, so this only guards a caller that
-/// bypasses it — but the failure mode is bad enough to refuse explicitly.
-const MIN_TERRAIN_RESOLUTION: u32 = 2;
-
 /// Build the material every terrain entity shares, matching the `EntityType::Terrain`
 /// arm of `spawn_from_snapshot` so a spawn/undo/redo round-trip is lossless.
 fn terrain_material() -> StandardMaterial {
@@ -183,14 +173,21 @@ fn terrain_material() -> StandardMaterial {
     }
 }
 
-/// Swap `Mesh3d`'s handle for a freshly built mesh and release the superseded
-/// one. The old mesh had exactly one owner (this component — snapshots store
-/// `TerrainMeshData`, never a handle), so removing it explicitly is safe and
-/// keeps `Assets<Mesh>` from growing by one entry per edit for the lifetime of
-/// the session.
+/// Swap `Mesh3d`'s handle for a freshly built mesh and drop the superseded one.
+///
+/// The superseded handle is deliberately NOT passed to `Assets::remove`.
+/// `remove`/`remove_untracked` are REFCOUNT-BLIND — they delete the asset no
+/// matter how many live `Handle<Mesh>`es still point at it — and a terrain mesh
+/// handle is not exclusively owned: `apply_duplicate_requests` clones the
+/// source's `Mesh3d` handle straight onto the duplicate. An explicit remove
+/// therefore deleted the duplicate's mesh too and it rendered as nothing.
+///
+/// Dropping the handle here is sufficient: `init_asset` registers
+/// `Assets::<Mesh>::track_assets` in `PreUpdate`, which reclaims an asset once
+/// its refcount genuinely reaches zero (see
+/// `dropping_the_last_handle_frees_the_asset_without_an_explicit_remove`).
 fn swap_terrain_mesh(meshes: &mut Assets<Mesh>, mesh3d: &mut Mesh3d, mesh: Mesh) {
-    let superseded = std::mem::replace(&mut mesh3d.0, meshes.add(mesh));
-    meshes.remove(&superseded);
+    mesh3d.0 = meshes.add(mesh);
 }
 
 /// System that processes pending terrain spawn requests.
@@ -207,12 +204,15 @@ pub fn apply_terrain_spawn_requests(
 ) {
     for request in pending.terrain_spawn_requests.drain(..) {
         let terrain_data = request.terrain_data;
-        if terrain_data.resolution < MIN_TERRAIN_RESOLUTION {
-            tracing::warn!(
-                "Rejected terrain spawn: resolution {} is below the minimum of {}",
-                terrain_data.resolution,
-                MIN_TERRAIN_RESOLUTION,
-            );
+        // `terrain::build_terrain_mesh` divides by `resolution - 1` and sizes its
+        // index buffer from `(resolution - 1)^2` in `usize`, so `resolution == 0`
+        // underflows into a capacity-overflow panic (which in WASM takes the whole
+        // engine down) and `resolution == 1` divides by zero into a NaN mesh. A
+        // huge resolution allocates `resolution^2` f32s inside a 32-bit heap.
+        // Non-finite noise parameters poison every vertex. The command layer
+        // already screens all of this; this refuses a caller that bypasses it.
+        if let Some(reason) = terrain::terrain_data_rejection(&terrain_data) {
+            tracing::warn!("Rejected terrain spawn: {}", reason);
             continue;
         }
 
@@ -273,8 +273,10 @@ pub fn apply_terrain_spawn_requests(
 
 /// System that processes pending terrain noise-config updates.
 ///
-/// The request carries a complete replacement `TerrainData` (see
-/// `handle_update_terrain`), so the heightmap is regenerated from scratch.
+/// The request carries a PATCH — only the fields the caller actually sent — which
+/// is merged onto the entity's live `TerrainData`. A request carrying a whole
+/// `TerrainData` could not distinguish "omitted" from "explicitly the default",
+/// so changing one field silently reset the other seven.
 pub fn apply_terrain_updates(
     mut pending: ResMut<PendingCommands>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -287,15 +289,6 @@ pub fn apply_terrain_updates(
     )>,
 ) {
     for update in pending.terrain_updates.drain(..) {
-        if update.terrain_data.resolution < MIN_TERRAIN_RESOLUTION {
-            tracing::warn!(
-                "Rejected terrain update: resolution {} is below the minimum of {}",
-                update.terrain_data.resolution,
-                MIN_TERRAIN_RESOLUTION,
-            );
-            continue;
-        }
-
         // An id matching nothing is dropped, not retried and not recorded: a
         // history entry that restores nothing would make the user's next undo
         // appear to do nothing at all.
@@ -311,12 +304,27 @@ pub fn apply_terrain_updates(
         };
 
         let old_terrain = terrain_data.clone();
+        let merged = update.patch.merge_into(&old_terrain);
+
+        // Validate the MERGED config, not the patch: a patch is only ever
+        // partial, so a resolution of 0 can arrive either explicitly or by
+        // merging onto a config that already carried one.
+        if let Some(reason) = terrain::terrain_data_rejection(&merged) {
+            tracing::warn!("Rejected terrain update: {}", reason);
+            continue;
+        }
+
+        // An update that changes nothing must not cost the user an undo press.
+        if merged == old_terrain {
+            continue;
+        }
+
         let old_mesh_data = mesh_data.clone();
 
         let new_mesh_data = terrain::TerrainMeshData {
-            heights: terrain::generate_heightmap(&update.terrain_data),
-            resolution: update.terrain_data.resolution,
-            size: update.terrain_data.size,
+            heights: terrain::generate_heightmap(&merged),
+            resolution: merged.resolution,
+            size: merged.size,
         };
         swap_terrain_mesh(
             &mut meshes,
@@ -324,13 +332,13 @@ pub fn apply_terrain_updates(
             terrain::rebuild_terrain_mesh(&new_mesh_data),
         );
 
-        *terrain_data = update.terrain_data.clone();
+        *terrain_data = merged.clone();
         *mesh_data = new_mesh_data.clone();
 
         history.push(UndoableAction::TerrainChange {
             entity_id: update.entity_id,
             old_terrain,
-            new_terrain: update.terrain_data,
+            new_terrain: merged,
             old_mesh_data,
             new_mesh_data,
         });
@@ -341,6 +349,13 @@ pub fn apply_terrain_updates(
 ///
 /// A sculpt edits the heightmap in place and leaves the noise config alone, so
 /// the recorded `TerrainChange` carries an identical `TerrainData` either side.
+///
+/// `sculpt.position` is a WORLD-space `[x, z]` — that is what every other
+/// position in the command API means, and it is the only thing a caller who
+/// picked a point off the viewport can supply. `terrain::sculpt_heightmap`
+/// indexes the grid in terrain-LOCAL space, so the entity's translation is
+/// subtracted here. Without that subtraction, sculpting a terrain that had ever
+/// been moved edited the wrong cells (or silently missed the grid entirely).
 pub fn apply_terrain_sculpts(
     mut pending: ResMut<PendingCommands>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -350,13 +365,14 @@ pub fn apply_terrain_sculpts(
         &terrain::TerrainData,
         &mut terrain::TerrainMeshData,
         &mut Mesh3d,
+        &Transform,
     )>,
 ) {
     for sculpt in pending.terrain_sculpts.drain(..) {
         // Same drop-don't-record contract as `apply_terrain_updates`.
-        let Some((_, terrain_data, mut mesh_data, mut mesh3d)) = terrain_query
+        let Some((_, terrain_data, mut mesh_data, mut mesh3d, transform)) = terrain_query
             .iter_mut()
-            .find(|(id, _, _, _)| id.0 == sculpt.entity_id)
+            .find(|(id, _, _, _, _)| id.0 == sculpt.entity_id)
         else {
             tracing::warn!(
                 "Dropped terrain sculpt: no entity with id {}",
@@ -367,15 +383,29 @@ pub fn apply_terrain_sculpts(
 
         let old_mesh_data = mesh_data.clone();
 
+        let local_position = [
+            sculpt.position[0] - transform.translation.x,
+            sculpt.position[1] - transform.translation.z,
+        ];
+
         let mut heights = mesh_data.heights.clone();
         terrain::sculpt_heightmap(
             &mut heights,
             mesh_data.resolution,
             mesh_data.size,
-            sculpt.position,
+            local_position,
             sculpt.radius,
             sculpt.strength,
         );
+
+        // A brush that fell outside the grid (or was rejected by
+        // `sculpt_heightmap`'s own guards) changed nothing. Rebuilding the mesh
+        // and pushing history for it would burn an undo slot on a no-op and let
+        // a stream of misses evict the user's real edits from the history stack.
+        if heights == mesh_data.heights {
+            continue;
+        }
+
         let new_mesh_data = terrain::TerrainMeshData {
             heights,
             resolution: mesh_data.resolution,
@@ -2601,11 +2631,14 @@ mod terrain_drain_tests {
         apply_terrain_sculpts, apply_terrain_spawn_requests, apply_terrain_updates, HistoryStack,
         UndoableAction,
     };
-    use crate::core::entity_id::EntityId;
+    use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
     use crate::core::pending_commands::{
         EntityType, PendingCommands, TerrainSculpt, TerrainSpawnRequest, TerrainUpdate,
     };
-    use crate::core::terrain::{TerrainData, TerrainEnabled, TerrainMeshData};
+    use crate::core::terrain::{
+        generate_heightmap, rebuild_terrain_mesh, TerrainData, TerrainDataPatch, TerrainEnabled,
+        TerrainMeshData,
+    };
     use bevy::prelude::*;
 
     /// A terrain small enough to reason about by hand: an 8x8 grid over 7.0
@@ -2696,6 +2729,30 @@ mod terrain_drain_tests {
             .clone()
     }
 
+    fn queue_update(world: &mut World, entity_id: &str, patch: TerrainDataPatch) {
+        world
+            .resource_mut::<PendingCommands>()
+            .terrain_updates
+            .push(TerrainUpdate {
+                entity_id: entity_id.to_string(),
+                patch,
+            });
+        run_system!(world, apply_terrain_updates);
+    }
+
+    fn queue_sculpt(world: &mut World, entity_id: &str, position: [f32; 2], strength: f32) {
+        world
+            .resource_mut::<PendingCommands>()
+            .terrain_sculpts
+            .push(TerrainSculpt {
+                entity_id: entity_id.to_string(),
+                position,
+                radius: 1.5,
+                strength,
+            });
+        run_system!(world, apply_terrain_sculpts);
+    }
+
     // === spawn: id resolution ===
 
     /// The core contract: a well-formed caller id becomes the entity's
@@ -2765,19 +2822,41 @@ mod terrain_drain_tests {
 
     // === spawn: components & transform ===
 
+    /// All TEN components, not the five that happened to be convenient. A
+    /// terrain missing `EntityName` is unlabelled in the hierarchy, missing
+    /// `EntityVisible` is invisible to the visibility toggle, and missing
+    /// `MeshMaterial3d` renders as Bevy's fallback magenta — each a real
+    /// user-visible break that a 5-component query cannot see.
     #[test]
     fn spawn_attaches_the_full_terrain_component_set() {
         let mut world = base_world();
         queue_spawn(&mut world, spawn_request(None, None));
 
-        let mut query =
-            world.query::<(&EntityType, &TerrainData, &TerrainMeshData, &TerrainEnabled, &Mesh3d)>();
-        let (entity_type, terrain_data, mesh_data, _, _) = query
-            .iter(&world)
-            .next()
-            .expect("terrain entity must carry EntityType, TerrainData, TerrainMeshData, TerrainEnabled and Mesh3d");
+        let mut query = world.query::<(
+            &EntityType,
+            &EntityId,
+            &EntityName,
+            &EntityVisible,
+            &TerrainData,
+            &TerrainMeshData,
+            &TerrainEnabled,
+            &Mesh3d,
+            &MeshMaterial3d<StandardMaterial>,
+            &Transform,
+        )>();
+        let (entity_type, entity_id, name, visible, terrain_data, mesh_data, _, mesh3d, material, _) =
+            query.iter(&world).next().expect(
+                "terrain entity must carry the full EntityType/EntityId/EntityName/EntityVisible/\
+                 TerrainData/TerrainMeshData/TerrainEnabled/Mesh3d/MeshMaterial3d/Transform set",
+            );
 
         assert_eq!(*entity_type, EntityType::Terrain);
+        assert!(!entity_id.0.is_empty());
+        assert!(
+            !name.0.is_empty(),
+            "an unnamed terrain shows as a blank row in the hierarchy",
+        );
+        assert!(visible.0, "a freshly spawned terrain must be visible");
         assert_eq!(terrain_data.resolution, 8);
         assert_eq!(mesh_data.resolution, 8);
         assert_eq!(mesh_data.size, 7.0);
@@ -2785,6 +2864,45 @@ mod terrain_drain_tests {
             mesh_data.heights.len(),
             8 * 8,
             "heightmap must hold resolution * resolution samples",
+        );
+
+        // The handles must name assets that actually exist, or the entity renders
+        // as nothing / Bevy's fallback magenta.
+        assert!(
+            world.resource::<Assets<Mesh>>().get(&mesh3d.0).is_some(),
+            "Mesh3d must reference a live mesh asset",
+        );
+        assert!(
+            world
+                .resource::<Assets<StandardMaterial>>()
+                .get(&material.0)
+                .is_some(),
+            "MeshMaterial3d must reference a live material asset",
+        );
+    }
+
+    /// The heightmap must be the noise function's real output for THIS config.
+    /// Asserting only `heights.len()` passes just as happily on a `vec![0.0; 64]`
+    /// placeholder, i.e. on a perfectly flat terrain that ignores every noise
+    /// parameter the user set.
+    #[test]
+    fn spawn_derives_the_heightmap_from_the_supplied_noise_config() {
+        let mut world = base_world();
+        let config = small_terrain(7);
+        queue_spawn(&mut world, spawn_request(None, None));
+
+        let heights = heights_of(&mut world);
+        assert_eq!(
+            heights,
+            crate::core::terrain::generate_heightmap(&config),
+            "the heightmap must be generate_heightmap() of the request's config, \
+             not a placeholder",
+        );
+        let first = heights[0];
+        assert!(
+            heights.iter().any(|h| (h - first).abs() > 1e-6),
+            "a noise heightmap must not be constant — got a flat plane, which is \
+             what a zeroed placeholder looks like",
         );
     }
 
@@ -2836,6 +2954,46 @@ mod terrain_drain_tests {
                     .as_ref()
                     .expect("snapshot must carry TerrainMeshData");
                 assert_eq!(mesh_data.heights.len(), 8 * 8);
+                assert_eq!(
+                    mesh_data.heights,
+                    crate::core::terrain::generate_heightmap(&small_terrain(7)),
+                    "the snapshot must carry the REAL heightmap — a placeholder \
+                     redoes as a flat plane",
+                );
+
+                // The snapshot's transform is what `spawn_from_snapshot` restores.
+                // A zeroed scale makes the redone terrain invisible; a zeroed
+                // quaternion is not a valid rotation at all. Neither is visible
+                // if the transform is left unasserted.
+                assert_eq!(snapshot.transform.position, [0.0, 0.0, 0.0]);
+                assert_eq!(
+                    snapshot.transform.rotation,
+                    [0.0, 0.0, 0.0, 1.0],
+                    "identity rotation is (0,0,0,1); (0,0,0,0) is not a unit quaternion",
+                );
+                assert_eq!(
+                    snapshot.transform.scale,
+                    [1.0, 1.0, 1.0],
+                    "a zero scale would redo the terrain as an invisible point",
+                );
+            }
+            other => panic!("expected UndoableAction::Spawn, got {other:?}"),
+        }
+    }
+
+    /// The snapshot transform must track the REQUEST, not a hardcoded identity.
+    #[test]
+    fn spawn_snapshot_records_the_supplied_position() {
+        let mut world = base_world();
+        queue_spawn(
+            &mut world,
+            spawn_request(Some("terrain-1"), Some(Vec3::new(1.0, 2.0, 3.0))),
+        );
+
+        let actions = drain_history(&mut world);
+        match &actions[0] {
+            UndoableAction::Spawn { snapshot } => {
+                assert_eq!(snapshot.transform.position, [1.0, 2.0, 3.0]);
             }
             other => panic!("expected UndoableAction::Spawn, got {other:?}"),
         }
@@ -2851,39 +3009,40 @@ mod terrain_drain_tests {
         let old_handle = mesh_handle_of(&mut world);
         let _ = drain_history(&mut world);
 
-        let new_data = TerrainData {
+        let merged = TerrainData {
             height_scale: 40.0,
             ..small_terrain(999)
         };
-        world
-            .resource_mut::<PendingCommands>()
-            .terrain_updates
-            .push(TerrainUpdate {
-                entity_id: "terrain-1".to_string(),
-                terrain_data: new_data.clone(),
-            });
-        run_system!(&mut world, apply_terrain_updates);
+        queue_update(
+            &mut world,
+            "terrain-1",
+            TerrainDataPatch {
+                seed: Some(999),
+                height_scale: Some(40.0),
+                ..Default::default()
+            },
+        );
 
         let after = heights_of(&mut world);
         assert_ne!(
             before, after,
             "changing the noise config must regenerate the heightmap",
         );
+        assert_eq!(
+            after,
+            crate::core::terrain::generate_heightmap(&merged),
+            "the new heightmap must be generate_heightmap() of the MERGED config",
+        );
 
         let mut query = world.query::<&TerrainData>();
         let live = query.iter(&world).next().expect("terrain still exists");
-        assert_eq!(live.seed, 999, "the new TerrainData must replace the old");
+        assert_eq!(live.seed, 999, "the patched fields must be applied");
         assert_eq!(live.height_scale, 40.0);
 
         assert_ne!(
             mesh_handle_of(&mut world),
             old_handle,
             "the Mesh3d handle must point at the rebuilt mesh",
-        );
-        assert_eq!(
-            world.resource::<Assets<Mesh>>().len(),
-            1,
-            "the superseded mesh must be released, not leaked in Assets<Mesh>",
         );
 
         let actions = drain_history(&mut world);
@@ -2921,14 +3080,11 @@ mod terrain_drain_tests {
         let before = heights_of(&mut world);
         let _ = drain_history(&mut world);
 
-        world
-            .resource_mut::<PendingCommands>()
-            .terrain_updates
-            .push(TerrainUpdate {
-                entity_id: "does-not-exist".to_string(),
-                terrain_data: small_terrain(999),
-            });
-        run_system!(&mut world, apply_terrain_updates);
+        queue_update(
+            &mut world,
+            "does-not-exist",
+            TerrainDataPatch { seed: Some(999), ..Default::default() },
+        );
 
         assert_eq!(
             heights_of(&mut world),
@@ -3005,27 +3161,116 @@ mod terrain_drain_tests {
         );
     }
 
+    /// Magnitude, not just sign. A sign-only assertion passes on a brush that
+    /// applies 1% of the requested strength — the "lower terrain" tool would feel
+    /// broken while the test stayed green. Matches the tolerance the sibling
+    /// `terrain::sculpt_tests` assertion uses.
     #[test]
     fn sculpt_lowers_when_strength_is_negative() {
         let mut world = base_world();
         queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
         let before = heights_of(&mut world);
 
-        world
-            .resource_mut::<PendingCommands>()
-            .terrain_sculpts
-            .push(TerrainSculpt {
-                entity_id: "terrain-1".to_string(),
-                position: [-3.5, -3.5],
-                radius: 1.5,
-                strength: -5.0,
-            });
-        run_system!(&mut world, apply_terrain_sculpts);
+        queue_sculpt(&mut world, "terrain-1", [-3.5, -3.5], -5.0);
         let after = heights_of(&mut world);
 
+        let delta = after[0] - before[0];
         assert!(
-            after[0] < before[0],
-            "negative strength must lower the brush centre",
+            (delta + 5.0).abs() < 1e-3,
+            "the brush centre must drop by the full strength, dropped {delta}",
+        );
+    }
+
+    /// THE positioning contract. `sculpt_terrain`'s payload is documented as
+    /// world space and every other position in the command API is world space,
+    /// but `sculpt_heightmap` addresses the heightmap in terrain-LOCAL space. The
+    /// drain has to convert, or a terrain moved off the origin sculpts at the
+    /// wrong spot — and at any offset larger than the grid, the brush lands
+    /// entirely off it and the tool does nothing at all.
+    #[test]
+    fn sculpt_position_is_world_space_and_is_offset_by_the_terrain_transform() {
+        let mut world = base_world();
+        let origin = Vec3::new(10.0, 0.0, 10.0);
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), Some(origin)));
+        let before = heights_of(&mut world);
+
+        // Grid cell (0,0) of a terrain centred on (10, 10) is at world
+        // (10 - 3.5, 10 - 3.5) = (6.5, 6.5).
+        queue_sculpt(&mut world, "terrain-1", [6.5, 6.5], 5.0);
+        let after = heights_of(&mut world);
+
+        let delta = after[0] - before[0];
+        assert!(
+            (delta - 5.0).abs() < 1e-3,
+            "a world-space brush over cell (0,0) of a terrain at {origin:?} must \
+             raise that cell by the full strength, raised {delta}",
+        );
+    }
+
+    /// The converse: the brush must NOT be applied at the raw world coordinate.
+    /// Pre-fix, sculpting world (-3.5,-3.5) on a terrain at (10,0,10) hit cell
+    /// (0,0) — the local coordinate — instead of missing the grid entirely.
+    #[test]
+    fn sculpt_far_from_an_offset_terrain_changes_nothing() {
+        let mut world = base_world();
+        queue_spawn(
+            &mut world,
+            spawn_request(Some("terrain-1"), Some(Vec3::new(10.0, 0.0, 10.0))),
+        );
+        let before = heights_of(&mut world);
+        let _ = drain_history(&mut world);
+
+        queue_sculpt(&mut world, "terrain-1", [-3.5, -3.5], 5.0);
+
+        assert_eq!(
+            heights_of(&mut world),
+            before,
+            "a brush 14 world units off the grid must change nothing",
+        );
+        assert!(
+            drain_history(&mut world).is_empty(),
+            "a stroke that changed no height must not push an undo entry the user \
+             then has to press Ctrl+Z twice to get past",
+        );
+    }
+
+    /// The mesh must be rebuilt from the SCULPTED heights, not the pre-stroke
+    /// ones — otherwise the stored heightmap and the rendered surface diverge and
+    /// the sculpt is invisible until some later edit happens to rebuild.
+    #[test]
+    fn sculpt_rebuilds_the_mesh_from_the_new_heightmap() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+        queue_sculpt(&mut world, "terrain-1", [-3.5, -3.5], 5.0);
+
+        let heights = heights_of(&mut world);
+        let handle = mesh_handle_of(&mut world);
+        let expected = crate::core::terrain::rebuild_terrain_mesh(&TerrainMeshData {
+            heights: heights.clone(),
+            resolution: 8,
+            size: 7.0,
+        });
+        let expected_positions = expected
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .expect("terrain mesh must carry positions")
+            .as_float3()
+            .expect("positions are float3")
+            .to_vec();
+
+        let meshes = world.resource::<Assets<Mesh>>();
+        let live = meshes.get(&handle).expect("Mesh3d must reference a live mesh");
+        let live_positions = live
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .expect("terrain mesh must carry positions")
+            .as_float3()
+            .expect("positions are float3")
+            .to_vec();
+
+        assert_eq!(live_positions, expected_positions);
+        // The y of vertex 0 is grid cell (0,0)'s height, i.e. the brush centre.
+        assert!(
+            (live_positions[0][1] - heights[0]).abs() < 1e-6,
+            "the rendered surface must follow the sculpted heightmap",
         );
     }
 
@@ -3040,26 +3285,12 @@ mod terrain_drain_tests {
         let old_handle = mesh_handle_of(&mut world);
         let _ = drain_history(&mut world);
 
-        world
-            .resource_mut::<PendingCommands>()
-            .terrain_sculpts
-            .push(TerrainSculpt {
-                entity_id: "terrain-1".to_string(),
-                position: [-3.5, -3.5],
-                radius: 1.5,
-                strength: 5.0,
-            });
-        run_system!(&mut world, apply_terrain_sculpts);
+        queue_sculpt(&mut world, "terrain-1", [-3.5, -3.5], 5.0);
 
         assert_ne!(
             mesh_handle_of(&mut world),
             old_handle,
             "the Mesh3d handle must point at the resculpted mesh",
-        );
-        assert_eq!(
-            world.resource::<Assets<Mesh>>().len(),
-            1,
-            "the superseded mesh must be released, not leaked in Assets<Mesh>",
         );
 
         let actions = drain_history(&mut world);
@@ -3073,10 +3304,14 @@ mod terrain_drain_tests {
                 new_mesh_data,
             } => {
                 assert_eq!(entity_id, "terrain-1");
-                assert_eq!(
-                    old_terrain.seed, new_terrain.seed,
-                    "a sculpt must not alter the noise config",
-                );
+                // Both sides pinned to the entity's REAL config. Comparing the two
+                // sides only to each other passes just as well when the sculpt
+                // silently rewrote both to TerrainData::default().
+                for (label, data) in [("old", old_terrain), ("new", new_terrain)] {
+                    assert_eq!(data.seed, 7, "{label}_terrain.seed");
+                    assert_eq!(data.resolution, 8, "{label}_terrain.resolution");
+                    assert_eq!(data.size, 7.0, "{label}_terrain.size");
+                }
                 assert_eq!(old_mesh_data.heights, before);
                 assert_ne!(
                     old_mesh_data.heights, new_mesh_data.heights,
@@ -3094,16 +3329,7 @@ mod terrain_drain_tests {
         let before = heights_of(&mut world);
         let _ = drain_history(&mut world);
 
-        world
-            .resource_mut::<PendingCommands>()
-            .terrain_sculpts
-            .push(TerrainSculpt {
-                entity_id: "does-not-exist".to_string(),
-                position: [-3.5, -3.5],
-                radius: 1.5,
-                strength: 5.0,
-            });
-        run_system!(&mut world, apply_terrain_sculpts);
+        queue_sculpt(&mut world, "does-not-exist", [-3.5, -3.5], 5.0);
 
         assert_eq!(
             heights_of(&mut world),
@@ -3156,5 +3382,207 @@ mod terrain_drain_tests {
                 "a rejected spawn must not push history",
             );
         }
+    }
+
+    /// The same underflow is reachable through `update_terrain`, which had no
+    /// test at all — the spawn-path guard proves nothing about this one.
+    #[test]
+    fn update_with_degenerate_resolution_is_rejected_without_panicking() {
+        for resolution in [0u32, 1u32] {
+            let mut world = base_world();
+            queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+            let before = heights_of(&mut world);
+            let _ = drain_history(&mut world);
+
+            queue_update(
+                &mut world,
+                "terrain-1",
+                TerrainDataPatch { resolution: Some(resolution), ..Default::default() },
+            );
+
+            assert_eq!(
+                heights_of(&mut world),
+                before,
+                "resolution {resolution} must leave the terrain untouched",
+            );
+            assert!(
+                drain_history(&mut world).is_empty(),
+                "a rejected update must not push history",
+            );
+        }
+    }
+
+    /// An oversized resolution allocates `resolution^2` f32s inside a 32-bit
+    /// WASM heap. 100000 is 40 GB and aborts the whole instance, taking the
+    /// user's unsaved scene with it.
+    #[test]
+    fn update_with_an_oversized_resolution_is_rejected() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+        let before = heights_of(&mut world);
+        let _ = drain_history(&mut world);
+
+        queue_update(
+            &mut world,
+            "terrain-1",
+            TerrainDataPatch { resolution: Some(100_000), ..Default::default() },
+        );
+
+        assert_eq!(heights_of(&mut world), before);
+        assert!(drain_history(&mut world).is_empty());
+    }
+
+    // === update is a merge, not a replace ===
+
+    /// The drain half of the patch contract: an omitted field must keep the
+    /// entity's LIVE value, not fall back to `TerrainData::default()`.
+    #[test]
+    fn update_merges_the_patch_onto_the_live_config() {
+        let mut world = base_world();
+        let live = TerrainData {
+            noise_type: crate::core::terrain::NoiseType::Value,
+            octaves: 3,
+            frequency: 0.11,
+            amplitude: 0.77,
+            height_scale: 12.5,
+            seed: 4242,
+            resolution: 8,
+            size: 7.0,
+        };
+        world
+            .resource_mut::<PendingCommands>()
+            .terrain_spawn_requests
+            .push(TerrainSpawnRequest {
+                name: None,
+                position: None,
+                terrain_data: live.clone(),
+                id: Some("terrain-1".to_string()),
+            });
+        run_system!(&mut world, apply_terrain_spawn_requests);
+        let _ = drain_history(&mut world);
+
+        queue_update(
+            &mut world,
+            "terrain-1",
+            TerrainDataPatch { height_scale: Some(40.0), ..Default::default() },
+        );
+
+        let mut query = world.query::<&TerrainData>();
+        let after = query.iter(&world).next().expect("terrain still exists");
+        assert_eq!(after.height_scale, 40.0, "the patched field must move");
+        assert_eq!(after.seed, 4242, "an omitted field must keep its live value");
+        assert_eq!(after.noise_type, crate::core::terrain::NoiseType::Value);
+        assert_eq!(after.octaves, 3);
+        assert_eq!(after.frequency, 0.11);
+        assert_eq!(after.amplitude, 0.77);
+        assert_eq!(after.resolution, 8);
+        assert_eq!(after.size, 7.0);
+    }
+
+    /// An update that changes nothing must not cost the user an undo press.
+    #[test]
+    fn update_with_an_empty_patch_pushes_no_history() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+        let before = heights_of(&mut world);
+        let _ = drain_history(&mut world);
+
+        queue_update(&mut world, "terrain-1", TerrainDataPatch::default());
+
+        assert_eq!(heights_of(&mut world), before);
+        assert!(
+            drain_history(&mut world).is_empty(),
+            "a no-op update must not push a history entry",
+        );
+    }
+
+    // === mesh handle lifetime ===
+
+    /// `Assets::remove` is REFCOUNT-BLIND: it deletes the asset outright no
+    /// matter how many live `Handle<Mesh>`es still point at it. Terrain mesh
+    /// handles are NOT exclusively owned — `apply_duplicate_requests` clones the
+    /// source's handle straight onto the duplicate — so an explicit remove on
+    /// update/sculpt deleted the *duplicate's* mesh too, and the duplicate
+    /// rendered as nothing.
+    ///
+    /// The correct release path is dropping the handle and letting
+    /// `Assets::<Mesh>::track_assets` (registered in `PreUpdate` by
+    /// `init_asset`) reclaim it once the refcount actually hits zero.
+    #[test]
+    fn updating_a_terrain_does_not_delete_a_mesh_another_entity_still_holds() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+
+        // Mirror what `apply_duplicate_requests` does: clone the handle onto a
+        // second entity.
+        let shared = mesh_handle_of(&mut world);
+        world.spawn(Mesh3d(shared.clone()));
+
+        queue_update(
+            &mut world,
+            "terrain-1",
+            TerrainDataPatch { seed: Some(999), ..Default::default() },
+        );
+
+        assert!(
+            world.resource::<Assets<Mesh>>().get(&shared).is_some(),
+            "the duplicate's mesh must survive an edit to the original",
+        );
+    }
+
+    #[test]
+    fn sculpting_a_terrain_does_not_delete_a_mesh_another_entity_still_holds() {
+        let mut world = base_world();
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), None));
+
+        let shared = mesh_handle_of(&mut world);
+        world.spawn(Mesh3d(shared.clone()));
+
+        queue_sculpt(&mut world, "terrain-1", [-3.5, -3.5], 5.0);
+
+        assert!(
+            world.resource::<Assets<Mesh>>().get(&shared).is_some(),
+            "the duplicate's mesh must survive a sculpt of the original",
+        );
+    }
+
+    /// The measurement behind the fix: in a real `App` (where `AssetPlugin`
+    /// registers `Assets::<Mesh>::track_assets` in `PreUpdate`), dropping the
+    /// last handle DOES free the asset. So the superseded mesh is reclaimed
+    /// without an explicit refcount-blind `remove`, and nothing leaks.
+    #[test]
+    fn dropping_the_last_handle_frees_the_asset_without_an_explicit_remove() {
+        use bevy::asset::AssetPlugin;
+
+        let mut app = App::new();
+        app.add_plugins((bevy::app::TaskPoolPlugin::default(), AssetPlugin::default()));
+        app.init_asset::<Mesh>();
+
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<Mesh>>()
+            .add(Mesh::new(
+                bevy::mesh::PrimitiveTopology::TriangleList,
+                bevy::asset::RenderAssetUsages::default(),
+            ));
+        let id = handle.id();
+        app.update();
+        assert_eq!(
+            app.world().resource::<Assets<Mesh>>().len(),
+            1,
+            "sanity: the asset is live while a handle exists",
+        );
+
+        drop(handle);
+        // track_assets drains the drop channel; give it a couple of frames since
+        // the drop notification is delivered asynchronously.
+        app.update();
+        app.update();
+
+        assert!(
+            app.world().resource::<Assets<Mesh>>().get(id).is_none(),
+            "dropping the last handle must free the asset via track_assets — this \
+             is why an explicit refcount-blind remove is unnecessary AND unsafe",
+        );
     }
 }
