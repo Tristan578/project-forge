@@ -939,8 +939,8 @@ jobs:
   # Independent of the main web deploy — docs can ship without a full Vercel web build.
   deploy-docs:
     name: Deploy Docs
-    needs: [check-changes, lint, typecheck]
-    if: (needs.check-changes.outputs.docs-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure'
+    needs: [check-changes, lint, typecheck, security]
+    if: (needs.check-changes.outputs.docs-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure' && needs.security.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -985,8 +985,8 @@ jobs:
   # Deploys apps/design (Storybook) to the Vercel design project when UI or design files changed.
   deploy-design:
     name: Deploy Design Workbench
-    needs: [check-changes, lint, typecheck]
-    if: (needs.check-changes.outputs.design-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure'
+    needs: [check-changes, lint, typecheck, security]
+    if: (needs.check-changes.outputs.design-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure' && needs.security.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

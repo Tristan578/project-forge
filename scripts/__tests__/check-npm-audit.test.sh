@@ -2089,8 +2089,12 @@ STEPS_EOF
   # `needs.security.result == 'skipped'`, and deploy-production inherits that
   # exposure on the push path — its push branch gates only on deploy-staging's
   # success, with a strict `security == 'success'` check only in the
-  # workflow_dispatch promote branch. deploy-docs/deploy-design carry no
-  # audit gating at all: pre-existing gap, tracked in PF-1011/#9030.)
+  # workflow_dispatch promote branch. deploy-docs/deploy-design carried no
+  # audit gating at all until PF-1011/#9030 closed that gap; they are pinned
+  # by their own loop below, which is separate rather than a widening of this
+  # one because their if: is a single-line plain scalar, they have no
+  # `environment:` key, and their job-level key ORDER differs — assert_job_level_keys
+  # is an ORDERED byte-exact comparison, so folding them in here would fail loudly.)
   # Cut each deploy job's block (same awk anchor idiom), assert exactly ONE
   # needs: line (YAML keeps the last duplicate key), and assert `security`
   # appears as a flow-list ELEMENT on a trailing-comment-stripped copy of
@@ -2249,6 +2253,88 @@ STEPS_EOF
       *) cd_dj_env_expect="" ;;
     esac
     assert_block_lines_exact "$cd_dj_envblk" "cd.yml ${cd_dj} environment: block" "$cd_dj_env_expect" "the environment named here carries this deploy's protection rules (required reviewers, wait timers, branch policies), and a line folded into its name: scalar retargets the job at an unknown environment, which GitHub creates on demand with NO protection rules"
+  done
+
+  # PF-1011 / #9030. deploy-docs and deploy-design each run
+  # `vercel deploy --prod --archive=tgz` against a PRODUCTION Vercel project
+  # (docs.spawnforge.ai, design.spawnforge.ai) and, until this ticket, neither
+  # named `security` in its needs: nor referenced it in its if:. A red
+  # `check-npm-audit.sh` therefore stopped the web deploy and shipped these two.
+  #
+  # Why `== 'success'` and not the `!= 'failure'` idiom the sibling lint/typecheck
+  # clauses on these same lines use: `!= 'failure'` fails OPEN under the exact
+  # tampering this suite exists to catch. Drop `security` from the needs: list and
+  # `needs.security.result` is no longer in the needs context, so it resolves to
+  # null; `null != 'failure'` is TRUE, and with `security` gone from needs: the
+  # implicit success() no longer covers it either — the deploy proceeds UNAUDITED.
+  # `== 'success'` is unresolvable-false in that same scenario, so the deploy
+  # skips loudly. That is the fail-safe property the two already-gated jobs rely
+  # on, and it lets the arms below reuse this suite's proven needs-element and
+  # if-containment greps verbatim rather than hand-rolling weaker twins.
+  #
+  # Unlike deploy-staging/deploy-production these jobs carry NO `always()`, so the
+  # implicit success() over needs: is doing real work here too — the explicit
+  # clause is the second lock, not the only one.
+  for cd_pj in deploy-docs deploy-design; do
+    # Same last-key-wins job-count pin as the loop above: an appended duplicate
+    # `deploy-docs:` at end of file is the effective job and carries none of the
+    # gating pinned below, while the block cut only ever sees the FIRST one.
+    cd_pj_job_count="$(grep -cE "^  [\"']?${cd_pj}[\"']?[[:space:]]*:" <<<"$cd_exec" || true)"
+    if [ "$cd_pj_job_count" -ne 1 ]; then
+      fail "cd.yml defines the ${cd_pj} job $cd_pj_job_count times (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate JOB key, so an appended second ${cd_pj}: job deploys to production with none of the audit gating this suite pins)"
+    else
+      pass "cd.yml defines the ${cd_pj} job exactly once"
+    fi
+    cd_pj_block="$(awk -v hdr="  ${cd_pj}:" -v re="$job_key_re" '$0 == hdr {f=1} f{print} f && $0 ~ re && $0 != hdr {exit}' <<<"$cd_exec")"
+
+    # These jobs' key ORDER differs from the deploy-staging/deploy-production
+    # set pinned above (no `environment:`; needs/if precede runs-on), and the
+    # comparison is ordered and byte-exact — hence a separate expected set.
+    assert_job_level_keys "$cd_pj_block" "cd $cd_pj job" "    name
+    needs
+    if
+    runs-on
+    timeout-minutes
+    permissions
+    steps"
+    if [ -z "$cd_pj_block" ]; then
+      fail "cd.yml ${cd_pj} job block is empty after comment-strip — job missing, renamed, or fully commented out (production deploy gating cannot be verified)"
+      continue
+    fi
+
+    cd_pj_needs_count="$(grep -cE "^    [\"']?needs[\"']?[[:space:]]*:" <<<"$cd_pj_block" || true)"
+    cd_pj_needs_line="$(grep -E "^    [\"']?needs[\"']?[[:space:]]*:" <<<"$cd_pj_block" || true)"
+    cd_pj_needs_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cd_pj_needs_line")"
+    if [ "$cd_pj_needs_count" -ne 1 ]; then
+      fail "cd.yml ${cd_pj} job has $cd_pj_needs_count job-level needs: lines (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key)"
+    elif grep -qE '(\[|,)[[:space:]]*security[[:space:]]*(,|\])' <<<"$cd_pj_needs_scan"; then
+      pass "cd.yml ${cd_pj} needs: lists security as a flow-list element (keeps needs.security resolvable, and makes the implicit success() cover the audit)"
+    else
+      fail "cd.yml ${cd_pj} needs: does not list security as a flow-list element — needs.security.result becomes unresolvable and the implicit success() stops covering the audit, so a red npm/cargo audit would not stop this production deploy"
+    fi
+
+    cd_pj_if_count="$(grep -cE "^    [\"']?if[\"']?[[:space:]]*:" <<<"$cd_pj_block" || true)"
+    cd_pj_ifblk="$(awk "/^    [\"']?if[\"']?[[:space:]]*:/{f=1;print;next} f && /^    [A-Za-z_\"']/{exit} f{print}" <<<"$cd_pj_block")"
+    cd_pj_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cd_pj_ifblk")"
+    if [ "$cd_pj_if_count" -ne 1 ]; then
+      fail "cd.yml ${cd_pj} job has $cd_pj_if_count job-level if: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so a second if: overrides the needs.security.result clause at runtime while the original line still matches)"
+    elif grep -qE "needs\.security\.result[[:space:]]*==[[:space:]]*'success'" <<<"$cd_pj_scan"; then
+      pass "cd.yml ${cd_pj} if: requires needs.security.result == 'success' — the clause that keeps this production deploy blocked on a red audit even if security is dropped from needs: (exactly 1 if: key)"
+    else
+      fail "cd.yml ${cd_pj} if: no longer contains needs.security.result == 'success' — the deploy loses its fail-safe second lock, and a needs:-only gate can be removed in one line"
+    fi
+
+    # Same PRESENT-vs-EFFECTIVE residual as the loop above (a vacuous
+    # `|| true` still passes containment), closed the same way: pin the if:
+    # line verbatim. These are single-line plain scalars, so there is no
+    # block-scalar continuation exposure here — the whole expression is the
+    # one line, and anything appended to it changes that line.
+    case "$cd_pj" in
+      deploy-docs) cd_pj_expect="    if: (needs.check-changes.outputs.docs-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure' && needs.security.result == 'success'" ;;
+      deploy-design) cd_pj_expect="    if: (needs.check-changes.outputs.design-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure' && needs.security.result == 'success'" ;;
+      *) cd_pj_expect="" ;;
+    esac
+    assert_block_lines_exact "$cd_pj_ifblk" "cd.yml ${cd_pj} if: block" "$cd_pj_expect" "the containment pin above proves the security clause is PRESENT; this proves nothing has been appended beside it (a trailing \`|| true\`, or a rewrite of the sibling lint/typecheck clauses) that changes what the one-line expression evaluates to while the pinned clause stays byte-identical"
   done
 
   # Invocations asserted against the comment-stripped SECURITY JOB block,
