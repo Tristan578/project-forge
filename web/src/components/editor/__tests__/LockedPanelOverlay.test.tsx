@@ -5,13 +5,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
 import { LockedPanelOverlay } from '../LockedPanelOverlay';
 
-vi.mock('@/lib/ai/tierAccess', () => ({
-  TIER_LABELS: {
-    starter: 'Starter',
-    hobbyist: 'Hobbyist',
-    creator: 'Creator',
-    pro: 'Pro',
-  },
+// Only `getRequiredTier` is stubbed. The labels come from the real module: a
+// hand-written copy here read "Hobbyist"/"Pro" — internal billing keys that name
+// no plan a user can buy — and the assertions below happily agreed with it.
+vi.mock('@/lib/ai/tierAccess', async () => ({
+  TIER_LABELS: (await vi.importActual<typeof import('@/lib/ai/tierAccess')>(
+    '@/lib/ai/tierAccess'
+  )).TIER_LABELS,
   getRequiredTier: vi.fn((panelId: string) => {
     const tiers: Record<string, 'starter' | 'hobbyist' | 'creator' | 'pro'> = {
       'physics-feel': 'pro',
@@ -27,7 +27,7 @@ vi.mock('lucide-react', async () => {
   return Object.fromEntries(Object.keys(actual).map(k => [k, () => null]));
 });
 
-import { getRequiredTier } from '@/lib/ai/tierAccess';
+import { getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
 
 describe('LockedPanelOverlay', () => {
   beforeEach(() => {
@@ -53,19 +53,19 @@ describe('LockedPanelOverlay', () => {
 
   it('shows tier label from getRequiredTier lookup', () => {
     render(<LockedPanelOverlay panelId="physics-feel" />);
-    expect(screen.getByText('Pro plan required')).toBeInTheDocument();
+    expect(screen.getByText(`${TIER_LABELS.pro} plan required`)).toBeInTheDocument();
   });
 
   it('uses override requiredTier when provided', () => {
     render(<LockedPanelOverlay panelId="unknown-panel" requiredTier="creator" />);
-    expect(screen.getByText('Creator plan required')).toBeInTheDocument();
+    expect(screen.getByText(`${TIER_LABELS.creator} plan required`)).toBeInTheDocument();
     // getRequiredTier should NOT be called when requiredTier is provided
     expect(vi.mocked(getRequiredTier)).not.toHaveBeenCalled();
   });
 
   it('shows upgrade link pointing to /settings/billing', () => {
     render(<LockedPanelOverlay panelId="physics-feel" />);
-    const link = screen.getByRole('link', { name: 'Upgrade to Pro' });
+    const link = screen.getByRole('link', { name: `Upgrade to ${TIER_LABELS.pro}` });
     expect(link.getAttribute('href')).toBe('/settings/billing');
   });
 
@@ -78,18 +78,20 @@ describe('LockedPanelOverlay', () => {
 
   it('shows hobbyist tier for accessibility panel', () => {
     render(<LockedPanelOverlay panelId="accessibility" />);
-    expect(screen.getByText('Hobbyist plan required')).toBeInTheDocument();
+    expect(screen.getByText(`${TIER_LABELS.hobbyist} plan required`)).toBeInTheDocument();
   });
 
   it('shows creator tier for economy panel', () => {
     render(<LockedPanelOverlay panelId="economy" />);
-    expect(screen.getByText('Creator plan required')).toBeInTheDocument();
+    expect(screen.getByText(`${TIER_LABELS.creator} plan required`)).toBeInTheDocument();
   });
 
   it('upgrade link text mentions the tier name', () => {
     render(<LockedPanelOverlay panelId="physics-feel" />);
     // Text is split across JSX nodes: "Upgrade to " + tierLabel
-    expect(screen.getByRole('link', { name: /Upgrade to Pro/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: `Upgrade to ${TIER_LABELS.pro}` })
+    ).toBeInTheDocument();
   });
 
   it('shows descriptive message about upgrading', () => {

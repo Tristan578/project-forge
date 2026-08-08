@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import type { OrchestratorGDD, GameSystem, AssetNeed } from '@/lib/game-creation/types';
 import { buildPlan } from '@/lib/game-creation/planBuilder';
+import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -391,7 +392,9 @@ describe('buildPlan', () => {
     expect(plan.gdd).toBe(gdd);
     expect(plan.currentStepIndex).toBe(0);
     expect(plan.createdAt).toBeGreaterThan(0);
-    expect(plan.tokenEstimate.userTier).toBe('Hobbyist tier');
+    // The `hobbyist` key is sold as "Starter" — capitalizing the key named a
+    // plan ("Hobbyist tier") that appears on no pricing card.
+    expect(plan.tokenEstimate.userTier).toBe(`${TIER_DISPLAY_NAMES.hobbyist} tier`);
   });
 
   // Additional: all steps have pending status

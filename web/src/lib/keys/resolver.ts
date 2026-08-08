@@ -5,6 +5,7 @@ import type { Provider } from '../db/schema';
 import { decryptProviderKey } from './encryption';
 import { deductTokens } from '../tokens/service';
 import { PLATFORM_KEY_ENV } from '../config/providers';
+import { TIER_DISPLAY_NAMES } from '../billing/tierPlans';
 
 export interface ResolvedKey {
   type: 'byok' | 'platform';
@@ -87,7 +88,7 @@ export async function resolveApiKey(
   if (user.tier === 'starter') {
     throw new ApiKeyError(
       'TIER_NOT_ALLOWED',
-      `Starter tier cannot use AI generation. Upgrade to Hobbyist and add your own ${provider} API key, or upgrade to Pro for platform keys.`
+      `The ${TIER_DISPLAY_NAMES.starter} tier cannot use AI generation. Upgrade to ${TIER_DISPLAY_NAMES.hobbyist} and add your own ${provider} API key, or upgrade to ${TIER_DISPLAY_NAMES.pro} for platform keys.`
     );
   }
 
@@ -98,7 +99,7 @@ export async function resolveApiKey(
     throw new ApiKeyError(
       'NO_KEY_CONFIGURED',
       `No ${provider} API key configured. Add your own key in Settings, ` +
-        `upgrade to Pro tier, or purchase add-on tokens.`
+        `upgrade to the ${TIER_DISPLAY_NAMES.pro} tier, or purchase add-on tokens.`
     );
   }
 

@@ -67,7 +67,7 @@ function makeMockPlan(): OrchestratorPlan {
     totalEstimated: 500,
     totalVarianceHigh: 700,
     totalVarianceLow: 300,
-    userTier: 'Hobbyist tier',
+    userTier: 'Starter tier',
     sufficientBalance: true,
   };
 

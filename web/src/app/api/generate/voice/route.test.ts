@@ -24,7 +24,13 @@ vi.mock('@/lib/generate/elevenlabsClient', () => ({
   },
 }));
 vi.mock('@/lib/monitoring/sentry-server');
-vi.mock('@/lib/tokens/pricing', () => ({ getTokenCost: vi.fn().mockReturnValue(10) }));
+// Only `getTokenCost` is stubbed. Replacing the whole module drops its
+// constants, and anything the route pulls in transitively that reads one
+// (`billing/tierPlans` reads TIER_MONTHLY_TOKENS) fails to load at import time.
+vi.mock('@/lib/tokens/pricing', async () => ({
+  ...(await vi.importActual<typeof import('@/lib/tokens/pricing')>('@/lib/tokens/pricing')),
+  getTokenCost: vi.fn().mockReturnValue(10),
+}));
 vi.mock('@/lib/rateLimit', () => ({
   rateLimit: vi.fn(),
   rateLimitResponse: vi.fn().mockReturnValue(new Response('Rate Limited', { status: 429 })),

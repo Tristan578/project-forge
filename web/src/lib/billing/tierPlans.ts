@@ -66,3 +66,95 @@ export function formatLimit(limit: number): string {
 export function formatPrice(cents: number): string {
   return `$${Math.round(cents / 100)}`;
 }
+
+/** `3 projects`, `1 project`, `Unlimited projects`. */
+export function countLabel(limit: number, singular: string, plural: string): string {
+  return `${formatLimit(limit)} ${limit === 1 ? singular : plural}`;
+}
+
+/**
+ * What each tier can do, beyond the numbers.
+ *
+ * Every line here is traceable to the code that enforces it. That constraint is
+ * the whole point of this module: the pricing surfaces used to carry claims
+ * ("Unlimited AI chat", "Remove branding", "Team collaboration", "Custom
+ * domain") that no gate implemented and no feature existed for.
+ *
+ * - `starter` has no AI at all. `/api/chat` rejects it (`assertTier`), the key
+ *   resolver rejects it, and `PANEL_TIER_REQUIREMENTS` gates every AI panel at
+ *   `hobbyist` or above — a free user can open none of them.
+ * - `hobbyist` unlocks AI chat, the generation panels, and BYOK (`/api/keys`).
+ *   Chat is rate limited to 10 requests/minute, so it is never "unlimited".
+ * - `creator` adds the platform MCP key (`/api/keys/api-key`) and the
+ *   creator-gated panels in `PANEL_TIER_REQUIREMENTS`.
+ * - `pro` reaches platform keys without a token balance (`resolver.ts` exempts
+ *   it from the balance check) and the four pro-only panels.
+ */
+const TIER_CAPABILITIES: Record<TierKey, readonly string[]> = {
+  starter: ['Full editor and local export', 'No AI features'],
+  hobbyist: ['AI chat and asset generation', 'Bring your own AI keys (BYOK)'],
+  creator: ['MCP access for external AI tools', 'Advanced AI panels'],
+  pro: ['Platform AI keys, no balance required', 'Pro AI panels'],
+};
+
+/** A plan exactly as it should be presented to a user. */
+export interface TierPlan {
+  key: TierKey;
+  /** Public plan name. Never the raw key. */
+  name: string;
+  priceCents: number;
+  /** `$0`, `$9`, `$29`, `$79`. */
+  price: string;
+  /** Feature bullets, derived from the enforced limits and capabilities. */
+  features: readonly string[];
+}
+
+/**
+ * The four plans, in ascending order, with every quantified claim derived from
+ * the limit map that enforces it rather than restated as prose. A limit change
+ * moves the marketing copy in the same commit, which is the only reliable way
+ * to keep the two in step.
+ *
+ * `ENTITY_LIMITS` is deliberately absent: it is declared but no code path reads
+ * it, so an entity cap is not a limit we can honestly quote.
+ */
+export const TIER_PLANS: readonly TierPlan[] = TIER_KEYS.map((key) => ({
+  key,
+  name: TIER_DISPLAY_NAMES[key],
+  priceCents: TIER_PRICE_CENTS[key],
+  price: formatPrice(TIER_PRICE_CENTS[key]),
+  features: [
+    countLabel(PROJECT_LIMITS[key], 'cloud project', 'cloud projects'),
+    countLabel(PUBLISH_LIMITS[key], 'published game', 'published games'),
+    ...(key === 'starter'
+      ? []
+      : [`${formatLimit(TIER_MONTHLY_TOKENS[key])} AI tokens/month`]),
+    ...TIER_CAPABILITIES[key],
+  ],
+}));
+
+/**
+ * True when a feature bullet states an absence ("No AI features") rather than an
+ * inclusion. Every surface that lists these bullets must mark them as a
+ * constraint — a green check beside "No AI features" reads as the opposite of
+ * what it says.
+ */
+export function isExclusionFeature(feature: string): boolean {
+  return feature.startsWith('No ');
+}
+
+/** Looks a plan up by its internal billing key. */
+export function getTierPlan(key: TierKey): TierPlan {
+  const plan = TIER_PLANS.find((p) => p.key === key);
+  // TIER_PLANS is built from TIER_KEYS, so this cannot miss for a valid key.
+  if (!plan) throw new Error(`Unknown tier: ${key}`);
+  return plan;
+}
+
+/**
+ * One-line plan summary for metadata descriptions and structured data, e.g.
+ * `Free ($0/mo)`.
+ */
+export function tierSummary(plan: TierPlan): string {
+  return `${plan.name} (${plan.price}/mo)`;
+}

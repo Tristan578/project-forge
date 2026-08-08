@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, within } from '@/test/utils/componentTestUtils';
 import { RENDERED_TEXT_CLAIMS } from '@/test/utils/socialProofPatterns';
+import { TIER_PLANS } from '@/lib/billing/tierPlans';
 import LandingPage from '../LandingPage';
 
 vi.mock('next/cache', () => ({
@@ -54,6 +55,7 @@ vi.mock('lucide-react', () => {
     ArrowRight: icon,
     Check: icon,
     Minus: icon,
+    X: icon,
     Zap: icon,
     Shield: icon,
     Gamepad2: icon,
@@ -133,16 +135,49 @@ describe('LandingPage', () => {
     expect(screen.getByText('One-click web publish').textContent).toBe('One-click web publish');
   });
 
-  it('renders all 4 pricing tiers with correct prices per spec', () => {
-    expect(screen.getByText('$0').textContent).toBe('$0');
-    expect(screen.getByText('$9').textContent).toBe('$9');
-    expect(screen.getByText('$29').textContent).toBe('$29');
-    expect(screen.getByText('$99').textContent).toBe('$99');
+  it('renders all 4 pricing tiers with the names and prices billing enforces', () => {
+    // Derived from TIER_PLANS rather than restated: this page used to name two
+    // plans by their internal billing keys ("Hobbyist", "Pro") and charge $99
+    // for the plan the pricing cards sold at $79.
+    for (const plan of TIER_PLANS) {
+      expect(screen.getByText(plan.name).textContent).toBe(plan.name);
+      expect(screen.getByText(plan.price).textContent).toBe(plan.price);
+    }
+  });
 
-    expect(screen.getByText('Starter').textContent).toBe('Starter');
-    expect(screen.getByText('Hobbyist').textContent).toBe('Hobbyist');
-    expect(screen.getByText('Creator').textContent).toBe('Creator');
-    expect(screen.getByText('Pro').textContent).toBe('Pro');
+  it('never renders an internal billing key as a plan name', () => {
+    // 'starter' and 'creator' are both keys AND display names, so only the two
+    // keys that are not public names can be asserted absent.
+    for (const key of ['Hobbyist', 'Pro'] as const) {
+      expect(screen.queryByText(key)).toBeNull();
+    }
+  });
+
+  it('quotes each tier\'s feature list from the plan that enforces it', () => {
+    for (const plan of TIER_PLANS) {
+      const heading = screen.getByText(plan.name);
+      const card = heading.closest('div');
+      expect(card).not.toBeNull();
+      for (const feature of plan.features) {
+        expect(card?.textContent).toContain(feature);
+      }
+    }
+  });
+
+  it('does not sell a feature no code path implements', () => {
+    // Each shipped on this page with nothing behind it — no gate, no route,
+    // no flag. PF-1021 exists because they were sold anyway.
+    const copy = document.body.textContent ?? '';
+    for (const claim of [
+      'Custom domain',
+      'Remove branding',
+      'Team collaboration',
+      'Custom integrations',
+      'Unlimited AI chat',
+      'Priority support',
+    ]) {
+      expect(copy).not.toContain(claim);
+    }
   });
 
   it('highlights the Creator tier as "Most Popular"', () => {

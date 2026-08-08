@@ -9,6 +9,11 @@ import {
   TIER_MONTHLY_TOKENS,
   formatLimit,
   formatPrice,
+  countLabel,
+  isExclusionFeature,
+  getTierPlan,
+  tierSummary,
+  TIER_PLANS,
 } from '../tierPlans';
 
 /**
@@ -131,6 +136,78 @@ describe('tierPlans', () => {
         '$29',
         '$79',
       ]);
+    });
+  });
+
+  describe('countLabel', () => {
+    it('agrees the noun with the count', () => {
+      expect(countLabel(1, 'published game', 'published games')).toBe('1 published game');
+      expect(countLabel(3, 'cloud project', 'cloud projects')).toBe('3 cloud projects');
+      expect(countLabel(0, 'cloud project', 'cloud projects')).toBe('0 cloud projects');
+    });
+
+    it('pluralizes an unbounded limit', () => {
+      expect(countLabel(Infinity, 'cloud project', 'cloud projects')).toBe(
+        'Unlimited cloud projects'
+      );
+    });
+  });
+
+  describe('isExclusionFeature', () => {
+    it('recognizes the free tier absence bullet', () => {
+      // A surface that puts a check mark beside every bullet turns "No AI
+      // features" into a promise of AI features.
+      expect(isExclusionFeature('No AI features')).toBe(true);
+      expect(isExclusionFeature('AI chat and asset generation')).toBe(false);
+    });
+
+    it('does not misread a feature that merely starts with the letters', () => {
+      expect(isExclusionFeature('Node-based visual scripting')).toBe(false);
+    });
+
+    it('classifies every feature the free tier lists', () => {
+      const free = getTierPlan('starter');
+      expect(free.features.filter(isExclusionFeature)).toEqual(['No AI features']);
+    });
+  });
+
+  describe('TIER_PLANS', () => {
+    it('carries one plan per tier, in tier order', () => {
+      expect(TIER_PLANS.map((p) => p.key)).toEqual([...TIER_KEYS]);
+    });
+
+    it('gives every plan at least one feature to show', () => {
+      for (const plan of TIER_PLANS) {
+        expect(plan.features.length, plan.key).toBeGreaterThan(0);
+      }
+    });
+
+    it('never repeats a feature within a plan', () => {
+      for (const plan of TIER_PLANS) {
+        expect(new Set(plan.features).size, plan.key).toBe(plan.features.length);
+      }
+    });
+  });
+
+  describe('getTierPlan', () => {
+    it('returns the plan whose name and price the cards render', () => {
+      const plan = getTierPlan('hobbyist');
+      expect(plan.name).toBe('Starter');
+      expect(plan.price).toBe('$9');
+      expect(plan.priceCents).toBe(900);
+    });
+
+    it('throws rather than returning undefined for an unknown tier', () => {
+      // Callers interpolate the result straight into copy. A silent `undefined`
+      // ships "The undefined tier cannot use AI generation" to a user.
+      expect(() => getTierPlan('enterprise' as never)).toThrow(/enterprise/);
+    });
+  });
+
+  describe('tierSummary', () => {
+    it('names the plan and its price in one phrase', () => {
+      expect(tierSummary(getTierPlan('pro'))).toBe('Studio ($79/mo)');
+      expect(tierSummary(getTierPlan('starter'))).toBe('Free ($0/mo)');
     });
   });
 });

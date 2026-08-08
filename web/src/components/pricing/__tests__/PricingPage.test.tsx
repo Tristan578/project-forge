@@ -6,6 +6,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@/test/utils/componentTestUtils';
 import { PricingPage } from '../PricingPage';
+import {
+  TIER_PLANS,
+  PROJECT_LIMITS,
+  PUBLISH_LIMITS,
+  formatLimit,
+} from '@/lib/billing/tierPlans';
 
 vi.mock('@clerk/nextjs', () => ({
   useAuth: vi.fn(() => ({ isSignedIn: false })),
@@ -115,6 +121,58 @@ describe('PricingPage', () => {
     render(<PricingPage />);
     const checks = screen.getAllByTestId('check-icon');
     expect(checks.length).toBeGreaterThan(0);
+  });
+
+  describe('claims match what the code enforces', () => {
+    it('quotes each tier\'s project and publish limits from the maps that enforce them', () => {
+      render(<PricingPage />);
+
+      for (const plan of TIER_PLANS) {
+        const card = screen.getByTestId(`pricing-card-${plan.key}`);
+        const projects = PROJECT_LIMITS[plan.key];
+        const published = PUBLISH_LIMITS[plan.key];
+
+        expect(card.textContent).toContain(
+          `${formatLimit(projects)} ${projects === 1 ? 'cloud project' : 'cloud projects'}`,
+        );
+        expect(card.textContent).toContain(
+          `${formatLimit(published)} ${published === 1 ? 'published game' : 'published games'}`,
+        );
+      }
+    });
+
+    it('does not sell a feature no code path implements', () => {
+      const { container } = render(<PricingPage />);
+      const copy = container.textContent ?? '';
+
+      // Each of these shipped on a pricing surface with nothing behind it:
+      // no gate, no route, no flag. Selling them is the defect PF-1021 exists
+      // to fix, so the page must never carry them again.
+      for (const claim of [
+        'Custom domain',
+        'Remove branding',
+        'Team collaboration',
+        'Custom integrations',
+        'Unlimited AI chat',
+        'dedicated support',
+      ]) {
+        expect(copy).not.toContain(claim);
+      }
+    });
+
+    it('does not quote an entity cap, because nothing enforces one', () => {
+      // ENTITY_LIMITS is declared but read by no code path, so a per-project
+      // entity cap is not a limit we can honestly put on a card.
+      const { container } = render(<PricingPage />);
+      expect(container.textContent ?? '').not.toContain('entities');
+    });
+
+    it('marks the free tier\'s AI exclusion as an absence, not a feature', () => {
+      render(<PricingPage />);
+      const card = screen.getByTestId('pricing-card-starter');
+      expect(card.textContent).toContain('No AI features');
+      expect(card.querySelectorAll('[data-testid="x-icon"]')).toHaveLength(1);
+    });
   });
 
   describe('handleSubscribe failure feedback', () => {
