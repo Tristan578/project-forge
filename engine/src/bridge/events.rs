@@ -373,14 +373,12 @@ pub fn emit_shader_changed(entity_id: &str, data: Option<&crate::core::shader_ef
 
 /// Emit a terrain changed event for an entity.
 pub fn emit_terrain_changed(entity_id: &str, data: &crate::core::terrain::TerrainData) {
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct TerrainPayload<'a> {
-        entity_id: &'a str,
-        #[serde(flatten)]
-        data: &'a crate::core::terrain::TerrainData,
-    }
-    emit_event("TERRAIN_CHANGED", &TerrainPayload { entity_id, data });
+    // The payload struct lives in `core::terrain` so its wire shape can be pinned
+    // by a native test -- this module is wasm32-only, so a test here never runs.
+    emit_event(
+        "TERRAIN_CHANGED",
+        &crate::core::terrain::TerrainChangedPayload { entity_id, terrain_data: data },
+    );
 }
 
 /// Emit a CSG operation completed event.

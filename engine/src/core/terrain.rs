@@ -858,6 +858,25 @@ impl TerrainChangeEvents {
     }
 }
 
+/// The exact wire shape of a `TERRAIN_CHANGED` event payload.
+///
+/// This lives in `core`, not in `bridge`, for one reason: `bridge` is compiled
+/// only for `wasm32`, so a `#[cfg(test)]` beside it silently matches zero tests
+/// under native `cargo test`. Declaring the payload here is what lets
+/// `terrain_changed_wire_contract_tests` actually run and pin the shape.
+///
+/// `terrain_data` is deliberately NOT `#[serde(flatten)]`. It used to be, which
+/// put every `TerrainData` field at the top level of the payload while the web
+/// handler read a nested `payload.terrainData` — so the handler stored
+/// `undefined` for every terrain and the inspector rendered nothing. The nested
+/// form matches the sibling `SHADER_CHANGED` payload and `TerrainDataState`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerrainChangedPayload<'a> {
+    pub entity_id: &'a str,
+    pub terrain_data: &'a TerrainData,
+}
+
 /// Queue a `TERRAIN_CHANGED` notification for every terrain whose config was
 /// added or mutated this frame.
 ///
@@ -973,5 +992,80 @@ mod terrain_change_event_tests {
         assert_eq!(emitted.len(), 2);
         assert_eq!(emitted[0].0, "terrain-1");
         assert_eq!(emitted[1].0, "terrain-2");
+    }
+}
+
+#[cfg(test)]
+mod terrain_changed_wire_contract_tests {
+    use super::*;
+
+    /// The single source of truth for the `TERRAIN_CHANGED` wire shape, shared
+    /// with the web handler's test (`web/src/hooks/events/__tests__/
+    /// materialEvents.test.ts`), which parses this same file.
+    ///
+    /// `include_str!` rather than a runtime read on purpose: if the fixture is
+    /// moved or deleted, that is a compile error here instead of a test that
+    /// quietly stops covering the boundary. It is inside `#[cfg(test)]`, so the
+    /// wasm build never reaches across into `web/`.
+    const FIXTURE: &str =
+        include_str!("../../../web/src/hooks/events/__tests__/fixtures/terrainChanged.json");
+
+    fn fixture() -> serde_json::Value {
+        serde_json::from_str(FIXTURE).expect("terrainChanged.json is not valid JSON")
+    }
+
+    /// Both halves of the bridge are pinned to one file, so the engine cannot
+    /// change what it emits without failing here, and the web handler cannot
+    /// change what it reads without failing its own test against the same bytes.
+    #[test]
+    fn payload_serializes_to_the_shared_fixture() {
+        let data = TerrainData::default();
+        let payload = TerrainChangedPayload { entity_id: "terrain-789", terrain_data: &data };
+
+        assert_eq!(
+            serde_json::to_value(&payload).expect("payload must serialize"),
+            fixture(),
+            "TERRAIN_CHANGED payload drifted from the fixture the web handler is tested against"
+        );
+    }
+
+    /// Guards the specific regression: `#[serde(flatten)]` on `terrain_data`
+    /// hoists all eight `TerrainData` fields to the top level, which the web
+    /// handler reads as `payload.terrainData === undefined`. Full-value equality
+    /// above already catches it; this names it so the failure is diagnosable.
+    #[test]
+    fn terrain_data_is_nested_not_flattened() {
+        let data = TerrainData::default();
+        let payload = TerrainChangedPayload { entity_id: "terrain-789", terrain_data: &data };
+        let value = serde_json::to_value(&payload).expect("payload must serialize");
+
+        let mut keys: Vec<&str> = value
+            .as_object()
+            .expect("payload must be a JSON object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+
+        assert_eq!(
+            keys,
+            ["entityId", "terrainData"],
+            "TERRAIN_CHANGED must nest the config under `terrainData`; flattening it \
+             puts the noise fields at the top level and the web handler reads undefined"
+        );
+        assert!(
+            value["terrainData"].get("noiseType").is_some(),
+            "nested config must carry the camelCase TerrainData fields"
+        );
+    }
+
+    /// The fixture is only meaningful if it round-trips back into the real type:
+    /// a hand-edited fixture with a misspelled or missing field would otherwise
+    /// still satisfy a web test written against the same typo.
+    #[test]
+    fn fixture_deserializes_back_into_terrain_data() {
+        let parsed: TerrainData = serde_json::from_value(fixture()["terrainData"].clone())
+            .expect("fixture terrainData must deserialize into TerrainData");
+        assert_eq!(parsed, TerrainData::default());
     }
 }
