@@ -341,6 +341,7 @@ impl Plugin for SelectionPlugin {
             .init_resource::<core::lod::SimplificationBackend>()
             .init_resource::<core::custom_wgsl::CustomShaderRegistry>()
             .init_resource::<core::sprite::SortingLayerConfig>()
+            .init_resource::<core::terrain::TerrainChangeEvents>()
             .init_resource::<scripts::PlayTickCache>()
             .add_message::<SelectionChangedEvent>();
 
@@ -574,11 +575,17 @@ impl Plugin for SelectionPlugin {
                 ).in_set(EditorSystemSet))
                 // Terrain create/edit. Separate `add_systems` call rather than
                 // growing the tuple above, to stay clear of the tuple limit.
+                // `.chain()` is load-bearing: the collector reads
+                // `Changed<TerrainData>`, so it MUST run after the three drains
+                // that write it, or a spawn/update lands one frame before the
+                // event that tells the shell about it.
                 .add_systems(Update, (
                     entity_factory::apply_terrain_spawn_requests,
                     entity_factory::apply_terrain_updates,
                     entity_factory::apply_terrain_sculpts,
-                ).in_set(EditorSystemSet))
+                    core::terrain::collect_terrain_changes,
+                    procedural::emit_terrain_changes,
+                ).chain().in_set(EditorSystemSet))
                 .add_systems(Update, (
                     physics::apply_debug_physics_toggle,
                     physics::apply_create_joint_requests,

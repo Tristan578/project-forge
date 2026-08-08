@@ -823,3 +823,155 @@ mod terrain_patch_tests {
         assert_eq!(merged.resolution, original.resolution);
     }
 }
+
+/// Terrain config changes waiting to be emitted to the JS shell.
+///
+/// The bridge had exactly one `TERRAIN_CHANGED` emitter and it fired only in
+/// response to an explicit `get_terrain` query — which nothing in the web app
+/// ever dispatched. So `editorStore.terrainData` stayed `{}` for the whole
+/// session: spawning a terrain, editing its noise config, or loading a scene
+/// containing one all left the Terrain inspector blank, and the user had no way
+/// to see or re-edit the terrain they had just created.
+///
+/// This resource is the core-side half of the fix, so the "what changed"
+/// decision is unit-testable natively; `bridge` only drains it and calls
+/// `emit_terrain_changed`.
+#[derive(Resource, Debug, Default)]
+pub struct TerrainChangeEvents {
+    pending: Vec<(String, TerrainData)>,
+}
+
+impl TerrainChangeEvents {
+    /// Drain every queued change. Draining is the only read path, so a change
+    /// cannot be emitted twice.
+    pub fn take(&mut self) -> Vec<(String, TerrainData)> {
+        std::mem::take(&mut self.pending)
+    }
+
+    /// Number of queued changes, for tests and diagnostics.
+    pub fn len(&self) -> usize {
+        self.pending.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+    }
+}
+
+/// Queue a `TERRAIN_CHANGED` notification for every terrain whose config was
+/// added or mutated this frame.
+///
+/// `Changed<TerrainData>` covers insertion as well as mutation, so a freshly
+/// spawned terrain and a scene-load restore both notify without a second system.
+pub fn collect_terrain_changes(
+    changed: Query<(&crate::core::entity_id::EntityId, &TerrainData), Changed<TerrainData>>,
+    mut events: ResMut<TerrainChangeEvents>,
+) {
+    for (entity_id, data) in changed.iter() {
+        events.pending.push((entity_id.0.clone(), data.clone()));
+    }
+}
+
+#[cfg(test)]
+mod terrain_change_event_tests {
+    use super::*;
+    use crate::core::entity_id::EntityId;
+
+    /// A persistent `Schedule`, NOT `run_system_once`.
+    ///
+    /// `Changed<T>` is evaluated against the SYSTEM's own `last_run` tick, and
+    /// `run_system_once` builds a fresh system every call whose `last_run` is
+    /// zero — so every entity reads as changed on every invocation and a
+    /// "nothing changed this frame" assertion can never fail. The regression
+    /// this system exists to prevent (re-emitting on a quiet frame) is invisible
+    /// under that harness.
+    struct Harness {
+        world: World,
+        schedule: Schedule,
+    }
+
+    impl Harness {
+        fn new() -> Self {
+            let mut world = World::new();
+            world.insert_resource(TerrainChangeEvents::default());
+            let mut schedule = Schedule::default();
+            schedule.add_systems(collect_terrain_changes);
+            Self { world, schedule }
+        }
+
+        /// Advance one frame and drain whatever the system queued.
+        fn frame(&mut self) -> Vec<(String, TerrainData)> {
+            self.schedule.run(&mut self.world);
+            self.world.resource_mut::<TerrainChangeEvents>().take()
+        }
+    }
+
+    #[test]
+    fn a_newly_spawned_terrain_queues_one_change() {
+        let mut h = Harness::new();
+        let config = TerrainData { seed: 4242, resolution: 8, size: 7.0, ..Default::default() };
+        h.world.spawn((EntityId::new("terrain-1"), config.clone()));
+
+        let emitted = h.frame();
+
+        assert_eq!(emitted.len(), 1, "an inserted TerrainData counts as changed");
+        assert_eq!(emitted[0].0, "terrain-1");
+        assert_eq!(emitted[0].1, config);
+    }
+
+    #[test]
+    fn an_unchanged_terrain_queues_nothing_on_a_later_frame() {
+        let mut h = Harness::new();
+        h.world.spawn((EntityId::new("terrain-1"), TerrainData::default()));
+        assert_eq!(h.frame().len(), 1);
+
+        assert!(
+            h.frame().is_empty(),
+            "a quiet frame must not re-emit — the JS shell would rebuild the \
+             inspector on every tick",
+        );
+    }
+
+    #[test]
+    fn mutating_the_config_queues_the_new_value() {
+        let mut h = Harness::new();
+        let entity = h
+            .world
+            .spawn((EntityId::new("terrain-1"), TerrainData::default()))
+            .id();
+        let _ = h.frame();
+
+        h.world.entity_mut(entity).get_mut::<TerrainData>().unwrap().seed = 999;
+
+        let emitted = h.frame();
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].1.seed, 999, "the emitted payload must be the NEW config");
+    }
+
+    #[test]
+    fn taking_drains_so_a_change_is_never_emitted_twice() {
+        let mut h = Harness::new();
+        h.world.spawn((EntityId::new("terrain-1"), TerrainData::default()));
+
+        assert_eq!(h.frame().len(), 1);
+        assert!(
+            h.world.resource::<TerrainChangeEvents>().is_empty(),
+            "take() must leave the queue empty",
+        );
+    }
+
+    #[test]
+    fn every_changed_terrain_is_reported_not_just_the_first() {
+        let mut h = Harness::new();
+        h.world.spawn((EntityId::new("terrain-1"), TerrainData::default()));
+        h.world
+            .spawn((EntityId::new("terrain-2"), TerrainData { seed: 7, ..Default::default() }));
+
+        let mut emitted = h.frame();
+        emitted.sort_by(|a, b| a.0.cmp(&b.0));
+
+        assert_eq!(emitted.len(), 2);
+        assert_eq!(emitted[0].0, "terrain-1");
+        assert_eq!(emitted[1].0, "terrain-2");
+    }
+}

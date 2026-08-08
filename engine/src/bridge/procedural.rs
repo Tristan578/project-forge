@@ -552,3 +552,18 @@ pub(super) fn apply_lathe_requests(
         emit_procedural_mesh_created(&entity_id_str, &name, "lathe");
     }
 }
+
+/// Forward queued terrain config changes to the JS shell.
+///
+/// `core::terrain::collect_terrain_changes` does the ECS half (it owns the
+/// `Changed<TerrainData>` filter and is natively testable); this is the thin
+/// wasm-only half that actually calls out to JS. Without it `TERRAIN_CHANGED`
+/// only ever fired in response to an explicit `get_terrain` query — which
+/// nothing in the web app sends — so `editorStore.terrainData` stayed `{}`
+/// forever and the Terrain inspector was blank after every spawn, update and
+/// sculpt.
+pub(super) fn emit_terrain_changes(mut changes: ResMut<core::terrain::TerrainChangeEvents>) {
+    for (entity_id, data) in changes.take() {
+        events::emit_terrain_changed(&entity_id, &data);
+    }
+}
