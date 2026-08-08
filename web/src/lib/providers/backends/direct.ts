@@ -8,6 +8,11 @@
  */
 
 import type { ProviderBackend, ProviderCapability } from '../types';
+import {
+  PLATFORM_KEY_ENV,
+  getPlatformKeyEnvVar,
+  type PlatformKeyProvider,
+} from '@/lib/config/providers';
 
 /** All capabilities — direct backend is the universal catch-all */
 const ALL_CAPABILITIES: ReadonlyArray<ProviderCapability> = [
@@ -24,40 +29,37 @@ const ALL_CAPABILITIES: ReadonlyArray<ProviderCapability> = [
 ];
 
 /**
- * Maps capability to the environment variable holding the platform key.
- * For capabilities that need multiple providers, the primary one is listed.
+ * Maps capability to the provider that serves it directly. For capabilities
+ * that could use several providers, the primary one is listed.
+ *
+ * Keyed on provider rather than on the env-var name so the env names have a
+ * single source (`PLATFORM_KEY_ENV`) and a typo here fails `tsc` instead of
+ * silently reading an unset variable. Before PF-1054 this table held its own
+ * hardcoded copy of the names, which is exactly the drift that put two
+ * permanent false outages on the status page.
  */
-const CAPABILITY_ENV_MAP: Record<ProviderCapability, string> = {
-  chat: 'ANTHROPIC_API_KEY',
-  embedding: 'PLATFORM_OPENAI_KEY',
-  image: 'PLATFORM_OPENAI_KEY',
-  model3d: 'PLATFORM_MESHY_KEY',
-  texture: 'PLATFORM_MESHY_KEY',
-  sfx: 'PLATFORM_ELEVENLABS_KEY',
-  voice: 'PLATFORM_ELEVENLABS_KEY',
-  music: 'PLATFORM_SUNO_KEY',
-  sprite: 'PLATFORM_REPLICATE_KEY',
-  bg_removal: 'PLATFORM_REMOVEBG_KEY',
-};
-
-/** Maps a named direct provider to its environment variable */
-const DIRECT_PROVIDER_ENV: Record<string, string> = {
-  anthropic: 'ANTHROPIC_API_KEY',
-  openai: 'PLATFORM_OPENAI_KEY',
-  meshy: 'PLATFORM_MESHY_KEY',
-  hyper3d: 'PLATFORM_HYPER3D_KEY',
-  elevenlabs: 'PLATFORM_ELEVENLABS_KEY',
-  suno: 'PLATFORM_SUNO_KEY',
-  replicate: 'PLATFORM_REPLICATE_KEY',
-  removebg: 'PLATFORM_REMOVEBG_KEY',
+const CAPABILITY_PROVIDER_MAP: Record<ProviderCapability, PlatformKeyProvider> = {
+  chat: 'anthropic',
+  embedding: 'openai',
+  image: 'openai',
+  model3d: 'meshy',
+  texture: 'meshy',
+  sfx: 'elevenlabs',
+  voice: 'elevenlabs',
+  music: 'suno',
+  sprite: 'replicate',
+  bg_removal: 'removebg',
 };
 
 /**
  * Get the platform key for a named provider.
  * Returns the key string or null if not configured.
+ *
+ * The provider -> env-var table lives in `@/lib/config/providers`; this file
+ * carried a value-identical private copy until PF-1054.
  */
 export function getDirectProviderKey(provider: string): string | null {
-  const envVar = DIRECT_PROVIDER_ENV[provider];
+  const envVar = getPlatformKeyEnvVar(provider);
   if (!envVar) return null;
   return process.env[envVar] ?? null;
 }
@@ -71,7 +73,7 @@ export function isDirectProviderConfigured(provider: string): boolean {
 
 /** Get the primary API key for a capability via the direct path */
 function getKeyForCapability(capability: ProviderCapability): string {
-  const envVar = CAPABILITY_ENV_MAP[capability];
+  const envVar = PLATFORM_KEY_ENV[CAPABILITY_PROVIDER_MAP[capability]];
   return process.env[envVar] ?? '';
 }
 
@@ -82,7 +84,7 @@ export const directBackend: ProviderBackend = {
 
   isConfigured(): boolean {
     // Configured if any platform key is set
-    return Object.values(DIRECT_PROVIDER_ENV).some(
+    return Object.values(PLATFORM_KEY_ENV).some(
       (envVar) => Boolean(process.env[envVar])
     );
   },
@@ -90,7 +92,7 @@ export const directBackend: ProviderBackend = {
   getApiKey(): string {
     // Return Anthropic key as the primary key for general use;
     // callers should use getDirectProviderKey() for specific providers
-    return process.env.ANTHROPIC_API_KEY ?? '';
+    return process.env[PLATFORM_KEY_ENV.anthropic] ?? '';
   },
 
   getEndpoint(): string {

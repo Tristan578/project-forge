@@ -6,19 +6,20 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { ASSET_STORAGE_ENV } from '@/lib/config/assetStorage';
 
 let client: S3Client | null = null;
 
 function getR2Client(): S3Client {
   if (client) return client;
 
-  const accountId = process.env.ASSET_R2_ACCOUNT_ID;
-  const accessKeyId = process.env.ASSET_R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.ASSET_R2_SECRET_ACCESS_KEY;
+  const accountId = process.env[ASSET_STORAGE_ENV.accountId];
+  const accessKeyId = process.env[ASSET_STORAGE_ENV.accessKeyId];
+  const secretAccessKey = process.env[ASSET_STORAGE_ENV.secretAccessKey];
 
   if (!accountId || !accessKeyId || !secretAccessKey) {
     throw new Error(
-      'R2 storage not configured. Set ASSET_R2_ACCOUNT_ID, ASSET_R2_ACCESS_KEY_ID, ASSET_R2_SECRET_ACCESS_KEY.'
+      `R2 storage not configured. Set ${ASSET_STORAGE_ENV.accountId}, ${ASSET_STORAGE_ENV.accessKeyId}, ${ASSET_STORAGE_ENV.secretAccessKey}.`
     );
   }
 
@@ -32,8 +33,8 @@ function getR2Client(): S3Client {
 }
 
 function getBucket(): string {
-  const bucket = process.env.ASSET_BUCKET_NAME;
-  if (!bucket) throw new Error('ASSET_BUCKET_NAME not configured');
+  const bucket = process.env[ASSET_STORAGE_ENV.bucketName];
+  if (!bucket) throw new Error(`${ASSET_STORAGE_ENV.bucketName} not configured`);
   return bucket;
 }
 

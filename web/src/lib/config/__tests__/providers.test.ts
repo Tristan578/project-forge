@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
+  CHAT_BACKEND_ENV_VARS,
   PROVIDER_NAMES,
   BYOK_PROVIDERS,
   BACKEND_IDS,
@@ -247,5 +248,65 @@ describe('CIRCUIT_BREAKER_DEFAULTS', () => {
 
   it('has positive costAnomalyMultiplier', () => {
     expect(CIRCUIT_BREAKER_DEFAULTS.costAnomalyMultiplier).toBeGreaterThan(1);
+  });
+});
+
+describe('isVercelRuntime / resolveConfiguredChatBackend', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    // Blank every chat-backend key so the resolver's answer is decided purely
+    // by the Vercel signal under test, not by whatever the shell exports.
+    for (const envVar of CHAT_BACKEND_ENV_VARS) vi.stubEnv(envVar, '');
+    vi.stubEnv('VERCEL', '');
+    vi.stubEnv('VERCEL_ENV', '');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('is false when neither VERCEL nor VERCEL_ENV is set', async () => {
+    const { isVercelRuntime } = await import('../providers');
+    expect(isVercelRuntime()).toBe(false);
+  });
+
+  it('is true on VERCEL alone', async () => {
+    vi.stubEnv('VERCEL', '1');
+    const { isVercelRuntime } = await import('../providers');
+    expect(isVercelRuntime()).toBe(true);
+  });
+
+  // `vercel env pull` writes VERCEL_ENV into .env.local without VERCEL, so this
+  // is a real environment, not a hypothetical one.
+  it('is true on VERCEL_ENV alone', async () => {
+    vi.stubEnv('VERCEL_ENV', 'production');
+    const { isVercelRuntime } = await import('../providers');
+    expect(isVercelRuntime()).toBe(true);
+  });
+
+  it('resolves the gateway with no key when only VERCEL_ENV is set', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    const { resolveConfiguredChatBackend } = await import('../providers');
+    expect(resolveConfiguredChatBackend()?.id).toBe('vercel-gateway');
+  });
+
+  it('resolves nothing when no key and no Vercel signal is present', async () => {
+    const { resolveConfiguredChatBackend } = await import('../providers');
+    expect(resolveConfiguredChatBackend()).toBeNull();
+  });
+
+  // The regression this guards: the health check said "no chat backend
+  // configured" while the gateway was happily serving chat off OIDC, which
+  // reads as an AI outage on the public status page. Whatever the backend that
+  // actually serves traffic believes, the reporter must believe too.
+  it.each([
+    ['VERCEL', '1'],
+    ['VERCEL_ENV', 'production'],
+  ])('agrees with vercelGatewayBackend.isConfigured() on %s alone', async (envVar, value) => {
+    vi.stubEnv(envVar, value);
+    const { resolveConfiguredChatBackend } = await import('../providers');
+    const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
+    expect(vercelGatewayBackend.isConfigured()).toBe(true);
+    expect(resolveConfiguredChatBackend()?.id).toBe(vercelGatewayBackend.id);
   });
 });

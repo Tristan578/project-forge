@@ -130,6 +130,25 @@ describe('GET /api/capabilities', () => {
     expect(chat.available).toBe(true);
   });
 
+  // `vercel env pull` writes VERCEL_ENV without VERCEL, and the gateway backend
+  // treats either as OIDC-capable. When this route accepted only VERCEL it
+  // reported chat unavailable in exactly the environment the gateway was
+  // serving it in.
+  it('marks chat available via AI Gateway when only VERCEL_ENV is set', async () => {
+    for (const key of ['VERCEL', 'AI_GATEWAY_API_KEY', 'OPENROUTER_API_KEY', 'GITHUB_MODELS_PAT', 'ANTHROPIC_API_KEY']) {
+      delete process.env[key];
+    }
+    process.env.VERCEL_ENV = 'production';
+
+    const { GET } = await import('./route');
+    const req = new NextRequest(BASE_URL);
+    const res = await GET(req);
+    const body = await res.json();
+
+    const chat = body.capabilities.find((c: { capability: string }) => c.capability === 'chat');
+    expect(chat.available).toBe(true);
+  });
+
   it('does not include requiredProviders for available capabilities', async () => {
     process.env.ANTHROPIC_API_KEY = 'sk-test';
 

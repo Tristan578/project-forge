@@ -92,7 +92,7 @@ describe('validateEnv', () => {
       vi.stubEnv('SENTRY_DSN', 'https://xxx@sentry.io/123');
       vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://xxx@sentry.io/123');
       vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test');
-      vi.stubEnv('CLOUDFLARE_ACCOUNT_ID', '0b949ff499d179e24dde841f71d6134f');
+      vi.stubEnv('ASSET_R2_ACCOUNT_ID', '0b949ff499d179e24dde841f71d6134f');
       vi.stubEnv('ADMIN_USER_IDS', 'user_abc123');
 
       const { validateEnvironment } = await import('../validateEnv');
@@ -270,7 +270,7 @@ describe('validateEnv', () => {
       const { OPTIONAL_VARS } = await import('../validateEnv');
       const keys = OPTIONAL_VARS.map((v) => v.key);
       expect(keys).toContain('NEXT_PUBLIC_POSTHOG_KEY');
-      expect(keys).toContain('CLOUDFLARE_ACCOUNT_ID');
+      expect(keys).toContain('ASSET_R2_ACCOUNT_ID');
       expect(keys).toContain('ANTHROPIC_API_KEY');
     });
 

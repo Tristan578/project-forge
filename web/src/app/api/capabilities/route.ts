@@ -1,51 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { ProviderCapability } from '@/lib/providers/types';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import {
+  PLATFORM_KEY_ENV,
+  GATEWAY_KEY_ENV,
+  CHAT_BACKEND_ENV_VARS,
+  isVercelRuntime,
+} from '@/lib/config/providers';
 
 /**
  * Maps each provider capability to the environment variable(s) that must be set.
- * Mirrors the direct backend's CAPABILITY_ENV_MAP but also includes gateway/router
- * env vars that can provide certain capabilities.
+ * Mirrors the direct backend's CAPABILITY_PROVIDER_MAP but also includes the
+ * gateway/router env vars that can serve certain capabilities.
+ *
+ * Every name comes from `lib/config/providers` — this table held its own
+ * hardcoded copy until PF-1054, which is exactly the drift that put two
+ * permanent false outages on the status page.
  */
 const CAPABILITY_KEY_MAP: Record<ProviderCapability, string[]> = {
-  chat: [
-    'ANTHROPIC_API_KEY',
-    'AI_GATEWAY_API_KEY',
-    'OPENROUTER_API_KEY',
-    'GITHUB_MODELS_PAT',
-  ],
+  // Any chat backend serves chat, so this is precisely the backend table.
+  chat: [...CHAT_BACKEND_ENV_VARS],
   embedding: [
-    'PLATFORM_OPENAI_KEY',
-    'AI_GATEWAY_API_KEY',
-    'OPENROUTER_API_KEY',
-    'GITHUB_MODELS_PAT',
+    PLATFORM_KEY_ENV.openai,
+    GATEWAY_KEY_ENV.vercelGateway,
+    GATEWAY_KEY_ENV.openrouter,
+    GATEWAY_KEY_ENV.githubModels,
   ],
   image: [
-    'PLATFORM_OPENAI_KEY',
-    'AI_GATEWAY_API_KEY',
-    'OPENROUTER_API_KEY',
+    PLATFORM_KEY_ENV.openai,
+    GATEWAY_KEY_ENV.vercelGateway,
+    GATEWAY_KEY_ENV.openrouter,
   ],
-  model3d: ['PLATFORM_MESHY_KEY'],
-  texture: ['PLATFORM_MESHY_KEY'],
-  sfx: ['PLATFORM_ELEVENLABS_KEY'],
-  voice: ['PLATFORM_ELEVENLABS_KEY'],
-  music: ['PLATFORM_SUNO_KEY'],
-  sprite: ['PLATFORM_REPLICATE_KEY'],
-  bg_removal: ['PLATFORM_REMOVEBG_KEY'],
+  model3d: [PLATFORM_KEY_ENV.meshy],
+  texture: [PLATFORM_KEY_ENV.meshy],
+  sfx: [PLATFORM_KEY_ENV.elevenlabs],
+  voice: [PLATFORM_KEY_ENV.elevenlabs],
+  music: [PLATFORM_KEY_ENV.suno],
+  sprite: [PLATFORM_KEY_ENV.replicate],
+  bg_removal: [PLATFORM_KEY_ENV.removebg],
 };
 
 /** Human-readable provider names for each env var */
 const ENV_VAR_PROVIDER_NAMES: Record<string, string> = {
-  ANTHROPIC_API_KEY: 'Anthropic',
-  PLATFORM_OPENAI_KEY: 'OpenAI',
-  PLATFORM_MESHY_KEY: 'Meshy',
-  PLATFORM_ELEVENLABS_KEY: 'ElevenLabs',
-  PLATFORM_SUNO_KEY: 'Suno',
-  PLATFORM_REPLICATE_KEY: 'Replicate',
-  PLATFORM_REMOVEBG_KEY: 'remove.bg',
-  AI_GATEWAY_API_KEY: 'Vercel AI Gateway',
-  OPENROUTER_API_KEY: 'OpenRouter',
-  GITHUB_MODELS_PAT: 'GitHub Models',
+  [PLATFORM_KEY_ENV.anthropic]: 'Anthropic',
+  [PLATFORM_KEY_ENV.openai]: 'OpenAI',
+  [PLATFORM_KEY_ENV.meshy]: 'Meshy',
+  [PLATFORM_KEY_ENV.elevenlabs]: 'ElevenLabs',
+  [PLATFORM_KEY_ENV.suno]: 'Suno',
+  [PLATFORM_KEY_ENV.replicate]: 'Replicate',
+  [PLATFORM_KEY_ENV.removebg]: 'remove.bg',
+  [PLATFORM_KEY_ENV.hyper3d]: 'Hyper3D',
+  [GATEWAY_KEY_ENV.vercelGateway]: 'Vercel AI Gateway',
+  [GATEWAY_KEY_ENV.openrouter]: 'OpenRouter',
+  [GATEWAY_KEY_ENV.githubModels]: 'GitHub Models',
 };
 
 /** User-facing feature names mapped to capabilities */
@@ -105,7 +112,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
   const capabilities: CapabilityStatus[] = allCapabilities.map((cap) => {
     const envVars = CAPABILITY_KEY_MAP[cap];
     // On Vercel, AI Gateway uses OIDC auto-auth (no explicit key needed for chat/embedding)
-    const vercelOidc = Boolean(process.env.VERCEL) && envVars.includes('AI_GATEWAY_API_KEY');
+    const vercelOidc = isVercelRuntime() && envVars.includes(GATEWAY_KEY_ENV.vercelGateway);
     const isAvailable = vercelOidc || envVars.some((envVar) => Boolean(process.env[envVar]));
 
     const status: CapabilityStatus = {

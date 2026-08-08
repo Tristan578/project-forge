@@ -8,6 +8,7 @@
 
 import type { ProviderBackend, ProviderCapability } from '../types';
 import { AI_MODELS } from '@/lib/ai/models';
+import { isVercelRuntime } from '@/lib/config/providers';
 
 const ENDPOINT = 'https://ai-gateway.vercel.sh/v1';
 
@@ -46,11 +47,7 @@ export const vercelGatewayBackend: ProviderBackend = {
   isConfigured(): boolean {
     // Configured if either an explicit key is present or we're on a Vercel deployment
     // (OIDC tokens are injected automatically by the runtime)
-    return Boolean(
-      process.env.AI_GATEWAY_API_KEY ||
-      process.env.VERCEL ||
-      process.env.VERCEL_ENV
-    );
+    return Boolean(process.env.AI_GATEWAY_API_KEY) || isVercelRuntime();
   },
 
   getApiKey(): string {

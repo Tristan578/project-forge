@@ -13,6 +13,7 @@
 // validateEnv is loaded via instrumentation.ts `register()`, which runs in the
 // edge runtime too, where node `crypto` (pulled in by encryption.ts) is unavailable.
 import { MASTER_KEY_HEX } from '@/lib/keys/masterKeyFormat';
+import { ASSET_STORAGE_ENV } from '@/lib/config/assetStorage';
 
 /** Descriptor for a required environment variable. */
 interface RequiredVar {
@@ -72,7 +73,10 @@ const OPTIONAL_VARS: OptionalVar[] = [
     defaultValue: '',
   },
   {
-    key: 'CLOUDFLARE_ACCOUNT_ID',
+    // Not `CLOUDFLARE_ACCOUNT_ID` — that name is read by nothing in this tree.
+    // `lib/storage/r2.ts` (the only R2 consumer) reads the ASSET_* namespace,
+    // and `lib/config/assetStorage.ts` is the single source of those names.
+    key: ASSET_STORAGE_ENV.accountId,
     description: 'Cloudflare account ID for R2 asset storage',
     defaultValue: '',
   },

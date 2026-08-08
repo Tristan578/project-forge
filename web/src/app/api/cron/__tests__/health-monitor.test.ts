@@ -82,7 +82,7 @@ function allHealthyReport() {
     makeService('Engine CDN', 'healthy'),
     makeService('AI Providers', 'healthy'),
     makeService('Clerk', 'healthy'),
-    makeService('Anthropic', 'healthy'),
+    makeService('Chat Backend', 'healthy'),
     makeService('Sentry', 'healthy'),
     makeService('Cloudflare R2', 'healthy'),
   ];

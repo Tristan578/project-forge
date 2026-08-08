@@ -4,6 +4,7 @@ import { users, providerKeys } from '../db/schema';
 import type { Provider } from '../db/schema';
 import { decryptProviderKey } from './encryption';
 import { deductTokens } from '../tokens/service';
+import { PLATFORM_KEY_ENV } from '../config/providers';
 
 export interface ResolvedKey {
   type: 'byok' | 'platform';
@@ -22,19 +23,16 @@ export class ApiKeyError extends Error {
   }
 }
 
-const PLATFORM_KEY_ENV: Record<Provider, string> = {
-  anthropic: 'ANTHROPIC_API_KEY',
-  meshy: 'PLATFORM_MESHY_KEY',
-  hyper3d: 'PLATFORM_HYPER3D_KEY',
-  elevenlabs: 'PLATFORM_ELEVENLABS_KEY',
-  suno: 'PLATFORM_SUNO_KEY',
-  openai: 'PLATFORM_OPENAI_KEY',
-  replicate: 'PLATFORM_REPLICATE_KEY',
-  removebg: 'PLATFORM_REMOVEBG_KEY',
-};
+/**
+ * Completeness guard: every DB `Provider` must have a platform env var in the
+ * shared table. Purely a type assertion — erased at compile time — so adding a
+ * provider to the DB enum without adding its key here fails `tsc` rather than
+ * throwing `undefined` into `process.env[...]` at runtime.
+ */
+const PLATFORM_KEY_ENV_BY_PROVIDER = PLATFORM_KEY_ENV satisfies Record<Provider, string>;
 
 function getPlatformKey(provider: Provider): string {
-  const envVar = PLATFORM_KEY_ENV[provider];
+  const envVar = PLATFORM_KEY_ENV_BY_PROVIDER[provider];
   const key = process.env[envVar];
   if (!key) {
     throw new Error(`Platform key not configured: ${envVar}`);
