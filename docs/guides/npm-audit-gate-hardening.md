@@ -374,3 +374,52 @@ fixed price for some time.
 **If you are extending this suite: budget rounds against the size of the shipped
 change, not the size of the suite around it.** Finding a real defect in round N is
 not evidence that round N was worth its cost.
+
+---
+
+## Addendum (PF-1011 / #9030): extending coverage, not another round
+
+This is deliberately **not** Round 39. Rounds 1–38 were adversarial passes over
+the *same* two-line change; this entry records a **coverage extension** — new
+jobs brought under the existing pins — which is the one kind of edit the closing
+lesson above invites rather than warns against.
+
+**What was uncovered.** `cd.yml` has four deploy jobs. `deploy-staging` and
+`deploy-production` both named `security` in `needs:` and referenced
+`needs.security.result` in `if:`, and the suite pinned both. `deploy-docs` and
+`deploy-design` — each running `vercel deploy --prod --archive=tgz` against a
+production Vercel project (docs.spawnforge.ai, design.spawnforge.ai) — named it
+in neither. A red `check-npm-audit.sh` therefore blocked the web deploy and
+shipped those two, which is the failure mode this entire suite exists to prevent,
+sitting one job over from where it was being prevented.
+
+**Why `== 'success'` and not the `!= 'failure'` idiom** used by the sibling
+lint/typecheck clauses on those same lines: `!= 'failure'` fails OPEN under
+exactly the tampering these pins catch. Remove `security` from the `needs:` list
+and `needs.security.result` is no longer in the needs context, so it resolves to
+null; `null != 'failure'` is TRUE, and with `security` gone the implicit
+`success()` over `needs:` no longer covers it either — the deploy proceeds
+unaudited. `null == 'success'` is false in that same scenario, so the deploy
+skips loudly. That is the property the two already-gated jobs rely on, and it
+also let the new arms reuse the suite's proven needs-element and if-containment
+greps verbatim instead of hand-rolling weaker twins.
+
+**Why a separate loop and not a widened one.** `assert_job_level_keys` is an
+ORDERED byte-exact comparison. deploy-docs/deploy-design are
+`name, needs, if, runs-on, timeout-minutes, permissions, steps`;
+deploy-staging/deploy-production are
+`name, runs-on, timeout-minutes, needs, if, permissions, environment, steps`.
+Folding them together would fail loudly on ordering and on the absent
+`environment:` key. Five pins per job: job-count, ordered job-level keys,
+needs-element, if-containment, and an exact `assert_block_lines_exact` on the
+`if:` block (the containment grep proves the clause is PRESENT; only the exact
+pin proves nothing vacuous was appended beside it).
+
+Each new FAIL line was red-verified by mutation before this shipped: dropping
+`security` from a `needs:` list, deleting the `== 'success'` clause, appending
+`|| true`, and duplicating the `if:` key each redden a specific, named arm.
+
+**Still uncovered, filed separately:** `upload-wasm-cdn` publishes the engine
+WASM to the production R2 bucket behind `engine.spawnforge.ai` with
+`needs: [build-wasm]` and no security gate. Same class of defect, different
+needs-graph; deliberately not folded in here.
