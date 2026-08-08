@@ -2,14 +2,35 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const isPublicRoute = createRouteMatcher([
+/**
+ * Every pattern is an exact path plus an explicit `/(.*)` subtree. Clerk's
+ * `createRouteMatcher` delegates to a vendored pathToRegexp in which a bare
+ * `X(.*)` is a case-insensitive SUFFIX wildcard with no path-segment boundary —
+ * `/sign-in(.*)` would also make a future `/sign-internal` public. The default
+ * here is to protect, so a route becomes public by being listed: the bare form
+ * silently exempts any later sibling that merely shares a name prefix.
+ *
+ * `/robots.txt` and `/sitemap.xml` are listed because the `config.matcher` below
+ * only exempts `_next` and the favicon — without these two entries a crawler
+ * fetching either one receives a 307 to sign-in, which makes the sitemap
+ * `app/sitemap.ts` builds undiscoverable and the crawl policy in
+ * `app/robots.ts` unreadable.
+ */
+export const PUBLIC_ROUTES = [
   '/',
-  '/sign-in(.*)',
-  '/sign-up(.*)',
-  '/api/webhooks(.*)',
+  '/robots.txt',
+  '/sitemap.xml',
+  '/sign-in',
+  '/sign-in/(.*)',
+  '/sign-up',
+  '/sign-up/(.*)',
+  '/api/webhooks',
+  '/api/webhooks/(.*)',
   '/mcp',
   '/mcp/(.*)',
-]);
+];
+
+const isPublicRoute = createRouteMatcher(PUBLIC_ROUTES);
 
 function passThrough() {
   return NextResponse.next();
