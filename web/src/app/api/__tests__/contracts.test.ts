@@ -25,9 +25,33 @@ vi.mock('server-only', () => ({}));
 
 vi.mock('@/lib/rateLimit', () => ({
   rateLimitPublicRoute: vi.fn().mockResolvedValue(null),
+  getClientIp: vi.fn().mockReturnValue('1.2.3.4'),
+  rateLimitResponse: vi.fn(),
+}));
+
+vi.mock('@/lib/monitoring/healthFanoutBudget', () => ({
+  checkHealthFanoutBudget: vi
+    .fn()
+    .mockResolvedValue({ allowed: true, remaining: 29, resetAt: 0 }),
 }));
 
 vi.mock('@/lib/monitoring/healthChecks', () => ({
+  // `/api/health` reads through the shared cache, not `runAllHealthChecks`
+  // directly. A `vi.mock` factory replaces the WHOLE module, so an export the
+  // factory omits is `undefined` at the call site — the route would throw a
+  // TypeError, its catch would turn that into a 500, and the response-shape
+  // contracts below would fail on a mock gap rather than a real regression.
+  getCachedHealthReport: vi.fn().mockResolvedValue({
+    overall: 'healthy',
+    environment: 'test',
+    version: '1.0.0',
+    timestamp: '2026-01-01T00:00:00Z',
+    services: [
+      { name: 'Database (Neon)', status: 'healthy', latencyMs: 5, error: null },
+      { name: 'Auth (Clerk)', status: 'healthy', latencyMs: 3, error: null },
+    ],
+  }),
+  peekCachedHealthReport: vi.fn().mockReturnValue(null),
   runAllHealthChecks: vi.fn().mockResolvedValue({
     overall: 'healthy',
     environment: 'test',

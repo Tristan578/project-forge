@@ -719,20 +719,32 @@ export async function runAllHealthChecks(): Promise<HealthReport> {
 /**
  * Module-level cache for `runAllHealthChecks()`.
  *
- * `runAllHealthChecks()` fans out to ten concurrent outbound probes — the
- * database, Stripe, Upstash, the engine CDN, Clerk, Anthropic, Sentry, R2 and
- * the generation factory. Any unauthenticated surface that calls it directly
- * turns one inbound request into ten outbound ones, which is an amplification
- * vector for us AND for every upstream we probe.
+ * Of the ten checks it runs, **four make outbound network calls**: the database
+ * (`SELECT 1` against Neon), the engine CDN (HEAD), Clerk (`GET
+ * api.clerk.com/v1/jwks`) and Anthropic (HEAD). `checkGenerationFactory` drives
+ * the handler in-process, and the remaining five are `process.env` presence
+ * checks that return `latencyMs: 0` without touching the network. So one
+ * inbound request costs four outbound ones — smaller than a naive read of
+ * `runAllHealthChecks()` suggests, but still an amplification vector, and the
+ * Clerk probe in particular sends `CLERK_SECRET_KEY` to Clerk's API on behalf
+ * of whoever triggered it.
  *
- * Server Components cannot use `rateLimitPublicRoute()` (it needs a
- * `NextRequest`), so the cache IS the guard for `/health`. Two layers:
+ * Two layers, both about cost rather than access control:
  *
  * - a TTL cache, so a burst of requests inside `HEALTH_CACHE_TTL_MS` costs one
  *   fan-out, and
  * - in-flight promise dedup, so N *concurrent* cold requests also cost one
  *   fan-out rather than N. Without the second layer a cold cache under
  *   concurrency is exactly as amplifying as no cache at all.
+ *
+ * This is NOT a rate limit and must not be described as one. The state is
+ * per-lambda-instance, so it bounds an instance, not the internet: under a
+ * distributed burst Vercel scales instances and aggregate fan-out scales with
+ * them. An anonymous caller therefore needs a real, shared bound as well —
+ * `distributedRateLimit()` takes a plain string key and is callable from a
+ * Server Component, which is what `/health` uses. (An earlier revision of this
+ * comment claimed a Server Component had no rate-limiting option and that the
+ * cache "IS the guard". Both halves were wrong.)
  *
  * A rejection is never cached and clears the in-flight slot, so a transient
  * failure does not pin the surface into an error state for the whole TTL. Every
@@ -752,20 +764,56 @@ export async function getCachedHealthReport(): Promise<HealthReport> {
     return inFlightHealthReport;
   }
 
-  const pending = runAllHealthChecks()
+  const pending: Promise<HealthReport> = runAllHealthChecks()
     .then((report) => {
-      cachedHealthReport = { report, expiresAt: Date.now() + HEALTH_CACHE_TTL_MS };
+      // Same identity guard as the `.finally` below, and for the same reason:
+      // once `resetCachedHealthReport()` has detached this fan-out, a newer one
+      // owns the slot. Writing unconditionally would let a slow, detached probe
+      // land last and overwrite a FRESHER report — and, worse, stamp it with a
+      // full new `expiresAt`, so the stale data would then be served for an
+      // entire TTL. Losing the write is correct: the report we would have
+      // written is by definition the older of the two.
+      if (inFlightHealthReport === pending) {
+        cachedHealthReport = { report, expiresAt: Date.now() + HEALTH_CACHE_TTL_MS };
+      }
       return report;
     })
     .finally(() => {
-      inFlightHealthReport = null;
+      // Identity-guarded: `resetCachedHealthReport()` can null the slot and a
+      // NEWER fan-out can claim it while this one is still settling. Clearing
+      // unconditionally would then evict that newer in-flight promise, and the
+      // next caller would start a third redundant fan-out.
+      if (inFlightHealthReport === pending) {
+        inFlightHealthReport = null;
+      }
     });
 
   inFlightHealthReport = pending;
   return pending;
 }
 
-/** Test seam — clears both the TTL cache and any in-flight fan-out. */
+/**
+ * The cached report if one is live, else `null`. Never starts a fan-out.
+ *
+ * For callers that want fresh-if-cheap and are not willing to pay for a probe —
+ * e.g. a request that has already been rate-limited and must still render.
+ */
+export function peekCachedHealthReport(): HealthReport | null {
+  const cached = cachedHealthReport;
+  return cached && Date.now() < cached.expiresAt ? cached.report : null;
+}
+
+/**
+ * Test seam — drops the cached report and detaches any in-flight fan-out.
+ *
+ * "Detaches", not "cancels": a promise already in flight cannot be cancelled,
+ * so an outstanding fan-out still runs to completion. What detaching buys is
+ * that its result is then discarded — both the cache write and the in-flight
+ * clear are guarded on promise identity, so a slow probe that lands after a
+ * reset cannot overwrite a fresher report, refresh its TTL, or evict the newer
+ * in-flight slot. The NEXT call observes neither the old report nor the old
+ * promise.
+ */
 export function resetCachedHealthReport(): void {
   cachedHealthReport = null;
   inFlightHealthReport = null;

@@ -199,10 +199,12 @@ export function buildPublicRoutes({ includeDev }: { includeDev: boolean }): stri
     '/sign-up(.*)',
     '/api/auth/webhook(.*)',
     '/api/stripe/webhook(.*)',
-    // `(.*)` rather than a bare `/pricing`: the segment also owns
+    // Two patterns rather than a bare `/pricing`: the segment also owns
     // `/pricing/opengraph-image`, which crawlers and link unfurlers fetch
-    // without a session.
-    '/pricing(.*)',
+    // without a session. See the note on the `/docs` entry below for why this
+    // is `'/pricing' + '/pricing/(.*)'` and not `'/pricing(.*)'`.
+    '/pricing',
+    '/pricing/(.*)',
     '/play(.*)',
     '/terms(.*)',
     '/privacy(.*)',
@@ -238,17 +240,31 @@ export function buildPublicRoutes({ includeDev }: { includeDev: boolean }): stri
     // Public PAGE routes that shipped without a matching entry here (#9060).
     // Each one renders for anonymous visitors by design, and each was being
     // bounced to /sign-in instead.
-    '/docs(.*)',
-    // The status dashboard. Its fan-out is guarded by the shared TTL cache in
-    // healthChecks.ts, not by auth — a Server Component cannot rate-limit
-    // itself, and gating a status page behind a session defeats its purpose.
-    '/health(.*)',
+    //
+    // Each is declared as an exact path PLUS a `/(.*)` subtree, never as a bare
+    // `X(.*)`. Clerk's `createRouteMatcher` vendors its own pathToRegexp (NOT
+    // the tree's path-to-regexp 8.x, which rejects `(.*)` outright), and there
+    // `(.*)` is a plain SUFFIX wildcard with no path-segment boundary. Measured:
+    // `/health(.*)` matches `/healthz`, `/health-internal` and
+    // `/healthcheck-admin`; `/docs(.*)` matches `/docsecret`. So the bare form
+    // would silently exempt any future sibling route that merely shares a
+    // prefix — an auth hole opened by a spelling, not by a decision. The
+    // two-pattern form returns false for every one of those while still
+    // matching the route and its real subtree.
+    '/docs',
+    '/docs/(.*)',
+    // The status dashboard. Gating a status page behind a session defeats its
+    // purpose, so it is public; its outbound fan-out is bounded in the page
+    // itself (see web/src/app/health/page.tsx), not by auth.
+    '/health',
+    '/health/(.*)',
     // Crawler and unfurler surfaces. `.txt` and `.xml` are NOT in the matcher's
     // static-extension exclusion list below, so these genuinely reach Clerk and
     // genuinely need listing — that is why `/llms.txt` is already here.
     '/robots.txt',
     '/sitemap.xml',
-    '/opengraph-image(.*)',
+    '/opengraph-image',
+    '/opengraph-image/(.*)',
   ];
   if (includeDev) {
     publicRoutes.push('/dev(.*)');

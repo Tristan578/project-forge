@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@/test/utils/componentTestUtils';
-import { HealthDashboard } from '../HealthDashboard';
+import { HealthDashboard, type WireReport } from '../HealthDashboard';
 import type { HealthReport, ServiceHealth } from '@/lib/monitoring/healthChecks';
 
 function makeService(
@@ -209,6 +209,160 @@ describe('HealthDashboard', () => {
     // Should not throw — stale data should remain
     await waitFor(() => {
       expect(screen.getByText('All Systems Operational')).toBeDefined();
+    });
+  });
+
+  /**
+   * `/api/health` does NOT serve a `HealthReport`. Its `normalizeStatus()`
+   * rewrites each service's `'healthy'` to `'up'` for the public contract,
+   * while leaving `overall` as the raw internal value. So the poll payload and
+   * the server-rendered prop speak two different vocabularies, and only the
+   * per-service half differs.
+   *
+   * These fixtures are built from the ROUTE's body shape rather than from
+   * `makeReport()`. Every other refresh test in this file feeds
+   * `makeReport('healthy', …)` — the internal vocabulary — straight back
+   * through the mocked fetch, which is exactly the substitution that let the
+   * defect ship: it makes the client agree with itself instead of with the API.
+   */
+  describe('polling the real /api/health body', () => {
+    /**
+     * Mirrors the `body` literal in `src/app/api/health/route.ts`. The
+     * `WireReport` half is the component's own exported wire type, so a drift
+     * in that vocabulary fails to compile here instead of quietly agreeing with
+     * a stale fixture; the remaining fields are route-only and untyped by it.
+     */
+    function makeWireBody(
+      serviceNames: string[],
+    ): WireReport & { status: string; commit: string; database: string } {
+      return {
+        status: 'ok',
+        environment: 'test',
+        commit: 'abcdef12',
+        database: 'connected',
+        timestamp: '2026-01-01T00:00:00.000Z',
+        // Raw internal vocabulary — the route does not normalize this field.
+        overall: 'healthy',
+        version: 'abcdef12',
+        services: serviceNames.map((name) => ({
+          name,
+          status: 'up',
+          latencyMs: 12,
+          lastChecked: '2026-01-01T00:00:00.000Z',
+        })),
+      };
+    }
+
+    it("renders 'up' services as healthy rather than falling through to Unknown", async () => {
+      const names = allHealthyServices.map((s) => s.name);
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => makeWireBody(names),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
+      render(<HealthDashboard initialReport={makeReport('degraded', allHealthyServices)} />);
+
+      screen.getByRole('button', { name: /refresh/i }).click();
+
+      await waitFor(() => {
+        expect(screen.getByText('All Systems Operational')).toBeDefined();
+      });
+
+      // Without the boundary translation every card falls to its `default:`
+      // arm, so a fully-operational platform reads as nine unknown services on
+      // the one page people load during an incident.
+      expect(screen.getAllByText('Healthy')).toHaveLength(names.length);
+      expect(screen.queryByText('Unknown')).toBeNull();
+    });
+
+    it('leaves degraded and down services untouched', async () => {
+      const body = makeWireBody(['Database (Neon)', 'Sentry']);
+      body.overall = 'degraded';
+      body.services[0].status = 'down';
+      body.services[1].status = 'degraded';
+
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 503,
+        json: async () => body,
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
+      render(<HealthDashboard initialReport={makeReport('healthy', allHealthyServices)} />);
+
+      screen.getByRole('button', { name: /refresh/i }).click();
+
+      // Only 'healthy' is renamed on the wire, so the translation must be a
+      // targeted remap and not a blanket "anything unrecognized is healthy".
+      await waitFor(() => {
+        expect(screen.getByText('Down')).toBeDefined();
+      });
+      expect(screen.getByText('Degraded')).toBeDefined();
+      expect(screen.queryByText('Healthy')).toBeNull();
+    });
+  });
+
+  /**
+   * `/health` is public and rate-limited, and a limited request degrades rather
+   * than 429-ing — so the server hands the dashboard `null` to mean "we did not
+   * look". That is deliberately NOT a synthetic report with a fourth `overall`
+   * member: `ServiceStatus` has exactly three, and widening it to express an
+   * absence would leak into the API contract. See `src/app/health/page.tsx`.
+   */
+  describe('with no server-rendered report', () => {
+    it('renders a neutral shell rather than claiming an outage', () => {
+      vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+      render(<HealthDashboard initialReport={null} />);
+
+      expect(screen.getByText('Checking Service Status')).toBeDefined();
+      // Saying "Major Outage" here would be worse than saying nothing — this
+      // page is what people trust during a real incident.
+      expect(screen.queryByText('Major Outage Detected')).toBeNull();
+      expect(screen.queryByText('All Systems Operational')).toBeNull();
+    });
+
+    it('fetches a report on mount instead of waiting a full refresh interval', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => makeReport('healthy', allHealthyServices),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
+      render(<HealthDashboard initialReport={null} />);
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith('/api/health', expect.any(Object));
+      });
+      await waitFor(() => {
+        expect(screen.getByText('All Systems Operational')).toBeDefined();
+      });
+    });
+
+    it('keeps the shell and offers a retry when the mount fetch fails', async () => {
+      const mockFetch = vi.fn().mockRejectedValue(new Error('network error'));
+      vi.stubGlobal('fetch', mockFetch);
+
+      render(<HealthDashboard initialReport={null} />);
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+      expect(screen.getByText('Checking Service Status')).toBeDefined();
+      expect(screen.getByRole('button', { name: /retry/i })).toBeDefined();
+    });
+
+    it('does not fetch on mount when the server did supply a report', () => {
+      const mockFetch = vi.fn();
+      vi.stubGlobal('fetch', mockFetch);
+
+      render(<HealthDashboard initialReport={makeReport('healthy', allHealthyServices)} />);
+
+      // The server already paid for the fan-out; an unconditional mount fetch
+      // would double every cold page load.
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 });
