@@ -707,10 +707,54 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   else
     fail "design-internal-gate does not run '$UI_TEST_CMD' (un-commented)"
   fi
+  # Containment alone is NOT enough, and it fails green. GitHub's YAML parser
+  # keeps the LAST of two duplicate keys, so APPENDING a second `run:` to the UI
+  # suite step replaces the command under last-key-wins while the ORIGINAL
+  # `run: cd packages/ui && npm test` line stays byte-present and still
+  # satisfies the containment grep above — the only per-PR run of the UI suite
+  # for a packages/ui-only PR is dead, and this pin reads green. On the
+  # `pull_request` path GitHub runs the PR's OWN workflow file, so the mutation
+  # takes effect in the very run that should have caught it. actionlint flags
+  # duplicate keys, but it is not wired into this repo's CI — this count is the
+  # backstop (#9031). Scope it to the STEP so sibling steps' legitimate `run:`
+  # keys are not counted.
+  dig_test_step="$(awk '
+    !f && /^      - name:/ && index($0, "Test @spawnforge/ui") {f=1; print; next}
+    f && /^      - /{exit}
+    f && !/^        / && !/^[[:space:]]*$/{exit}
+    f {print}
+  ' <<<"$dig_block")"
+  if [ -z "$dig_test_step" ]; then
+    fail "design-internal-gate has no step named 'Test @spawnforge/ui' — the step cut read nothing, so the run: count below would pass vacuously"
+  else
+    dig_run_count="$(grep -cE '^[[:space:]]*["'"'"']?run["'"'"']?[[:space:]]*:' <<<"$dig_test_step" || true)"
+    if [ "$dig_run_count" -ne 1 ]; then
+      fail "design-internal-gate UI suite step has $dig_run_count run: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended run: silently replaces the suite invocation while the original run: line still greps as present)"
+    else
+      pass "design-internal-gate UI suite step has exactly 1 run: key"
+    fi
+    if grep -qE "^[[:space:]]*run: cd packages/ui && npm test[[:space:]]*\$" <<<"$dig_test_step"; then
+      pass "design-internal-gate runs the UI suite as that step's whole run: line"
+    else
+      fail "design-internal-gate UI suite step does not run '$UI_TEST_CMD' as its whole run: line — neutered, rewritten, or comment-suffixed"
+    fi
+  fi
   if grep -v '^[[:space:]]*#' <<<"$dig_block" | grep -q 'continue-on-error'; then
     fail "design-internal-gate must not carry continue-on-error (would shadow a red suite)"
   else
     pass "design-internal-gate has no continue-on-error"
+  fi
+  # Same last-key-wins hazard on the job-level `if:`: appending a second
+  # `if: false` at job level unwires the whole gate while the original
+  # needs-design line stays byte-present for the containment check below.
+  # Anchor at exactly 4 spaces — job-level keys sit there, and this job carries
+  # a LEGITIMATE step-level `if:` at 8 spaces on 'Build @spawnforge/ui' that an
+  # any-indent count would false-fail on (#9031).
+  dig_if_count="$(grep -cE '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$dig_block" || true)"
+  if [ "$dig_if_count" -ne 1 ]; then
+    fail "design-internal-gate has $dig_if_count job-level if: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended constant-false if: unwires the gate while the original if: line still greps as present)"
+  else
+    pass "design-internal-gate has exactly 1 job-level if: key (a duplicate cannot shadow the pin below)"
   fi
   if grep -v '^[[:space:]]*#' <<<"$dig_block" | grep -qF "needs.ci-gate.outputs.needs-design == 'true'"; then
     pass "design-internal-gate is gated on needs-design"

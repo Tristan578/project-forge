@@ -341,7 +341,24 @@ if [ -f "$CI_YML" ]; then
   # API surface. That introducing PR edits ci.yml (sets needs-ci=true) and runs
   # THIS suite — so this assertion catches the constant-false at introduction
   # time, closing the window the anti-tamper alone leaves open.
-  oa_if="$(grep -E '^[[:space:]]+if:' <<<"$oa_block")"
+  #
+  # Containment alone is NOT enough, and it fails green. GitHub's YAML parser
+  # keeps the LAST of two duplicate keys, so APPENDING a second job-level
+  # `if: false` leaves the original needs-api line byte-identical and still
+  # matching the greps below, while the job that actually runs is gated on a
+  # constant false. On the `pull_request` path GitHub runs the PR's OWN workflow
+  # file, so the mutation takes effect in the very run that should have caught
+  # it. Count the key at ITS OWN indent level first (4 spaces = job level; a
+  # deeper-indented step `if:` is legitimate and must not be counted) and
+  # require exactly one. actionlint flags duplicate keys, but it is not wired
+  # into this repo's CI — this pin is the backstop (#9031).
+  oa_if_count="$(grep -cE '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$oa_block" || true)"
+  if [ "$oa_if_count" -ne 1 ]; then
+    fail "openapi-route-sync job has $oa_if_count job-level if: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended constant-false if: unwires the gate while the original if: line still greps as present)"
+  else
+    pass "openapi-route-sync job has exactly 1 job-level if: key (a duplicate cannot shadow the pin below)"
+  fi
+  oa_if="$(grep -E '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$oa_block")"
   if grep -qF 'needs-api' <<<"$oa_if" && grep -qF "== 'true'" <<<"$oa_if"; then
     pass "openapi-route-sync job if: keys on needs-api == 'true' (a constant if:false is caught here)"
   else
@@ -351,6 +368,34 @@ if [ -f "$CI_YML" ]; then
   # Scope the run-step check to the EXTRACTED block: the script name also appears
   # in the self-defense job's shellcheck list, so a broad match would still PASS
   # if the real `run: bash ...` line were deleted from THIS job.
+  #
+  # …and scope the invocation pin to the gate's own STEP block, with the same
+  # duplicate-key count as the job-level `if:` above. Appending a second `run:`
+  # to this step replaces the command under last-key-wins while the original
+  # `run: bash scripts/check-openapi-route-sync.sh` line stays present and
+  # satisfies a containment grep — the step is dead and every pin on it reads
+  # green.
+  oa_step="$(awk '
+    !f && /^      - name:/ && index($0, "Check OpenAPI spec is valid and in sync with API routes") {f=1; print; next}
+    f && /^      - /{exit}
+    f && !/^        / && !/^[[:space:]]*$/{exit}
+    f {print}
+  ' <<<"$oa_block")"
+  if [ -z "$oa_step" ]; then
+    fail "openapi-route-sync job has no step named 'Check OpenAPI spec is valid and in sync with API routes' — the step cut read nothing, so the run: count and invocation pins below would pass vacuously"
+  else
+    oa_run_count="$(grep -cE '^[[:space:]]*["'"'"']?run["'"'"']?[[:space:]]*:' <<<"$oa_step" || true)"
+    if [ "$oa_run_count" -ne 1 ]; then
+      fail "openapi-route-sync gate step has $oa_run_count run: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended run: silently replaces the gate invocation while the original run: line still greps as present)"
+    else
+      pass "openapi-route-sync gate step has exactly 1 run: key"
+    fi
+    if grep -qE '^[[:space:]]*run: bash scripts/check-openapi-route-sync\.sh[[:space:]]*$' <<<"$oa_step"; then
+      pass "openapi-route-sync job runs scripts/check-openapi-route-sync.sh as that step's whole run: line"
+    else
+      fail "openapi-route-sync gate step does not run 'bash scripts/check-openapi-route-sync.sh' as its whole run: line — neutered, rewritten, or comment-suffixed"
+    fi
+  fi
   if grep -qF 'run: bash scripts/check-openapi-route-sync.sh' <<<"$oa_block"; then
     pass "openapi-route-sync job runs scripts/check-openapi-route-sync.sh"
   else
