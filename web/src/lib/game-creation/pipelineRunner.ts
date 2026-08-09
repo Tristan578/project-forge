@@ -175,9 +175,19 @@ export async function runPipeline(
     setStepStatus(step, 'running');
 
     let lastResult: ExecutorResult | undefined;
+    let cancelledMidRetry = false;
     const maxAttempts = step.maxRetries + 1;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      // A cancel that lands while an attempt is in flight must not buy the
+      // step another one. Each retry of a generation step is a fresh
+      // multi-second provider call, so checking only between steps means the
+      // user's cancel is honoured no sooner than the last retry's completion.
+      if (attempt > 0 && context.signal.aborted) {
+        cancelledMidRetry = true;
+        break;
+      }
+
       try {
         lastResult = await executor.execute(step.input, effectiveContext);
       } catch (err) {
@@ -199,6 +209,20 @@ export async function runPipeline(
       if (lastResult.error && !lastResult.error.retryable) {
         break;
       }
+    }
+
+    // Retries were cut short by a cancel, so the step did not fail on its own
+    // merits — report the plan as cancelled rather than failed. A step that
+    // genuinely exhausted its retries (or failed non-retryably) still reports
+    // failed below, even if a cancel happened to land alongside it.
+    if (cancelledMidRetry) {
+      setStepStatus(step, 'skipped');
+      step.error = lastResult?.error;
+      for (let j = i + 1; j < plan.steps.length; j++) {
+        setStepStatus(plan.steps[j], 'skipped');
+      }
+      setPlanStatus(plan, 'cancelled', callbacks);
+      return plan;
     }
 
     if (lastResult?.success) {

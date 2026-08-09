@@ -484,6 +484,86 @@ describe('runPipeline', () => {
     expect(result.status).toBe('cancelled'); // plan status transitions to cancelled on abort
   });
 
+  it('respects abort signal mid-retry: does not start another attempt', async () => {
+    const localController = new AbortController();
+    let attempts = 0;
+    let step1Started = false;
+
+    const retryRegistry = new Map<ExecutorName, ExecutorDefinition>([
+      ['scene_create', {
+        name: 'scene_create',
+        inputSchema: z.object({}),
+        execute: async (): Promise<ExecutorResult> => {
+          attempts += 1;
+          // Cancel arrives while the first attempt is in flight.
+          localController.abort();
+          return {
+            success: false,
+            error: {
+              code: 'TRANSIENT',
+              message: 'provider hiccup',
+              userFacingMessage: 'Scene creation failed.',
+              retryable: true,
+            },
+          };
+        },
+        userFacingErrorMessage: 'Scene creation failed.',
+      }],
+      ['verify_all_scenes', {
+        name: 'verify_all_scenes',
+        inputSchema: z.object({}),
+        execute: async (): Promise<ExecutorResult> => {
+          step1Started = true;
+          return { success: true, output: {} };
+        },
+        userFacingErrorMessage: '',
+      }],
+    ]);
+
+    const plan = makePlan({
+      steps: [
+        makeStep('step_0', 'scene_create', { maxRetries: 3 }),
+        makeStep('step_1', 'verify_all_scenes'),
+      ],
+    });
+    const ctx = makeContext(localController.signal);
+    const result = await runPipeline(plan, retryRegistry, ctx);
+
+    expect(attempts).toBe(1); // the three remaining retries are abandoned
+    expect(step1Started).toBe(false);
+    expect(result.steps[0].status).toBe('skipped');
+    expect(result.steps[1].status).toBe('skipped');
+    expect(result.status).toBe('cancelled'); // cancelled, not failed
+  });
+
+  it('still reports failed (not cancelled) when retries are genuinely exhausted', async () => {
+    const plan = makePlan({ steps: [makeStep('step_0', 'scene_create', { maxRetries: 1 })] });
+    const ctx = makeContext(controller.signal);
+    let attempts = 0;
+
+    const result = await runPipeline(plan, makeRegistry({
+      name: 'scene_create',
+      inputSchema: z.object({}),
+      execute: async (): Promise<ExecutorResult> => {
+        attempts += 1;
+        return {
+          success: false,
+          error: {
+            code: 'TRANSIENT',
+            message: 'provider hiccup',
+            userFacingMessage: 'Scene creation failed.',
+            retryable: true,
+          },
+        };
+      },
+      userFacingErrorMessage: 'Scene creation failed.',
+    }), ctx);
+
+    expect(attempts).toBe(2);
+    expect(result.steps[0].status).toBe('failed');
+    expect(result.status).toBe('failed');
+  });
+
   it('fires onPlanStatusChange when plan status transitions', async () => {
     const statuses: string[] = [];
     const plan = makePlan({ steps: [makeStep('step_0')] });
