@@ -56,6 +56,15 @@ function makeGdd(overrides: Partial<OrchestratorGDD> = {}): OrchestratorGDD {
   };
 }
 
+/** The entity_setup step for a named entity — where its engine id is minted. */
+function findEntitySetup(plan: { steps: Array<{ executor: string; input: Record<string, unknown> }> }, name: string) {
+  const step = plan.steps.find(
+    s => s.executor === 'entity_setup' && (s.input.entity as { name: string }).name === name,
+  );
+  if (!step) throw new Error(`no entity_setup step for "${name}"`);
+  return step;
+}
+
 function makeSystem(
   category: GameSystem['category'],
   type: string,
@@ -567,9 +576,15 @@ describe('buildPlan', () => {
 
     const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
     const step = plan.steps.find(s => s.executor === 'custom_script_generate')!;
+    const narratorSetup = findEntitySetup(plan, 'Narrator');
 
     expect(step).toBeDefined();
-    expect(step.input.targetEntityId).toBe('Narrator');
+    // The engine matches set_script on the EntityId component, never on
+    // EntityName — so the binding must be the planned id, not the name.
+    expect(step.input.targetEntityId).toBe(narratorSetup.input.entityId);
+    expect(step.input.targetEntityId).not.toBe('Narrator');
+    // The human name still travels alongside it, for the LLM prompt only.
+    expect(step.input.targetEntityName).toBe('Narrator');
   });
 
   it('falls back to the first entity in the GDD when no entity declares the unknown category', () => {
@@ -581,9 +596,56 @@ describe('buildPlan', () => {
 
     const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
     const step = plan.steps.find(s => s.executor === 'custom_script_generate')!;
+    const playerSetup = findEntitySetup(plan, 'Player');
 
     expect(step).toBeDefined();
-    expect(step.input.targetEntityId).toBe('Player');
+    expect(step.input.targetEntityId).toBe(playerSetup.input.entityId);
+    expect(step.input.targetEntityName).toBe('Player');
+  });
+
+  // ---------------------------------------------------------------------
+  // Entity identity: the plan mints the engine id up front so that every
+  // downstream step binds to something the engine can actually resolve.
+  // ---------------------------------------------------------------------
+
+  it('gives every entity_setup step a distinct non-name entityId', () => {
+    const gdd = makeGdd({
+      scenes: [
+        {
+          name: 'Main',
+          purpose: 'main',
+          systems: [],
+          entities: [
+            { name: 'Player', role: 'player', systems: [], appearance: 'capsule', behaviors: [] },
+            { name: 'Enemy', role: 'enemy', systems: [], appearance: 'cube', behaviors: [] },
+          ],
+          transitions: [],
+        },
+        {
+          name: 'Boss',
+          purpose: 'boss room',
+          systems: [],
+          // Same name in a different scene — must still get its own id.
+          entities: [
+            { name: 'Enemy', role: 'enemy', systems: [], appearance: 'cube', behaviors: [] },
+          ],
+          transitions: [],
+        },
+      ],
+    });
+
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const ids = plan.steps
+      .filter(s => s.executor === 'entity_setup')
+      .map(s => s.input.entityId as string);
+
+    expect(ids).toHaveLength(3);
+    for (const id of ids) {
+      expect(typeof id).toBe('string');
+      expect(id.length).toBeGreaterThan(0);
+      expect(['Player', 'Enemy']).not.toContain(id);
+    }
+    expect(new Set(ids).size).toBe(3);
   });
 
   it('skips custom_script_generate for an unknown category when the GDD has zero entities anywhere', () => {

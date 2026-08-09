@@ -176,13 +176,22 @@ export function buildPlan(
   // --- Phase 2: Entity setup (depends on scene creation) ---
   // [B2] Entities must exist BEFORE physics/camera/systems can reference them
   const entityStepIds: Record<string, string> = {};
+  // The engine identifies entities by their `EntityId` component, which defaults
+  // to a random UUID it never reports back synchronously. `spawn_entity` accepts
+  // a caller-supplied id precisely so JS can reference the entity without waiting
+  // for the async SELECTION_CHANGED round-trip — so the plan mints the id here and
+  // every later step binds to it. Binding to the designed NAME instead matches no
+  // entity in the engine, and the engine's match loops emit nothing on a miss.
+  const entityIds: Record<string, string> = {};
   for (const scene of gdd.scenes) {
     const sceneStepId = sceneStepIds[scene.name];
     for (const entity of scene.entities) {
+      const entityId = crypto.randomUUID();
       const step = makeStep(
         'entity_setup',
         {
           entity,
+          entityId,
           scene: scene.name,
           projectType: gdd.projectType, // [B5] Propagated
         },
@@ -191,6 +200,7 @@ export function buildPlan(
       // Scope entity step IDs by scene to avoid collisions when
       // entities in different scenes share the same name
       entityStepIds[`${scene.name}:${entity.name}`] = step.id;
+      entityIds[`${scene.name}:${entity.name}`] = entityId;
       steps.push(step);
     }
   }
@@ -247,19 +257,23 @@ export function buildPlan(
       // Find the first entity that declares this system category, or fall back
       // to the first entity in the GDD. The customScriptExecutor requires
       // targetEntityId to bind the generated script to an entity.
-      let targetEntityId = '';
+      let target: { scene: string; name: string } | undefined;
       for (const scene of gdd.scenes) {
         for (const entity of scene.entities) {
           if (entity.systems.includes(system.category)) {
-            targetEntityId = entity.name;
+            target = { scene: scene.name, name: entity.name };
             break;
           }
         }
-        if (targetEntityId) break;
+        if (target) break;
       }
-      if (!targetEntityId && gdd.scenes.length > 0 && gdd.scenes[0].entities.length > 0) {
-        targetEntityId = gdd.scenes[0].entities[0].name;
+      if (!target && gdd.scenes.length > 0 && gdd.scenes[0].entities.length > 0) {
+        target = { scene: gdd.scenes[0].name, name: gdd.scenes[0].entities[0].name };
       }
+      // The engine binds set_script by id; the name rides along only so the
+      // generated prompt can name what it is scripting.
+      const targetEntityId = target ? entityIds[`${target.scene}:${target.name}`] : '';
+      const targetEntityName = target?.name ?? '';
 
       // If no entity exists to bind the script to, skip the step entirely.
       // Sending 'unbound' as entityId would cause set_script to fail in the engine.
@@ -271,6 +285,7 @@ export function buildPlan(
           system,
           description: `Implement ${system.category}:${system.type} behavior`,
           targetEntityId,
+          targetEntityName,
           projectType: gdd.projectType,
           feelDirective: gdd.feelDirective,
         },

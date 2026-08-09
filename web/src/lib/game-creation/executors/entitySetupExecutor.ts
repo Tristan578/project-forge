@@ -24,8 +24,26 @@ const entityBlueprintSchema = z.object({
   behaviors: z.array(z.string()).optional(),
 });
 
+// Mirrors the engine's `is_valid_override_id` (core/entity_factory.rs): trimmed,
+// non-empty, at most 64 BYTES, no control characters. An id the engine rejects is
+// not an error there — it silently falls back to a random UUID, which is exactly
+// the invisible failure this id exists to prevent. Reject it here instead.
+const engineEntityId = z.string().refine((raw) => {
+  const id = raw.trim();
+  const hasControlChar = [...id].some((c) => {
+    const code = c.codePointAt(0)!;
+    return code < 0x20 || code === 0x7f;
+  });
+  return id.length > 0
+    && !hasControlChar
+    && new TextEncoder().encode(id).length <= 64;
+}, 'entityId must be 1-64 bytes with no control characters');
+
 const inputSchema = z.object({
   entity: entityBlueprintSchema,
+  // Optional so a step built before this field existed still runs; when absent the
+  // engine assigns its own UUID and nothing downstream can address the entity.
+  entityId: engineEntityId.optional(),
   scene: z.string().min(1),
   projectType: z.enum(['2d', '3d']),
 });
@@ -52,7 +70,7 @@ export const entitySetupExecutor: ExecutorDefinition = {
 
     // `scene` stays a required input (a plan step that names no scene is malformed)
     // but is not dispatched — see the note on `commands` below.
-    const { entity, projectType } = parsed.data;
+    const { entity, entityId, projectType } = parsed.data;
     // Manifest: spawn_entity entityType is lowercase enum
     const entityType = projectType === '2d' ? 'plane' : (ROLE_TO_ENTITY_TYPE[entity.role] ?? 'cube');
 
@@ -60,8 +78,15 @@ export const entitySetupExecutor: ExecutorDefinition = {
     // time and rejects `switch_scene` by design — multi-scene management is JS-side
     // (`lib/scenes/sceneManager`), and the plan's `scene` field is JS-side metadata.
     // Leading the batch with it made every entity step fail on the rejection (PF-1097).
+    // The engine honors a caller-supplied `id` on spawn_entity (see
+    // core/entity_factory.rs `is_valid_override_id`) precisely so JS can address the
+    // entity without waiting for the async SELECTION_CHANGED round-trip. Every later
+    // step in the plan binds to this id.
     const commands = [
-      { command: 'spawn_entity', payload: { entityType, name: entity.name } },
+      {
+        command: 'spawn_entity',
+        payload: { entityType, name: entity.name, ...(entityId ? { id: entityId } : {}) },
+      },
     ];
 
     if (ctx.dispatchCommandBatch) {
@@ -79,6 +104,7 @@ export const entitySetupExecutor: ExecutorDefinition = {
       entityName: entity.name,
       role: entity.role,
       entityType,
+      ...(entityId ? { entityId } : {}),
     });
   },
 };
