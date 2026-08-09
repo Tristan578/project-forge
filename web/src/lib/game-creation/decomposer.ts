@@ -47,8 +47,11 @@ const zEntityBlueprint = z.object({
   name: z.string().min(1).max(100),
   role: z.enum(['player', 'enemy', 'npc', 'decoration', 'trigger', 'interactable', 'projectile']),
   systems: z.array(zSystemCategory),
+  // Free text, but `primitive:<shape>` is the form `entity_setup` acts on — it
+  // picks the spawned mesh from it. Anything else falls back to the role default.
+  // (`behaviors` used to live here too: prose the model spent tokens writing and
+  // no stage of the pipeline ever read — PF-1111.)
   appearance: z.string().max(300),
-  behaviors: z.array(z.string().max(200)),
 });
 
 const zSceneBlueprint = z.object({
@@ -122,6 +125,7 @@ ${SYSTEM_CATEGORIES.map(c => `- "${c}"`).join('\n')}
 4. Set dependsOn correctly: movement depends on physics, camera depends on entities, feedback depends on challenge, etc.
 5. The feelDirective captures the EMOTIONAL EXPERIENCE, not just function. A "cozy farming sim" and a "hardcore farming sim" have similar systems but different feel.
 6. Asset fallbacks must use format "primitive:<name>" or "builtin:<name>" (e.g., "primitive:cube", "builtin:footstep").
+6b. Entity "appearance" must use the same format: "primitive:<shape>" where shape is one of cube, sphere, plane, cylinder, cone, torus, capsule. That shape is what gets spawned, so pick the one closest to the entity (a boulder is primitive:sphere, a crate is primitive:cube, a humanoid is primitive:capsule).
 7. Limit assetManifest to items the game genuinely needs. Fewer high-impact assets over many decorative ones.
 8. estimatedScope: "small" = 1-3 scenes, few entities; "medium" = 3-8 scenes, moderate entities; "large" = 8+ scenes, many entities.
 9. If you include a "movement" system, at least one entity in one scene MUST have role "player" -- a movement system with nothing to move is rejected.
@@ -131,7 +135,7 @@ Respond with ONLY valid JSON matching this exact structure (no markdown, no expl
 {
   "title": "string",
   "systems": [{ "category": "movement", "type": "walk+jump", "config": { "gravity": 20 }, "priority": "core", "dependsOn": ["physics"] }],
-  "scenes": [{ "name": "string", "purpose": "string", "systems": ["movement"], "entities": [{ "name": "string", "role": "player|enemy|npc|decoration|trigger|interactable|projectile", "systems": ["movement"], "appearance": "string", "behaviors": ["string"] }], "transitions": [{ "to": "scene name", "trigger": "description" }] }],
+  "scenes": [{ "name": "string", "purpose": "string", "systems": ["movement"], "entities": [{ "name": "string", "role": "player|enemy|npc|decoration|trigger|interactable|projectile", "systems": ["movement"], "appearance": "primitive:capsule" }], "transitions": [{ "to": "scene name", "trigger": "description" }] }],
   "assetManifest": [{ "type": "3d-model|texture|sound|music|voice|sprite", "description": "string", "entityRef": "optional entity name", "styleDirective": "string", "priority": "required|nice-to-have", "fallback": "primitive:cube" }],
   "estimatedScope": "small|medium|large",
   "styleDirective": "string",
@@ -272,7 +276,7 @@ export async function decomposeIntoSystems(
         : 'Untitled Game',
       description: cleanPrompt,
       systems: data.systems,
-      // Sanitize nested string fields in scenes (entity names, purposes, behaviors).
+      // Sanitize nested string fields in scenes (entity names, purposes, appearance).
       // These flow into executor inputs and downstream LLM prompts.
       scenes: data.scenes.map(scene => {
         const sName = sanitizePrompt(scene.name, 200);
@@ -296,10 +300,6 @@ export async function decomposeIntoSystems(
               ...entity,
               name: eName.safe ? eName.filtered! : 'Entity',
               appearance: eAppearance.safe ? eAppearance.filtered! : 'default appearance',
-              behaviors: entity.behaviors
-                .map(b => sanitizePrompt(b, 100))
-                .filter(s => s.safe)
-                .map(s => s.filtered!),
             };
           }),
         };

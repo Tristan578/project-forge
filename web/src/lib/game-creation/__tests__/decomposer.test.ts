@@ -56,7 +56,6 @@ function makeValidLLMJson(overrides: Record<string, unknown> = {}): string {
             role: 'player',
             systems: ['movement', 'input'],
             appearance: 'small humanoid character',
-            behaviors: ['run', 'jump'],
           },
         ],
         transitions: [{ to: 'Game Over', trigger: 'player dies' }],
@@ -397,8 +396,7 @@ describe('decomposeIntoSystems', () => {
           name: `${role}-${i}`,
           role,
           systems: ['movement'],
-          appearance: 'a shape',
-          behaviors: [],
+          appearance: 'primitive:cube',
         })),
         transitions: [],
       };
@@ -482,5 +480,47 @@ describe('decomposeIntoSystems', () => {
         /player/,
       );
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // behaviors was designed data that nothing in the pipeline ever read (PF-1111)
+  // ---------------------------------------------------------------------------
+
+  it('accepts an entity with no behaviors and carries none through', async () => {
+    fetchAI.mockResolvedValue(makeValidLLMJson({
+      scenes: [
+        {
+          name: 'Main Level',
+          purpose: 'Primary gameplay arena',
+          systems: ['movement'],
+          entities: [
+            {
+              name: 'Player',
+              role: 'player',
+              systems: ['movement'],
+              appearance: 'primitive:capsule',
+            },
+          ],
+          transitions: [],
+        },
+      ],
+    }));
+
+    const gdd = await decomposeIntoSystems('make a platformer', '2d');
+
+    expect(fetchAI).toHaveBeenCalledTimes(1);
+    expect(gdd.scenes[0].entities[0]).not.toHaveProperty('behaviors');
+    expect(gdd.scenes[0].entities[0].appearance).toBe('primitive:capsule');
+  });
+
+  it('does not ask the model for behaviors', async () => {
+    await decomposeIntoSystems('make a platformer', '2d');
+
+    const [userMessage, opts] = fetchAI.mock.calls[0] as [string, { systemOverride: string }];
+    const prompt = `${userMessage}\n${opts.systemOverride}`;
+    expect(prompt).not.toContain('behaviors');
+    // The appearance convention has to be stated or the model writes prose and
+    // every entity silently falls back to the role-default shape.
+    expect(prompt).toContain('primitive:<shape>');
   });
 });

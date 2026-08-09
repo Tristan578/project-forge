@@ -42,22 +42,19 @@
           "name": "Hero",
           "role": "player",
           "systems": ["movement", "entities"],
-          "appearance": "sprite:hero-idle",
-          "behaviors": ["walk", "jump", "flip-on-direction"]
+          "appearance": "sprite:hero-idle"
         },
         {
           "name": "Coin",
           "role": "interactable",
           "systems": ["entities"],
-          "appearance": "sprite:coin-spin",
-          "behaviors": ["spin", "collect-on-touch"]
+          "appearance": "sprite:coin-spin"
         },
         {
           "name": "TreeDecor",
           "role": "decoration",
           "systems": [],
-          "appearance": "sprite:tree-large",
-          "behaviors": []
+          "appearance": "sprite:tree-large"
         }
       ],
       "transitions": [
@@ -73,8 +70,7 @@
           "name": "Hero",
           "role": "player",
           "systems": ["movement", "entities"],
-          "appearance": "sprite:hero-idle",
-          "behaviors": ["walk", "jump"]
+          "appearance": "sprite:hero-idle"
         }
       ],
       "transitions": [

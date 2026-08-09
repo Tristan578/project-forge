@@ -246,6 +246,132 @@ describe('entitySetupExecutor', () => {
     }
   });
 
+  // The GDD writes appearance as `primitive:<shape>` (the same convention the
+  // asset manifest uses for fallbacks). Before PF-1111 the field was parsed and
+  // thrown away, so a design that explicitly asked for a sphere got whatever
+  // shape the role map happened to pick — every enemy was a cube.
+  describe('appearance', () => {
+    it('spawns the shape named by primitive:<shape> instead of the role default', async () => {
+      const ctx = makeCtx();
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Boulder', role: 'enemy', appearance: 'primitive:sphere' },
+        scene: 'S1',
+        projectType: '3d',
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.output?.entityType).toBe('sphere');
+      expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', {
+        entityType: 'sphere',
+        name: 'Boulder',
+      });
+    });
+
+    it('accepts every spawnable mesh shape', async () => {
+      for (const shape of ['cube', 'sphere', 'plane', 'cylinder', 'cone', 'torus', 'capsule']) {
+        const ctx = makeCtx();
+        const result = await entitySetupExecutor.execute({
+          entity: { name: shape, role: 'decoration', appearance: `primitive:${shape}` },
+          scene: 'S1',
+          projectType: '3d',
+        }, ctx);
+
+        expect(result.success).toBe(true);
+        expect(result.output?.entityType).toBe(shape);
+      }
+    });
+
+    it('is case-insensitive and tolerates surrounding whitespace', async () => {
+      const ctx = makeCtx();
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Barrel', role: 'decoration', appearance: '  Primitive:Cylinder  ' },
+        scene: 'S1',
+        projectType: '3d',
+      }, ctx);
+
+      expect(result.output?.entityType).toBe('cylinder');
+    });
+
+    // The field is free text by contract — the model is asked for the prefixed
+    // form but a prose description must never fail the step.
+    it('falls back to the role default for prose appearance', async () => {
+      const ctx = makeCtx();
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Golem', role: 'enemy', appearance: 'a hulking creature of moss-covered stone' },
+        scene: 'S1',
+        projectType: '3d',
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.output?.entityType).toBe('cube');
+    });
+
+    it('falls back to the role default for a shape the engine cannot spawn', async () => {
+      const ctx = makeCtx();
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Odd', role: 'projectile', appearance: 'primitive:dodecahedron' },
+        scene: 'S1',
+        projectType: '3d',
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.output?.entityType).toBe('sphere');
+    });
+
+    // `point_light` is a valid spawn_entity type but not a mesh. Every later step
+    // in the plan (physics, character rig, scripts) assumes it bound to a body,
+    // so an appearance string must not be able to turn a gameplay entity into a
+    // light source.
+    it('refuses to spawn a light through appearance', async () => {
+      const ctx = makeCtx();
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Lamp', role: 'decoration', appearance: 'primitive:point_light' },
+        scene: 'S1',
+        projectType: '3d',
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.output?.entityType).toBe('cube');
+    });
+
+    // 2D entities are textured planes. A capsule in a 2D scene is not a style
+    // choice, it is a broken sprite.
+    it('never overrides the plane in 2D', async () => {
+      const ctx = makeCtx();
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Hero', role: 'player', appearance: 'primitive:capsule' },
+        scene: 'S1',
+        projectType: '2d',
+      }, ctx);
+
+      expect(result.output?.entityType).toBe('plane');
+    });
+
+    it('falls back to the role default when appearance is absent', async () => {
+      const ctx = makeCtx();
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Hero', role: 'player' },
+        scene: 'S1',
+        projectType: '3d',
+      }, ctx);
+
+      expect(result.output?.entityType).toBe('capsule');
+    });
+  });
+
+  // `behaviors` was accepted here and consumed by nothing anywhere in the
+  // pipeline. It is gone from the GDD, so a step that omits it must still run.
+  it('accepts an entity with no behaviors field', async () => {
+    const ctx = makeCtx();
+    const result = await entitySetupExecutor.execute({
+      entity: { name: 'Hero', role: 'player', appearance: 'primitive:capsule' },
+      scene: 'S1',
+      projectType: '3d',
+    }, ctx);
+
+    expect(result.success).toBe(true);
+  });
+
   it('clamps entity name to 200 characters', async () => {
     const ctx = makeCtx();
     const result = await entitySetupExecutor.execute({

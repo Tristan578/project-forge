@@ -56,15 +56,13 @@
           "name": "Player",
           "role": "player",
           "systems": ["movement", "physics"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["jump-on-beat", "run-forward"]
+          "appearance": "primitive:capsule"
         },
         {
           "name": "BeatMarker",
           "role": "trigger",
           "systems": ["audio"],
-          "appearance": "primitive:sphere",
-          "behaviors": ["pulse-on-beat"]
+          "appearance": "primitive:sphere"
         }
       ],
       "transitions": [

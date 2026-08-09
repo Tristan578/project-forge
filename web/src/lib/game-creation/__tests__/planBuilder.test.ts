@@ -34,7 +34,6 @@ function makeGdd(overrides: Partial<OrchestratorGDD> = {}): OrchestratorGDD {
             role: 'player',
             systems: [],
             appearance: 'capsule',
-            behaviors: ['move'],
           },
         ],
         transitions: [],
@@ -367,7 +366,7 @@ describe('buildPlan', () => {
           purpose: 'outdoor level',
           systems: [],
           entities: [
-            { name: 'Enemy', role: 'enemy' as const, systems: [], appearance: 'goblin', behaviors: [] },
+            { name: 'Enemy', role: 'enemy' as const, systems: [], appearance: 'goblin' },
           ],
           transitions: [],
         },
@@ -376,7 +375,7 @@ describe('buildPlan', () => {
           purpose: 'indoor level',
           systems: [],
           entities: [
-            { name: 'Enemy', role: 'enemy' as const, systems: [], appearance: 'knight', behaviors: [] },
+            { name: 'Enemy', role: 'enemy' as const, systems: [], appearance: 'knight' },
           ],
           transitions: [],
         },
@@ -517,7 +516,7 @@ describe('buildPlan', () => {
           purpose: 'main',
           systems: [],
           entities: [
-            { name: 'Crate', role: 'decoration', systems: [], appearance: 'box', behaviors: [] },
+            { name: 'Crate', role: 'decoration', systems: [], appearance: 'box' },
           ],
           transitions: [],
         },
@@ -589,7 +588,6 @@ describe('buildPlan', () => {
               role: 'player',
               systems: ['challenge'],
               appearance: 'capsule',
-              behaviors: ['move'],
             },
           ],
           transitions: [],
@@ -700,8 +698,8 @@ describe('buildPlan', () => {
           purpose: 'story scene',
           systems: [],
           entities: [
-            { name: 'Bystander', role: 'npc', systems: [], appearance: 'human', behaviors: [] },
-            { name: 'Narrator', role: 'npc', systems: ['narrative'], appearance: 'ghost', behaviors: [] },
+            { name: 'Bystander', role: 'npc', systems: [], appearance: 'human' },
+            { name: 'Narrator', role: 'npc', systems: ['narrative'], appearance: 'ghost' },
           ],
           transitions: [],
         },
@@ -750,8 +748,8 @@ describe('buildPlan', () => {
           purpose: 'main',
           systems: [],
           entities: [
-            { name: 'Player', role: 'player', systems: [], appearance: 'capsule', behaviors: [] },
-            { name: 'Enemy', role: 'enemy', systems: [], appearance: 'cube', behaviors: [] },
+            { name: 'Player', role: 'player', systems: [], appearance: 'capsule' },
+            { name: 'Enemy', role: 'enemy', systems: [], appearance: 'cube' },
           ],
           transitions: [],
         },
@@ -761,7 +759,7 @@ describe('buildPlan', () => {
           systems: [],
           // Same name in a different scene — must still get its own id.
           entities: [
-            { name: 'Enemy', role: 'enemy', systems: [], appearance: 'cube', behaviors: [] },
+            { name: 'Enemy', role: 'enemy', systems: [], appearance: 'cube' },
           ],
           transitions: [],
         },
@@ -796,8 +794,8 @@ describe('buildPlan', () => {
           purpose: 'main',
           systems: [],
           entities: [
-            { name: 'Crate', role: 'decoration', systems: [], appearance: 'box', behaviors: [] },
-            { name: 'Knight', role: 'player', systems: [], appearance: 'armored', behaviors: ['move'] },
+            { name: 'Crate', role: 'decoration', systems: [], appearance: 'box' },
+            { name: 'Knight', role: 'player', systems: [], appearance: 'armored' },
           ],
           transitions: [],
         },
@@ -851,8 +849,8 @@ describe('buildPlan', () => {
           purpose: 'Main gameplay scene',
           systems: [],
           entities: [
-            { name: 'First', role: 'player', systems: [], appearance: 'a', behaviors: [] },
-            { name: 'Second', role: 'enemy', systems: [], appearance: 'b', behaviors: [] },
+            { name: 'First', role: 'player', systems: [], appearance: 'a' },
+            { name: 'Second', role: 'enemy', systems: [], appearance: 'b' },
           ],
           transitions: [],
         },

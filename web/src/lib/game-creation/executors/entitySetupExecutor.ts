@@ -14,6 +14,29 @@ const ROLE_TO_ENTITY_TYPE: Record<string, string> = {
   projectile: 'sphere',
 };
 
+// The mesh primitives `spawn_entity` accepts. Its enum also carries the three
+// light types, deliberately excluded here: every later step in the plan (physics
+// profile, character rig, scripts) binds to the entity as a body, so an
+// appearance string must not be able to turn a gameplay entity into a light.
+const SPAWNABLE_SHAPES = new Set([
+  'cube', 'sphere', 'plane', 'cylinder', 'cone', 'torus', 'capsule',
+]);
+
+const PRIMITIVE_APPEARANCE = /^\s*primitive:([a-z][a-z0-9_-]{0,63})\s*$/i;
+
+// The GDD writes appearance as `primitive:<shape>` — the same convention the
+// asset manifest uses for fallbacks. When it names a shape the engine can spawn,
+// that is a deliberate design choice and outranks the role default. The field is
+// free text by contract, so anything else (prose, an unknown shape, a sprite
+// reference) yields undefined and the caller keeps the role default rather than
+// failing the step.
+function shapeFromAppearance(appearance: string | undefined): string | undefined {
+  const match = appearance ? PRIMITIVE_APPEARANCE.exec(appearance) : null;
+  if (!match) return undefined;
+  const shape = match[1].toLowerCase();
+  return SPAWNABLE_SHAPES.has(shape) ? shape : undefined;
+}
+
 const entityBlueprintSchema = z.object({
   name: z.string().min(1).max(200),
   role: z.enum([
@@ -21,7 +44,6 @@ const entityBlueprintSchema = z.object({
   ]),
   systems: z.array(z.string()).optional(),
   appearance: z.string().optional(),
-  behaviors: z.array(z.string()).optional(),
 });
 
 // Mirrors the engine's `is_valid_override_id` (core/entity_factory.rs): trimmed,
@@ -71,8 +93,12 @@ export const entitySetupExecutor: ExecutorDefinition = {
     // `scene` stays a required input (a plan step that names no scene is malformed)
     // but is not dispatched — see the note on `commands` below.
     const { entity, entityId, projectType } = parsed.data;
-    // Manifest: spawn_entity entityType is lowercase enum
-    const entityType = projectType === '2d' ? 'plane' : (ROLE_TO_ENTITY_TYPE[entity.role] ?? 'cube');
+    // Manifest: spawn_entity entityType is lowercase enum.
+    // 2D entities are textured planes — a capsule in a 2D scene is not a style
+    // choice, it is a broken sprite — so the appearance override is 3D only.
+    const entityType = projectType === '2d'
+      ? 'plane'
+      : (shapeFromAppearance(entity.appearance) ?? ROLE_TO_ENTITY_TYPE[entity.role] ?? 'cube');
 
     // Spawn into the engine's active scene. The engine holds exactly one scene at a
     // time and rejects `switch_scene` by design — multi-scene management is JS-side

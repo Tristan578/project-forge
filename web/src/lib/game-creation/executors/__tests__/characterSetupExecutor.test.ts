@@ -23,7 +23,7 @@ describe('characterSetupExecutor', () => {
   it('adds CharacterController game component for 3D', async () => {
     const ctx = makeCtx();
     const result = await characterSetupExecutor.execute({
-      entity: { name: 'Hero', role: 'player', appearance: 'knight', behaviors: ['move', 'jump'] },
+      entity: { name: 'Hero', role: 'player', appearance: 'knight' },
       projectType: '3d',
       entityId: 'ent_123',
     }, ctx);
@@ -44,10 +44,29 @@ describe('characterSetupExecutor', () => {
     });
   });
 
+  // This executor required `appearance` and `behaviors` on the entity and read
+  // neither. `behaviors` is gone from the GDD and `appearance` is consumed by
+  // `entity_setup` at spawn time, so demanding them here only made the rig step
+  // fail on a blueprint that no longer carries them (PF-1111).
+  it('runs on a blueprint carrying only name and role', async () => {
+    const ctx = makeCtx();
+    const result = await characterSetupExecutor.execute({
+      entity: { name: 'Hero', role: 'player' },
+      projectType: '3d',
+      entityId: 'ent_123',
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', expect.objectContaining({
+      entityId: 'ent_123',
+      componentType: 'character_controller',
+    }));
+  });
+
   it('dispatches create_skeleton2d for 2D projects', async () => {
     const ctx = makeCtx();
     const result = await characterSetupExecutor.execute({
-      entity: { name: 'Sprite', role: 'player', appearance: 'pixel', behaviors: ['move'] },
+      entity: { name: 'Sprite', role: 'player', appearance: 'pixel' },
       projectType: '2d',
       entityId: 'ent_456',
     }, ctx);
@@ -94,7 +113,7 @@ describe('characterSetupExecutor', () => {
     });
 
     const result = await characterSetupExecutor.execute({
-      entity: { name: 'Player', role: 'player', appearance: 'knight', behaviors: ['move'] },
+      entity: { name: 'Player', role: 'player', appearance: 'knight' },
       projectType: '3d',
     }, ctx);
 
@@ -108,7 +127,7 @@ describe('characterSetupExecutor', () => {
   it('rejects an empty entityId', async () => {
     const ctx = makeCtx();
     const result = await characterSetupExecutor.execute({
-      entity: { name: 'Hero', role: 'player', appearance: 'knight', behaviors: ['move'] },
+      entity: { name: 'Hero', role: 'player', appearance: 'knight' },
       projectType: '3d',
       entityId: '',
     }, ctx);
@@ -121,7 +140,7 @@ describe('characterSetupExecutor', () => {
   it('rejects invalid projectType', async () => {
     const ctx = makeCtx();
     const result = await characterSetupExecutor.execute({
-      entity: { name: 'Hero', role: 'player', appearance: 'knight', behaviors: ['move'] },
+      entity: { name: 'Hero', role: 'player', appearance: 'knight' },
       projectType: 'vr',
       entityId: 'ent_1',
     }, ctx);
@@ -133,7 +152,7 @@ describe('characterSetupExecutor', () => {
   it('accepts custom entity with all fields', async () => {
     const ctx = makeCtx();
     const result = await characterSetupExecutor.execute({
-      entity: { name: 'Wizard', role: 'mage', appearance: 'robed', behaviors: ['cast', 'teleport'] },
+      entity: { name: 'Wizard', role: 'mage', appearance: 'robed' },
       projectType: '3d',
       entityId: 'wizard_1',
       movementType: 'flying',
@@ -147,7 +166,7 @@ describe('characterSetupExecutor', () => {
   it('does not dispatch duplicate commands when entityId is provided', async () => {
     const ctx = makeCtx();
     await characterSetupExecutor.execute({
-      entity: { name: 'Hero', role: 'player', appearance: 'knight', behaviors: ['move'] },
+      entity: { name: 'Hero', role: 'player', appearance: 'knight' },
       projectType: '3d',
       entityId: 'explicit_id',
     }, ctx);

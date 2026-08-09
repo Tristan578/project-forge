@@ -49,22 +49,19 @@
           "name": "Cartographer",
           "role": "player",
           "systems": ["movement"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["walk", "examine", "talk-to-npc"]
+          "appearance": "primitive:capsule"
         },
         {
           "name": "Archivist",
           "role": "npc",
           "systems": ["narrative"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["greet", "share-lore", "quest-giver"]
+          "appearance": "primitive:capsule"
         },
         {
           "name": "GhostEcho",
           "role": "npc",
           "systems": ["narrative"],
-          "appearance": "primitive:sphere",
-          "behaviors": ["drift", "whisper-history"]
+          "appearance": "primitive:sphere"
         }
       ],
       "transitions": [
@@ -81,8 +78,7 @@
           "name": "Cartographer",
           "role": "player",
           "systems": ["movement"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["walk", "examine"]
+          "appearance": "primitive:capsule"
         }
       ],
       "transitions": [

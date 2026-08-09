@@ -9,7 +9,6 @@ function makeEntity(overrides?: Partial<EntityBlueprint>): EntityBlueprint {
     role: 'player',
     systems: [],
     appearance: 'a knight',
-    behaviors: ['move'],
     ...overrides,
   };
 }

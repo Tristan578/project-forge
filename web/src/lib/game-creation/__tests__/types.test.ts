@@ -103,7 +103,6 @@ describe('game-creation/types — Phase 2A Layer 1', () => {
         role: 'player',
         systems: ['movement', 'input'],
         appearance: 'pixel art character',
-        behaviors: ['walk', 'jump'],
       };
       const scene: SceneBlueprint = {
         name: 'Level 1',

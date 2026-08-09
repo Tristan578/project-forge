@@ -158,22 +158,19 @@
           "name": "Hero",
           "role": "player",
           "systems": ["movement", "input", "feedback"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["walk", "jump", "swim", "attack", "talk"]
+          "appearance": "primitive:capsule"
         },
         {
           "name": "Villager",
           "role": "npc",
           "systems": ["narrative"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["greet", "give-quest"]
+          "appearance": "primitive:capsule"
         },
         {
           "name": "Slime",
           "role": "enemy",
           "systems": ["entities"],
-          "appearance": "primitive:sphere",
-          "behaviors": ["hop-toward-player", "melee-attack"]
+          "appearance": "primitive:sphere"
         }
       ],
       "transitions": [
@@ -189,15 +186,13 @@
           "name": "Hero",
           "role": "player",
           "systems": ["movement", "feedback"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["walk", "attack"]
+          "appearance": "primitive:capsule"
         },
         {
           "name": "Boss",
           "role": "enemy",
           "systems": ["entities"],
-          "appearance": "primitive:cube",
-          "behaviors": ["phase-two-attack", "summon-minions"]
+          "appearance": "primitive:cube"
         }
       ],
       "transitions": [
