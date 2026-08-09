@@ -27,25 +27,32 @@ export const SceneStatistics = memo(function SceneStatistics() {
     const totalAssets = Object.keys(assetRegistry).length;
     const totalSprites = Object.keys(sprites).length;
 
-    // Count component types from sceneGraph node data
+    // Count component types from sceneGraph node data.
+    //
+    // The strings below are the exact names `detect_components` emits in
+    // `engine/src/core/scene_graph.rs`. They are a wire contract, not labels:
+    // a node payload carries no entity-type field, so a counter keyed on a
+    // name the engine does not emit reports zero forever with nothing to show
+    // for it. Every one of these counters used to do exactly that.
     let lightCount = 0;
     let physicsCount = 0;
     let audioCount = 0;
     let particleCount = 0;
     let gameComponentCount = 0;
-    let animClipCount = 0;
 
     for (const id of entityIds) {
       const components = nodes[id]?.components;
       if (!Array.isArray(components)) continue;
-      for (const c of components) {
-        if (c === 'Light' || c === 'PointLight' || c === 'DirectionalLight' || c === 'SpotLight') lightCount++;
-        if (c === 'Physics' || c === 'RigidBody') physicsCount++;
-        if (c === 'Audio') audioCount++;
-        if (c === 'Particle') particleCount++;
-        if (c === 'GameComponent') gameComponentCount++;
-        if (c === 'AnimationClip') animClipCount++;
-      }
+      // Count ENTITIES, not component names. The engine emits a data component
+      // and a separate enabled-marker for the same feature (`PhysicsData` +
+      // `PhysicsEnabled`), so tallying per name reports two physics bodies for
+      // one entity.
+      const has = new Set(components);
+      if (has.has('PointLight') || has.has('DirectionalLight') || has.has('SpotLight')) lightCount++;
+      if (has.has('PhysicsData') || has.has('PhysicsEnabled')) physicsCount++;
+      if (has.has('AudioData') || has.has('AudioEnabled')) audioCount++;
+      if (has.has('ParticleData') || has.has('ParticleEnabled')) particleCount++;
+      if (has.has('GameComponents')) gameComponentCount++;
     }
 
     // Asset breakdown
@@ -63,7 +70,6 @@ export const SceneStatistics = memo(function SceneStatistics() {
       audioCount,
       particleCount,
       gameComponentCount,
-      animClipCount,
       textureCount,
       modelCount,
       audioAssetCount,
@@ -84,7 +90,6 @@ export const SceneStatistics = memo(function SceneStatistics() {
     { label: 'Audio Sources', value: stats.audioCount },
     { label: 'Particles', value: stats.particleCount },
     { label: 'Game Components', value: stats.gameComponentCount },
-    { label: 'Animation Clips', value: stats.animClipCount },
   ].filter((r) => r.value > 0);
 
   const assetBreakdown: StatRow[] = [

@@ -104,7 +104,7 @@ describe('SceneStatistics', () => {
 
   it('expands breakdown when Scene Statistics is clicked', () => {
     setupStore({
-      nodes: { p: makeNode('p', ['Light']) },
+      nodes: { p: makeNode('p', ['PointLight']) },
     });
     render(<SceneStatistics />);
     fireEvent.click(screen.getByText('Scene Statistics'));
@@ -114,13 +114,88 @@ describe('SceneStatistics', () => {
   it('shows light count in component breakdown when expanded', () => {
     setupStore({
       nodes: {
-        e1: makeNode('e1', ['Light']),
+        e1: makeNode('e1', ['DirectionalLight']),
         e2: makeNode('e2', ['PointLight']),
       },
     });
     render(<SceneStatistics />);
     fireEvent.click(screen.getByText('Scene Statistics'));
     expect(screen.getByText('Lights')).toBeInTheDocument();
+  });
+
+  // The component names below are the exact strings `detect_components` in
+  // `engine/src/core/scene_graph.rs` emits. They are a wire contract: the node
+  // payload carries no entity-type field, so a counter keyed on an invented
+  // name (`'Physics'`, `'Audio'`, `'Particle'`, `'GameComponent'`) can only
+  // ever report zero. Every name asserted here must exist on that side.
+  describe('component breakdown keys on the engine-emitted names', () => {
+    /** Reads the number rendered next to a breakdown row label. */
+    function rowValue(label: string): string | null {
+      const row = screen.getByText(label).parentElement;
+      return row?.querySelector('span:last-child')?.textContent ?? null;
+    }
+
+    function renderExpanded(nodes: Record<string, { id: string; name: string; components: string[] }>) {
+      setupStore({ nodes });
+      render(<SceneStatistics />);
+      fireEvent.click(screen.getByText('Scene Statistics'));
+    }
+
+    it('counts physics bodies', () => {
+      renderExpanded({
+        a: makeNode('a', ['PhysicsData', 'PhysicsEnabled']),
+        b: makeNode('b', ['PhysicsEnabled']),
+        c: makeNode('c', ['Mesh3d']),
+      });
+      expect(rowValue('Physics Bodies')).toBe('2');
+    });
+
+    it('counts audio sources', () => {
+      renderExpanded({
+        a: makeNode('a', ['AudioData', 'AudioEnabled']),
+        b: makeNode('b', ['AudioData']),
+      });
+      expect(rowValue('Audio Sources')).toBe('2');
+    });
+
+    it('counts particle emitters', () => {
+      renderExpanded({
+        a: makeNode('a', ['ParticleData', 'ParticleEnabled']),
+      });
+      expect(rowValue('Particles')).toBe('1');
+    });
+
+    it('counts game components', () => {
+      renderExpanded({
+        a: makeNode('a', ['GameComponents']),
+        b: makeNode('b', ['GameComponents', 'ScriptData']),
+      });
+      expect(rowValue('Game Components')).toBe('2');
+    });
+
+    it('counts each light entity once regardless of light type', () => {
+      renderExpanded({
+        a: makeNode('a', ['PointLight']),
+        b: makeNode('b', ['DirectionalLight']),
+        c: makeNode('c', ['SpotLight']),
+      });
+      expect(rowValue('Lights')).toBe('3');
+    });
+
+    it('does not count an entity twice when it carries both the data and marker component', () => {
+      // `PhysicsData` and `PhysicsEnabled` describe one body. A per-name tally
+      // would report two.
+      renderExpanded({ solo: makeNode('solo', ['PhysicsData', 'PhysicsEnabled']) });
+      expect(rowValue('Physics Bodies')).toBe('1');
+    });
+
+    it('reports nothing for names the engine never emits', () => {
+      renderExpanded({ a: makeNode('a', ['Physics', 'Audio', 'Particle', 'GameComponent']) });
+      expect(screen.queryByText('Physics Bodies')).toBeNull();
+      expect(screen.queryByText('Audio Sources')).toBeNull();
+      expect(screen.queryByText('Particles')).toBeNull();
+      expect(screen.queryByText('Game Components')).toBeNull();
+    });
   });
 
   it('shows texture count in asset breakdown when expanded', () => {
@@ -134,7 +209,7 @@ describe('SceneStatistics', () => {
 
   it('collapses again after second click', () => {
     setupStore({
-      nodes: { p: makeNode('p', ['Light']) },
+      nodes: { p: makeNode('p', ['PointLight']) },
     });
     render(<SceneStatistics />);
     fireEvent.click(screen.getByText('Scene Statistics'));
