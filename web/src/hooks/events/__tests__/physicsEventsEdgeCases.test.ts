@@ -348,6 +348,10 @@ describe('handlePhysicsEvent — edge cases', () => {
 
   describe('PHYSICS_CHANGED — additional edge cases', () => {
     it('handles minimal payload (only entityId and enabled)', () => {
+      // These cases assert payload→PhysicsData field mapping, so the entity has
+      // to BE the primary selection — a foreign entity's physics is deliberately
+      // withheld from `primaryPhysics` (see physicsEvents.test.ts for that guard).
+      actions.primaryId = 'ent-min';
       const payload = { entityId: 'ent-min', enabled: true };
 
       const result = handlePhysicsEvent('PHYSICS_CHANGED', payload, mockSetGet.set, mockSetGet.get);
@@ -360,6 +364,7 @@ describe('handlePhysicsEvent — edge cases', () => {
     });
 
     it('preserves all physics properties (full PhysicsData shape)', () => {
+      actions.primaryId = 'ent-full';
       const payload = {
         entityId: 'ent-full',
         enabled: true,
@@ -393,6 +398,7 @@ describe('handlePhysicsEvent — edge cases', () => {
     });
 
     it('handles sensor body type (isSensor=true)', () => {
+      actions.primaryId = 'trigger-zone';
       const payload = { entityId: 'trigger-zone', enabled: true, bodyType: 'fixed', isSensor: true };
 
       handlePhysicsEvent('PHYSICS_CHANGED', payload, mockSetGet.set, mockSetGet.get);

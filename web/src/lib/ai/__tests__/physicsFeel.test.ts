@@ -302,14 +302,28 @@ describe('applyPhysicsProfile', () => {
     },
   });
 
-  it('should dispatch exactly two commands per entity', () => {
+  it('should dispatch two commands for a controller entity and one for a plain one', () => {
     const dispatch = vi.fn() as CommandDispatcher;
     const profile = PHYSICS_PRESETS.platformer_floaty;
 
-    applyPhysicsProfile(profile, dispatch, ['e1', 'e2'], {});
+    applyPhysicsProfile(profile, dispatch, ['player', 'crate'], {
+      player: [controller()],
+    });
 
-    // 2 entities x 2 commands each = 4 calls
-    expect(dispatch).toHaveBeenCalledTimes(4);
+    // `player` gets update_physics + update_game_component; `crate` has no
+    // controller, so it gets update_physics only — creating one for it would
+    // make a crate WASD-drivable (PF-1118 review F13).
+    expect(dispatch).toHaveBeenCalledTimes(3);
+    expect(
+      (dispatch as ReturnType<typeof vi.fn>).mock.calls.map(([cmd, payload]) => [
+        cmd,
+        (payload as { entityId: string }).entityId,
+      ]),
+    ).toEqual([
+      ['update_physics', 'player'],
+      ['update_game_component', 'player'],
+      ['update_physics', 'crate'],
+    ]);
   });
 
   it('should dispatch update_physics as a partial patch with exactly the four tuned keys', () => {
@@ -333,7 +347,7 @@ describe('applyPhysicsProfile', () => {
     const dispatch = vi.fn() as CommandDispatcher;
     const profile = PHYSICS_PRESETS.rpg_weighty;
 
-    applyPhysicsProfile(profile, dispatch, ['e1'], {});
+    applyPhysicsProfile(profile, dispatch, ['e1'], { e1: [controller()] });
 
     expect(dispatch).toHaveBeenNthCalledWith(2, 'update_game_component', {
       entityId: 'e1',
@@ -367,7 +381,7 @@ describe('applyPhysicsProfile', () => {
     });
   });
 
-  it('should fall back to defaults when the entity has other components but no controller', () => {
+  it('should NOT create a controller on an entity that has other components but none', () => {
     const dispatch = vi.fn() as CommandDispatcher;
     const profile = PHYSICS_PRESETS.arcade_classic;
 
@@ -386,17 +400,24 @@ describe('applyPhysicsProfile', () => {
       ],
     });
 
-    expect(dispatch).toHaveBeenCalledTimes(2);
-    expect(dispatch).toHaveBeenNthCalledWith(2, 'update_game_component', {
+    // Having SOME component is not having a controller. The physics half still
+    // applies; the movement half is skipped rather than fabricated.
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledWith('update_physics', {
       entityId: 'e1',
-      componentType: 'character_controller',
-      properties: {
-        speed: profile.moveSpeed,
-        jumpHeight: profile.jumpForce,
-        gravityScale: profile.gravity / 10,
-        canDoubleJump: false,
-      },
+      gravityScale: profile.gravity / 10,
+      friction: profile.friction,
+      restitution: profile.restitution,
     });
+  });
+
+  it('should NOT create a controller on an entity with no components at all', () => {
+    const dispatch = vi.fn() as CommandDispatcher;
+
+    applyPhysicsProfile(PHYSICS_PRESETS.arcade_classic, dispatch, ['e1'], {});
+
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect((dispatch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('update_physics');
   });
 
   it('should read each entity its own existing controller', () => {

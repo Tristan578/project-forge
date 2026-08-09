@@ -31,14 +31,19 @@ const OCCLUSION_RAYCAST_PREFIX = 'audio_occlusion:';
  * re-checked on a microtask of our own — queued after the batcher's, so the
  * selection has landed by then — instead of being dropped outright.
  *
- * With no selection at all there is nothing to protect: `InspectorPanel`
- * renders no inspector body without a `primaryId`, so no write-back path
- * exists and the payload is applied directly.
+ * No selection is NOT a safe case, and is handled by the same deferral. Writing
+ * the payload straight through when `primaryId` is null looks harmless — nothing
+ * renders it right now — but it survives in the store, so the next entity the
+ * user selects inherits a foreign 13-field body as its inspector state and the
+ * first slider move writes that body onto it. That is the same corruption the
+ * mismatch branch exists to prevent, just deferred until selection. The only
+ * case the deferral discards is "no entity is ever selected", where
+ * `primaryPhysics` has no reader at all.
  */
 function applyPrimaryPhysics(entityId: string, physData: PhysicsData, enabled: boolean): void {
   const primaryId = useEditorStore.getState().primaryId;
 
-  if (primaryId == null || primaryId === entityId) {
+  if (primaryId === entityId) {
     useEditorStore.getState().setPrimaryPhysics(physData, enabled);
     return;
   }

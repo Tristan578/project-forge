@@ -100,10 +100,15 @@ impl Default for PhysicsData {
 /// would, for example, flip a Fixed platform to Dynamic.
 ///
 /// Trade-off: because nothing is required, a misspelled key (`gravtiyScale`)
-/// silently no-ops instead of erroring. Callers go through a fully-typed
-/// TypeScript wrapper, which is where that class of typo is caught.
-/// `deny_unknown_fields` is not an option here — it is incompatible with the
-/// `#[serde(flatten)]` used by the `update_physics` payload.
+/// silently no-ops instead of erroring, and the engine cannot detect it —
+/// `deny_unknown_fields` is incompatible with the `#[serde(flatten)]` that the
+/// `update_physics` payload uses. The web client closes that gap on its side by
+/// building every payload through `buildPhysicsPatch`
+/// (`web/src/lib/physics/updatePhysicsPayload.ts`), which copies only
+/// allowlisted keys, so an unknown key cannot reach the wire in the first place.
+/// Note that a type annotation alone would NOT be enough there: TypeScript's
+/// excess-property check does not apply to spread-in properties, so the
+/// allowlist has to be enforced by construction rather than by a `satisfies`.
 ///
 /// `Serialize` is derived purely so the drift test can enumerate the field names
 /// serde actually emits; nothing on the wire ever sends a `PhysicsPatch` back out.

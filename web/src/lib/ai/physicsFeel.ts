@@ -6,7 +6,8 @@
  */
 
 import { buildStoreComponent, toWireComponent } from '@/lib/engine/gameComponentWire';
-import type { GameComponentData, PhysicsData } from '@/stores/slices/types';
+import { buildPhysicsPatch } from '@/lib/physics/updatePhysicsPayload';
+import type { GameComponentData } from '@/stores/slices/types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,22 +55,6 @@ export interface PhysicsSceneContext {
 
 /** A dispatcher that can send engine commands. */
 export type CommandDispatcher = (command: string, payload: unknown) => void;
-
-/**
- * Wire shape of the engine's `update_physics` command: `entityId` plus every
- * `PhysicsData` field as optional, mirroring the engine's `PhysicsPatch`
- * (`engine/src/core/physics.rs`) field for field.
- *
- * This exists because `CommandDispatcher` takes `payload: unknown`, so a bare
- * object literal at a dispatch site is completely unchecked: `gravtiyScale`
- * type-checks, deserializes into a `PhysicsPatch` with every field `None`
- * (serde ignores unknown keys), writes nothing, and gravity silently never
- * changes. Annotating the payload against this type — via `satisfies`, which
- * keeps excess-property checking on the literal — turns that typo into a
- * compile error. Derived from `PhysicsData` rather than re-listing the 13
- * fields so the two can never drift.
- */
-export type PhysicsPatchPayload = { entityId: string } & Partial<PhysicsData>;
 
 // ---------------------------------------------------------------------------
 // Presets
@@ -400,8 +385,10 @@ export function analyzePhysicsFeel(ctx: PhysicsSceneContext): PhysicsAnalysis {
 
 /**
  * Apply a physics profile to all physics entities in the scene via dispatch commands.
- * Updates gravity scale, friction and restitution on physics-enabled entities, and the
- * character controller's speed / jump height / gravity scale on entities that have one.
+ * Updates gravity scale, friction and restitution on every listed entity, and the
+ * character controller's speed / jump height / gravity scale ONLY on entities that
+ * already have a controller — see the comment at the skip below for why creating one
+ * here would be worse than skipping.
  *
  * `existingComponents` is the store's `allGameComponents` map. It is REQUIRED, not
  * defaulted: `update_game_component` replaces the whole component engine-side
@@ -428,21 +415,33 @@ export function applyPhysicsProfile(
     // impossible: the store only ever holds the SELECTED entity's physics
     // (`physicsSlice.primaryPhysics`), so the rest would have to be invented from
     // defaults, which would flip every static platform to dynamic.
-    dispatch('update_physics', {
-      entityId,
-      gravityScale,
-      friction: profile.friction,
-      restitution: profile.restitution,
-    } satisfies PhysicsPatchPayload);
+    dispatch(
+      'update_physics',
+      buildPhysicsPatch(entityId, {
+        gravityScale,
+        friction: profile.friction,
+        restitution: profile.restitution,
+      }),
+    );
 
-    // Merge onto the entity's existing controller so unrelated fields survive; fall
-    // back to a fully-populated default component when it has none.
+    // Tune the character controller only on entities that ALREADY have one.
+    //
+    // `entityIds` here is every physics-enabled entity in the scene — crates,
+    // platforms, enemies, pickups. Creating a controller for each of them would
+    // make every one of them WASD-drivable and give the scene several "players",
+    // which is a far worse outcome than leaving a profile field unapplied. The
+    // physics half above still reaches all of them, which is what a physics
+    // profile is actually for.
     const existing = existingComponents[entityId]?.find(
       (c): c is Extract<GameComponentData, { type: 'characterController' }> =>
         c.type === 'characterController',
     );
+    if (!existing) continue;
+
+    // Merge onto the existing controller so fields this profile does not own —
+    // `canDoubleJump` above all — survive the round trip.
     const merged = buildStoreComponent('character_controller', {
-      ...existing?.characterController,
+      ...existing.characterController,
       speed: profile.moveSpeed,
       jumpHeight: profile.jumpForce,
       gravityScale,

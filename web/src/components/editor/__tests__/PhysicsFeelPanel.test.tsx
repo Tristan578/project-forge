@@ -115,7 +115,7 @@ describe('PhysicsFeelPanel', () => {
   it('shows Apply button disabled when no physics entities exist', () => {
     mockStore({ sceneGraph: { nodes: {} }, physics2d: {}, physicsEnabled: false });
     render(<PhysicsFeelPanel />);
-    const applyBtn = screen.getByLabelText('Apply physics profile to all entities');
+    const applyBtn = screen.getByRole('button', { name: /Apply physics profile to \d+ entities/ });
     expect(applyBtn.hasAttribute('disabled')).toBe(true);
   });
 
@@ -130,7 +130,7 @@ describe('PhysicsFeelPanel', () => {
       physicsEnabled: false,
     });
     render(<PhysicsFeelPanel />);
-    const applyBtn = screen.getByLabelText('Apply physics profile to all entities');
+    const applyBtn = screen.getByRole('button', { name: /Apply physics profile to \d+ entities/ });
     expect(applyBtn.hasAttribute('disabled')).toBe(false);
   });
 
@@ -149,7 +149,7 @@ describe('PhysicsFeelPanel', () => {
     });
 
     render(<PhysicsFeelPanel />);
-    fireEvent.click(screen.getByLabelText('Apply physics profile to all entities'));
+    fireEvent.click(screen.getByRole('button', { name: /Apply physics profile to \d+ entities/ }));
     expect(vi.mocked(applyPhysicsProfile)).toHaveBeenCalledOnce();
 
     const call = vi.mocked(applyPhysicsProfile).mock.calls[0];
@@ -203,7 +203,7 @@ describe('PhysicsFeelPanel', () => {
     });
 
     render(<PhysicsFeelPanel />);
-    fireEvent.click(screen.getByLabelText('Apply physics profile to all entities'));
+    fireEvent.click(screen.getByRole('button', { name: /Apply physics profile to \d+ entities/ }));
 
     const call = vi.mocked(applyPhysicsProfile).mock.calls[0];
     expect(call[3]).toBeDefined();

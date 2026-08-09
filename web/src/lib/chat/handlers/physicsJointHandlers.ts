@@ -5,7 +5,7 @@
 import { z } from 'zod';
 import { zEntityId, zVec3, zVec2, parseArgs } from './types';
 import type { ToolHandler } from './types';
-import type { PhysicsPatchPayload } from '@/lib/ai/physicsFeel';
+import { buildPhysicsPatch } from '@/lib/physics/updatePhysicsPayload';
 import type { JointData } from '@/stores/editorStore';
 
 // ===== Shared Schemas =====
@@ -70,10 +70,7 @@ export const physicsJointHandlers: Record<string, ToolHandler> = {
     // real selection. Nothing needs writing here: the engine echoes
     // `PHYSICS_CHANGED` for the selected entity and `physicsEvents.ts` feeds
     // `setPrimaryPhysics` from that.
-    ctx.dispatchCommand('update_physics', {
-      entityId,
-      ...physInput,
-    } satisfies PhysicsPatchPayload);
+    ctx.dispatchCommand('update_physics', buildPhysicsPatch(entityId, physInput));
     return { success: true };
   },
 

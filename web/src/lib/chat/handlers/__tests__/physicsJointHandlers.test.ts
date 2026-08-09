@@ -3,27 +3,12 @@
  * extrude, lathe, array, and combine mesh commands.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { invokeHandler, createMockStore } from './handlerTestUtils';
+import { invokeHandler } from './handlerTestUtils';
 import { physicsJointHandlers } from '../physicsJointHandlers';
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
-
-/**
- * `invokeHandler` does not surface the dispatcher, and `update_physics` is now a
- * pure dispatch — the payload IS the behaviour, so it has to be observable.
- */
-async function invokeWithDispatch(
-  name: string,
-  args: Record<string, unknown>,
-  storeOverrides: Record<string, unknown> = {},
-) {
-  const store = createMockStore(storeOverrides);
-  const dispatchCommand = vi.fn();
-  const result = await physicsJointHandlers[name](args, { store, dispatchCommand });
-  return { result, store, dispatchCommand };
-}
 
 // ===========================================================================
 // update_physics
@@ -38,7 +23,7 @@ describe('update_physics', () => {
   });
 
   it('dispatches ONLY the fields the tool call supplied', async () => {
-    const { result, dispatchCommand } = await invokeWithDispatch('update_physics', {
+    const { result, dispatchCommand } = await invokeHandler(physicsJointHandlers, 'update_physics', {
       entityId: 'ent-1',
       bodyType: 'fixed',
     }, { primaryPhysics: null });
@@ -69,7 +54,7 @@ describe('update_physics', () => {
       lockRotationX: false, lockRotationY: false, lockRotationZ: false,
       isSensor: true,
     };
-    const { dispatchCommand, store } = await invokeWithDispatch('update_physics', {
+    const { dispatchCommand, store } = await invokeHandler(physicsJointHandlers, 'update_physics', {
       entityId: 'ground',
       restitution: 0.9,
     }, { primaryPhysics: selectedEntityPhysics });
@@ -113,7 +98,7 @@ describe('update_physics', () => {
   });
 
   it('dispatches only the lock flags that were named, not all six', async () => {
-    const { dispatchCommand } = await invokeWithDispatch('update_physics', {
+    const { dispatchCommand } = await invokeHandler(physicsJointHandlers, 'update_physics', {
       entityId: 'ent-1',
       lockTranslationY: true,
       lockRotationX: true,

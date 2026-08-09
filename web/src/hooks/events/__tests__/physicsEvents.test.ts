@@ -50,77 +50,71 @@ describe('handlePhysicsEvent', () => {
   });
 
   describe('PHYSICS_CHANGED', () => {
+    /**
+     * The engine emits every field of `PhysicsData` — the 13 in
+     * `stores/slices/types.ts`, mirroring the Rust struct of the same name.
+     * Earlier fixtures here asserted `mass`, `colliderType`, `colliderSize`,
+     * `linearDamping` and `angularDamping`, none of which exist on either side
+     * of the wire; the handler passes its payload through untouched, so those
+     * assertions passed while describing an event the engine cannot send
+     * (PF-1118 review F19).
+     */
+    const fullPhysics = () => ({
+      bodyType: 'dynamic' as const,
+      colliderShape: 'cuboid' as const,
+      restitution: 0.7,
+      friction: 0.3,
+      density: 1.5,
+      gravityScale: 1.0,
+      lockTranslationX: false,
+      lockTranslationY: false,
+      lockTranslationZ: false,
+      lockRotationX: false,
+      lockRotationY: true,
+      lockRotationZ: false,
+      isSensor: false,
+    });
+
     it('strips entityId and passes physics data with enabled flag', () => {
-      const payload = {
-        entityId: 'entity-1',
-        enabled: true,
-        bodyType: 'dynamic',
-        mass: 1.5,
-        friction: 0.3,
-        restitution: 0.7,
-        colliderType: 'box',
-        colliderSize: [1, 1, 1],
-        gravityScale: 1.0,
-        linearDamping: 0.0,
-        angularDamping: 0.05,
-      };
+      actions.primaryId = 'entity-1';
+      const physics = fullPhysics();
 
       const result = handlePhysicsEvent(
         'PHYSICS_CHANGED',
-        payload,
+        { entityId: 'entity-1', enabled: true, ...physics },
         mockSetGet.set,
         mockSetGet.get
       );
 
       expect(result).toBe(true);
-      expect(actions.setPrimaryPhysics).toHaveBeenCalledWith(
-        {
-          bodyType: 'dynamic',
-          mass: 1.5,
-          friction: 0.3,
-          restitution: 0.7,
-          colliderType: 'box',
-          colliderSize: [1, 1, 1],
-          gravityScale: 1.0,
-          linearDamping: 0.0,
-          angularDamping: 0.05,
-        },
-        true
-      );
+      expect(actions.setPrimaryPhysics).toHaveBeenCalledWith(physics, true);
     });
 
     it('handles disabled physics', () => {
-      const payload = {
-        entityId: 'entity-2',
-        enabled: false,
-        bodyType: 'static',
-        mass: 0,
-        friction: 0.5,
-        restitution: 0.0,
-        colliderType: 'sphere',
-        colliderSize: [1],
-        gravityScale: 1.0,
-        linearDamping: 0.0,
-        angularDamping: 0.0,
-      };
+      actions.primaryId = 'entity-2';
+      const physics = { ...fullPhysics(), bodyType: 'fixed' as const, density: 0 };
 
       const result = handlePhysicsEvent(
         'PHYSICS_CHANGED',
-        payload,
+        { entityId: 'entity-2', enabled: false, ...physics },
         mockSetGet.set,
         mockSetGet.get
       );
 
       expect(result).toBe(true);
-      expect(actions.setPrimaryPhysics).toHaveBeenCalledWith(
-        expect.objectContaining({ bodyType: 'static' }),
-        false
-      );
+      // Full-shape, not `objectContaining`: a containing matcher cannot catch a
+      // field the handler drops, which is the whole defect class this PR closes.
+      expect(actions.setPrimaryPhysics).toHaveBeenCalledWith(physics, false);
     });
 
     it('should strip entityId from physics data', () => {
-      const payload = { entityId: 'entity-1', enabled: false, bodyType: 'static' };
-      handlePhysicsEvent('PHYSICS_CHANGED', payload, mockSetGet.set, mockSetGet.get);
+      actions.primaryId = 'entity-1';
+      handlePhysicsEvent(
+        'PHYSICS_CHANGED',
+        { entityId: 'entity-1', enabled: false, bodyType: 'fixed' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
 
       const calledData = actions.setPrimaryPhysics.mock.calls[0][0];
       expect(calledData).not.toHaveProperty('entityId');
@@ -223,7 +217,7 @@ describe('handlePhysicsEvent', () => {
         );
       });
 
-      it('applies when nothing is selected (no inspector write-back path)', () => {
+      it('does NOT write through when nothing is selected', async () => {
         actions.primaryId = null;
 
         handlePhysicsEvent(
@@ -233,7 +227,35 @@ describe('handlePhysicsEvent', () => {
           mockSetGet.get
         );
 
-        expect(actions.setPrimaryPhysics).toHaveBeenCalledWith({ bodyType: 'fixed' }, false);
+        // "Nothing selected" is not a safe case. The payload would survive in
+        // the store and become the inspector state of whichever entity the user
+        // selects next, so the first slider nudge would write a foreign body
+        // onto it — the same corruption the mismatch branch prevents, deferred.
+        expect(actions.setPrimaryPhysics).not.toHaveBeenCalled();
+
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(actions.setPrimaryPhysics).not.toHaveBeenCalled();
+      });
+
+      it('applies once the user selects the entity the event described', async () => {
+        actions.primaryId = null;
+
+        handlePhysicsEvent(
+          'PHYSICS_CHANGED',
+          { entityId: 'crate-3', enabled: true, bodyType: 'dynamic', friction: 0.6 },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        actions.primaryId = 'crate-3';
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(actions.setPrimaryPhysics).toHaveBeenCalledWith(
+          { bodyType: 'dynamic', friction: 0.6 },
+          true
+        );
       });
     });
   });
