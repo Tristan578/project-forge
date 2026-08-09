@@ -12,12 +12,20 @@
  *   in `engine/src/core/game_components.rs`; `properties` is deserialized straight
  *   into the matching Rust struct.
  *
- * The engine rejects a payload with no `componentType` ("Missing componentType") and
- * `build_game_component` runs strict serde on any non-empty properties bag, so a
- * partial bag drops the whole component. `dispatchCommand` returns `void`, so neither
- * rejection is observable from the caller — the store keeps the component and the UI
- * shows it as applied while the engine has nothing. Every dispatch of a game component
- * must therefore go through `toWireComponent`.
+ * The engine rejects a payload with no `componentType` ("Missing componentType"), and
+ * `dispatchCommand` returns `void`, so that rejection is not observable from the
+ * caller — the store keeps the component and the UI shows it as applied while the
+ * engine has nothing. Every dispatch of a game component must therefore go through
+ * `toWireComponent`.
+ *
+ * Within a recognised component, `build_game_component` is permissive rather than
+ * strict: it merges each recognised field onto the type's `Default`, and anything
+ * missing, unknown, wrongly typed or out of range leaves its default standing. That
+ * makes the second failure mode quieter than an outright rejection — a value the
+ * engine will not accept does not fail, it diverges. The store keeps what it was
+ * given and the engine keeps its own, and every surface that reads one shows a
+ * different game than the one being played. Matching the engine's coercions here
+ * (see `int` below) is what keeps the two sides on a single value.
  */
 
 import type { GameComponentData, PlatformLoopMode, WinConditionType } from '@/stores/slices/types';
@@ -84,6 +92,25 @@ function propertiesOf(component: GameComponentData): Record<string, unknown> {
       oneShot: component.dialogueTrigger.oneShot,
     };
   }
+}
+
+/**
+ * Re-run a complete component through the same coercions a freshly-built one gets.
+ *
+ * The inspector edits a component field-by-field and hands the whole object back,
+ * so it never passes through `buildStoreComponent` — a `10.4` typed into the
+ * Value box would be stored verbatim while the engine rounds it. Normalizing at
+ * the store boundary means one value goes into both. Lossless for an already-valid
+ * component: every field is read back under its own name, so this is a no-op
+ * except where the engine would have disagreed.
+ */
+export function normalizeGameComponent(component: GameComponentData): GameComponentData {
+  return buildStoreComponent(component.type, propsOf(component)) ?? component;
+}
+
+/** The component's own data object, keyed by its discriminant. */
+function propsOf(component: GameComponentData): Record<string, unknown> {
+  return (component as unknown as Record<string, Record<string, unknown>>)[component.type];
 }
 
 /** Convert a store component into the flat payload the engine expects. */
@@ -154,20 +181,49 @@ const vec3 = (v: unknown, fallback: [number, number, number]): [number, number, 
   Array.isArray(v) && v.length === 3 && v.every(n => typeof n === 'number' && Number.isFinite(n))
     ? (v as [number, number, number])
     : fallback;
-const nullableNum = (v: unknown, fallback: number | null): number | null =>
-  v === null ? null : typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 const nullableStr = (v: unknown, fallback: string | null): string | null =>
   v === null ? null : typeof v === 'string' ? v : fallback;
+
+/**
+ * The engine's ceiling for each `u32` field, from the `prop_u32` call sites in
+ * `engine/src/core/game_components.rs`. Named rather than inlined because the
+ * value has to be read against the Rust source to be checked at all.
+ */
+const U32_MAX = 4294967295;
+const COLLECTIBLE_VALUE_MAX = 1_000_000;
+const SPAWNER_MAX_COUNT_MAX = 1000;
+const TARGET_SCORE_MAX = U32_MAX;
+
+/**
+ * Coerce a whole-number field the same way the engine's `prop_u32` does.
+ *
+ * Three fields on this wire are `u32` in Rust. The engine rounds to nearest and
+ * clamps into `0..=max`; a plain finite-number check let the store keep `10.4`,
+ * `-5` or `1e12` — values the engine can never hold. Nothing reports the
+ * mismatch, so the inspector would show one number while the running game used
+ * another. Doing the same arithmetic here keeps both sides on one value.
+ *
+ * Rounding matches Rust's `f64::round` for every input that survives the zero
+ * floor: both round half away from zero, and the cases where they differ (`-2.5`
+ * → `-3` in Rust, `-2` in JS) clamp to `0` either way.
+ */
+const int = (v: unknown, fallback: number, max: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.min(Math.max(Math.round(v), 0), max) : fallback;
+
+const nullableInt = (v: unknown, fallback: number | null, max: number): number | null =>
+  v === null ? null : typeof v === 'number' && Number.isFinite(v) ? int(v, 0, max) : fallback;
 
 /**
  * Build a COMPLETE store component from a partial properties bag.
  *
  * Callers that only know one field — the AI auto-iteration fixer, the chat
- * `add_game_component` tool — must not dispatch that field alone: the engine
- * deserializes the bag with strict serde, so a partial bag is rejected outright
- * and the component is silently dropped. Every missing field is filled here with
- * the same default the Rust struct's `Default` impl uses, so the resulting bag
- * always deserializes.
+ * `add_game_component` tool — must not dispatch that field alone. The engine
+ * would accept it (it merges onto `Default`), but the STORE would then be
+ * holding a component with whatever the caller happened to pass and nothing for
+ * the rest, so the inspector, the export and the engine would each describe the
+ * entity differently. Every missing field is filled here with the same default
+ * the Rust struct's `Default` impl uses, so the store's copy and the engine's
+ * copy are the same component.
  *
  * `name` accepts either vocabulary (`character_controller` or `characterController`).
  * Returns `null` for an unrecognized name so the caller can report it rather than
@@ -208,7 +264,7 @@ export function buildStoreComponent(
       return {
         type: 'collectible',
         collectible: {
-          value: num(props.value, 1),
+          value: int(props.value, 1, COLLECTIBLE_VALUE_MAX),
           destroyOnCollect: bool(props.destroyOnCollect, true),
           pickupSoundAsset: nullableStr(props.pickupSoundAsset, null),
           rotateSpeed: num(props.rotateSpeed, 90),
@@ -258,7 +314,7 @@ export function buildStoreComponent(
         spawner: {
           entityType: str(props.entityType, 'cube'),
           intervalSecs: num(props.intervalSecs, 3),
-          maxCount: num(props.maxCount, 5),
+          maxCount: int(props.maxCount, 5, SPAWNER_MAX_COUNT_MAX),
           spawnOffset: vec3(props.spawnOffset, [0, 1, 0]),
           onTrigger: nullableStr(props.onTrigger, null),
         },
@@ -289,7 +345,7 @@ export function buildStoreComponent(
         type: 'winCondition',
         winCondition: {
           conditionType: (props.conditionType as WinConditionType) ?? 'score',
-          targetScore: nullableNum(props.targetScore, 10),
+          targetScore: nullableInt(props.targetScore, 10, TARGET_SCORE_MAX),
           targetEntityId: nullableStr(props.targetEntityId, null),
         },
       };
