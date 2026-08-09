@@ -42,7 +42,16 @@ export interface SceneSlice {
   cloudSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
   lastCloudSave: string | null;
 
-  saveScene: () => void;
+  /**
+   * Ask the engine to serialize the current scene.
+   *
+   * The result arrives asynchronously as the `forge:scene-exported` DOM event.
+   * Pass `requestId` (from `newSceneExportRequestId()`) to have it echoed back
+   * on that event so a listener can tell its own answer from an export someone
+   * else triggered (PF-1103). Callers that just want the scene persisted (the
+   * debounced autosave, the chat tool) can omit it.
+   */
+  saveScene: (requestId?: string) => void;
   loadScene: (json: string) => void;
   newScene: () => void;
   setSceneName: (name: string) => void;
@@ -73,7 +82,8 @@ export interface SceneSlice {
   combineMeshes: (entityIds: string[], deleteSources?: boolean, name?: string) => void;
   setExporting: (value: boolean) => void;
   setProjectId: (id: string | null) => void;
-  saveToCloud: () => void;
+  /** Trigger the export whose event drives the cloud-save PUT. See {@link saveScene} for `requestId`. */
+  saveToCloud: (requestId?: string) => void;
   setCloudSaveStatus: (status: 'idle' | 'saving' | 'saved' | 'error') => void;
   /** Set the ISO-8601 timestamp of the most recent successful cloud save (PF-540). */
   setLastCloudSave: (timestamp: string) => void;
@@ -135,8 +145,11 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
   cloudSaveStatus: 'idle',
   lastCloudSave: null,
 
-  saveScene: () => {
-    if (dispatchCommand) dispatchCommand('export_scene', {});
+  saveScene: (requestId) => {
+    // Built conditionally rather than `{ requestId }`: the engine validates a
+    // `requestId` key that is present, and an explicit `undefined` can survive
+    // as `null` depending on how the payload is marshalled.
+    if (dispatchCommand) dispatchCommand('export_scene', requestId ? { requestId } : {});
   },
   loadScene: (json) => {
     if (dispatchCommand) dispatchCommand('load_scene', { json });
@@ -221,13 +234,13 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
   },
   setExporting: (value) => set({ isExporting: value }),
   setProjectId: (id) => set({ projectId: id }),
-  saveToCloud: () => {
+  saveToCloud: (requestId) => {
     // Cloud save is orchestrated externally via SceneToolbar which listens for
     // the forge:scene-exported window event to obtain the scene JSON. This
     // action triggers the engine export; SceneToolbar is responsible for calling
     // setCloudSaveStatus and setLastCloudSave on completion (PF-540).
     if (dispatchCommand) {
-      dispatchCommand('export_scene', {});
+      dispatchCommand('export_scene', requestId ? { requestId } : {});
     }
   },
   setCloudSaveStatus: (status) => set({ cloudSaveStatus: status }),

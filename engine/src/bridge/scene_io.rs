@@ -26,7 +26,7 @@ use crate::core::{
     lod::LodData,
     material::MaterialData,
     particles::{ParticleData, ParticleEnabled},
-    pending_commands::{EntityType, PendingCommands},
+    pending_commands::{self, EntityType, PendingCommands},
     physics::{JointData, PhysicsData, PhysicsEnabled},
     post_processing::PostProcessingSettings,
     procedural_mesh::ProceduralMeshData,
@@ -76,7 +76,11 @@ pub(super) fn apply_scene_export(
     if pending.scene_export_requests.is_empty() {
         return;
     }
-    pending.scene_export_requests.clear();
+    // Drain rather than clear: every queued request gets its own answer below.
+    // N requests coalescing into a single event was harmless while no caller
+    // could tell events apart, but with correlation ids (PF-1103) it would
+    // strand every caller but one waiting on an id that is never emitted.
+    let requests: Vec<_> = std::mem::take(&mut pending.scene_export_requests);
 
     // Build entity snapshots
     let mut snapshots = Vec::new();
@@ -193,8 +197,21 @@ pub(super) fn apply_scene_export(
 
     match serde_json::to_string(&scene_file) {
         Ok(json) => {
-            events::emit_scene_exported(&json, &scene_name.0);
-            tracing::info!("Scene exported: {} entities", scene_file.entities.len());
+            // One event per DISTINCT correlation id, not per request: the JSON
+            // is built once, but each caller needs its own id echoed back
+            // (PF-1103) — while every extra event re-runs the web side's full
+            // persistence chain against the same payload, so the id-less and
+            // repeated requests are collapsed first.
+            let correlation_ids = pending_commands::export_correlation_ids(&requests);
+            for request_id in &correlation_ids {
+                events::emit_scene_exported(&json, &scene_name.0, *request_id);
+            }
+            tracing::info!(
+                "Scene exported: {} entities ({} request(s), {} event(s))",
+                scene_file.entities.len(),
+                requests.len(),
+                correlation_ids.len()
+            );
         }
         Err(e) => {
             tracing::error!("Failed to serialize scene: {}", e);

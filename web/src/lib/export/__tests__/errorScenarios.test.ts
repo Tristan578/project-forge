@@ -13,6 +13,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { downloadBlob } from '../exportEngine';
+import { SCENE_EXPORTED_EVENT } from '@/lib/engine/sceneExportWire';
 
 // ── Hoist mock references ────────────────────────────────────────────────────
 const mocks = vi.hoisted(() => {
@@ -78,7 +79,7 @@ function scheduleSceneExportedEvent(detail: unknown, delayMs = 50) {
   // eslint-disable-next-line no-restricted-syntax
   setTimeout(() => {
     window.dispatchEvent(
-      new CustomEvent('forge:scene-exported', { detail })
+      new CustomEvent(SCENE_EXPORTED_EVENT, { detail })
     );
   }, delayMs);
 }
@@ -182,6 +183,88 @@ describe('exportGame: missing scene data', () => {
     expect(result).toBeInstanceOf(Error);
     expect((result as Error).message).toContain('5 seconds');
     expect((result as Error).message).toContain('engine is loaded');
+
+    vi.useRealTimers();
+  });
+});
+
+describe('exportGame: scene-export correlation (PF-1103)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    mockFetchWithWasm();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** The request id exportGame minted, read back off the saveScene call. */
+  function mintedRequestId(): string {
+    expect(mocks.saveScene).toHaveBeenCalledTimes(1);
+    const id = mocks.saveScene.mock.calls[0][0];
+    expect(typeof id).toBe('string');
+    return id as string;
+  }
+
+  it('ignores an export it did not request and settles on its own', async () => {
+    vi.useFakeTimers();
+    mocks.getState.mockReturnValue(makeStoreState({ sceneName: 'Correlated' }));
+
+    const { exportGame } = await import('../exportEngine');
+    const exportPromise = exportGame({
+      title: 'Test Game',
+      mode: 'single-html',
+      resolution: 'responsive',
+      bgColor: '#000000',
+      includeDebug: false,
+    });
+
+    const requestId = mintedRequestId();
+
+    // An autosave tick (or a cloud save) exports a DIFFERENT scene first. Before
+    // correlation, whichever export landed first was consumed as the answer.
+    scheduleSceneExportedEvent(
+      { json: JSON.stringify({ name: 'Theirs', entities: [{ id: 'zzz-foreign-marker' }] }), name: 'Theirs', requestId: `${requestId}-not` },
+      50,
+    );
+    scheduleSceneExportedEvent(
+      { json: JSON.stringify({ name: 'Mine', entities: [{ id: 'zzz-own-marker' }] }), name: 'Mine', requestId },
+      100,
+    );
+    await vi.advanceTimersByTimeAsync(200);
+
+    const html = await (await exportPromise).text();
+    expect(html).toContain('zzz-own-marker');
+    expect(html).not.toContain('zzz-foreign-marker');
+
+    vi.useRealTimers();
+  });
+
+  it('accepts an export with no request id (engine binary predating the change)', async () => {
+    vi.useFakeTimers();
+    mocks.getState.mockReturnValue(makeStoreState({ sceneName: 'Legacy' }));
+
+    const { exportGame } = await import('../exportEngine');
+    const exportPromise = exportGame({
+      title: 'Test Game',
+      mode: 'single-html',
+      resolution: 'responsive',
+      bgColor: '#000000',
+      includeDebug: false,
+    });
+
+    mintedRequestId();
+    scheduleSceneExportedEvent(
+      { json: JSON.stringify({ name: 'Legacy', entities: [{ id: 'zzz-legacy-marker' }] }), name: 'Legacy' },
+      50,
+    );
+    // Well inside the 5 s timeout: an id-less event must settle the export, not
+    // be discarded until it expires.
+    await vi.advanceTimersByTimeAsync(200);
+
+    const html = await (await exportPromise).text();
+    expect(html).toContain('zzz-legacy-marker');
 
     vi.useRealTimers();
   });

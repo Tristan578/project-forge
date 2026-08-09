@@ -41,8 +41,17 @@ pub struct RemoveTextureRequest {
     pub slot: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct SceneExportRequest;
+/// One caller's request for a scene export.
+///
+/// `request_id` is the correlation token echoed back on the `SCENE_EXPORTED`
+/// event so a listener can tell its own answer from someone else's (PF-1103).
+/// It is `Option` because `export_scene` has always been callable with no
+/// payload, and a caller that does not care about correlation (the periodic
+/// autosave, the chat tool) still must not be forced to mint one.
+#[derive(Debug, Clone, Default)]
+pub struct SceneExportRequest {
+    pub request_id: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct SceneLoadRequest {
@@ -73,8 +82,8 @@ pub struct QualityPresetRequest {
 // === Queue Methods ===
 
 impl PendingCommands {
-    pub fn queue_scene_export(&mut self) {
-        self.scene_export_requests.push(SceneExportRequest);
+    pub fn queue_scene_export(&mut self, request: SceneExportRequest) {
+        self.scene_export_requests.push(request);
     }
 
     pub fn queue_scene_load(&mut self, request: SceneLoadRequest) {
@@ -120,8 +129,8 @@ impl PendingCommands {
 
 // === Bridge Functions ===
 
-pub fn queue_scene_export_from_bridge() -> bool {
-    super::with_pending(|pc| pc.queue_scene_export()).is_some()
+pub fn queue_scene_export_from_bridge(request: SceneExportRequest) -> bool {
+    super::with_pending(|pc| pc.queue_scene_export(request)).is_some()
 }
 
 pub fn queue_scene_load_from_bridge(request: SceneLoadRequest) -> bool {
@@ -162,4 +171,104 @@ pub fn queue_quality_preset_from_bridge(request: QualityPresetRequest) -> bool {
 
 pub fn queue_instantiate_prefab_from_bridge(request: InstantiatePrefabRequest) -> bool {
     super::with_pending(|pc| pc.queue_instantiate_prefab(request)).is_some()
+}
+
+// === Export correlation ===
+
+/// Collapse one frame's queued export requests into the minimal set of
+/// correlation ids that have to be echoed back on `SCENE_EXPORTED`.
+///
+/// Every emitted event re-runs the web side's whole persistence chain
+/// (`setLastExportedScene`, the localStorage autosave, the sessionStorage
+/// backup, a store write and a DOM re-broadcast) against a scene JSON that can
+/// reach `MAX_SCENE_JSON_BYTES`, so an event that no listener needs is not
+/// merely redundant — it is another full multi-megabyte write.
+///
+/// Correlation only needs one event per *distinct* id. Id-less events are
+/// accepted by any waiting listener, so a second one answers nobody: at most
+/// one is emitted no matter how many id-less requests coalesced into the frame.
+/// One is still emitted, because the back-compat listeners and the autosave
+/// side effects hang off it.
+///
+/// Order follows first appearance in the queue, so the earliest caller is
+/// answered first.
+pub fn export_correlation_ids(requests: &[SceneExportRequest]) -> Vec<Option<&str>> {
+    let mut ids: Vec<Option<&str>> = Vec::new();
+    for request in requests {
+        let id = request.request_id.as_deref();
+        // Linear scan rather than a set: a frame carries a handful of requests
+        // at most, so this never grows into the hot path, and it keeps first
+        // appearance as the emission order for free.
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    ids
+}
+
+#[cfg(test)]
+mod export_correlation_tests {
+    use super::{export_correlation_ids, SceneExportRequest};
+
+    fn req(id: Option<&str>) -> SceneExportRequest {
+        SceneExportRequest {
+            request_id: id.map(str::to_owned),
+        }
+    }
+
+    /// The single-caller case, correlated and not — one request, one event.
+    #[test]
+    fn a_single_request_yields_exactly_one_event() {
+        assert_eq!(export_correlation_ids(&[req(None)]), vec![None]);
+        assert_eq!(export_correlation_ids(&[req(Some("a"))]), vec![Some("a")]);
+    }
+
+    /// Two uncorrelated callers in the same frame must NOT double-write the
+    /// scene. An id-less event is accepted by every waiting listener, so the
+    /// second one answers nobody while still re-running the full persistence
+    /// chain against the same multi-megabyte JSON.
+    #[test]
+    fn id_less_requests_collapse_to_one_event() {
+        assert_eq!(
+            export_correlation_ids(&[req(None), req(None), req(None)]),
+            vec![None],
+        );
+    }
+
+    /// Each distinct correlation id still gets its own event — collapsing those
+    /// would strand a caller waiting on an answer that never arrives.
+    #[test]
+    fn distinct_ids_each_get_their_own_event() {
+        assert_eq!(
+            export_correlation_ids(&[req(Some("a")), req(Some("b")), req(None)]),
+            vec![Some("a"), Some("b"), None],
+        );
+    }
+
+    /// A repeated id is one caller, however many times it queued — one event.
+    #[test]
+    fn repeated_ids_collapse_to_one_event_each() {
+        assert_eq!(
+            export_correlation_ids(&[req(Some("a")), req(Some("b")), req(Some("a"))]),
+            vec![Some("a"), Some("b")],
+        );
+    }
+
+    /// Order follows first appearance, so the earliest caller is answered
+    /// first even when a later duplicate would otherwise reorder the set.
+    #[test]
+    fn order_follows_first_appearance() {
+        assert_eq!(
+            export_correlation_ids(&[req(None), req(Some("b")), req(None), req(Some("a"))]),
+            vec![None, Some("b"), Some("a")],
+        );
+    }
+
+    /// An empty queue emits nothing. `apply_scene_export` returns before
+    /// building the JSON in that case, but the helper must not invent an event
+    /// if that guard is ever restructured.
+    #[test]
+    fn an_empty_queue_emits_nothing() {
+        assert!(export_correlation_ids(&[]).is_empty());
+    }
 }

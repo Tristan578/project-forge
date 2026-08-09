@@ -512,6 +512,58 @@ describe('handleTransformEvent', () => {
       dispatchSpy.mockRestore();
     });
 
+    it('forwards the engine requestId onto the DOM event detail', () => {
+      // The correlation token is what lets a listener tell its own export from
+      // one someone else triggered (PF-1103) — dropping it here silently
+      // reinstates the cross-talk.
+      const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as unknown as StoreState);
+
+      handleTransformEvent(
+        'SCENE_EXPORTED',
+        { json: '{"entities":[]}', name: 'MyScene', requestId: 'req-abc' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(dispatchSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          detail: { json: '{"entities":[]}', name: 'MyScene', requestId: 'req-abc' },
+        })
+      );
+
+      dispatchSpy.mockRestore();
+    });
+
+    it('runs its persistence side effects even for an uncorrelated export', () => {
+      // The autosave write and the sceneModified reset mean "the scene was
+      // exported", not "my request was answered" — they must never become
+      // conditional on the correlation id.
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: true } as unknown as StoreState);
+      const mockSetItem = vi.fn();
+      const origLocalStorage = globalThis.localStorage;
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: { ...origLocalStorage, setItem: mockSetItem, getItem: vi.fn(), removeItem: vi.fn() },
+        writable: true,
+        configurable: true,
+      });
+
+      handleTransformEvent(
+        'SCENE_EXPORTED',
+        { json: '{"entities":[]}', name: 'MyScene' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(mockSetItem).toHaveBeenCalledWith('forge:autosave', '{"entities":[]}');
+      expect(useEditorStore.setState).toHaveBeenCalledWith({ sceneModified: false });
+
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: origLocalStorage,
+        writable: true,
+        configurable: true,
+      });
+    });
 
     it('resets sceneModified to false after export', () => {
       vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as unknown as StoreState);
