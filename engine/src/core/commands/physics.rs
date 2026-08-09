@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::core::pending_commands::*;
-use crate::core::physics::{PhysicsData, JointData, JointType, JointLimits, JointMotor};
+use crate::core::physics::{PhysicsPatch, JointData, JointType, JointLimits, JointMotor};
 
 /// Monotonic counter for request IDs — avoids `SystemTime::now()` which panics on WASM.
 static RAYCAST_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -102,12 +102,16 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
 // ============================================================================
 
 /// Payload for update_physics command.
+///
+/// The physics fields are flattened as a [`PhysicsPatch`], so a caller may send
+/// any subset (down to none at all) and the untouched properties keep their
+/// current values. A full 13-field payload behaves exactly as before.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdatePhysicsPayload {
     entity_id: String,
     #[serde(flatten)]
-    physics_data: PhysicsData,
+    patch: PhysicsPatch,
 }
 
 /// Handle update_physics command.
@@ -117,7 +121,7 @@ fn handle_update_physics(payload: serde_json::Value) -> super::CommandResult {
 
     let update = PhysicsUpdate {
         entity_id: data.entity_id.clone(),
-        physics_data: data.physics_data,
+        patch: data.patch,
     };
 
     if queue_physics_update_from_bridge(update) {
@@ -559,8 +563,10 @@ fn handle_set_2d_collider_shape(payload: serde_json::Value) -> super::CommandRes
         .map_err(|e| format!("Invalid set_2d_collider_shape payload: {}", e))?;
 
     // Build minimal physics data with just the shape change
-    let mut physics_data = Physics2dData::default();
-    physics_data.collider_shape = data.collider_shape;
+    let mut physics_data = Physics2dData {
+        collider_shape: data.collider_shape,
+        ..Default::default()
+    };
     if let Some(size) = data.size {
         physics_data.size = size;
     }
@@ -597,8 +603,10 @@ fn handle_set_2d_body_type(payload: serde_json::Value) -> super::CommandResult {
     let data: Set2dBodyTypePayload = serde_json::from_value(payload)
         .map_err(|e| format!("Invalid set_2d_body_type payload: {}", e))?;
 
-    let mut physics_data = Physics2dData::default();
-    physics_data.body_type = data.body_type;
+    let physics_data = Physics2dData {
+        body_type: data.body_type,
+        ..Default::default()
+    };
 
     let update = Physics2dUpdate {
         entity_id: data.entity_id.clone(),
@@ -818,6 +826,7 @@ fn handle_set_debug_physics2d(payload: serde_json::Value) -> super::CommandResul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::physics::{ColliderShape, PhysicsData, RigidBodyKind};
     use serde_json::json;
 
     fn run(command: &str, payload: serde_json::Value) -> Result<(), String> {
@@ -862,14 +871,145 @@ mod tests {
     }
 
     #[test]
-    fn update_physics_rejects_missing_required_physics_fields() {
-        // bodyType and colliderShape are required (no default) in PhysicsData
+    fn update_physics_accepts_entity_id_only() {
+        // Every physics field is optional: an entityId-only payload is a valid
+        // (empty) patch. It used to be a hard `Invalid update_physics payload`
+        // parse failure, which meant the command never reached the queue.
         let result = run("update_physics", json!({"entityId": "entity-1"}));
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
+            err.contains("not initialized"),
+            "Expected the payload to parse and reach the queue, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn update_physics_accepts_partial_payload() {
+        // The exact three-field shape `applyPhysicsProfile` dispatches.
+        let result = run("update_physics", json!({
+            "entityId": "entity-1",
+            "gravityScale": 0.5,
+            "friction": 0.9,
+            "restitution": 0.2
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("not initialized"),
+            "Expected the partial payload to parse and reach the queue, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn update_physics_payload_deserializes_partial_fields() {
+        // Proves the parse itself succeeds (not just that dispatch stopped at
+        // the uninitialized queue) and that only the sent fields are Some.
+        let payload: UpdatePhysicsPayload = serde_json::from_value(json!({
+            "entityId": "entity-1",
+            "gravityScale": 0.5,
+            "friction": 0.9,
+            "restitution": 0.2
+        }))
+        .expect("partial update_physics payload must parse");
+
+        assert_eq!(payload.entity_id, "entity-1");
+        assert_eq!(payload.patch.gravity_scale, Some(0.5));
+        assert_eq!(payload.patch.friction, Some(0.9));
+        assert_eq!(payload.patch.restitution, Some(0.2));
+        assert!(payload.patch.body_type.is_none());
+        assert!(payload.patch.collider_shape.is_none());
+        assert!(payload.patch.density.is_none());
+        assert!(payload.patch.is_sensor.is_none());
+    }
+
+    #[test]
+    fn update_physics_payload_deserializes_full_thirteen_fields() {
+        // Existing-caller compatibility: a full payload still populates all 13.
+        let payload: UpdatePhysicsPayload = serde_json::from_value(json!({
+            "entityId": "entity-1",
+            "bodyType": "fixed",
+            "colliderShape": "ball",
+            "restitution": 0.3,
+            "friction": 0.5,
+            "density": 1.0,
+            "gravityScale": 1.0,
+            "lockTranslationX": true,
+            "lockTranslationY": true,
+            "lockTranslationZ": true,
+            "lockRotationX": true,
+            "lockRotationY": true,
+            "lockRotationZ": true,
+            "isSensor": true
+        }))
+        .expect("full update_physics payload must parse");
+
+        let mut applied = PhysicsData::default();
+        payload.patch.apply_to(&mut applied);
+        assert_eq!(applied.body_type, RigidBodyKind::Fixed);
+        assert_eq!(applied.collider_shape, ColliderShape::Ball);
+        assert_eq!(applied.restitution, 0.3);
+        assert_eq!(applied.friction, 0.5);
+        assert_eq!(applied.density, 1.0);
+        assert_eq!(applied.gravity_scale, 1.0);
+        assert!(applied.lock_translation_x);
+        assert!(applied.lock_translation_y);
+        assert!(applied.lock_translation_z);
+        assert!(applied.lock_rotation_x);
+        assert!(applied.lock_rotation_y);
+        assert!(applied.lock_rotation_z);
+        assert!(applied.is_sensor);
+    }
+
+    #[test]
+    fn update_physics_ignores_unknown_key_and_still_applies_other_fields() {
+        // Companion to `PhysicsPatch`'s own
+        // `unknown_key_is_ignored_and_other_fields_still_apply`, pinned here at
+        // the layer that actually has the `#[serde(flatten)]`: a misspelled key
+        // is absorbed by flatten (never an error, never a write), and the
+        // correctly-spelled siblings in the SAME payload still apply.
+        // `deny_unknown_fields` is incompatible with flatten, so this leniency
+        // is the accepted contract, not an oversight — a serde upgrade or a
+        // future attempt to tighten it must break this test, not ship silently.
+        let payload: UpdatePhysicsPayload = serde_json::from_value(json!({
+            "entityId": "entity-1",
+            "gravtiyScale": 99.0,       // typo — must be ignored, not applied
+            "totallyUnknownKey": "junk",
+            "friction": 0.9
+        }))
+        .expect("an unknown key must be ignored, not rejected");
+
+        assert_eq!(payload.entity_id, "entity-1");
+        assert!(
+            payload.patch.gravity_scale.is_none(),
+            "a typo'd key must not populate its intended field"
+        );
+        assert_eq!(payload.patch.friction, Some(0.9));
+
+        let mut applied = PhysicsData::default();
+        payload.patch.apply_to(&mut applied);
+        assert_eq!(applied.friction, 0.9);
+        assert_eq!(
+            applied.gravity_scale,
+            PhysicsData::default().gravity_scale,
+            "the unknown key must write nothing"
+        );
+    }
+
+    #[test]
+    fn update_physics_rejects_invalid_field_value() {
+        // Optional fields relax MISSING keys, not INVALID values.
+        let result = run("update_physics", json!({
+            "entityId": "entity-1",
+            "bodyType": "not_a_body_type"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
             err.contains("Invalid"),
-            "Expected parse error for missing physics fields, got: {}",
+            "Expected parse error for an unknown bodyType token, got: {}",
             err
         );
     }

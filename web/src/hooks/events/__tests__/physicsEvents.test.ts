@@ -126,6 +126,116 @@ describe('handlePhysicsEvent', () => {
       expect(calledData).not.toHaveProperty('entityId');
       expect(calledData).not.toHaveProperty('enabled');
     });
+
+    // PF-1118 review F2: a bulk update_physics (Physics Feel "Apply") makes the
+    // engine emit PHYSICS_CHANGED for EVERY touched entity, not just the
+    // selected one. Letting a foreign payload into primaryPhysics means the
+    // next slider nudge writes that entity's 13 fields onto the selected one.
+    describe('primary-selection guard', () => {
+      it('ignores an event for an entity that is not the primary selection', async () => {
+        actions.primaryId = 'ground-platform';
+
+        const result = handlePhysicsEvent(
+          'PHYSICS_CHANGED',
+          { entityId: 'enemy-7', enabled: true, bodyType: 'dynamic', friction: 0.9 },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        // Still "handled" — no other domain handler should try to claim it.
+        expect(result).toBe(true);
+        expect(actions.setPrimaryPhysics).not.toHaveBeenCalled();
+
+        // The deferred re-check must not resurrect it either.
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(actions.setPrimaryPhysics).not.toHaveBeenCalled();
+      });
+
+      it('applies an event for the entity that IS the primary selection', () => {
+        actions.primaryId = 'ground-platform';
+
+        const result = handlePhysicsEvent(
+          'PHYSICS_CHANGED',
+          { entityId: 'ground-platform', enabled: true, bodyType: 'fixed', friction: 0.4 },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        expect(result).toBe(true);
+        expect(actions.setPrimaryPhysics).toHaveBeenCalledWith(
+          { bodyType: 'fixed', friction: 0.4 },
+          true
+        );
+      });
+
+      it('keeps the selected entity intact across a whole-scene bulk apply', async () => {
+        actions.primaryId = 'ground-platform';
+
+        for (const entityId of ['enemy-1', 'ground-platform', 'enemy-2', 'crate-3']) {
+          handlePhysicsEvent(
+            'PHYSICS_CHANGED',
+            {
+              entityId,
+              enabled: true,
+              bodyType: entityId === 'ground-platform' ? 'fixed' : 'dynamic',
+              friction: 0.5,
+            },
+            mockSetGet.set,
+            mockSetGet.get
+          );
+        }
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(actions.setPrimaryPhysics).toHaveBeenCalledTimes(1);
+        expect(actions.setPrimaryPhysics).toHaveBeenCalledWith(
+          { bodyType: 'fixed', friction: 0.5 },
+          true
+        );
+      });
+
+      it('applies a late-resolving selection change (viewport pick)', async () => {
+        // useEngineEvents batches SELECTION_CHANGED through a queueMicrotask,
+        // so PHYSICS_CHANGED for the newly picked entity is handled while the
+        // store still reports the PREVIOUS primary.
+        actions.primaryId = 'old-entity';
+
+        const result = handlePhysicsEvent(
+          'PHYSICS_CHANGED',
+          { entityId: 'new-entity', enabled: true, bodyType: 'dynamic', friction: 0.2 },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        expect(result).toBe(true);
+        expect(actions.setPrimaryPhysics).not.toHaveBeenCalled();
+
+        // Selection batcher flush lands.
+        actions.primaryId = 'new-entity';
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(actions.setPrimaryPhysics).toHaveBeenCalledWith(
+          { bodyType: 'dynamic', friction: 0.2 },
+          true
+        );
+      });
+
+      it('applies when nothing is selected (no inspector write-back path)', () => {
+        actions.primaryId = null;
+
+        handlePhysicsEvent(
+          'PHYSICS_CHANGED',
+          { entityId: 'anything', enabled: false, bodyType: 'fixed' },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        expect(actions.setPrimaryPhysics).toHaveBeenCalledWith({ bodyType: 'fixed' }, false);
+      });
+    });
   });
 
   describe('JOINT_CHANGED', () => {

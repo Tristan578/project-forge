@@ -3,6 +3,8 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { physicsProfileExecutor } from '../physicsProfileExecutor';
+import { useEditorStore, type EditorState } from '@/stores/editorStore';
+import type { GameComponentData } from '@/stores/slices/types';
 import type { ExecutorContext } from '../../types';
 
 // Mock the physics module
@@ -20,12 +22,30 @@ vi.mock('@/lib/ai/physicsFeel', () => ({
   applyPhysicsProfile: (...args: unknown[]) => mockApplyPhysicsProfile(...args),
 }));
 
+/**
+ * The stub carries `allGameComponents` only to mirror the real `EditorState`
+ * shape. The executor deliberately does NOT read it from here — see the live-map
+ * test below.
+ */
+function makeStore(
+  nodes: Record<string, ReturnType<typeof makeNode>> = {},
+  allGameComponents: Record<string, unknown[]> = {},
+): ExecutorContext['store'] {
+  return {
+    sceneGraph: { nodes, rootIds: Object.keys(nodes) },
+    allGameComponents,
+  } as unknown as ExecutorContext['store'];
+}
+
+/** Seed the real store's component map (what `character_setup` does mid-pipeline). */
+function seedLiveGameComponents(map: Record<string, GameComponentData[]>): void {
+  useEditorStore.setState({ allGameComponents: map } as Partial<EditorState> as EditorState);
+}
+
 function makeCtx(overrides: Partial<ExecutorContext> = {}): ExecutorContext {
   return {
     dispatchCommand: vi.fn(),
-    store: {
-      sceneGraph: { nodes: {}, rootIds: [] },
-    } as unknown as ExecutorContext['store'],
+    store: makeStore(),
     projectType: '3d',
     userTier: 'creator',
     signal: new AbortController().signal,
@@ -51,6 +71,7 @@ function makeFeelDirective(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  seedLiveGameComponents({});
 });
 
 describe('physicsProfileExecutor', () => {
@@ -120,23 +141,55 @@ describe('physicsProfileExecutor', () => {
       expect.any(Object),
       ctx.dispatchCommand,
       ['e1', 'e2'],
+      useEditorStore.getState().allGameComponents,
     );
     const output = result.output as { entityCount: number };
     expect(output.entityCount).toBe(2);
   });
 
+  it('reads the LIVE component map, not the pre-pipeline context snapshot', async () => {
+    // Drives the REAL snapshot semantics of the pipeline. The orchestrator builds
+    // the ExecutorContext ONCE (`store: useEditorStore.getState()`) and
+    // pipelineRunner reuses that object for every step; Zustand 5 REPLACES the
+    // state object on write, so `ctx.store` can never observe a later write.
+    // `character_setup` runs a step earlier and setStates a NEW allGameComponents,
+    // so a snapshot read here always sees `{}` — merging against that rebuilds the
+    // controller from Default and wipes canDoubleJump (PF-1118).
+    //
+    // Context first, exactly as the orchestrator does it...
+    const ctx = makeCtx({ store: useEditorStore.getState() });
+
+    // ...then the mid-pipeline write the snapshot cannot see.
+    const components = {
+      e1: [
+        {
+          type: 'characterController',
+          characterController: { speed: 5, jumpHeight: 8, gravityScale: 1, canDoubleJump: true },
+        },
+      ],
+    } as unknown as Record<string, GameComponentData[]>;
+    seedLiveGameComponents(components);
+
+    // Guard the premise: if this ever stops being `{}`, the test has stopped
+    // reproducing the bug and would pass vacuously.
+    expect(ctx.store.allGameComponents).toEqual({});
+
+    await physicsProfileExecutor.execute({
+      feelDirective: makeFeelDirective(),
+      projectType: '3d',
+      entityIds: ['e1'],
+    }, ctx);
+
+    expect(mockApplyPhysicsProfile.mock.calls[0][3]).toEqual(components);
+  });
+
   it('falls back to store physics nodes when no entityIds', async () => {
     const ctx = makeCtx({
-      store: {
-        sceneGraph: {
-          nodes: {
-            e1: makeNode('e1', 'Player', ['PhysicsData']),
-            e2: makeNode('e2', 'Enemy', ['RigidBody']),
-            e3: makeNode('e3', 'Ground', []),
-          },
-          rootIds: ['e1', 'e2', 'e3'],
-        },
-      } as unknown as ExecutorContext['store'],
+      store: makeStore({
+        e1: makeNode('e1', 'Player', ['PhysicsData']),
+        e2: makeNode('e2', 'Enemy', ['RigidBody']),
+        e3: makeNode('e3', 'Ground', []),
+      }),
     });
 
     const result = await physicsProfileExecutor.execute({
@@ -149,6 +202,7 @@ describe('physicsProfileExecutor', () => {
       expect.any(Object),
       ctx.dispatchCommand,
       ['e1', 'e2'],
+      useEditorStore.getState().allGameComponents,
     );
     const output = result.output as { entityCount: number };
     expect(output.entityCount).toBe(2);
@@ -169,12 +223,7 @@ describe('physicsProfileExecutor', () => {
 
   it('allows safe config overrides for moveSpeed and jumpForce', async () => {
     const ctx = makeCtx({
-      store: {
-        sceneGraph: {
-          nodes: { e1: makeNode('e1', 'Player', ['PhysicsData']) },
-          rootIds: ['e1'],
-        },
-      } as unknown as ExecutorContext['store'],
+      store: makeStore({ e1: makeNode('e1', 'Player', ['PhysicsData']) }),
     });
 
     await physicsProfileExecutor.execute({
@@ -190,12 +239,7 @@ describe('physicsProfileExecutor', () => {
 
   it('ignores non-numeric config overrides', async () => {
     const ctx = makeCtx({
-      store: {
-        sceneGraph: {
-          nodes: { e1: makeNode('e1', 'Player', ['PhysicsData']) },
-          rootIds: ['e1'],
-        },
-      } as unknown as ExecutorContext['store'],
+      store: makeStore({ e1: makeNode('e1', 'Player', ['PhysicsData']) }),
     });
 
     await physicsProfileExecutor.execute({

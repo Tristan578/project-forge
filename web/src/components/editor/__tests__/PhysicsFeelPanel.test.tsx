@@ -52,12 +52,33 @@ vi.mock('lucide-react', async () => {
 import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
 import { applyPhysicsProfile, analyzePhysicsFeel } from '@/lib/ai/physicsFeel';
 
+/**
+ * A live `allGameComponents` map carrying a NON-default character controller.
+ *
+ * `applyPhysicsProfile` merges the profile onto each entity's existing
+ * controller, so the panel forwarding the wrong map (or `undefined`) silently
+ * wipes the configured controller. Seeding a value the defaults can never
+ * produce (`canDoubleJump: true`, `speed: 5`) is what makes the 4th-argument
+ * assertions below able to fail. Shape must stay in sync with
+ * `GameComponentData` in `@/stores/slices/types`.
+ */
+const GAME_COMPONENTS_FIXTURE = {
+  'ent-1': [
+    {
+      type: 'characterController' as const,
+      characterController: { speed: 5, jumpHeight: 2, gravityScale: 1, canDoubleJump: true },
+    },
+  ],
+};
+
 function mockStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
     sceneGraph: { nodes: {} },
     primaryPhysics: null,
     physicsEnabled: false,
     physics2d: {},
+    physics2dEnabled: {},
+    allGameComponents: {},
     ...overrides,
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -124,11 +145,69 @@ describe('PhysicsFeelPanel', () => {
       },
       physics2d: {},
       physicsEnabled: false,
+      allGameComponents: GAME_COMPONENTS_FIXTURE,
     });
 
     render(<PhysicsFeelPanel />);
     fireEvent.click(screen.getByLabelText('Apply physics profile to all entities'));
     expect(vi.mocked(applyPhysicsProfile)).toHaveBeenCalledOnce();
+
+    const call = vi.mocked(applyPhysicsProfile).mock.calls[0];
+    expect(call[1]).toBe(mockDispatch);
+    expect(call[2]).toEqual(['ent-1']);
+    // PF-1118 review F5: the live component map is a REQUIRED 4th argument.
+    // Without this assertion the panel could forward `undefined` and every
+    // test here would still pass while a real Apply click threw.
+    expect(call[3]).toEqual(GAME_COMPONENTS_FIXTURE);
+  });
+
+  it('forwards the live game-component map from the Custom Feel Generate button', () => {
+    const mockDispatch = vi.fn();
+    vi.mocked(getCommandDispatcher).mockReturnValue(mockDispatch);
+    mockStore({
+      sceneGraph: {
+        nodes: {
+          'ent-1': { entityId: 'ent-1', components: ['PhysicsData'], name: 'Box' },
+        },
+      },
+      physics2d: {},
+      physicsEnabled: false,
+      allGameComponents: GAME_COMPONENTS_FIXTURE,
+    });
+
+    render(<PhysicsFeelPanel />);
+    fireEvent.change(screen.getByLabelText('Describe a custom physics feel'), {
+      target: { value: 'floaty moon gravity' },
+    });
+    fireEvent.click(screen.getByLabelText('Generate custom physics feel from description'));
+
+    expect(vi.mocked(applyPhysicsProfile)).toHaveBeenCalledOnce();
+    const call = vi.mocked(applyPhysicsProfile).mock.calls[0];
+    expect(call[1]).toBe(mockDispatch);
+    expect(call[2]).toEqual(['ent-1']);
+    expect(call[3]).toEqual(GAME_COMPONENTS_FIXTURE);
+  });
+
+  it('forwards an empty component map rather than undefined when no entity has components', () => {
+    const mockDispatch = vi.fn();
+    vi.mocked(getCommandDispatcher).mockReturnValue(mockDispatch);
+    mockStore({
+      sceneGraph: {
+        nodes: {
+          'ent-1': { entityId: 'ent-1', components: ['PhysicsData'], name: 'Box' },
+        },
+      },
+      physics2d: {},
+      physicsEnabled: false,
+      allGameComponents: {},
+    });
+
+    render(<PhysicsFeelPanel />);
+    fireEvent.click(screen.getByLabelText('Apply physics profile to all entities'));
+
+    const call = vi.mocked(applyPhysicsProfile).mock.calls[0];
+    expect(call[3]).toBeDefined();
+    expect(call[3]).toEqual({});
   });
 
   it('blend slider changes blend factor', () => {
