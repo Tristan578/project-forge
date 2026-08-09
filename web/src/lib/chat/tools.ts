@@ -8,6 +8,7 @@
 
 // Sourced from mcp-server/manifest/commands.json — keep in sync when adding MCP commands
 import manifestJson from '@/data/commands.json';
+import { modelToolSchema } from '@/lib/ai/modelToolSchema';
 
 interface ManifestCommand {
   name: string;
@@ -35,38 +36,13 @@ interface ClaudeTool {
 const manifest = manifestJson as { version: string; commands: ManifestCommand[] };
 
 /**
- * Manifest parameters that are real for a direct-to-engine MCP client but must not
- * be offered to the model.
- *
- * `spawn_entity.id` is the only entry today, and it is the reason this seam exists:
- * an MCP client driving the engine directly has a legitimate use for supplying its
- * own entity id, but the chat path does not — `sceneGraphSlice.spawnEntity` mints
- * the id itself and returns it synchronously, so a model-supplied id buys nothing.
- * Worse, the engine's `is_valid_override_id` validates only length and control
- * characters; an id that collides with an existing entity is accepted, and every
- * id-matching loop in the engine then addresses the wrong entity.
- */
-const EXCLUDED_TOOL_PROPERTIES: Record<string, readonly string[]> = {
-  spawn_entity: ['id'],
-};
-
-/** Strip the excluded properties from a command's schema without mutating the manifest. */
-function toolSchemaFor(cmd: ManifestCommand): ClaudeTool['input_schema'] {
-  const excluded = EXCLUDED_TOOL_PROPERTIES[cmd.name];
-  const properties = cmd.parameters.properties || {};
-  const required = cmd.parameters.required || [];
-  return {
-    type: cmd.parameters.type || 'object',
-    properties: excluded
-      ? Object.fromEntries(Object.entries(properties).filter(([key]) => !excluded.includes(key)))
-      : properties,
-    required: excluded ? required.filter((key) => !excluded.includes(key)) : required,
-  };
-}
-
-/**
  * Generate Claude tool definitions from the command manifest.
  * Filters to only scene-editing tools (not query tools — those are handled via context).
+ *
+ * Schemas go through `modelToolSchema`, which withholds the manifest parameters
+ * that are meaningful only to a direct-to-engine MCP client. That filter is shared
+ * with `spawnforgeAgent.getAgentTools()` — applying it to one tool surface and not
+ * the other leaves the parameter on offer.
  */
 export function getChatTools(): ClaudeTool[] {
   return manifest.commands
@@ -74,7 +50,7 @@ export function getChatTools(): ClaudeTool[] {
     .map((cmd) => ({
       name: cmd.name,
       description: cmd.description,
-      input_schema: toolSchemaFor(cmd),
+      input_schema: modelToolSchema(cmd.name, cmd.parameters),
     }));
 }
 

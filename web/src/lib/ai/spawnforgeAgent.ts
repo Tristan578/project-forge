@@ -18,6 +18,7 @@ import { ToolLoopAgent, stepCountIs, type SystemModelMessage } from 'ai';
 import { gateway } from '@ai-sdk/gateway';
 import { anthropic } from '@ai-sdk/anthropic';
 import { convertManifestToolsToSdkTools, type ManifestTool } from '@/lib/ai/toolAdapter';
+import { modelToolSchema } from '@/lib/ai/modelToolSchema';
 import { AI_MODEL_PRIMARY, AI_MODELS } from '@/lib/ai/models';
 import { buildAnthropicCacheControl, type CacheTtlTier } from '@/lib/ai/cachedContext';
 import manifestJson from '@/data/commands.json';
@@ -41,6 +42,11 @@ const manifest = manifestJson as { version: string; commands: ManifestEntry[] };
  * Read-only informational commands are excluded to reduce tool count (274 of 350)
  * and prevent the model from calling informational endpoints when it should be acting.
  *
+ * Schemas go through `modelToolSchema`, which withholds the manifest parameters
+ * that are meaningful only to a direct-to-engine MCP client. This is the surface
+ * the chat route actually reaches — `lib/chat/tools.getChatTools()` shares the
+ * same filter, and filtering only there would leave those parameters on offer here.
+ *
  * IMPORTANT: This function runs once at module load and the result is cached in
  * AGENT_TOOLS. It must NEVER contain per-user or per-request logic (e.g. tier-based
  * tool gating). If per-user filtering is needed in the future, move the call inside
@@ -49,26 +55,23 @@ const manifest = manifestJson as { version: string; commands: ManifestEntry[] };
 function getAgentTools() {
   const writeTools = manifest.commands
     .filter((cmd) => cmd.requiredScope.endsWith(':write') || cmd.category === 'query')
-    .map((cmd) => {
-      const params = cmd.parameters;
-      const isObject = params && !Array.isArray(params) && typeof params === 'object';
-      return {
-        name: cmd.name,
-        description: cmd.description,
-        parameters: {
-          type: (isObject ? params.type : undefined) || 'object',
-          properties: (isObject ? params.properties : undefined) || {},
-          required: (isObject ? params.required : undefined) || [],
-        },
-      };
-    });
+    .map((cmd) => ({
+      name: cmd.name,
+      description: cmd.description,
+      parameters: modelToolSchema(cmd.name, cmd.parameters),
+    }));
 
   return convertManifestToolsToSdkTools(writeTools);
 }
 
-// Cached tools — computed once at module load. Safe for serverless because
-// the manifest is a static JSON import (no I/O, deterministic).
-const AGENT_TOOLS = getAgentTools();
+/**
+ * The tool set the agent advertises. Computed once at module load — safe for
+ * serverless because the manifest is a static JSON import (no I/O, deterministic).
+ *
+ * Exported so the withheld-parameter guarantee is assertable against the surface
+ * the chat route really uses, rather than against a helper it does not call.
+ */
+export const AGENT_TOOLS = getAgentTools();
 
 // ---------------------------------------------------------------------------
 // Agent factory
