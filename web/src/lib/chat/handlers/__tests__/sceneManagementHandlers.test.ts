@@ -15,6 +15,7 @@ const mockDeleteScene = vi.fn();
 const mockRenameScene = vi.fn();
 const mockSetStartScene = vi.fn();
 const mockGetSceneByName = vi.fn();
+const mockSaveCurrentSceneData = vi.fn();
 
 vi.mock('@/lib/scenes/sceneManager', () => ({
   loadProjectScenes: (...args: unknown[]) => mockLoadProjectScenes(...args),
@@ -26,6 +27,15 @@ vi.mock('@/lib/scenes/sceneManager', () => ({
   renameScene: (...args: unknown[]) => mockRenameScene(...args),
   setStartScene: (...args: unknown[]) => mockSetStartScene(...args),
   getSceneByName: (...args: unknown[]) => mockGetSceneByName(...args),
+  saveCurrentSceneData: (...args: unknown[]) => mockSaveCurrentSceneData(...args),
+}));
+
+// PF-1100: switching and duplicating first read the live scene back out of the
+// engine. Mocking the capture is what lets each test pick a status — the real
+// one is an async round trip that would just time out with no engine attached.
+const mockCaptureActiveScene = vi.fn();
+vi.mock('@/lib/scenes/captureScene', () => ({
+  captureActiveScene: (...args: unknown[]) => mockCaptureActiveScene(...args),
 }));
 
 const mockTemplateRegistry = [
@@ -75,6 +85,8 @@ beforeEach(() => {
   mockLoadProjectScenes.mockReturnValue(baseProject);
   // Default: getSceneByName returns undefined (ID lookups pass through)
   mockGetSceneByName.mockReturnValue(undefined);
+  // Default: no engine attached, so there is no live scene that could be lost
+  mockCaptureActiveScene.mockResolvedValue({ status: 'unavailable' });
 });
 
 // ---------------------------------------------------------------------------
@@ -403,6 +415,47 @@ describe('switch_scene', () => {
     expect(mockSwitchScene).toHaveBeenCalledWith(baseProject, 'scene_2');
   });
 
+  it('folds the captured live scene into the project before switching', async () => {
+    // Without this the outgoing scene is written back exactly as it was last
+    // saved — which, before PF-1100, was never (its `data` stayed null).
+    const live = { formatVersion: 1, sceneName: 'Level 1', entities: [{ id: 'player' }] };
+    const withLive = { ...baseProject, captured: true };
+    mockCaptureActiveScene.mockResolvedValue({ status: 'captured', data: live });
+    mockSaveCurrentSceneData.mockReturnValue(withLive);
+    mockSwitchScene.mockReturnValue({ project: withLive, sceneToLoad: null });
+
+    const { result } = await invokeHandler(
+      sceneManagementHandlers,
+      'switch_scene',
+      { sceneId: 'scene_2' }
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockSaveCurrentSceneData).toHaveBeenCalledWith(baseProject, live);
+    // The switch must operate on the folded project, not the one off disk.
+    expect(mockSwitchScene).toHaveBeenCalledWith(withLive, 'scene_2');
+  });
+
+  it('refuses to switch when the live scene could not be read', async () => {
+    mockCaptureActiveScene.mockResolvedValue({
+      status: 'failed',
+      reason: 'Engine did not answer.',
+    });
+
+    const { result, store } = await invokeHandler(
+      sceneManagementHandlers,
+      'switch_scene',
+      { sceneId: 'scene_2' }
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Engine did not answer.');
+    // Nothing may be written — switching now would discard the live scene.
+    expect(mockSwitchScene).not.toHaveBeenCalled();
+    expect(mockSaveProjectScenes).not.toHaveBeenCalled();
+    expect(store.loadScene).not.toHaveBeenCalled();
+  });
+
   it('returns failure when switchScene returns an error', async () => {
     mockSwitchScene.mockReturnValue({ error: 'Scene not found' });
 
@@ -457,6 +510,26 @@ describe('duplicate_scene', () => {
     expect((result.result as Record<string, unknown>).sceneId).toBe(newSceneId);
     expect(mockDuplicateScene).toHaveBeenCalledWith(baseProject, 'scene_1', undefined);
     expect(store.setScenes).toHaveBeenCalled();
+  });
+
+  it('refuses to duplicate when the live scene could not be read', async () => {
+    // Duplicating the ACTIVE scene from stale data silently produces a copy of
+    // something the user never had on screen.
+    mockCaptureActiveScene.mockResolvedValue({
+      status: 'failed',
+      reason: 'Engine did not answer.',
+    });
+
+    const { result } = await invokeHandler(
+      sceneManagementHandlers,
+      'duplicate_scene',
+      { sceneId: 'scene_1' }
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Engine did not answer.');
+    expect(mockDuplicateScene).not.toHaveBeenCalled();
+    expect(mockSaveProjectScenes).not.toHaveBeenCalled();
   });
 
   it('passes optional name to duplicateScene', async () => {

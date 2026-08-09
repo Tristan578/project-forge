@@ -19,16 +19,20 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
   const duplicateScene = useEditorStore((s) => s.duplicateScene);
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  // Switching and duplicating now read the live scene back out of the engine
+  // first, so both are async. A second click while one is in flight would
+  // capture a scene that is already halfway through being replaced.
+  const [busy, setBusy] = useState(false);
 
   const entityCount = Object.keys(sceneGraph.nodes).length;
 
   const handleSwitch = useCallback(
     (sceneId: string) => {
-      if (sceneId !== activeSceneId) {
-        switchScene(sceneId);
-      }
+      if (busy || sceneId === activeSceneId) return;
+      setBusy(true);
+      void switchScene(sceneId).finally(() => setBusy(false));
     },
-    [activeSceneId, switchScene]
+    [activeSceneId, busy, switchScene]
   );
 
   const handleAdd = useCallback(() => {
@@ -38,9 +42,11 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
   const handleDuplicate = useCallback(
     (sceneId: string, e: React.MouseEvent) => {
       e.stopPropagation();
-      duplicateScene(sceneId);
+      if (busy) return;
+      setBusy(true);
+      void duplicateScene(sceneId).finally(() => setBusy(false));
     },
-    [duplicateScene]
+    [busy, duplicateScene]
   );
 
   const handleDeleteRequest = useCallback((sceneId: string, e: React.MouseEvent) => {

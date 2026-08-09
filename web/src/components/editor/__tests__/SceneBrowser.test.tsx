@@ -4,7 +4,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup, act } from '@/test/utils/componentTestUtils';
 import { SceneBrowser } from '../SceneBrowser';
 import { useEditorStore } from '@/stores/editorStore';
 
@@ -20,10 +20,13 @@ vi.mock('lucide-react', () => ({
   CheckCircle2: (props: Record<string, unknown>) => <span data-testid="check-icon" {...props} />,
 }));
 
-const mockSwitchScene = vi.fn();
+// PF-1100: switching and duplicating now read the live scene back out of the
+// engine first, so both actions are async and the component chains off the
+// returned promise. A bare `vi.fn()` would hand it `undefined` to chain from.
+const mockSwitchScene = vi.fn(async () => {});
 const mockCreateNewScene = vi.fn();
 const mockDeleteScene = vi.fn();
-const mockDuplicateScene = vi.fn();
+const mockDuplicateScene = vi.fn(async () => {});
 
 function buildState(overrides: {
   scenes?: Array<{ id: string; name: string; isStartScene: boolean }>;
@@ -148,6 +151,38 @@ describe('SceneBrowser', () => {
     render(<SceneBrowser isOpen onClose={mockOnClose} />);
     fireEvent.click(screen.getByText('Level 1'));
     expect(mockSwitchScene).not.toHaveBeenCalled();
+  });
+
+  it('ignores a second switch while the first is still in flight', async () => {
+    // The capture round trip takes as long as the engine takes to answer, so
+    // the window between clicks is real. A second switch starting inside it
+    // would capture a scene that is already halfway through being replaced.
+    let release!: () => void;
+    mockSwitchScene.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { release = resolve; })
+    );
+    setupStore({
+      scenes: [
+        { id: 'scene-1', name: 'Level 1', isStartScene: false },
+        { id: 'scene-2', name: 'Level 2', isStartScene: false },
+        { id: 'scene-3', name: 'Level 3', isStartScene: false },
+      ],
+      activeSceneId: 'scene-1',
+    });
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+
+    fireEvent.click(screen.getByText('Level 2'));
+    fireEvent.click(screen.getByText('Level 3'));
+    expect(mockSwitchScene).toHaveBeenCalledTimes(1);
+    expect(mockSwitchScene).toHaveBeenCalledWith('scene-2');
+
+    // Once the first switch settles the row is live again.
+    await act(async () => {
+      release();
+    });
+    fireEvent.click(screen.getByText('Level 3'));
+    expect(mockSwitchScene).toHaveBeenCalledTimes(2);
+    expect(mockSwitchScene).toHaveBeenLastCalledWith('scene-3');
   });
 
   it('calls createNewScene when Add Scene button is clicked', () => {
