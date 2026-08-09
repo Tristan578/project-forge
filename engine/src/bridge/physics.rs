@@ -21,6 +21,11 @@ use super::events;
 // ============================================================================
 
 /// System that applies pending physics updates (always-active — edit physics in any mode).
+///
+/// `update.patch` is a PARTIAL update, so it is merged into the entity's live
+/// `PhysicsData`. History and the JS event must both receive the MERGED result —
+/// the patch alone describes only the changed subset, and `PhysicsChange` stores
+/// full `PhysicsData` on both sides (undo overwrites the component wholesale).
 pub(super) fn apply_physics_updates(
     mut pending: ResMut<PendingCommands>,
     mut query: Query<(&EntityId, &mut PhysicsData)>,
@@ -30,19 +35,21 @@ pub(super) fn apply_physics_updates(
     for update in pending.physics_updates.drain(..) {
         for (entity_id, mut current_physics) in query.iter_mut() {
             if entity_id.0 == update.entity_id {
+                // Snapshot the pre-merge value BEFORE applying the patch.
                 let old_physics = current_physics.clone();
-                *current_physics = update.physics_data.clone();
+                update.patch.apply_to(&mut current_physics);
+                let new_physics = current_physics.clone();
 
                 // Record for undo
                 history.push(crate::core::history::UndoableAction::PhysicsChange {
                     entity_id: update.entity_id.clone(),
                     old_physics,
-                    new_physics: update.physics_data.clone(),
+                    new_physics: new_physics.clone(),
                 });
 
                 // Emit change event
                 let enabled = phys_enabled_query.iter().any(|eid| eid.0 == update.entity_id);
-                events::emit_physics_changed(&update.entity_id, &update.physics_data, enabled);
+                events::emit_physics_changed(&update.entity_id, &new_physics, enabled);
                 break;
             }
         }
@@ -665,10 +672,8 @@ pub(super) fn emit_physics_on_selection(
     // Emit on selection change
     for _event in selection_events.read() {
         if let Some(primary) = selection.primary {
-            if let Ok((entity_id, physics_data, phys_enabled)) = selection_query.get(primary) {
-                if let Some(pd) = physics_data {
-                    events::emit_physics_changed(&entity_id.0, pd, phys_enabled.is_some());
-                }
+            if let Ok((entity_id, Some(pd), phys_enabled)) = selection_query.get(primary) {
+                events::emit_physics_changed(&entity_id.0, pd, phys_enabled.is_some());
             }
         }
     }
@@ -692,10 +697,8 @@ pub(super) fn emit_joint_on_selection(
     // Emit on selection change
     for _event in selection_events.read() {
         if let Some(primary) = selection.primary {
-            if let Ok((_, joint_data)) = selection_query.get(primary) {
-                if let Some(jd) = joint_data {
-                    events::emit_joint_changed(jd);
-                }
+            if let Ok((_, Some(jd))) = selection_query.get(primary) {
+                events::emit_joint_changed(jd);
             }
         }
     }

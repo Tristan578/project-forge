@@ -56,6 +56,9 @@ export function PhysicsFeelPanel() {
   const physics2dEntityIds = useEditorStore((s) =>
     Object.keys(s.physics2d).filter(id => s.physics2dEnabled[id])
   );
+  // `applyPhysicsProfile` merges the profile onto each entity's existing character
+  // controller rather than replacing it, so it needs the live component map.
+  const allGameComponents = useEditorStore((s) => s.allGameComponents);
 
   // --- Local state ---
   const [selectedPresetA, setSelectedPresetA] = useState<string>(PRESET_KEYS[0]);
@@ -125,7 +128,7 @@ export function PhysicsFeelPanel() {
   const handleApply = useCallback(() => {
     const dispatch = getCommandDispatcher();
     if (!dispatch) return;
-    applyPhysicsProfile(currentProfile, dispatch, physicsEntityIds);
+    applyPhysicsProfile(currentProfile, dispatch, physicsEntityIds, allGameComponents);
     setApplied(true);
     // Reset the "applied" indicator after 2 seconds
     if (appliedTimerRef.current !== null) {
@@ -135,7 +138,7 @@ export function PhysicsFeelPanel() {
       setApplied(false);
       appliedTimerRef.current = null;
     }, 2000);
-  }, [currentProfile, physicsEntityIds]);
+  }, [currentProfile, physicsEntityIds, allGameComponents]);
 
   const handleCustomGenerate = useCallback(() => {
     if (!customDescription.trim()) return;
@@ -147,9 +150,9 @@ export function PhysicsFeelPanel() {
     // Apply the custom profile directly
     const dispatch = getCommandDispatcher();
     if (dispatch) {
-      applyPhysicsProfile(profile, dispatch, physicsEntityIds);
+      applyPhysicsProfile(profile, dispatch, physicsEntityIds, allGameComponents);
     }
-  }, [customDescription, physicsEntityIds]);
+  }, [customDescription, physicsEntityIds, allGameComponents]);
 
   return (
     <div className="flex flex-col gap-4 p-3 text-sm text-zinc-300 overflow-y-auto max-h-full">

@@ -6,6 +6,9 @@
  * never touches DOM, React state, or engine internals.
  */
 
+import { toWireComponent } from '@/lib/engine/gameComponentWire';
+import type { GameComponentData } from '@/stores/slices/types';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -213,22 +216,116 @@ export function calculateDifficultyAdjustment(
 // ---------------------------------------------------------------------------
 
 /**
- * Convert a difficulty profile into engine commands that can be
- * dispatched to game component entities (e.g. enemies, pickups).
+ * One entity's game components at BASELINE.
+ *
+ * "Baseline" means the authored values that correspond to a multiplier of `1.0` —
+ * what the level designer or the generation pipeline configured. It must NOT be the
+ * entity's already-scaled live values: the profile's multipliers are absolute, so
+ * re-deriving from a previous result compounds (1.5x applied to a 1.5x enemy is
+ * 2.25x) and difficulty runs away over a session.
+ */
+export interface DifficultyTarget {
+  entityId: string;
+  baseComponents: GameComponentData[];
+}
+
+/** Round like the profile's own derivations, so 1.1 * 100 is 110 and not 110.00000000000001. */
+function scale(value: number, multiplier: number): number {
+  return Number((value * multiplier).toFixed(4));
+}
+
+/**
+ * Convert a difficulty profile into engine commands for the given entities.
+ *
+ * The engine has no notion of a "multiplier" — there is no `healthMultiplier`,
+ * `damageMultiplier` or `speedMultiplier` field on any of the 13 game component types
+ * (`engine/src/core/game_components.rs`). The multipliers are therefore resolved HERE
+ * against each entity's baseline and emitted as concrete values on the real fields:
+ *
+ * | Profile multiplier      | Component     | Field(s)                 |
+ * |-------------------------|---------------|--------------------------|
+ * | `enemyHealthMultiplier` | `health`      | `maxHp`, `currentHp`     |
+ * | `enemyDamageMultiplier` | `damageZone`  | `damagePerSecond`        |
+ * | `enemyDamageMultiplier` | `projectile`  | `damage`                 |
+ * | `enemySpeedMultiplier`  | `projectile`  | `speed`                  |
+ * | `enemySpeedMultiplier`  | `follower`    | `speed`                  |
+ *
+ * `characterController` is deliberately absent — it is the PLAYER's movement, and
+ * scaling it by an *enemy* multiplier would make the player slower as they got worse.
+ * The profile's `resourceDropRate`, `checkpointFrequency` and `hintDelay` have no
+ * corresponding engine field at all and are not emitted; they remain runtime-script
+ * concerns (see `generateDDAScript`).
+ *
+ * Emits one command per scalable component, so an entity with both `health` and
+ * `follower` yields two — a single command can only carry one `componentType`.
+ * Components the profile does not own produce nothing.
  */
 export function difficultyToCommands(
   profile: DifficultyProfile,
-  entityIds: string[],
+  targets: DifficultyTarget[],
 ): EngineCommand[] {
-  return entityIds.map((entityId) => ({
-    cmd: 'update_game_component',
-    entityId,
-    properties: {
-      healthMultiplier: profile.enemyHealthMultiplier,
-      damageMultiplier: profile.enemyDamageMultiplier,
-      speedMultiplier: profile.enemySpeedMultiplier,
-    },
-  }));
+  const commands: EngineCommand[] = [];
+
+  for (const { entityId, baseComponents } of targets) {
+    for (const base of baseComponents) {
+      const scaled = scaleComponent(base, profile);
+      if (!scaled) continue;
+      // `toWireComponent` supplies `componentType` (the engine's snake_case name) and
+      // nests the fields under `properties`. Omitting either is a hard rejection
+      // ("Missing componentType") or a silent reset from Default respectively —
+      // see web/src/lib/engine/gameComponentWire.ts.
+      commands.push({ cmd: 'update_game_component', entityId, ...toWireComponent(scaled) });
+    }
+  }
+
+  return commands;
+}
+
+/** Apply the profile's multipliers to one component, or `null` if difficulty does not own it. */
+function scaleComponent(
+  base: GameComponentData,
+  profile: DifficultyProfile,
+): GameComponentData | null {
+  switch (base.type) {
+    case 'health':
+      return {
+        type: 'health',
+        health: {
+          ...base.health,
+          maxHp: scale(base.health.maxHp, profile.enemyHealthMultiplier),
+          // Scale current alongside max so a half-dead enemy stays half-dead rather
+          // than being refilled by a difficulty tick.
+          currentHp: scale(base.health.currentHp, profile.enemyHealthMultiplier),
+        },
+      };
+    case 'damageZone':
+      return {
+        type: 'damageZone',
+        damageZone: {
+          ...base.damageZone,
+          damagePerSecond: scale(base.damageZone.damagePerSecond, profile.enemyDamageMultiplier),
+        },
+      };
+    case 'projectile':
+      return {
+        type: 'projectile',
+        projectile: {
+          ...base.projectile,
+          speed: scale(base.projectile.speed, profile.enemySpeedMultiplier),
+          damage: scale(base.projectile.damage, profile.enemyDamageMultiplier),
+        },
+      };
+    case 'follower':
+      return {
+        type: 'follower',
+        follower: {
+          ...base.follower,
+          speed: scale(base.follower.speed, profile.enemySpeedMultiplier),
+        },
+      };
+    default:
+      return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

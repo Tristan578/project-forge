@@ -110,11 +110,14 @@ export const physicsProfileExecutor: ExecutorDefinition = {
         return successResult({ presetUsed: presetKey, entityCount: 0, appliedGlobally: false });
       }
 
-      applyPhysicsProfile(finalProfile, ctx.dispatchCommand, physicsNodes);
+      // Pass the live component map: this executor runs AFTER character_setup in the
+      // pipeline, and without the merge it would reset every field that step
+      // configured (PF-1118).
+      applyPhysicsProfile(finalProfile, ctx.dispatchCommand, physicsNodes, ctx.store.allGameComponents);
       return successResult({ presetUsed: presetKey, entityCount: physicsNodes.length, appliedGlobally: false });
     }
 
-    applyPhysicsProfile(finalProfile, ctx.dispatchCommand, ids);
+    applyPhysicsProfile(finalProfile, ctx.dispatchCommand, ids, ctx.store.allGameComponents);
 
     return successResult({ presetUsed: presetKey, entityCount: ids.length, appliedGlobally: false });
   },

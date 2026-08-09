@@ -10,6 +10,8 @@ import {
   type PlayerPerformance,
   type DifficultyProfile,
 } from '../difficultyAdjustment';
+import { ENGINE_COMPONENT_TYPES } from '@/lib/engine/gameComponentWire';
+import type { GameComponentData } from '@/stores/slices/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -280,28 +282,175 @@ describe('createDefaultProfile', () => {
 // difficultyToCommands
 // ---------------------------------------------------------------------------
 
+/**
+ * Full-shape assertions throughout. The previous suite only checked that a
+ * `properties` bag contained a `healthMultiplier` key — a field name that exists on
+ * none of the 13 engine component types — and never looked at `componentType`, which
+ * was absent entirely. Both defects passed (PF-1118).
+ */
 describe('difficultyToCommands', () => {
-  it('returns one command per entity', () => {
-    const profile = makeProfile();
-    const cmds = difficultyToCommands(profile, ['e1', 'e2', 'e3']);
-    expect(cmds).toHaveLength(3);
+  const health = (maxHp: number, currentHp = maxHp): GameComponentData => ({
+    type: 'health',
+    health: {
+      maxHp,
+      currentHp,
+      invincibilitySecs: 0.5,
+      respawnOnDeath: true,
+      respawnPoint: [0, 1, 0],
+    },
   });
 
-  it('each command targets the correct entity', () => {
-    const cmds = difficultyToCommands(makeProfile(), ['abc']);
-    expect(cmds[0].cmd).toBe('update_game_component');
-    expect(cmds[0].entityId).toBe('abc');
+  const follower = (speed: number): GameComponentData => ({
+    type: 'follower',
+    follower: { targetEntityId: null, speed, stopDistance: 1.5, lookAtTarget: true },
   });
 
-  it('embeds multiplier properties', () => {
+  const damageZone = (damagePerSecond: number): GameComponentData => ({
+    type: 'damageZone',
+    damageZone: { damagePerSecond, oneShot: false },
+  });
+
+  const projectile = (speed: number, damage: number): GameComponentData => ({
+    type: 'projectile',
+    projectile: { speed, damage, lifetimeSecs: 5, gravity: false, destroyOnHit: true },
+  });
+
+  it('scales health onto the engine maxHp/currentHp fields, as a complete component', () => {
     const profile = makeProfile({ enemyHealthMultiplier: 1.5 });
-    const cmds = difficultyToCommands(profile, ['e1']);
+    const cmds = difficultyToCommands(profile, [
+      { entityId: 'e1', baseComponents: [health(100)] },
+    ]);
+
+    expect(cmds).toEqual([
+      {
+        cmd: 'update_game_component',
+        entityId: 'e1',
+        componentType: 'health',
+        properties: {
+          maxHp: 150,
+          currentHp: 150,
+          invincibilitySecs: 0.5,
+          respawnOnDeath: true,
+          respawnPoint: [0, 1, 0],
+        },
+      },
+    ]);
+  });
+
+  it('scales currentHp proportionally rather than refilling a damaged enemy', () => {
+    const cmds = difficultyToCommands(makeProfile({ enemyHealthMultiplier: 2 }), [
+      { entityId: 'e1', baseComponents: [health(100, 40)] },
+    ]);
     const props = cmds[0].properties as Record<string, number>;
-    expect(props.healthMultiplier).toBe(1.5);
+    expect(props.maxHp).toBe(200);
+    expect(props.currentHp).toBe(80);
+  });
+
+  it('scales follower speed by the enemy speed multiplier', () => {
+    const cmds = difficultyToCommands(makeProfile({ enemySpeedMultiplier: 1.4 }), [
+      { entityId: 'e1', baseComponents: [follower(3)] },
+    ]);
+
+    expect(cmds).toEqual([
+      {
+        cmd: 'update_game_component',
+        entityId: 'e1',
+        componentType: 'follower',
+        properties: {
+          targetEntityId: null,
+          speed: 4.2,
+          stopDistance: 1.5,
+          lookAtTarget: true,
+        },
+      },
+    ]);
+  });
+
+  it('scales damage-zone damage per second by the enemy damage multiplier', () => {
+    const cmds = difficultyToCommands(makeProfile({ enemyDamageMultiplier: 0.5 }), [
+      { entityId: 'e1', baseComponents: [damageZone(25)] },
+    ]);
+
+    expect(cmds).toEqual([
+      {
+        cmd: 'update_game_component',
+        entityId: 'e1',
+        componentType: 'damage_zone',
+        properties: { damagePerSecond: 12.5, oneShot: false },
+      },
+    ]);
+  });
+
+  it('scales projectile damage and speed by their respective multipliers', () => {
+    const cmds = difficultyToCommands(
+      makeProfile({ enemyDamageMultiplier: 2, enemySpeedMultiplier: 1.5 }),
+      [{ entityId: 'e1', baseComponents: [projectile(15, 10)] }],
+    );
+
+    expect(cmds).toEqual([
+      {
+        cmd: 'update_game_component',
+        entityId: 'e1',
+        componentType: 'projectile',
+        properties: {
+          speed: 22.5,
+          damage: 20,
+          lifetimeSecs: 5,
+          gravity: false,
+          destroyOnHit: true,
+        },
+      },
+    ]);
+  });
+
+  it('emits one command per scalable component on the same entity', () => {
+    const cmds = difficultyToCommands(makeProfile(), [
+      { entityId: 'e1', baseComponents: [health(100), follower(3)] },
+    ]);
+    expect(cmds.map((c) => c.componentType)).toEqual(['health', 'follower']);
+  });
+
+  it('never emits a command that the engine would reject for a missing componentType', () => {
+    const cmds = difficultyToCommands(makeProfile(), [
+      { entityId: 'e1', baseComponents: [health(100), follower(3), damageZone(25)] },
+    ]);
+    expect(cmds.length).toBeGreaterThan(0);
+    for (const cmd of cmds) {
+      expect(typeof cmd.componentType).toBe('string');
+      expect(ENGINE_COMPONENT_TYPES).toContain(cmd.componentType as string);
+      expect(cmd.properties).toBeTypeOf('object');
+    }
+  });
+
+  it('ignores components difficulty does not own', () => {
+    const cmds = difficultyToCommands(makeProfile({ enemySpeedMultiplier: 2 }), [
+      {
+        entityId: 'e1',
+        baseComponents: [
+          {
+            type: 'characterController',
+            characterController: {
+              speed: 5,
+              jumpHeight: 8,
+              gravityScale: 1,
+              canDoubleJump: false,
+            },
+          },
+          { type: 'checkpoint', checkpoint: { autoSave: true } },
+        ],
+      },
+    ]);
+    expect(cmds).toEqual([]);
   });
 
   it('returns empty array for no entities', () => {
     expect(difficultyToCommands(makeProfile(), [])).toEqual([]);
+  });
+
+  it('is idempotent for a given baseline — re-running does not compound', () => {
+    const target = [{ entityId: 'e1', baseComponents: [health(100)] }];
+    const profile = makeProfile({ enemyHealthMultiplier: 1.5 });
+    expect(difficultyToCommands(profile, target)).toEqual(difficultyToCommands(profile, target));
   });
 });
 

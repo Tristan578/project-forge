@@ -20,12 +20,26 @@ vi.mock('@/lib/ai/physicsFeel', () => ({
   applyPhysicsProfile: (...args: unknown[]) => mockApplyPhysicsProfile(...args),
 }));
 
+/**
+ * A store stub always carries `allGameComponents` — the executor forwards it to
+ * `applyPhysicsProfile`, which merges the profile onto each entity's EXISTING
+ * character controller instead of rebuilding it from `Default`. Omitting it here
+ * would let the map silently arrive as `undefined` and reintroduce PF-1118.
+ */
+function makeStore(
+  nodes: Record<string, ReturnType<typeof makeNode>> = {},
+  allGameComponents: Record<string, unknown[]> = {},
+): ExecutorContext['store'] {
+  return {
+    sceneGraph: { nodes, rootIds: Object.keys(nodes) },
+    allGameComponents,
+  } as unknown as ExecutorContext['store'];
+}
+
 function makeCtx(overrides: Partial<ExecutorContext> = {}): ExecutorContext {
   return {
     dispatchCommand: vi.fn(),
-    store: {
-      sceneGraph: { nodes: {}, rootIds: [] },
-    } as unknown as ExecutorContext['store'],
+    store: makeStore(),
     projectType: '3d',
     userTier: 'creator',
     signal: new AbortController().signal,
@@ -120,23 +134,44 @@ describe('physicsProfileExecutor', () => {
       expect.any(Object),
       ctx.dispatchCommand,
       ['e1', 'e2'],
+      ctx.store.allGameComponents,
     );
     const output = result.output as { entityCount: number };
     expect(output.entityCount).toBe(2);
   });
 
+  it('forwards the live game-component map so existing controllers are merged, not reset', async () => {
+    // This executor runs AFTER character_setup in the pipeline. Dropping the map
+    // here makes applyPhysicsProfile rebuild the controller from Default and wipe
+    // every field that step configured — canDoubleJump above all (PF-1118).
+    const components = {
+      e1: [
+        {
+          type: 'characterController',
+          characterController: { speed: 5, jumpHeight: 8, gravityScale: 1, canDoubleJump: true },
+        },
+      ],
+    };
+    const ctx = makeCtx({
+      store: makeStore({ e1: makeNode('e1', 'Player', ['PhysicsData']) }, components),
+    });
+
+    await physicsProfileExecutor.execute({
+      feelDirective: makeFeelDirective(),
+      projectType: '3d',
+      entityIds: ['e1'],
+    }, ctx);
+
+    expect(mockApplyPhysicsProfile.mock.calls[0][3]).toEqual(components);
+  });
+
   it('falls back to store physics nodes when no entityIds', async () => {
     const ctx = makeCtx({
-      store: {
-        sceneGraph: {
-          nodes: {
-            e1: makeNode('e1', 'Player', ['PhysicsData']),
-            e2: makeNode('e2', 'Enemy', ['RigidBody']),
-            e3: makeNode('e3', 'Ground', []),
-          },
-          rootIds: ['e1', 'e2', 'e3'],
-        },
-      } as unknown as ExecutorContext['store'],
+      store: makeStore({
+        e1: makeNode('e1', 'Player', ['PhysicsData']),
+        e2: makeNode('e2', 'Enemy', ['RigidBody']),
+        e3: makeNode('e3', 'Ground', []),
+      }),
     });
 
     const result = await physicsProfileExecutor.execute({
@@ -149,6 +184,7 @@ describe('physicsProfileExecutor', () => {
       expect.any(Object),
       ctx.dispatchCommand,
       ['e1', 'e2'],
+      ctx.store.allGameComponents,
     );
     const output = result.output as { entityCount: number };
     expect(output.entityCount).toBe(2);
@@ -169,12 +205,7 @@ describe('physicsProfileExecutor', () => {
 
   it('allows safe config overrides for moveSpeed and jumpForce', async () => {
     const ctx = makeCtx({
-      store: {
-        sceneGraph: {
-          nodes: { e1: makeNode('e1', 'Player', ['PhysicsData']) },
-          rootIds: ['e1'],
-        },
-      } as unknown as ExecutorContext['store'],
+      store: makeStore({ e1: makeNode('e1', 'Player', ['PhysicsData']) }),
     });
 
     await physicsProfileExecutor.execute({
@@ -190,12 +221,7 @@ describe('physicsProfileExecutor', () => {
 
   it('ignores non-numeric config overrides', async () => {
     const ctx = makeCtx({
-      store: {
-        sceneGraph: {
-          nodes: { e1: makeNode('e1', 'Player', ['PhysicsData']) },
-          rootIds: ['e1'],
-        },
-      } as unknown as ExecutorContext['store'],
+      store: makeStore({ e1: makeNode('e1', 'Player', ['PhysicsData']) }),
     });
 
     await physicsProfileExecutor.execute({
