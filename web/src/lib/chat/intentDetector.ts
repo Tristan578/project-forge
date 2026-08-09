@@ -34,9 +34,13 @@ const GAME_GENRES = [
 const STRONG_PATTERNS: RegExp[] = [
   /\b(?:make|create|build|generate|design)\s+(?:me\s+)?a\s+game\b/i,
   /\b(?:make|create|build|generate|design)\s+(?:me\s+)?a\s+(?:new\s+)?(?:2d|3d)\s+game\b/i,
-  // "make me a platformer", "create a shooter", etc.
+  // "make me a platformer", "create a shooter", "build me a new 3D racer", etc.
+  // The `2d|3d` qualifier is optional and independent of `new` — on a 2D/3D
+  // engine it is the likeliest word to land between the article and the genre,
+  // and without it "make me a 3D platformer" (the product's flagship phrasing)
+  // scored as normal chat.
   new RegExp(
-    `\\b(?:make|create|build|generate)\\s+(?:me\\s+)?a\\s+(?:new\\s+)?(?:${GAME_GENRES.join('|')})\\b`,
+    `\\b(?:make|create|build|generate|design)\\s+(?:me\\s+)?a\\s+(?:new\\s+)?(?:2d\\s+|3d\\s+)?(?:${GAME_GENRES.join('|')})\\b`,
     'i',
   ),
   /\bi\s+want\s+(?:to\s+(?:make|create|build)\s+)?a\s+game\b/i,

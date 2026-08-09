@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   PANEL_DEFINITIONS,
@@ -98,6 +100,77 @@ describe('PANEL_DEFINITIONS', () => {
 
   it('has at least 10 panels (sanity — detect accidental deletion)', () => {
     expect(Object.keys(PANEL_DEFINITIONS).length).toBeGreaterThanOrEqual(10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Definition <-> component-registry parity
+//
+// Registering a panel is a TWO-part contract: a PANEL_DEFINITIONS entry here,
+// and a matching key in WorkspaceProvider's PANEL_COMPONENTS map (the object
+// handed to Dockview as `components={...}`). PanelsMenu enumerates every
+// definition, so a panel with only half the contract is *offered* to the user
+// and then cannot render — which is exactly how the `orchestrator` panel, and
+// the whole Phase 2A game-creation pipeline behind it, sat unreachable.
+//
+// The map is a module-local const inside a component file that pulls in
+// Dockview and every lazy panel, so this reads the source text rather than
+// importing it. Any failure to locate or parse the map throws — an
+// unverifiable contract is not a verified one.
+// ---------------------------------------------------------------------------
+
+function readPanelComponentKeys(): string[] {
+  const file = resolve(__dirname, '../../../components/editor/WorkspaceProvider.tsx');
+  const source = readFileSync(file, 'utf8');
+
+  const block = /const PANEL_COMPONENTS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(source);
+  if (!block) {
+    throw new Error(
+      `Could not locate the PANEL_COMPONENTS object literal in ${file}. ` +
+      `If it was renamed or moved, update this test — do not delete it.`
+    );
+  }
+
+  const keys: string[] = [];
+  for (const line of block[1].split('\n')) {
+    const entry = /^\s*'?([A-Za-z0-9_-]+)'?\s*:/.exec(line);
+    if (entry) keys.push(entry[1]);
+  }
+  if (keys.length === 0) {
+    throw new Error(`Parsed zero keys out of PANEL_COMPONENTS in ${file} — parser is broken.`);
+  }
+  return keys;
+}
+
+describe('PANEL_DEFINITIONS <-> PANEL_COMPONENTS parity', () => {
+  it('every defined panel has a component registered in WorkspaceProvider', () => {
+    const registered = new Set(readPanelComponentKeys());
+    const missing = Object.values(PANEL_DEFINITIONS)
+      .filter((d) => !registered.has(d.component))
+      .map((d) => `${d.id} (component: "${d.component}")`);
+
+    expect(
+      missing,
+      'These panels are offered by PanelsMenu but have no entry in ' +
+      "WorkspaceProvider's PANEL_COMPONENTS, so opening them renders nothing"
+    ).toEqual([]);
+  });
+
+  it('every registered component is backed by a panel definition', () => {
+    const defined = new Set(Object.values(PANEL_DEFINITIONS).map((d) => d.component));
+    const orphans = readPanelComponentKeys().filter((k) => !defined.has(k));
+
+    expect(
+      orphans,
+      'These components are registered with Dockview but no PANEL_DEFINITIONS ' +
+      'entry can ever request them — dead code, or a definition was deleted'
+    ).toEqual([]);
+  });
+
+  it('registers no duplicate component keys', () => {
+    const keys = readPanelComponentKeys();
+    const duplicates = keys.filter((k, i) => keys.indexOf(k) !== i);
+    expect(duplicates, 'Duplicate PANEL_COMPONENTS keys — the later one silently wins').toEqual([]);
   });
 });
 

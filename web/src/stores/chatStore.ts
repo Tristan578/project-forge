@@ -2,6 +2,16 @@ import { create } from 'zustand';
 import { estimateMessageTokens } from '../lib/chat/tokenCounter';
 import { showError } from '@/lib/toast';
 import { AI_MODEL_PRIMARY, AI_MODEL_FAST, AI_MODEL_PREMIUM } from '@/lib/ai/models';
+import { detectGameCreationIntent } from '@/lib/chat/intentDetector';
+
+/**
+ * Confidence at or above which a message is routed to the game-creation
+ * pipeline instead of the chat tool loop. Set by the integration spec
+ * (specs/2026-04-12-e1-pipeline-integration.md, Deliverable 5). Detection is
+ * keyword-only, so a miss simply falls through to normal chat — the safe
+ * direction, and the reason this can afford to be a plain threshold.
+ */
+const GAME_CREATION_CONFIDENCE_THRESHOLD = 0.7;
 
 export interface ToolCallStatus {
   id: string;
@@ -358,9 +368,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Non-critical — proceed if store unavailable
     }
 
-    // Track AI chat usage
-    try { const { trackAIChatMessageSent } = await import('@/lib/analytics/events'); trackAIChatMessageSent(activeModel); } catch { /* analytics non-critical */ }
-
     // Append entity reference context to the message if @-mentions were used
     let messageContent = text;
     if (entityRefs && Object.keys(entityRefs).length > 0) {
@@ -378,6 +385,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
       entityRefs,
       timestamp: Date.now(),
     };
+
+    // ---- Game-creation routing (spec Deliverable 5) ----
+    // "Make me a platformer" belongs to the creation pipeline, not the tool
+    // loop. This runs on the raw text, before entity-reference decoration, so
+    // an @-mention cannot perturb the classifier.
+    const intent = detectGameCreationIntent(text);
+    if (
+      intent.intent === 'game_creation' &&
+      intent.confidence >= GAME_CREATION_CONFIDENCE_THRESHOLD
+    ) {
+      const ack: ChatMessage = {
+        id: nextId(),
+        role: 'assistant',
+        content: 'Starting game creation — follow along in the Game Creator panel.',
+        timestamp: Date.now(),
+      };
+      set({
+        messages: [...messages, userMessage, ack],
+        error: null,
+        hasUnreadMessages: rightPanelTab !== 'chat',
+      });
+
+      try {
+        const [{ useEditorStore }, { useWorkspaceStore }] = await Promise.all([
+          import('./editorStore'),
+          import('./workspaceStore'),
+        ]);
+        // The panel owns the approval gate, so a plan produced without it on
+        // screen strands the user at `awaiting_approval` with no way forward.
+        useWorkspaceStore.getState().openPanel('orchestrator');
+        const editor = useEditorStore.getState();
+        await editor.startDecomposition(intent.extractedPrompt ?? text, editor.projectType);
+      } catch (err) {
+        set({ error: err instanceof Error ? err.message : 'Failed to start game creation.' });
+      }
+      return;
+    }
+
+    // Track AI chat usage
+    try { const { trackAIChatMessageSent } = await import('@/lib/analytics/events'); trackAIChatMessageSent(activeModel); } catch { /* analytics non-critical */ }
 
     const assistantMessage: ChatMessage = {
       id: nextId(),

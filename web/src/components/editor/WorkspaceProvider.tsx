@@ -124,6 +124,9 @@ const VoiceProfilePanel = lazy(() =>
 const ShaderEditorPanel = lazy(() =>
   import('./ShaderEditorPanel').then((m) => ({ default: m.ShaderEditorPanel }))
 );
+const OrchestratorPanel = lazy(() =>
+  import('./OrchestratorPanel').then((m) => ({ default: m.OrchestratorPanel }))
+);
 
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useUserStore } from '@/stores/userStore';
@@ -314,6 +317,11 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'voice-profile': withSuspense(VoiceProfilePanel),
   // Shader graph editor — no tier restriction, always-rendered for canvas continuity
   'shader-editor': withSuspense(ShaderEditorPanel),
+  // Game creation pipeline — deliberately NOT tier-gated. The orchestrator caps
+  // work per tier internally (ASSET_TIER_CAPS in planBuilder, starter included)
+  // and reserves tokens server-side, so gating the panel would deny a flow that
+  // is designed to degrade rather than refuse.
+  orchestrator: withSuspense(OrchestratorPanel),
   // AI panels — tier-gated (pro only)
   'auto-iteration': withTierGate('auto-iteration', AutoIterationPanel),
   playtest: withTierGate('playtest', PlaytestPanel),
