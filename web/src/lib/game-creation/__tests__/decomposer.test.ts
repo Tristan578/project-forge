@@ -381,4 +381,106 @@ describe('decomposeIntoSystems', () => {
     const gdd = await decomposeIntoSystems('make a platformer', '2d');
     expect(gdd.description).toBe('make a platformer (sanitized)');
   });
+
+  // ---------------------------------------------------------------------------
+  // Cross-field rule: a movement system needs something to move (PF-1113)
+  // ---------------------------------------------------------------------------
+
+  describe('movement system requires a player entity', () => {
+    /** A scene whose entities carry exactly the given roles. */
+    function sceneWith(name: string, roles: string[]) {
+      return {
+        name,
+        purpose: `${name} purpose`,
+        systems: ['movement'],
+        entities: roles.map((role, i) => ({
+          name: `${role}-${i}`,
+          role,
+          systems: ['movement'],
+          appearance: 'a shape',
+          behaviors: [],
+        })),
+        transitions: [],
+      };
+    }
+
+    const MOVEMENT_SYSTEM = {
+      category: 'movement',
+      type: 'walk+jump',
+      config: {},
+      priority: 'core',
+      dependsOn: [],
+    };
+
+    const CAMERA_SYSTEM = {
+      category: 'camera',
+      type: 'follow',
+      config: {},
+      priority: 'core',
+      dependsOn: [],
+    };
+
+    it('rejects a GDD whose movement system has no player entity to move', async () => {
+      fetchAI.mockResolvedValue(
+        makeValidLLMJson({
+          systems: [MOVEMENT_SYSTEM, CAMERA_SYSTEM],
+          scenes: [sceneWith('Main Level', ['enemy', 'decoration'])],
+        }),
+      );
+
+      // The message must name the role that is missing, so the retry prompt and
+      // any surfaced error say what to fix rather than just "invalid".
+      await expect(decomposeIntoSystems('make a game', '2d')).rejects.toThrow(
+        /player/,
+      );
+
+      // Rejected at decomposition, so the model is asked again rather than the
+      // nonsense design degrading downstream.
+      expect(fetchAI).toHaveBeenCalledTimes(3);
+    });
+
+    it('accepts a GDD with no movement system and no player entity', async () => {
+      fetchAI.mockResolvedValue(
+        makeValidLLMJson({
+          systems: [CAMERA_SYSTEM],
+          scenes: [sceneWith('Gallery', ['decoration', 'interactable'])],
+        }),
+      );
+
+      const gdd = await decomposeIntoSystems('a walking-simulator diorama', '3d');
+
+      expect(gdd.systems).toHaveLength(1);
+      expect(fetchAI).toHaveBeenCalledTimes(1);
+    });
+
+    it('accepts a player that lives in a scene other than the first', async () => {
+      fetchAI.mockResolvedValue(
+        makeValidLLMJson({
+          systems: [MOVEMENT_SYSTEM, CAMERA_SYSTEM],
+          scenes: [
+            sceneWith('Title Screen', ['decoration']),
+            sceneWith('Main Level', ['player', 'enemy']),
+          ],
+        }),
+      );
+
+      const gdd = await decomposeIntoSystems('make a game', '2d');
+
+      expect(gdd.scenes).toHaveLength(2);
+      expect(fetchAI).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects when every scene is empty of entities', async () => {
+      fetchAI.mockResolvedValue(
+        makeValidLLMJson({
+          systems: [MOVEMENT_SYSTEM],
+          scenes: [sceneWith('Empty', [])],
+        }),
+      );
+
+      await expect(decomposeIntoSystems('make a game', '2d')).rejects.toThrow(
+        /player/,
+      );
+    });
+  });
 });

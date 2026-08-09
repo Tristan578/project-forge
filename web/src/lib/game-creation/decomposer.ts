@@ -80,6 +80,26 @@ const zDecompositionOutput = z.object({
   styleDirective: z.string().max(500),
   feelDirective: zFeelDirective,
   constraints: z.array(z.string().max(200)),
+}).superRefine((gdd, ctx) => {
+  // A movement system needs something to move. `role` and `category` are each
+  // valid in isolation, so nothing below this point can tell that the design is
+  // internally nonsense: the plan builder drops the character_setup step and
+  // warns, and the user gets a game where the thing they asked to move does not
+  // exist. Reject here so the model is asked again instead (PF-1113).
+  if (!gdd.systems.some(s => s.category === 'movement')) {
+    return;
+  }
+  const hasPlayer = gdd.scenes.some(scene =>
+    scene.entities.some(entity => entity.role === 'player'),
+  );
+  if (!hasPlayer) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['scenes'],
+      message:
+        'a movement system was declared but no entity in any scene has role "player" — add a player entity or drop the movement system',
+    });
+  }
 });
 
 export type DecompositionOutput = z.infer<typeof zDecompositionOutput>;
@@ -104,6 +124,7 @@ ${SYSTEM_CATEGORIES.map(c => `- "${c}"`).join('\n')}
 6. Asset fallbacks must use format "primitive:<name>" or "builtin:<name>" (e.g., "primitive:cube", "builtin:footstep").
 7. Limit assetManifest to items the game genuinely needs. Fewer high-impact assets over many decorative ones.
 8. estimatedScope: "small" = 1-3 scenes, few entities; "medium" = 3-8 scenes, moderate entities; "large" = 8+ scenes, many entities.
+9. If you include a "movement" system, at least one entity in one scene MUST have role "player" -- a movement system with nothing to move is rejected.
 
 ## Output Format
 Respond with ONLY valid JSON matching this exact structure (no markdown, no explanation):
