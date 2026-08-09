@@ -26,6 +26,33 @@ describe('getChatTools', () => {
     expect(spawn).toBeDefined();
     expect(spawn!.input_schema.properties).toBeDefined();
   });
+
+  it('should not advertise spawn_entity.id to the model', () => {
+    // The manifest documents `id` because a direct-to-engine MCP client has a real
+    // use for it. The chat path does not: the store mints the id itself and returns
+    // it synchronously, so a model-supplied id buys nothing — and the engine's
+    // `is_valid_override_id` checks only length and control characters, so an id
+    // colliding with an existing entity would silently make every id-matching loop
+    // in the engine address the wrong entity.
+    const spawn = getChatTools().find((t) => t.name === 'spawn_entity');
+    expect(Object.keys(spawn!.input_schema.properties!)).not.toContain('id');
+    expect(spawn!.input_schema.required).not.toContain('id');
+  });
+
+  it('should still advertise every other documented spawn_entity property', () => {
+    const spawn = getChatTools().find((t) => t.name === 'spawn_entity');
+    const documented = Object.keys(getCommandDef('spawn_entity')!.parameters.properties!);
+    expect(Object.keys(spawn!.input_schema.properties!).sort()).toEqual(
+      documented.filter((key) => key !== 'id').sort(),
+    );
+  });
+
+  it('should not mutate the shared manifest when excluding a property', () => {
+    // The manifest object is module-scoped and also read by getCommandDef; a
+    // destructive delete here would strip `id` from every other consumer.
+    getChatTools();
+    expect(getCommandDef('spawn_entity')!.parameters.properties).toHaveProperty('id');
+  });
 });
 
 describe('getCommandNames', () => {
