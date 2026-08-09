@@ -157,6 +157,37 @@ export function validateArray<T>(
   return { valid: true, value: results };
 }
 
+/**
+ * Validate that a value is a 3-element array of finite numbers — the `[x, y, z]`
+ * tuple the engine deserializes into `Option<[f32; 3]>` (position, scale, …).
+ *
+ * Arity is checked strictly: a 2- or 4-element array is a caller mistake, and
+ * silently truncating or padding it would place the entity somewhere the caller
+ * never asked for while still reporting success.
+ */
+export function validateVec3(
+  value: unknown,
+  field: string = 'vec3'
+): ValidationResult<[number, number, number]> {
+  if (!Array.isArray(value)) {
+    return { valid: false, error: `${field} must be an array of 3 numbers`, field };
+  }
+  if (value.length !== 3) {
+    return {
+      valid: false,
+      error: `${field} must have exactly 3 elements, got ${value.length}`,
+      field,
+    };
+  }
+  for (let i = 0; i < 3; i++) {
+    const element: unknown = value[i];
+    if (typeof element !== 'number' || !Number.isFinite(element)) {
+      return { valid: false, error: `${field}[${i}] must be a finite number`, field };
+    }
+  }
+  return { valid: true, value: [value[0], value[1], value[2]] };
+}
+
 // ===== Factory helpers =====
 
 /** Create a ValidatorFn for entity IDs. */
@@ -192,6 +223,11 @@ export function required(): ValidatorFn<unknown> {
 /** Create a ValidatorFn for booleans. */
 export function boolean(): ValidatorFn<boolean> {
   return (value, field) => validateBoolean(value, field);
+}
+
+/** Create a ValidatorFn for `[x, y, z]` tuples of finite numbers. */
+export function vec3(): ValidatorFn<[number, number, number]> {
+  return (value, field) => validateVec3(value, field);
 }
 
 /** Create a ValidatorFn for numbers in a range. */

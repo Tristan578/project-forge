@@ -103,7 +103,7 @@ describe('entityHandlers', () => {
         { spawnEntity: vi.fn(() => 'cube-1') },
       );
       expect(result.success).toBe(true);
-      expect(store.spawnEntity).toHaveBeenCalledWith('cube', 'MyCube');
+      expect(store.spawnEntity).toHaveBeenCalledWith('cube', 'MyCube', undefined);
     });
 
     it('calls spawnEntity with type only (no name)', async () => {
@@ -114,7 +114,7 @@ describe('entityHandlers', () => {
         { spawnEntity: vi.fn(() => 'sphere-1') },
       );
       expect(result.success).toBe(true);
-      expect(store.spawnEntity).toHaveBeenCalledWith('sphere', undefined);
+      expect(store.spawnEntity).toHaveBeenCalledWith('sphere', undefined, undefined);
     });
 
     it('returns a message containing the entity type', async () => {
@@ -140,7 +140,7 @@ describe('entityHandlers', () => {
           { spawnEntity: vi.fn(() => `${entityType}-1`) },
         );
         expect(result.success).toBe(true);
-        expect(store.spawnEntity).toHaveBeenCalledWith(entityType, undefined);
+        expect(store.spawnEntity).toHaveBeenCalledWith(entityType, undefined, undefined);
       }
     });
   });

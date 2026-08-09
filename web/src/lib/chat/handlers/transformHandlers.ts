@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { ToolHandler } from './types';
 import { zEntityId, zXYZ, zSelectionMode, zGizmoMode, zCameraPreset, parseArgs } from './types';
 import { parseHandlerArgs } from '@/lib/validation/parseArgs';
-import { entityId, enumValue, boundedString } from '@/lib/validation/validators';
+import { entityId, enumValue, boundedString, vec3 } from '@/lib/validation/validators';
 import { SPAWNABLE_ENTITY_TYPES } from '@/stores/slices/sceneGraphSlice';
 
 // The accepted entity types for `spawn_entity` are derived from the single source of
@@ -23,9 +23,16 @@ export const transformHandlers: Record<string, ToolHandler> = {
     const p = parseHandlerArgs(args, {
       entityType: { validate: enumValue(SPAWNABLE_TYPES) },
       name: { validate: boundedString(1, 128), optional: true },
+      // `position` has been in the manifest — and honored by the engine — since
+      // spawn_entity existed, but the handler used to parse only entityType/name.
+      // "Spawn a cube at 5, 0, 3" therefore reported success and put the cube at
+      // the origin, with nothing to indicate the coordinates were discarded
+      // (PF-1112). A malformed position is REJECTED rather than dropped: dropping
+      // it reproduces the same lie in a narrower case.
+      position: { validate: vec3(), optional: true },
     });
     if (p.error) return p.error;
-    const newId = store.spawnEntity(p.data.entityType, p.data.name);
+    const newId = store.spawnEntity(p.data.entityType, p.data.name, p.data.position);
     if (!newId) {
       // The schema already rejects non-spawnable types, so a falsy id here means the
       // engine has not finished loading (no dispatcher yet). Surface a real failure

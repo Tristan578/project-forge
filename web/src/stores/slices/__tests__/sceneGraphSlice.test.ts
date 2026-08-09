@@ -156,6 +156,30 @@ describe('sceneGraphSlice', () => {
       });
     });
 
+    // The manifest has documented `position` on spawn_entity all along and the
+    // engine has always honored it (`SpawnEntityPayload.position` maps into
+    // `SpawnRequest.position`), but the slice never forwarded it — so "spawn a
+    // cube at 5, 0, 3" reported success and put the cube at the origin (PF-1112).
+    it('should forward an explicit position into the dispatched payload', () => {
+      const returnedId = store.getState().spawnEntity('cube', 'MyCube', [5, 0, 3]);
+      expect(mockDispatch).toHaveBeenCalledWith('spawn_entity', {
+        entityType: 'cube',
+        name: 'MyCube',
+        id: returnedId,
+        position: [5, 0, 3],
+      });
+    });
+
+    // The engine deserializes `position` as `Option<[f32; 3]>`, so the key must be
+    // ABSENT (not present-and-undefined) when no position is given — otherwise the
+    // engine's own default placement is overridden by a malformed field.
+    it('should omit position entirely when the caller supplies none', () => {
+      store.getState().spawnEntity('cube');
+      const call = mockDispatch.mock.calls.find(([command]) => command === 'spawn_entity');
+      expect(call).toBeDefined();
+      expect(Object.keys(call![1] as object)).not.toContain('position');
+    });
+
     // Terrain uses the separate spawn_terrain pipeline, but that pipeline now
     // honors a caller-supplied id, so spawnEntity must FORWARD what spawnTerrain
     // returns. Swallowing it left callers reading the async-only `primaryId`,

@@ -60,7 +60,7 @@ describe('spawn_entity', () => {
       { spawnEntity: vi.fn(() => 'cube-1') },
     );
     expect(result.success).toBe(true);
-    expect(store.spawnEntity).toHaveBeenCalledWith('cube', undefined);
+    expect(store.spawnEntity).toHaveBeenCalledWith('cube', undefined, undefined);
   });
 
   it('passes name to spawnEntity when provided', async () => {
@@ -68,7 +68,7 @@ describe('spawn_entity', () => {
       entityType: 'sphere',
       name: 'MyBall',
     });
-    expect(store.spawnEntity).toHaveBeenCalledWith('sphere', 'MyBall');
+    expect(store.spawnEntity).toHaveBeenCalledWith('sphere', 'MyBall', undefined);
   });
 
   it('spawns every engine-spawnable primitive/light type', async () => {

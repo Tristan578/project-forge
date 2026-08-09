@@ -11,8 +11,43 @@ describe('transformHandlers', () => {
       { spawnEntity: vi.fn(() => 'cube-1') },
     );
     expect(result.success).toBe(true);
-    expect(store.spawnEntity).toHaveBeenCalledWith('cube', 'MyCube');
+    expect(store.spawnEntity).toHaveBeenCalledWith('cube', 'MyCube', undefined);
     expect((result.result as { entityId?: string }).entityId).toBe('cube-1');
+  });
+
+  it('spawn_entity passes a valid position through to the store (PF-1112)', async () => {
+    // `position` has been documented on spawn_entity in the manifest all along and
+    // the engine honors it, but the handler parsed only entityType/name — so the
+    // AI could ask for a cube at 5,0,3, get a success, and find it at the origin.
+    const { result, store } = await invokeHandler(
+      transformHandlers,
+      'spawn_entity',
+      { entityType: 'cube', name: 'MyCube', position: [5, 0, 3] },
+      { spawnEntity: vi.fn(() => 'cube-1') },
+    );
+    expect(result.success).toBe(true);
+    expect(store.spawnEntity).toHaveBeenCalledWith('cube', 'MyCube', [5, 0, 3]);
+  });
+
+  it.each([
+    ['wrong arity', [1, 2]],
+    ['too many elements', [1, 2, 3, 4]],
+    ['a non-number element', [1, 'two', 3]],
+    ['a non-finite element', [1, Number.NaN, 3]],
+    ['not an array', { x: 1, y: 2, z: 3 }],
+  ])('spawn_entity rejects a position with %s rather than dropping it', async (_label, position) => {
+    // Silently ignoring a malformed position is the same defect as never reading
+    // it: the caller is told the entity landed where it asked. Fail loudly instead.
+    const spawnEntity = vi.fn(() => 'cube-1');
+    const { result } = await invokeHandler(
+      transformHandlers,
+      'spawn_entity',
+      { entityType: 'cube', position },
+      { spawnEntity },
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('position');
+    expect(spawnEntity).not.toHaveBeenCalled();
   });
 
   it('spawn_entity returns the id from spawnEntity (not the stale primaryId)', async () => {

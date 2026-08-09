@@ -77,7 +77,7 @@ describe('Chat executor integration: executeToolCall → handler → store', () 
     );
 
     expect(result.success).toBe(true);
-    expect(store.spawnEntity).toHaveBeenCalledWith('sphere', 'My Sphere');
+    expect(store.spawnEntity).toHaveBeenCalledWith('sphere', 'My Sphere', undefined);
   });
 
   it('spawn_entity: rejects invalid entity type', async () => {
