@@ -26,6 +26,10 @@ import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
 // --- Topological sort for system dependency ordering ---
 // Ensures systems are processed after their dependsOn categories.
 // Within same depth, sorted by priority (core first).
+//
+// A cyclic dependsOn graph is a build-time error, not something to route
+// around silently: it must FAIL loudly (naming the offending cycle), never
+// hang, and never silently drop a step to break the cycle.
 function topoSortSystems(
   systems: GameSystem[],
   priorityOrder: Record<string, number>,
@@ -36,15 +40,20 @@ function topoSortSystems(
   }
 
   const visited = new Set<SystemCategory>();
+  const stackPath: SystemCategory[] = []; // ordered path, for cycle reporting
   const inStack = new Set<SystemCategory>(); // cycle detection
   const result: GameSystem[] = [];
 
   function visit(system: GameSystem): void {
     if (visited.has(system.category)) return;
     if (inStack.has(system.category)) {
-      // Cycle detected — break it by skipping this dependency
-      return;
+      const cycleStart = stackPath.indexOf(system.category);
+      const cyclePath = [...stackPath.slice(cycleStart), system.category];
+      throw new Error(
+        `Cyclic system dependency detected: ${cyclePath.join(' -> ')}`,
+      );
     }
+    stackPath.push(system.category);
     inStack.add(system.category);
     // Visit dependencies first
     for (const dep of system.dependsOn) {
@@ -53,6 +62,7 @@ function topoSortSystems(
         visit(depSystem);
       }
     }
+    stackPath.pop();
     inStack.delete(system.category);
     visited.add(system.category);
     result.push(system);

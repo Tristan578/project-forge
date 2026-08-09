@@ -7,6 +7,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { OrchestratorGDD, GameSystem, AssetNeed } from '@/lib/game-creation/types';
 import { buildPlan } from '@/lib/game-creation/planBuilder';
 import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
@@ -489,5 +491,214 @@ describe('buildPlan', () => {
 
     expect(executors).toContain('physics_profile');
     expect(executors).toContain('character_setup');
+  });
+
+  // ---------------------------------------------------------------------
+  // Cycle detection — topoSortSystems must FAIL loudly, never silently
+  // drop a step or hang, when gdd.systems has a cyclic dependsOn graph.
+  // ---------------------------------------------------------------------
+
+  it('throws an error naming both categories when two systems cyclically depend on each other', () => {
+    const gdd = makeGdd({
+      systems: [
+        makeSystem('movement', 'walk', 'core', ['camera']),
+        makeSystem('camera', 'follow', 'core', ['movement']),
+      ],
+    });
+
+    expect(() => buildPlan(gdd, 'proj-1', 'creator', 10000)).toThrow(/movement/);
+    expect(() => buildPlan(gdd, 'proj-1', 'creator', 10000)).toThrow(/camera/);
+  });
+
+  it('throws an error for a self-referencing system category', () => {
+    const gdd = makeGdd({
+      systems: [makeSystem('world', 'level', 'core', ['world'])],
+    });
+
+    expect(() => buildPlan(gdd, 'proj-1', 'creator', 10000)).toThrow(/world/);
+  });
+
+  it('throws an error for a 3-node cycle (movement -> camera -> world -> movement)', () => {
+    const gdd = makeGdd({
+      systems: [
+        makeSystem('movement', 'walk', 'core', ['camera']),
+        makeSystem('camera', 'follow', 'core', ['world']),
+        makeSystem('world', 'level', 'core', ['movement']),
+      ],
+    });
+
+    expect(() => buildPlan(gdd, 'proj-1', 'creator', 10000)).toThrow(/movement/);
+  });
+
+  it('does not throw for a non-cyclic diamond dependency graph', () => {
+    const gdd = makeGdd({
+      systems: [
+        makeSystem('feedback', 'score', 'core', ['challenge']),
+        makeSystem('challenge', 'combat', 'core', ['entities']),
+        makeSystem('progression', 'levels', 'core', ['entities']),
+        makeSystem('entities', 'spawner', 'core', []),
+      ],
+    });
+
+    expect(() => buildPlan(gdd, 'proj-1', 'creator', 10000)).not.toThrow();
+  });
+
+  // ---------------------------------------------------------------------
+  // AC2 — unknown system category binds targetEntityId, and only skips
+  // the step when there is truly no entity anywhere in the GDD.
+  // ---------------------------------------------------------------------
+
+  it('binds targetEntityId to the entity that declares the unknown system category', () => {
+    const gdd = makeGdd({
+      systems: [makeSystem('narrative', 'dialogue')],
+      scenes: [
+        {
+          name: 'Main',
+          purpose: 'story scene',
+          systems: [],
+          entities: [
+            { name: 'Bystander', role: 'npc', systems: [], appearance: 'human', behaviors: [] },
+            { name: 'Narrator', role: 'npc', systems: ['narrative'], appearance: 'ghost', behaviors: [] },
+          ],
+          transitions: [],
+        },
+      ],
+    });
+
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const step = plan.steps.find(s => s.executor === 'custom_script_generate')!;
+
+    expect(step).toBeDefined();
+    expect(step.input.targetEntityId).toBe('Narrator');
+  });
+
+  it('falls back to the first entity in the GDD when no entity declares the unknown category', () => {
+    const gdd = makeGdd({
+      // 'challenge' is unknown to SYSTEM_REGISTRY; default gdd's only entity
+      // (Player) does not declare 'challenge' in its own systems list.
+      systems: [makeSystem('challenge', 'combat')],
+    });
+
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const step = plan.steps.find(s => s.executor === 'custom_script_generate')!;
+
+    expect(step).toBeDefined();
+    expect(step.input.targetEntityId).toBe('Player');
+  });
+
+  it('skips custom_script_generate for an unknown category when the GDD has zero entities anywhere', () => {
+    const gdd = makeGdd({
+      scenes: [
+        { name: 'Empty', purpose: 'no entities', systems: [], entities: [], transitions: [] },
+      ],
+      systems: [makeSystem('challenge', 'combat')],
+    });
+
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const customSteps = plan.steps.filter(s => s.executor === 'custom_script_generate');
+
+    expect(customSteps).toHaveLength(0);
+  });
+
+  // ---------------------------------------------------------------------
+  // NB2 — gate afterStepId must wire to the step that the NEXT (dependent)
+  // step actually depends on, not merely "some step near the gate". This
+  // distinguishes "pause after the gated step" from "pause before the step
+  // that depends on the gated step" — the off-by-one the naive reading gets
+  // wrong.
+  // ---------------------------------------------------------------------
+
+  it('gate_assets.afterStepId equals exactly the LAST entity_setup step id (not any other prior step)', () => {
+    // Asset steps depend on ALL prior steps by design (S2), so merely
+    // asserting "the first asset step's dependsOn contains afterStepId"
+    // is vacuously true for ANY prior step id and would not catch a
+    // misrouted gate. Pin equality against an independently-computed
+    // expected value instead.
+    const gdd = makeGdd({
+      scenes: [
+        {
+          name: 'Main',
+          purpose: 'Main gameplay scene',
+          systems: [],
+          entities: [
+            { name: 'First', role: 'player', systems: [], appearance: 'a', behaviors: [] },
+            { name: 'Second', role: 'enemy', systems: [], appearance: 'b', behaviors: [] },
+          ],
+          transitions: [],
+        },
+      ],
+      assetManifest: [makeAsset('Player model')],
+    });
+
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const gateAssets = plan.approvalGates.find(g => g.id === 'gate_assets')!;
+    const entitySteps = plan.steps.filter(s => s.executor === 'entity_setup');
+
+    expect(entitySteps).toHaveLength(2);
+    expect(gateAssets).toBeDefined();
+    expect(gateAssets!.afterStepId).toBe(entitySteps[entitySteps.length - 1].id);
+    // And it must NOT equal any earlier step (e.g. the plan_present step_0
+    // or the first entity step) — the off-by-one the naive reading gets wrong.
+    expect(gateAssets!.afterStepId).not.toBe('step_0');
+    expect(gateAssets!.afterStepId).not.toBe(entitySteps[0].id);
+  });
+
+  it('wires gate_final.afterStepId so auto_polish (the very next step) depends on exactly it', () => {
+    const gdd = makeGdd();
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    const gateFinal = plan.approvalGates.find(g => g.id === 'gate_final')!;
+    const polishStep = plan.steps.find(s => s.executor === 'auto_polish')!;
+
+    expect(polishStep.dependsOn).toEqual([gateFinal.afterStepId]);
+  });
+
+  // ---------------------------------------------------------------------
+  // AC7 — every GDD fixture under __fixtures__/ must produce a valid plan
+  // via buildPlan(): no throw, every dependsOn resolves to a real step id,
+  // and every gate's afterStepId resolves to a real step id.
+  // ---------------------------------------------------------------------
+
+  describe('AC7 — fixture corpus', () => {
+    const FIXTURES_DIR = path.resolve(__dirname, '../__fixtures__');
+    const fixtureFiles = fs
+      .readdirSync(FIXTURES_DIR)
+      .filter(f => f.endsWith('.json'))
+      .sort();
+
+    // Fail closed on an empty or thinned corpus: a directory that stopped
+    // resolving would make `it.each` register zero cases and report green.
+    // A floor rather than an exact count — deleting a fixture still trips it,
+    // but adding a 13th does not fail a test that has nothing to do with it.
+    it('enumerates the full fixture corpus', () => {
+      expect(fixtureFiles.length).toBeGreaterThanOrEqual(12);
+    });
+
+    it.each(fixtureFiles)(
+      'produces a plan with resolvable executors and dependsOn chains: %s',
+      (file) => {
+        const raw = fs.readFileSync(path.join(FIXTURES_DIR, file), 'utf-8');
+        const gdd = JSON.parse(raw) as OrchestratorGDD;
+
+        let plan: ReturnType<typeof buildPlan> | undefined;
+        expect(() => {
+          plan = buildPlan(gdd, 'proj-fixture', 'pro', 1_000_000);
+        }).not.toThrow();
+
+        expect(plan!.steps.length).toBeGreaterThan(0);
+
+        const stepIds = new Set(plan!.steps.map(s => s.id));
+        // Every dependsOn reference must resolve to an actual step in the plan.
+        for (const step of plan!.steps) {
+          for (const dep of step.dependsOn) {
+            expect(stepIds.has(dep)).toBe(true);
+          }
+        }
+        // Every gate's afterStepId must resolve to an actual step in the plan.
+        for (const gate of plan!.approvalGates) {
+          expect(stepIds.has(gate.afterStepId)).toBe(true);
+        }
+      },
+    );
   });
 });
