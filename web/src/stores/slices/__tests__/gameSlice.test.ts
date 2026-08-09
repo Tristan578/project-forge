@@ -140,6 +140,7 @@ describe('gameSlice', () => {
         invincibilitySecs: 0,
         respawnOnDeath: false,
         respawnPoint: [0, 0, 0],
+        despawnOnDeath: true,
       },
     };
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useId, useMemo, useState } from 'react';
 import { useEditorStore, type GameComponentData, type DialogueTriggerData, GAME_COMPONENT_TYPES } from '@/stores/editorStore';
 import { useDialogueStore } from '@/stores/dialogueStore';
 import { ChevronDown, ChevronRight, Trash2, Plus } from 'lucide-react';
@@ -53,13 +53,19 @@ interface CheckboxRowProps {
 }
 
 function CheckboxRow({ label, checked, onChange, tooltipTerm }: CheckboxRowProps) {
+  // Without `htmlFor`/`id` the visible text is not the checkbox's accessible
+  // name, so a screen reader announces a bare "checkbox" and the label is not
+  // a click target. Every row in this file shares the component, so associating
+  // here fixes all of them at once.
+  const inputId = useId();
   return (
     <div className="flex items-center gap-2">
       <div className="flex w-20 shrink-0 items-center gap-1">
-        <label className="text-xs text-zinc-400">{label}</label>
+        <label htmlFor={inputId} className="text-xs text-zinc-400">{label}</label>
         {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
       </div>
       <input
+        id={inputId}
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
@@ -248,6 +254,7 @@ function HealthSection({ data, onChange, onRemove }: HealthSectionProps) {
         </div>
         <Vec3Input label="" value={data.respawnPoint} onChange={(v) => onChange({ ...data, respawnPoint: v })} />
       </div>
+      <CheckboxRow label="Despawn" checked={data.despawnOnDeath} onChange={(v) => onChange({ ...data, despawnOnDeath: v })} tooltipTerm="gcDespawnOnDeath" />
     </ComponentSection>
   );
 }
@@ -561,7 +568,7 @@ export function GameComponentInspector() {
         component = { type: 'characterController', characterController: { speed: 5, jumpHeight: 8, gravityScale: 1, canDoubleJump: false } };
         break;
       case 'health':
-        component = { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0] } };
+        component = { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true } };
         break;
       case 'collectible':
         component = { type: 'collectible', collectible: { value: 1, destroyOnCollect: true, pickupSoundAsset: null, rotateSpeed: 90 } };

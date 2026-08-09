@@ -111,7 +111,7 @@ describe('GameComponentInspector', () => {
   it('hides already-attached types from add menu', () => {
     setupStore({
       primaryGameComponents: [
-        { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0] } },
+        { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true } },
       ],
     });
     render(<GameComponentInspector />);
@@ -297,7 +297,7 @@ describe('GameComponentInspector', () => {
   it('renders Health section', () => {
     setupStore({
       primaryGameComponents: [
-        { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0] } },
+        { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true } },
       ],
     });
     render(<GameComponentInspector />);
@@ -416,12 +416,36 @@ describe('GameComponentInspector', () => {
     );
   });
 
+  it('exposes the health Despawn toggle by its visible label and round-trips a change', () => {
+    setupStore({
+      primaryGameComponents: [
+        { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true } },
+      ],
+    });
+    render(<GameComponentInspector />);
+
+    // Resolved by accessible name, not by index — the label association is
+    // itself part of the contract, so a regression in `CheckboxRow` fails here
+    // rather than silently degrading to an unnamed checkbox.
+    const despawn = screen.getByLabelText('Despawn') as HTMLInputElement;
+    expect(despawn.checked).toBe(true);
+
+    fireEvent.click(despawn);
+    expect(mockUpdateGameComponent).toHaveBeenCalledWith(
+      'ent-1',
+      expect.objectContaining({
+        type: 'health',
+        health: expect.objectContaining({ despawnOnDeath: false }),
+      }),
+    );
+  });
+
   // ── Remove component ──────────────────────────────────────────────────
 
   it('calls removeGameComponent when remove button is clicked', () => {
     setupStore({
       primaryGameComponents: [
-        { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0] } },
+        { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true } },
       ],
     });
     render(<GameComponentInspector />);
@@ -467,7 +491,7 @@ describe('GameComponentInspector', () => {
     setupStore({
       primaryGameComponents: [
         { type: 'characterController', characterController: { speed: 5, jumpHeight: 8, gravityScale: 1, canDoubleJump: false } },
-        { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0] } },
+        { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true } },
         { type: 'collectible', collectible: { value: 1, destroyOnCollect: true, pickupSoundAsset: null, rotateSpeed: 90 } },
       ],
     });

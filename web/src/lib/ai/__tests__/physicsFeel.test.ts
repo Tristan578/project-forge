@@ -395,6 +395,7 @@ describe('applyPhysicsProfile', () => {
             invincibilitySecs: 0.5,
             respawnOnDeath: true,
             respawnPoint: [0, 1, 0],
+            despawnOnDeath: false,
           },
         },
       ],

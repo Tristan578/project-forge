@@ -97,6 +97,7 @@ const zHealthProps = z.object({
   invincibilitySecs: z.number().optional(),
   respawnOnDeath: z.boolean().optional(),
   respawnPoint: zVec3.optional(),
+  despawnOnDeath: z.boolean().optional(),
 }).passthrough();
 
 const zCollectibleProps = z.object({
@@ -294,6 +295,7 @@ export function buildGameComponentFromInput(
           invincibilitySecs: p.invincibilitySecs ?? 0.5,
           respawnOnDeath: p.respawnOnDeath ?? true,
           respawnPoint: p.respawnPoint ?? [0, 1, 0],
+          despawnOnDeath: p.despawnOnDeath ?? true,
         },
       };
     }

@@ -26,11 +26,17 @@ import type { GameComponentData } from '@/stores/slices/types';
 /** engine `component_name()` -> the exact serde field names of its Rust struct. */
 const ENGINE_PROPERTY_KEYS: Record<string, string[]> = {
   character_controller: ['speed', 'jumpHeight', 'gravityScale', 'canDoubleJump'],
-  // `despawnOnDeath` is the one Rust field with no TS counterpart. Omitting it
-  // leaves the Rust default (`true`) standing, which is the behaviour we want,
-  // so the gap is currently benign — but it is not authorable from the editor.
-  // Listed nowhere below on purpose.
-  health: ['maxHp', 'currentHp', 'invincibilitySecs', 'respawnOnDeath', 'respawnPoint'],
+  // `despawnOnDeath` carries `#[serde(default = "default_true")]` on the Rust
+  // side, so omitting it would still deserialize — but the store now authors it
+  // explicitly, and listing it here is what makes a future divergence fail.
+  health: [
+    'maxHp',
+    'currentHp',
+    'invincibilitySecs',
+    'respawnOnDeath',
+    'respawnPoint',
+    'despawnOnDeath',
+  ],
   collectible: ['value', 'destroyOnCollect', 'pickupSoundAsset', 'rotateSpeed'],
   damage_zone: ['damagePerSecond', 'oneShot'],
   checkpoint: ['autoSave'],
@@ -191,6 +197,16 @@ describe('gameComponentWire', () => {
 
       const spawner = toWireComponent(buildStoreComponent('spawner')!);
       expect(spawner.properties.onTrigger).toBeNull();
+    });
+
+    it('defaults despawnOnDeath to the engine default and round-trips an explicit false', () => {
+      // The engine's `default_true` is what makes an entity vanish at zero hp.
+      // A boss or destructible prop that must leave a corpse needs `false` to
+      // survive the store -> wire hop, so both directions are pinned.
+      expect(toWireComponent(buildStoreComponent('health')!).properties.despawnOnDeath).toBe(true);
+
+      const persists = buildStoreComponent('health', { despawnOnDeath: false });
+      expect(toWireComponent(persists!).properties.despawnOnDeath).toBe(false);
     });
 
     it('accepts maxHealth/currentHealth as aliases and defaults currentHp to maxHp', () => {

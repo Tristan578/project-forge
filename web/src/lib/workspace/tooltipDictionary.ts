@@ -247,6 +247,7 @@ export const TOOLTIP_DICTIONARY: Record<string, string> = {
   gcInvincibility: 'Seconds of protection after taking damage — prevents rapid repeat hits',
   gcRespawn: 'Whether the object reappears after being destroyed',
   gcRespawnPoint: 'The position where the object reappears after being destroyed',
+  gcDespawnOnDeath: 'Whether the object is removed from the scene at zero health — turn off to leave a wreck, play a death animation, or keep a defeated boss in place',
   gcCollectValue: 'How many points or items this pickup is worth',
   gcDestroyOnCollect: 'Whether the pickup disappears after being collected',
   gcRotateSpeed: 'How fast the pickup spins to attract attention',
