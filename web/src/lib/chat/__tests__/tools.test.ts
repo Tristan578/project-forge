@@ -26,11 +26,6 @@ describe('getChatTools', () => {
     expect(spawn).toBeDefined();
     expect(spawn!.input_schema.properties).toBeDefined();
   });
-
-  it('should advertise the position property the handler now honors', () => {
-    const spawn = getChatTools().find((t) => t.name === 'spawn_entity');
-    expect(Object.keys(spawn!.input_schema.properties!)).toContain('position');
-  });
 });
 
 describe('getCommandNames', () => {
@@ -67,5 +62,14 @@ describe('getCommandDef', () => {
 
   it('should return undefined for empty name', () => {
     expect(getCommandDef('')).toBeUndefined();
+  });
+});
+
+describe('spawn_entity position parameter (PF-1112)', () => {
+  it('is advertised to the model, not just documented for MCP clients', () => {
+    // The handler now reads `position`; the model can only send it if the tool
+    // schema carries it, so the two have to be checked together.
+    const spawn = getChatTools().find((t) => t.name === 'spawn_entity');
+    expect(Object.keys(spawn!.input_schema.properties!)).toContain('position');
   });
 });
