@@ -66,6 +66,51 @@ describe('useEngineEvents', () => {
     );
   });
 
+  // The engine answers every command with a CommandResponse and rejects a
+  // number of them by design. Discarding that answer here is what made every
+  // single-dispatch call site blind to a rejection (PF-1098).
+  it('returns the engine response so a rejection can be observed', () => {
+    wasmModule.handle_command.mockReturnValue({ success: false, error: 'Not yet implemented: switch_scene' });
+    renderHook(() => useEngineEvents({ wasmModule }));
+
+    const dispatcher = vi.mocked(setCommandDispatcher).mock.calls[0][0];
+
+    expect(dispatcher('switch_scene', {})).toEqual({
+      success: false,
+      error: 'Not yet implemented: switch_scene',
+    });
+  });
+
+  it('reports failure when dispatch throws', () => {
+    wasmModule.handle_command.mockImplementation(() => { throw new Error('WASM crash'); });
+    renderHook(() => useEngineEvents({ wasmModule }));
+
+    const dispatcher = vi.mocked(setCommandDispatcher).mock.calls[0][0];
+
+    expect(dispatcher('crash_command', {})).toEqual({ success: false, error: 'WASM crash' });
+  });
+
+  it('reports failure when the engine exposes no handle_command', () => {
+    const moduleWithoutDispatch = { set_event_callback: vi.fn() };
+    renderHook(() => useEngineEvents({ wasmModule: moduleWithoutDispatch }));
+
+    const dispatcher = vi.mocked(setCommandDispatcher).mock.calls[0][0];
+
+    expect(dispatcher('spawn_entity', {})).toEqual({ success: false, error: 'Engine is not loaded' });
+  });
+
+  it('treats a non-CommandResponse return as success', () => {
+    // An older engine build (or any test double) returns undefined. Absence of
+    // a response is not evidence of rejection — reading it as one would fire a
+    // false alarm on every dispatch.
+    wasmModule.handle_command.mockReturnValue(undefined);
+    renderHook(() => useEngineEvents({ wasmModule }));
+
+    const dispatcher = vi.mocked(setCommandDispatcher).mock.calls[0][0];
+
+    expect(dispatcher('spawn_entity', {})).toEqual({ success: true });
+  });
+
   it('registers event callback with WASM', () => {
     renderHook(() => useEngineEvents({ wasmModule }));
     expect(wasmModule.set_event_callback).toHaveBeenCalled();

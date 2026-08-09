@@ -21,6 +21,7 @@ import {
 } from './events';
 import { createSelectionBatcher, type SelectionPayload } from './selectionBatcher';
 import { createPlayModeThrottle } from '@/lib/throttle/playModeThrottle';
+import type { CommandResponse } from './useEngine';
 
 /**
  * Events that carry high-frequency runtime data and can be throttled to 10fps
@@ -38,6 +39,21 @@ const THROTTLED_EVENTS = new Set([
   'PHYSICS2D_UPDATED',
 ]);
 
+/**
+ * Coerce whatever `handle_command` returned into a `CommandResponse`.
+ *
+ * Only an explicit `success: false` counts as a rejection. Anything else —
+ * including `undefined` from an older engine build or a test double — is
+ * treated as success, so widening the return type cannot invent failures the
+ * engine never reported.
+ */
+function normalizeCommandResponse(raw: unknown): CommandResponse {
+  if (raw !== null && typeof raw === 'object' && (raw as CommandResponse).success === false) {
+    return { success: false, error: (raw as CommandResponse).error };
+  }
+  return { success: true };
+}
+
 interface UseEngineEventsOptions {
   wasmModule: {
     set_event_callback?: (callback: (event: unknown) => void) => void;
@@ -51,15 +67,24 @@ interface UseEngineEventsOptions {
  * Should be called once at the app level after WASM is loaded.
  */
 export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
-  // Create command dispatcher
+  // Create command dispatcher.
+  //
+  // The engine answers every command with a CommandResponse and rejects a
+  // number of them by design (the multi-scene stubs, unknown commands, invalid
+  // payloads). Returning that answer instead of discarding it is what lets
+  // `setCommandDispatcher` surface a rejection — see PF-1098. The batch path
+  // below has always returned its results, which is why a rejection there was
+  // noticed and the single-dispatch equivalent was not.
   const dispatchCommand = useCallback(
-    (command: string, payload: unknown) => {
-      if (wasmModule?.handle_command) {
-        try {
-          wasmModule.handle_command(command, payload);
-        } catch (error) {
-          console.error(`Error dispatching command '${command}':`, error);
-        }
+    (command: string, payload: unknown): CommandResponse => {
+      if (!wasmModule?.handle_command) {
+        return { success: false, error: 'Engine is not loaded' };
+      }
+      try {
+        return normalizeCommandResponse(wasmModule.handle_command(command, payload));
+      } catch (error) {
+        console.error(`Error dispatching command '${command}':`, error);
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
     [wasmModule]

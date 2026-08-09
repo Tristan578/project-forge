@@ -7,11 +7,12 @@
 
 import { create } from 'zustand';
 import { trackCommandDispatched } from '@/lib/analytics/events';
-import { addBreadcrumb } from '@/lib/monitoring/sentry-client';
+import { addBreadcrumb, captureException } from '@/lib/monitoring/sentry-client';
 // Namespace import so partial test mocks of `@/hooks/useEngine` (which omit
 // the snapshot setter) don't throw at module load. We feature-detect the
 // export at runtime instead of relying on the named binding being present.
 import * as engineModule from '@/hooks/useEngine';
+import type { CommandResponse } from '@/hooks/useEngine';
 
 // Import all slices
 import {
@@ -183,8 +184,49 @@ export function getRecentCommands(): readonly string[] {
   return _recentCommands;
 }
 
-// Command dispatcher type - will be set by useEngine hook
-type CommandDispatcher = (command: string, payload: unknown) => void;
+// Commands whose rejection has already been reported to Sentry this session.
+// A rejection inside a per-frame dispatch would otherwise flood the issue
+// stream; the console signal below stays unthrottled.
+const _reportedRejections = new Set<string>();
+
+/**
+ * Surface an engine rejection that no caller can observe.
+ *
+ * The engine answers every command with a `CommandResponse` and rejects a
+ * number of them by design, but ~40 single-dispatch call sites ignore the
+ * return value — the failure was invisible until someone noticed the effect
+ * never happened (PF-1097 lived that way for its whole life). Reporting here,
+ * in the wrapper every dispatch already passes through, covers all of them
+ * without touching a single caller.
+ *
+ * Monitoring must never break dispatch, so every step is guarded.
+ */
+function reportCommandRejected(command: string, error: string | undefined): void {
+  const engineError = error ?? 'no error message';
+  console.error(`Engine rejected command '${command}': ${engineError}`);
+  try {
+    addBreadcrumb({
+      category: 'engine.command.rejected',
+      message: `${command}: ${engineError}`,
+      level: 'error',
+    });
+    if (!_reportedRejections.has(command)) {
+      _reportedRejections.add(command);
+      captureException(new Error(`Engine rejected command '${command}'`), {
+        command,
+        engineError,
+      });
+    }
+  } catch {
+    /* monitoring is best-effort — never let it throw into the dispatch path */
+  }
+}
+
+// Command dispatcher type - will be set by useEngine hook.
+// The return value is what makes an engine rejection observable; callers that
+// do not care may still ignore it (a value-returning function is assignable to
+// a `=> void` parameter), which is why widening this needed no call-site churn.
+type CommandDispatcher = (command: string, payload: unknown) => CommandResponse | void;
 let _dispatchCommand: CommandDispatcher | null = null;
 
 export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
@@ -193,7 +235,14 @@ export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
   const tracked: CommandDispatcher = (command, payload) => {
     trackCommandDispatched(command);
     recordCommand(command);
-    dispatcher(command, payload);
+    const response = dispatcher(command, payload);
+    // Only an explicit `success: false` is a rejection. A dispatcher that
+    // returns nothing (every test double, and any pre-PF-1098 caller) is not
+    // reporting failure, and must not be treated as if it were.
+    if (response && response.success === false) {
+      reportCommandRejected(command, response.error);
+    }
+    return response;
   };
   _dispatchCommand = tracked;
 
@@ -223,7 +272,7 @@ export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
 }
 
 /** Get the raw command dispatcher for direct engine communication. */
-export function getCommandDispatcher(): ((command: string, payload: unknown) => void) | null {
+export function getCommandDispatcher(): CommandDispatcher | null {
   return _dispatchCommand;
 }
 
