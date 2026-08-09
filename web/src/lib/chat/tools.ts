@@ -8,6 +8,7 @@
 
 // Sourced from mcp-server/manifest/commands.json — keep in sync when adding MCP commands
 import manifestJson from '@/data/commands.json';
+import { modelToolSchema } from '@/lib/ai/modelToolSchema';
 
 interface ManifestCommand {
   name: string;
@@ -37,6 +38,11 @@ const manifest = manifestJson as { version: string; commands: ManifestCommand[] 
 /**
  * Generate Claude tool definitions from the command manifest.
  * Filters to only scene-editing tools (not query tools — those are handled via context).
+ *
+ * Schemas go through `modelToolSchema`, which withholds the manifest parameters
+ * that are meaningful only to a direct-to-engine MCP client. That filter is shared
+ * with `spawnforgeAgent.getAgentTools()` — applying it to one tool surface and not
+ * the other leaves the parameter on offer.
  */
 export function getChatTools(): ClaudeTool[] {
   return manifest.commands
@@ -44,11 +50,7 @@ export function getChatTools(): ClaudeTool[] {
     .map((cmd) => ({
       name: cmd.name,
       description: cmd.description,
-      input_schema: {
-        type: cmd.parameters.type || 'object',
-        properties: cmd.parameters.properties || {},
-        required: cmd.parameters.required || [],
-      },
+      input_schema: modelToolSchema(cmd.name, cmd.parameters),
     }));
 }
 
