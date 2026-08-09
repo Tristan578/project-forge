@@ -36,7 +36,15 @@ export interface SceneSlice {
   setSceneSwitching: (switching: boolean) => void;
   startSceneTransition: (targetScene: string, configOverride?: Partial<SceneTransitionConfig>) => Promise<void>;
   setDefaultTransition: (config: Partial<SceneTransitionConfig>) => void;
-  spawnTerrain: (terrainData?: Partial<TerrainDataState>) => void;
+  /**
+   * Spawn a terrain. Returns the new entity's id **synchronously** so callers can
+   * immediately target it (reparent/transform/material) without waiting for the
+   * async SELECTION_CHANGED round-trip. Returns `undefined` when the engine isn't
+   * loaded yet (`dispatchCommand` is null) and nothing was spawned — callers MUST
+   * guard on the result. Do NOT read `primaryId` after calling this; it is not
+   * updated until the engine emits SELECTION_CHANGED.
+   */
+  spawnTerrain: (terrainData?: Partial<TerrainDataState>, name?: string) => string | undefined;
   updateTerrain: (entityId: string, terrainData: TerrainDataState) => void;
   sculptTerrain: (entityId: string, position: [number, number], radius: number, strength: number) => void;
   setTerrainData: (entityId: string, data: TerrainDataState) => void;
@@ -119,8 +127,21 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
     const state = get();
     set({ defaultTransition: { ...state.defaultTransition, ...config } });
   },
-  spawnTerrain: (terrainData) => {
-    if (dispatchCommand) dispatchCommand('spawn_terrain', terrainData || {});
+  spawnTerrain: (terrainData, name) => {
+    // Mirror of `spawnEntity`: generate the id client-side and hand it to the
+    // engine, which overrides the spawned entity's EntityId to match (a
+    // malformed value is ignored engine-side and falls back to a generated
+    // UUID, so the returned id would be wrong — hence `crypto.randomUUID()`
+    // and nothing else). Only return an id when the command actually went out;
+    // returning one while `dispatchCommand` is null would be a phantom
+    // reference that every follow-up command targets in vain.
+    if (!dispatchCommand) return undefined;
+    const id = crypto.randomUUID();
+    // `id` and `name` stay AFTER the spread on purpose: `terrainData` can carry
+    // LLM-authored keys, and an `id` inside it must never be able to override
+    // the one generated here (the returned id would then name no entity).
+    dispatchCommand('spawn_terrain', { ...(terrainData || {}), id, name });
+    return id;
   },
   updateTerrain: (entityId, terrainData) => {
     if (dispatchCommand) dispatchCommand('update_terrain', { entityId, ...terrainData });

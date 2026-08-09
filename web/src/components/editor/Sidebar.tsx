@@ -6,6 +6,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { AddEntityMenu, EntityType } from './AddEntityMenu';
+import { spawnEntityWithFeedback } from './spawnFeedback';
 import { SettingsPanel } from '../settings/SettingsPanel';
 import { ComplexityToggle } from './ComplexityToggle';
 
@@ -171,7 +172,7 @@ export function Sidebar() {
   }, [setGizmoMode, deleteSelectedEntities, duplicateSelectedEntity, primaryId, undo, redo, toggleGrid, setCameraPreset, toggleCoordinateMode, rightPanelTab, setRightPanelTab, engineMode, play, stop]);
 
   const handleSpawnEntity = (type: EntityType) => {
-    spawnEntity(type);
+    spawnEntityWithFeedback(spawnEntity, type);
   };
 
   // Check if exactly 2 entities are selected for CSG operations

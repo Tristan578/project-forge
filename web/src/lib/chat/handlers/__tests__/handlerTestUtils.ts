@@ -140,7 +140,11 @@ export function createMockStore(overrides: Record<string, unknown> = {}): ToolCa
 
     // Terrain
     terrainData: {},
-    spawnTerrain: vi.fn(),
+    // Returns an id: `spawnTerrain` yields `undefined` only when the engine has
+    // not finished loading, and the handler now reports that as a failure. A
+    // bare `vi.fn()` here would model a dead engine in every test that did not
+    // opt into it. Tests covering the not-ready path override this explicitly.
+    spawnTerrain: vi.fn(() => 'terrain-1'),
     updateTerrain: vi.fn(),
     sculptTerrain: vi.fn(),
 

@@ -496,20 +496,52 @@ describe('compoundHandlers', () => {
       expect(store.setInputPreset).toHaveBeenCalledWith('platformer');
     });
 
-    it('reports the terrain ground as an explicit failure when its id is unavailable (#8749 boundary)', async () => {
-      // The terrain path still reads the stale `primaryId` (#8749). On a fresh
-      // scene that is null, so the ground cannot be parented. The handler must
-      // surface that as a failed operation — never silently drop it and imply
-      // the ground exists.
+    // #8749: the terrain ground used to be built from a `primaryId` read, which
+    // is only written by the async SELECTION_CHANGED event — null on a fresh
+    // scene, so the ground was always reported as a failure. `spawnTerrain` now
+    // returns the id it handed the engine, so the happy path actually works.
+    it('parents the terrain ground using the id spawnTerrain returns', async () => {
       const { result, store } = await invoke('create_level_layout', {
         levelName: 'TerrainLevel',
         ground: { useTerrain: true, terrainConfig: { size: 64 } },
       }, {
         spawnEntity: vi.fn(() => 'root-1'),
-        // primaryId left at its default null; spawnTerrain does not set it (#8749)
+        spawnTerrain: vi.fn(() => 'terrain-1'),
+        // A NON-null primaryId that is deliberately the WRONG answer. Leaving it
+        // null only proves the handler doesn't crash without it; a mutant that
+        // went back to reading the store would then yield `undefined` and fail
+        // for the wrong reason. With a real-looking stale value, the pre-fix
+        // code reparents to 'stale-selection' and the assertion below names
+        // exactly what regressed.
+        primaryId: 'stale-selection',
+      });
+
+      expect(store.spawnTerrain).toHaveBeenCalledWith({ size: 64 });
+      expect(store.reparentEntity).toHaveBeenCalledWith('terrain-1', 'root-1');
+
+      const data = result.result as {
+        success: boolean;
+        operations: Array<{ action: string; success: boolean; entityId?: string }>;
+      };
+      const groundOp = data.operations.find((op) => op.action === 'create terrain ground');
+      expect(groundOp?.success).toBe(true);
+      expect(groundOp?.entityId).toBe('terrain-1');
+    });
+
+    it('reports the terrain ground as an explicit failure when the engine is not ready', async () => {
+      // `spawnTerrain` returns undefined only when nothing was dispatched. The
+      // handler must surface that as a failed operation — never silently drop it
+      // and imply the ground exists.
+      const { result, store } = await invoke('create_level_layout', {
+        levelName: 'TerrainLevel',
+        ground: { useTerrain: true, terrainConfig: { size: 64 } },
+      }, {
+        spawnEntity: vi.fn(() => 'root-1'),
+        spawnTerrain: vi.fn(() => undefined),
       });
 
       expect(store.spawnTerrain).toHaveBeenCalled();
+      expect(store.reparentEntity).not.toHaveBeenCalled();
       const data = result.result as {
         success: boolean;
         operations: Array<{ action: string; success: boolean; error?: string }>;
@@ -518,8 +550,8 @@ describe('compoundHandlers', () => {
       const groundOp = data.operations.find((op) => op.action === 'create terrain ground');
       expect(groundOp).toBeDefined();
       expect(groundOp?.success).toBe(false);
-      expect(groundOp?.error).toContain('#8749');
-      // Root succeeded, ground failed → the compound result reports partial
+      expect(groundOp?.error).toContain('engine not ready');
+      // Root succeeded, ground failed -> the compound result reports partial
       // success, not a clean success that would imply the ground exists.
       expect(data.success).toBe(false);
       expect(data.partialSuccess).toBe(true);

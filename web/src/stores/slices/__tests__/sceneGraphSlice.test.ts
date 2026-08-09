@@ -11,7 +11,7 @@ type TestState = SceneGraphSlice & {
   primaryId: string | null;
   primaryName: string | null;
   primaryTransform: unknown | null;
-  spawnTerrain: () => void;
+  spawnTerrain: () => string | undefined;
 };
 
 const mockGraph: SceneGraph = {
@@ -24,7 +24,7 @@ const mockGraph: SceneGraph = {
 };
 
 function createTestStore() {
-  const spawnTerrainMock = vi.fn();
+  const spawnTerrainMock = vi.fn(() => 'terrain-generated-id');
   return {
     store: create<TestState>()((set, get, api) => ({
       ...createSceneGraphSlice(set, get, api),
@@ -156,11 +156,20 @@ describe('sceneGraphSlice', () => {
       });
     });
 
-    it('should call spawnTerrain for terrain type and return undefined', () => {
+    // Terrain uses the separate spawn_terrain pipeline, but that pipeline now
+    // honors a caller-supplied id, so spawnEntity must FORWARD what spawnTerrain
+    // returns. Swallowing it left callers reading the async-only `primaryId`,
+    // which is null on a fresh scene — the terrain was silently dropped (#8749).
+    it('should call spawnTerrain for terrain type and forward its id', () => {
       const returnedId = store.getState().spawnEntity('terrain');
       expect(spawnTerrainMock).toHaveBeenCalled();
-      expect(returnedId).toBeUndefined();
+      expect(returnedId).toBe('terrain-generated-id');
       expect(mockDispatch).not.toHaveBeenCalledWith('spawn_entity', expect.anything());
+    });
+
+    it('should return undefined for terrain when spawnTerrain could not spawn', () => {
+      spawnTerrainMock.mockReturnValueOnce(undefined as unknown as string);
+      expect(store.getState().spawnEntity('terrain')).toBeUndefined();
     });
 
     // The engine's apply_spawn_requests only spawns primitive mesh/light types

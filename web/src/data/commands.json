@@ -4471,7 +4471,7 @@
             },
             "minItems": 2,
             "maxItems": 2,
-            "description": "Sculpt center [x, z] in terrain local space"
+            "description": "Sculpt center [x, z] in WORLD space — the engine subtracts the terrain entity's transform to find the brush cell, so an offset terrain sculpts where you clicked, not where it would have been at the origin"
           },
           "radius": {
             "type": "number",

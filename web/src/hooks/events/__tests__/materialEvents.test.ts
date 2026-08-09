@@ -12,6 +12,7 @@ vi.mock('@/stores/editorStore', () => ({
 
 import { useEditorStore } from '@/stores/editorStore';
 import { handleMaterialEvent } from '../materialEvents';
+import terrainChangedFixture from './fixtures/terrainChanged.json';
 
 describe('handleMaterialEvent', () => {
   let actions: ReturnType<typeof createMockActions>;
@@ -178,32 +179,46 @@ describe('handleMaterialEvent', () => {
     expect(actions.setPrimaryShaderEffect).toHaveBeenCalledWith(null);
   });
 
-  it('TERRAIN_CHANGED: calls setTerrainData with entityId and terrainData', () => {
-    const payload = {
-      entityId: 'terrain-789',
-      terrainData: {
-        resolution: 64,
-        scale: 100,
-        heightScale: 20,
-      },
-    };
-
+  // Driven by the shared fixture rather than a hand-written object. The previous
+  // version of this test invented its own payload (`{ resolution, scale,
+  // heightScale }` -- `scale` is not even a TerrainData field) and so passed
+  // happily while the engine emitted a completely different, flattened shape that
+  // this handler could never read. Both halves now assert against the same file:
+  // `engine/src/core/terrain.rs` -> `terrain_changed_wire_contract_tests`.
+  //
+  // The event NAME comes from the fixture too, not a literal here. A rename on
+  // either side used to be silent in both directions: the engine kept emitting,
+  // this `switch` fell through to its default, and the inspector just never
+  // updated.
+  it('TERRAIN_CHANGED: stores the config the engine actually emits', () => {
     const result = handleMaterialEvent(
-      'TERRAIN_CHANGED',
-      payload,
+      terrainChangedFixture.event,
+      terrainChangedFixture.payload,
       mockSetGet.set,
       mockSetGet.get
     );
 
     expect(result).toBe(true);
     expect(actions.setTerrainData).toHaveBeenCalledWith(
-      'terrain-789',
-      {
-        resolution: 64,
-        scale: 100,
-        heightScale: 20,
-      }
+      terrainChangedFixture.payload.entityId,
+      terrainChangedFixture.payload.terrainData
     );
+  });
+
+  // The assertion above compares against the fixture on both sides, so it would
+  // still pass if the handler read some other key that happened to be undefined
+  // on both. Pin the value itself: a real config, never undefined.
+  it('TERRAIN_CHANGED: does not store undefined when the config is nested', () => {
+    handleMaterialEvent(
+      terrainChangedFixture.event,
+      terrainChangedFixture.payload,
+      mockSetGet.set,
+      mockSetGet.get
+    );
+
+    const [, stored] = actions.setTerrainData.mock.calls[0];
+    expect(stored).toBeDefined();
+    expect(stored).toMatchObject({ noiseType: 'perlin', resolution: 64 });
   });
 
   it('QUALITY_CHANGED: calls setQualityFromEngine with full payload', () => {

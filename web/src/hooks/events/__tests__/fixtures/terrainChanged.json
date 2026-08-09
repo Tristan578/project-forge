@@ -1,0 +1,16 @@
+{
+  "event": "TERRAIN_CHANGED",
+  "payload": {
+    "entityId": "terrain-789",
+    "terrainData": {
+      "noiseType": "perlin",
+      "octaves": 4,
+      "frequency": 0.03,
+      "amplitude": 0.5,
+      "heightScale": 10.0,
+      "seed": 42,
+      "resolution": 64,
+      "size": 50.0
+    }
+  }
+}
