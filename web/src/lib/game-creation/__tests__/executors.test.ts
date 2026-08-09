@@ -361,7 +361,14 @@ describe('character_setup executor', () => {
   });
 
   it('resolves entity from store when entityId not provided (no duplicate spawn)', async () => {
-    const ctx = makeMockCtx();
+    const ctx = makeMockCtx({
+      store: makeMockStore({
+        sceneGraph: {
+          nodes: { n1: { entityId: 'resolved-uuid', name: 'Player' } },
+          rootIds: ['n1'],
+        },
+      } as unknown as Partial<EditorState>),
+    });
     const result = await executor.execute(
       { entity: baseEntity, projectType: '3d' },
       ctx,
@@ -370,10 +377,25 @@ describe('character_setup executor', () => {
     // When called without entityId, resolves from store — does NOT spawn a duplicate
     expect(result.success).toBe(true);
     expect(ctx.dispatchCommand).not.toHaveBeenCalledWith('spawn_entity', expect.anything());
-    // Should still add game component using the resolved entity name
+    // The component must target the engine's EntityId (a UUID), never the
+    // designed name — the engine's match loop emits nothing on a miss, so a
+    // name-bound command silently leaves the player without a controller.
     expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', expect.objectContaining({
+      entityId: 'resolved-uuid',
       componentType: 'character_controller',
     }));
+  });
+
+  it('fails loudly when neither the step nor the store yields an engine id', async () => {
+    const ctx = makeMockCtx();
+    const result = await executor.execute(
+      { entity: baseEntity, projectType: '3d' },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('ENTITY_NOT_FOUND');
+    expect(ctx.dispatchCommand).not.toHaveBeenCalled();
   });
 
   it('uses default player entity when entity not provided', async () => {

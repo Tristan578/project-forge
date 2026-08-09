@@ -21,6 +21,7 @@ import type {
 } from './types';
 import { FALLBACK_SCHEMA } from './types';
 import { SYSTEM_REGISTRY } from './systems';
+import type { PlannedEntity } from './systems';
 import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
 
 // --- Topological sort for system dependency ordering ---
@@ -183,6 +184,9 @@ export function buildPlan(
   // every later step binds to it. Binding to the designed NAME instead matches no
   // entity in the engine, and the engine's match loops emit nothing on a miss.
   const entityIds: Record<string, string> = {};
+  // Same ids, in declaration order, for system definitions that must target an
+  // entity (e.g. movement's character_setup) but are not driven by this loop.
+  const plannedEntities: PlannedEntity[] = [];
   for (const scene of gdd.scenes) {
     const sceneStepId = sceneStepIds[scene.name];
     for (const entity of scene.entities) {
@@ -201,6 +205,7 @@ export function buildPlan(
       // entities in different scenes share the same name
       entityStepIds[`${scene.name}:${entity.name}`] = step.id;
       entityIds[`${scene.name}:${entity.name}`] = entityId;
+      plannedEntities.push({ entityId, scene: scene.name, entity });
       steps.push(step);
     }
   }
@@ -234,7 +239,7 @@ export function buildPlan(
     }
 
     if (def) {
-      const systemSteps = def.setupSteps(system, gdd);
+      const systemSteps = def.setupSteps(system, gdd, { entities: plannedEntities });
       for (const stepInput of systemSteps) {
         // [S1] Hardcoded values injected by executor, not spread from config
         const step = makeStep(

@@ -95,7 +95,12 @@ describe('characterSetupExecutor', () => {
     expect(result.output?.entityId).toBe('resolved_id');
   });
 
-  it('falls back to entity name as ID when not found in scene graph', async () => {
+  // Previously this fell back to the entity NAME as the id and returned success.
+  // The engine matches `add_game_component` on the EntityId component, so a name
+  // matches nothing and the engine's match loop emits nothing on a miss — the
+  // player silently ended up with no CharacterController and could not move.
+  // An unresolvable target is a failure, not a binding to nothing.
+  it('fails loudly when the entity resolves to no engine id', async () => {
     const ctx = makeCtx({
       store: {
         sceneGraph: {
@@ -111,8 +116,10 @@ describe('characterSetupExecutor', () => {
       projectType: '3d',
     }, ctx);
 
-    expect(result.success).toBe(true);
-    expect(result.output?.entityId).toBe('Ghost');
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('ENTITY_NOT_FOUND');
+    expect(result.error?.message).toContain('Ghost');
+    expect(ctx.dispatchCommand).not.toHaveBeenCalled();
   });
 
   it('rejects invalid projectType', async () => {

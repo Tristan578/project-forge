@@ -8,6 +8,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import type { ExecutorName, GameSystem, OrchestratorGDD } from '@/lib/game-creation/types';
+import type { SystemStepContext } from '@/lib/game-creation/systems';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -23,6 +24,11 @@ const VALID_EXECUTOR_NAMES: ReadonlySet<ExecutorName> = new Set<ExecutorName>([
   'verify_all_scenes',
   'auto_polish',
 ]);
+
+/** No planned entities — these cases assert step SHAPE, not entity binding. */
+function makeCtx(overrides?: Partial<SystemStepContext>): SystemStepContext {
+  return { entities: [], ...overrides };
+}
 
 function makeSystem(category: GameSystem['category'], type: string): GameSystem {
   return {
@@ -102,7 +108,7 @@ describe('SYSTEM_REGISTRY', () => {
 
     for (const [category, def] of SYSTEM_REGISTRY) {
       const system = makeSystem(category as GameSystem['category'], 'test_type');
-      const steps = def.setupSteps(system, gdd);
+      const steps = def.setupSteps(system, gdd, makeCtx());
       expect(Array.isArray(steps), `${category}.setupSteps should return an array`).toBe(true);
     }
   });
@@ -112,7 +118,7 @@ describe('SYSTEM_REGISTRY', () => {
 
     for (const [category, def] of SYSTEM_REGISTRY) {
       const system = makeSystem(category as GameSystem['category'], 'test_type');
-      const steps = def.setupSteps(system, gdd);
+      const steps = def.setupSteps(system, gdd, makeCtx());
       for (const step of steps) {
         expect(
           VALID_EXECUTOR_NAMES.has(step.executor),
@@ -130,7 +136,7 @@ describe('SYSTEM_REGISTRY', () => {
     it('returns exactly 2 steps', () => {
       const def = SYSTEM_REGISTRY.get('movement')!;
       const system = makeSystem('movement', 'platformer');
-      const steps = def.setupSteps(system, makeGdd());
+      const steps = def.setupSteps(system, makeGdd(), makeCtx());
       expect(steps).toHaveLength(2);
     });
 
@@ -138,7 +144,7 @@ describe('SYSTEM_REGISTRY', () => {
       const def = SYSTEM_REGISTRY.get('movement')!;
       const system = makeSystem('movement', 'platformer');
       system.config = { gravity: 9.8 };
-      const steps = def.setupSteps(system, makeGdd());
+      const steps = def.setupSteps(system, makeGdd(), makeCtx());
       expect(steps[0].executor).toBe('physics_profile');
       expect(steps[0].input).toMatchObject({
         config: system.config,
@@ -150,7 +156,7 @@ describe('SYSTEM_REGISTRY', () => {
       const def = SYSTEM_REGISTRY.get('movement')!;
       const system = makeSystem('movement', 'top_down');
       system.config = { speed: 5 };
-      const steps = def.setupSteps(system, makeGdd());
+      const steps = def.setupSteps(system, makeGdd(), makeCtx());
       expect(steps[1].executor).toBe('character_setup');
       expect(steps[1].input).toMatchObject({
         movementType: system.type,
@@ -163,7 +169,7 @@ describe('SYSTEM_REGISTRY', () => {
     it('returns exactly 1 step', () => {
       const def = SYSTEM_REGISTRY.get('camera')!;
       const system = makeSystem('camera', 'follow');
-      const steps = def.setupSteps(system, makeGdd());
+      const steps = def.setupSteps(system, makeGdd(), makeCtx());
       expect(steps).toHaveLength(1);
     });
 
@@ -171,7 +177,7 @@ describe('SYSTEM_REGISTRY', () => {
       const def = SYSTEM_REGISTRY.get('camera')!;
       const system = makeSystem('camera', 'orbit');
       system.config = { fov: 60 };
-      const steps = def.setupSteps(system, makeGdd());
+      const steps = def.setupSteps(system, makeGdd(), makeCtx());
       expect(steps[0].executor).toBe('scene_create');
       expect(steps[0].input).toMatchObject({
         cameraMode: system.type,
@@ -184,7 +190,7 @@ describe('SYSTEM_REGISTRY', () => {
     it('returns exactly 1 step', () => {
       const def = SYSTEM_REGISTRY.get('world')!;
       const system = makeSystem('world', 'open_world');
-      const steps = def.setupSteps(system, makeGdd());
+      const steps = def.setupSteps(system, makeGdd(), makeCtx());
       expect(steps).toHaveLength(1);
     });
 
@@ -192,7 +198,7 @@ describe('SYSTEM_REGISTRY', () => {
       const def = SYSTEM_REGISTRY.get('world')!;
       const system = makeSystem('world', 'dungeon');
       system.config = { rooms: 10 };
-      const steps = def.setupSteps(system, makeGdd());
+      const steps = def.setupSteps(system, makeGdd(), makeCtx());
       expect(steps[0].executor).toBe('scene_create');
       expect(steps[0].input).toMatchObject({
         worldType: system.type,

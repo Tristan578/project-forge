@@ -648,6 +648,40 @@ describe('buildPlan', () => {
     expect(new Set(ids).size).toBe(3);
   });
 
+  // `character_setup` comes from the SYSTEM registry, not the entity loop, so
+  // it used to carry no entity at all — the executor then fell back to the
+  // designed name, which the engine's EntityId match never resolves. A
+  // generated player silently received no CharacterController and could not
+  // move. The plan already mints the id; it must reach the registry.
+  it('binds character_setup to the planned player entity id', () => {
+    const gdd = makeGdd({
+      systems: [makeSystem('movement', 'platformer')],
+      scenes: [
+        {
+          name: 'Main',
+          purpose: 'main',
+          systems: [],
+          entities: [
+            { name: 'Crate', role: 'decoration', systems: [], appearance: 'box', behaviors: [] },
+            { name: 'Knight', role: 'player', systems: [], appearance: 'armored', behaviors: ['move'] },
+          ],
+          transitions: [],
+        },
+      ],
+    });
+
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const step = plan.steps.find(s => s.executor === 'character_setup')!;
+    const knightSetup = findEntitySetup(plan, 'Knight');
+
+    expect(step).toBeDefined();
+    expect(step.input.entityId).toBe(knightSetup.input.entityId);
+    expect(step.input.entityId).not.toBe('Knight');
+    // The GDD's real player travels with it — the executor's own default is
+    // named 'Player', so without this a store lookup searches the wrong name.
+    expect((step.input.entity as { name: string }).name).toBe('Knight');
+  });
+
   it('skips custom_script_generate for an unknown category when the GDD has zero entities anywhere', () => {
     const gdd = makeGdd({
       scenes: [

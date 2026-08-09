@@ -1,6 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import { SYSTEM_REGISTRY, registerSystem } from '../index';
-import type { GameSystem, OrchestratorGDD } from '../../types';
+import type { SystemStepContext } from '../index';
+import type { GameSystem, OrchestratorGDD, EntityBlueprint } from '../../types';
+
+function makeEntity(overrides?: Partial<EntityBlueprint>): EntityBlueprint {
+  return {
+    name: 'Hero',
+    role: 'player',
+    systems: [],
+    appearance: 'a knight',
+    behaviors: ['move'],
+    ...overrides,
+  };
+}
+
+function makeCtx(overrides?: Partial<SystemStepContext>): SystemStepContext {
+  return { entities: [], ...overrides };
+}
 
 function makeSystem(overrides?: Partial<GameSystem>): GameSystem {
   return {
@@ -60,13 +76,50 @@ describe('movement system', () => {
     const system = makeSystem({ type: 'topdown', config: { speed: 5 } });
     const gdd = makeGDD();
 
-    const steps = def.setupSteps(system, gdd);
+    const steps = def.setupSteps(system, gdd, makeCtx());
 
     expect(steps).toHaveLength(2);
     expect(steps[0].executor).toBe('physics_profile');
     expect(steps[0].input).toEqual({ config: { speed: 5 }, systemType: 'topdown' });
     expect(steps[1].executor).toBe('character_setup');
     expect(steps[1].input).toEqual({ movementType: 'topdown', systemConfig: { speed: 5 } });
+  });
+
+  // The engine matches `add_game_component`/`create_skeleton2d` on the EntityId
+  // component. `character_setup` never carried one, so the executor fell back to
+  // the designed NAME — which matches no entity, and the engine's match loops
+  // emit nothing on a miss. The plan mints the id, so the registry must forward it.
+  it('binds character_setup to the planned player entity id', () => {
+    const def = SYSTEM_REGISTRY.get('movement')!;
+    const player = makeEntity({ name: 'Knight' });
+    const ctx = makeCtx({
+      entities: [
+        { entityId: 'id-goblin', scene: 'Level1', entity: makeEntity({ name: 'Goblin', role: 'enemy' }) },
+        { entityId: 'id-knight', scene: 'Level1', entity: player },
+      ],
+    });
+
+    const steps = def.setupSteps(makeSystem(), makeGDD(), ctx);
+
+    expect(steps[1].executor).toBe('character_setup');
+    expect(steps[1].input.entityId).toBe('id-knight');
+    // The GDD's own player, not the executor's hardcoded 'Player' default —
+    // a store lookup keyed on the wrong name is how this silently missed before.
+    expect(steps[1].input.entity).toEqual(player);
+  });
+
+  it('omits entityId when the GDD declares no player entity', () => {
+    const def = SYSTEM_REGISTRY.get('movement')!;
+    const ctx = makeCtx({
+      entities: [
+        { entityId: 'id-goblin', scene: 'Level1', entity: makeEntity({ name: 'Goblin', role: 'enemy' }) },
+      ],
+    });
+
+    const steps = def.setupSteps(makeSystem(), makeGDD(), ctx);
+
+    expect(steps[1].input).not.toHaveProperty('entityId');
+    expect(steps[1].input).not.toHaveProperty('entity');
   });
 });
 
@@ -76,7 +129,7 @@ describe('camera system', () => {
     const system = makeSystem({ category: 'camera', type: 'follow', config: { smoothing: 0.8 } });
     const gdd = makeGDD();
 
-    const steps = def.setupSteps(system, gdd);
+    const steps = def.setupSteps(system, gdd, makeCtx());
 
     expect(steps).toHaveLength(1);
     expect(steps[0].executor).toBe('scene_create');
@@ -90,7 +143,7 @@ describe('world system', () => {
     const system = makeSystem({ category: 'world', type: 'procedural', config: { biome: 'forest' } });
     const gdd = makeGDD();
 
-    const steps = def.setupSteps(system, gdd);
+    const steps = def.setupSteps(system, gdd, makeCtx());
 
     expect(steps).toHaveLength(1);
     expect(steps[0].executor).toBe('scene_create');
@@ -109,7 +162,7 @@ describe('registerSystem', () => {
 
     expect(SYSTEM_REGISTRY.has(testCategory)).toBe(true);
     const def = SYSTEM_REGISTRY.get(testCategory)!;
-    const steps = def.setupSteps(makeSystem(), makeGDD());
+    const steps = def.setupSteps(makeSystem(), makeGDD(), makeCtx());
     expect(steps[0].executor).toBe('verify_all_scenes');
 
     // Clean up
@@ -130,7 +183,7 @@ describe('registerSystem', () => {
     });
 
     const def = SYSTEM_REGISTRY.get(testCategory)!;
-    const steps = def.setupSteps(makeSystem(), makeGDD());
+    const steps = def.setupSteps(makeSystem(), makeGDD(), makeCtx());
     expect(steps[0].executor).toBe('auto_polish');
 
     SYSTEM_REGISTRY.delete(testCategory);

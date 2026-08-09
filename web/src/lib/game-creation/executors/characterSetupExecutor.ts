@@ -48,14 +48,28 @@ export const characterSetupExecutor: ExecutorDefinition = {
     const { entity, projectType } = parsed.data;
     let { entityId } = parsed.data;
 
-    // When called from system registry (no entityId), resolve from the store.
-    // Entities are already spawned by entity_setup steps in planBuilder Phase 2 —
-    // spawning here would create duplicates.
+    // When the step carries no entityId, fall back to the store. Entities are
+    // already spawned by entity_setup steps in planBuilder Phase 2 — spawning
+    // here would create duplicates.
     if (!entityId) {
       // Look up the first entity matching the expected name in the scene graph
       const nodes = Object.values(ctx.store.sceneGraph.nodes);
-      const match = nodes.find(n => n.name === entity.name);
-      entityId = match?.entityId ?? entity.name;
+      entityId = nodes.find(n => n.name === entity.name)?.entityId;
+    }
+
+    // No fallback to the entity NAME. The engine addresses entities by their
+    // `EntityId` component — a UUID, and a separate component from
+    // `EntityName` — and its match loops emit nothing when nothing matches, so
+    // a name-bound command is a silent no-op that leaves the player with no
+    // CharacterController and no way to move. Fail loudly instead.
+    if (!entityId) {
+      return failResult(
+        makeStepError(
+          'ENTITY_NOT_FOUND',
+          `No engine entity id for "${entity.name}": the step carried none and no scene-graph node has that name.`,
+          this.userFacingErrorMessage,
+        ),
+      );
     }
 
     // [B5] Route based on project type
