@@ -269,6 +269,8 @@ pub fn apply_terrain_spawn_requests(
         };
         let mesh = terrain::rebuild_terrain_mesh(&mesh_data);
 
+        let transform = Transform::from_translation(position);
+
         // Component set is byte-for-byte the `EntityType::Terrain` arm of
         // `spawn_from_snapshot`, so undo/redo of this spawn round-trips.
         commands.spawn((
@@ -281,7 +283,19 @@ pub fn apply_terrain_spawn_requests(
             TerrainEnabled,
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(terrain_material())),
-            Transform::from_translation(position),
+            transform,
+            // `Transform` requires `GlobalTransform`, but the required-component
+            // default is the IDENTITY, and `TransformPlugin` does not correct it
+            // until `PostUpdate`. The terrain drains are `.chain()`ed in
+            // `bridge/mod.rs`, so `apply_terrain_sculpts` queries this entity in
+            // the same frame it is spawned — and it converts a world-space brush
+            // to terrain-local through this affine. Left at the identity, a hill
+            // requested right after a spawn lands at the terrain's local
+            // coordinate instead of the world one. A freshly-spawned ROOT
+            // entity's global pose is just its local pose, so writing it here is
+            // exact; `PostUpdate` recomputes the same value, or the parented one
+            // once something reparents the terrain.
+            GlobalTransform::from(transform),
         ));
 
         // Undo rebuilds the mesh from the snapshot, so it needs BOTH the noise
@@ -409,9 +423,16 @@ pub fn apply_terrain_updates(
 /// Y-rotation, scale and parenting; a terrain tilted about X or Z would need a
 /// real ray/plane intersection, which the 2D command shape cannot express.
 ///
-/// `GlobalTransform` propagates in `PostUpdate`, so a pose written this frame
-/// is visible on the next one — the same one-frame budget the rest of the
-/// editor already runs on.
+/// `GlobalTransform` propagates in `PostUpdate`, so a pose written by a
+/// `Transform` mutation this frame is only visible on the next one — the same
+/// one-frame budget the rest of the editor already runs on. A SPAWN is the
+/// exception and is NOT covered by that budget: the terrain drains are
+/// `.chain()`ed in `bridge/mod.rs`, so the `ApplyDeferred` between them makes a
+/// terrain spawned this frame queryable here in the same frame, and the
+/// required-component default `GlobalTransform` is the identity rather than the
+/// pose it was spawned with. `apply_terrain_spawn_requests` therefore writes an
+/// explicit `GlobalTransform`; do not drop it on the assumption that the
+/// required component covers this.
 pub fn apply_terrain_sculpts(
     mut pending: ResMut<PendingCommands>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -2847,7 +2868,7 @@ mod terrain_drain_tests {
         run_system!(world, apply_terrain_updates);
     }
 
-    fn queue_sculpt(world: &mut World, entity_id: &str, position: [f32; 2], strength: f32) {
+    fn push_sculpt(world: &mut World, entity_id: &str, position: [f32; 2], strength: f32) {
         world
             .resource_mut::<PendingCommands>()
             .terrain_sculpts
@@ -2857,9 +2878,29 @@ mod terrain_drain_tests {
                 radius: 1.5,
                 strength,
             });
-        // The real editor propagates transforms every frame; a sculpt landing on
-        // a stale `GlobalTransform` is not a case the drain system can see.
+    }
+
+    /// Sculpt a frame AFTER the spawn: the editor ran `PostUpdate` in between,
+    /// so every `GlobalTransform` is already current.
+    fn queue_sculpt(world: &mut World, entity_id: &str, position: [f32; 2], strength: f32) {
+        push_sculpt(world, entity_id, position, strength);
         propagate_transforms(world);
+        run_system!(world, apply_terrain_sculpts);
+    }
+
+    /// Sculpt in the SAME frame as the spawn, which is what the `Update` chain
+    /// in `bridge/mod.rs` actually does — the drains are `.chain()`ed, so the
+    /// `ApplyDeferred` between them makes the just-spawned terrain queryable,
+    /// and `TransformPlugin` does not run until `PostUpdate`. No propagation
+    /// here, deliberately: propagating would hide exactly the case this
+    /// ordering creates.
+    fn queue_sculpt_same_frame(
+        world: &mut World,
+        entity_id: &str,
+        position: [f32; 2],
+        strength: f32,
+    ) {
+        push_sculpt(world, entity_id, position, strength);
         run_system!(world, apply_terrain_sculpts);
     }
 
@@ -3314,6 +3355,61 @@ mod terrain_drain_tests {
             (delta - 5.0).abs() < 1e-3,
             "a world-space brush over cell (0,0) of a terrain at {origin:?} must \
              raise that cell by the full strength, raised {delta}",
+        );
+    }
+
+    /// The same conversion, one frame earlier — and that one frame is the whole
+    /// bug. `bridge/mod.rs` registers the terrain drains with `.chain()`, so the
+    /// `ApplyDeferred` between `apply_terrain_spawn_requests` and
+    /// `apply_terrain_sculpts` makes a terrain spawned this frame queryable by
+    /// the sculpt drain in the same frame. But `TransformPlugin` propagates in
+    /// `PostUpdate`, so the entity is visible with its `Transform` set and its
+    /// `GlobalTransform` still at the identity. The world -> local conversion
+    /// then ran through the wrong affine and the brush landed on the terrain's
+    /// LOCAL coordinate — the exact off-by-the-offset error
+    /// `sculpt_position_is_world_space_and_is_offset_by_the_terrain_transform`
+    /// fixed for the second frame onward.
+    ///
+    /// "Spawn a terrain, then immediately raise a hill" is one chat turn, so this
+    /// is the ordinary path, not a corner.
+    #[test]
+    fn sculpting_a_terrain_the_frame_it_spawned_still_uses_its_real_pose() {
+        let mut world = base_world();
+        let origin = Vec3::new(10.0, 0.0, 10.0);
+        queue_spawn(&mut world, spawn_request(Some("terrain-1"), Some(origin)));
+        let before = heights_of(&mut world);
+
+        // Same brush as the propagated test: cell (0,0) of a terrain centred on
+        // (10, 10) sits at world (6.5, 6.5).
+        queue_sculpt_same_frame(&mut world, "terrain-1", [6.5, 6.5], 5.0);
+        let after = heights_of(&mut world);
+
+        let delta = after[0] - before[0];
+        assert!(
+            (delta - 5.0).abs() < 1e-3,
+            "a terrain sculpted the same frame it spawned must use the pose it \
+             spawned with, not the identity; cell (0,0) rose by {delta}",
+        );
+    }
+
+    /// The converse of the same-frame case: with a stale identity
+    /// `GlobalTransform`, the raw local coordinate (-3.5,-3.5) hits cell (0,0)
+    /// instead of missing the grid by 14 units.
+    #[test]
+    fn sculpting_the_spawn_frame_far_off_an_offset_terrain_changes_nothing() {
+        let mut world = base_world();
+        queue_spawn(
+            &mut world,
+            spawn_request(Some("terrain-1"), Some(Vec3::new(10.0, 0.0, 10.0))),
+        );
+        let before = heights_of(&mut world);
+
+        queue_sculpt_same_frame(&mut world, "terrain-1", [-3.5, -3.5], 5.0);
+
+        assert_eq!(
+            heights_of(&mut world),
+            before,
+            "a same-frame brush 14 world units off the grid must change nothing",
         );
     }
 
