@@ -41,8 +41,17 @@ pub struct RemoveTextureRequest {
     pub slot: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct SceneExportRequest;
+/// One caller's request for a scene export.
+///
+/// `request_id` is the correlation token echoed back on the `SCENE_EXPORTED`
+/// event so a listener can tell its own answer from someone else's (PF-1103).
+/// It is `Option` because `export_scene` has always been callable with no
+/// payload, and a caller that does not care about correlation (the periodic
+/// autosave, the chat tool) still must not be forced to mint one.
+#[derive(Debug, Clone, Default)]
+pub struct SceneExportRequest {
+    pub request_id: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct SceneLoadRequest {
@@ -73,8 +82,8 @@ pub struct QualityPresetRequest {
 // === Queue Methods ===
 
 impl PendingCommands {
-    pub fn queue_scene_export(&mut self) {
-        self.scene_export_requests.push(SceneExportRequest);
+    pub fn queue_scene_export(&mut self, request: SceneExportRequest) {
+        self.scene_export_requests.push(request);
     }
 
     pub fn queue_scene_load(&mut self, request: SceneLoadRequest) {
@@ -120,8 +129,8 @@ impl PendingCommands {
 
 // === Bridge Functions ===
 
-pub fn queue_scene_export_from_bridge() -> bool {
-    super::with_pending(|pc| pc.queue_scene_export()).is_some()
+pub fn queue_scene_export_from_bridge(request: SceneExportRequest) -> bool {
+    super::with_pending(|pc| pc.queue_scene_export(request)).is_some()
 }
 
 pub fn queue_scene_load_from_bridge(request: SceneLoadRequest) -> bool {

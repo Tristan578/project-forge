@@ -1,6 +1,12 @@
 import { bundleScripts } from './scriptBundler';
 import { generateGameHTML, type GameTemplateOptions, type EmbeddedWasmData } from './gameTemplate';
 import { useEditorStore } from '@/stores/editorStore';
+import {
+  SCENE_EXPORTED_EVENT,
+  isSceneExportResponseFor,
+  newSceneExportRequestId,
+  type SceneExportedDetail,
+} from '@/lib/engine/sceneExportWire';
 import { exportAsZip, type ZipExportOptions } from './zipExporter';
 import type { LoadingScreenConfig } from './loadingScreen';
 import type { ExportFormat, ExportPreset } from './presets';
@@ -113,16 +119,22 @@ async function getSceneData(signal?: AbortSignal): Promise<unknown> {
     // eslint-disable-next-line prefer-const -- timeoutId must be declared before cleanup but assigned after
     let timeoutId: ReturnType<typeof setTimeout>;
 
+    // Correlation token for this export, echoed back on the event so a scene
+    // someone else exported (an autosave tick, a cloud save) can't be mistaken
+    // for our answer (PF-1103).
+    const requestId = newSceneExportRequestId();
+
     const cleanup = () => {
       clearTimeout(timeoutId);
-      window.removeEventListener('forge:scene-exported', handler);
+      window.removeEventListener(SCENE_EXPORTED_EVENT, handler);
       signal?.removeEventListener('abort', onAbort);
     };
 
     // Listen for the export response event
     const handler = (event: Event) => {
+      const customEvent = event as CustomEvent<SceneExportedDetail>;
+      if (!isSceneExportResponseFor(requestId, customEvent.detail)) return;
       cleanup();
-      const customEvent = event as CustomEvent;
       try {
         const sceneData = JSON.parse(customEvent.detail.json);
         const uiData = injectUIData(sceneData);
@@ -145,7 +157,7 @@ async function getSceneData(signal?: AbortSignal): Promise<unknown> {
       return;
     }
 
-    window.addEventListener('forge:scene-exported', handler);
+    window.addEventListener(SCENE_EXPORTED_EVENT, handler);
     signal?.addEventListener('abort', onAbort);
 
     // Timeout — if engine doesn't respond, reject rather than producing a
@@ -161,7 +173,7 @@ async function getSceneData(signal?: AbortSignal): Promise<unknown> {
 
     // Trigger export_scene command
     const store = useEditorStore.getState();
-    store.saveScene();
+    store.saveScene(requestId);
   });
 }
 

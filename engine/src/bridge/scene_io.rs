@@ -76,7 +76,11 @@ pub(super) fn apply_scene_export(
     if pending.scene_export_requests.is_empty() {
         return;
     }
-    pending.scene_export_requests.clear();
+    // Drain rather than clear: every queued request gets its own answer below.
+    // N requests coalescing into a single event was harmless while no caller
+    // could tell events apart, but with correlation ids (PF-1103) it would
+    // strand every caller but one waiting on an id that is never emitted.
+    let requests: Vec<_> = std::mem::take(&mut pending.scene_export_requests);
 
     // Build entity snapshots
     let mut snapshots = Vec::new();
@@ -193,8 +197,16 @@ pub(super) fn apply_scene_export(
 
     match serde_json::to_string(&scene_file) {
         Ok(json) => {
-            events::emit_scene_exported(&json, &scene_name.0);
-            tracing::info!("Scene exported: {} entities", scene_file.entities.len());
+            // One event per queued request: the JSON is built once, but each
+            // caller needs its own correlation id echoed back (PF-1103).
+            for request in &requests {
+                events::emit_scene_exported(&json, &scene_name.0, request.request_id.as_deref());
+            }
+            tracing::info!(
+                "Scene exported: {} entities ({} request(s))",
+                scene_file.entities.len(),
+                requests.len()
+            );
         }
         Err(e) => {
             tracing::error!("Failed to serialize scene: {}", e);

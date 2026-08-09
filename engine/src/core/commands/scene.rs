@@ -6,7 +6,7 @@ use crate::core::pending::scene::{
     queue_scene_export_from_bridge, queue_scene_load_from_bridge, queue_new_scene_from_bridge,
     queue_gltf_import_from_bridge, queue_texture_load_from_bridge, queue_place_asset_from_bridge,
     queue_delete_asset_from_bridge, queue_remove_texture_from_bridge, queue_audio_import_from_bridge,
-    SceneLoadRequest, GltfImportRequest, TextureLoadRequest, RemoveTextureRequest,
+    SceneExportRequest, SceneLoadRequest, GltfImportRequest, TextureLoadRequest, RemoveTextureRequest,
     PlaceAssetRequest, DeleteAssetRequest, AudioImportRequest,
 };
 use crate::core::pending::audio::{
@@ -59,9 +59,55 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
 
 // ===== Handler Functions =====
 
+/// Maximum byte length of a caller-supplied scene-export correlation id.
+///
+/// The id is copied into the queued request and echoed back on the event, so
+/// this is a storage bound on a string we hold — bytes, not grapheme count, is
+/// the right unit. 64 matches [`entity_factory::is_valid_override_id`]; the
+/// production caller passes a 36-byte `crypto.randomUUID()`.
+const MAX_EXPORT_REQUEST_ID_LEN: usize = 64;
+
+/// Extract and validate the optional `requestId` from an `export_scene` payload.
+///
+/// Absent (or a payload that is not an object) is the legitimate no-correlation
+/// case and yields `Ok(None)`. A key that IS present but unusable is an error
+/// rather than a silent drop: a caller that asked to be correlated and is not
+/// told otherwise waits on an event that will never carry its id, which is a
+/// worse failure than the miswiring it hides.
+fn parse_export_request_id(payload: &serde_json::Value) -> Result<Option<String>, String> {
+    let Some(value) = payload.get("requestId") else {
+        return Ok(None);
+    };
+    // An explicit null is the shape a JS caller produces for "no id" (e.g.
+    // `JSON.stringify({ requestId: undefined })` drops the key, but a
+    // hand-built `{ requestId: null }` does not), so treat it as absent.
+    if value.is_null() {
+        return Ok(None);
+    }
+    let id = value
+        .as_str()
+        .ok_or("export_scene 'requestId' must be a string")?;
+    if id.is_empty() {
+        return Err("export_scene 'requestId' must not be empty".to_string());
+    }
+    if id.len() > MAX_EXPORT_REQUEST_ID_LEN {
+        return Err(format!(
+            "export_scene 'requestId' must be at most {MAX_EXPORT_REQUEST_ID_LEN} bytes"
+        ));
+    }
+    // Control characters would be echoed verbatim into the event payload and on
+    // into any log line built from it — the same log-injection surface
+    // `is_valid_override_id` closes for entity ids.
+    if id.chars().any(|c| c.is_control()) {
+        return Err("export_scene 'requestId' must not contain control characters".to_string());
+    }
+    Ok(Some(id.to_string()))
+}
+
 /// Handle export_scene command — triggers scene serialization + event.
-fn handle_export_scene(_payload: serde_json::Value) -> super::CommandResult {
-    if queue_scene_export_from_bridge() {
+fn handle_export_scene(payload: serde_json::Value) -> super::CommandResult {
+    let request_id = parse_export_request_id(&payload)?;
+    if queue_scene_export_from_bridge(SceneExportRequest { request_id }) {
         tracing::info!("Queued scene export");
         Ok(())
     } else {
@@ -358,6 +404,108 @@ mod tests {
         let result = run("export_scene", json!({}));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === export_scene requestId correlation (PF-1103) ===
+    //
+    // `parse_export_request_id` is exercised directly: reaching it through
+    // `dispatch` only distinguishes "rejected" from "accepted" (an accepted
+    // payload falls through to the uninitialized-PendingCommands error under
+    // native test), so the accepted VALUE would go unasserted.
+
+    #[test]
+    fn request_id_absent_is_none() {
+        assert_eq!(parse_export_request_id(&json!({})), Ok(None));
+    }
+
+    #[test]
+    fn request_id_null_is_none() {
+        assert_eq!(parse_export_request_id(&json!({ "requestId": null })), Ok(None));
+    }
+
+    #[test]
+    fn non_object_payload_is_none() {
+        // `handle_export_scene` is also registered for `export_scene_json`, and
+        // a caller may pass a bare `null`/string rather than an object.
+        assert_eq!(parse_export_request_id(&json!(null)), Ok(None));
+        assert_eq!(parse_export_request_id(&json!("whatever")), Ok(None));
+    }
+
+    #[test]
+    fn request_id_string_is_preserved_verbatim() {
+        let id = "b3f1c0a2-6d1e-4a7b-9f2c-8e5d4c3b2a10";
+        assert_eq!(
+            parse_export_request_id(&json!({ "requestId": id })),
+            Ok(Some(id.to_string()))
+        );
+    }
+
+    #[test]
+    fn request_id_at_length_limit_is_accepted() {
+        let id = "a".repeat(MAX_EXPORT_REQUEST_ID_LEN);
+        assert_eq!(
+            parse_export_request_id(&json!({ "requestId": id })),
+            Ok(Some(id))
+        );
+    }
+
+    #[test]
+    fn request_id_one_byte_over_limit_is_rejected() {
+        let id = "a".repeat(MAX_EXPORT_REQUEST_ID_LEN + 1);
+        let err = parse_export_request_id(&json!({ "requestId": id })).unwrap_err();
+        assert!(err.contains("at most"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn request_id_length_bound_is_bytes_not_chars() {
+        // 33 two-byte chars = 66 bytes: under the char count, over the byte
+        // bound. The bound guards the stored string, so bytes must win.
+        let id = "é".repeat(33);
+        assert_eq!(id.chars().count(), 33);
+        assert!(id.len() > MAX_EXPORT_REQUEST_ID_LEN);
+        assert!(parse_export_request_id(&json!({ "requestId": id })).is_err());
+    }
+
+    #[test]
+    fn request_id_non_string_is_rejected() {
+        for bad in [json!(42), json!(true), json!(["a"]), json!({ "a": 1 })] {
+            let err = parse_export_request_id(&json!({ "requestId": bad }))
+                .unwrap_err();
+            assert!(err.contains("must be a string"), "unexpected error: {err}");
+        }
+    }
+
+    #[test]
+    fn request_id_empty_is_rejected() {
+        // An empty id can never match a listener's own id, so accepting it
+        // would silently produce an event no one will claim.
+        let err = parse_export_request_id(&json!({ "requestId": "" })).unwrap_err();
+        assert!(err.contains("must not be empty"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn request_id_with_control_characters_is_rejected() {
+        for bad in ["a\0b", "a\nb", "a\rb"] {
+            let err = parse_export_request_id(&json!({ "requestId": bad })).unwrap_err();
+            assert!(err.contains("control characters"), "unexpected error: {err}");
+        }
+    }
+
+    #[test]
+    fn export_scene_rejects_bad_request_id_before_queueing() {
+        // A rejected id must surface its own error, NOT fall through to the
+        // uninitialized-PendingCommands error every accepted payload returns
+        // under native test — that ordering is what proves nothing was queued.
+        let result = run("export_scene", json!({ "requestId": 42 }));
+        let err = result.unwrap_err();
+        assert!(err.contains("must be a string"), "unexpected error: {err}");
+        assert!(!err.contains("not initialized"));
+    }
+
+    #[test]
+    fn export_scene_json_alias_validates_request_id_too() {
+        let err = run("export_scene_json", json!({ "requestId": "" })).unwrap_err();
+        assert!(err.contains("must not be empty"), "unexpected error: {err}");
     }
 
     // === load_scene ===

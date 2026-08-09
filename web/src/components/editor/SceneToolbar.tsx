@@ -8,6 +8,12 @@ import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, 
 import { ExportDialog } from './ExportDialog';
 import { SceneBrowser } from './SceneBrowser';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import {
+  SCENE_EXPORTED_EVENT,
+  isSceneExportResponseFor,
+  newSceneExportRequestId,
+  type SceneExportedDetail,
+} from '@/lib/engine/sceneExportWire';
 
 export function SceneToolbar() {
   const sceneName = useEditorStore((s) => s.sceneName);
@@ -35,21 +41,27 @@ export function SceneToolbar() {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showSceneBrowser, setShowSceneBrowser] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const pendingDownloadRef = useRef(false);
-  // Set to true when a cloud save is requested so the next forge:scene-exported
+  // Correlation ids for the two exports this toolbar can be waiting on, or null
+  // when it is waiting on neither. These replace the plain pending-flags that
+  // used to consume whichever export landed first, whoever triggered it
+  // (PF-1103); holding the id is what makes "is this mine?" answerable.
+  const pendingDownloadRef = useRef<string | null>(null);
+  // Set when a cloud save is requested so the matching forge:scene-exported
   // event handler performs the PUT to /api/projects/{id} (PF-540).
-  const pendingCloudSaveRef = useRef(false);
+  const pendingCloudSaveRef = useRef<string | null>(null);
 
   // Listen for SCENE_EXPORTED to trigger file download or cloud save
   useEffect(() => {
-    const handleExported = (e: CustomEvent<{ json: string; name: string }>) => {
-      if (pendingDownloadRef.current) {
-        pendingDownloadRef.current = false;
+    const handleExported = (e: CustomEvent<SceneExportedDetail>) => {
+      const downloadId = pendingDownloadRef.current;
+      if (downloadId !== null && isSceneExportResponseFor(downloadId, e.detail)) {
+        pendingDownloadRef.current = null;
         downloadSceneFile(e.detail.json, e.detail.name);
       }
 
-      if (pendingCloudSaveRef.current && projectId) {
-        pendingCloudSaveRef.current = false;
+      const cloudSaveId = pendingCloudSaveRef.current;
+      if (cloudSaveId !== null && isSceneExportResponseFor(cloudSaveId, e.detail) && projectId) {
+        pendingCloudSaveRef.current = null;
         const { json, name } = e.detail;
         void saveSceneToCloud(projectId, name, json).then((result) => {
           if (result.ok && result.savedAt) {
@@ -61,23 +73,25 @@ export function SceneToolbar() {
         });
       }
     };
-    window.addEventListener('forge:scene-exported', handleExported as EventListener);
-    return () => window.removeEventListener('forge:scene-exported', handleExported as EventListener);
+    window.addEventListener(SCENE_EXPORTED_EVENT, handleExported as EventListener);
+    return () => window.removeEventListener(SCENE_EXPORTED_EVENT, handleExported as EventListener);
   }, [projectId, setCloudSaveStatus, setLastCloudSave]);
 
   const handleSave = useCallback(() => {
-    pendingDownloadRef.current = true;
-    saveScene();
+    const requestId = newSceneExportRequestId();
+    pendingDownloadRef.current = requestId;
+    saveScene(requestId);
   }, [saveScene]);
 
   /**
-   * Trigger a cloud save. Sets the pending flag so the next forge:scene-exported
-   * event completes the PUT to /api/projects/{id} (PF-540).
+   * Trigger a cloud save. Records the request id so the matching
+   * forge:scene-exported event completes the PUT to /api/projects/{id} (PF-540).
    */
   const handleCloudSave = useCallback(() => {
     if (!projectId) return;
-    pendingCloudSaveRef.current = true;
-    saveToCloud();
+    const requestId = newSceneExportRequestId();
+    pendingCloudSaveRef.current = requestId;
+    saveToCloud(requestId);
   }, [projectId, saveToCloud]);
 
   const handleLoad = useCallback(async () => {
@@ -99,11 +113,13 @@ export function SceneToolbar() {
     const handler = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === 's') {
         e.preventDefault();
+        // Delegate rather than re-inline the download path: it used to be a copy
+        // of handleSave's body, which is one more place the request-id wiring
+        // could be forgotten.
         if (projectId) {
           handleCloudSave();
         } else {
-          pendingDownloadRef.current = true;
-          saveScene();
+          handleSave();
         }
       }
       if (e.ctrlKey && e.shiftKey && e.key === 'N') {
@@ -113,7 +129,7 @@ export function SceneToolbar() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [saveScene, newScene, projectId, handleCloudSave]);
+  }, [handleSave, newScene, projectId, handleCloudSave]);
 
   const handleExport = useCallback(() => {
     setShowExportDialog(true);

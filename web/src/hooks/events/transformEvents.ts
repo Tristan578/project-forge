@@ -8,6 +8,7 @@ import { setLastExportedScene } from '@/lib/storage/autoSave';
 import { invalidateSceneCache } from '@/lib/ai/cachedContext';
 import type { SceneNode } from '@/stores/slices/types';
 import { castPayload, type SetFn, type GetFn } from './types';
+import { SCENE_EXPORTED_EVENT, type SceneExportedDetail } from '@/lib/engine/sceneExportWire';
 import { DEBOUNCE_TRANSFORM_AUTOSAVE_MS } from '@/lib/config/timeouts';
 
 const TRANSFORM_DEBOUNCE_MS = DEBOUNCE_TRANSFORM_AUTOSAVE_MS;
@@ -147,8 +148,13 @@ export function handleTransformEvent(
     }
 
     case 'SCENE_EXPORTED': {
-      const payload = castPayload<{ json: string; name: string }>(data);
-      const { json, name } = payload;
+      const payload = castPayload<SceneExportedDetail>(data);
+      // requestId correlates this export with the caller that asked for it
+      // (PF-1103). It is absent when nobody asked to be correlated, and also
+      // when the running engine binary predates the change — every side effect
+      // below is "the scene was exported", not "my request was answered", so
+      // none of them may depend on it.
+      const { json, name, requestId } = payload;
       const state = useEditorStore.getState();
 
       // Cache for periodic IndexedDB auto-save
@@ -169,7 +175,11 @@ export function handleTransformEvent(
       // Reset sceneModified since the scene has been persisted (PF-528)
       useEditorStore.setState({ sceneModified: false });
       // Dispatch DOM event so SceneToolbar can trigger file download
-      window.dispatchEvent(new CustomEvent('forge:scene-exported', { detail: { json, name } }));
+      window.dispatchEvent(
+        new CustomEvent<SceneExportedDetail>(SCENE_EXPORTED_EVENT, {
+          detail: { json, name, requestId },
+        }),
+      );
       return true;
     }
 

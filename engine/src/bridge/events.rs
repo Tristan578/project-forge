@@ -206,15 +206,26 @@ pub fn emit_joint_changed(joint_data: &crate::core::physics::JointData) {
 }
 
 /// Emit a scene exported event with the full JSON.
-pub fn emit_scene_exported(json: &str, name: &str) {
+///
+/// `request_id` echoes back the correlation token the caller passed to
+/// `export_scene`, so a listener can tell its own answer from an export someone
+/// else triggered (PF-1103). It is omitted from the payload entirely when the
+/// caller supplied none — a listener reads `undefined` and falls back to
+/// accepting the event, which is what keeps an uncorrelated caller working.
+pub fn emit_scene_exported(json: &str, name: &str, request_id: Option<&str>) {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct SceneExportedPayload<'a> {
         json: &'a str,
         name: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_id: Option<&'a str>,
     }
 
-    emit_event("SCENE_EXPORTED", &SceneExportedPayload { json, name });
+    emit_event(
+        "SCENE_EXPORTED",
+        &SceneExportedPayload { json, name, request_id },
+    );
 }
 
 /// Emit a scene loaded event.
