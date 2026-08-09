@@ -42,15 +42,13 @@
           "name": "Explorer",
           "role": "player",
           "systems": ["movement"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["walk", "flip-gravity"]
+          "appearance": "primitive:capsule"
         },
         {
           "name": "GravityOrb",
           "role": "interactable",
           "systems": ["challenge"],
-          "appearance": "primitive:sphere",
-          "behaviors": ["activate-gravity-flip"]
+          "appearance": "primitive:sphere"
         }
       ],
       "transitions": [
@@ -66,8 +64,7 @@
           "name": "Explorer",
           "role": "player",
           "systems": ["movement"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["walk", "flip-gravity"]
+          "appearance": "primitive:capsule"
         }
       ],
       "transitions": [

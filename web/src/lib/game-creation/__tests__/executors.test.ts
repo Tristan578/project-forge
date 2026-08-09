@@ -318,7 +318,6 @@ describe('character_setup executor', () => {
     name: 'Player',
     role: 'player',
     appearance: 'humanoid character',
-    behaviors: ['jump', 'run'],
   };
 
   it('is registered', () => {
@@ -407,7 +406,6 @@ describe('entity_setup executor', () => {
     name: 'Enemy',
     role: 'enemy' as const,
     appearance: 'goblin',
-    behaviors: ['patrol'],
   };
 
   it('is registered', () => {

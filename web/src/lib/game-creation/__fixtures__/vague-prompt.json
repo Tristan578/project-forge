@@ -21,8 +21,7 @@
           "name": "Thing",
           "role": "decoration",
           "systems": [],
-          "appearance": "primitive:cube",
-          "behaviors": []
+          "appearance": "primitive:cube"
         }
       ],
       "transitions": []

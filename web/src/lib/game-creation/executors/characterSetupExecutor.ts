@@ -11,11 +11,13 @@ const inputSchema = z.object({
   // a step arriving without one is a programming error, not a data shape to
   // absorb with a default named 'Player' that matches whatever happens to be in
   // the scene.
+  // Only the fields this step reads. It used to require `appearance` and
+  // `behaviors` and read neither — `appearance` is consumed by `entity_setup` at
+  // spawn time and `behaviors` no longer exists, so demanding them here would
+  // only fail the rig step on a blueprint that is otherwise fine (PF-1111).
   entity: z.object({
     name: z.string(),
     role: z.string(),
-    appearance: z.string(),
-    behaviors: z.array(z.string()),
   }),
   entityId: z.string().min(1),
   projectType: z.enum(['2d', '3d']),

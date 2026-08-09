@@ -35,8 +35,7 @@
           "name": "Player",
           "role": "player",
           "systems": ["movement"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["walk"]
+          "appearance": "primitive:capsule"
         }
       ],
       "transitions": []

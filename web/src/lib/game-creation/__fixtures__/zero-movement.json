@@ -42,8 +42,7 @@
           "name": "NoteTarget",
           "role": "trigger",
           "systems": ["input"],
-          "appearance": "primitive:sphere",
-          "behaviors": ["appear-on-beat", "register-tap"]
+          "appearance": "primitive:sphere"
         }
       ],
       "transitions": [

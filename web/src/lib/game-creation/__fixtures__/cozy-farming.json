@@ -63,22 +63,19 @@
           "name": "Farmer",
           "role": "player",
           "systems": ["movement"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["walk", "water-crops", "harvest", "pet-animals"]
+          "appearance": "primitive:capsule"
         },
         {
           "name": "Chicken",
           "role": "npc",
           "systems": ["entities"],
-          "appearance": "primitive:sphere",
-          "behaviors": ["wander", "lay-eggs", "follow-player"]
+          "appearance": "primitive:sphere"
         },
         {
           "name": "TownVillager",
           "role": "npc",
           "systems": ["entities"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["daily-schedule", "gift-exchange", "friendly-chat"]
+          "appearance": "primitive:capsule"
         }
       ],
       "transitions": [
@@ -95,15 +92,13 @@
           "name": "Farmer",
           "role": "player",
           "systems": ["movement"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["walk", "shop", "socialize"]
+          "appearance": "primitive:capsule"
         },
         {
           "name": "Shopkeeper",
           "role": "npc",
           "systems": ["entities"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["open-shop", "daily-schedule"]
+          "appearance": "primitive:capsule"
         }
       ],
       "transitions": [

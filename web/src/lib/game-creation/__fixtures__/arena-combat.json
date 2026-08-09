@@ -49,22 +49,19 @@
           "name": "Warrior",
           "role": "player",
           "systems": ["movement", "feedback"],
-          "appearance": "primitive:capsule",
-          "behaviors": ["melee-attack", "dodge-roll", "take-damage"]
+          "appearance": "primitive:capsule"
         },
         {
           "name": "Grunt",
           "role": "enemy",
           "systems": ["entities"],
-          "appearance": "primitive:cube",
-          "behaviors": ["chase-player", "melee-attack"]
+          "appearance": "primitive:cube"
         },
         {
           "name": "Brute",
           "role": "enemy",
           "systems": ["entities"],
-          "appearance": "primitive:cube",
-          "behaviors": ["charge-attack", "area-slam"]
+          "appearance": "primitive:cube"
         }
       ],
       "transitions": [

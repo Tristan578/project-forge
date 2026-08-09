@@ -84,8 +84,8 @@ export interface EntityBlueprint {
   name: string;
   role: 'player' | 'enemy' | 'npc' | 'decoration' | 'trigger' | 'interactable' | 'projectile';
   systems: SystemCategory[];
+  /** Free text; `primitive:<shape>` selects the spawned mesh (see entitySetupExecutor). */
   appearance: string;
-  behaviors: string[];
 }
 
 // ---------------------------------------------------------------------------

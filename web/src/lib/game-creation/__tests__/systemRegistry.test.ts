@@ -46,7 +46,6 @@ function makePlayerCtx(): SystemStepContext {
           role: 'player',
           systems: [],
           appearance: 'a knight',
-          behaviors: ['move'],
         },
       },
     ],
@@ -73,7 +72,6 @@ function makeGdd(entityCountPerScene = 2, sceneCount = 1): OrchestratorGDD {
       role: 'decoration' as const,
       systems: [] as OrchestratorGDD['scenes'][number]['entities'][number]['systems'],
       appearance: 'cube',
-      behaviors: [],
     })),
     transitions: [],
   }));

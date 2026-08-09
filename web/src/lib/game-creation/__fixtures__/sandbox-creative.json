@@ -42,8 +42,7 @@
           "name": "PlaceableBlock",
           "role": "decoration",
           "systems": ["entities"],
-          "appearance": "primitive:cube",
-          "behaviors": ["place", "remove", "color-change"]
+          "appearance": "primitive:cube"
         }
       ],
       "transitions": []
