@@ -164,8 +164,6 @@ struct EdgeCollapse {
     v1: usize,
     v2: usize,
     optimal: [f32; 3],
-    /// Interpolation parameter for attribute blending (0.0 = v1, 1.0 = v2).
-    t: f32,
 }
 
 impl PartialEq for EdgeCollapse {
@@ -481,9 +479,8 @@ fn qem_simplify_with_attrs(
             if seen_edges.insert((v1, v2)) {
                 let combined = quadrics[v1].add(&quadrics[v2]);
                 let opt = combined.optimal_point(pos[v1], pos[v2]);
-                let t_attr = combined.optimal_t(pos[v1], pos[v2]);
                 let cost = combined.evaluate(opt[0], opt[1], opt[2]).abs();
-                heap.push(Reverse(EdgeCollapse { cost, v1, v2, optimal: opt, t: t_attr }));
+                heap.push(Reverse(EdgeCollapse { cost, v1, v2, optimal: opt }));
             }
         }
     }
@@ -564,9 +561,8 @@ fn qem_simplify_with_attrs(
         for (nv1, nv2) in new_neighbors {
             let combined = quadrics[nv1].add(&quadrics[nv2]);
             let opt = combined.optimal_point(pos[nv1], pos[nv2]);
-            let t_attr = combined.optimal_t(pos[nv1], pos[nv2]);
             let cost = combined.evaluate(opt[0], opt[1], opt[2]).abs();
-            heap.push(Reverse(EdgeCollapse { cost, v1: nv1, v2: nv2, optimal: opt, t: t_attr }));
+            heap.push(Reverse(EdgeCollapse { cost, v1: nv1, v2: nv2, optimal: opt }));
         }
     }
 
@@ -699,7 +695,7 @@ fn qem_simplify(
                 let combined = quadrics[v1].add(&quadrics[v2]);
                 let opt = combined.optimal_point(pos[v1], pos[v2]);
                 let cost = combined.evaluate(opt[0], opt[1], opt[2]).abs();
-                heap.push(Reverse(EdgeCollapse { cost, v1, v2, optimal: opt, t: 0.5 }));
+                heap.push(Reverse(EdgeCollapse { cost, v1, v2, optimal: opt }));
             }
         }
     }
@@ -772,7 +768,7 @@ fn qem_simplify(
             let combined = quadrics[nv1].add(&quadrics[nv2]);
             let opt = combined.optimal_point(pos[nv1], pos[nv2]);
             let cost = combined.evaluate(opt[0], opt[1], opt[2]).abs();
-            heap.push(Reverse(EdgeCollapse { cost, v1: nv1, v2: nv2, optimal: opt, t: 0.5 }));
+            heap.push(Reverse(EdgeCollapse { cost, v1: nv1, v2: nv2, optimal: opt }));
         }
     }
 
@@ -1147,9 +1143,9 @@ mod tests {
     #[test]
     fn edge_collapse_nan_cost_sorts_last() {
         let mut heap = BinaryHeap::new();
-        heap.push(Reverse(EdgeCollapse { cost: f32::NAN, v1: 0, v2: 1, optimal: [0.0; 3], t: 0.5 }));
-        heap.push(Reverse(EdgeCollapse { cost: 1.0,     v1: 2, v2: 3, optimal: [0.0; 3], t: 0.5 }));
-        heap.push(Reverse(EdgeCollapse { cost: 0.5,     v1: 4, v2: 5, optimal: [0.0; 3], t: 0.5 }));
+        heap.push(Reverse(EdgeCollapse { cost: f32::NAN, v1: 0, v2: 1, optimal: [0.0; 3] }));
+        heap.push(Reverse(EdgeCollapse { cost: 1.0,     v1: 2, v2: 3, optimal: [0.0; 3] }));
+        heap.push(Reverse(EdgeCollapse { cost: 0.5,     v1: 4, v2: 5, optimal: [0.0; 3] }));
         let first = heap.pop().unwrap().0;
         assert_eq!(first.cost, 0.5);
         let second = heap.pop().unwrap().0;

@@ -27,6 +27,11 @@ pub fn dispatch(command: &str, payload: &Value) -> Option<CommandResult> {
     }
 }
 
+// Every payload below is deserialized on all targets — that is what turns a
+// malformed command into an Err instead of a silent no-op — but only the wasm32
+// bridge reads the fields back out. Scope the allow to non-wasm so a genuinely
+// unused field still warns in the build that ships.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 #[derive(Deserialize)]
 struct SetLodPayload {
     #[serde(rename = "entityId")]
@@ -40,6 +45,7 @@ struct SetLodPayload {
 }
 
 fn handle_set_lod(payload: &Value) -> CommandResult {
+    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let params: SetLodPayload = serde_json::from_value(payload.clone())
         .map_err(|e| format!("Invalid set_lod payload: {}", e))?;
 
@@ -54,6 +60,7 @@ fn handle_set_lod(payload: &Value) -> CommandResult {
     Ok(())
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 #[derive(Deserialize)]
 struct GenerateLodsPayload {
     #[serde(rename = "entityId")]
@@ -61,6 +68,7 @@ struct GenerateLodsPayload {
 }
 
 fn handle_generate_lods(payload: &Value) -> CommandResult {
+    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let params: GenerateLodsPayload = serde_json::from_value(payload.clone())
         .map_err(|e| format!("Invalid generate_lods payload: {}", e))?;
 
@@ -70,6 +78,7 @@ fn handle_generate_lods(payload: &Value) -> CommandResult {
     Ok(())
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 #[derive(Deserialize)]
 struct SetPerformanceBudgetPayload {
     #[serde(rename = "maxTriangles")]
@@ -83,6 +92,7 @@ struct SetPerformanceBudgetPayload {
 }
 
 fn handle_set_performance_budget(payload: &Value) -> CommandResult {
+    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let params: SetPerformanceBudgetPayload = serde_json::from_value(payload.clone())
         .map_err(|e| format!("Invalid set_performance_budget payload: {}", e))?;
 
@@ -111,12 +121,14 @@ fn handle_optimize_scene() -> CommandResult {
     Ok(())
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 #[derive(Deserialize)]
 struct SetLodDistancesPayload {
     distances: [f32; 3],
 }
 
 fn handle_set_lod_distances(payload: &Value) -> CommandResult {
+    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let params: SetLodDistancesPayload = serde_json::from_value(payload.clone())
         .map_err(|e| format!("Invalid set_lod_distances payload: {}", e))?;
 

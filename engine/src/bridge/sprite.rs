@@ -47,6 +47,13 @@ pub struct TilemapRenderState {
 }
 
 /// Newtype wrapper for Handle<TextureAtlasLayout> since Handle<T> is not a Component in Bevy 0.16.
+///
+/// The handle is never read back out — the component exists so the entity OWNS a
+/// strong handle to its atlas layout. Dropping it (via `remove::<AtlasLayoutHandle>()`
+/// on animation teardown) is what lets the layout asset be reclaimed. So the field is
+/// load-bearing through its lifetime, not its value, which is exactly the shape
+/// `dead_code` cannot see.
+#[allow(dead_code)]
 #[derive(Component)]
 pub struct AtlasLayoutHandle(pub Handle<TextureAtlasLayout>);
 
