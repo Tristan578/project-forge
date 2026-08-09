@@ -21,7 +21,6 @@ pub mod entity_id;
 pub mod environment;
 pub mod game_camera;
 pub mod game_components;
-pub mod game_components_helpers;
 pub mod gizmo;
 pub mod history;
 pub mod input;
