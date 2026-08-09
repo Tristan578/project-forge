@@ -328,68 +328,300 @@ impl GameComponents {
     }
 }
 
-/// Build a GameComponentData from a type name and JSON properties string.
-/// If properties_json is empty, uses defaults.
+/// Read a finite `f32` out of a properties bag, clamped to the range the engine
+/// can actually simulate. A missing, wrongly-typed, or non-finite value yields
+/// `None` so the caller keeps the field's default rather than propagating a NaN
+/// into a transform.
+fn prop_f32(props: &serde_json::Value, key: &str, min: f32, max: f32) -> Option<f32> {
+    let v = props.get(key)?.as_f64()? as f32;
+    v.is_finite().then(|| v.clamp(min, max))
+}
+
+fn prop_bool(props: &serde_json::Value, key: &str) -> Option<bool> {
+    props.get(key)?.as_bool()
+}
+
+fn prop_string(props: &serde_json::Value, key: &str) -> Option<String> {
+    props.get(key).and_then(|v| v.as_str()).map(str::to_string)
+}
+
+fn prop_u32(props: &serde_json::Value, key: &str, max: u32) -> Option<u32> {
+    props.get(key)?.as_u64().map(|v| v.min(max as u64) as u32)
+}
+
+/// A 3-element vector, or `None` if the key is absent, not a 3-element array, or
+/// carries a component the engine cannot use. Partial application would place an
+/// entity somewhere the caller never asked for, so the vector is all-or-nothing.
+fn prop_vec3(props: &serde_json::Value, key: &str) -> Option<[f32; 3]> {
+    let arr = props.get(key)?.as_array()?;
+    if arr.len() != 3 {
+        return None;
+    }
+    let mut out = [0.0f32; 3];
+    for (slot, value) in out.iter_mut().zip(arr) {
+        let v = value.as_f64()? as f32;
+        if !v.is_finite() {
+            return None;
+        }
+        *slot = v;
+    }
+    Some(out)
+}
+
+/// Build a `GameComponentData` from a type name and a JSON properties bag.
+///
+/// Every caller is a wire boundary — JS editor commands, MCP, the AI
+/// orchestrator, and `.forge` scenes written by an older build — so a bag can
+/// legitimately name any subset of a type's fields. Each recognised field is
+/// merged onto the type's default and anything missing, unknown, wrongly typed,
+/// or out of range leaves its default standing. Only two things are errors: a
+/// component type the engine has no systems for, and a body that is not a JSON
+/// object at all. Both mean the caller sent something structurally wrong that no
+/// amount of field defaulting can repair.
 pub fn build_game_component(component_type: &str, properties_json: &str) -> Result<GameComponentData, String> {
-    if properties_json.is_empty() || properties_json == "{}" {
-        return Ok(match component_type {
-            "character_controller" => GameComponentData::CharacterController(CharacterControllerData::default()),
-            "health" => GameComponentData::Health(HealthData::default()),
-            "collectible" => GameComponentData::Collectible(CollectibleData::default()),
-            "damage_zone" => GameComponentData::DamageZone(DamageZoneData::default()),
-            "checkpoint" => GameComponentData::Checkpoint(CheckpointData::default()),
-            "teleporter" => GameComponentData::Teleporter(TeleporterData::default()),
-            "moving_platform" => GameComponentData::MovingPlatform(MovingPlatformData::default()),
-            "trigger_zone" => GameComponentData::TriggerZone(TriggerZoneData::default()),
-            "spawner" => GameComponentData::Spawner(SpawnerData::default()),
-            "follower" => GameComponentData::Follower(FollowerData::default()),
-            "projectile" => GameComponentData::Projectile(ProjectileData::default()),
-            "win_condition" => GameComponentData::WinCondition(WinConditionData::default()),
-            "dialogue_trigger" => GameComponentData::DialogueTrigger(DialogueTriggerData::default()),
-            other => return Err(format!("Unknown game component type: {}", other)),
-        });
+    let props = if properties_json.trim().is_empty() {
+        serde_json::Value::Object(serde_json::Map::new())
+    } else {
+        serde_json::from_str::<serde_json::Value>(properties_json)
+            .map_err(|e| format!("Invalid {} properties: {}", component_type, e))?
+    };
+    if !props.is_object() {
+        return Err(format!(
+            "Invalid {} properties: expected a JSON object",
+            component_type
+        ));
     }
 
     match component_type {
-        "character_controller" => serde_json::from_str::<CharacterControllerData>(properties_json)
-            .map(GameComponentData::CharacterController)
-            .map_err(|e| format!("Invalid character_controller properties: {}", e)),
-        "health" => serde_json::from_str::<HealthData>(properties_json)
-            .map(GameComponentData::Health)
-            .map_err(|e| format!("Invalid health properties: {}", e)),
-        "collectible" => serde_json::from_str::<CollectibleData>(properties_json)
-            .map(GameComponentData::Collectible)
-            .map_err(|e| format!("Invalid collectible properties: {}", e)),
-        "damage_zone" => serde_json::from_str::<DamageZoneData>(properties_json)
-            .map(GameComponentData::DamageZone)
-            .map_err(|e| format!("Invalid damage_zone properties: {}", e)),
-        "checkpoint" => serde_json::from_str::<CheckpointData>(properties_json)
-            .map(GameComponentData::Checkpoint)
-            .map_err(|e| format!("Invalid checkpoint properties: {}", e)),
-        "teleporter" => serde_json::from_str::<TeleporterData>(properties_json)
-            .map(GameComponentData::Teleporter)
-            .map_err(|e| format!("Invalid teleporter properties: {}", e)),
-        "moving_platform" => serde_json::from_str::<MovingPlatformData>(properties_json)
-            .map(GameComponentData::MovingPlatform)
-            .map_err(|e| format!("Invalid moving_platform properties: {}", e)),
-        "trigger_zone" => serde_json::from_str::<TriggerZoneData>(properties_json)
-            .map(GameComponentData::TriggerZone)
-            .map_err(|e| format!("Invalid trigger_zone properties: {}", e)),
-        "spawner" => serde_json::from_str::<SpawnerData>(properties_json)
-            .map(GameComponentData::Spawner)
-            .map_err(|e| format!("Invalid spawner properties: {}", e)),
-        "follower" => serde_json::from_str::<FollowerData>(properties_json)
-            .map(GameComponentData::Follower)
-            .map_err(|e| format!("Invalid follower properties: {}", e)),
-        "projectile" => serde_json::from_str::<ProjectileData>(properties_json)
-            .map(GameComponentData::Projectile)
-            .map_err(|e| format!("Invalid projectile properties: {}", e)),
-        "win_condition" => serde_json::from_str::<WinConditionData>(properties_json)
-            .map(GameComponentData::WinCondition)
-            .map_err(|e| format!("Invalid win_condition properties: {}", e)),
-        "dialogue_trigger" => serde_json::from_str::<DialogueTriggerData>(properties_json)
-            .map(GameComponentData::DialogueTrigger)
-            .map_err(|e| format!("Invalid dialogue_trigger properties: {}", e)),
+        "character_controller" => {
+            let mut data = CharacterControllerData::default();
+            if let Some(v) = prop_f32(&props, "speed", 0.0, 1000.0) {
+                data.speed = v;
+            }
+            if let Some(v) = prop_f32(&props, "jumpHeight", 0.0, 100.0) {
+                data.jump_height = v;
+            }
+            if let Some(v) = prop_f32(&props, "gravityScale", -10.0, 10.0) {
+                data.gravity_scale = v;
+            }
+            if let Some(v) = prop_bool(&props, "canDoubleJump") {
+                data.can_double_jump = v;
+            }
+            Ok(GameComponentData::CharacterController(data))
+        }
+        "health" => {
+            let mut data = HealthData::default();
+            let max_hp = prop_f32(&props, "maxHp", 1.0, 1_000_000.0);
+            if let Some(v) = max_hp {
+                data.max_hp = v;
+            }
+            match prop_f32(&props, "currentHp", 0.0, 1_000_000.0) {
+                Some(v) => data.current_hp = v,
+                // A raised cap with no explicit current value means a full-health
+                // entity. Leaving the default would spawn a 250-hp enemy at 100.
+                None => {
+                    if let Some(v) = max_hp {
+                        data.current_hp = v;
+                    }
+                }
+            }
+            if let Some(v) = prop_f32(&props, "invincibilitySecs", 0.0, 60.0) {
+                data.invincibility_secs = v;
+            }
+            if let Some(v) = prop_bool(&props, "respawnOnDeath") {
+                data.respawn_on_death = v;
+            }
+            if let Some(v) = prop_vec3(&props, "respawnPoint") {
+                data.respawn_point = v;
+            }
+            if let Some(v) = prop_bool(&props, "despawnOnDeath") {
+                data.despawn_on_death = v;
+            }
+            Ok(GameComponentData::Health(data))
+        }
+        "collectible" => {
+            let mut data = CollectibleData::default();
+            if let Some(v) = prop_u32(&props, "value", 1_000_000) {
+                data.value = v;
+            }
+            if let Some(v) = prop_bool(&props, "destroyOnCollect") {
+                data.destroy_on_collect = v;
+            }
+            if let Some(v) = prop_string(&props, "pickupSoundAsset") {
+                data.pickup_sound_asset = Some(v);
+            }
+            if let Some(v) = prop_f32(&props, "rotateSpeed", -100.0, 100.0) {
+                data.rotate_speed = v;
+            }
+            Ok(GameComponentData::Collectible(data))
+        }
+        "damage_zone" => {
+            let mut data = DamageZoneData::default();
+            if let Some(v) = prop_f32(&props, "damagePerSecond", 0.0, 10_000.0) {
+                data.damage_per_second = v;
+            }
+            if let Some(v) = prop_bool(&props, "oneShot") {
+                data.one_shot = v;
+            }
+            Ok(GameComponentData::DamageZone(data))
+        }
+        "checkpoint" => {
+            let mut data = CheckpointData::default();
+            if let Some(v) = prop_bool(&props, "autoSave") {
+                data.auto_save = v;
+            }
+            Ok(GameComponentData::Checkpoint(data))
+        }
+        "teleporter" => {
+            let mut data = TeleporterData::default();
+            if let Some(v) = prop_vec3(&props, "targetPosition") {
+                data.target_position = v;
+            }
+            if let Some(v) = prop_f32(&props, "cooldownSecs", 0.0, 300.0) {
+                data.cooldown_secs = v;
+            }
+            Ok(GameComponentData::Teleporter(data))
+        }
+        "moving_platform" => {
+            let mut data = MovingPlatformData::default();
+            if let Some(v) = prop_f32(&props, "speed", 0.0, 1000.0) {
+                data.speed = v;
+            }
+            if let Some(arr) = props.get("waypoints").and_then(|v| v.as_array()) {
+                let waypoints: Vec<[f32; 3]> = arr
+                    .iter()
+                    .filter_map(|w| {
+                        let wp = w.as_array()?;
+                        if wp.len() != 3 {
+                            return None;
+                        }
+                        let mut out = [0.0f32; 3];
+                        for (slot, value) in out.iter_mut().zip(wp) {
+                            let v = value.as_f64()? as f32;
+                            if !v.is_finite() {
+                                return None;
+                            }
+                            *slot = v;
+                        }
+                        Some(out)
+                    })
+                    .collect();
+                if !waypoints.is_empty() {
+                    data.waypoints = waypoints;
+                }
+            }
+            if let Some(v) = prop_f32(&props, "pauseDuration", 0.0, 60.0) {
+                data.pause_duration = v;
+            }
+            if let Some(v) = props.get("loopMode").and_then(|v| v.as_str()) {
+                data.loop_mode = match v {
+                    "loop" => PlatformLoopMode::Loop,
+                    "once" => PlatformLoopMode::Once,
+                    _ => PlatformLoopMode::PingPong,
+                };
+            }
+            Ok(GameComponentData::MovingPlatform(data))
+        }
+        "trigger_zone" => {
+            let mut data = TriggerZoneData::default();
+            if let Some(v) = prop_string(&props, "eventName") {
+                data.event_name = v;
+            }
+            if let Some(v) = prop_bool(&props, "oneShot") {
+                data.one_shot = v;
+            }
+            Ok(GameComponentData::TriggerZone(data))
+        }
+        "spawner" => {
+            let mut data = SpawnerData::default();
+            if let Some(v) = prop_string(&props, "entityType") {
+                data.entity_type = v;
+            }
+            if let Some(v) = prop_f32(&props, "intervalSecs", 0.1, 3600.0) {
+                data.interval_secs = v;
+            }
+            if let Some(v) = prop_u32(&props, "maxCount", 1000) {
+                data.max_count = v;
+            }
+            if let Some(v) = prop_vec3(&props, "spawnOffset") {
+                data.spawn_offset = v;
+            }
+            if let Some(v) = prop_string(&props, "onTrigger") {
+                data.on_trigger = Some(v);
+            }
+            Ok(GameComponentData::Spawner(data))
+        }
+        "follower" => {
+            let mut data = FollowerData::default();
+            if let Some(v) = prop_string(&props, "targetEntityId") {
+                data.target_entity_id = Some(v);
+            }
+            if let Some(v) = prop_f32(&props, "speed", 0.0, 1000.0) {
+                data.speed = v;
+            }
+            if let Some(v) = prop_f32(&props, "stopDistance", 0.0, 1000.0) {
+                data.stop_distance = v;
+            }
+            if let Some(v) = prop_bool(&props, "lookAtTarget") {
+                data.look_at_target = v;
+            }
+            Ok(GameComponentData::Follower(data))
+        }
+        "projectile" => {
+            let mut data = ProjectileData::default();
+            if let Some(v) = prop_f32(&props, "speed", 0.0, 10_000.0) {
+                data.speed = v;
+            }
+            if let Some(v) = prop_f32(&props, "damage", 0.0, 100_000.0) {
+                data.damage = v;
+            }
+            if let Some(v) = prop_f32(&props, "lifetimeSecs", 0.0, 300.0) {
+                data.lifetime_secs = v;
+            }
+            if let Some(v) = prop_bool(&props, "gravity") {
+                data.gravity = v;
+            }
+            if let Some(v) = prop_bool(&props, "destroyOnHit") {
+                data.destroy_on_hit = v;
+            }
+            Ok(GameComponentData::Projectile(data))
+        }
+        "win_condition" => {
+            let mut data = WinConditionData::default();
+            if let Some(v) = props.get("conditionType").and_then(|v| v.as_str()) {
+                data.condition_type = match v {
+                    "collectAll" => WinConditionType::CollectAll,
+                    "reachGoal" => WinConditionType::ReachGoal,
+                    _ => WinConditionType::Score,
+                };
+            }
+            if let Some(v) = prop_u32(&props, "targetScore", u32::MAX) {
+                data.target_score = Some(v);
+            }
+            if let Some(v) = prop_string(&props, "targetEntityId") {
+                data.target_entity_id = Some(v);
+            }
+            Ok(GameComponentData::WinCondition(data))
+        }
+        "dialogue_trigger" => {
+            let mut data = DialogueTriggerData::default();
+            if let Some(v) = prop_string(&props, "dialogueTreeId") {
+                data.dialogue_tree_id = v;
+            }
+            if let Some(v) = prop_f32(&props, "interactionRadius", 0.0, 100.0) {
+                data.interaction_radius = v;
+            }
+            if let Some(v) = prop_bool(&props, "autoStart") {
+                data.auto_start = v;
+            }
+            if let Some(v) = prop_bool(&props, "oneShot") {
+                data.one_shot = v;
+            }
+            if let Some(v) = prop_string(&props, "interactionKey") {
+                data.interaction_key = v;
+            }
+            Ok(GameComponentData::DialogueTrigger(data))
+        }
         other => Err(format!("Unknown game component type: {}", other)),
     }
 }
@@ -1954,5 +2186,203 @@ mod win_condition_tests {
         // Draining an already-empty queue is a safe no-op (matches the bridge's
         // every-frame call when nothing happened).
         assert!(runtime.take_pending_events().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod build_game_component_tests {
+    use super::{build_game_component, GameComponentData, PlatformLoopMode, WinConditionType};
+
+    /// Every caller of `build_game_component` is a wire boundary: JS commands, MCP,
+    /// and `.forge` scenes authored by an older version of the editor. A properties
+    /// bag from any of them can legitimately carry a subset of the fields, so a
+    /// missing field must fall back to the type's default rather than rejecting the
+    /// whole component.
+    #[test]
+    fn a_partial_properties_bag_fills_the_rest_from_defaults() {
+        let built = build_game_component("character_controller", r#"{"speed":9.0}"#)
+            .expect("a partial bag is a valid bag");
+        let GameComponentData::CharacterController(data) = built else {
+            panic!("wrong variant");
+        };
+        assert_eq!(data.speed, 9.0);
+        assert_eq!(data.jump_height, 8.0);
+        assert_eq!(data.gravity_scale, 1.0);
+        assert!(!data.can_double_jump);
+    }
+
+    #[test]
+    fn an_empty_bag_is_all_defaults() {
+        for bag in ["", "{}"] {
+            let built = build_game_component("health", bag).expect("empty bag builds defaults");
+            let GameComponentData::Health(data) = built else {
+                panic!("wrong variant")
+            };
+            assert_eq!(data.max_hp, 100.0);
+            assert!(data.despawn_on_death);
+        }
+    }
+
+    /// A value the engine cannot use must not take the whole component down with
+    /// it — the field is skipped and its default stands. This mirrors the
+    /// allowlist-and-guard rule the JS side already follows for LLM-authored input.
+    #[test]
+    fn a_wrongly_typed_field_is_skipped_not_fatal() {
+        let built = build_game_component(
+            "character_controller",
+            r#"{"speed":"very fast","jumpHeight":3.0}"#,
+        )
+        .expect("one bad field does not sink the component");
+        let GameComponentData::CharacterController(data) = built else {
+            panic!("wrong variant");
+        };
+        assert_eq!(data.speed, 5.0, "the unusable value falls back to the default");
+        assert_eq!(data.jump_height, 3.0, "the usable sibling still applies");
+    }
+
+    #[test]
+    fn an_unknown_field_is_ignored() {
+        let built = build_game_component("checkpoint", r#"{"autoSave":false,"colour":"red"}"#)
+            .expect("an unknown key is not an error");
+        let GameComponentData::Checkpoint(data) = built else {
+            panic!("wrong variant")
+        };
+        assert!(!data.auto_save);
+    }
+
+    /// Out-of-range numbers reach the engine as physics inputs. Clamping keeps a
+    /// hallucinated 1e30 from producing a non-finite transform downstream.
+    #[test]
+    fn out_of_range_numbers_are_clamped_to_the_usable_range() {
+        let built = build_game_component("character_controller", r#"{"speed":1e30}"#)
+            .expect("an extreme value clamps rather than failing");
+        let GameComponentData::CharacterController(data) = built else {
+            panic!("wrong variant");
+        };
+        assert_eq!(data.speed, 1000.0);
+
+        let built = build_game_component("projectile", r#"{"lifetimeSecs":-4.0}"#)
+            .expect("a negative lifetime clamps");
+        let GameComponentData::Projectile(data) = built else {
+            panic!("wrong variant")
+        };
+        assert_eq!(data.lifetime_secs, 0.0);
+    }
+
+    #[test]
+    fn vector_fields_apply_only_at_the_right_arity() {
+        let built = build_game_component("teleporter", r#"{"targetPosition":[1.0,2.0,3.0]}"#)
+            .expect("a 3-element vector applies");
+        let GameComponentData::Teleporter(data) = built else {
+            panic!("wrong variant")
+        };
+        assert_eq!(data.target_position, [1.0, 2.0, 3.0]);
+
+        let built = build_game_component("teleporter", r#"{"targetPosition":[1.0,2.0]}"#)
+            .expect("a short vector is skipped, not fatal");
+        let GameComponentData::Teleporter(data) = built else {
+            panic!("wrong variant")
+        };
+        assert_eq!(data.target_position, [0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn enum_valued_fields_map_from_their_camel_case_names() {
+        let built = build_game_component("moving_platform", r#"{"loopMode":"once"}"#)
+            .expect("a known loop mode applies");
+        let GameComponentData::MovingPlatform(data) = built else {
+            panic!("wrong variant")
+        };
+        assert!(matches!(data.loop_mode, PlatformLoopMode::Once));
+
+        let built = build_game_component("win_condition", r#"{"conditionType":"collectAll"}"#)
+            .expect("a known condition type applies");
+        let GameComponentData::WinCondition(data) = built else {
+            panic!("wrong variant")
+        };
+        assert!(matches!(data.condition_type, WinConditionType::CollectAll));
+    }
+
+    #[test]
+    fn a_win_condition_keeps_its_target_score() {
+        let built =
+            build_game_component("win_condition", r#"{"conditionType":"score","targetScore":42}"#)
+                .expect("builds");
+        let GameComponentData::WinCondition(data) = built else {
+            panic!("wrong variant")
+        };
+        assert!(matches!(data.condition_type, WinConditionType::Score));
+        assert_eq!(data.target_score, Some(42));
+    }
+
+    /// The two things that ARE errors: a component type the engine has no systems
+    /// for, and a body that is not JSON at all. Both mean the caller sent something
+    /// structurally wrong, which no amount of field defaulting can repair.
+    #[test]
+    fn an_unknown_component_type_is_an_error() {
+        let err = build_game_component("teleporter_deluxe", "{}").unwrap_err();
+        assert!(err.contains("teleporter_deluxe"), "error names the type: {err}");
+    }
+
+    #[test]
+    fn malformed_json_is_an_error() {
+        let err = build_game_component("health", "{not json").unwrap_err();
+        assert!(!err.is_empty());
+    }
+
+    /// Valid JSON that is not an object has no fields to merge, so treating it as
+    /// an empty bag would silently hand back defaults for a call that was wrong.
+    #[test]
+    fn a_non_object_body_is_an_error() {
+        for body in ["[1,2,3]", "\"health\"", "42", "null"] {
+            let err = build_game_component("health", body)
+                .expect_err(&format!("{body} must be rejected"));
+            assert!(err.contains("expected a JSON object"), "{err}");
+        }
+    }
+
+    /// Raising the cap without naming a current value means a full-health entity.
+    /// Keeping the default would spawn a 250-hp enemy already at 100.
+    #[test]
+    fn raising_max_hp_alone_starts_the_entity_at_full_health() {
+        let built = build_game_component("health", r#"{"maxHp":250.0}"#).expect("builds");
+        let GameComponentData::Health(data) = built else {
+            panic!("wrong variant")
+        };
+        assert_eq!(data.max_hp, 250.0);
+        assert_eq!(data.current_hp, 250.0);
+
+        // An explicit current value still wins — a wounded enemy stays wounded.
+        let built =
+            build_game_component("health", r#"{"maxHp":250.0,"currentHp":30.0}"#).expect("builds");
+        let GameComponentData::Health(data) = built else {
+            panic!("wrong variant")
+        };
+        assert_eq!(data.current_hp, 30.0);
+    }
+
+    /// Every type the engine dispatches on must be constructible from an empty bag,
+    /// or a caller can add a component the engine will never accept.
+    #[test]
+    fn every_component_type_builds_from_an_empty_bag() {
+        for name in [
+            "character_controller",
+            "health",
+            "collectible",
+            "damage_zone",
+            "checkpoint",
+            "teleporter",
+            "moving_platform",
+            "trigger_zone",
+            "spawner",
+            "follower",
+            "projectile",
+            "win_condition",
+            "dialogue_trigger",
+        ] {
+            let built = build_game_component(name, "{}")
+                .unwrap_or_else(|e| panic!("{name} must build from an empty bag: {e}"));
+            assert_eq!(built.component_name(), name);
+        }
     }
 }
