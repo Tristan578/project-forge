@@ -21,6 +21,11 @@ const inputSchema = z.object({
   }),
   description: z.string().min(1),
   targetEntityId: z.string().min(1),    // [B6] Entity binding is required
+  // The designed name, carried alongside the id for the LLM prompt only. The engine
+  // matches set_script on the EntityId component, never on EntityName, so the name
+  // must never be what we bind to. Optional: a plan built before this field existed
+  // still runs, falling back to naming the entity by its id in the prompt.
+  targetEntityName: z.string().min(1).max(200).optional(),
   projectType: z.enum(['2d', '3d']),
 });
 
@@ -149,7 +154,7 @@ export const customScriptExecutor: ExecutorDefinition = {
       );
     }
 
-    const { system, description, targetEntityId, projectType } = parsed.data;
+    const { system, description, targetEntityId, targetEntityName, projectType } = parsed.data;
 
     // [S3] Sanitize the description before using it in the LLM prompt
     const sanitized = sanitizePrompt(description, 500);
@@ -193,6 +198,23 @@ export const customScriptExecutor: ExecutorDefinition = {
       );
     }
 
+    // The entity name originates in the LLM-authored GDD, so it is untrusted text on
+    // its way into a second prompt — same gate as every other interpolated field.
+    let promptEntityLabel = safeEntityId.filtered;
+    if (targetEntityName !== undefined) {
+      const safeEntityName = sanitizePrompt(targetEntityName, 100);
+      if (!safeEntityName.safe) {
+        return failResult(
+          makeStepError(
+            'UNSAFE_INPUT',
+            `Entity name rejected: ${safeEntityName.reason}`,
+            this.userFacingErrorMessage,
+          ),
+        );
+      }
+      promptEntityLabel = safeEntityName.filtered;
+    }
+
     // [FIX: V4-4] Sanitize system.type before interpolation into LLM prompt.
     const safeType = sanitizePrompt(system.type, 100);
     if (!safeType.safe) {
@@ -206,7 +228,7 @@ export const customScriptExecutor: ExecutorDefinition = {
     }
 
     const userMessage = [
-      `Generate a script for entity "${safeEntityId.filtered}" (project: ${projectType}).`,
+      `Generate a script for entity "${promptEntityLabel}" (project: ${projectType}).`,
       `System: ${system.category}:${safeType.filtered}`,
       `Behavior: ${sanitized.filtered}`,
       Object.keys(safeConfigEntries).length > 0
@@ -257,9 +279,11 @@ export const customScriptExecutor: ExecutorDefinition = {
     }
 
     // [FIX: NB1] Bind script to entity via set_script command (NOT update_script).
-    // Use original targetEntityId (not safeEntityId.filtered) — the entity ID is an
-    // engine-assigned identifier, not user input. sanitizePrompt above only gates
-    // whether the ID is safe for LLM prompt interpolation, not whether it's valid.
+    // Dispatch the ORIGINAL targetEntityId, never safeEntityId.filtered — sanitizing
+    // rewrites the string, and the engine matches this byte-for-byte against the
+    // entity's EntityId component (bridge/scripts.rs `apply_script_updates`). The
+    // sanitized copy exists only to be safe inside the LLM prompt. A miss here is
+    // SILENT: the engine's match loop simply never runs and emits nothing.
     ctx.dispatchCommand('set_script', {
       entityId: targetEntityId,
       source: code,

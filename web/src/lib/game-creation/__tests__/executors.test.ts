@@ -360,30 +360,39 @@ describe('character_setup executor', () => {
     expect(result.output?.['rigApplied']).toBe(true);
   });
 
-  it('resolves entity from store when entityId not provided (no duplicate spawn)', async () => {
-    const ctx = makeMockCtx();
+  // The store lookup used to be the fallback when a step carried no entityId,
+  // and it raced the engine: `entity_setup` dispatches `spawn_entity` and the
+  // scene graph is only repopulated when the engine emits back, so the lookup
+  // ran against a graph that did not yet hold the entity. The plan mints the id
+  // up front so no lookup is needed — even a store that HAS the node must not
+  // rescue a step that arrived without one.
+  it('never consults the scene graph, even when it holds a matching node', async () => {
+    const ctx = makeMockCtx({
+      store: makeMockStore({
+        sceneGraph: {
+          nodes: { n1: { entityId: 'resolved-uuid', name: 'Player' } },
+          rootIds: ['n1'],
+        },
+      } as unknown as Partial<EditorState>),
+    });
     const result = await executor.execute(
       { entity: baseEntity, projectType: '3d' },
       ctx,
     );
 
-    // When called without entityId, resolves from store — does NOT spawn a duplicate
-    expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).not.toHaveBeenCalledWith('spawn_entity', expect.anything());
-    // Should still add game component using the resolved entity name
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', expect.objectContaining({
-      componentType: 'character_controller',
-    }));
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('INVALID_INPUT');
+    expect(ctx.dispatchCommand).not.toHaveBeenCalled();
   });
 
-  it('uses default player entity when entity not provided', async () => {
+  it('rejects a step that carries no entity', async () => {
     const ctx = makeMockCtx();
     const result = await executor.execute({ projectType: '3d', entityId: 'e1' }, ctx);
 
-    // When called from system registry (no explicit entity), uses default player
-    expect(result.success).toBe(true);
-    expect(result.output?.entityId).toBe('e1');
-    expect(result.output?.projectType).toBe('3d');
+    // A default player entity would bind the rig to a name the GDD never used.
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('INVALID_INPUT');
+    expect(ctx.dispatchCommand).not.toHaveBeenCalled();
   });
 });
 

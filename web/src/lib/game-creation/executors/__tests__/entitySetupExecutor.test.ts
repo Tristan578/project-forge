@@ -37,6 +37,39 @@ describe('entitySetupExecutor', () => {
     expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', { entityType: 'capsule', name: 'Hero' });
   });
 
+  // The engine assigns every entity a random-UUID `EntityId` unless the spawn
+  // command supplies one. Downstream steps (set_script, character setup) match
+  // on that id, so the plan's id has to reach the engine or the binding silently
+  // resolves to nothing.
+  it('forwards the planned entityId to the engine and returns it', async () => {
+    const ctx = makeCtx();
+    const result = await entitySetupExecutor.execute({
+      entity: { name: 'Hero', role: 'player' },
+      scene: 'MainScene',
+      projectType: '3d',
+      entityId: 'e1e1e1e1-0000-4000-8000-000000000001',
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.output).toMatchObject({ entityId: 'e1e1e1e1-0000-4000-8000-000000000001' });
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', {
+      entityType: 'capsule',
+      name: 'Hero',
+      id: 'e1e1e1e1-0000-4000-8000-000000000001',
+    });
+  });
+
+  it('omits id when no entityId was planned', async () => {
+    const ctx = makeCtx();
+    await entitySetupExecutor.execute({
+      entity: { name: 'Hero', role: 'player' },
+      scene: 'MainScene',
+      projectType: '3d',
+    }, ctx);
+
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', { entityType: 'capsule', name: 'Hero' });
+  });
+
   // The engine holds exactly one active scene and rejects `switch_scene` by design
   // (scene management is JS-side). Dispatching it made every entity step fail.
   it('never dispatches switch_scene', async () => {

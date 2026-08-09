@@ -56,6 +56,15 @@ function makeGdd(overrides: Partial<OrchestratorGDD> = {}): OrchestratorGDD {
   };
 }
 
+/** The entity_setup step for a named entity — where its engine id is minted. */
+function findEntitySetup(plan: { steps: Array<{ executor: string; input: Record<string, unknown> }> }, name: string) {
+  const step = plan.steps.find(
+    s => s.executor === 'entity_setup' && (s.input.entity as { name: string }).name === name,
+  );
+  if (!step) throw new Error(`no entity_setup step for "${name}"`);
+  return step;
+}
+
 function makeSystem(
   category: GameSystem['category'],
   type: string,
@@ -493,6 +502,53 @@ describe('buildPlan', () => {
     expect(executors).toContain('character_setup');
   });
 
+  // A GDD is LLM-authored and nothing forces a movement system to come with a
+  // player-role entity, so this shape is reachable. `character_setup` is a
+  // non-optional step, and a non-optional step that fails sets the whole plan
+  // to `failed` — the level, the collectibles and the win condition would all
+  // be discarded to rig a character the design never named. Drop the step and
+  // tell the user instead.
+  it('drops character_setup and warns when a movement system has no player entity', () => {
+    const gdd = makeGdd({
+      systems: [makeSystem('movement', 'platformer')],
+      scenes: [
+        {
+          name: 'Main',
+          purpose: 'main',
+          systems: [],
+          entities: [
+            { name: 'Crate', role: 'decoration', systems: [], appearance: 'box', behaviors: [] },
+          ],
+          transitions: [],
+        },
+      ],
+    });
+
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const gateFinal = plan.approvalGates.find(g => g.id === 'gate_final')!;
+    const summary = gateFinal.displayData.completionSummary!;
+
+    expect(plan.steps.map(s => s.executor)).not.toContain('character_setup');
+    expect(plan.steps.map(s => s.executor)).toContain('physics_profile');
+    expect(summary.warnings).toHaveLength(1);
+    expect(summary.warnings[0]).toMatch(/player/i);
+  });
+
+  // The channel must stay quiet on the happy path — a warnings list that is
+  // never empty is one users learn to ignore.
+  it('leaves completionSummary.warnings empty when nothing was dropped', () => {
+    const plan = buildPlan(
+      makeGdd({ systems: [makeSystem('movement', 'platformer')] }),
+      'proj-1',
+      'creator',
+      10000,
+    );
+    const gateFinal = plan.approvalGates.find(g => g.id === 'gate_final')!;
+    const summary = gateFinal.displayData.completionSummary!;
+
+    expect(summary.warnings).toEqual([]);
+  });
+
   // ---------------------------------------------------------------------
   // Two systems may legitimately share a category — there are only 12
   // categories and a real game routinely wants more mechanics than that
@@ -654,9 +710,15 @@ describe('buildPlan', () => {
 
     const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
     const step = plan.steps.find(s => s.executor === 'custom_script_generate')!;
+    const narratorSetup = findEntitySetup(plan, 'Narrator');
 
     expect(step).toBeDefined();
-    expect(step.input.targetEntityId).toBe('Narrator');
+    // The engine matches set_script on the EntityId component, never on
+    // EntityName — so the binding must be the planned id, not the name.
+    expect(step.input.targetEntityId).toBe(narratorSetup.input.entityId);
+    expect(step.input.targetEntityId).not.toBe('Narrator');
+    // The human name still travels alongside it, for the LLM prompt only.
+    expect(step.input.targetEntityName).toBe('Narrator');
   });
 
   it('falls back to the first entity in the GDD when no entity declares the unknown category', () => {
@@ -668,9 +730,90 @@ describe('buildPlan', () => {
 
     const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
     const step = plan.steps.find(s => s.executor === 'custom_script_generate')!;
+    const playerSetup = findEntitySetup(plan, 'Player');
 
     expect(step).toBeDefined();
-    expect(step.input.targetEntityId).toBe('Player');
+    expect(step.input.targetEntityId).toBe(playerSetup.input.entityId);
+    expect(step.input.targetEntityName).toBe('Player');
+  });
+
+  // ---------------------------------------------------------------------
+  // Entity identity: the plan mints the engine id up front so that every
+  // downstream step binds to something the engine can actually resolve.
+  // ---------------------------------------------------------------------
+
+  it('gives every entity_setup step a distinct non-name entityId', () => {
+    const gdd = makeGdd({
+      scenes: [
+        {
+          name: 'Main',
+          purpose: 'main',
+          systems: [],
+          entities: [
+            { name: 'Player', role: 'player', systems: [], appearance: 'capsule', behaviors: [] },
+            { name: 'Enemy', role: 'enemy', systems: [], appearance: 'cube', behaviors: [] },
+          ],
+          transitions: [],
+        },
+        {
+          name: 'Boss',
+          purpose: 'boss room',
+          systems: [],
+          // Same name in a different scene — must still get its own id.
+          entities: [
+            { name: 'Enemy', role: 'enemy', systems: [], appearance: 'cube', behaviors: [] },
+          ],
+          transitions: [],
+        },
+      ],
+    });
+
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const ids = plan.steps
+      .filter(s => s.executor === 'entity_setup')
+      .map(s => s.input.entityId as string);
+
+    expect(ids).toHaveLength(3);
+    for (const id of ids) {
+      expect(typeof id).toBe('string');
+      expect(id.length).toBeGreaterThan(0);
+      expect(['Player', 'Enemy']).not.toContain(id);
+    }
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  // `character_setup` comes from the SYSTEM registry, not the entity loop, so
+  // it used to carry no entity at all — the executor then fell back to the
+  // designed name, which the engine's EntityId match never resolves. A
+  // generated player silently received no CharacterController and could not
+  // move. The plan already mints the id; it must reach the registry.
+  it('binds character_setup to the planned player entity id', () => {
+    const gdd = makeGdd({
+      systems: [makeSystem('movement', 'platformer')],
+      scenes: [
+        {
+          name: 'Main',
+          purpose: 'main',
+          systems: [],
+          entities: [
+            { name: 'Crate', role: 'decoration', systems: [], appearance: 'box', behaviors: [] },
+            { name: 'Knight', role: 'player', systems: [], appearance: 'armored', behaviors: ['move'] },
+          ],
+          transitions: [],
+        },
+      ],
+    });
+
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const step = plan.steps.find(s => s.executor === 'character_setup')!;
+    const knightSetup = findEntitySetup(plan, 'Knight');
+
+    expect(step).toBeDefined();
+    expect(step.input.entityId).toBe(knightSetup.input.entityId);
+    expect(step.input.entityId).not.toBe('Knight');
+    // The GDD's real player travels with it — the executor's own default is
+    // named 'Player', so without this a store lookup searches the wrong name.
+    expect((step.input.entity as { name: string }).name).toBe('Knight');
   });
 
   it('skips custom_script_generate for an unknown category when the GDD has zero entities anywhere', () => {

@@ -9,7 +9,12 @@
  */
 
 // Re-export public API from the core registry module
-export type { SystemStepInput, SystemDefinition } from './registry';
+export type {
+  SystemStepInput,
+  SystemDefinition,
+  SystemStepContext,
+  PlannedEntity,
+} from './registry';
 export { SYSTEM_REGISTRY, registerSystem } from './registry';
 
 // Side-effect imports — each file calls registerSystem() on load
