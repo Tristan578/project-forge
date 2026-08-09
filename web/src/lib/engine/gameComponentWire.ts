@@ -257,6 +257,7 @@ export function buildStoreComponent(
           invincibilitySecs: num(props.invincibilitySecs, 0.5),
           respawnOnDeath: bool(props.respawnOnDeath, true),
           respawnPoint: vec3(props.respawnPoint, [0, 1, 0]),
+          despawnOnDeath: bool(props.despawnOnDeath, true),
         },
       };
     }

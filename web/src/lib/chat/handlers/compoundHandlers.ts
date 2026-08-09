@@ -241,6 +241,7 @@ function buildGameComponentFromInput(
           invincibilitySecs: (props.invincibilitySecs as number) ?? 0.5,
           respawnOnDeath: (props.respawnOnDeath as boolean) ?? true,
           respawnPoint: (props.respawnPoint as [number, number, number]) ?? [0, 1, 0],
+          despawnOnDeath: (props.despawnOnDeath as boolean) ?? true,
         },
       };
     case 'collectible':

@@ -1027,7 +1027,7 @@ describe('get_game_components', () => {
 
   it('returns game components and count for an entity', async () => {
     const components = [
-      { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 1, respawnOnDeath: true, respawnPoint: [0, 0, 0] } },
+      { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 1, respawnOnDeath: true, respawnPoint: [0, 0, 0], despawnOnDeath: true } },
       { type: 'collectible', collectible: { value: 10, destroyOnCollect: true, pickupSoundAsset: null, rotateSpeed: 1 } },
     ];
     const { result } = await invokeHandler(

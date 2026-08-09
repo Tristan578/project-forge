@@ -7622,6 +7622,10 @@
               },
               "invincibilitySecs": {
                 "type": "number"
+              },
+              "despawnOnDeath": {
+                "type": "boolean",
+                "description": "Remove the entity at zero health when it is not respawning (default: true)"
               }
             }
           },

@@ -144,6 +144,15 @@ describe('buildGameComponentFromInput', () => {
     expect(h.maxHp).toBe(200);
     expect(h.currentHp).toBe(200);
     expect(h.respawnOnDeath).toBe(false);
+    // Matches the engine's `default_true` — omitting the knob must not change
+    // what an entity does at zero health.
+    expect(h.despawnOnDeath).toBe(true);
+  });
+
+  it('should build health with despawnOnDeath disabled', () => {
+    const comp = buildGameComponentFromInput('health', { despawnOnDeath: false }) as Record<string, unknown>;
+    const h = comp.health as Record<string, unknown>;
+    expect(h.despawnOnDeath).toBe(false);
   });
 
   it('should build collectible', () => {

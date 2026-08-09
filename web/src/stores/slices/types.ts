@@ -776,6 +776,12 @@ export interface HealthData {
   invincibilitySecs: number;
   respawnOnDeath: boolean;
   respawnPoint: [number, number, number];
+  /**
+   * Despawn the entity once hp reaches zero and it is not respawning.
+   * `true` matches the engine's own default; `false` leaves the entity in the
+   * scene, which is what a boss, a wreck, or a death animation needs.
+   */
+  despawnOnDeath: boolean;
 }
 
 export interface CollectibleData {
