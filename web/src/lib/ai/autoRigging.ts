@@ -431,7 +431,7 @@ export function validateRig(rig: RigTemplate): RigValidationResult {
 export function rigToCommands(rig: RigTemplate, entityId: string): EngineCommand[] {
   const commands: EngineCommand[] = [];
 
-  // Build bones array in the format expected by set_skeleton_2d
+  // Build bones array in the format expected by `SkeletonData2d`
   const bones = rig.bones.map((bone) => ({
     name: bone.name,
     parentBone: bone.parent ?? null,
@@ -444,22 +444,28 @@ export function rigToCommands(rig: RigTemplate, entityId: string): EngineCommand
     color: [1, 1, 1, 1] as [number, number, number, number],
   }));
 
-  // Set skeleton data on the entity
+  // Set skeleton data on the entity. `create_skeleton2d` is the command the
+  // engine actually implements — it takes the whole `SkeletonData2d` nested
+  // under `skeletonData`, not the fields spread across the payload root.
   commands.push({
-    command: 'set_skeleton_2d',
+    command: 'create_skeleton2d',
     payload: {
       entityId,
-      bones,
-      slots: [],
-      skins: {},
-      activeSkin: 'default',
-      ikConstraints: rig.ik_chains.map((chain) => ({
-        name: chain.name,
-        boneChain: buildBoneChain(rig.bones, chain.startBone, chain.endBone),
-        targetEntityId: 0,
-        bendDirection: 1,
-        mix: 1.0,
-      })),
+      skeletonData: {
+        bones,
+        slots: [],
+        skins: {},
+        activeSkin: 'default',
+        ikConstraints: rig.ik_chains.map((chain) => ({
+          name: chain.name,
+          boneChain: buildBoneChain(rig.bones, chain.startBone, chain.endBone),
+          // `IkConstraint2d.target_entity_id` is a UUID string, not a number.
+          // Empty means "no target yet" — the user picks one in the panel.
+          targetEntityId: '',
+          bendDirection: 1,
+          mix: 1.0,
+        })),
+      },
     },
   });
 

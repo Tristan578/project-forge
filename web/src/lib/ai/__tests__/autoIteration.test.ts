@@ -430,7 +430,8 @@ describe('applyFixes', () => {
         changes: [
           {
             entityId: 'dz-1',
-            component: 'game_component',
+            component: 'damageZone',
+            properties: { damagePerSecond: 25, oneShot: true },
             property: 'damagePerSecond',
             oldValue: 25,
             newValue: 15,
@@ -438,7 +439,8 @@ describe('applyFixes', () => {
           },
           {
             entityId: 'dz-2',
-            component: 'game_component',
+            component: 'damageZone',
+            properties: { damagePerSecond: 30, oneShot: true },
             property: 'damagePerSecond',
             oldValue: 30,
             newValue: 18,
@@ -452,11 +454,82 @@ describe('applyFixes', () => {
 
     applyFixes(fixes, dispatch, 1);
     expect(dispatch).toHaveBeenCalledTimes(2);
+    // The engine deserializes the bag with strict serde, so the dispatch has to
+    // carry EVERY field — and the untouched ones keep the entity's own values
+    // rather than being reset to the Rust defaults (`oneShot` defaults false).
     expect(dispatch).toHaveBeenCalledWith('update_game_component', {
       entityId: 'dz-1',
-      componentType: 'game_component',
-      properties: { damagePerSecond: 15 },
+      componentType: 'damage_zone',
+      properties: { damagePerSecond: 15, oneShot: true },
     });
+  });
+
+  it('fills unknown fields with engine defaults when a change captured no properties', () => {
+    const dispatch = vi.fn();
+    applyFixes(
+      [
+        {
+          issueId: 'issue-1',
+          description: 'Slow the platform',
+          changes: [
+            {
+              entityId: 'mp-1',
+              component: 'movingPlatform',
+              property: 'speed',
+              oldValue: 2,
+              newValue: 1.4,
+              command: 'update_game_component',
+            },
+          ],
+          confidence: 0.7,
+          estimatedImpact: 'Easier timing',
+        },
+      ],
+      dispatch,
+      1,
+    );
+
+    expect(dispatch).toHaveBeenCalledWith('update_game_component', {
+      entityId: 'mp-1',
+      componentType: 'moving_platform',
+      properties: {
+        speed: 1.4,
+        waypoints: [[0, 0, 0], [0, 3, 0]],
+        pauseDuration: 0.5,
+        loopMode: 'pingPong',
+      },
+    });
+  });
+
+  it('drops a game-component change naming a type the engine does not have', () => {
+    const dispatch = vi.fn();
+    applyFixes(
+      [
+        {
+          issueId: 'issue-1',
+          description: 'Nonsense fix',
+          changes: [
+            {
+              entityId: 'e-1',
+              component: 'game_component',
+              property: 'speed',
+              oldValue: 1,
+              newValue: 2,
+              command: 'update_game_component',
+            },
+          ],
+          confidence: 0.5,
+          estimatedImpact: 'None',
+        },
+      ],
+      dispatch,
+      1,
+    );
+
+    // `game_component` is not a component type. Dispatching it anyway produced
+    // "Unknown game component type: game_component" — silently, since dispatch
+    // returns void — so every rebalance fix looked applied and did nothing.
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it('returns correct iteration report structure', () => {
@@ -573,9 +646,11 @@ describe('applyFixes', () => {
     // add_game_component scheduled for next animation frame
     vi.advanceTimersByTime(16);
 
+    // snake_case, because that is the only vocabulary `build_game_component`
+    // matches. The PascalCase name this used to assert was rejected outright.
     expect(dispatch).toHaveBeenCalledWith('add_game_component', {
       entityId: 'spawned-entity-42',
-      componentType: 'Checkpoint',
+      componentType: 'checkpoint',
       properties: { autoSave: true },
     });
     expect(getSelectedEntityId).toHaveBeenCalled();
@@ -628,7 +703,7 @@ describe('applyFixes', () => {
     vi.advanceTimersByTime(16);
     expect(dispatch).toHaveBeenCalledWith('add_game_component', {
       entityId: 'entity-checkpoint',
-      componentType: 'Checkpoint',
+      componentType: 'checkpoint',
       properties: { autoSave: true },
     });
 
@@ -641,10 +716,17 @@ describe('applyFixes', () => {
 
     // Third frame: attach second game component to second entity
     vi.advanceTimersByTime(16);
+    // The queue only carries one property, so the rest of the bag comes from the
+    // Rust struct's own defaults — a single-key payload fails strict serde.
     expect(dispatch).toHaveBeenCalledWith('add_game_component', {
       entityId: 'entity-collectible',
-      componentType: 'Collectible',
-      properties: { value: 10 },
+      componentType: 'collectible',
+      properties: {
+        value: 10,
+        destroyOnCollect: true,
+        pickupSoundAsset: null,
+        rotateSpeed: 90,
+      },
     });
 
     // Each getSelectedEntityId call returned a DIFFERENT entity

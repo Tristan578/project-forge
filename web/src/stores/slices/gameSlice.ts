@@ -9,6 +9,7 @@ import type { AccessibilityProfile } from '@/lib/ai/accessibilityGenerator';
 import { createDefaultProfile } from '@/lib/ai/accessibilityGenerator';
 import type { ExportPreset } from '@/lib/export/presets';
 import { validateWinnability, formatWinnabilityMessage } from '@/lib/playMode/winnabilityValidator';
+import { toWireComponent, toEngineComponentType, toStoreComponentType } from '@/lib/engine/gameComponentWire';
 
 export interface GameSlice {
   allGameComponents: Record<string, GameComponentData[]>;
@@ -138,7 +139,12 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
         [entityId]: [...(state.allGameComponents[entityId] || []), component],
       },
     }));
-    if (dispatchCommand) dispatchCommand('add_game_component', { entityId, component });
+    // The engine wants `{ entityId, componentType, properties }`, not the store's
+    // tagged union — see gameComponentWire.ts. Dispatching the store shape makes
+    // handle_add_game_component reject with "Missing componentType", and because
+    // dispatchCommand returns void that rejection is invisible here: the store
+    // would keep a component the engine never received.
+    if (dispatchCommand) dispatchCommand('add_game_component', { entityId, ...toWireComponent(component) });
   },
   updateGameComponent: (entityId, component) => {
     set(state => ({
@@ -147,16 +153,26 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
         [entityId]: (state.allGameComponents[entityId] || []).map(c => c.type === component.type ? component : c),
       },
     }));
-    if (dispatchCommand) dispatchCommand('update_game_component', { entityId, component });
+    if (dispatchCommand) dispatchCommand('update_game_component', { entityId, ...toWireComponent(component) });
   },
   removeGameComponent: (entityId, componentName) => {
-    set(state => ({
-      allGameComponents: {
-        ...state.allGameComponents,
-        [entityId]: (state.allGameComponents[entityId] || []).filter(c => c.type !== componentName),
-      },
-    }));
-    if (dispatchCommand) dispatchCommand('remove_game_component', { entityId, componentName });
+    // Callers disagree on vocabulary: the inspector removes by the engine's
+    // snake_case name while the store's own entries are keyed by the camelCase
+    // discriminant. Normalize both sides — comparing the two spellings directly
+    // never matches, which is why the inspector's Remove button did nothing.
+    const storeType = toStoreComponentType(componentName);
+    if (storeType) {
+      set(state => ({
+        allGameComponents: {
+          ...state.allGameComponents,
+          [entityId]: (state.allGameComponents[entityId] || []).filter(c => c.type !== storeType),
+        },
+      }));
+    }
+    // An unrecognized name is still forwarded so the engine sees exactly what the
+    // caller asked for (it will ignore it) rather than a silently rewritten name.
+    const engineName = toEngineComponentType(componentName) ?? componentName;
+    if (dispatchCommand) dispatchCommand('remove_game_component', { entityId, componentName: engineName });
   },
   setGameCamera: (entityId, data) => {
     set(state => ({ allGameCameras: { ...state.allGameCameras, [entityId]: data } }));

@@ -340,25 +340,51 @@ describe('rigToCommands', () => {
     expect(commands.length).toBeGreaterThan(0);
   });
 
-  it('first command is set_skeleton_2d', () => {
+  // `set_skeleton_2d` is not a command the engine implements — dispatching it
+  // was a silent no-op, so applying a rig never did anything. The real command
+  // is `create_skeleton2d`, and it nests the whole `SkeletonData2d` under
+  // `skeletonData` rather than spreading its fields across the payload root.
+  it('first command is create_skeleton2d', () => {
     const rig = RIG_TEMPLATES.fish();
     const commands = rigToCommands(rig, 'entity-456');
-    expect(commands[0].command).toBe('set_skeleton_2d');
+    expect(commands[0].command).toBe('create_skeleton2d');
     expect(commands[0].payload.entityId).toBe('entity-456');
   });
 
-  it('includes all bones in the payload', () => {
+  it('includes all bones in the skeleton data', () => {
     const rig = RIG_TEMPLATES.fish();
     const commands = rigToCommands(rig, 'eid');
-    const payload = commands[0].payload as { bones: unknown[] };
-    expect(payload.bones).toHaveLength(8);
+    const payload = commands[0].payload as { skeletonData: { bones: unknown[] } };
+    expect(payload.skeletonData.bones).toHaveLength(8);
   });
 
   it('maps IK chains into ikConstraints', () => {
     const rig = RIG_TEMPLATES.humanoid();
     const commands = rigToCommands(rig, 'eid');
-    const payload = commands[0].payload as { ikConstraints: unknown[] };
-    expect(payload.ikConstraints).toHaveLength(4); // 2 arms + 2 legs
+    const payload = commands[0].payload as { skeletonData: { ikConstraints: unknown[] } };
+    expect(payload.skeletonData.ikConstraints).toHaveLength(4); // 2 arms + 2 legs
+  });
+
+  it('sends a string targetEntityId, which is what IkConstraint2d declares', () => {
+    // Rust models it as `target_entity_id: String` (a UUID). A number fails
+    // deserialization and takes the whole skeleton down with it.
+    const rig = RIG_TEMPLATES.humanoid();
+    const commands = rigToCommands(rig, 'eid');
+    const payload = commands[0].payload as {
+      skeletonData: { ikConstraints: Array<{ targetEntityId: unknown }> };
+    };
+    for (const constraint of payload.skeletonData.ikConstraints) {
+      expect(typeof constraint.targetEntityId).toBe('string');
+    }
+  });
+
+  it('fills in the rest of SkeletonData2d so serde can deserialize it', () => {
+    const rig = RIG_TEMPLATES.fish();
+    const commands = rigToCommands(rig, 'eid');
+    const payload = commands[0].payload as { skeletonData: Record<string, unknown> };
+    expect(Object.keys(payload.skeletonData).sort()).toEqual(
+      ['activeSkin', 'bones', 'ikConstraints', 'skins', 'slots'].sort()
+    );
   });
 
   it('produces valid bone format with localPosition tuple including Z', () => {
@@ -370,12 +396,14 @@ describe('rigToCommands', () => {
     };
     const commands = rigToCommands(rig, 'e1');
     const payload = commands[0].payload as {
-      bones: Array<{ name: string; localPosition: [number, number, number]; length: number }>;
+      skeletonData: {
+        bones: Array<{ name: string; localPosition: [number, number, number]; length: number }>;
+      };
     };
-    expect(payload.bones[0].name).toBe('root');
+    expect(payload.skeletonData.bones[0].name).toBe('root');
     // All 3 coordinates must be preserved (Z is no longer dropped)
-    expect(payload.bones[0].localPosition).toEqual([1, 2, 3]);
-    expect(payload.bones[0].length).toBe(0.5);
+    expect(payload.skeletonData.bones[0].localPosition).toEqual([1, 2, 3]);
+    expect(payload.skeletonData.bones[0].length).toBe(0.5);
   });
 });
 

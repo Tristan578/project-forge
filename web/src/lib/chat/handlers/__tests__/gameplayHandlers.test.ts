@@ -336,11 +336,17 @@ describe('get_game_components', () => {
 // ===========================================================================
 
 describe('list_game_component_types', () => {
-  it('returns success with all 12 component types', async () => {
+  it('returns success with all 13 component types', async () => {
     const { result } = await invokeHandler(gameplayHandlers, 'list_game_component_types', {});
     expect(result.success).toBe(true);
     const data = result.result as { types: Array<{ name: string; description: string }> };
-    expect(data.types).toHaveLength(12);
+    expect(data.types).toHaveLength(13);
+  });
+
+  it('lists dialogue_trigger, which the hand-written list used to omit', async () => {
+    const { result } = await invokeHandler(gameplayHandlers, 'list_game_component_types', {});
+    const data = result.result as { types: Array<{ name: string; description: string }> };
+    expect(data.types.map((t) => t.name)).toContain('dialogue_trigger');
   });
 
   it('every type entry has name and description', async () => {

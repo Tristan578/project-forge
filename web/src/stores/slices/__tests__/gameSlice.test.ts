@@ -149,9 +149,12 @@ describe('gameSlice', () => {
       const state = store.getState();
       expect(state.allGameComponents['entity-1']).toEqual([characterController]);
 
+      // The engine takes `{ entityId, componentType, properties }` — the store's
+      // tagged union is rejected outright ("Missing componentType").
       expect(mockDispatch).toHaveBeenCalledWith('add_game_component', {
         entityId: 'entity-1',
-        component: characterController,
+        componentType: 'character_controller',
+        properties: characterController.characterController,
       });
     });
 
@@ -165,7 +168,8 @@ describe('gameSlice', () => {
       expect(mockDispatch).toHaveBeenCalledTimes(2);
       expect(mockDispatch).toHaveBeenLastCalledWith('add_game_component', {
         entityId: 'entity-1',
-        component: health,
+        componentType: 'health',
+        properties: health.health,
       });
     });
 
@@ -189,7 +193,8 @@ describe('gameSlice', () => {
 
       expect(mockDispatch).toHaveBeenLastCalledWith('update_game_component', {
         entityId: 'entity-1',
-        component: updatedController,
+        componentType: 'character_controller',
+        properties: updatedController.characterController,
       });
     });
 
@@ -202,9 +207,26 @@ describe('gameSlice', () => {
       const state = store.getState();
       expect(state.allGameComponents['entity-1']).toEqual([health]);
 
+      // Normalized to the engine's vocabulary — `component_name()` is snake_case.
       expect(mockDispatch).toHaveBeenLastCalledWith('remove_game_component', {
         entityId: 'entity-1',
-        componentName: 'characterController',
+        componentName: 'character_controller',
+      });
+    });
+
+    it('should remove game component when named the way the engine names it', () => {
+      // The inspector removes by the engine's snake_case name. Comparing that
+      // directly against the store's camelCase discriminant never matched, which
+      // is why the inspector's Remove button did nothing for all 13 types.
+      store.getState().addGameComponent('entity-1', characterController);
+      store.getState().addGameComponent('entity-1', health);
+
+      store.getState().removeGameComponent('entity-1', 'character_controller');
+
+      expect(store.getState().allGameComponents['entity-1']).toEqual([health]);
+      expect(mockDispatch).toHaveBeenLastCalledWith('remove_game_component', {
+        entityId: 'entity-1',
+        componentName: 'character_controller',
       });
     });
 
