@@ -18,6 +18,8 @@ import {
   boolean,
   numberInRange,
   array,
+  validateVec3,
+  vec3,
 } from '../validators';
 
 // ===== validateEntityId =====
@@ -360,5 +362,52 @@ describe('factory helpers', () => {
     const v = array(entityId());
     expect(v(['a', 'b'], 'ids').valid).toBe(true);
     expect(v([1], 'ids').valid).toBe(false);
+  });
+
+  it('vec3() creates a working validator', () => {
+    const v = vec3();
+    expect(v([1, 2, 3], 'position').valid).toBe(true);
+    expect(v([1, 2], 'position').valid).toBe(false);
+  });
+});
+
+describe('validateVec3', () => {
+  it('accepts a 3-element array of finite numbers, including zero and negatives', () => {
+    const r = validateVec3([0, -1.5, 3], 'position');
+    expect(r.valid).toBe(true);
+    if (r.valid) expect(r.value).toEqual([0, -1.5, 3]);
+  });
+
+  it.each([
+    ['fewer than 3 elements', [1, 2]],
+    ['more than 3 elements', [1, 2, 3, 4]],
+    ['an empty array', []],
+  ])('rejects %s', (_label, input) => {
+    const r = validateVec3(input, 'position');
+    expect(r.valid).toBe(false);
+    if (!r.valid) expect(r.field).toBe('position');
+  });
+
+  it.each([
+    ['a string element', [1, '2', 3]],
+    ['NaN', [1, Number.NaN, 3]],
+    ['Infinity', [1, 2, Number.POSITIVE_INFINITY]],
+    ['null', [1, null, 3]],
+  ])('rejects %s', (_label, input) => {
+    expect(validateVec3(input, 'position').valid).toBe(false);
+  });
+
+  it.each([
+    ['a non-array object', { x: 1, y: 2, z: 3 }],
+    ['a string', '1,2,3'],
+    ['a number', 3],
+  ])('rejects %s', (_label, input) => {
+    expect(validateVec3(input, 'position').valid).toBe(false);
+  });
+
+  it('names the offending index in the error message', () => {
+    const r = validateVec3([1, 'two', 3], 'position');
+    expect(r.valid).toBe(false);
+    if (!r.valid) expect(r.error).toContain('position[1]');
   });
 });

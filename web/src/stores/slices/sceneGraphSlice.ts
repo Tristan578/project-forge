@@ -48,8 +48,17 @@ export interface SceneGraphSlice {
    * `SPAWNABLE_ENTITY_TYPES`), or when the engine isn't loaded yet
    * (`dispatchCommand` is null). Callers MUST guard on the result. Do NOT read `primaryId` after calling this — it is not updated
    * until the engine emits SELECTION_CHANGED.
+   *
+   * `position` is the optional world-space `[x, y, z]` the entity spawns at. It is
+   * forwarded only when supplied — the engine reads it as `Option<[f32; 3]>` and
+   * applies its own default placement when the key is absent. Terrain ignores it:
+   * that type routes to `spawnTerrain`, whose placement comes from the terrain data.
    */
-  spawnEntity: (type: EntityType, name?: string) => string | undefined;
+  spawnEntity: (
+    type: EntityType,
+    name?: string,
+    position?: [number, number, number]
+  ) => string | undefined;
   deleteSelectedEntities: () => void;
   duplicateSelectedEntity: () => void;
   reparentEntity: (
@@ -259,7 +268,7 @@ export const createSceneGraphSlice: StateCreator<
     }
   },
 
-  spawnEntity: (type, name) => {
+  spawnEntity: (type, name, position) => {
     if (type === 'terrain') {
       // Terrain goes through the separate `spawn_terrain` engine pipeline, but
       // it now honors a caller-supplied id just like `spawn_entity` does, so
@@ -292,7 +301,15 @@ export const createSceneGraphSlice: StateCreator<
     // it as a real failure, matching the pre-fix `void` contract.
     if (dispatchCommand) {
       const id = crypto.randomUUID();
-      dispatchCommand('spawn_entity', { entityType: type, name, id });
+      // Spread `position` in only when the caller gave one. The engine reads it as
+      // `Option<[f32; 3]>`, so an absent key means "use the engine's default
+      // placement" — a key present with an undefined value is not the same thing.
+      dispatchCommand('spawn_entity', {
+        entityType: type,
+        name,
+        id,
+        ...(position ? { position } : {}),
+      });
       return id;
     }
     return undefined;
