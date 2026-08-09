@@ -303,6 +303,22 @@ describe('sceneSlice', () => {
   describe('Scene Browser actions', () => {
     beforeEach(() => {
       localStorage.clear();
+      // PF-1100: switching and duplicating first read the live scene back out of
+      // the engine (`export_scene` → `forge:scene-exported`) and REFUSE to
+      // proceed if that answer never comes. The shared mock dispatcher records
+      // commands without answering any, so it has to be wrapped here or every
+      // async action below would sit out the full capture timeout and then
+      // correctly decline to do anything.
+      setSceneDispatcher((command, payload) => {
+        mockDispatch(command, payload);
+        if (command === 'export_scene') {
+          window.dispatchEvent(
+            new CustomEvent('forge:scene-exported', {
+              detail: { json: '{"formatVersion":3,"sceneName":"Live","entities":[]}' },
+            })
+          );
+        }
+      });
     });
 
     function persisted() {
@@ -321,28 +337,28 @@ describe('sceneSlice', () => {
       expect(store.getState().scenes.some((s) => s.name === 'New Scene')).toBe(true);
     });
 
-    it('switchScene makes the target active and loads its data', () => {
+    it('switchScene makes the target active and loads its data', async () => {
       store.getState().createNewScene('Second');
       const target = store.getState().scenes.find((s) => s.name === 'Second');
 
-      store.getState().switchScene(target!.id);
+      await store.getState().switchScene(target!.id);
 
       expect(persisted().activeSceneId).toBe(target!.id);
       expect(store.getState().activeSceneId).toBe(target!.id);
       expect(mockDispatch).toHaveBeenCalledWith('load_scene', expect.anything());
     });
 
-    it('switchScene leaves state untouched for an unknown scene', () => {
+    it('switchScene leaves state untouched for an unknown scene', async () => {
       const before = store.getState().activeSceneId;
-      store.getState().switchScene('scene_does_not_exist');
+      await store.getState().switchScene('scene_does_not_exist');
       expect(store.getState().activeSceneId).toBe(before);
     });
 
-    it('duplicateScene adds a copy', () => {
+    it('duplicateScene adds a copy', async () => {
       store.getState().createNewScene('Original');
       const source = store.getState().scenes.find((s) => s.name === 'Original');
 
-      store.getState().duplicateScene(source!.id);
+      await store.getState().duplicateScene(source!.id);
 
       expect(store.getState().scenes.some((s) => s.name === 'Original Copy')).toBe(true);
       expect(persisted().scenes.some((s) => s.name === 'Original Copy')).toBe(true);
@@ -367,11 +383,11 @@ describe('sceneSlice', () => {
       expect(persisted().scenes.some((s) => s.id === activeId)).toBe(true);
     });
 
-    it('never dispatches an unimplemented scene-management command', () => {
+    it('never dispatches an unimplemented scene-management command', async () => {
       store.getState().createNewScene('A');
       const a = store.getState().scenes.find((s) => s.name === 'A');
-      store.getState().switchScene(a!.id);
-      store.getState().duplicateScene(a!.id);
+      await store.getState().switchScene(a!.id);
+      await store.getState().duplicateScene(a!.id);
       store.getState().createNewScene('B');
       const b = store.getState().scenes.find((s) => s.name === 'B');
       store.getState().deleteScene(b!.id);

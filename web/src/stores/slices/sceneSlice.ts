@@ -12,8 +12,10 @@ import {
   deleteScene as deleteSceneIn,
   duplicateScene as duplicateSceneIn,
   switchScene as switchSceneIn,
+  saveCurrentSceneData,
   type ProjectScenes,
 } from '@/lib/scenes/sceneManager';
+import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
 
 /** Project scenes reduced to the shape the store mirrors for the Scene Browser. */
 function toSceneList(project: ProjectScenes) {
@@ -76,16 +78,46 @@ export interface SceneSlice {
   /** Set the ISO-8601 timestamp of the most recent successful cloud save (PF-540). */
   setLastCloudSave: (timestamp: string) => void;
   loadTemplate: (templateId: string) => Promise<void>;
-  switchScene: (sceneId: string) => void;
+  /**
+   * Persist the live scene, then activate `sceneId`. Async because the scene
+   * has to be read back out of the engine first — resolves once the switch has
+   * happened (or been refused), so callers awaiting it can trust the new state.
+   */
+  switchScene: (sceneId: string) => Promise<void>;
   createNewScene: (name?: string) => void;
   deleteScene: (sceneId: string) => void;
-  duplicateScene: (sceneId: string) => void;
+  /** Persist the live scene first, so duplicating the ACTIVE scene copies its current contents. */
+  duplicateScene: (sceneId: string) => Promise<void>;
 }
 
 let dispatchCommand: ((command: string, payload: unknown) => void) | null = null;
 
 export function setSceneDispatcher(dispatcher: (command: string, payload: unknown) => void): void {
   dispatchCommand = dispatcher;
+}
+
+/**
+ * Ask the engine to export the active scene. Returns `false` when there is no
+ * engine to ask, which `captureActiveScene` reads as "nothing to capture"
+ * rather than "asked and got no answer".
+ */
+export function requestSceneExport(): boolean {
+  if (!dispatchCommand) return false;
+  dispatchCommand('export_scene', {});
+  return true;
+}
+
+/**
+ * Fold the live scene into the stored project before a mutation moves off it.
+ *
+ * Returns `null` when the capture failed — a live scene exists and could not be
+ * read, so the caller must abort rather than write a stale copy over it. On
+ * `unavailable` there is no live scene to lose, so the project passes through.
+ */
+function withCapturedScene(project: ProjectScenes, capture: SceneCapture): ProjectScenes | null {
+  if (capture.status === 'failed') return null;
+  if (capture.status === 'unavailable') return project;
+  return saveCurrentSceneData(project, capture.data);
 }
 
 export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (set, get) => ({
@@ -210,8 +242,20 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
   // Scene Browser control was silently inert. They now go through sceneManager,
   // mirroring `lib/chat/handlers/sceneManagementHandlers`, and dispatch only
   // commands the engine actually implements.
-  switchScene: (sceneId) => {
-    const result = switchSceneIn(loadProjectScenes(), sceneId);
+  // PF-1100: both of these capture the live scene first. `saveCurrentSceneData`
+  // had no production caller at all, so every scene's `data` stayed null forever
+  // — switching away discarded the outgoing scene's work AND loaded nothing back.
+  switchScene: async (sceneId) => {
+    const captured = await captureActiveScene(requestSceneExport);
+    const project = withCapturedScene(loadProjectScenes(), captured);
+    if (!project) {
+      console.error(
+        `[Scenes] Refusing to switch scenes: ${captured.status === 'failed' ? captured.reason : ''} ` +
+          'Switching now would discard unsaved work in the current scene.'
+      );
+      return;
+    }
+    const result = switchSceneIn(project, sceneId);
     if ('error' in result) return;
     saveProjectScenes(result.project);
     get().setScenes(toSceneList(result.project), result.project.activeSceneId);
@@ -232,8 +276,17 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
     saveProjectScenes(result.project);
     get().setScenes(toSceneList(result.project), result.project.activeSceneId);
   },
-  duplicateScene: (sceneId) => {
-    const result = duplicateSceneIn(loadProjectScenes(), sceneId);
+  duplicateScene: async (sceneId) => {
+    const captured = await captureActiveScene(requestSceneExport);
+    const project = withCapturedScene(loadProjectScenes(), captured);
+    if (!project) {
+      console.error(
+        `[Scenes] Refusing to duplicate: ${captured.status === 'failed' ? captured.reason : ''} ` +
+          'The copy would be made from stale scene data.'
+      );
+      return;
+    }
+    const result = duplicateSceneIn(project, sceneId);
     if ('error' in result) return;
     saveProjectScenes(result.project);
     get().setScenes(toSceneList(result.project), result.project.activeSceneId);

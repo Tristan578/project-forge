@@ -6,6 +6,23 @@
 import { z } from 'zod';
 import type { ToolHandler, ExecutionResult, InputBinding } from './types';
 import { parseArgs } from './types';
+import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
+import { requestSceneExport } from '@/stores/slices/sceneSlice';
+
+/**
+ * Read the live scene back out of the engine before a mutation moves off it
+ * (PF-1100). `unavailable` means there is no engine and so no live scene to
+ * lose; `failed` means one exists and could not be read, which must abort the
+ * mutation rather than persist a stale copy over it.
+ */
+async function captureBeforeMutating(): Promise<SceneCapture> {
+  return captureActiveScene(requestSceneExport);
+}
+
+function captureFailure(capture: SceneCapture, action: string): ExecutionResult | null {
+  if (capture.status !== 'failed') return null;
+  return { success: false, error: `Could not ${action}: ${capture.reason}` };
+}
 
 export const sceneManagementHandlers: Record<string, ToolHandler> = {
   export_scene: async (_args, ctx): Promise<ExecutionResult> => {
@@ -108,8 +125,13 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   switch_scene: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ sceneId: z.string().min(1) }), args);
     if (p.error) return p.error;
-    const { switchScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
-    const project = loadProjectScenes();
+    const { switchScene, loadProjectScenes, saveProjectScenes, getSceneByName, saveCurrentSceneData } = await import('@/lib/scenes/sceneManager');
+    const capture = await captureBeforeMutating();
+    const failure = captureFailure(capture, 'switch scenes');
+    if (failure) return failure;
+
+    let project = loadProjectScenes();
+    if (capture.status === 'captured') project = saveCurrentSceneData(project, capture.data);
     let targetId = p.data.sceneId;
     const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;
@@ -133,8 +155,13 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   duplicate_scene: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ sceneId: z.string().min(1), name: z.string().optional() }), args);
     if (p.error) return p.error;
-    const { duplicateScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
-    const project = loadProjectScenes();
+    const { duplicateScene, loadProjectScenes, saveProjectScenes, getSceneByName, saveCurrentSceneData } = await import('@/lib/scenes/sceneManager');
+    const capture = await captureBeforeMutating();
+    const failure = captureFailure(capture, 'duplicate the scene');
+    if (failure) return failure;
+
+    let project = loadProjectScenes();
+    if (capture.status === 'captured') project = saveCurrentSceneData(project, capture.data);
     let targetId = p.data.sceneId;
     const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;
