@@ -10,18 +10,24 @@ const FEEL_DIRECTIVE = {
   oneLiner: 'A platformer adventure',
 };
 
-function makeCtx(overrides?: Partial<ExecutorContext>): ExecutorContext {
-  const ctx: ExecutorContext = {
+/**
+ * `store` is a TEST-ONLY override key: it seeds what `ctx.getStore()` returns.
+ * `ExecutorContext` itself has no `store` field — executors must read the live
+ * store through `getStore()`, never a snapshot (PF-1118).
+ */
+type CtxOverrides = Partial<ExecutorContext> & { store?: unknown };
+
+function makeCtx(overrides: CtxOverrides = {}): ExecutorContext {
+  const { store = { sceneGraph: { nodes: {} } } as never, ...rest } = overrides;
+  return {
     dispatchCommand: vi.fn(),
-    store: { sceneGraph: { nodes: {} } } as never,
-    getStore: () => ctx.store,
+    getStore: () => store as ReturnType<ExecutorContext['getStore']>,
     projectType: '3d',
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn().mockReturnValue(undefined),
-    ...overrides,
+    ...rest,
   };
-  return ctx;
 }
 
 describe('autoPolishExecutor', () => {

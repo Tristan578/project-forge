@@ -5,18 +5,23 @@ import { describe, it, expect, vi } from 'vitest';
 import { verifyExecutor } from '../verifyExecutor';
 import type { ExecutorContext } from '../../types';
 
-function makeCtx(overrides: Partial<ExecutorContext> = {}): ExecutorContext {
+/**
+ * `store` is a TEST-ONLY override key: it seeds what `ctx.getStore()` returns.
+ * `ExecutorContext` itself has no `store` field — executors must read the live
+ * store through `getStore()`, never a snapshot (PF-1118).
+ */
+type CtxOverrides = Partial<ExecutorContext> & { store?: unknown };
+
+function makeCtx(overrides: CtxOverrides = {}): ExecutorContext {
+  const { store = { sceneGraph: { nodes: {}, rootIds: [] } }, ...rest } = overrides;
   const ctx: ExecutorContext = {
     dispatchCommand: vi.fn(),
-    store: {
-      sceneGraph: { nodes: {}, rootIds: [] },
-    } as unknown as ExecutorContext['store'],
-    getStore: () => ctx.store,
+    getStore: () => store as ReturnType<ExecutorContext['getStore']>,
     projectType: '3d',
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn(),
-    ...overrides,
+    ...rest,
   };
   return ctx;
 }
@@ -55,7 +60,7 @@ describe('verifyExecutor', () => {
           },
           rootIds: ['e1', 'e2', 'e3', 'e4'],
         },
-      } as unknown as ExecutorContext['store'],
+      },
     });
 
     const result = await verifyExecutor.execute({}, ctx);
@@ -78,7 +83,7 @@ describe('verifyExecutor', () => {
           },
           rootIds: ['e1', 'e2', 'e3'],
         },
-      } as unknown as ExecutorContext['store'],
+      },
     });
 
     const result = await verifyExecutor.execute({}, ctx);
@@ -98,7 +103,7 @@ describe('verifyExecutor', () => {
           },
           rootIds: ['e1', 'e2', 'e3'],
         },
-      } as unknown as ExecutorContext['store'],
+      },
     });
 
     const result = await verifyExecutor.execute({}, ctx);
@@ -119,7 +124,7 @@ describe('verifyExecutor', () => {
           },
           rootIds: ['e1', 'e2', 'e3'],
         },
-      } as unknown as ExecutorContext['store'],
+      },
     });
 
     const result = await verifyExecutor.execute({}, ctx);
@@ -140,7 +145,7 @@ describe('verifyExecutor', () => {
           },
           rootIds: ['e1', 'e2', 'e3'],
         },
-      } as unknown as ExecutorContext['store'],
+      },
     });
 
     const result = await verifyExecutor.execute({}, ctx);
@@ -161,7 +166,7 @@ describe('verifyExecutor', () => {
             },
             rootIds: ['e1', 'e2', 'e3'],
           },
-        } as unknown as ExecutorContext['store'],
+        },
       });
 
       const result = await verifyExecutor.execute({}, ctx);
@@ -182,7 +187,7 @@ describe('verifyExecutor', () => {
             },
             rootIds: ['e1', 'e2', 'e3'],
           },
-        } as unknown as ExecutorContext['store'],
+        },
       });
 
       const result = await verifyExecutor.execute({}, ctx);
@@ -204,7 +209,7 @@ describe('verifyExecutor', () => {
             },
             rootIds: ['e1', 'e2', 'e3'],
           },
-        } as unknown as ExecutorContext['store'],
+        },
       });
 
       const result = await verifyExecutor.execute({}, ctx);
@@ -226,7 +231,7 @@ describe('verifyExecutor', () => {
           },
           rootIds: ['e1', 'e2', 'e3', 'e4', 'e5'],
         },
-      } as unknown as ExecutorContext['store'],
+      },
     });
 
     const result = await verifyExecutor.execute({}, ctx);

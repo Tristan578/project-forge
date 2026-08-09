@@ -3,11 +3,16 @@ vi.mock('server-only', () => ({}));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { decomposeIntoSystems } from '@/lib/game-creation';
+import { decomposeIntoSystems } from '@/lib/game-creation/decomposer';
 import { makeUser } from '@/test/utils/apiTestUtils';
 
 vi.mock('@/lib/api/middleware');
-vi.mock('@/lib/game-creation', () => ({
+// Must match the route's import specifier exactly — vitest keys module mocks by
+// resolved specifier, so mocking the `@/lib/game-creation` barrel here would
+// silently stop intercepting and run the real decomposer. The route imports the
+// module directly (not via the barrel) so a server bundle doesn't pull in the
+// client-only executor graph.
+vi.mock('@/lib/game-creation/decomposer', () => ({
   decomposeIntoSystems: vi.fn(),
 }));
 vi.mock('@/lib/monitoring/sentry-server', () => ({

@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { decomposeIntoSystems } from '@/lib/game-creation';
+import { decomposeIntoSystems } from '@/lib/game-creation/decomposer';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const maxDuration = 30;
