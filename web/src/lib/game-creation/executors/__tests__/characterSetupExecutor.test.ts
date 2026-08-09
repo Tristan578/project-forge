@@ -165,6 +165,109 @@ describe('characterSetupExecutor', () => {
     expect(result.output?.entityName).toBe('Wizard');
   });
 
+  // The feel directive used to die between the two movement steps. The plan
+  // pushes `physics_profile` first and `character_setup` second, and
+  // `applyPhysicsProfile` only tunes a CharacterController that ALREADY exists
+  // — which the player does not yet, at that point. So the controller half of
+  // the profile was always skipped, and this executor then created the
+  // controller from hardcoded numbers. Every generated 3D game moved
+  // identically no matter what the GDD asked for.
+  describe('feel directive drives the controller', () => {
+    it('derives the controller from the resolved preset', async () => {
+      const ctx = makeCtx();
+      const result = await characterSetupExecutor.execute({
+        entity: { name: 'Hero', role: 'player' },
+        projectType: '3d',
+        entityId: 'ent_floaty',
+        feelDirective: {
+          mood: 'dreamy',
+          pacing: 'medium',
+          weight: 'floaty',
+          referenceGames: [],
+          oneLiner: 'drifting through the dark',
+        },
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      // floaty + medium -> platformer_floaty: moveSpeed 6, jumpForce 8,
+      // gravity 5. gravityScale is gravity/10 — the same conversion
+      // `applyPhysicsProfile` uses, so the two paths cannot disagree.
+      expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', {
+        entityId: 'ent_floaty',
+        componentType: 'character_controller',
+        properties: { speed: 6, jumpHeight: 8, gravityScale: 0.5, canDoubleJump: false },
+      });
+    });
+
+    it('produces different movement for a different feel', async () => {
+      const ctx = makeCtx();
+      await characterSetupExecutor.execute({
+        entity: { name: 'Knight', role: 'player' },
+        projectType: '3d',
+        entityId: 'ent_heavy',
+        feelDirective: {
+          mood: 'grim',
+          pacing: 'medium',
+          weight: 'heavy',
+          referenceGames: [],
+          oneLiner: 'every step costs you',
+        },
+      }, ctx);
+
+      // heavy + medium -> rpg_weighty: moveSpeed 4, jumpForce 12, gravity 20.
+      expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', {
+        entityId: 'ent_heavy',
+        componentType: 'character_controller',
+        properties: { speed: 4, jumpHeight: 12, gravityScale: 2, canDoubleJump: false },
+      });
+    });
+
+    // [S1] The same safe-override rule `physics_profile` enforces: a
+    // user-controlled system config may move speed and jump, never gravity.
+    it('applies only the safe systemConfig overrides', async () => {
+      const ctx = makeCtx();
+      await characterSetupExecutor.execute({
+        entity: { name: 'Hero', role: 'player' },
+        projectType: '3d',
+        entityId: 'ent_cfg',
+        systemConfig: { moveSpeed: 11, jumpForce: 3, gravity: 999 },
+        feelDirective: {
+          mood: 'dreamy',
+          pacing: 'medium',
+          weight: 'floaty',
+          referenceGames: [],
+          oneLiner: 'drifting',
+        },
+      }, ctx);
+
+      expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', {
+        entityId: 'ent_cfg',
+        componentType: 'character_controller',
+        // gravityScale still 0.5 from the preset — config cannot touch it.
+        properties: { speed: 11, jumpHeight: 3, gravityScale: 0.5, canDoubleJump: false },
+      });
+    });
+
+    // A malformed directive must not take the rig down with it — a player that
+    // moves at default speed still beats a player with no controller at all.
+    it('falls back to the defaults when the directive is unusable', async () => {
+      const ctx = makeCtx();
+      const result = await characterSetupExecutor.execute({
+        entity: { name: 'Hero', role: 'player' },
+        projectType: '3d',
+        entityId: 'ent_bad',
+        feelDirective: { mood: 'odd', pacing: 'glacial', weight: 'gaseous' },
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', {
+        entityId: 'ent_bad',
+        componentType: 'character_controller',
+        properties: { speed: 5, jumpHeight: 2, gravityScale: 1, canDoubleJump: false },
+      });
+    });
+  });
+
   it('does not dispatch duplicate commands when entityId is provided', async () => {
     const ctx = makeCtx();
     await characterSetupExecutor.execute({
