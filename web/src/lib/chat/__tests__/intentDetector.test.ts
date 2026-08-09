@@ -15,6 +15,12 @@ describe('detectGameCreationIntent', () => {
       "Let's build a game about dragons",
       'I want to make a game',
       'I want to create a game',
+      // A dimension qualifier between the article and the genre is the most
+      // likely phrasing on a 2D/3D engine, and it must not defeat detection.
+      'make me a 3D platformer where you collect gems',
+      'build a 2D shooter',
+      'create me a new 3d racer',
+      'design a 2D puzzle',
     ];
 
     for (const msg of cases) {
@@ -119,6 +125,11 @@ describe('detectGameCreationIntent', () => {
   describe('mixed signals — editing + creation', () => {
     it('"change this into a platformer game" -> normal_chat (editing wins)', () => {
       const result = detectGameCreationIntent('change this into a platformer game');
+      expect(result.intent).toBe('normal_chat');
+    });
+
+    it('a dimension qualifier does not override an editing signal', () => {
+      const result = detectGameCreationIntent('update the 3D platformer camera to follow the player');
       expect(result.intent).toBe('normal_chat');
     });
   });
