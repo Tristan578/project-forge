@@ -577,7 +577,11 @@ export function EditorLayout() {
       },
       () => {
         const dispatcher = getCommandDispatcher();
-        if (dispatcher) dispatcher('save_scene', {});
+        // `export_scene`, not `save_scene`: only export emits SCENE_EXPORTED, which
+        // is the sole thing that populates autoSave's scene-JSON cache. `save_scene`
+        // is an engine stub that emits nothing, so crash-recovery autosave never
+        // wrote a byte until the user had already saved by hand (PF-1097).
+        if (dispatcher) dispatcher('export_scene', {});
       },
     );
     return () => handle.stop();
