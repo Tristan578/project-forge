@@ -326,6 +326,7 @@ export const createOrchestratorSlice: StateCreator<
       dispatchCommand: dispatcher,
       dispatchCommandBatch: getCommandBatchDispatcher() ?? undefined,
       store: useEditorStore.getState(),
+      getStore: () => useEditorStore.getState(),
       projectType: currentPlan.gdd.projectType,
       userTier: tier as UserTier,
       signal: _abortController.signal,

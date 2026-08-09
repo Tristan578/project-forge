@@ -98,14 +98,16 @@ function makeGate(id: string, afterStepId: string, overrides: Partial<ApprovalGa
 }
 
 function makeContext(signal: AbortSignal, resolveStepOutput?: (id: string) => Record<string, unknown> | undefined): ExecutorContext {
-  return {
+  const ctx: ExecutorContext = {
     dispatchCommand: vi.fn(),
     store: {} as ExecutorContext['store'],
+    getStore: () => ctx.store,
     projectType: '2d',
     userTier: 'starter',
     signal,
     resolveStepOutput: resolveStepOutput ?? (() => undefined),
   };
+  return ctx;
 }
 
 const successExecutor: ExecutorDefinition = {

@@ -45,14 +45,16 @@ function makeMockCtx(
   physicsOverrides: Record<string, unknown> = {},
   projectType: '2d' | '3d' = '3d',
 ): ExecutorContext {
-  return {
+  const ctx: ExecutorContext = {
     dispatchCommand: vi.fn(),
     store: makeMockStore(nodes, physicsOverrides),
+    getStore: () => ctx.store,
     projectType,
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn(),
   };
+  return ctx;
 }
 
 // ---------------------------------------------------------------------------

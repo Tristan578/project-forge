@@ -94,13 +94,43 @@ export const physicsProfileExecutor: ExecutorDefinition = {
 
     const ids = entityIds ?? [];
 
+    // Read the store LIVE, never off `ctx.store`. The orchestrator builds the
+    // executor context ONCE with `useEditorStore.getState()` (orchestratorSlice)
+    // and `pipelineRunner` reuses that same object for every step, so
+    // `ctx.store` is a snapshot taken before the pipeline ran. Zustand 5
+    // replaces the state object on every write
+    // (`state = Object.assign({}, state, next)`), so that snapshot can never
+    // observe a write made by an earlier step — it is frozen at pipeline start,
+    // and every entity the pipeline itself spawned is missing from it.
+    //
+    // On the movement pipeline `physics_profile` runs BEFORE `character_setup`
+    // (see systems/movement.ts), so the controller usually does not exist yet
+    // and the merge below is a no-op. It is still read live rather than
+    // defaulted: this executor is also invoked directly with explicit
+    // `entityIds` against an already-built scene, where the entity DOES have a
+    // controller, and merging against `{}` there would rebuild it from
+    // `Default` and reset every field the caller did not name — the PF-1118
+    // data loss. Reading live is correct in both orders; the snapshot is
+    // correct in neither.
+    //
+    // Read through `ctx.getStore()` rather than importing the store here.
+    // Importing it — statically OR dynamically — creates a real module edge
+    // that Turbopack traces, and this file is reachable from the server route
+    // /api/game/decompose via the executor barrel; that pulls `useEngine` and
+    // its `useSyncExternalStore` into a React Server Component and fails
+    // `next build`. A getter supplied by the (client-only) orchestrator has no
+    // such edge, and it also sidesteps the editorStore -> slices/index ->
+    // orchestratorSlice -> executors/index -> this file module cycle.
+    const liveStore = ctx.getStore();
+    const liveGameComponents = liveStore.allGameComponents;
+
     // When called from movement system registry without entityIds, apply the
     // physics profile globally via update_physics_config (scene-level settings).
     // Per-entity physics is applied when entityIds are provided.
     if (ids.length === 0) {
       // No entityIds provided (common path from movement system registry).
       // Look up physics-enabled entities from the store.
-      const storeNodes = Object.values(ctx.store.sceneGraph.nodes);
+      const storeNodes = Object.values(liveStore.sceneGraph.nodes);
       const physicsNodes = storeNodes
         .filter(n => n.components.some(c => ['PhysicsData', 'RigidBody', 'Collider'].includes(c)))
         .map(n => n.entityId)
@@ -110,11 +140,11 @@ export const physicsProfileExecutor: ExecutorDefinition = {
         return successResult({ presetUsed: presetKey, entityCount: 0, appliedGlobally: false });
       }
 
-      applyPhysicsProfile(finalProfile, ctx.dispatchCommand, physicsNodes);
+      applyPhysicsProfile(finalProfile, ctx.dispatchCommand, physicsNodes, liveGameComponents);
       return successResult({ presetUsed: presetKey, entityCount: physicsNodes.length, appliedGlobally: false });
     }
 
-    applyPhysicsProfile(finalProfile, ctx.dispatchCommand, ids);
+    applyPhysicsProfile(finalProfile, ctx.dispatchCommand, ids, liveGameComponents);
 
     return successResult({ presetUsed: presetKey, entityCount: ids.length, appliedGlobally: false });
   },

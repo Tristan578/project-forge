@@ -5,7 +5,8 @@
 import { z } from 'zod';
 import { zEntityId, zVec3, zVec2, parseArgs } from './types';
 import type { ToolHandler } from './types';
-import type { PhysicsData, JointData } from '@/stores/editorStore';
+import { buildPhysicsPatch } from '@/lib/physics/updatePhysicsPayload';
+import type { JointData } from '@/stores/editorStore';
 
 // ===== Shared Schemas =====
 
@@ -52,30 +53,24 @@ export const physicsJointHandlers: Record<string, ToolHandler> = {
 
     const { entityId, ...physInput } = p.data;
 
-    const basePhysics: PhysicsData = ctx.store.primaryPhysics ?? {
-      bodyType: 'dynamic',
-      colliderShape: 'auto',
-      restitution: 0.3,
-      friction: 0.5,
-      density: 1.0,
-      gravityScale: 1.0,
-      lockTranslationX: false,
-      lockTranslationY: false,
-      lockTranslationZ: false,
-      lockRotationX: false,
-      lockRotationY: false,
-      lockRotationZ: false,
-      isSensor: false,
-    };
-
-    const merged: PhysicsData = { ...basePhysics };
-    for (const [key, value] of Object.entries(physInput)) {
-      if (value !== undefined && key in merged) {
-        (merged as unknown as Record<string, unknown>)[key] = value;
-      }
-    }
-
-    ctx.store.updatePhysics(entityId, merged);
+    // Dispatch the validated PARTIAL straight through. The engine deserializes
+    // `update_physics` into `PhysicsPatch` (every field `Option`), so the ten
+    // fields this tool call did not name keep their live engine-side values.
+    //
+    // The previous code reconstructed a full 13-field `PhysicsData` from
+    // `ctx.store.primaryPhysics`, which is a CROSS-ENTITY leak: `primaryPhysics`
+    // holds the SELECTED entity's config, not `entityId`'s. "Make the ground
+    // bouncier" while a dynamic sensor cube was selected copied that cube's
+    // `bodyType: 'dynamic'` and `isSensor: true` onto the ground platform and the
+    // player fell through the level. With no selection it was just as wrong,
+    // stamping invented defaults over whatever the entity actually had.
+    //
+    // Going through `ctx.store.updatePhysics` is also what wrote the global
+    // `primaryPhysics` for an arbitrary entity, desyncing the inspector from the
+    // real selection. Nothing needs writing here: the engine echoes
+    // `PHYSICS_CHANGED` for the selected entity and `physicsEvents.ts` feeds
+    // `setPrimaryPhysics` from that.
+    ctx.dispatchCommand('update_physics', buildPhysicsPatch(entityId, physInput));
     return { success: true };
   },
 

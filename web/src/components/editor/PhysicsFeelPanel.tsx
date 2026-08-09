@@ -56,6 +56,9 @@ export function PhysicsFeelPanel() {
   const physics2dEntityIds = useEditorStore((s) =>
     Object.keys(s.physics2d).filter(id => s.physics2dEnabled[id])
   );
+  // `applyPhysicsProfile` merges the profile onto each entity's existing character
+  // controller rather than replacing it, so it needs the live component map.
+  const allGameComponents = useEditorStore((s) => s.allGameComponents);
 
   // --- Local state ---
   const [selectedPresetA, setSelectedPresetA] = useState<string>(PRESET_KEYS[0]);
@@ -125,7 +128,7 @@ export function PhysicsFeelPanel() {
   const handleApply = useCallback(() => {
     const dispatch = getCommandDispatcher();
     if (!dispatch) return;
-    applyPhysicsProfile(currentProfile, dispatch, physicsEntityIds);
+    applyPhysicsProfile(currentProfile, dispatch, physicsEntityIds, allGameComponents);
     setApplied(true);
     // Reset the "applied" indicator after 2 seconds
     if (appliedTimerRef.current !== null) {
@@ -135,7 +138,7 @@ export function PhysicsFeelPanel() {
       setApplied(false);
       appliedTimerRef.current = null;
     }, 2000);
-  }, [currentProfile, physicsEntityIds]);
+  }, [currentProfile, physicsEntityIds, allGameComponents]);
 
   const handleCustomGenerate = useCallback(() => {
     if (!customDescription.trim()) return;
@@ -147,9 +150,9 @@ export function PhysicsFeelPanel() {
     // Apply the custom profile directly
     const dispatch = getCommandDispatcher();
     if (dispatch) {
-      applyPhysicsProfile(profile, dispatch, physicsEntityIds);
+      applyPhysicsProfile(profile, dispatch, physicsEntityIds, allGameComponents);
     }
-  }, [customDescription, physicsEntityIds]);
+  }, [customDescription, physicsEntityIds, allGameComponents]);
 
   return (
     <div className="flex flex-col gap-4 p-3 text-sm text-zinc-300 overflow-y-auto max-h-full">
@@ -163,8 +166,18 @@ export function PhysicsFeelPanel() {
 
       {/* Preset Gallery */}
       <div>
-        <label className="text-xs text-zinc-400 mb-1 block">Preset A</label>
-        <div className="grid grid-cols-2 gap-1.5">
+        <span id="physics-preset-a-label" className="text-xs text-zinc-400 mb-1 block">
+          Preset A
+        </span>
+        {/* `aria-pressed` is what carries the selection: the selected preset is
+            otherwise distinguished only by colour, which fails WCAG 1.4.1 and
+            leaves screen-reader users with no way to tell which preset is
+            active. */}
+        <div
+          role="group"
+          aria-labelledby="physics-preset-a-label"
+          className="grid grid-cols-2 gap-1.5"
+        >
           {PRESET_KEYS.map((key) => {
             const preset = PHYSICS_PRESETS[key];
             return (
@@ -172,12 +185,12 @@ export function PhysicsFeelPanel() {
                 key={key}
                 type="button"
                 onClick={() => setSelectedPresetA(key)}
+                aria-pressed={selectedPresetA === key}
                 className={`text-left p-2 rounded text-xs transition-colors duration-150 ${
                   selectedPresetA === key
                     ? 'bg-blue-600/30 border border-blue-500/50 text-blue-300'
                     : 'bg-zinc-800 border border-zinc-700 hover:border-zinc-600 text-zinc-300'
                 }`}
-                aria-label={`Select ${preset.name} as Preset A`}
               >
                 <div className="font-medium">{preset.name}</div>
                 <div className="text-zinc-400 mt-0.5 line-clamp-2">{preset.description}</div>
@@ -268,14 +281,16 @@ export function PhysicsFeelPanel() {
               ? 'bg-zinc-800 border border-zinc-700 text-zinc-400 cursor-not-allowed'
               : 'bg-blue-600 hover:bg-blue-500 text-white'
         }`}
-        aria-label="Apply physics profile to all entities"
       >
+        {/* No `aria-label` here on purpose: it would override the text below and
+            hide both the entity count and the "Applied" confirmation from screen
+            readers — the two pieces of state this button exists to communicate. */}
         {applied ? (
-          <span className="flex items-center justify-center gap-1.5">
-            <Check className="w-3.5 h-3.5" /> Applied
+          <span role="status" className="flex items-center justify-center gap-1.5">
+            <Check aria-hidden="true" className="w-3.5 h-3.5" /> Applied
           </span>
         ) : (
-          `Apply to ${physicsEntityIds.length} entities`
+          `Apply physics profile to ${physicsEntityIds.length} entities`
         )}
       </button>
 

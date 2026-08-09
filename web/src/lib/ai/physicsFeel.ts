@@ -5,6 +5,10 @@
  * analysis of current physics settings, profile blending, and AI-powered custom profile generation.
  */
 
+import { buildStoreComponent, toWireComponent } from '@/lib/engine/gameComponentWire';
+import { buildPhysicsPatch } from '@/lib/physics/updatePhysicsPayload';
+import type { GameComponentData } from '@/stores/slices/types';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -381,32 +385,75 @@ export function analyzePhysicsFeel(ctx: PhysicsSceneContext): PhysicsAnalysis {
 
 /**
  * Apply a physics profile to all physics entities in the scene via dispatch commands.
- * Updates gravity scale and friction on physics-enabled entities, and character controller
- * properties on entities with that game component.
+ * Updates gravity scale, friction and restitution on every listed entity, and the
+ * character controller's speed / jump height / gravity scale ONLY on entities that
+ * already have a controller — see the comment at the skip below for why creating one
+ * here would be worse than skipping.
+ *
+ * `existingComponents` is the store's `allGameComponents` map. It is REQUIRED, not
+ * defaulted: `update_game_component` replaces the whole component engine-side
+ * (`build_game_component` merges the `properties` bag onto the type's `Default` and
+ * `GameComponentRuntime::add` replaces the existing entry of the same type), so
+ * dispatching without the entity's current values silently resets every field this
+ * profile does not own — `canDoubleJump` above all. A defaulted parameter would let a
+ * future call site reintroduce that data loss with no compile error (PF-1118).
  */
 export function applyPhysicsProfile(
   profile: PhysicsProfile,
   dispatch: CommandDispatcher,
   entityIds: string[],
+  existingComponents: Record<string, GameComponentData[]>,
 ): void {
   // Convert absolute gravity to gravity scale (relative to default ~10)
   const gravityScale = profile.gravity / 10;
 
   for (const entityId of entityIds) {
-    dispatch('update_physics', {
-      entityId,
-      gravityScale,
-      friction: profile.friction,
-      restitution: profile.restitution,
-    });
+    // A PARTIAL payload on purpose. The engine deserializes `update_physics` into
+    // `PhysicsPatch` (every field `Option`), so only the keys named here are written
+    // and the other ten `PhysicsData` fields — body type, collider shape, the six
+    // lock flags — keep their live values. Sending a full `PhysicsData` from here is
+    // impossible: the store only ever holds the SELECTED entity's physics
+    // (`physicsSlice.primaryPhysics`), so the rest would have to be invented from
+    // defaults, which would flip every static platform to dynamic.
+    dispatch(
+      'update_physics',
+      buildPhysicsPatch(entityId, {
+        gravityScale,
+        friction: profile.friction,
+        restitution: profile.restitution,
+      }),
+    );
 
-    dispatch('update_game_component', {
-      entityId,
-      componentType: 'character_controller',
+    // Tune the character controller only on entities that ALREADY have one.
+    //
+    // `entityIds` here is every physics-enabled entity in the scene — crates,
+    // platforms, enemies, pickups. Creating a controller for each of them would
+    // make every one of them WASD-drivable and give the scene several "players",
+    // which is a far worse outcome than leaving a profile field unapplied. The
+    // physics half above still reaches all of them, which is what a physics
+    // profile is actually for.
+    const existing = existingComponents[entityId]?.find(
+      (c): c is Extract<GameComponentData, { type: 'characterController' }> =>
+        c.type === 'characterController',
+    );
+    if (!existing) continue;
+
+    // Merge onto the existing controller so fields this profile does not own —
+    // `canDoubleJump` above all — survive the round trip.
+    const merged = buildStoreComponent('character_controller', {
+      ...existing.characterController,
       speed: profile.moveSpeed,
       jumpHeight: profile.jumpForce,
       gravityScale,
     });
+    // `buildStoreComponent` only returns null for an unrecognized name, and
+    // 'character_controller' is a literal here.
+    if (!merged) continue;
+
+    // `toWireComponent` is what puts the fields under `properties`. Without it the
+    // engine sees an absent bag, defaults it to `{}`, and rebuilds the component
+    // from scratch — see gameComponentWire.ts.
+    dispatch('update_game_component', { entityId, ...toWireComponent(merged) });
   }
 }
 

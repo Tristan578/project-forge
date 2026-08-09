@@ -139,15 +139,17 @@ function makeMockStore(overrides: Partial<EditorState> = {}): EditorState {
 }
 
 function makeMockCtx(overrides: Partial<ExecutorContext> = {}): ExecutorContext {
-  return {
+  const ctx: ExecutorContext = {
     dispatchCommand: vi.fn(),
     store: makeMockStore(),
+    getStore: () => ctx.store,
     projectType: '3d',
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn(),
     ...overrides,
   };
+  return ctx;
 }
 
 beforeEach(() => {

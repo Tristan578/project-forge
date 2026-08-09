@@ -231,8 +231,17 @@ export async function invokeHandler(
   name: string,
   args: Record<string, unknown> = {},
   storeOverrides: Record<string, unknown> = {}
-): Promise<{ result: ExecutionResult; store: ToolCallContext['store'] }> {
+): Promise<{
+  result: ExecutionResult;
+  store: ToolCallContext['store'];
+  dispatchCommand: ReturnType<typeof vi.fn>;
+}> {
   const store = createMockStore(storeOverrides);
-  const result = await handlers[name](args, { store, dispatchCommand: vi.fn() });
-  return { result, store };
+  // Returned as well as passed: handlers that dispatch straight to the engine
+  // (e.g. `update_physics`, whose payload IS its behaviour) have nothing
+  // observable on the store, so a suite that can only see `store` would have to
+  // assert on nothing at all.
+  const dispatchCommand = vi.fn();
+  const result = await handlers[name](args, { store, dispatchCommand });
+  return { result, store, dispatchCommand };
 }

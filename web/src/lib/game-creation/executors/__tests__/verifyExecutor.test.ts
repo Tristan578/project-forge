@@ -6,17 +6,19 @@ import { verifyExecutor } from '../verifyExecutor';
 import type { ExecutorContext } from '../../types';
 
 function makeCtx(overrides: Partial<ExecutorContext> = {}): ExecutorContext {
-  return {
+  const ctx: ExecutorContext = {
     dispatchCommand: vi.fn(),
     store: {
       sceneGraph: { nodes: {}, rootIds: [] },
     } as unknown as ExecutorContext['store'],
+    getStore: () => ctx.store,
     projectType: '3d',
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn(),
     ...overrides,
   };
+  return ctx;
 }
 
 function makeNode(entityId: string, name: string, components: string[] = []) {

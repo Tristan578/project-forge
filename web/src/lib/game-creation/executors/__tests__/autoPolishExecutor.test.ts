@@ -11,15 +11,17 @@ const FEEL_DIRECTIVE = {
 };
 
 function makeCtx(overrides?: Partial<ExecutorContext>): ExecutorContext {
-  return {
+  const ctx: ExecutorContext = {
     dispatchCommand: vi.fn(),
     store: { sceneGraph: { nodes: {} } } as never,
+    getStore: () => ctx.store,
     projectType: '3d',
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn().mockReturnValue(undefined),
     ...overrides,
   };
+  return ctx;
 }
 
 describe('autoPolishExecutor', () => {

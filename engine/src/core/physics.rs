@@ -15,41 +15,38 @@ use super::engine_mode::EngineMode;
 // ---------------------------------------------------------------------------
 
 /// Collider shape for physics entities.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ColliderShape {
     Cuboid,
     Ball,
     Cylinder,
     Capsule,
+    #[default]
     Auto,
 }
 
-impl Default for ColliderShape {
-    fn default() -> Self {
-        Self::Auto
-    }
-}
-
 /// Rigid body type.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RigidBodyKind {
+    #[default]
     Dynamic,
     Fixed,
     KinematicPosition,
     KinematicVelocity,
 }
 
-impl Default for RigidBodyKind {
-    fn default() -> Self {
-        Self::Dynamic
-    }
-}
-
 /// Physics configuration component (stored persistently on entities).
 /// This is the serializable, bridge-friendly representation of physics properties.
-#[derive(Component, Debug, Clone, Serialize, Deserialize)]
+///
+/// **Every field here MUST have a matching `Option<_>` field on [`PhysicsPatch`]**,
+/// which is the only way a partial `update_physics` can write physics properties.
+/// A field added here but not mirrored there is permanently unsettable through
+/// that path — silently, because the patch simply never carries it. The
+/// `physics_data_and_patch_expose_the_same_field_set` test compares the two
+/// serialized key sets and fails on any unmirrored addition, removal, or rename.
+#[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PhysicsData {
     pub body_type: RigidBodyKind,
@@ -87,20 +84,131 @@ impl Default for PhysicsData {
     }
 }
 
+/// Partial [`PhysicsData`] update.
+///
+/// Every field is optional so a caller can change one property without having
+/// to know (or resend) the other twelve. A missing field means "leave the
+/// current value alone" — it never means "reset to the default".
+///
+/// **This is a shadow struct of [`PhysicsData`] and must stay field-for-field in
+/// sync with it** — see that type's doc comment and the
+/// `physics_data_and_patch_expose_the_same_field_set` drift test.
+///
+/// This exists because the web store keeps physics config only for the
+/// *selected* entity, so it cannot reconstruct a complete 13-field payload for
+/// an arbitrary entity without inventing the other twelve from defaults — which
+/// would, for example, flip a Fixed platform to Dynamic.
+///
+/// Trade-off: because nothing is required, a misspelled key (`gravtiyScale`)
+/// silently no-ops instead of erroring, and the engine cannot detect it —
+/// `deny_unknown_fields` is incompatible with the `#[serde(flatten)]` that the
+/// `update_physics` payload uses. The web client closes that gap on its side by
+/// building every payload through `buildPhysicsPatch`
+/// (`web/src/lib/physics/updatePhysicsPayload.ts`), which copies only
+/// allowlisted keys, so an unknown key cannot reach the wire in the first place.
+/// Note that a type annotation alone would NOT be enough there: TypeScript's
+/// excess-property check does not apply to spread-in properties, so the
+/// allowlist has to be enforced by construction rather than by a `satisfies`.
+///
+/// `Serialize` is derived purely so the drift test can enumerate the field names
+/// serde actually emits; nothing on the wire ever sends a `PhysicsPatch` back out.
+/// Do NOT add `skip_serializing_if` here — that would erase the very keys the
+/// drift test compares.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PhysicsPatch {
+    pub body_type: Option<RigidBodyKind>,
+    pub collider_shape: Option<ColliderShape>,
+    pub restitution: Option<f32>,
+    pub friction: Option<f32>,
+    pub density: Option<f32>,
+    pub gravity_scale: Option<f32>,
+    pub lock_translation_x: Option<bool>,
+    pub lock_translation_y: Option<bool>,
+    pub lock_translation_z: Option<bool>,
+    pub lock_rotation_x: Option<bool>,
+    pub lock_rotation_y: Option<bool>,
+    pub lock_rotation_z: Option<bool>,
+    pub is_sensor: Option<bool>,
+}
+
+impl PhysicsPatch {
+    /// Merge this patch into `target`, overwriting only the fields it carries.
+    ///
+    /// A patch carrying all 13 fields is equivalent to a whole-struct
+    /// assignment, so pre-existing full-payload callers are unaffected.
+    pub fn apply_to(&self, target: &mut PhysicsData) {
+        if let Some(body_type) = self.body_type.clone() {
+            target.body_type = body_type;
+        }
+        if let Some(collider_shape) = self.collider_shape.clone() {
+            target.collider_shape = collider_shape;
+        }
+        if let Some(restitution) = self.restitution {
+            target.restitution = restitution;
+        }
+        if let Some(friction) = self.friction {
+            target.friction = friction;
+        }
+        if let Some(density) = self.density {
+            target.density = density;
+        }
+        if let Some(gravity_scale) = self.gravity_scale {
+            target.gravity_scale = gravity_scale;
+        }
+        if let Some(lock_translation_x) = self.lock_translation_x {
+            target.lock_translation_x = lock_translation_x;
+        }
+        if let Some(lock_translation_y) = self.lock_translation_y {
+            target.lock_translation_y = lock_translation_y;
+        }
+        if let Some(lock_translation_z) = self.lock_translation_z {
+            target.lock_translation_z = lock_translation_z;
+        }
+        if let Some(lock_rotation_x) = self.lock_rotation_x {
+            target.lock_rotation_x = lock_rotation_x;
+        }
+        if let Some(lock_rotation_y) = self.lock_rotation_y {
+            target.lock_rotation_y = lock_rotation_y;
+        }
+        if let Some(lock_rotation_z) = self.lock_rotation_z {
+            target.lock_rotation_z = lock_rotation_z;
+        }
+        if let Some(is_sensor) = self.is_sensor {
+            target.is_sensor = is_sensor;
+        }
+    }
+
+    /// Merge this patch into `target` and return `(old, new)` — the value before
+    /// the merge and the value after it.
+    ///
+    /// This exists so the ORDER of the three steps (snapshot, merge, report) is
+    /// testable natively. The bridge's `apply_physics_updates` records
+    /// `UndoableAction::PhysicsChange` and emits the JS event from the returned
+    /// pair; if the snapshot were taken after the merge, `old == new` and every
+    /// undo would silently restore nothing. The bridge is wasm-only, so that
+    /// ordering cannot be unit-tested there — keep the sequence here.
+    ///
+    /// `old == new` means the patch was a no-op (all-`None`, or every field
+    /// already at the requested value). Callers must not push history or emit a
+    /// change event in that case: `HistoryStack::push` clears the redo stack, so
+    /// a no-op patch would destroy the user's redo history.
+    pub fn apply_recording(&self, target: &mut PhysicsData) -> (PhysicsData, PhysicsData) {
+        let old = target.clone();
+        self.apply_to(target);
+        let new = target.clone();
+        (old, new)
+    }
+}
+
 /// Marker component: entity has active physics simulation enabled.
 /// Separate from PhysicsData to allow toggling physics on/off without losing config.
 #[derive(Component, Debug, Clone)]
 pub struct PhysicsEnabled;
 
 /// Resource controlling debug physics wireframe rendering.
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct DebugPhysicsEnabled(pub bool);
-
-impl Default for DebugPhysicsEnabled {
-    fn default() -> Self {
-        Self(false)
-    }
-}
 
 /// Joint type for connecting physics bodies.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -194,12 +302,20 @@ pub fn make_collider(shape: &ColliderShape, scale: Vec3) -> Collider {
 // Lifecycle systems
 // ---------------------------------------------------------------------------
 
+/// Entities that have physics enabled but no Rapier body attached yet.
+type PhysicsAttachQuery<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static PhysicsData, &'static Transform),
+    (With<PhysicsEnabled>, Without<RigidBody>),
+>;
+
 /// Unified system managing the physics simulation lifecycle.
 /// Handles Edit→Play (attach), Play→Edit (detach), and Paused states.
 fn manage_physics_lifecycle(
     engine_mode: Res<EngineMode>,
     mut commands: Commands,
-    to_attach: Query<(Entity, &PhysicsData, &Transform), (With<PhysicsEnabled>, Without<RigidBody>)>,
+    to_attach: PhysicsAttachQuery,
     to_detach: Query<Entity, With<RigidBody>>,
     mut rapier_config: Query<&mut RapierConfiguration>,
     mut prev_mode: Local<Option<EngineMode>>,
@@ -219,7 +335,7 @@ fn manage_physics_lifecycle(
 
     // Transition: Edit → Play — attach Rapier components
     let entering_play = current == EngineMode::Play
-        && prev.map_or(true, |p| p == EngineMode::Edit);
+        && prev.is_none_or(|p| p == EngineMode::Edit);
     if entering_play {
         for (entity, physics_data, transform) in to_attach.iter() {
             let collider = make_collider(&physics_data.collider_shape, transform.scale);
@@ -245,7 +361,7 @@ fn manage_physics_lifecycle(
 
     // Transition: Play/Paused → Edit (Stop) — remove all Rapier components
     let entering_edit = current == EngineMode::Edit
-        && prev.map_or(false, |p| p != EngineMode::Edit);
+        && prev.is_some_and(|p| p != EngineMode::Edit);
     if entering_edit {
         for entity in to_detach.iter() {
             commands.entity(entity)
@@ -294,7 +410,7 @@ fn manage_joint_lifecycle(
 
     // Transition: Edit → Play — attach Rapier joints
     let entering_play = current == EngineMode::Play
-        && prev.map_or(true, |p| p == EngineMode::Edit);
+        && prev.is_none_or(|p| p == EngineMode::Edit);
     if entering_play {
         for (entity, joint_data) in to_attach.iter() {
             // Resolve connected entity ID to Bevy Entity
@@ -386,7 +502,7 @@ fn manage_joint_lifecycle(
 
     // Transition: Play/Paused → Edit (Stop) — remove all ImpulseJoint components
     let entering_edit = current == EngineMode::Edit
-        && prev.map_or(false, |p| p != EngineMode::Edit);
+        && prev.is_some_and(|p| p != EngineMode::Edit);
     if entering_edit {
         for entity in to_detach.iter() {
             commands.entity(entity).remove::<ImpulseJoint>();
@@ -414,5 +530,431 @@ impl Plugin for PhysicsPlugin {
                 sync_debug_physics,
             ))
             .add_systems(Update, manage_joint_lifecycle.in_set(PlaySystemSet));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::BTreeSet;
+
+    /// The two physics enums get their `Default` from a `#[default]` variant
+    /// attribute rather than a hand-written `impl`. That is terser but positional:
+    /// moving the attribute to another variant silently changes what every
+    /// `..Default::default()` in the codebase produces. Pin the values.
+    #[test]
+    fn enum_defaults_are_auto_and_dynamic() {
+        assert_eq!(ColliderShape::default(), ColliderShape::Auto);
+        assert_eq!(RigidBodyKind::default(), RigidBodyKind::Dynamic);
+    }
+
+    /// A `PhysicsData` whose every field differs from `PhysicsData::default()`,
+    /// so a test that accidentally resets a field cannot pass by coincidence.
+    fn seeded() -> PhysicsData {
+        PhysicsData {
+            body_type: RigidBodyKind::Fixed,
+            collider_shape: ColliderShape::Capsule,
+            restitution: 0.77,
+            friction: 0.11,
+            density: 4.25,
+            gravity_scale: 2.5,
+            lock_translation_x: true,
+            lock_translation_y: true,
+            lock_translation_z: true,
+            lock_rotation_x: true,
+            lock_rotation_y: true,
+            lock_rotation_z: true,
+            is_sensor: true,
+        }
+    }
+
+    #[test]
+    fn seeded_fixture_differs_from_default_in_every_field() {
+        // Guards the other tests: if this ever overlaps with the defaults, a
+        // "field untouched" assertion could pass for the wrong reason.
+        let s = seeded();
+        let d = PhysicsData::default();
+        assert_ne!(s.body_type, d.body_type);
+        assert_ne!(s.collider_shape, d.collider_shape);
+        assert_ne!(s.restitution, d.restitution);
+        assert_ne!(s.friction, d.friction);
+        assert_ne!(s.density, d.density);
+        assert_ne!(s.gravity_scale, d.gravity_scale);
+        assert_ne!(s.lock_translation_x, d.lock_translation_x);
+        assert_ne!(s.lock_translation_y, d.lock_translation_y);
+        assert_ne!(s.lock_translation_z, d.lock_translation_z);
+        assert_ne!(s.lock_rotation_x, d.lock_rotation_x);
+        assert_ne!(s.lock_rotation_y, d.lock_rotation_y);
+        assert_ne!(s.lock_rotation_z, d.lock_rotation_z);
+        assert_ne!(s.is_sensor, d.is_sensor);
+    }
+
+    // === 1. Empty patch is a no-op ===
+
+    #[test]
+    fn empty_patch_leaves_every_field_untouched() {
+        let mut target = seeded();
+        PhysicsPatch::default().apply_to(&mut target);
+        assert_eq!(target, seeded());
+    }
+
+    #[test]
+    fn empty_json_object_deserializes_to_an_all_none_patch() {
+        let patch: PhysicsPatch = serde_json::from_value(json!({})).expect("empty object must parse");
+        let mut target = seeded();
+        patch.apply_to(&mut target);
+        assert_eq!(target, seeded());
+    }
+
+    // === 2. Single-field patches touch exactly one field ===
+
+    #[test]
+    fn single_field_patch_changes_only_that_field() {
+        // gravityScale is the field `applyPhysicsProfile` actually sends.
+        let mut target = seeded();
+        let patch = PhysicsPatch {
+            gravity_scale: Some(0.25),
+            ..Default::default()
+        };
+        patch.apply_to(&mut target);
+
+        let mut expected = seeded();
+        expected.gravity_scale = 0.25;
+        assert_eq!(target, expected);
+    }
+
+    #[test]
+    fn single_field_patch_never_resets_body_type_to_default() {
+        // The regression that made a web-side "fill in the other 12 from
+        // defaults" workaround unacceptable: a Fixed platform must stay Fixed.
+        let mut target = seeded();
+        assert_eq!(target.body_type, RigidBodyKind::Fixed);
+        PhysicsPatch { friction: Some(0.9), ..Default::default() }.apply_to(&mut target);
+        assert_eq!(target.body_type, RigidBodyKind::Fixed);
+        assert_ne!(target.body_type, PhysicsData::default().body_type);
+    }
+
+    #[test]
+    fn every_single_field_patch_changes_exactly_its_own_field() {
+        // One case per field — a patch that writes the DEFAULT value over the
+        // seeded value, so an accidental cross-field write is visible.
+        let d = PhysicsData::default();
+
+        macro_rules! case {
+            ($field:ident, $patch:expr) => {{
+                let mut target = seeded();
+                let patch: PhysicsPatch = $patch;
+                patch.apply_to(&mut target);
+                let mut expected = seeded();
+                expected.$field = d.$field.clone();
+                assert_eq!(
+                    target,
+                    expected,
+                    concat!("patching ", stringify!($field), " changed another field")
+                );
+            }};
+        }
+
+        case!(body_type, PhysicsPatch { body_type: Some(d.body_type.clone()), ..Default::default() });
+        case!(collider_shape, PhysicsPatch { collider_shape: Some(d.collider_shape.clone()), ..Default::default() });
+        case!(restitution, PhysicsPatch { restitution: Some(d.restitution), ..Default::default() });
+        case!(friction, PhysicsPatch { friction: Some(d.friction), ..Default::default() });
+        case!(density, PhysicsPatch { density: Some(d.density), ..Default::default() });
+        case!(gravity_scale, PhysicsPatch { gravity_scale: Some(d.gravity_scale), ..Default::default() });
+        case!(lock_translation_x, PhysicsPatch { lock_translation_x: Some(d.lock_translation_x), ..Default::default() });
+        case!(lock_translation_y, PhysicsPatch { lock_translation_y: Some(d.lock_translation_y), ..Default::default() });
+        case!(lock_translation_z, PhysicsPatch { lock_translation_z: Some(d.lock_translation_z), ..Default::default() });
+        case!(lock_rotation_x, PhysicsPatch { lock_rotation_x: Some(d.lock_rotation_x), ..Default::default() });
+        case!(lock_rotation_y, PhysicsPatch { lock_rotation_y: Some(d.lock_rotation_y), ..Default::default() });
+        case!(lock_rotation_z, PhysicsPatch { lock_rotation_z: Some(d.lock_rotation_z), ..Default::default() });
+        case!(is_sensor, PhysicsPatch { is_sensor: Some(d.is_sensor), ..Default::default() });
+    }
+
+    // === 3. A full 13-field patch still sets all 13 (existing-caller guarantee) ===
+
+    #[test]
+    fn full_patch_sets_all_thirteen_fields() {
+        let mut target = PhysicsData::default();
+        let s = seeded();
+        let patch = PhysicsPatch {
+            body_type: Some(s.body_type.clone()),
+            collider_shape: Some(s.collider_shape.clone()),
+            restitution: Some(s.restitution),
+            friction: Some(s.friction),
+            density: Some(s.density),
+            gravity_scale: Some(s.gravity_scale),
+            lock_translation_x: Some(s.lock_translation_x),
+            lock_translation_y: Some(s.lock_translation_y),
+            lock_translation_z: Some(s.lock_translation_z),
+            lock_rotation_x: Some(s.lock_rotation_x),
+            lock_rotation_y: Some(s.lock_rotation_y),
+            lock_rotation_z: Some(s.lock_rotation_z),
+            is_sensor: Some(s.is_sensor),
+        };
+        patch.apply_to(&mut target);
+        assert_eq!(target, seeded());
+    }
+
+    #[test]
+    fn full_camel_case_json_payload_sets_all_thirteen_fields() {
+        // The wire shape every pre-existing caller sends — must be unaffected.
+        let patch: PhysicsPatch = serde_json::from_value(json!({
+            "bodyType": "fixed",
+            "colliderShape": "capsule",
+            "restitution": 0.77,
+            "friction": 0.11,
+            "density": 4.25,
+            "gravityScale": 2.5,
+            "lockTranslationX": true,
+            "lockTranslationY": true,
+            "lockTranslationZ": true,
+            "lockRotationX": true,
+            "lockRotationY": true,
+            "lockRotationZ": true,
+            "isSensor": true
+        }))
+        .expect("full camelCase payload must parse");
+
+        let mut target = PhysicsData::default();
+        patch.apply_to(&mut target);
+        assert_eq!(target, seeded());
+    }
+
+    // === 4. Partial camelCase JSON — the case that used to be a hard error ===
+
+    #[test]
+    fn partial_camel_case_json_yields_some_for_exactly_those_fields() {
+        let patch: PhysicsPatch =
+            serde_json::from_value(json!({ "gravityScale": 0.5, "friction": 0.9 }))
+                .expect("partial payload must parse (this used to be a hard error)");
+
+        assert_eq!(patch.gravity_scale, Some(0.5));
+        assert_eq!(patch.friction, Some(0.9));
+
+        assert!(patch.body_type.is_none());
+        assert!(patch.collider_shape.is_none());
+        assert!(patch.restitution.is_none());
+        assert!(patch.density.is_none());
+        assert!(patch.lock_translation_x.is_none());
+        assert!(patch.lock_translation_y.is_none());
+        assert!(patch.lock_translation_z.is_none());
+        assert!(patch.lock_rotation_x.is_none());
+        assert!(patch.lock_rotation_y.is_none());
+        assert!(patch.lock_rotation_z.is_none());
+        assert!(patch.is_sensor.is_none());
+    }
+
+    #[test]
+    fn applying_the_physics_feel_profile_shape_preserves_the_other_ten_fields() {
+        // Exactly what `applyPhysicsProfile` sends: gravityScale + friction + restitution.
+        let patch: PhysicsPatch = serde_json::from_value(json!({
+            "gravityScale": 0.5,
+            "friction": 0.9,
+            "restitution": 0.2
+        }))
+        .expect("physics-feel payload must parse");
+
+        let mut target = seeded();
+        patch.apply_to(&mut target);
+
+        let mut expected = seeded();
+        expected.gravity_scale = 0.5;
+        expected.friction = 0.9;
+        expected.restitution = 0.2;
+        assert_eq!(target, expected);
+    }
+
+    // === 5. Enum fields round-trip through their snake_case serde form ===
+
+    #[test]
+    fn body_type_round_trips_through_snake_case() {
+        for (wire, expected) in [
+            ("dynamic", RigidBodyKind::Dynamic),
+            ("fixed", RigidBodyKind::Fixed),
+            ("kinematic_position", RigidBodyKind::KinematicPosition),
+            ("kinematic_velocity", RigidBodyKind::KinematicVelocity),
+        ] {
+            let patch: PhysicsPatch = serde_json::from_value(json!({ "bodyType": wire }))
+                .unwrap_or_else(|e| panic!("bodyType {wire} must parse: {e}"));
+            assert_eq!(patch.body_type, Some(expected.clone()), "bodyType {wire}");
+
+            let mut target = seeded();
+            patch.apply_to(&mut target);
+            assert_eq!(target.body_type, expected);
+
+            // Serializing PhysicsData must emit the same wire token back.
+            assert_eq!(
+                serde_json::to_value(&target).expect("PhysicsData serializes")["bodyType"],
+                json!(wire)
+            );
+        }
+    }
+
+    #[test]
+    fn collider_shape_round_trips_through_snake_case() {
+        for (wire, expected) in [
+            ("cuboid", ColliderShape::Cuboid),
+            ("ball", ColliderShape::Ball),
+            ("cylinder", ColliderShape::Cylinder),
+            ("capsule", ColliderShape::Capsule),
+            ("auto", ColliderShape::Auto),
+        ] {
+            let patch: PhysicsPatch = serde_json::from_value(json!({ "colliderShape": wire }))
+                .unwrap_or_else(|e| panic!("colliderShape {wire} must parse: {e}"));
+            assert_eq!(patch.collider_shape, Some(expected.clone()), "colliderShape {wire}");
+
+            let mut target = seeded();
+            patch.apply_to(&mut target);
+            assert_eq!(target.collider_shape, expected);
+
+            assert_eq!(
+                serde_json::to_value(&target).expect("PhysicsData serializes")["colliderShape"],
+                json!(wire)
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_enum_token_is_still_rejected() {
+        // All-Option fields relax MISSING keys, not INVALID values.
+        let err = serde_json::from_value::<PhysicsPatch>(json!({ "bodyType": "not_a_body_type" }));
+        assert!(err.is_err(), "an unknown bodyType token must not silently parse");
+    }
+
+    #[test]
+    fn wrong_typed_value_is_still_rejected() {
+        let err = serde_json::from_value::<PhysicsPatch>(json!({ "friction": "slippery" }));
+        assert!(err.is_err(), "a non-numeric friction must not silently parse");
+    }
+
+    #[test]
+    fn explicit_null_is_treated_as_absent() {
+        // `Option<T>` accepts JSON null as None; that must mean "leave alone",
+        // never "reset to default".
+        let patch: PhysicsPatch = serde_json::from_value(json!({ "friction": null }))
+            .expect("explicit null must parse");
+        assert!(patch.friction.is_none());
+
+        let mut target = seeded();
+        patch.apply_to(&mut target);
+        assert_eq!(target, seeded());
+    }
+
+    #[test]
+    fn unknown_key_is_ignored_and_other_fields_still_apply() {
+        // The all-Option design is justified by callers going through a typed
+        // wrapper; the engine's half of that contract is that an unknown key is
+        // absorbed (never an error, never a write). `deny_unknown_fields` is not
+        // available here — it is incompatible with the `#[serde(flatten)]` the
+        // `update_physics` payload uses — so pin the accepted behaviour: a typo'd
+        // key writes NOTHING, and the correctly-spelled siblings in the SAME
+        // payload still apply.
+        let patch: PhysicsPatch = serde_json::from_value(json!({
+            "gravtiyScale": 99.0,   // typo — must be ignored, not applied
+            "totallyUnknownKey": { "nested": [1, 2, 3] },
+            "friction": 0.9
+        }))
+        .expect("an unknown key must be ignored, not rejected");
+
+        assert!(patch.gravity_scale.is_none(), "a typo'd key must not populate its intended field");
+        assert_eq!(patch.friction, Some(0.9));
+
+        let mut target = seeded();
+        patch.apply_recording(&mut target);
+
+        let mut expected = seeded();
+        expected.friction = 0.9;
+        assert_eq!(target, expected, "the unknown key must write nothing");
+    }
+
+    // === 6. PhysicsData / PhysicsPatch field-set drift ===
+
+    #[test]
+    fn physics_data_and_patch_expose_the_same_field_set() {
+        // PhysicsPatch is a shadow struct of PhysicsData, and nothing in the type
+        // system ties the two field lists together. Adding `angular_damping` to
+        // PhysicsData without mirroring it here would make the field permanently
+        // unsettable through the partial-update path — the exact class of bug
+        // PF-1118 fixed, one level down. Enumerate the keys serde emits rather
+        // than hand-listing them, so a 14th field cannot slip past.
+        let data = serde_json::to_value(PhysicsData::default())
+            .expect("PhysicsData serializes");
+        let patch = serde_json::to_value(PhysicsPatch::default())
+            .expect("PhysicsPatch serializes");
+
+        let data_keys: BTreeSet<String> = data
+            .as_object()
+            .expect("PhysicsData serializes to an object")
+            .keys()
+            .cloned()
+            .collect();
+        let patch_keys: BTreeSet<String> = patch
+            .as_object()
+            .expect("PhysicsPatch serializes to an object")
+            .keys()
+            .cloned()
+            .collect();
+
+        assert_eq!(
+            data_keys, patch_keys,
+            "PhysicsData and PhysicsPatch field sets have drifted — every PhysicsData \
+             field needs a matching Option<_> on PhysicsPatch (and vice versa)"
+        );
+    }
+
+    // === 7. apply_recording — the ordered sequence the wasm-only bridge relies on ===
+
+    #[test]
+    fn apply_recording_returns_the_pre_merge_value_as_old() {
+        // If the snapshot were taken AFTER the merge, old would equal new and
+        // every undo would silently restore nothing.
+        let mut target = seeded();
+        let (old, new) = PhysicsPatch { friction: Some(0.9), ..Default::default() }
+            .apply_recording(&mut target);
+
+        assert_eq!(old, seeded(), "old must be the value from BEFORE the merge");
+        assert_ne!(old, new, "a non-identity patch must produce old != new");
+        assert_eq!(old.friction, seeded().friction);
+        assert_eq!(new.friction, 0.9);
+    }
+
+    #[test]
+    fn apply_recording_returns_the_merged_value_as_new() {
+        // `new` is what history stores as the redo side and what the JS event
+        // carries — it must be the MERGED struct, not the patch's subset.
+        let mut target = seeded();
+        let (_, new) = PhysicsPatch { friction: Some(0.9), ..Default::default() }
+            .apply_recording(&mut target);
+
+        assert_eq!(new, target, "new must equal the merged target");
+
+        let mut expected = seeded();
+        expected.friction = 0.9;
+        assert_eq!(new, expected, "new must carry the other twelve fields too");
+    }
+
+    #[test]
+    fn apply_recording_yields_old_equal_to_new_for_an_identity_patch() {
+        // The signal callers gate history + emit on. An all-None patch, and a
+        // patch that re-sends values already in place, are both no-ops.
+        let mut target = seeded();
+        let (old, new) = PhysicsPatch::default().apply_recording(&mut target);
+        assert_eq!(old, new, "an all-None patch must be reported as a no-op");
+        assert_eq!(target, seeded());
+
+        let mut target = seeded();
+        let (old, new) = PhysicsPatch {
+            friction: Some(seeded().friction),
+            body_type: Some(seeded().body_type),
+            ..Default::default()
+        }
+        .apply_recording(&mut target);
+        assert_eq!(old, new, "re-sending the current values must be reported as a no-op");
+        assert_eq!(target, seeded());
     }
 }

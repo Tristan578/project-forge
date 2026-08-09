@@ -22,21 +22,28 @@ describe('update_physics', () => {
     expect(result.success).toBe(false);
   });
 
-  it('calls store.updatePhysics with merged defaults when no existing physics', async () => {
-    const { result, store } = await invokeHandler(physicsJointHandlers, 'update_physics', {
+  it('dispatches ONLY the fields the tool call supplied', async () => {
+    const { result, dispatchCommand } = await invokeHandler(physicsJointHandlers, 'update_physics', {
       entityId: 'ent-1',
       bodyType: 'fixed',
     }, { primaryPhysics: null });
+
     expect(result.success).toBe(true);
-    expect(store.updatePhysics).toHaveBeenCalledTimes(1);
-    const [entityId, physics] = (store.updatePhysics as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { bodyType: string; friction: number }];
-    expect(entityId).toBe('ent-1');
-    expect(physics.bodyType).toBe('fixed');
-    expect(physics.friction).toBe(0.5); // default
+    expect(dispatchCommand).toHaveBeenCalledTimes(1);
+    const [command, payload] = dispatchCommand.mock.calls[0] as [string, Record<string, unknown>];
+    expect(command).toBe('update_physics');
+    // FULL-shape equality on purpose. `expect.objectContaining` is exactly what
+    // let the old 13-field payload go unnoticed: it asserts what IS there and is
+    // blind to the ten invented fields that flipped platforms to dynamic.
+    expect(payload).toEqual({ entityId: 'ent-1', bodyType: 'fixed' });
   });
 
-  it('merges onto existing primaryPhysics', async () => {
-    const existingPhysics = {
+  it('never sources unspecified fields from another entity\'s primaryPhysics', async () => {
+    // `primaryPhysics` is the SELECTED entity's config. Synthesizing a full
+    // payload from it made "make the ground bouncier" copy the selected sensor
+    // cube's bodyType/isSensor onto the ground and drop the player through the
+    // level (PF-1118 F4).
+    const selectedEntityPhysics = {
       bodyType: 'dynamic',
       colliderShape: 'ball',
       restitution: 0.8,
@@ -45,15 +52,19 @@ describe('update_physics', () => {
       gravityScale: 1.0,
       lockTranslationX: false, lockTranslationY: false, lockTranslationZ: false,
       lockRotationX: false, lockRotationY: false, lockRotationZ: false,
-      isSensor: false,
+      isSensor: true,
     };
-    const { store } = await invokeHandler(physicsJointHandlers, 'update_physics', {
-      entityId: 'ent-1',
-      restitution: 0.2,
-    }, { primaryPhysics: existingPhysics });
-    const [, physics] = (store.updatePhysics as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { restitution: number; friction: number }];
-    expect(physics.restitution).toBe(0.2);
-    expect(physics.friction).toBe(0.3); // preserved from existing
+    const { dispatchCommand, store } = await invokeHandler(physicsJointHandlers, 'update_physics', {
+      entityId: 'ground',
+      restitution: 0.9,
+    }, { primaryPhysics: selectedEntityPhysics });
+
+    const [, payload] = dispatchCommand.mock.calls[0] as [string, Record<string, unknown>];
+    expect(payload).toEqual({ entityId: 'ground', restitution: 0.9 });
+    // And the global selection state stays untouched — `store.updatePhysics`
+    // writes `primaryPhysics` unconditionally, desyncing the inspector from the
+    // entity it is actually showing.
+    expect(store.updatePhysics).not.toHaveBeenCalled();
   });
 
   it('accepts all valid bodyType values', async () => {
@@ -86,16 +97,17 @@ describe('update_physics', () => {
     expect(result.success).toBe(false);
   });
 
-  it('applies lock flags correctly', async () => {
-    const { store } = await invokeHandler(physicsJointHandlers, 'update_physics', {
+  it('dispatches only the lock flags that were named, not all six', async () => {
+    const { dispatchCommand } = await invokeHandler(physicsJointHandlers, 'update_physics', {
       entityId: 'ent-1',
       lockTranslationY: true,
       lockRotationX: true,
     }, { primaryPhysics: null });
-    const [, physics] = (store.updatePhysics as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { lockTranslationY: boolean; lockRotationX: boolean; lockTranslationX: boolean }];
-    expect(physics.lockTranslationY).toBe(true);
-    expect(physics.lockRotationX).toBe(true);
-    expect(physics.lockTranslationX).toBe(false); // default
+    const [, payload] = dispatchCommand.mock.calls[0] as [string, Record<string, unknown>];
+    // The four unnamed lock flags must be ABSENT, not `false` — the engine's
+    // PhysicsPatch leaves an absent field alone, whereas a `false` would unlock
+    // an axis the user never mentioned.
+    expect(payload).toEqual({ entityId: 'ent-1', lockTranslationY: true, lockRotationX: true });
   });
 });
 

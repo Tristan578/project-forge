@@ -1,15 +1,17 @@
 //! Physics 3D and 2D pending commands.
 
 use super::PendingCommands;
-use crate::core::physics::{JointData, JointLimits, JointMotor, JointType, PhysicsData};
+use crate::core::physics::{JointData, JointLimits, JointMotor, JointType, PhysicsPatch};
 use crate::core::physics_2d::{Physics2dData, PhysicsJoint2d};
 
 // === 3D Physics Request Structs ===
 
+/// A partial physics update: only the fields the caller actually sent.
+/// The drain site merges it into the entity's live `PhysicsData`.
 #[derive(Debug, Clone)]
 pub struct PhysicsUpdate {
     pub entity_id: String,
-    pub physics_data: PhysicsData,
+    pub patch: PhysicsPatch,
 }
 
 #[derive(Debug, Clone)]
