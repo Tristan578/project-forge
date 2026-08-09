@@ -106,7 +106,7 @@ vi.mock('@/lib/ai/autoRigging', () => ({
     ikChains: [],
   }),
   rigToCommands: vi.fn().mockReturnValue([
-    { command: 'set_skeleton_2d', payload: { bones: [] } },
+    { command: 'create_skeleton2d', payload: { skeletonData: { bones: [] } } },
   ]),
 }));
 
@@ -333,7 +333,7 @@ describe('character_setup executor', () => {
     expect(result.output?.['rigApplied']).toBe(false);
   });
 
-  it('dispatches set_skeleton_2d for 2D', async () => {
+  it('dispatches create_skeleton2d for 2D', async () => {
     const ctx = makeMockCtx({ projectType: '2d' });
     const result = await executor.execute(
       { entity: baseEntity, projectType: '2d', entityId: 'entity-1' },
@@ -341,7 +341,7 @@ describe('character_setup executor', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_skeleton_2d', expect.any(Object));
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('create_skeleton2d', expect.any(Object));
     expect(result.output?.['rigApplied']).toBe(true);
   });
 

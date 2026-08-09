@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
+import { toWireComponent } from '@/lib/engine/gameComponentWire';
 
 const DEFAULT_PLAYER_ENTITY = {
   name: 'Player',
@@ -59,23 +60,26 @@ export const characterSetupExecutor: ExecutorDefinition = {
 
     // [B5] Route based on project type
     if (projectType === '2d') {
-      // 2D: dispatch set_skeleton_2d for skeletal animation
-      ctx.dispatchCommand('set_skeleton_2d', {
-        entityId,
-        bones: [],
-      });
+      // 2D: create the skeleton for skeletal animation. `skeletonData` is optional
+      // and the engine defaults it, so an empty rig needs no payload beyond the
+      // entity. (This used to dispatch `set_skeleton_2d`, which is not a command
+      // the engine implements — the rig was never created.)
+      ctx.dispatchCommand('create_skeleton2d', { entityId });
     } else {
-      // 3D: Add CharacterController game component
-      // Manifest: add_game_component requires { entityId, componentType }
-      //           optional { properties: object }
+      // 3D: add the CharacterController that makes the player movable.
+      //
+      // The properties bag must be COMPLETE. `build_game_component` deserializes
+      // it with strict serde, and `CharacterControllerData` declares no serde
+      // defaults, so a bag missing even one field fails to deserialize and the
+      // component is dropped — leaving the generated player unable to move, with
+      // no error surfaced (`dispatchCommand` returns void). Building the store
+      // value and converting keeps every field accounted for by the typechecker.
       ctx.dispatchCommand('add_game_component', {
         entityId,
-        componentType: 'character_controller',
-        properties: {
-          speed: 5,
-          jumpHeight: 2,
-          gravityScale: 1,
-        },
+        ...toWireComponent({
+          type: 'characterController',
+          characterController: { speed: 5, jumpHeight: 2, gravityScale: 1, canDoubleJump: false },
+        }),
       });
     }
 

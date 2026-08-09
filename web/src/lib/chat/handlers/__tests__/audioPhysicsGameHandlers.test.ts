@@ -1304,11 +1304,13 @@ describe('gameplayHandlers', () => {
   // list_game_component_types
   // -------------------------------------------------------------------------
   describe('list_game_component_types', () => {
-    it('returns all 12 component types', async () => {
+    // 13, not 12 — the hand-written list used to omit `dialogue_trigger`, which
+    // the engine has always accepted.
+    it('returns all 13 component types', async () => {
       const { result } = await invokeHandler(gameplayHandlers, 'list_game_component_types');
       expect(result.success).toBe(true);
       const data = result.result as { types: { name: string; description: string }[] };
-      expect(data.types).toHaveLength(12);
+      expect(data.types).toHaveLength(13);
     });
 
     it('includes expected component type names', async () => {

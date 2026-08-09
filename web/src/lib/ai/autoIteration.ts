@@ -6,6 +6,8 @@
  * analytics -> diagnose -> fix -> redeploy.
  */
 
+import { buildStoreComponent, toWireComponent } from '@/lib/engine/gameComponentWire';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -30,11 +32,26 @@ export interface GameIssue {
 
 export interface FixChange {
   entityId?: string;
+  /**
+   * For a game-component change, the component's type in either vocabulary
+   * (`damageZone` or `damage_zone`) — see `gameComponentWire.ts`. For a
+   * `spawn_entity` change, the key that selects the entity type and the
+   * component to attach. For anything else, a free-form label.
+   */
   component: string;
   property: string;
   oldValue: unknown;
   newValue: unknown;
   command: string;
+  /**
+   * The entity's other current properties, captured when the fix was generated.
+   *
+   * The engine deserializes a game component's properties bag with strict serde,
+   * so a dispatch has to carry EVERY field. Without this, applying a fix would
+   * reset the entity's untouched fields to the Rust defaults instead of leaving
+   * them alone.
+   */
+  properties?: Record<string, unknown>;
 }
 
 export interface IssueFix {
@@ -284,7 +301,8 @@ function generateFixForIssue(
           description: `Reduce damage zone intensity in "${issue.affectedArea}" to ease difficulty`,
           changes: damageEntities.map((e) => ({
             entityId: e.id,
-            component: 'game_component',
+            component: 'damageZone',
+            properties: e.properties,
             property: 'damagePerSecond',
             oldValue: (e.properties.damagePerSecond as number) ?? 25,
             newValue: Math.max(5, ((e.properties.damagePerSecond as number) ?? 25) * 0.6),
@@ -305,7 +323,8 @@ function generateFixForIssue(
           description: `Increase player health to compensate for difficulty spike`,
           changes: healthEntities.map((e) => ({
             entityId: e.id,
-            component: 'game_component',
+            component: 'health',
+            properties: e.properties,
             property: 'maxHp',
             oldValue: (e.properties.maxHp as number) ?? 100,
             newValue: Math.round(((e.properties.maxHp as number) ?? 100) * 1.5),
@@ -387,7 +406,8 @@ function generateFixForIssue(
           description: `Slow down moving platforms to make progression easier`,
           changes: movingPlatforms.map((e) => ({
             entityId: e.id,
-            component: 'game_component',
+            component: 'movingPlatform',
+            properties: e.properties,
             property: 'speed',
             oldValue: (e.properties.speed as number) ?? 2,
             newValue: Math.max(0.5, ((e.properties.speed as number) ?? 2) * 0.7),
@@ -426,7 +446,8 @@ function generateFixForIssue(
           description: `Rebalance enemy spawner intervals`,
           changes: spawners.map((e) => ({
             entityId: e.id,
-            component: 'game_component',
+            component: 'spawner',
+            properties: e.properties,
             property: 'intervalSecs',
             oldValue: (e.properties.intervalSecs as number) ?? 3,
             newValue: ((e.properties.intervalSecs as number) ?? 3) * 1.5,
@@ -467,11 +488,17 @@ function generateFixForIssue(
 
 export type CommandDispatcher = (command: string, payload: unknown) => void;
 
-/** Game component types that should be attached after spawning an entity. */
+/**
+ * Game component types that should be attached after spawning an entity.
+ *
+ * Values are component names `gameComponentWire` recognizes. They used to be
+ * PascalCase (`'Checkpoint'`), which `build_game_component` matches against
+ * nothing — every attach was rejected with "Unknown game component type".
+ */
 const SPAWN_GAME_COMPONENTS: Record<string, string> = {
-  checkpoint: 'Checkpoint',
-  collectible: 'Collectible',
-  triggerZone: 'TriggerZone',
+  checkpoint: 'checkpoint',
+  collectible: 'collectible',
+  triggerZone: 'triggerZone',
 };
 
 /**
@@ -526,6 +553,27 @@ export function applyFixes(
         dispatch(change.command, {
           [change.property]: change.newValue,
         });
+      } else if (
+        change.command === 'add_game_component' ||
+        change.command === 'update_game_component'
+      ) {
+        // A game component cannot be dispatched as a single property. The engine
+        // deserializes the bag with strict serde, so a one-key payload fails to
+        // deserialize and the whole component is dropped — silently, since
+        // dispatch returns void. Merge the change over the entity's captured
+        // properties and let buildStoreComponent fill whatever is still missing
+        // with the same defaults the Rust struct uses.
+        //
+        // This also normalizes the type name: these changes used to carry the
+        // literal string 'game_component', which matches no component type in
+        // the engine, so every rebalance fix was rejected outright.
+        const merged = buildStoreComponent(change.component, {
+          ...(change.properties ?? {}),
+          [change.property]: change.newValue,
+        });
+        if (merged) {
+          dispatch(change.command, { entityId: change.entityId, ...toWireComponent(merged) });
+        }
       } else {
         dispatch(change.command, {
           entityId: change.entityId,
@@ -552,11 +600,14 @@ export function applyFixes(
       requestAnimationFrame(() => {
         const entityId = getSelectedEntityId!();
         if (entityId) {
-          dispatch('add_game_component', {
-            entityId,
-            componentType: item.gameComponent,
-            properties: { [item.property]: item.value },
+          // Same strict-serde constraint as above: the one property we want to
+          // set is not a valid bag on its own, so build the complete component.
+          const component = buildStoreComponent(item.gameComponent, {
+            [item.property]: item.value,
           });
+          if (component) {
+            dispatch('add_game_component', { entityId, ...toWireComponent(component) });
+          }
         }
         // Process next spawn on the following frame (only if items remain)
         if (idx < spawnQueue.length) {

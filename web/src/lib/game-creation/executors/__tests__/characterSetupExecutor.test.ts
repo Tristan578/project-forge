@@ -35,14 +35,16 @@ describe('characterSetupExecutor', () => {
       projectType: '3d',
       rigApplied: false,
     });
+    // `canDoubleJump` has no `#[serde(default)]` on the Rust struct, so a bag
+    // missing it fails deserialization and the component is never added.
     expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', {
       entityId: 'ent_123',
       componentType: 'character_controller',
-      properties: { speed: 5, jumpHeight: 2, gravityScale: 1 },
+      properties: { speed: 5, jumpHeight: 2, gravityScale: 1, canDoubleJump: false },
     });
   });
 
-  it('dispatches set_skeleton_2d for 2D projects', async () => {
+  it('dispatches create_skeleton2d for 2D projects', async () => {
     const ctx = makeCtx();
     const result = await characterSetupExecutor.execute({
       entity: { name: 'Sprite', role: 'player', appearance: 'pixel', behaviors: ['move'] },
@@ -52,9 +54,10 @@ describe('characterSetupExecutor', () => {
 
     expect(result.success).toBe(true);
     expect(result.output?.rigApplied).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_skeleton_2d', {
+    // `set_skeleton_2d` is not a command the engine implements — the rig was
+    // never created. `skeletonData` is optional and the engine defaults it.
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('create_skeleton2d', {
       entityId: 'ent_456',
-      bones: [],
     });
   });
 
