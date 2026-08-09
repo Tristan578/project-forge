@@ -325,7 +325,6 @@ export const createOrchestratorSlice: StateCreator<
     const ctx: ExecutorContext = {
       dispatchCommand: dispatcher,
       dispatchCommandBatch: getCommandBatchDispatcher() ?? undefined,
-      store: useEditorStore.getState(),
       getStore: () => useEditorStore.getState(),
       projectType: currentPlan.gdd.projectType,
       userTier: tier as UserTier,

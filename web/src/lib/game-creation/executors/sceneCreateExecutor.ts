@@ -69,7 +69,7 @@ export const sceneCreateExecutor: ExecutorDefinition = {
       const project = loadProjectScenes();
       const { project: withScene, sceneId } = createScene(project, name);
       saveProjectScenes({ ...withScene, activeSceneId: sceneId });
-      ctx.store.setScenes(
+      ctx.getStore().setScenes(
         withScene.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
         sceneId,
       );

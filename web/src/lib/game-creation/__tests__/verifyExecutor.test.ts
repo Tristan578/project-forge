@@ -45,10 +45,13 @@ function makeMockCtx(
   physicsOverrides: Record<string, unknown> = {},
   projectType: '2d' | '3d' = '3d',
 ): ExecutorContext {
+  // Closed over, not stored on the context: executors read the store through
+  // `getStore()` at call time, and `ExecutorContext` no longer carries a
+  // snapshot field for them to reach for by mistake (PF-1118).
+  const store = makeMockStore(nodes, physicsOverrides);
   const ctx: ExecutorContext = {
     dispatchCommand: vi.fn(),
-    store: makeMockStore(nodes, physicsOverrides),
-    getStore: () => ctx.store,
+    getStore: () => store,
     projectType,
     userTier: 'creator',
     signal: new AbortController().signal,

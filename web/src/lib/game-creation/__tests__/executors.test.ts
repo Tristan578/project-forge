@@ -138,16 +138,23 @@ function makeMockStore(overrides: Partial<EditorState> = {}): EditorState {
   } as unknown as EditorState;
 }
 
-function makeMockCtx(overrides: Partial<ExecutorContext> = {}): ExecutorContext {
+/**
+ * `store` is a TEST-ONLY override key: it seeds what `ctx.getStore()` returns.
+ * `ExecutorContext` itself has no `store` field — executors must read the live
+ * store through `getStore()`, never a snapshot (PF-1118).
+ */
+type CtxOverrides = Partial<ExecutorContext> & { store?: unknown };
+
+function makeMockCtx(overrides: CtxOverrides = {}): ExecutorContext {
+  const { store = makeMockStore(), ...rest } = overrides;
   const ctx: ExecutorContext = {
     dispatchCommand: vi.fn(),
-    store: makeMockStore(),
-    getStore: () => ctx.store,
+    getStore: () => store as ReturnType<ExecutorContext['getStore']>,
     projectType: '3d',
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn(),
-    ...overrides,
+    ...rest,
   };
   return ctx;
 }
@@ -178,7 +185,7 @@ describe('scene_create executor', () => {
 
     expect(result.success).toBe(true);
     expect(result.output?.['sceneName']).toBe('Level 1');
-    expect(ctx.store.setScenes).toHaveBeenCalledWith(
+    expect(ctx.getStore().setScenes).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ name: 'Level 1' })]),
       expect.any(String),
     );
@@ -201,7 +208,7 @@ describe('scene_create executor', () => {
     // When called from system registry (camera/world), name defaults to 'Untitled Scene'
     expect(result.success).toBe(true);
     expect(result.output?.['sceneName']).toBe('Untitled Scene');
-    expect(ctx.store.setScenes).toHaveBeenCalledWith(
+    expect(ctx.getStore().setScenes).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ name: 'Untitled Scene' })]),
       expect.any(String),
     );

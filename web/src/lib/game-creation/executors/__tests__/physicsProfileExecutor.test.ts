@@ -22,27 +22,6 @@ vi.mock('@/lib/ai/physicsFeel', () => ({
   applyPhysicsProfile: (...args: unknown[]) => mockApplyPhysicsProfile(...args),
 }));
 
-/**
- * A snapshot-shaped stub for `ctx.store`.
- *
- * The executor deliberately reads NEITHER `sceneGraph` nor `allGameComponents`
- * from here: `ctx.store` is a `getState()` snapshot the orchestrator captures
- * once, before the pipeline runs, and Zustand replaces the state object on every
- * write — so it can never see an entity a previous step spawned (PF-1118 review
- * cluster A). Every fixture below therefore seeds the LIVE store and leaves this
- * stub holding decoy data, so an assertion fails loudly if the executor ever
- * regresses to reading the snapshot.
- */
-function makeStore(
-  nodes: Record<string, ReturnType<typeof makeNode>> = {},
-  allGameComponents: Record<string, unknown[]> = {},
-): ExecutorContext['store'] {
-  return {
-    sceneGraph: { nodes, rootIds: Object.keys(nodes) },
-    allGameComponents,
-  } as unknown as ExecutorContext['store'];
-}
-
 /** Seed the real store's component map (what `character_setup` does mid-pipeline). */
 function seedLiveGameComponents(map: Record<string, GameComponentData[]>): void {
   useEditorStore.setState({ allGameComponents: map } as Partial<EditorState> as EditorState);
@@ -55,23 +34,13 @@ function seedLiveSceneGraph(nodes: Record<string, ReturnType<typeof makeNode>>):
   } as unknown as Partial<EditorState> as EditorState);
 }
 
-/**
- * A snapshot the executor must ignore. Its entity ids are disjoint from every
- * live fixture, so reading it instead of the live store produces the wrong
- * `entityIds` rather than an incidentally-correct one.
- */
-function decoySnapshotStore(): ExecutorContext['store'] {
-  return makeStore({ 'stale-1': makeNode('stale-1', 'Stale', ['PhysicsData']) });
-}
-
 function makeCtx(overrides: Partial<ExecutorContext> = {}): ExecutorContext {
   return {
     dispatchCommand: vi.fn(),
-    store: makeStore(),
-    // Deliberately NOT `() => ctx.store`: the orchestrator wires this to the
-    // real store, and these tests seed that store mid-fixture to stand in for
-    // an earlier pipeline step's writes. Pointing it at the snapshot instead
-    // would make every "reads live" assertion below pass vacuously.
+    // Wired to the REAL store, exactly as the orchestrator wires it. These tests
+    // seed that store mid-fixture to stand in for an earlier pipeline step's
+    // writes, so pointing this at a frozen stub would make every "reads live"
+    // assertion below pass vacuously.
     getStore: () => useEditorStore.getState(),
     projectType: '3d',
     userTier: 'creator',
@@ -180,15 +149,16 @@ describe('physicsProfileExecutor', () => {
 
   it('reads the LIVE component map, not the pre-pipeline context snapshot', async () => {
     // Drives the REAL snapshot semantics of the pipeline. The orchestrator builds
-    // the ExecutorContext ONCE (`store: useEditorStore.getState()`) and
-    // pipelineRunner reuses that object for every step; Zustand 5 REPLACES the
-    // state object on write, so `ctx.store` can never observe a later write.
-    // `character_setup` runs a step earlier and setStates a NEW allGameComponents,
-    // so a snapshot read here always sees `{}` — merging against that rebuilds the
-    // controller from Default and wipes canDoubleJump (PF-1118).
+    // the ExecutorContext ONCE and pipelineRunner reuses that object for every
+    // step; Zustand 5 REPLACES the state object on write, so anything captured
+    // at construction time can never observe a later write. `character_setup`
+    // runs a step earlier and setStates a NEW allGameComponents, so a snapshot
+    // read here always sees `{}` — merging against that rebuilds the controller
+    // from Default and wipes canDoubleJump (PF-1118).
     //
     // Context first, exactly as the orchestrator does it...
-    const ctx = makeCtx({ store: useEditorStore.getState() });
+    const ctx = makeCtx();
+    const atConstructionTime = useEditorStore.getState().allGameComponents;
 
     // ...then the mid-pipeline write the snapshot cannot see.
     const components = {
@@ -201,9 +171,11 @@ describe('physicsProfileExecutor', () => {
     } as unknown as Record<string, GameComponentData[]>;
     seedLiveGameComponents(components);
 
-    // Guard the premise: if this ever stops being `{}`, the test has stopped
-    // reproducing the bug and would pass vacuously.
-    expect(ctx.store.allGameComponents).toEqual({});
+    // Guard the premise: the value a snapshot would have frozen is `{}`, and the
+    // live store has genuinely moved on. If these ever converge the test has
+    // stopped reproducing the bug and would pass vacuously.
+    expect(atConstructionTime).toEqual({});
+    expect(useEditorStore.getState().allGameComponents).not.toEqual({});
 
     await physicsProfileExecutor.execute({
       feelDirective: makeFeelDirective(),
@@ -216,11 +188,10 @@ describe('physicsProfileExecutor', () => {
 
   it('falls back to the LIVE scene graph when no entityIds, not the context snapshot', async () => {
     // The entities a pipeline run acts on are the ones `scene_create`/`spawn`
-    // put in the store DURING the run — none of them exist in the snapshot the
-    // orchestrator captured beforehand. Seeding the snapshot with a disjoint
-    // entity makes the two sources distinguishable: reading `ctx.store` would
-    // apply the profile to `stale-1` and miss every real entity.
-    const ctx = makeCtx({ store: decoySnapshotStore() });
+    // put in the store DURING the run — none of them exist yet when the
+    // orchestrator builds the context, so the fallback has to resolve them at
+    // call time.
+    const ctx = makeCtx();
 
     seedLiveSceneGraph({
       e1: makeNode('e1', 'Player', ['PhysicsData']),
@@ -258,7 +229,7 @@ describe('physicsProfileExecutor', () => {
   });
 
   it('allows safe config overrides for moveSpeed and jumpForce', async () => {
-    const ctx = makeCtx({ store: decoySnapshotStore() });
+    const ctx = makeCtx();
     seedLiveSceneGraph({ e1: makeNode('e1', 'Player', ['PhysicsData']) });
 
     await physicsProfileExecutor.execute({
@@ -273,7 +244,7 @@ describe('physicsProfileExecutor', () => {
   });
 
   it('ignores non-numeric config overrides', async () => {
-    const ctx = makeCtx({ store: decoySnapshotStore() });
+    const ctx = makeCtx();
     seedLiveSceneGraph({ e1: makeNode('e1', 'Player', ['PhysicsData']) });
 
     await physicsProfileExecutor.execute({

@@ -55,7 +55,11 @@ export const autoPolishExecutor: ExecutorDefinition = {
 
     // set_game_camera — manifest requires { entityId, mode }
     if (issues.includes('no_camera_on_player')) {
-      const nodes = Object.values(ctx.store.sceneGraph.nodes);
+      // Live read: this runs at the end of the pipeline, and the entityId below
+      // is dispatched straight to the engine. A snapshot taken before the
+      // pipeline started names entities that no longer exist, and
+      // `set_game_camera` against a despawned id is a silent no-op (PF-1118).
+      const nodes = Object.values(ctx.getStore().sceneGraph.nodes);
       const cameraNode = nodes.find(n => {
         const lower = n.name.toLowerCase();
         return lower === 'camera' || lower.endsWith('camera') || lower.endsWith('_cam');

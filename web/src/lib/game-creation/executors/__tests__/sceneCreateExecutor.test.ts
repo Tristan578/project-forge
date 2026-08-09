@@ -3,18 +3,24 @@ import { sceneCreateExecutor } from '../sceneCreateExecutor';
 import type { ExecutorContext } from '../../types';
 import { loadProjectScenes } from '@/lib/scenes/sceneManager';
 
-function makeCtx(overrides?: Partial<ExecutorContext>): ExecutorContext {
-  const ctx: ExecutorContext = {
+/**
+ * `store` is a TEST-ONLY override key: it seeds what `ctx.getStore()` returns.
+ * `ExecutorContext` itself has no `store` field — executors must read the live
+ * store through `getStore()`, never a snapshot (PF-1118).
+ */
+type CtxOverrides = Partial<ExecutorContext> & { store?: unknown };
+
+function makeCtx(overrides: CtxOverrides = {}): ExecutorContext {
+  const { store = { setScenes: vi.fn(), sceneGraph: { nodes: {} } } as never, ...rest } = overrides;
+  return {
     dispatchCommand: vi.fn(),
-    store: { setScenes: vi.fn(), sceneGraph: { nodes: {} } } as never,
-    getStore: () => ctx.store,
+    getStore: () => store as ReturnType<ExecutorContext['getStore']>,
     projectType: '3d',
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn(),
-    ...overrides,
+    ...rest,
   };
-  return ctx;
 }
 
 describe('sceneCreateExecutor', () => {
@@ -47,7 +53,7 @@ describe('sceneCreateExecutor', () => {
     expect(entry).toBeDefined();
     expect(project.activeSceneId).toBe(entry?.id);
 
-    expect(ctx.store.setScenes).toHaveBeenCalledWith(
+    expect(ctx.getStore().setScenes).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ name: 'Cave Level' })]),
       entry?.id,
     );
@@ -69,7 +75,7 @@ describe('sceneCreateExecutor', () => {
     expect(result.success).toBe(true);
     expect(loadProjectScenes().scenes.length).toBe(before);
     expect(ctx.dispatchCommand).not.toHaveBeenCalledWith('new_scene', {});
-    expect(ctx.store.setScenes).not.toHaveBeenCalled();
+    expect(ctx.getStore().setScenes).not.toHaveBeenCalled();
   });
 
   it('still applies camera config on a primary creation step', async () => {

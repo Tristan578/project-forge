@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, failResult } from './shared';
 
-// The verify executor takes no structured input — it reads from ctx.store
+// The verify executor takes no structured input — it reads the live store
 const inputSchema = z.object({}).passthrough();
 
 /**
@@ -48,7 +48,10 @@ export const verifyExecutor: ExecutorDefinition = {
     const warnings: string[] = [];
     const issues: string[] = [];
 
-    const { sceneGraph } = ctx.store;
+    // Live, not the pipeline-start snapshot: `verify_all_scenes` is scheduled
+    // after every entity-creation step, so a frozen graph would report on a
+    // scene the pipeline has already replaced (empty_scene on a populated one).
+    const { sceneGraph } = ctx.getStore();
     const nodes = Object.values(sceneGraph.nodes);
 
     // Check 1: Empty scene

@@ -224,17 +224,6 @@ export interface ExecutorContext {
   dispatchCommand: (command: string, payload: unknown) => void;
   dispatchCommandBatch?: (commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult;
   /**
-   * A snapshot of the editor store taken ONCE, before the pipeline starts.
-   *
-   * Zustand 5 replaces the state object on every write
-   * (`state = Object.assign({}, state, next)`), so this can never observe a
-   * write made by an earlier pipeline step — every entity the pipeline itself
-   * spawned is missing from it. Prefer `getStore()` for anything that a
-   * previous step may have mutated; `store` remains for the executors that
-   * only read pipeline-invariant fields.
-   */
-  store: EditorState;
-  /**
    * Reads the editor store LIVE at call time.
    *
    * Supplied by the orchestrator rather than imported, deliberately: a static
@@ -243,6 +232,15 @@ export interface ExecutorContext {
    * `/api/game/decompose`, so importing the store there drags `useEngine`
    * (and its `useSyncExternalStore`) into a React Server Component and breaks
    * `next build`. Passing a function keeps the edge in client-only code.
+   *
+   * This replaced a plain `store: EditorState` snapshot field. The snapshot was
+   * taken once, before the pipeline started, and Zustand 5 replaces the state
+   * object on every write (`state = Object.assign({}, state, next)`) — so it
+   * could never observe a write made by an earlier step, and every entity the
+   * pipeline itself spawned was missing from it. Two executors were reading it
+   * as if it were live; one of them dispatched a despawned `entityId` straight
+   * to the engine (PF-1118). The field is gone rather than deprecated so the
+   * mistake is a type error, not a comment someone has to notice.
    */
   getStore: () => EditorState;
   projectType: '2d' | '3d';
