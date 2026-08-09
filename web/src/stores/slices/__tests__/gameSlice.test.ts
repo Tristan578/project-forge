@@ -198,6 +198,64 @@ describe('gameSlice', () => {
       });
     });
 
+    // The inspector's Value / Max Count fields are plain number inputs, so a typed
+    // `10.4` reaches the store verbatim. Those two fields (and `targetScore`) are
+    // `u32` in the engine, which rounds and clamps them — leaving the store holding
+    // a number the running game never uses, with nothing to report the mismatch.
+    it('should coerce whole-number fields to what the engine will hold', () => {
+      store.getState().addGameComponent('entity-1', {
+        type: 'collectible',
+        collectible: {
+          value: 10.4,
+          destroyOnCollect: true,
+          pickupSoundAsset: null,
+          rotateSpeed: 90,
+        },
+      });
+
+      const stored = store.getState().allGameComponents['entity-1'][0];
+      expect(stored.type === 'collectible' && stored.collectible.value).toBe(10);
+      expect(mockDispatch).toHaveBeenLastCalledWith('add_game_component', {
+        entityId: 'entity-1',
+        componentType: 'collectible',
+        properties: expect.objectContaining({ value: 10 }),
+      });
+    });
+
+    it('should coerce whole-number fields on update as well as add', () => {
+      store.getState().addGameComponent('entity-1', {
+        type: 'spawner',
+        spawner: {
+          entityType: 'cube',
+          intervalSecs: 3,
+          maxCount: 5,
+          spawnOffset: [0, 1, 0],
+          onTrigger: null,
+        },
+      });
+      store.getState().updateGameComponent('entity-1', {
+        type: 'spawner',
+        spawner: {
+          entityType: 'cube',
+          intervalSecs: 2.5,
+          maxCount: 5000,
+          spawnOffset: [0, 1, 0],
+          onTrigger: null,
+        },
+      });
+
+      const stored = store.getState().allGameComponents['entity-1'][0];
+      expect(stored.type === 'spawner' && stored.spawner.maxCount).toBe(1000);
+      // A float field alongside it must stay fractional — the coercion is per
+      // field, not per component.
+      expect(stored.type === 'spawner' && stored.spawner.intervalSecs).toBe(2.5);
+      expect(mockDispatch).toHaveBeenLastCalledWith('update_game_component', {
+        entityId: 'entity-1',
+        componentType: 'spawner',
+        properties: expect.objectContaining({ maxCount: 1000, intervalSecs: 2.5 }),
+      });
+    });
+
     it('should remove game component by type', () => {
       store.getState().addGameComponent('entity-1', characterController);
       store.getState().addGameComponent('entity-1', health);

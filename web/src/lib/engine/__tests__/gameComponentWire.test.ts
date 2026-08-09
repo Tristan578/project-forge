@@ -15,18 +15,21 @@ import type { GameComponentData } from '@/stores/slices/types';
  * `engine/src/core/game_components.rs` — the `component_name()` table and the
  * `#[serde(rename_all = "camelCase")]` struct fields.
  *
- * `build_game_component` in the engine deserializes each properties bag with
- * STRICT serde: a field without `#[serde(default)]` that is missing from the
- * JSON fails the whole component. So the key sets here are not stylistic —
- * a missing key is a dropped component at runtime.
+ * `build_game_component` in the engine merges each recognised field onto the
+ * type's `Default`, so the key sets here are not about avoiding a rejection —
+ * they are about the store and the engine holding the SAME value. A key the
+ * store omits leaves the Rust default standing while the store shows whatever
+ * the store put there, and the two silently disagree for the rest of the
+ * session.
  */
 
 /** engine `component_name()` -> the exact serde field names of its Rust struct. */
 const ENGINE_PROPERTY_KEYS: Record<string, string[]> = {
   character_controller: ['speed', 'jumpHeight', 'gravityScale', 'canDoubleJump'],
-  // `despawnOnDeath` is the one Rust field with no TS counterpart. It carries
-  // `#[serde(default = "default_true")]`, so omitting it is valid — the engine
-  // fills in `true`. Listed nowhere below on purpose.
+  // `despawnOnDeath` is the one Rust field with no TS counterpart. Omitting it
+  // leaves the Rust default (`true`) standing, which is the behaviour we want,
+  // so the gap is currently benign — but it is not authorable from the editor.
+  // Listed nowhere below on purpose.
   health: ['maxHp', 'currentHp', 'invincibilitySecs', 'respawnOnDeath', 'respawnPoint'],
   collectible: ['value', 'destroyOnCollect', 'pickupSoundAsset', 'rotateSpeed'],
   damage_zone: ['damagePerSecond', 'oneShot'],
@@ -210,6 +213,87 @@ describe('gameComponentWire', () => {
     it('rejects a malformed vec3 rather than shipping it to the engine', () => {
       const component = buildStoreComponent('teleporter', { targetPosition: [1, 2] });
       expect(toWireComponent(component!).properties.targetPosition).toEqual([0, 1, 0]);
+    });
+  });
+
+  describe('whole-number fields', () => {
+    /**
+     * Three fields on this wire are `u32` in Rust — `collectible.value`,
+     * `spawner.maxCount` and `win_condition.targetScore`. The engine reads each
+     * through `prop_u32`, which rounds to nearest and clamps into `0..=max`
+     * (`game_components.rs`). The store used a plain finite-number check, so it
+     * could hold `10.4` or `-5` or `1e9` — values the engine will never hold.
+     * The divergence is invisible: the inspector shows the store's number while
+     * the running game uses the engine's, so a collectible displayed as worth
+     * 10.4 scores something else entirely.
+     */
+    const U32_FIELDS: {
+      name: string;
+      component: string;
+      key: string;
+      max: number;
+    }[] = [
+      { name: 'collectible.value', component: 'collectible', key: 'value', max: 1_000_000 },
+      { name: 'spawner.maxCount', component: 'spawner', key: 'maxCount', max: 1000 },
+      { name: 'win_condition.targetScore', component: 'win_condition', key: 'targetScore', max: 4294967295 },
+    ];
+
+    it.each(U32_FIELDS)('$name rounds a fractional value to nearest', ({ component, key }) => {
+      const wire = toWireComponent(buildStoreComponent(component, { [key]: 10.4 })!);
+      expect(wire.properties[key]).toBe(10);
+
+      const up = toWireComponent(buildStoreComponent(component, { [key]: 10.6 })!);
+      expect(up.properties[key]).toBe(11);
+    });
+
+    it.each(U32_FIELDS)('$name floors a negative value at zero', ({ component, key }) => {
+      const wire = toWireComponent(buildStoreComponent(component, { [key]: -5 })!);
+      expect(wire.properties[key]).toBe(0);
+    });
+
+    it.each(U32_FIELDS)('$name clamps to the engine ceiling', ({ component, key, max }) => {
+      const wire = toWireComponent(buildStoreComponent(component, { [key]: max + 1000 })!);
+      expect(wire.properties[key]).toBe(max);
+    });
+
+    it.each(U32_FIELDS)('$name keeps a whole in-range value untouched', ({ component, key }) => {
+      const wire = toWireComponent(buildStoreComponent(component, { [key]: 42 })!);
+      expect(wire.properties[key]).toBe(42);
+    });
+
+    it.each(U32_FIELDS)('$name falls back to its default for a non-number', ({ component, key }) => {
+      const bogus = toWireComponent(buildStoreComponent(component, { [key]: 'lots' })!);
+      const bare = toWireComponent(buildStoreComponent(component)!);
+      expect(bogus.properties[key]).toBe(bare.properties[key]);
+    });
+
+    it.each(U32_FIELDS)('$name rejects a non-finite value', ({ component, key }) => {
+      const bare = toWireComponent(buildStoreComponent(component)!);
+      for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+        const wire = toWireComponent(buildStoreComponent(component, { [key]: bad })!);
+        expect(wire.properties[key]).toBe(bare.properties[key]);
+      }
+    });
+
+    // `targetScore` is `Option<u32>`, and an explicit null is how the store says
+    // "this win condition is not score-based". Rounding must not swallow that.
+    it('preserves an explicit null targetScore', () => {
+      const wire = toWireComponent(
+        buildStoreComponent('win_condition', { conditionType: 'reachGoal', targetScore: null })!,
+      );
+      expect(wire.properties.targetScore).toBeNull();
+    });
+
+    // Guard against the coercion leaking onto neighbouring float fields: the
+    // engine reads these through `prop_f32`, which does not round.
+    it('leaves float fields fractional', () => {
+      const collectible = toWireComponent(
+        buildStoreComponent('collectible', { rotateSpeed: 90.5 })!,
+      );
+      expect(collectible.properties.rotateSpeed).toBe(90.5);
+
+      const spawner = toWireComponent(buildStoreComponent('spawner', { intervalSecs: 2.5 })!);
+      expect(spawner.properties.intervalSecs).toBe(2.5);
     });
   });
 

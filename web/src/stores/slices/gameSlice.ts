@@ -9,7 +9,12 @@ import type { AccessibilityProfile } from '@/lib/ai/accessibilityGenerator';
 import { createDefaultProfile } from '@/lib/ai/accessibilityGenerator';
 import type { ExportPreset } from '@/lib/export/presets';
 import { validateWinnability, formatWinnabilityMessage } from '@/lib/playMode/winnabilityValidator';
-import { toWireComponent, toEngineComponentType, toStoreComponentType } from '@/lib/engine/gameComponentWire';
+import {
+  toWireComponent,
+  toEngineComponentType,
+  toStoreComponentType,
+  normalizeGameComponent,
+} from '@/lib/engine/gameComponentWire';
 
 export interface GameSlice {
   allGameComponents: Record<string, GameComponentData[]>;
@@ -132,7 +137,11 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   gameWon: false,
   gameScore: 0,
 
-  addGameComponent: (entityId, component) => {
+  addGameComponent: (entityId, raw) => {
+    // Normalize BEFORE the store write so the store and the engine hold the same
+    // numbers — the engine rounds and clamps its `u32` fields, and a divergence
+    // there is silent (see gameComponentWire.ts).
+    const component = normalizeGameComponent(raw);
     set(state => ({
       allGameComponents: {
         ...state.allGameComponents,
@@ -146,7 +155,8 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
     // would keep a component the engine never received.
     if (dispatchCommand) dispatchCommand('add_game_component', { entityId, ...toWireComponent(component) });
   },
-  updateGameComponent: (entityId, component) => {
+  updateGameComponent: (entityId, raw) => {
+    const component = normalizeGameComponent(raw);
     set(state => ({
       allGameComponents: {
         ...state.allGameComponents,
