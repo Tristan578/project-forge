@@ -50,12 +50,17 @@ export const entitySetupExecutor: ExecutorDefinition = {
       );
     }
 
-    const { entity, scene, projectType } = parsed.data;
+    // `scene` stays a required input (a plan step that names no scene is malformed)
+    // but is not dispatched — see the note on `commands` below.
+    const { entity, projectType } = parsed.data;
     // Manifest: spawn_entity entityType is lowercase enum
     const entityType = projectType === '2d' ? 'plane' : (ROLE_TO_ENTITY_TYPE[entity.role] ?? 'cube');
 
+    // Spawn into the engine's active scene. The engine holds exactly one scene at a
+    // time and rejects `switch_scene` by design — multi-scene management is JS-side
+    // (`lib/scenes/sceneManager`), and the plan's `scene` field is JS-side metadata.
+    // Leading the batch with it made every entity step fail on the rejection (PF-1097).
     const commands = [
-      { command: 'switch_scene', payload: { sceneId: scene } },
       { command: 'spawn_entity', payload: { entityType, name: entity.name } },
     ];
 

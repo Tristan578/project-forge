@@ -132,6 +132,8 @@ function makeMockStore(overrides: Partial<EditorState> = {}): EditorState {
     primaryPhysics: null,
     physicsEnabled: false,
     debugPhysics: false,
+    // scene_create mirrors the JS-side scene list into the store (PF-1097).
+    setScenes: vi.fn(),
     ...overrides,
   } as unknown as EditorState;
 }
@@ -150,6 +152,8 @@ function makeMockCtx(overrides: Partial<ExecutorContext> = {}): ExecutorContext 
 
 beforeEach(() => {
   vi.resetModules();
+  // scene_create persists through lib/scenes/sceneManager, which is localStorage-backed.
+  localStorage.clear();
 });
 
 // ---------------------------------------------------------------------------
@@ -164,13 +168,20 @@ describe('scene_create executor', () => {
     expect(executor.name).toBe('scene_create');
   });
 
-  it('dispatches create_scene on happy path', async () => {
+  // `create_scene` is an engine stub that rejects by design — scenes are JS-side
+  // (`lib/scenes/sceneManager`) — so dispatching it was a silent no-op (PF-1097).
+  it('records the scene JS-side and clears the starter scene on happy path', async () => {
     const ctx = makeMockCtx();
     const result = await executor.execute({ name: 'Level 1', purpose: 'Main game level' }, ctx);
 
     expect(result.success).toBe(true);
     expect(result.output?.['sceneName']).toBe('Level 1');
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('create_scene', { name: 'Level 1' });
+    expect(ctx.store.setScenes).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ name: 'Level 1' })]),
+      expect.any(String),
+    );
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('new_scene', {});
+    expect(ctx.dispatchCommand).not.toHaveBeenCalledWith('create_scene', expect.anything());
   });
 
   it('fails with INVALID_INPUT when name is empty', async () => {
@@ -187,7 +198,11 @@ describe('scene_create executor', () => {
 
     // When called from system registry (camera/world), name defaults to 'Untitled Scene'
     expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('create_scene', { name: 'Untitled Scene' });
+    expect(result.output?.['sceneName']).toBe('Untitled Scene');
+    expect(ctx.store.setScenes).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ name: 'Untitled Scene' })]),
+      expect.any(String),
+    );
   });
 
   it('returns ABORTED when signal is already aborted', async () => {
@@ -391,7 +406,7 @@ describe('entity_setup executor', () => {
     expect(executor.name).toBe('entity_setup');
   });
 
-  it('dispatches switch_scene then spawn_entity on happy path (3D)', async () => {
+  it('dispatches spawn_entity on happy path (3D)', async () => {
     const ctx = makeMockCtx({ projectType: '3d' });
     const result = await executor.execute(
       { entity: baseEntity, scene: 'Level 1', projectType: '3d' },
@@ -399,7 +414,9 @@ describe('entity_setup executor', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('switch_scene', { sceneId: 'Level 1' });
+    // The engine rejects `switch_scene` by design; leading with it failed every
+    // entity step in the pipeline (PF-1097).
+    expect(ctx.dispatchCommand).not.toHaveBeenCalledWith('switch_scene', expect.anything());
     expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', expect.objectContaining({
       name: 'Enemy',
       entityType: 'cube',
@@ -455,7 +472,6 @@ describe('entity_setup executor', () => {
 
     expect(result.success).toBe(true);
     expect(batchFn).toHaveBeenCalledWith([
-      { command: 'switch_scene', payload: { sceneId: 'Level 1' } },
       { command: 'spawn_entity', payload: { entityType: 'cube', name: 'Enemy' } },
     ]);
     expect(ctx.dispatchCommand).not.toHaveBeenCalled();
@@ -469,7 +485,7 @@ describe('entity_setup executor', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledTimes(2);
+    expect(ctx.dispatchCommand).toHaveBeenCalledTimes(1);
   });
 
   it('returns failure when batch reports a command error', async () => {

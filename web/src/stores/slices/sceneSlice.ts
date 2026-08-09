@@ -5,6 +5,20 @@
 import { StateCreator } from 'zustand';
 import type { SceneTransitionConfig, TerrainDataState } from './types';
 import { DEFAULT_TRANSITION } from './types';
+import {
+  loadProjectScenes,
+  saveProjectScenes,
+  createScene as createSceneIn,
+  deleteScene as deleteSceneIn,
+  duplicateScene as duplicateSceneIn,
+  switchScene as switchSceneIn,
+  type ProjectScenes,
+} from '@/lib/scenes/sceneManager';
+
+/** Project scenes reduced to the shape the store mirrors for the Scene Browser. */
+function toSceneList(project: ProjectScenes) {
+  return project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene }));
+}
 
 export interface SceneSlice {
   sceneName: string;
@@ -190,16 +204,38 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
     // Not yet implemented — log warning instead of throwing to avoid crashing callers
     console.warn('loadTemplate: not yet implemented');
   },
+  // PF-1097: these four used to dispatch `switch_scene` / `create_scene` /
+  // `delete_scene` / `duplicate_scene`. The engine rejects all four by design —
+  // multi-scene management is JS-side — and single dispatch returns void, so every
+  // Scene Browser control was silently inert. They now go through sceneManager,
+  // mirroring `lib/chat/handlers/sceneManagementHandlers`, and dispatch only
+  // commands the engine actually implements.
   switchScene: (sceneId) => {
-    if (dispatchCommand) dispatchCommand('switch_scene', { sceneId });
+    const result = switchSceneIn(loadProjectScenes(), sceneId);
+    if ('error' in result) return;
+    saveProjectScenes(result.project);
+    get().setScenes(toSceneList(result.project), result.project.activeSceneId);
+    if (result.sceneToLoad) {
+      get().loadScene(JSON.stringify(result.sceneToLoad));
+    } else {
+      get().newScene();
+    }
   },
   createNewScene: (name) => {
-    if (dispatchCommand) dispatchCommand('create_scene', { name: name ?? 'New Scene' });
+    const { project } = createSceneIn(loadProjectScenes(), name ?? 'New Scene');
+    saveProjectScenes(project);
+    get().setScenes(toSceneList(project), project.activeSceneId);
   },
   deleteScene: (sceneId) => {
-    if (dispatchCommand) dispatchCommand('delete_scene', { sceneId });
+    const result = deleteSceneIn(loadProjectScenes(), sceneId);
+    if (result.error) return;
+    saveProjectScenes(result.project);
+    get().setScenes(toSceneList(result.project), result.project.activeSceneId);
   },
   duplicateScene: (sceneId) => {
-    if (dispatchCommand) dispatchCommand('duplicate_scene', { sceneId });
+    const result = duplicateSceneIn(loadProjectScenes(), sceneId);
+    if ('error' in result) return;
+    saveProjectScenes(result.project);
+    get().setScenes(toSceneList(result.project), result.project.activeSceneId);
   },
 });

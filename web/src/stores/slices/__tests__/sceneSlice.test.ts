@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
 import { createSceneSlice, setSceneDispatcher, type SceneSlice } from '../sceneSlice';
+import { loadProjectScenes } from '@/lib/scenes/sceneManager';
 
 describe('sceneSlice', () => {
   let store: ReturnType<typeof createSliceStore<SceneSlice>>;
@@ -294,6 +295,91 @@ describe('sceneSlice', () => {
     it('dispatches export_scene when projectId-aware cloud save is triggered', () => {
       store.getState().saveToCloud();
       expect(mockDispatch).toHaveBeenCalledWith('export_scene', {});
+    });
+  });
+
+  // PF-1097: these four actions dispatched engine commands that reject by design
+  // (scene management is JS-side), so every Scene Browser control was inert.
+  describe('Scene Browser actions', () => {
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    function persisted() {
+      return loadProjectScenes();
+    }
+
+    it('createNewScene records a scene and mirrors it into store state', () => {
+      store.getState().createNewScene('Boss Room');
+
+      expect(persisted().scenes.some((s) => s.name === 'Boss Room')).toBe(true);
+      expect(store.getState().scenes.some((s) => s.name === 'Boss Room')).toBe(true);
+    });
+
+    it('createNewScene defaults the name when none is given', () => {
+      store.getState().createNewScene();
+      expect(store.getState().scenes.some((s) => s.name === 'New Scene')).toBe(true);
+    });
+
+    it('switchScene makes the target active and loads its data', () => {
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+
+      store.getState().switchScene(target!.id);
+
+      expect(persisted().activeSceneId).toBe(target!.id);
+      expect(store.getState().activeSceneId).toBe(target!.id);
+      expect(mockDispatch).toHaveBeenCalledWith('load_scene', expect.anything());
+    });
+
+    it('switchScene leaves state untouched for an unknown scene', () => {
+      const before = store.getState().activeSceneId;
+      store.getState().switchScene('scene_does_not_exist');
+      expect(store.getState().activeSceneId).toBe(before);
+    });
+
+    it('duplicateScene adds a copy', () => {
+      store.getState().createNewScene('Original');
+      const source = store.getState().scenes.find((s) => s.name === 'Original');
+
+      store.getState().duplicateScene(source!.id);
+
+      expect(store.getState().scenes.some((s) => s.name === 'Original Copy')).toBe(true);
+      expect(persisted().scenes.some((s) => s.name === 'Original Copy')).toBe(true);
+    });
+
+    it('deleteScene removes a non-active scene', () => {
+      store.getState().createNewScene('Doomed');
+      const doomed = store.getState().scenes.find((s) => s.name === 'Doomed');
+
+      store.getState().deleteScene(doomed!.id);
+
+      expect(store.getState().scenes.some((s) => s.name === 'Doomed')).toBe(false);
+      expect(persisted().scenes.some((s) => s.name === 'Doomed')).toBe(false);
+    });
+
+    it('deleteScene refuses to delete the active scene', () => {
+      store.getState().createNewScene('Keeper');
+      const activeId = persisted().activeSceneId;
+
+      store.getState().deleteScene(activeId);
+
+      expect(persisted().scenes.some((s) => s.id === activeId)).toBe(true);
+    });
+
+    it('never dispatches an unimplemented scene-management command', () => {
+      store.getState().createNewScene('A');
+      const a = store.getState().scenes.find((s) => s.name === 'A');
+      store.getState().switchScene(a!.id);
+      store.getState().duplicateScene(a!.id);
+      store.getState().createNewScene('B');
+      const b = store.getState().scenes.find((s) => s.name === 'B');
+      store.getState().deleteScene(b!.id);
+
+      const dispatched = mockDispatch.mock.calls.map((c) => c[0]);
+      for (const stub of ['create_scene', 'switch_scene', 'delete_scene', 'duplicate_scene', 'save_scene']) {
+        expect(dispatched).not.toContain(stub);
+      }
     });
   });
 });

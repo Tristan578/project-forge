@@ -34,8 +34,45 @@ describe('entitySetupExecutor', () => {
       role: 'player',
       entityType: 'capsule',
     });
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('switch_scene', { sceneId: 'MainScene' });
     expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', { entityType: 'capsule', name: 'Hero' });
+  });
+
+  // The engine holds exactly one active scene and rejects `switch_scene` by design
+  // (scene management is JS-side). Dispatching it made every entity step fail.
+  it('never dispatches switch_scene', async () => {
+    const batch = vi.fn().mockReturnValue({ success: true, results: [{ success: true }] });
+    const ctx = makeCtx({ dispatchCommandBatch: batch });
+
+    await entitySetupExecutor.execute({
+      entity: { name: 'Hero', role: 'player' },
+      scene: 'MainScene',
+      projectType: '3d',
+    }, ctx);
+
+    const dispatched = [
+      ...(ctx.dispatchCommand as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]),
+      ...batch.mock.calls.flatMap(
+        (c) => (c[0] as Array<{ command: string }>).map((x) => x.command),
+      ),
+    ];
+    expect(dispatched).not.toContain('switch_scene');
+  });
+
+  it('succeeds against a dispatcher that rejects unimplemented scene commands', async () => {
+    const UNIMPLEMENTED = new Set(['switch_scene', 'create_scene', 'delete_scene', 'duplicate_scene', 'save_scene']);
+    const batch = vi.fn().mockImplementation((commands: Array<{ command: string }>) => {
+      const results = commands.map((c) => ({ success: !UNIMPLEMENTED.has(c.command) }));
+      return { success: results.every((r) => r.success), results };
+    });
+    const ctx = makeCtx({ dispatchCommandBatch: batch });
+
+    const result = await entitySetupExecutor.execute({
+      entity: { name: 'Hero', role: 'player' },
+      scene: 'MainScene',
+      projectType: '3d',
+    }, ctx);
+
+    expect(result.success).toBe(true);
   });
 
   it('spawns a sphere for projectile role in 3D', async () => {
@@ -86,7 +123,6 @@ describe('entitySetupExecutor', () => {
 
     expect(result.success).toBe(true);
     expect(batch).toHaveBeenCalledWith([
-      { command: 'switch_scene', payload: { sceneId: 'S1' } },
       { command: 'spawn_entity', payload: { entityType: 'cube', name: 'Deco' } },
     ]);
     expect(ctx.dispatchCommand).not.toHaveBeenCalled();

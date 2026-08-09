@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
+import { createScene, loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
 
 // Valid camera modes per engine manifest (set_game_camera.mode enum)
 const VALID_CAMERA_MODES = [
@@ -61,8 +62,22 @@ export const sceneCreateExecutor: ExecutorDefinition = {
       && name === 'Untitled Scene';
 
     if (!isConfigOverlay) {
-      // Primary scene creation — manifest: create_scene requires { name: string }
-      ctx.dispatchCommand('create_scene', { name });
+      // Primary scene creation. `create_scene` is an engine stub that rejects by
+      // design — scenes live JS-side in `lib/scenes/sceneManager` — and because
+      // single dispatch returns void, the rejection was unobservable and this step
+      // was a silent no-op that still reported success (PF-1097).
+      const project = loadProjectScenes();
+      const { project: withScene, sceneId } = createScene(project, name);
+      saveProjectScenes({ ...withScene, activeSceneId: sceneId });
+      ctx.store.setScenes(
+        withScene.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
+        sceneId,
+      );
+      // Clear the starter scene (Ground/Player/Sun from the engine's Startup
+      // `setup_scene`) so the generated game is not stacked on top of it.
+      // `new_scene` despawns deletable entities and resets editor state; it does
+      // not re-run `setup_scene`.
+      ctx.dispatchCommand('new_scene', {});
     }
 
     // Apply camera configuration if provided (from camera system registry).
