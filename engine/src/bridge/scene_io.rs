@@ -26,7 +26,7 @@ use crate::core::{
     lod::LodData,
     material::MaterialData,
     particles::{ParticleData, ParticleEnabled},
-    pending_commands::{EntityType, PendingCommands},
+    pending_commands::{self, EntityType, PendingCommands},
     physics::{JointData, PhysicsData, PhysicsEnabled},
     post_processing::PostProcessingSettings,
     procedural_mesh::ProceduralMeshData,
@@ -197,15 +197,20 @@ pub(super) fn apply_scene_export(
 
     match serde_json::to_string(&scene_file) {
         Ok(json) => {
-            // One event per queued request: the JSON is built once, but each
-            // caller needs its own correlation id echoed back (PF-1103).
-            for request in &requests {
-                events::emit_scene_exported(&json, &scene_name.0, request.request_id.as_deref());
+            // One event per DISTINCT correlation id, not per request: the JSON
+            // is built once, but each caller needs its own id echoed back
+            // (PF-1103) — while every extra event re-runs the web side's full
+            // persistence chain against the same payload, so the id-less and
+            // repeated requests are collapsed first.
+            let correlation_ids = pending_commands::export_correlation_ids(&requests);
+            for request_id in &correlation_ids {
+                events::emit_scene_exported(&json, &scene_name.0, *request_id);
             }
             tracing::info!(
-                "Scene exported: {} entities ({} request(s))",
+                "Scene exported: {} entities ({} request(s), {} event(s))",
                 scene_file.entities.len(),
-                requests.len()
+                requests.len(),
+                correlation_ids.len()
             );
         }
         Err(e) => {
