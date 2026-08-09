@@ -34,9 +34,27 @@ function topoSortSystems(
   systems: GameSystem[],
   priorityOrder: Record<string, number>,
 ): GameSystem[] {
-  const byCategory = new Map<SystemCategory, GameSystem>();
-  for (const s of systems) {
-    byCategory.set(s.category, s);
+  // Sort by priority first so that within same dependency depth — and within
+  // a single category — core comes before secondary before polish.
+  const sorted = [...systems].sort(
+    (a, b) => (priorityOrder[a.priority] ?? 2) - (priorityOrder[b.priority] ?? 2),
+  );
+
+  // Several systems may legitimately share a category: there are only 12
+  // categories and a real game routinely wants more mechanics than that
+  // (walk + swim, enemy waves + environmental hazards). The graph node is
+  // therefore the CATEGORY, and every system in it is emitted together —
+  // keying the visited set by category while emitting one system per node
+  // silently dropped all but the first, so the user got a plan missing a
+  // mechanic they asked for, with nothing surfaced anywhere.
+  const byCategory = new Map<SystemCategory, GameSystem[]>();
+  for (const s of sorted) {
+    const bucket = byCategory.get(s.category);
+    if (bucket) {
+      bucket.push(s);
+    } else {
+      byCategory.set(s.category, [s]);
+    }
   }
 
   const visited = new Set<SystemCategory>();
@@ -44,36 +62,37 @@ function topoSortSystems(
   const inStack = new Set<SystemCategory>(); // cycle detection
   const result: GameSystem[] = [];
 
-  function visit(system: GameSystem): void {
-    if (visited.has(system.category)) return;
-    if (inStack.has(system.category)) {
-      const cycleStart = stackPath.indexOf(system.category);
-      const cyclePath = [...stackPath.slice(cycleStart), system.category];
+  function visit(category: SystemCategory): void {
+    if (visited.has(category)) return;
+    if (inStack.has(category)) {
+      const cycleStart = stackPath.indexOf(category);
+      const cyclePath = [...stackPath.slice(cycleStart), category];
       throw new Error(
         `Cyclic system dependency detected: ${cyclePath.join(' -> ')}`,
       );
     }
-    stackPath.push(system.category);
-    inStack.add(system.category);
-    // Visit dependencies first
-    for (const dep of system.dependsOn) {
-      const depSystem = byCategory.get(dep);
-      if (depSystem) {
-        visit(depSystem);
+    const bucket = byCategory.get(category);
+    if (!bucket) return;
+
+    stackPath.push(category);
+    inStack.add(category);
+    // A category is ready only once the dependencies of EVERY system in it
+    // have been emitted.
+    for (const system of bucket) {
+      for (const dep of system.dependsOn) {
+        if (byCategory.has(dep)) {
+          visit(dep);
+        }
       }
     }
     stackPath.pop();
-    inStack.delete(system.category);
-    visited.add(system.category);
-    result.push(system);
+    inStack.delete(category);
+    visited.add(category);
+    result.push(...bucket);
   }
 
-  // Sort by priority first so that within same dependency depth, core comes first
-  const sorted = [...systems].sort(
-    (a, b) => (priorityOrder[a.priority] ?? 2) - (priorityOrder[b.priority] ?? 2),
-  );
   for (const system of sorted) {
-    visit(system);
+    visit(system.category);
   }
   return result;
 }

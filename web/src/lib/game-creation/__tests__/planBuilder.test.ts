@@ -494,6 +494,93 @@ describe('buildPlan', () => {
   });
 
   // ---------------------------------------------------------------------
+  // Two systems may legitimately share a category — there are only 12
+  // categories and a real game routinely wants more mechanics than that
+  // (walk + swim, enemies + hazards). Neither may be silently dropped.
+  // ---------------------------------------------------------------------
+
+  it('builds steps for EVERY system sharing a category, not just the first', () => {
+    const gdd = makeGdd({
+      systems: [
+        makeSystem('movement', 'platformer'),
+        makeSystem('movement', 'swim'),
+      ],
+    });
+
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const systemTypes = plan.steps
+      .filter(s => s.executor === 'physics_profile')
+      .map(s => (s.input as { systemType?: string }).systemType);
+
+    expect(systemTypes).toEqual(expect.arrayContaining(['platformer', 'swim']));
+    expect(plan.steps.filter(s => s.executor === 'character_setup')).toHaveLength(2);
+  });
+
+  it('builds a custom_script step for every unknown-category system sharing that category', () => {
+    const gdd = makeGdd({
+      systems: [
+        makeSystem('challenge', 'enemy-waves'),
+        makeSystem('challenge', 'environmental-hazards'),
+      ],
+      scenes: [
+        {
+          name: 'Main',
+          purpose: 'Main gameplay scene',
+          systems: [],
+          entities: [
+            {
+              name: 'Player',
+              role: 'player',
+              systems: ['challenge'],
+              appearance: 'capsule',
+              behaviors: ['move'],
+            },
+          ],
+          transitions: [],
+        },
+      ],
+    });
+
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const scripts = plan.steps.filter(s => s.executor === 'custom_script_generate');
+
+    expect(scripts).toHaveLength(2);
+  });
+
+  it('orders a duplicated category after the category it depends on', () => {
+    // 'world' depends on 'movement'; both movement systems must still precede it.
+    const gdd = makeGdd({
+      systems: [
+        makeSystem('world', 'terrain', 'core', ['movement']),
+        makeSystem('movement', 'platformer'),
+        makeSystem('movement', 'swim'),
+      ],
+    });
+
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const ids = plan.steps.map(s => s.id);
+    const movementIdx = plan.steps
+      .map((s, i) => (s.executor === 'character_setup' ? i : -1))
+      .filter(i => i >= 0);
+    const worldIdx = plan.steps.findIndex(
+      s => (s.input as { worldType?: string }).worldType === 'terrain',
+    );
+
+    expect(movementIdx).toHaveLength(2);
+    expect(worldIdx).toBeGreaterThan(-1);
+    for (const mi of movementIdx) {
+      expect(mi).toBeLessThan(worldIdx);
+    }
+    // Every dependency must name a step that appears earlier in the array,
+    // or runPipeline skips it and fails the whole plan.
+    for (let i = 0; i < plan.steps.length; i++) {
+      for (const dep of plan.steps[i].dependsOn) {
+        expect(ids.indexOf(dep)).toBeLessThan(i);
+      }
+    }
+  });
+
+  // ---------------------------------------------------------------------
   // Cycle detection — topoSortSystems must FAIL loudly, never silently
   // drop a step or hang, when gdd.systems has a cyclic dependsOn graph.
   // ---------------------------------------------------------------------
