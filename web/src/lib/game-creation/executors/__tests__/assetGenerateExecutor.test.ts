@@ -3,15 +3,17 @@ import { assetGenerateExecutor } from '../assetGenerateExecutor';
 import type { ExecutorContext } from '../../types';
 
 function makeCtx(overrides?: Partial<ExecutorContext>): ExecutorContext {
-  return {
+  const ctx: ExecutorContext = {
     dispatchCommand: vi.fn(),
     store: { sceneGraph: { nodes: {} } } as never,
+    getStore: () => ctx.store,
     projectType: '3d',
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn(),
     ...overrides,
   };
+  return ctx;
 }
 
 describe('assetGenerateExecutor', () => {

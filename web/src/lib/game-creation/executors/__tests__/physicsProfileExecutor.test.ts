@@ -68,6 +68,11 @@ function makeCtx(overrides: Partial<ExecutorContext> = {}): ExecutorContext {
   return {
     dispatchCommand: vi.fn(),
     store: makeStore(),
+    // Deliberately NOT `() => ctx.store`: the orchestrator wires this to the
+    // real store, and these tests seed that store mid-fixture to stand in for
+    // an earlier pipeline step's writes. Pointing it at the snapshot instead
+    // would make every "reads live" assertion below pass vacuously.
+    getStore: () => useEditorStore.getState(),
     projectType: '3d',
     userTier: 'creator',
     signal: new AbortController().signal,

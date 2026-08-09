@@ -223,7 +223,28 @@ export type UserTier = 'starter' | 'hobbyist' | 'creator' | 'pro';
 export interface ExecutorContext {
   dispatchCommand: (command: string, payload: unknown) => void;
   dispatchCommandBatch?: (commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult;
+  /**
+   * A snapshot of the editor store taken ONCE, before the pipeline starts.
+   *
+   * Zustand 5 replaces the state object on every write
+   * (`state = Object.assign({}, state, next)`), so this can never observe a
+   * write made by an earlier pipeline step — every entity the pipeline itself
+   * spawned is missing from it. Prefer `getStore()` for anything that a
+   * previous step may have mutated; `store` remains for the executors that
+   * only read pipeline-invariant fields.
+   */
   store: EditorState;
+  /**
+   * Reads the editor store LIVE at call time.
+   *
+   * Supplied by the orchestrator rather than imported, deliberately: a static
+   * or dynamic `import('@/stores/editorStore')` from an executor is a real
+   * module edge, and the executor barrel is reachable from
+   * `/api/game/decompose`, so importing the store there drags `useEngine`
+   * (and its `useSyncExternalStore`) into a React Server Component and breaks
+   * `next build`. Passing a function keeps the edge in client-only code.
+   */
+  getStore: () => EditorState;
   projectType: '2d' | '3d';
   userTier: UserTier;
   signal: AbortSignal;

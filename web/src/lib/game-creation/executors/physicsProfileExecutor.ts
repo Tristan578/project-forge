@@ -113,12 +113,15 @@ export const physicsProfileExecutor: ExecutorDefinition = {
     // data loss. Reading live is correct in both orders; the snapshot is
     // correct in neither.
     //
-    // The import is dynamic because a static one closes a module cycle —
-    // editorStore -> slices/index -> orchestratorSlice -> executors/index ->
-    // this file — which leaves `useEditorStore` in the TDZ whenever the
-    // executor barrel is evaluated first.
-    const { useEditorStore } = await import('@/stores/editorStore');
-    const liveStore = useEditorStore.getState();
+    // Read through `ctx.getStore()` rather than importing the store here.
+    // Importing it — statically OR dynamically — creates a real module edge
+    // that Turbopack traces, and this file is reachable from the server route
+    // /api/game/decompose via the executor barrel; that pulls `useEngine` and
+    // its `useSyncExternalStore` into a React Server Component and fails
+    // `next build`. A getter supplied by the (client-only) orchestrator has no
+    // such edge, and it also sidesteps the editorStore -> slices/index ->
+    // orchestratorSlice -> executors/index -> this file module cycle.
+    const liveStore = ctx.getStore();
     const liveGameComponents = liveStore.allGameComponents;
 
     // When called from movement system registry without entityIds, apply the
