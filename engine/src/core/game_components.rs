@@ -345,8 +345,19 @@ fn prop_string(props: &serde_json::Value, key: &str) -> Option<String> {
     props.get(key).and_then(|v| v.as_str()).map(str::to_string)
 }
 
+/// Read a whole-number field out of a properties bag, clamped to `0..=max`.
+///
+/// Parsed via `as_f64` rather than `as_u64` on purpose: JSON has one number type
+/// and every producer here spells integers differently — JS `JSON.stringify(10)`
+/// emits `10`, but anything that has been through a float (a slider, an LLM
+/// writing `10.0`, a `.forge` scene round-tripped through `f64`) emits `10.0`.
+/// `as_u64` answers `None` for the second spelling, which silently reverted the
+/// field to its default. Out-of-range values clamp instead of dropping, matching
+/// [`prop_f32`] — but since `as_f64` accepts negatives that `as_u64` used to
+/// reject outright, the zero floor has to be re-established explicitly.
 fn prop_u32(props: &serde_json::Value, key: &str, max: u32) -> Option<u32> {
-    props.get(key)?.as_u64().map(|v| v.min(max as u64) as u32)
+    let v = props.get(key)?.as_f64()?;
+    v.is_finite().then(|| v.round().clamp(0.0, max as f64) as u32)
 }
 
 /// A 3-element vector, or `None` if the key is absent, not a 3-element array, or
@@ -2383,6 +2394,88 @@ mod build_game_component_tests {
             let built = build_game_component(name, "{}")
                 .unwrap_or_else(|e| panic!("{name} must build from an empty bag: {e}"));
             assert_eq!(built.component_name(), name);
+        }
+    }
+
+    /// JSON has one number type, and every producer here formats integers
+    /// differently: JS `JSON.stringify(10)` emits `10`, but a value that has been
+    /// through a float (a slider, an LLM writing `10.0`, a `.forge` scene round-
+    /// tripped through `f64`) emits `10.0`. `as_u64()` answers `None` for the
+    /// second form, so the count silently fell back to its default — the exact
+    /// "unusable value" outcome the permissive builder exists to avoid, and
+    /// inconsistent with the sibling float/vector readers, which both take either
+    /// spelling.
+    #[test]
+    fn integer_fields_accept_a_float_spelling() {
+        let built = build_game_component("collectible", r#"{"value":10.0}"#).expect("builds");
+        let GameComponentData::Collectible(data) = built else {
+            panic!("wrong variant")
+        };
+        assert_eq!(data.value, 10, "10.0 names the same score as 10");
+
+        let built = build_game_component("spawner", r#"{"maxCount":3.0}"#).expect("builds");
+        let GameComponentData::Spawner(data) = built else {
+            panic!("wrong variant")
+        };
+        assert_eq!(data.max_count, 3);
+
+        let built =
+            build_game_component("win_condition", r#"{"targetScore":42.0}"#).expect("builds");
+        let GameComponentData::WinCondition(data) = built else {
+            panic!("wrong variant")
+        };
+        assert_eq!(data.target_score, Some(42));
+    }
+
+    /// A fractional count has no meaning to a system that iterates it, so it
+    /// rounds to the nearest whole rather than truncating — 2.6 spawners is much
+    /// closer to 3 than to 2.
+    #[test]
+    fn a_fractional_integer_field_rounds_to_nearest() {
+        for (bag, expected) in [(r#"{"value":10.4}"#, 10), (r#"{"value":10.6}"#, 11)] {
+            let built = build_game_component("collectible", bag).expect("builds");
+            let GameComponentData::Collectible(data) = built else {
+                panic!("wrong variant")
+            };
+            assert_eq!(data.value, expected, "{bag}");
+        }
+    }
+
+    /// Same clamp-don't-drop rule the float reader follows: an out-of-range count
+    /// lands on the nearest usable value instead of silently reverting to the
+    /// default. Negative is the floor case — it used to be rejected outright by
+    /// `as_u64`, so the floor has to be re-established explicitly.
+    #[test]
+    fn out_of_range_integer_fields_clamp_to_the_usable_range() {
+        let built = build_game_component("collectible", r#"{"value":1e12}"#).expect("builds");
+        let GameComponentData::Collectible(data) = built else {
+            panic!("wrong variant")
+        };
+        assert_eq!(data.value, 1_000_000, "clamped to the cap, not defaulted");
+
+        let built = build_game_component("collectible", r#"{"value":-5}"#).expect("builds");
+        let GameComponentData::Collectible(data) = built else {
+            panic!("wrong variant")
+        };
+        assert_eq!(data.value, 0, "a negative score floors at zero");
+
+        let built = build_game_component("spawner", r#"{"maxCount":99999}"#).expect("builds");
+        let GameComponentData::Spawner(data) = built else {
+            panic!("wrong variant")
+        };
+        assert_eq!(data.max_count, 1000);
+    }
+
+    /// Widening the accepted spelling must not widen it to non-numbers: a string
+    /// or a bool still leaves the default standing.
+    #[test]
+    fn a_non_numeric_integer_field_is_still_skipped() {
+        for bag in [r#"{"value":"ten"}"#, r#"{"value":true}"#, r#"{"value":null}"#] {
+            let built = build_game_component("collectible", bag).expect("builds");
+            let GameComponentData::Collectible(data) = built else {
+                panic!("wrong variant")
+            };
+            assert_eq!(data.value, 1, "{bag} leaves the default standing");
         }
     }
 }
