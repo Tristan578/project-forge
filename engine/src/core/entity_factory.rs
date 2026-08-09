@@ -122,7 +122,7 @@ pub fn apply_spawn_requests(
             EntityType::Torus => spawn_torus_with_id(&mut commands, &mut meshes, &mut materials, &name, request.position),
             EntityType::Capsule => spawn_capsule_with_id(&mut commands, &mut meshes, &mut materials, &name, request.position),
             EntityType::PointLight => spawn_point_light_with_id(&mut commands, &name, request.position),
-            EntityType::DirectionalLight => spawn_directional_light_with_id(&mut commands, &name),
+            EntityType::DirectionalLight => spawn_directional_light_with_id(&mut commands, &name, request.position),
             EntityType::SpotLight => spawn_spot_light_with_id(&mut commands, &name, request.position),
             EntityType::Sprite => continue,
             EntityType::GltfModel | EntityType::GltfMesh => {
@@ -1286,7 +1286,12 @@ fn spawn_point_light_with_id(
 fn spawn_directional_light_with_id(
     commands: &mut Commands,
     name: &str,
+    position: Option<Vec3>,
 ) -> (Entity, String, Vec3) {
+    // A directional light's illumination is rotation-only, but its translation
+    // is still what the gizmo, the outliner and the history snapshot address, so
+    // a requested position has to land on the Transform like every other type.
+    let pos = position.unwrap_or(Vec3::ZERO);
     let entity_id = EntityId::default();
     let entity_id_str = entity_id.0.clone();
     let light_data = LightData::directional();
@@ -1302,10 +1307,11 @@ fn spawn_directional_light_with_id(
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.5, 0.5, 0.0)),
+        Transform::from_translation(pos)
+            .with_rotation(Quat::from_euler(EulerRot::XYZ, -0.5, 0.5, 0.0)),
     )).id();
 
-    (entity, entity_id_str, Vec3::ZERO)
+    (entity, entity_id_str, pos)
 }
 
 fn spawn_spot_light_with_id(
@@ -2725,6 +2731,101 @@ mod spawn_id_tests {
             36,
             "oversized id must fall back to a UUID-v4, got {:?}",
             ids[0],
+        );
+    }
+}
+
+#[cfg(test)]
+mod spawn_position_tests {
+    use super::apply_spawn_requests;
+    use super::HistoryStack;
+    use crate::core::pending_commands::{EntityType, PendingCommands, SpawnRequest};
+    use bevy::prelude::*;
+
+    /// Spawn one entity and return its Transform. Mirrors `run_spawn` in
+    /// `spawn_id_tests`, but reads the Transform rather than the EntityId.
+    fn run_spawn_transform(entity_type: EntityType, position: Option<Vec3>) -> Transform {
+        let mut world = World::new();
+        let mut pending = PendingCommands::default();
+        pending.spawn_requests.push(SpawnRequest {
+            entity_type,
+            name: Some("Subject".into()),
+            position,
+            id: None,
+        });
+        world.insert_resource(pending);
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        world.insert_resource(HistoryStack::default());
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(apply_spawn_requests);
+        schedule.run(&mut world);
+
+        let mut query = world.query::<&Transform>();
+        let transforms: Vec<Transform> = query.iter(&world).copied().collect();
+        assert_eq!(transforms.len(), 1, "exactly one entity should spawn");
+        transforms[0]
+    }
+
+    /// Every spawnable type must honor a requested position. `DirectionalLight`
+    /// was the one arm of `apply_spawn_requests` that never received
+    /// `request.position`, so a caller asking for a light at (5, 10, 5) silently
+    /// got one at the origin — and, because the arm also returned `Vec3::ZERO`,
+    /// the history snapshot recorded the origin too, so undo/redo could not
+    /// recover the requested placement either.
+    #[test]
+    fn every_spawnable_type_honors_the_requested_position() {
+        let requested = Vec3::new(5.0, 10.0, -5.0);
+
+        for entity_type in [
+            EntityType::Cube,
+            EntityType::Sphere,
+            EntityType::Plane,
+            EntityType::Cylinder,
+            EntityType::Cone,
+            EntityType::Torus,
+            EntityType::Capsule,
+            EntityType::PointLight,
+            EntityType::DirectionalLight,
+            EntityType::SpotLight,
+        ] {
+            let transform = run_spawn_transform(entity_type, Some(requested));
+            assert_eq!(
+                transform.translation, requested,
+                "{entity_type:?} ignored the requested spawn position",
+            );
+        }
+    }
+
+    /// Applying the position must not cost the directional light its default
+    /// aim — the rotation is what makes it light the scene at all, so a fix that
+    /// swapped `from_rotation` for `from_translation` would be a silent
+    /// regression the position assertion above cannot see.
+    #[test]
+    fn directional_light_keeps_its_default_rotation() {
+        let expected = Quat::from_euler(EulerRot::XYZ, -0.5, 0.5, 0.0);
+
+        for position in [None, Some(Vec3::new(5.0, 10.0, -5.0))] {
+            let transform = run_spawn_transform(EntityType::DirectionalLight, position);
+            assert!(
+                transform.rotation.abs_diff_eq(expected, 1e-5),
+                "directional light lost its default rotation (position: {position:?})",
+            );
+        }
+    }
+
+    /// Omitting the position keeps each type's own documented default. Pinned so
+    /// the position plumbing can never quietly move an existing default.
+    #[test]
+    fn omitted_position_keeps_the_type_default() {
+        assert_eq!(
+            run_spawn_transform(EntityType::DirectionalLight, None).translation,
+            Vec3::ZERO,
+        );
+        assert_eq!(
+            run_spawn_transform(EntityType::SpotLight, None).translation,
+            Vec3::new(0.0, 3.0, 0.0),
         );
     }
 }
