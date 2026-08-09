@@ -964,6 +964,41 @@ mod tests {
     }
 
     #[test]
+    fn update_physics_ignores_unknown_key_and_still_applies_other_fields() {
+        // Companion to `PhysicsPatch`'s own
+        // `unknown_key_is_ignored_and_other_fields_still_apply`, pinned here at
+        // the layer that actually has the `#[serde(flatten)]`: a misspelled key
+        // is absorbed by flatten (never an error, never a write), and the
+        // correctly-spelled siblings in the SAME payload still apply.
+        // `deny_unknown_fields` is incompatible with flatten, so this leniency
+        // is the accepted contract, not an oversight — a serde upgrade or a
+        // future attempt to tighten it must break this test, not ship silently.
+        let payload: UpdatePhysicsPayload = serde_json::from_value(json!({
+            "entityId": "entity-1",
+            "gravtiyScale": 99.0,       // typo — must be ignored, not applied
+            "totallyUnknownKey": "junk",
+            "friction": 0.9
+        }))
+        .expect("an unknown key must be ignored, not rejected");
+
+        assert_eq!(payload.entity_id, "entity-1");
+        assert!(
+            payload.patch.gravity_scale.is_none(),
+            "a typo'd key must not populate its intended field"
+        );
+        assert_eq!(payload.patch.friction, Some(0.9));
+
+        let mut applied = PhysicsData::default();
+        payload.patch.apply_to(&mut applied);
+        assert_eq!(applied.friction, 0.9);
+        assert_eq!(
+            applied.gravity_scale,
+            PhysicsData::default().gravity_scale,
+            "the unknown key must write nothing"
+        );
+    }
+
+    #[test]
     fn update_physics_rejects_invalid_field_value() {
         // Optional fields relax MISSING keys, not INVALID values.
         let result = run("update_physics", json!({

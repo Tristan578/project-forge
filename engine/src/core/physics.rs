@@ -39,6 +39,13 @@ pub enum RigidBodyKind {
 
 /// Physics configuration component (stored persistently on entities).
 /// This is the serializable, bridge-friendly representation of physics properties.
+///
+/// **Every field here MUST have a matching `Option<_>` field on [`PhysicsPatch`]**,
+/// which is the only way a partial `update_physics` can write physics properties.
+/// A field added here but not mirrored there is permanently unsettable through
+/// that path — silently, because the patch simply never carries it. The
+/// `physics_data_and_patch_expose_the_same_field_set` test compares the two
+/// serialized key sets and fails on any unmirrored addition, removal, or rename.
 #[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PhysicsData {
@@ -83,6 +90,10 @@ impl Default for PhysicsData {
 /// to know (or resend) the other twelve. A missing field means "leave the
 /// current value alone" — it never means "reset to the default".
 ///
+/// **This is a shadow struct of [`PhysicsData`] and must stay field-for-field in
+/// sync with it** — see that type's doc comment and the
+/// `physics_data_and_patch_expose_the_same_field_set` drift test.
+///
 /// This exists because the web store keeps physics config only for the
 /// *selected* entity, so it cannot reconstruct a complete 13-field payload for
 /// an arbitrary entity without inventing the other twelve from defaults — which
@@ -93,7 +104,12 @@ impl Default for PhysicsData {
 /// TypeScript wrapper, which is where that class of typo is caught.
 /// `deny_unknown_fields` is not an option here — it is incompatible with the
 /// `#[serde(flatten)]` used by the `update_physics` payload.
-#[derive(Debug, Clone, Default, Deserialize)]
+///
+/// `Serialize` is derived purely so the drift test can enumerate the field names
+/// serde actually emits; nothing on the wire ever sends a `PhysicsPatch` back out.
+/// Do NOT add `skip_serializing_if` here — that would erase the very keys the
+/// drift test compares.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PhysicsPatch {
     pub body_type: Option<RigidBodyKind>,
@@ -156,6 +172,27 @@ impl PhysicsPatch {
         if let Some(is_sensor) = self.is_sensor {
             target.is_sensor = is_sensor;
         }
+    }
+
+    /// Merge this patch into `target` and return `(old, new)` — the value before
+    /// the merge and the value after it.
+    ///
+    /// This exists so the ORDER of the three steps (snapshot, merge, report) is
+    /// testable natively. The bridge's `apply_physics_updates` records
+    /// `UndoableAction::PhysicsChange` and emits the JS event from the returned
+    /// pair; if the snapshot were taken after the merge, `old == new` and every
+    /// undo would silently restore nothing. The bridge is wasm-only, so that
+    /// ordering cannot be unit-tested there — keep the sequence here.
+    ///
+    /// `old == new` means the patch was a no-op (all-`None`, or every field
+    /// already at the requested value). Callers must not push history or emit a
+    /// change event in that case: `HistoryStack::push` clears the redo stack, so
+    /// a no-op patch would destroy the user's redo history.
+    pub fn apply_recording(&self, target: &mut PhysicsData) -> (PhysicsData, PhysicsData) {
+        let old = target.clone();
+        self.apply_to(target);
+        let new = target.clone();
+        (old, new)
     }
 }
 
@@ -499,6 +536,7 @@ impl Plugin for PhysicsPlugin {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::collections::BTreeSet;
 
     /// The two physics enums get their `Default` from a `#[default]` variant
     /// attribute rather than a hand-written `impl`. That is terser but positional:
@@ -799,6 +837,119 @@ mod tests {
 
         let mut target = seeded();
         patch.apply_to(&mut target);
+        assert_eq!(target, seeded());
+    }
+
+    #[test]
+    fn unknown_key_is_ignored_and_other_fields_still_apply() {
+        // The all-Option design is justified by callers going through a typed
+        // wrapper; the engine's half of that contract is that an unknown key is
+        // absorbed (never an error, never a write). `deny_unknown_fields` is not
+        // available here — it is incompatible with the `#[serde(flatten)]` the
+        // `update_physics` payload uses — so pin the accepted behaviour: a typo'd
+        // key writes NOTHING, and the correctly-spelled siblings in the SAME
+        // payload still apply.
+        let patch: PhysicsPatch = serde_json::from_value(json!({
+            "gravtiyScale": 99.0,   // typo — must be ignored, not applied
+            "totallyUnknownKey": { "nested": [1, 2, 3] },
+            "friction": 0.9
+        }))
+        .expect("an unknown key must be ignored, not rejected");
+
+        assert!(patch.gravity_scale.is_none(), "a typo'd key must not populate its intended field");
+        assert_eq!(patch.friction, Some(0.9));
+
+        let mut target = seeded();
+        patch.apply_recording(&mut target);
+
+        let mut expected = seeded();
+        expected.friction = 0.9;
+        assert_eq!(target, expected, "the unknown key must write nothing");
+    }
+
+    // === 6. PhysicsData / PhysicsPatch field-set drift ===
+
+    #[test]
+    fn physics_data_and_patch_expose_the_same_field_set() {
+        // PhysicsPatch is a shadow struct of PhysicsData, and nothing in the type
+        // system ties the two field lists together. Adding `angular_damping` to
+        // PhysicsData without mirroring it here would make the field permanently
+        // unsettable through the partial-update path — the exact class of bug
+        // PF-1118 fixed, one level down. Enumerate the keys serde emits rather
+        // than hand-listing them, so a 14th field cannot slip past.
+        let data = serde_json::to_value(PhysicsData::default())
+            .expect("PhysicsData serializes");
+        let patch = serde_json::to_value(PhysicsPatch::default())
+            .expect("PhysicsPatch serializes");
+
+        let data_keys: BTreeSet<String> = data
+            .as_object()
+            .expect("PhysicsData serializes to an object")
+            .keys()
+            .cloned()
+            .collect();
+        let patch_keys: BTreeSet<String> = patch
+            .as_object()
+            .expect("PhysicsPatch serializes to an object")
+            .keys()
+            .cloned()
+            .collect();
+
+        assert_eq!(
+            data_keys, patch_keys,
+            "PhysicsData and PhysicsPatch field sets have drifted — every PhysicsData \
+             field needs a matching Option<_> on PhysicsPatch (and vice versa)"
+        );
+    }
+
+    // === 7. apply_recording — the ordered sequence the wasm-only bridge relies on ===
+
+    #[test]
+    fn apply_recording_returns_the_pre_merge_value_as_old() {
+        // If the snapshot were taken AFTER the merge, old would equal new and
+        // every undo would silently restore nothing.
+        let mut target = seeded();
+        let (old, new) = PhysicsPatch { friction: Some(0.9), ..Default::default() }
+            .apply_recording(&mut target);
+
+        assert_eq!(old, seeded(), "old must be the value from BEFORE the merge");
+        assert_ne!(old, new, "a non-identity patch must produce old != new");
+        assert_eq!(old.friction, seeded().friction);
+        assert_eq!(new.friction, 0.9);
+    }
+
+    #[test]
+    fn apply_recording_returns_the_merged_value_as_new() {
+        // `new` is what history stores as the redo side and what the JS event
+        // carries — it must be the MERGED struct, not the patch's subset.
+        let mut target = seeded();
+        let (_, new) = PhysicsPatch { friction: Some(0.9), ..Default::default() }
+            .apply_recording(&mut target);
+
+        assert_eq!(new, target, "new must equal the merged target");
+
+        let mut expected = seeded();
+        expected.friction = 0.9;
+        assert_eq!(new, expected, "new must carry the other twelve fields too");
+    }
+
+    #[test]
+    fn apply_recording_yields_old_equal_to_new_for_an_identity_patch() {
+        // The signal callers gate history + emit on. An all-None patch, and a
+        // patch that re-sends values already in place, are both no-ops.
+        let mut target = seeded();
+        let (old, new) = PhysicsPatch::default().apply_recording(&mut target);
+        assert_eq!(old, new, "an all-None patch must be reported as a no-op");
+        assert_eq!(target, seeded());
+
+        let mut target = seeded();
+        let (old, new) = PhysicsPatch {
+            friction: Some(seeded().friction),
+            body_type: Some(seeded().body_type),
+            ..Default::default()
+        }
+        .apply_recording(&mut target);
+        assert_eq!(old, new, "re-sending the current values must be reported as a no-op");
         assert_eq!(target, seeded());
     }
 }

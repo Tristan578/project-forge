@@ -376,22 +376,24 @@ describe('physicsJointHandlers', () => {
   // update_physics
   // -------------------------------------------------------------------------
   describe('update_physics', () => {
-    it('merges physics data from args with default base', async () => {
-      const { result, store } = await invokeHandler(physicsJointHandlers, 'update_physics', {
+    it('dispatches only the named fields, inventing no defaults', async () => {
+      const { result, dispatchCommand } = await invokeHandler(physicsJointHandlers, 'update_physics', {
         entityId: 'ent1',
         restitution: 0.7,
         friction: 0.3,
       });
       expect(result.success).toBe(true);
-      expect(store.updatePhysics).toHaveBeenCalledWith('ent1', expect.objectContaining({
-        bodyType: 'dynamic',
+      // PF-1118: the handler used to fill the 10 unnamed fields from a default
+      // base, which flipped `fixed` platforms to `dynamic`. The engine patches
+      // partially now, so anything unnamed must be ABSENT from the payload.
+      expect(dispatchCommand).toHaveBeenCalledWith('update_physics', {
+        entityId: 'ent1',
         restitution: 0.7,
         friction: 0.3,
-        density: 1.0,
-      }));
+      });
     });
 
-    it('merges with existing primaryPhysics when available', async () => {
+    it('never sources unnamed fields from another entity primaryPhysics', async () => {
       const existing = {
         bodyType: 'kinematic' as const,
         colliderShape: 'cuboid' as const,
@@ -407,30 +409,35 @@ describe('physicsJointHandlers', () => {
         lockRotationZ: false,
         isSensor: false,
       };
-      const { result, store } = await invokeHandler(
+      const { result, store, dispatchCommand } = await invokeHandler(
         physicsJointHandlers,
         'update_physics',
         { entityId: 'ent2', density: 5.0 },
         { primaryPhysics: existing }
       );
       expect(result.success).toBe(true);
-      expect(store.updatePhysics).toHaveBeenCalledWith('ent2', expect.objectContaining({
-        bodyType: 'kinematic',
+      // `primaryPhysics` describes the SELECTED entity, not `ent2` — copying it
+      // across is the cross-entity leak PF-1118 removed.
+      expect(dispatchCommand).toHaveBeenCalledWith('update_physics', {
+        entityId: 'ent2',
         density: 5.0,
-        restitution: 0.5,
-      }));
+      });
+      // Nor may it clobber the global primary-physics state for an arbitrary
+      // entity; the inspector is fed by the engine's PHYSICS_CHANGED echo.
+      expect(store.updatePhysics).not.toHaveBeenCalled();
     });
 
-    it('ignores unknown fields in physics merge', async () => {
-      const { result, store } = await invokeHandler(physicsJointHandlers, 'update_physics', {
+    it('ignores unknown fields in the dispatched patch', async () => {
+      const { result, dispatchCommand } = await invokeHandler(physicsJointHandlers, 'update_physics', {
         entityId: 'ent3',
         unknownField: 'ignored',
         bodyType: 'fixed',
       });
       expect(result.success).toBe(true);
-      const calledWith = (store.updatePhysics as ReturnType<typeof vi.fn>).mock.calls[0][1];
-      expect(calledWith.bodyType).toBe('fixed');
-      expect(calledWith).not.toHaveProperty('unknownField');
+      expect(dispatchCommand).toHaveBeenCalledWith('update_physics', {
+        entityId: 'ent3',
+        bodyType: 'fixed',
+      });
     });
   });
 

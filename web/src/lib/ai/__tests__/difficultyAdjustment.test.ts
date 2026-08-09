@@ -447,10 +447,44 @@ describe('difficultyToCommands', () => {
     expect(difficultyToCommands(makeProfile(), [])).toEqual([]);
   });
 
-  it('is idempotent for a given baseline — re-running does not compound', () => {
+  /**
+   * The previous version of this test asserted
+   * `difficultyToCommands(p, t) toEqual difficultyToCommands(p, t)` and was named
+   * "is idempotent — re-running does not compound". Both sides are the same pure
+   * call on the same inputs, so the only way it could ever fail is if the function
+   * mutated its own argument — it could not fail for the reason its name claimed.
+   * The two tests below split that into the two claims that CAN fail: the call
+   * leaves `baseComponents` untouched, and re-feeding a previous result DOES
+   * compound (which is exactly what `DifficultyTarget`'s doc-comment warns about).
+   */
+  it('does not mutate the supplied baseComponents', () => {
     const target = [{ entityId: 'e1', baseComponents: [health(100)] }];
+    const untouched = structuredClone(target);
     const profile = makeProfile({ enemyHealthMultiplier: 1.5 });
-    expect(difficultyToCommands(profile, target)).toEqual(difficultyToCommands(profile, target));
+
+    difficultyToCommands(profile, target);
+
+    expect(target).toEqual(untouched);
+  });
+
+  it('compounds when a previous run’s scaled output is fed back in as the baseline', () => {
+    const profile = makeProfile({ enemyHealthMultiplier: 1.5 });
+
+    const first = difficultyToCommands(profile, [
+      { entityId: 'e1', baseComponents: [health(100)] },
+    ]);
+    const firstHp = (first[0].properties as { maxHp: number }).maxHp;
+    expect(firstHp).toBe(150);
+
+    // The misuse `DifficultyTarget` documents: passing the entity's already-scaled
+    // LIVE values back in as the baseline. The multipliers are absolute, so 1.5x on
+    // a 1.5x enemy is 2.25x and difficulty runs away over a session. Asserted, not
+    // merely warned about in prose — callers must re-derive from authored values.
+    const second = difficultyToCommands(profile, [
+      { entityId: 'e1', baseComponents: [health(firstHp)] },
+    ]);
+
+    expect((second[0].properties as { maxHp: number }).maxHp).toBe(225);
   });
 });
 

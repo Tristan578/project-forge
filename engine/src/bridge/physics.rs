@@ -26,6 +26,20 @@ use super::events;
 /// `PhysicsData`. History and the JS event must both receive the MERGED result —
 /// the patch alone describes only the changed subset, and `PhysicsChange` stores
 /// full `PhysicsData` on both sides (undo overwrites the component wholesale).
+/// That ordered snapshot→merge→report sequence lives in
+/// [`crate::core::physics::PhysicsPatch::apply_recording`] so it is unit-testable
+/// natively; this module is wasm-only and never compiles under `cargo test`.
+///
+/// REQUIREMENT: the target entity must already carry a `PhysicsData` component.
+/// `update_physics` does NOT create one — use `toggle_physics` (which inserts a
+/// default `PhysicsData`) first. Callers that select entities by `RigidBody` or
+/// `Collider` can hold ids that have no `PhysicsData`; those updates cannot be
+/// applied and are logged as a warning rather than applied to nothing.
+///
+/// A patch that changes nothing (all-`None`, or every field already at the
+/// requested value) pushes NO history entry and emits NO event —
+/// `HistoryStack::push` clears the redo stack, so a no-op update would otherwise
+/// destroy the user's redo history and add an undo entry that restores nothing.
 pub(super) fn apply_physics_updates(
     mut pending: ResMut<PendingCommands>,
     mut query: Query<(&EntityId, &mut PhysicsData)>,
@@ -33,12 +47,22 @@ pub(super) fn apply_physics_updates(
     mut history: ResMut<HistoryStack>,
 ) {
     for update in pending.physics_updates.drain(..) {
+        let mut matched = false;
         for (entity_id, mut current_physics) in query.iter_mut() {
-            if entity_id.0 == update.entity_id {
-                // Snapshot the pre-merge value BEFORE applying the patch.
-                let old_physics = current_physics.clone();
-                update.patch.apply_to(&mut current_physics);
-                let new_physics = current_physics.clone();
+            if entity_id.0 != update.entity_id {
+                continue;
+            }
+            matched = true;
+
+            // Snapshot → merge → report, in that order (see apply_recording).
+            // bypass_change_detection so a no-op patch does not mark the
+            // component Changed and re-trigger the selection emit system.
+            let (old_physics, new_physics) = update
+                .patch
+                .apply_recording(current_physics.bypass_change_detection());
+
+            if new_physics != old_physics {
+                current_physics.set_changed();
 
                 // Record for undo
                 history.push(crate::core::history::UndoableAction::PhysicsChange {
@@ -50,8 +74,16 @@ pub(super) fn apply_physics_updates(
                 // Emit change event
                 let enabled = phys_enabled_query.iter().any(|eid| eid.0 == update.entity_id);
                 events::emit_physics_changed(&update.entity_id, &new_physics, enabled);
-                break;
             }
+            break;
+        }
+
+        if !matched {
+            tracing::warn!(
+                "update_physics ignored: entity '{}' has no PhysicsData component \
+                 (enable physics on it first)",
+                update.entity_id
+            );
         }
     }
 }

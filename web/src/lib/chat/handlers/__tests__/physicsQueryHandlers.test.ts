@@ -188,21 +188,29 @@ describe('get_joint — edge cases', () => {
 // update_physics — all body types and collider shapes
 // ---------------------------------------------------------------------------
 
+// `update_physics` dispatches a genuine PARTIAL to the engine (PF-1118): the
+// fields a call does not name must be ABSENT from the payload so the engine's
+// `PhysicsPatch` leaves their live values alone. `toEqual` on the whole payload
+// is therefore the assertion that matters — `objectContaining` would pass just
+// as happily on the old 13-field reconstruction that caused the bug.
+
 describe('update_physics — all bodyType variants', () => {
   const bodyTypes = ['dynamic', 'fixed', 'kinematic_position', 'kinematic_velocity'] as const;
 
   for (const bodyType of bodyTypes) {
     it(`updates bodyType=${bodyType} correctly`, async () => {
-      const { result, store } = await invokeHandler(physicsJointHandlers, 'update_physics', {
+      const { result, store, dispatchCommand } = await invokeHandler(
+        physicsJointHandlers,
+        'update_physics',
+        { entityId: 'ent1', bodyType }
+      );
+
+      expect(result.success).toBe(true);
+      expect(dispatchCommand).toHaveBeenCalledWith('update_physics', {
         entityId: 'ent1',
         bodyType,
       });
-
-      expect(result.success).toBe(true);
-      expect(store.updatePhysics).toHaveBeenCalledWith(
-        'ent1',
-        expect.objectContaining({ bodyType })
-      );
+      expect(store.updatePhysics).not.toHaveBeenCalled();
     });
   }
 });
@@ -212,23 +220,25 @@ describe('update_physics — all colliderShape variants', () => {
 
   for (const colliderShape of shapes) {
     it(`updates colliderShape=${colliderShape} correctly`, async () => {
-      const { result, store } = await invokeHandler(physicsJointHandlers, 'update_physics', {
+      const { result, store, dispatchCommand } = await invokeHandler(
+        physicsJointHandlers,
+        'update_physics',
+        { entityId: 'ent1', colliderShape }
+      );
+
+      expect(result.success).toBe(true);
+      expect(dispatchCommand).toHaveBeenCalledWith('update_physics', {
         entityId: 'ent1',
         colliderShape,
       });
-
-      expect(result.success).toBe(true);
-      expect(store.updatePhysics).toHaveBeenCalledWith(
-        'ent1',
-        expect.objectContaining({ colliderShape })
-      );
+      expect(store.updatePhysics).not.toHaveBeenCalled();
     });
   }
 });
 
 describe('update_physics — lock field combinations', () => {
   it('can lock all translation axes', async () => {
-    const { result, store } = await invokeHandler(physicsJointHandlers, 'update_physics', {
+    const { result, dispatchCommand } = await invokeHandler(physicsJointHandlers, 'update_physics', {
       entityId: 'ent1',
       lockTranslationX: true,
       lockTranslationY: true,
@@ -236,18 +246,16 @@ describe('update_physics — lock field combinations', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(store.updatePhysics).toHaveBeenCalledWith(
-      'ent1',
-      expect.objectContaining({
-        lockTranslationX: true,
-        lockTranslationY: true,
-        lockTranslationZ: true,
-      })
-    );
+    expect(dispatchCommand).toHaveBeenCalledWith('update_physics', {
+      entityId: 'ent1',
+      lockTranslationX: true,
+      lockTranslationY: true,
+      lockTranslationZ: true,
+    });
   });
 
   it('can lock all rotation axes', async () => {
-    const { result, store } = await invokeHandler(physicsJointHandlers, 'update_physics', {
+    const { result, dispatchCommand } = await invokeHandler(physicsJointHandlers, 'update_physics', {
       entityId: 'ent1',
       lockRotationX: true,
       lockRotationY: true,
@@ -255,27 +263,25 @@ describe('update_physics — lock field combinations', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(store.updatePhysics).toHaveBeenCalledWith(
-      'ent1',
-      expect.objectContaining({
-        lockRotationX: true,
-        lockRotationY: true,
-        lockRotationZ: true,
-      })
-    );
+    expect(dispatchCommand).toHaveBeenCalledWith('update_physics', {
+      entityId: 'ent1',
+      lockRotationX: true,
+      lockRotationY: true,
+      lockRotationZ: true,
+    });
   });
 
   it('can enable isSensor flag', async () => {
-    const { result, store } = await invokeHandler(physicsJointHandlers, 'update_physics', {
+    const { result, dispatchCommand } = await invokeHandler(physicsJointHandlers, 'update_physics', {
       entityId: 'trigger-entity',
       isSensor: true,
     });
 
     expect(result.success).toBe(true);
-    expect(store.updatePhysics).toHaveBeenCalledWith(
-      'trigger-entity',
-      expect.objectContaining({ isSensor: true })
-    );
+    expect(dispatchCommand).toHaveBeenCalledWith('update_physics', {
+      entityId: 'trigger-entity',
+      isSensor: true,
+    });
   });
 
   it('returns error when entityId is missing', async () => {

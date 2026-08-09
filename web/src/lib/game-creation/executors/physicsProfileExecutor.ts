@@ -94,6 +94,24 @@ export const physicsProfileExecutor: ExecutorDefinition = {
 
     const ids = entityIds ?? [];
 
+    // Read the component map LIVE, never off `ctx.store`. The orchestrator
+    // builds the executor context ONCE with `useEditorStore.getState()` and
+    // `pipelineRunner` reuses that same object for every step, so `ctx.store`
+    // is a snapshot taken before the pipeline ran. Zustand 5 replaces the state
+    // object on every write (`state = Object.assign({}, state, next)`), so that
+    // snapshot can never observe a later write: on the pipeline path
+    // `character_setup` adds the controller a step earlier and
+    // `ctx.store.allGameComponents` is still `{}` here. Merging against `{}`
+    // rebuilds the controller from `Default` and resets it — the exact PF-1118
+    // data loss this executor is supposed to avoid.
+    //
+    // The import is dynamic because a static one closes a module cycle —
+    // editorStore -> slices/index -> orchestratorSlice -> executors/index ->
+    // this file — which leaves `useEditorStore` in the TDZ whenever the
+    // executor barrel is evaluated first.
+    const { useEditorStore } = await import('@/stores/editorStore');
+    const liveGameComponents = useEditorStore.getState().allGameComponents;
+
     // When called from movement system registry without entityIds, apply the
     // physics profile globally via update_physics_config (scene-level settings).
     // Per-entity physics is applied when entityIds are provided.
@@ -113,11 +131,11 @@ export const physicsProfileExecutor: ExecutorDefinition = {
       // Pass the live component map: this executor runs AFTER character_setup in the
       // pipeline, and without the merge it would reset every field that step
       // configured (PF-1118).
-      applyPhysicsProfile(finalProfile, ctx.dispatchCommand, physicsNodes, ctx.store.allGameComponents);
+      applyPhysicsProfile(finalProfile, ctx.dispatchCommand, physicsNodes, liveGameComponents);
       return successResult({ presetUsed: presetKey, entityCount: physicsNodes.length, appliedGlobally: false });
     }
 
-    applyPhysicsProfile(finalProfile, ctx.dispatchCommand, ids, ctx.store.allGameComponents);
+    applyPhysicsProfile(finalProfile, ctx.dispatchCommand, ids, liveGameComponents);
 
     return successResult({ presetUsed: presetKey, entityCount: ids.length, appliedGlobally: false });
   },

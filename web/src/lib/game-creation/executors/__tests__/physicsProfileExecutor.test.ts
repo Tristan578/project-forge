@@ -3,6 +3,8 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { physicsProfileExecutor } from '../physicsProfileExecutor';
+import { useEditorStore, type EditorState } from '@/stores/editorStore';
+import type { GameComponentData } from '@/stores/slices/types';
 import type { ExecutorContext } from '../../types';
 
 // Mock the physics module
@@ -21,10 +23,9 @@ vi.mock('@/lib/ai/physicsFeel', () => ({
 }));
 
 /**
- * A store stub always carries `allGameComponents` — the executor forwards it to
- * `applyPhysicsProfile`, which merges the profile onto each entity's EXISTING
- * character controller instead of rebuilding it from `Default`. Omitting it here
- * would let the map silently arrive as `undefined` and reintroduce PF-1118.
+ * The stub carries `allGameComponents` only to mirror the real `EditorState`
+ * shape. The executor deliberately does NOT read it from here — see the live-map
+ * test below.
  */
 function makeStore(
   nodes: Record<string, ReturnType<typeof makeNode>> = {},
@@ -34,6 +35,11 @@ function makeStore(
     sceneGraph: { nodes, rootIds: Object.keys(nodes) },
     allGameComponents,
   } as unknown as ExecutorContext['store'];
+}
+
+/** Seed the real store's component map (what `character_setup` does mid-pipeline). */
+function seedLiveGameComponents(map: Record<string, GameComponentData[]>): void {
+  useEditorStore.setState({ allGameComponents: map } as Partial<EditorState> as EditorState);
 }
 
 function makeCtx(overrides: Partial<ExecutorContext> = {}): ExecutorContext {
@@ -65,6 +71,7 @@ function makeFeelDirective(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  seedLiveGameComponents({});
 });
 
 describe('physicsProfileExecutor', () => {
@@ -134,16 +141,25 @@ describe('physicsProfileExecutor', () => {
       expect.any(Object),
       ctx.dispatchCommand,
       ['e1', 'e2'],
-      ctx.store.allGameComponents,
+      useEditorStore.getState().allGameComponents,
     );
     const output = result.output as { entityCount: number };
     expect(output.entityCount).toBe(2);
   });
 
-  it('forwards the live game-component map so existing controllers are merged, not reset', async () => {
-    // This executor runs AFTER character_setup in the pipeline. Dropping the map
-    // here makes applyPhysicsProfile rebuild the controller from Default and wipe
-    // every field that step configured — canDoubleJump above all (PF-1118).
+  it('reads the LIVE component map, not the pre-pipeline context snapshot', async () => {
+    // Drives the REAL snapshot semantics of the pipeline. The orchestrator builds
+    // the ExecutorContext ONCE (`store: useEditorStore.getState()`) and
+    // pipelineRunner reuses that object for every step; Zustand 5 REPLACES the
+    // state object on write, so `ctx.store` can never observe a later write.
+    // `character_setup` runs a step earlier and setStates a NEW allGameComponents,
+    // so a snapshot read here always sees `{}` — merging against that rebuilds the
+    // controller from Default and wipes canDoubleJump (PF-1118).
+    //
+    // Context first, exactly as the orchestrator does it...
+    const ctx = makeCtx({ store: useEditorStore.getState() });
+
+    // ...then the mid-pipeline write the snapshot cannot see.
     const components = {
       e1: [
         {
@@ -151,10 +167,12 @@ describe('physicsProfileExecutor', () => {
           characterController: { speed: 5, jumpHeight: 8, gravityScale: 1, canDoubleJump: true },
         },
       ],
-    };
-    const ctx = makeCtx({
-      store: makeStore({ e1: makeNode('e1', 'Player', ['PhysicsData']) }, components),
-    });
+    } as unknown as Record<string, GameComponentData[]>;
+    seedLiveGameComponents(components);
+
+    // Guard the premise: if this ever stops being `{}`, the test has stopped
+    // reproducing the bug and would pass vacuously.
+    expect(ctx.store.allGameComponents).toEqual({});
 
     await physicsProfileExecutor.execute({
       feelDirective: makeFeelDirective(),
@@ -184,7 +202,7 @@ describe('physicsProfileExecutor', () => {
       expect.any(Object),
       ctx.dispatchCommand,
       ['e1', 'e2'],
-      ctx.store.allGameComponents,
+      useEditorStore.getState().allGameComponents,
     );
     const output = result.output as { entityCount: number };
     expect(output.entityCount).toBe(2);

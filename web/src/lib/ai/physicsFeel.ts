@@ -6,7 +6,7 @@
  */
 
 import { buildStoreComponent, toWireComponent } from '@/lib/engine/gameComponentWire';
-import type { GameComponentData } from '@/stores/slices/types';
+import type { GameComponentData, PhysicsData } from '@/stores/slices/types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,6 +54,22 @@ export interface PhysicsSceneContext {
 
 /** A dispatcher that can send engine commands. */
 export type CommandDispatcher = (command: string, payload: unknown) => void;
+
+/**
+ * Wire shape of the engine's `update_physics` command: `entityId` plus every
+ * `PhysicsData` field as optional, mirroring the engine's `PhysicsPatch`
+ * (`engine/src/core/physics.rs`) field for field.
+ *
+ * This exists because `CommandDispatcher` takes `payload: unknown`, so a bare
+ * object literal at a dispatch site is completely unchecked: `gravtiyScale`
+ * type-checks, deserializes into a `PhysicsPatch` with every field `None`
+ * (serde ignores unknown keys), writes nothing, and gravity silently never
+ * changes. Annotating the payload against this type — via `satisfies`, which
+ * keeps excess-property checking on the literal — turns that typo into a
+ * compile error. Derived from `PhysicsData` rather than re-listing the 13
+ * fields so the two can never drift.
+ */
+export type PhysicsPatchPayload = { entityId: string } & Partial<PhysicsData>;
 
 // ---------------------------------------------------------------------------
 // Presets
@@ -417,7 +433,7 @@ export function applyPhysicsProfile(
       gravityScale,
       friction: profile.friction,
       restitution: profile.restitution,
-    });
+    } satisfies PhysicsPatchPayload);
 
     // Merge onto the entity's existing controller so unrelated fields survive; fall
     // back to a fully-populated default component when it has none.
