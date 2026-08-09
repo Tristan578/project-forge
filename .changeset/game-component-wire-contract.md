@@ -1,5 +1,5 @@
 ---
-"spawnforge-web": patch
+"web": patch
 ---
 
 Fix the JS↔engine game-component wire contract so AI-authored gameplay actually reaches the engine.
