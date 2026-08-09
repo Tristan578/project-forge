@@ -27,7 +27,30 @@ const VALID_EXECUTOR_NAMES: ReadonlySet<ExecutorName> = new Set<ExecutorName>([
 
 /** No planned entities — these cases assert step SHAPE, not entity binding. */
 function makeCtx(overrides?: Partial<SystemStepContext>): SystemStepContext {
-  return { entities: [], ...overrides };
+  return { entities: [], warn: () => {}, ...overrides };
+}
+
+/**
+ * A ctx carrying one player-role entity. Movement only plans its
+ * `character_setup` step when the GDD designed a player to rig, so the shape
+ * assertions below need one present.
+ */
+function makePlayerCtx(): SystemStepContext {
+  return makeCtx({
+    entities: [
+      {
+        entityId: 'id-hero',
+        scene: 'Level1',
+        entity: {
+          name: 'Hero',
+          role: 'player',
+          systems: [],
+          appearance: 'a knight',
+          behaviors: ['move'],
+        },
+      },
+    ],
+  });
 }
 
 function makeSystem(category: GameSystem['category'], type: string): GameSystem {
@@ -136,7 +159,7 @@ describe('SYSTEM_REGISTRY', () => {
     it('returns exactly 2 steps', () => {
       const def = SYSTEM_REGISTRY.get('movement')!;
       const system = makeSystem('movement', 'platformer');
-      const steps = def.setupSteps(system, makeGdd(), makeCtx());
+      const steps = def.setupSteps(system, makeGdd(), makePlayerCtx());
       expect(steps).toHaveLength(2);
     });
 
@@ -144,7 +167,7 @@ describe('SYSTEM_REGISTRY', () => {
       const def = SYSTEM_REGISTRY.get('movement')!;
       const system = makeSystem('movement', 'platformer');
       system.config = { gravity: 9.8 };
-      const steps = def.setupSteps(system, makeGdd(), makeCtx());
+      const steps = def.setupSteps(system, makeGdd(), makePlayerCtx());
       expect(steps[0].executor).toBe('physics_profile');
       expect(steps[0].input).toMatchObject({
         config: system.config,
@@ -156,12 +179,23 @@ describe('SYSTEM_REGISTRY', () => {
       const def = SYSTEM_REGISTRY.get('movement')!;
       const system = makeSystem('movement', 'top_down');
       system.config = { speed: 5 };
-      const steps = def.setupSteps(system, makeGdd(), makeCtx());
+      const steps = def.setupSteps(system, makeGdd(), makePlayerCtx());
       expect(steps[1].executor).toBe('character_setup');
       expect(steps[1].input).toMatchObject({
         movementType: system.type,
         systemConfig: system.config,
+        entityId: 'id-hero',
       });
+    });
+
+    // Without a player there is nothing to rig, and `character_setup` is a
+    // non-optional step — planning one that cannot resolve a target fails the
+    // whole plan, discarding the level, the collectibles and the win condition
+    // along with the rig.
+    it('drops the character step when the GDD names no player', () => {
+      const def = SYSTEM_REGISTRY.get('movement')!;
+      const steps = def.setupSteps(makeSystem('movement', 'top_down'), makeGdd(), makeCtx());
+      expect(steps.map(s => s.executor)).toEqual(['physics_profile']);
     });
   });
 

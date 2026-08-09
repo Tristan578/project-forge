@@ -187,6 +187,12 @@ export function buildPlan(
   // Same ids, in declaration order, for system definitions that must target an
   // entity (e.g. movement's character_setup) but are not driven by this loop.
   const plannedEntities: PlannedEntity[] = [];
+  // Plan-level warnings raised while systems are being planned. A system that
+  // cannot plan one of its steps drops it and says so here rather than emitting
+  // a step certain to fail — a non-optional step failing sets the whole plan to
+  // `failed`, discarding everything else the build would have produced. These
+  // surface on the final approval gate.
+  const planWarnings: string[] = [];
   for (const scene of gdd.scenes) {
     const sceneStepId = sceneStepIds[scene.name];
     for (const entity of scene.entities) {
@@ -239,7 +245,10 @@ export function buildPlan(
     }
 
     if (def) {
-      const systemSteps = def.setupSteps(system, gdd, { entities: plannedEntities });
+      const systemSteps = def.setupSteps(system, gdd, {
+        entities: plannedEntities,
+        warn: message => planWarnings.push(message),
+      });
       for (const stepInput of systemSteps) {
         // [S1] Hardcoded values injected by executor, not spread from config
         const step = makeStep(
@@ -406,7 +415,7 @@ export function buildPlan(
         totalEntities: gdd.scenes.reduce((sum, s) => sum + s.entities.length, 0),
         totalScenes: gdd.scenes.length,
         totalScripts: steps.filter(s => s.executor === 'custom_script_generate').length,
-        warnings: [],
+        warnings: planWarnings,
       },
     },
   });

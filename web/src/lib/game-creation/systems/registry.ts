@@ -36,6 +36,15 @@ export interface PlannedEntity {
  */
 export interface SystemStepContext {
   entities: PlannedEntity[];
+  /**
+   * Record a plan-level warning for the user. A system that cannot plan one of
+   * its steps — because the GDD gave it nothing to target — should drop that
+   * step and say so here rather than emit a step that is certain to fail: a
+   * non-optional step failing sets the whole plan to `failed`, discarding every
+   * other thing the build would have produced. The collected messages surface
+   * on the final approval gate.
+   */
+  warn: (message: string) => void;
 }
 
 export interface SystemDefinition {

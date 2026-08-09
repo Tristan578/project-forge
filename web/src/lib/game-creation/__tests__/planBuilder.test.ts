@@ -502,6 +502,53 @@ describe('buildPlan', () => {
     expect(executors).toContain('character_setup');
   });
 
+  // A GDD is LLM-authored and nothing forces a movement system to come with a
+  // player-role entity, so this shape is reachable. `character_setup` is a
+  // non-optional step, and a non-optional step that fails sets the whole plan
+  // to `failed` — the level, the collectibles and the win condition would all
+  // be discarded to rig a character the design never named. Drop the step and
+  // tell the user instead.
+  it('drops character_setup and warns when a movement system has no player entity', () => {
+    const gdd = makeGdd({
+      systems: [makeSystem('movement', 'platformer')],
+      scenes: [
+        {
+          name: 'Main',
+          purpose: 'main',
+          systems: [],
+          entities: [
+            { name: 'Crate', role: 'decoration', systems: [], appearance: 'box', behaviors: [] },
+          ],
+          transitions: [],
+        },
+      ],
+    });
+
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const gateFinal = plan.approvalGates.find(g => g.id === 'gate_final')!;
+    const summary = gateFinal.displayData.completionSummary!;
+
+    expect(plan.steps.map(s => s.executor)).not.toContain('character_setup');
+    expect(plan.steps.map(s => s.executor)).toContain('physics_profile');
+    expect(summary.warnings).toHaveLength(1);
+    expect(summary.warnings[0]).toMatch(/player/i);
+  });
+
+  // The channel must stay quiet on the happy path — a warnings list that is
+  // never empty is one users learn to ignore.
+  it('leaves completionSummary.warnings empty when nothing was dropped', () => {
+    const plan = buildPlan(
+      makeGdd({ systems: [makeSystem('movement', 'platformer')] }),
+      'proj-1',
+      'creator',
+      10000,
+    );
+    const gateFinal = plan.approvalGates.find(g => g.id === 'gate_final')!;
+    const summary = gateFinal.displayData.completionSummary!;
+
+    expect(summary.warnings).toEqual([]);
+  });
+
   // ---------------------------------------------------------------------
   // Cycle detection — topoSortSystems must FAIL loudly, never silently
   // drop a step or hang, when gdd.systems has a cyclic dependsOn graph.

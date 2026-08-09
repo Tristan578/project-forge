@@ -1,9 +1,10 @@
 /**
  * Movement system definition.
  *
- * Produces two steps:
+ * Produces up to two steps:
  *  1. physics_profile — configure physics for the movement type
- *  2. character_setup — spawn a controllable character entity
+ *  2. character_setup — rig the player entity so it can be controlled
+ *     (only when the GDD actually designed a player to rig)
  */
 
 import { registerSystem } from './registry';
@@ -20,23 +21,38 @@ registerSystem({
     // The engine matches `add_game_component` / `create_skeleton2d` on the
     // EntityId component and emits nothing on a miss, so the character step
     // must carry the id the plan minted for the player. The blueprint rides
-    // along too — the executor's own default entity is named 'Player', so
-    // without it a store lookup searches for the wrong name.
+    // along for the step's own reporting.
     const player = ctx.entities.find(e => e.entity.role === 'player');
 
-    return [
+    const steps: SystemStepInput[] = [
       {
         executor: 'physics_profile',
         input: { config: system.config, systemType: system.type },
       },
-      {
-        executor: 'character_setup',
-        input: {
-          movementType: system.type,
-          systemConfig: system.config,
-          ...(player ? { entityId: player.entityId, entity: player.entity } : {}),
-        },
-      },
     ];
+
+    // A GDD is LLM-authored, so a movement system with no player-role entity is
+    // reachable. There is no character to rig, and `character_setup` is a
+    // non-optional step — planning one that cannot resolve a target would fail
+    // the whole plan and discard the level, the collectibles and the win
+    // condition along with the rig. Drop the step and say why instead.
+    if (!player) {
+      ctx.warn(
+        'The design asked for a movement system but named no player character, so nothing was set up to be controlled.',
+      );
+      return steps;
+    }
+
+    steps.push({
+      executor: 'character_setup',
+      input: {
+        movementType: system.type,
+        systemConfig: system.config,
+        entityId: player.entityId,
+        entity: player.entity,
+      },
+    });
+
+    return steps;
   },
 });

@@ -61,22 +61,28 @@ describe('characterSetupExecutor', () => {
     });
   });
 
-  it('uses default entity when none provided', async () => {
+  // The entity is no longer defaulted. A default named 'Player' silently bound
+  // the rig to whatever happened to carry that name — or to nothing at all,
+  // since the GDD names its own characters.
+  it('rejects a step that carries no entity', async () => {
     const ctx = makeCtx();
     const result = await characterSetupExecutor.execute({
       projectType: '3d',
       entityId: 'ent_default',
     }, ctx);
 
-    expect(result.success).toBe(true);
-    expect(result.output?.entityName).toBe('Player');
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', expect.objectContaining({
-      entityId: 'ent_default',
-      componentType: 'character_controller',
-    }));
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('INVALID_INPUT');
+    expect(ctx.dispatchCommand).not.toHaveBeenCalled();
   });
 
-  it('looks up entity by name in scene graph when no entityId', async () => {
+  // The scene-graph lookup raced the engine: `entity_setup` dispatches
+  // `spawn_entity` and the graph is only repopulated once the engine emits
+  // back, so this ran against a graph that did not yet hold the entity. The
+  // plan mints the id up front precisely so no lookup is needed — a step
+  // without one is a wiring bug, and must not be papered over by consulting a
+  // store that may or may not have caught up.
+  it('does not fall back to a scene-graph name lookup', async () => {
     const ctx = makeCtx({
       store: {
         sceneGraph: {
@@ -88,43 +94,34 @@ describe('characterSetupExecutor', () => {
     });
 
     const result = await characterSetupExecutor.execute({
-      projectType: '3d',
-    }, ctx);
-
-    expect(result.success).toBe(true);
-    expect(result.output?.entityId).toBe('resolved_id');
-  });
-
-  // Previously this fell back to the entity NAME as the id and returned success.
-  // The engine matches `add_game_component` on the EntityId component, so a name
-  // matches nothing and the engine's match loop emits nothing on a miss — the
-  // player silently ended up with no CharacterController and could not move.
-  // An unresolvable target is a failure, not a binding to nothing.
-  it('fails loudly when the entity resolves to no engine id', async () => {
-    const ctx = makeCtx({
-      store: {
-        sceneGraph: {
-          nodes: {
-            n1: { entityId: 'other_id', name: 'Enemy' },
-          },
-        },
-      } as never,
-    });
-
-    const result = await characterSetupExecutor.execute({
-      entity: { name: 'Ghost', role: 'npc', appearance: 'ghost', behaviors: [] },
+      entity: { name: 'Player', role: 'player', appearance: 'knight', behaviors: ['move'] },
       projectType: '3d',
     }, ctx);
 
     expect(result.success).toBe(false);
-    expect(result.error?.code).toBe('ENTITY_NOT_FOUND');
-    expect(result.error?.message).toContain('Ghost');
+    expect(result.error?.code).toBe('INVALID_INPUT');
+    expect(ctx.dispatchCommand).not.toHaveBeenCalled();
+  });
+
+  // An empty string is a present-but-useless id: the engine's match loops emit
+  // nothing on a miss, so dispatching it would be a silent no-op.
+  it('rejects an empty entityId', async () => {
+    const ctx = makeCtx();
+    const result = await characterSetupExecutor.execute({
+      entity: { name: 'Hero', role: 'player', appearance: 'knight', behaviors: ['move'] },
+      projectType: '3d',
+      entityId: '',
+    }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('INVALID_INPUT');
     expect(ctx.dispatchCommand).not.toHaveBeenCalled();
   });
 
   it('rejects invalid projectType', async () => {
     const ctx = makeCtx();
     const result = await characterSetupExecutor.execute({
+      entity: { name: 'Hero', role: 'player', appearance: 'knight', behaviors: ['move'] },
       projectType: 'vr',
       entityId: 'ent_1',
     }, ctx);
@@ -150,6 +147,7 @@ describe('characterSetupExecutor', () => {
   it('does not dispatch duplicate commands when entityId is provided', async () => {
     const ctx = makeCtx();
     await characterSetupExecutor.execute({
+      entity: { name: 'Hero', role: 'player', appearance: 'knight', behaviors: ['move'] },
       projectType: '3d',
       entityId: 'explicit_id',
     }, ctx);
