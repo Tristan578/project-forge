@@ -122,6 +122,33 @@ describe('sceneCreateExecutor', () => {
     });
   });
 
+  it('does not read camera params off the prototype chain', async () => {
+    const ctx = makeCtx();
+    // `cameraConfig` is GDD-derived, so the model controls its keys, and a
+    // `__proto__` entry in that JSON produces exactly this object.
+    //
+    // Pins the PROPERTY, not one implementation of it: two independent guards
+    // hold here — Zod's `z.record()` parse rebuilds the input as a plain object,
+    // and the param loop reads own keys only — so this passes with either one
+    // alone and only fails if BOTH go. That is weaker than a single-guard test
+    // would be, and it is the honest shape given where the guards live.
+    const cameraConfig = Object.create({ topDownHeight: 999 }) as Record<string, unknown>;
+    cameraConfig['entityId'] = 'cam-1';
+
+    const result = await sceneCreateExecutor.execute({
+      name: 'Arena',
+      cameraMode: 'top-down',
+      cameraConfig,
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'cam-1',
+      mode: 'topDown',
+      targetEntity: null,
+    });
+  });
+
   it('aborts before touching persisted scenes', async () => {
     const controller = new AbortController();
     controller.abort();

@@ -122,6 +122,12 @@ export const sceneCreateExecutor: ExecutorDefinition = {
         const rawConfig = (cameraConfig ?? {}) as Record<string, unknown>;
         for (const key of TRANSLATED_CAMERA_FIELDS) {
           if (key === 'mode' || key === 'targetEntity') continue;
+          // Own keys only. `cameraConfig` is GDD-derived, so the model controls
+          // its keys. Zod's `z.record()` parse already rebuilds it as a plain
+          // object, which strips any inherited property — this is the local,
+          // independently-true version of that guarantee, so the read stays
+          // correct if the schema is ever loosened to `z.custom`/passthrough.
+          if (!Object.hasOwn(rawConfig, key)) continue;
           const val = rawConfig[key];
           if (typeof val === 'number' && Number.isFinite(val)) {
             cameraData[key] = val;
