@@ -106,6 +106,7 @@ EditorLayout, SceneHierarchy, InspectorPanel, MaterialInspector, LightInspector,
 - `chat/executor.ts` — Handler registry dispatcher, delegates to `chat/handlers/` (all handlers fully migrated)
 - `chat/handlers/` — 29 domain tool handler files (transform, material, entity, physics, audio, audioEntity, animation, sprite, shader, scene, script, query, export, asset, compound, generation, gameplay, economy, dialogue, cutscene, localization, idea, world, uiBuilder, pixelArt, editMode, performance, security, leaderboard + types/helpers)
 - `chat/context.ts` — Scene context for AI
+- `game/gameCameraPayload.ts` — The ONLY place the authoring camera vocabulary (`followDistance`, `followHeight`, …) and the engine's flat wire vocabulary (`offset`, `damping`, `eyeHeight`, …) meet. Owns both directions (`buildSetGameCameraPayload` / `parseGameCameraWire`) plus `ENGINE_CAMERA_DEFAULTS`, the mirror of `GameCameraMode::from_flat`'s per-variant defaults (pinned against the Rust source by its test — PF-1126). Imports from `@/stores/slices/types` must stay `import type`: this module is reachable from an API route, and a value-import of `@/stores/` breaks `next build` (see `rules/gotchas.md` → the RSC-boundary entry)
 - `scripting/` — Web Worker sandbox, forge.* API types, templates
 - `audio/` — Web Audio API manager (spatial, per-entity nodes)
 - `export/` — Export pipeline (scriptBundler, assetPackager, gameTemplate)

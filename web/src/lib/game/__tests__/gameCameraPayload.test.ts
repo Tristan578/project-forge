@@ -436,6 +436,18 @@ describe('gameCameraPayload', () => {
           expect(parsed).toEqual(authoring);
         });
       }
+
+      // The fixtures above are hand-written, so a field added to `GameCameraData`
+      // would be forced into `TRANSLATED_FIELDS` by the `satisfies` check — the
+      // build breaks until its engine mapping is decided — and then sit here
+      // permanently un-round-tripped, which is the half nothing enforces. A round
+      // trip is the only check that the two directions AGREE; a field mapped in
+      // one direction only would pass every other test in this file.
+      it('exercises every field in TRANSLATED_CAMERA_FIELDS', () => {
+        const exercised = new Set(Object.values(authoringByMode).flatMap((a) => Object.keys(a)));
+
+        expect([...TRANSLATED_CAMERA_FIELDS].sort()).toEqual([...exercised].sort());
+      });
     });
 
     it('returns null for an unrecognized mode string (e.g. the old PascalCase spelling)', () => {
