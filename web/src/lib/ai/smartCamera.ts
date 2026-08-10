@@ -6,7 +6,8 @@
  * engine commands that can be dispatched to the Bevy ECS.
  */
 
-import type { GameCameraMode } from '@/stores/slices/types';
+import type { GameCameraData, GameCameraMode } from '@/stores/slices/types';
+import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -327,52 +328,71 @@ export function detectOptimalCamera(ctx: SmartCameraSceneContext): CameraPreset 
 // ---------------------------------------------------------------------------
 
 /**
- * Convert a camera preset into engine commands that can be dispatched
- * via the WASM bridge's `handle_command`.
+ * Convert a camera preset into the store's authoring shape.
+ *
+ * Only the parameters an engine variant actually carries are set — a preset
+ * field with no engine counterpart is dropped here, deliberately and with a
+ * note, rather than assigned to an invented key that the wire silently loses.
  */
-export function cameraToCommands(preset: CameraPreset, entityId: string): EngineCommand[] {
+export function presetToGameCameraData(preset: CameraPreset): GameCameraData {
   const engineMode = smartModeToEngine(preset.mode);
-  const commands: EngineCommand[] = [];
-
-  // Build the GameCameraData payload based on mode
-  const gameCameraPayload: Record<string, unknown> = {
-    entityId,
-    mode: engineMode,
-    targetEntity: null,
-  };
+  const data: GameCameraData = { mode: engineMode, targetEntity: null };
 
   switch (engineMode) {
     case 'thirdPersonFollow':
-      gameCameraPayload['followDistance'] = preset.followDistance;
-      gameCameraPayload['followHeight'] = preset.followHeight;
-      gameCameraPayload['followLookAhead'] = preset.lookAhead;
-      gameCameraPayload['followSmoothing'] = preset.followSmoothing;
+      data.followDistance = preset.followDistance;
+      data.followHeight = preset.followHeight;
+      // `preset.lookAhead` has no engine counterpart — `ThirdPersonFollow` carries
+      // offset/damping/min_distance/max_distance/look_at_target/collision_avoidance
+      // and nothing else. It used to be assigned here and dropped on the wire.
+      data.followSmoothing = preset.followSmoothing;
       break;
     case 'firstPerson':
-      gameCameraPayload['firstPersonHeight'] = preset.followHeight;
-      gameCameraPayload['firstPersonMouseSensitivity'] = 2;
+      data.firstPersonHeight = preset.followHeight;
+      data.firstPersonMouseSensitivity = 2;
       break;
     case 'sideScroller':
-      gameCameraPayload['sideScrollerDistance'] = preset.followDistance;
-      gameCameraPayload['sideScrollerHeight'] = preset.followHeight;
+      // `SideScroller` is z_offset/follow_y/y_bounds/damping — there is no height
+      // to set; vertical framing comes from follow_y.
+      data.sideScrollerDistance = preset.followDistance;
       break;
     case 'topDown':
-      gameCameraPayload['topDownHeight'] = preset.followHeight;
-      gameCameraPayload['topDownAngle'] = 60;
+      // `TopDown` is height/damping/follow_rotation — it has no angle.
+      data.topDownHeight = preset.followHeight;
       break;
     case 'orbital':
-      gameCameraPayload['orbitalDistance'] = preset.followDistance;
-      gameCameraPayload['orbitalAutoRotateSpeed'] = 0;
+      data.orbitalDistance = preset.followDistance;
+      data.orbitalAutoRotateSpeed = 0;
       break;
     case 'fixed':
-      // No extra params needed for fixed
+      // Position comes from the camera entity's own transform.
       break;
   }
 
-  commands.push({ command: 'set_game_camera', payload: gameCameraPayload });
-  commands.push({ command: 'set_active_game_camera', payload: { entityId } });
+  return data;
+}
 
-  return commands;
+/**
+ * Convert a camera preset into engine commands that can be dispatched
+ * via the WASM bridge's `handle_command`.
+ *
+ * The `set_game_camera` payload is the ENGINE's vocabulary, not the store's:
+ * these commands go straight to `handle_command`, bypassing the slice that
+ * would otherwise translate. This used to emit authoring keys
+ * (`followDistance`, `topDownHeight`, …) plus three that exist in no vocabulary
+ * at all, so every command this function produced was rejected outright.
+ */
+export function cameraToCommands(preset: CameraPreset, entityId: string): EngineCommand[] {
+  // Spread only to widen the picked payload to the transport type — the keys
+  // were already chosen one by one by `buildSetGameCameraPayload`.
+  const payload: Record<string, unknown> = {
+    ...buildSetGameCameraPayload(entityId, presetToGameCameraData(preset)),
+  };
+
+  return [
+    { command: 'set_game_camera', payload },
+    { command: 'set_active_game_camera', payload: { entityId } },
+  ];
 }
 
 // ---------------------------------------------------------------------------

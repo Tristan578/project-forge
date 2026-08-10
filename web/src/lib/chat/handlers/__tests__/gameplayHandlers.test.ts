@@ -379,6 +379,11 @@ describe('set_game_camera', () => {
     expect(result.success).toBe(false);
   });
 
+  // The store object is asserted in FULL (an object literal, not
+  // `expect.objectContaining`): a key the AI invented and this handler passed
+  // through would sit invisibly alongside a partial assertion, then be dropped
+  // by the engine with no error — the exact failure this handler was fixed for.
+
   it('sets third-person camera with defaults', async () => {
     const { result, store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
       entityId: 'cam-1',
@@ -386,10 +391,10 @@ describe('set_game_camera', () => {
     });
     expect(result.success).toBe(true);
     expect(store.setGameCamera).toHaveBeenCalledTimes(1);
-    const [entityId, camData] = (store.setGameCamera as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { mode: string; targetEntity: null }];
-    expect(entityId).toBe('cam-1');
-    expect(camData.mode).toBe('thirdPersonFollow');
-    expect(camData.targetEntity).toBeNull();
+    expect(store.setGameCamera).toHaveBeenCalledWith('cam-1', {
+      mode: 'thirdPersonFollow',
+      targetEntity: null,
+    });
   });
 
   it('passes targetEntity when provided', async () => {
@@ -398,8 +403,59 @@ describe('set_game_camera', () => {
       mode: 'thirdPersonFollow',
       targetEntity: 'player-1',
     });
-    const [, camData] = (store.setGameCamera as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { targetEntity: string }];
-    expect(camData.targetEntity).toBe('player-1');
+    expect(store.setGameCamera).toHaveBeenCalledWith('cam-1', {
+      mode: 'thirdPersonFollow',
+      targetEntity: 'player-1',
+    });
+  });
+
+  it('forwards every supported authoring parameter', async () => {
+    const { store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
+      entityId: 'cam-1',
+      mode: 'thirdPersonFollow',
+      targetEntity: 'player-1',
+      followDistance: 8,
+      followHeight: 3,
+      followSmoothing: 4,
+      firstPersonHeight: 1.8,
+      firstPersonMouseSensitivity: 0.2,
+      sideScrollerDistance: 12,
+      topDownHeight: 25,
+      orbitalDistance: 9,
+      orbitalAutoRotateSpeed: 15,
+    });
+    expect(store.setGameCamera).toHaveBeenCalledWith('cam-1', {
+      mode: 'thirdPersonFollow',
+      targetEntity: 'player-1',
+      followDistance: 8,
+      followHeight: 3,
+      followSmoothing: 4,
+      firstPersonHeight: 1.8,
+      firstPersonMouseSensitivity: 0.2,
+      sideScrollerDistance: 12,
+      topDownHeight: 25,
+      orbitalDistance: 9,
+      orbitalAutoRotateSpeed: 15,
+    });
+  });
+
+  it('drops parameters no engine camera variant has', async () => {
+    // `followLookAhead`, `sideScrollerHeight` and `topDownAngle` were advertised
+    // to the model by this handler's own schema but exist in no engine variant.
+    const { result, store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
+      entityId: 'cam-1',
+      mode: 'topDown',
+      topDownHeight: 20,
+      followLookAhead: 2,
+      sideScrollerHeight: 6,
+      topDownAngle: 45,
+    });
+    expect(result.success).toBe(true);
+    expect(store.setGameCamera).toHaveBeenCalledWith('cam-1', {
+      mode: 'topDown',
+      targetEntity: null,
+      topDownHeight: 20,
+    });
   });
 
   it('result message includes mode and entityId', async () => {

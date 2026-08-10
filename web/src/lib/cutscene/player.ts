@@ -9,6 +9,9 @@
 
 import type { Cutscene, CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
 import { useCutsceneStore } from '@/stores/cutsceneStore';
+import { buildSetGameCameraPayload, TRANSLATED_CAMERA_FIELDS } from '@/lib/game/gameCameraPayload';
+import type { SetGameCameraPayload } from '@/lib/game/gameCameraPayload';
+import type { GameCameraData, GameCameraMode } from '@/stores/slices/types';
 
 // ============================================================================
 // Types
@@ -58,6 +61,71 @@ export function applyEasing(t: number, easing: CutsceneKeyframe['easing']): numb
 // ============================================================================
 
 /**
+ * The modes a camera keyframe may name.
+ *
+ * An object rather than an array, and `satisfies Record<GameCameraMode, true>`
+ * rather than an annotation: this way a mode added to the union fails the build
+ * here instead of silently becoming an unrecognized string at runtime.
+ */
+const CAMERA_KEYFRAME_MODES = {
+  thirdPersonFollow: true,
+  firstPerson: true,
+  sideScroller: true,
+  topDown: true,
+  fixed: true,
+  orbital: true,
+} satisfies Record<GameCameraMode, true>;
+
+/**
+ * The numeric authoring params a camera keyframe may carry.
+ *
+ * Derived from the translator's own field list, so a new `GameCameraData`
+ * parameter becomes readable here the moment its engine mapping is decided —
+ * there is no second list to remember to update.
+ */
+type CameraKeyframeParam = Exclude<keyof GameCameraData, 'mode' | 'targetEntity'>;
+const CAMERA_KEYFRAME_PARAMS = TRANSLATED_CAMERA_FIELDS.filter(
+  (field): field is CameraKeyframeParam => field !== 'mode' && field !== 'targetEntity',
+);
+
+/**
+ * Read a camera keyframe's payload into a `set_game_camera` command payload.
+ *
+ * Keyframe payloads are `Record<string, unknown>` written by the cutscene
+ * generator — i.e. model output. They are read field by field against an
+ * allowlist, never spread onto the command: a spread would hand the engine
+ * whatever keys the model invented, and every key the engine does not
+ * recognize is dropped with no error, no log and no failing test.
+ *
+ * Returns null when the track names no camera entity, or when the payload's
+ * mode is absent or unrecognized. `set_game_camera` configures a specific
+ * camera entity, so there is nothing to address without one — the same reason
+ * the animation and audio tracks return null without an `entityId`.
+ */
+function buildCameraCommandPayload(
+  entityId: string | null,
+  payload: Record<string, unknown>,
+): SetGameCameraPayload | null {
+  if (!entityId) return null;
+
+  const rawMode = payload.mode;
+  if (typeof rawMode !== 'string' || !Object.hasOwn(CAMERA_KEYFRAME_MODES, rawMode)) return null;
+
+  const rawTarget = payload.targetEntity;
+  const data: GameCameraData = {
+    mode: rawMode as GameCameraMode,
+    targetEntity: typeof rawTarget === 'string' && rawTarget !== '' ? rawTarget : null,
+  };
+
+  for (const key of CAMERA_KEYFRAME_PARAMS) {
+    const value = payload[key];
+    if (typeof value === 'number' && Number.isFinite(value)) data[key] = value;
+  }
+
+  return buildSetGameCameraPayload(entityId, data);
+}
+
+/**
  * Translate a keyframe payload into an engine command for the given track type.
  * Returns null if the track type is 'wait' (no command to dispatch).
  */
@@ -65,17 +133,22 @@ export function buildCommand(
   trackType: CutsceneTrack['type'],
   entityId: string | null,
   keyframe: CutsceneKeyframe,
-  progress: number,
+  // Nothing consumes playback progress today. The camera command used to carry
+  // it as `_easedProgress`, a field no engine command has ever read and nothing
+  // on the JS side consumed either — so easing a camera keyframe has always been
+  // a no-op. Interpolating would mean lerping the camera between its current and
+  // target state JS-side and dispatching each step; `set_game_camera` is an
+  // absolute set with no interpolation of its own. The parameter stays so the
+  // scheduler's call sites keep their shape when that lands.
+  _progress: number,
 ): { command: string; payload: unknown } | null {
   const { payload } = keyframe;
-  const easedProgress = applyEasing(progress, keyframe.easing);
 
   switch (trackType) {
     case 'camera': {
-      return {
-        command: 'set_game_camera',
-        payload: { ...payload, entityId: entityId ?? undefined, _easedProgress: easedProgress },
-      };
+      const cameraPayload = buildCameraCommandPayload(entityId, payload);
+      if (!cameraPayload) return null;
+      return { command: 'set_game_camera', payload: cameraPayload };
     }
     case 'animation': {
       if (!entityId) return null;

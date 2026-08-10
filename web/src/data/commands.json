@@ -5441,6 +5441,10 @@
             "type": "number",
             "description": "Eye height (1st person)"
           },
+          "firstPersonMouseSensitivity": {
+            "type": "number",
+            "description": "Mouse look sensitivity (1st person)"
+          },
           "sideScrollerDistance": {
             "type": "number",
             "description": "Distance from plane (side scroller)"
@@ -5448,10 +5452,6 @@
           "topDownHeight": {
             "type": "number",
             "description": "Height above target (top down)"
-          },
-          "topDownAngle": {
-            "type": "number",
-            "description": "View angle in degrees (top down)"
           },
           "orbitalDistance": {
             "type": "number",

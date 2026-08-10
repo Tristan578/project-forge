@@ -2,6 +2,11 @@ import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 import { createScene, loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
+import { buildSetGameCameraPayload, TRANSLATED_CAMERA_FIELDS } from '@/lib/game/gameCameraPayload';
+// Type-only: erased at compile time, so this adds no module edge into `@/stores`
+// (see `__tests__/serverSafeImports.test.ts` — this file is reachable from an
+// API route and a value-import of the store would break the RSC build).
+import type { GameCameraData } from '@/stores/slices/types';
 
 // Valid camera modes per engine manifest (set_game_camera.mode enum)
 const VALID_CAMERA_MODES = [
@@ -107,26 +112,25 @@ export const sceneCreateExecutor: ExecutorDefinition = {
       if (typeof cameraEntityId === 'string') {
         // Allowlist known safe numeric camera params from LLM config.
         // Rejects arbitrary keys, __proto__, Infinity, NaN.
-        const ALLOWED_CAMERA_PARAMS = [
-          'followDistance', 'followHeight', 'followSmoothing',
-          'firstPersonHeight', 'firstPersonMouseSensitivity',
-          'sideScrollerDistance', 'sideScrollerHeight',
-          'topDownHeight', 'topDownAngle',
-          'orbitalDistance', 'orbitalAutoRotateSpeed',
-        ] as const;
-        const filteredConfig: Record<string, number> = {};
+        //
+        // Derived from the translator's own field list rather than re-typed, so
+        // a parameter cannot be accepted here without an engine mapping. The
+        // hand-written list this replaces carried two names no engine variant
+        // has — `sideScrollerHeight` (SideScroller is z_offset/follow_y/y_bounds/
+        // damping) and `topDownAngle` (TopDown is height/damping/follow_rotation).
+        const cameraData: GameCameraData = { mode: validMode, targetEntity: null };
         const rawConfig = (cameraConfig ?? {}) as Record<string, unknown>;
-        for (const key of ALLOWED_CAMERA_PARAMS) {
+        for (const key of TRANSLATED_CAMERA_FIELDS) {
+          if (key === 'mode' || key === 'targetEntity') continue;
           const val = rawConfig[key];
           if (typeof val === 'number' && Number.isFinite(val)) {
-            filteredConfig[key] = val;
+            cameraData[key] = val;
           }
         }
-        ctx.dispatchCommand('set_game_camera', {
-          entityId: cameraEntityId,
-          mode: validMode,
-          ...filteredConfig,
-        });
+        // Translated, never spread: these params are the store's AUTHORING
+        // vocabulary and share no name with the engine's wire form, so
+        // dispatching them flat sent the engine nothing it could read (PF-1126).
+        ctx.dispatchCommand('set_game_camera', buildSetGameCameraPayload(cameraEntityId, cameraData));
       }
       // If no entityId, camera config stored in output for downstream steps
     }
@@ -157,14 +161,14 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // Downstream steps receive sanitized data, not raw LLM objects.
     let pendingFilteredConfig: Record<string, number> | undefined;
     if (cameraMode && !hasCameraEntityId && cameraConfig) {
-      const PENDING_ALLOWED = [
-        'followDistance', 'followHeight', 'followSmoothing',
-        'firstPersonHeight', 'sideScrollerDistance', 'topDownHeight',
-        'topDownAngle', 'orbitalDistance', 'orbitalAutoRotateSpeed',
-      ] as const;
+      // Same derived allowlist as the dispatch path above, so the two cannot
+      // drift. The hand-written list this replaces carried `topDownAngle`, which
+      // no engine camera variant has, and omitted `firstPersonMouseSensitivity`,
+      // which one does.
       pendingFilteredConfig = {};
       const raw = cameraConfig as Record<string, unknown>;
-      for (const key of PENDING_ALLOWED) {
+      for (const key of TRANSLATED_CAMERA_FIELDS) {
+        if (key === 'mode' || key === 'targetEntity') continue;
         const val = raw[key];
         if (typeof val === 'number' && Number.isFinite(val)) {
           pendingFilteredConfig[key] = val;

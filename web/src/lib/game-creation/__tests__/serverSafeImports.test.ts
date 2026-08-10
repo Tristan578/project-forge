@@ -20,18 +20,27 @@
  * `ExecutorContext.getStore()`, supplied by the (client-only) orchestrator. A
  * function value carries no module edge.
  *
- * Scope, stated honestly: this checks `lib/game-creation/` only — the subtree
- * whose barrel is reachable from a server route today — and it is textual, so
- * it catches the direct import forms, not an alias laundered through a third
- * module. It is a tripwire for the regression that actually happened, not a
- * proof of the whole boundary. `next build` remains the authority.
+ * Scope, stated honestly: this checks the subtrees listed in `GUARDED_ROOTS` —
+ * those reachable from a server route today — and it is textual, so it catches
+ * the direct import forms, not an alias laundered through a third module. It is
+ * a tripwire for the regression that actually happened, not a proof of the whole
+ * boundary. `next build` remains the authority.
+ *
+ * A root belongs here once a guarded module VALUE-imports it, because from that
+ * moment its own imports are on the server graph too. `lib/game/` was added when
+ * `sceneCreateExecutor` began importing the game-camera wire contract (PF-1126):
+ * that module needs `GameCameraData` from `@/stores/slices/types`, and the whole
+ * boundary now rests on that import staying `import type`.
  */
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-const ROOT = join(__dirname, '..');
+/** `web/src/lib` — the base every reported path is relative to. */
+const LIB = join(__dirname, '..', '..');
+
+const GUARDED_ROOTS = [join(LIB, 'game-creation'), join(LIB, 'game')];
 
 /** Modules that pull client-only React state into whatever imports them. */
 const CLIENT_ONLY_SPECIFIERS = ['@/stores/', '@/hooks/useEngine'];
@@ -151,10 +160,16 @@ function isTypeOnlyOccurrence(line: string): boolean {
 }
 
 describe('game-creation server-safe imports', () => {
-  const files = collectSourceFiles(ROOT);
+  const files = GUARDED_ROOTS.flatMap(collectSourceFiles);
 
   it('finds source files to check (fails closed on a bad root)', () => {
     expect(files.length).toBeGreaterThan(5);
+  });
+
+  // A root that silently stops existing would take its coverage with it while
+  // the aggregate count above stays comfortably over the threshold.
+  it.each(GUARDED_ROOTS)('walks %s', root => {
+    expect(collectSourceFiles(root).length).toBeGreaterThan(0);
   });
 
   it('never value-imports a client-only module', () => {
@@ -166,15 +181,15 @@ describe('game-creation server-safe imports', () => {
       stripComments(source).forEach((line, i) => {
         if (!CLIENT_ONLY_SPECIFIERS.some(spec => line.includes(spec))) return;
         if (isTypeOnlyOccurrence(line)) return;
-        violations.push(`${relative(ROOT, file)}:${i + 1}: ${raw[i]?.trim() ?? line.trim()}`);
+        violations.push(`${relative(LIB, file)}:${i + 1}: ${raw[i]?.trim() ?? line.trim()}`);
       });
     }
 
     expect(
       violations,
-      'A value import of a client-only module from lib/game-creation/ breaks ' +
-        '`next build` via /api/game/decompose. Use `import type`, or take the ' +
-        'value through ExecutorContext (e.g. `getStore()`).',
+      'A value import of a client-only module from a server-reachable lib/ ' +
+        'subtree breaks `next build` via /api/game/decompose. Use `import ' +
+        'type`, or take the value through ExecutorContext (e.g. `getStore()`).',
     ).toEqual([]);
   });
 });

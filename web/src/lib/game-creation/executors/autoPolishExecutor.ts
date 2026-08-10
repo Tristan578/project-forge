@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
+import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 
 // [B4] diagnoseIssues() requires GameMetrics (avgPlayTime, completionRate, etc.)
 // which do not exist on a freshly-built game. auto_polish uses STRUCTURAL
@@ -67,7 +68,19 @@ export const autoPolishExecutor: ExecutorDefinition = {
 
       if (cameraNode) {
         const mode = parsed.data.projectType === '2d' ? 'sideScroller' : 'thirdPersonFollow';
-        commands.push({ command: 'set_game_camera', payload: { entityId: cameraNode.entityId, mode, followSmoothing: 0.8 } });
+        // Translated, never flat: `followSmoothing` is the store's authoring name
+        // for the engine's `damping`, and the engine drops every key it does not
+        // recognize without an error (PF-1126). Note the smoothing only survives
+        // the 3D branch — `GameCameraData` has no side-scroller damping field, so
+        // a 2D camera takes the engine's default of 5.
+        commands.push({
+          command: 'set_game_camera',
+          payload: buildSetGameCameraPayload(cameraNode.entityId, {
+            mode,
+            targetEntity: null,
+            followSmoothing: 0.8,
+          }),
+        });
         fixes.push(`Configured camera as ${mode}`);
       } else {
         fixes.push('Warning: no camera entity found to configure');

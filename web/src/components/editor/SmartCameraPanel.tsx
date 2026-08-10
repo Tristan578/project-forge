@@ -3,12 +3,11 @@
 import { useState, useCallback, useMemo } from 'react';
 import { Camera, Sparkles, SlidersHorizontal } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
-import type { GameCameraData } from '@/stores/slices/types';
 import {
   CAMERA_PRESETS,
   PRESET_KEYS,
   detectOptimalCamera,
-  smartModeToEngine,
+  presetToGameCameraData,
   interpolatePresets,
   type CameraPreset,
   type SmartCameraSceneContext,
@@ -150,44 +149,6 @@ function SliderRow({
 // ---------------------------------------------------------------------------
 // Main panel
 // ---------------------------------------------------------------------------
-
-/** Convert a CameraPreset to a GameCameraData object. */
-function presetToGameCameraData(preset: CameraPreset): GameCameraData {
-  const engineMode = smartModeToEngine(preset.mode);
-  const data: GameCameraData = { mode: engineMode, targetEntity: null };
-
-  switch (engineMode) {
-    case 'thirdPersonFollow':
-      data.followDistance = preset.followDistance;
-      data.followHeight = preset.followHeight;
-      // `preset.lookAhead` has no engine counterpart — `ThirdPersonFollow` carries
-      // offset/damping/min_distance/max_distance/look_at_target/collision_avoidance
-      // and nothing else. It used to be assigned here and dropped on the wire.
-      data.followSmoothing = preset.followSmoothing;
-      break;
-    case 'firstPerson':
-      data.firstPersonHeight = preset.followHeight;
-      data.firstPersonMouseSensitivity = 2;
-      break;
-    case 'sideScroller':
-      // `SideScroller` is z_offset/follow_y/y_bounds/damping — there is no height
-      // to set; vertical framing comes from follow_y.
-      data.sideScrollerDistance = preset.followDistance;
-      break;
-    case 'topDown':
-      // `TopDown` is height/damping/follow_rotation — it has no angle.
-      data.topDownHeight = preset.followHeight;
-      break;
-    case 'orbital':
-      data.orbitalDistance = preset.followDistance;
-      data.orbitalAutoRotateSpeed = 0;
-      break;
-    case 'fixed':
-      break;
-  }
-
-  return data;
-}
 
 export function SmartCameraPanel() {
   const primaryId = useEditorStore((s) => s.primaryId);

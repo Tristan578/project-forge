@@ -87,10 +87,38 @@ describe('sceneCreateExecutor', () => {
     }, ctx);
 
     expect(result.success).toBe(true);
+    // Translated into the engine's vocabulary — `sideScrollerDistance` is the
+    // store's authoring name for the engine's `zOffset`, and the engine drops
+    // every name it does not recognize without an error (PF-1126).
     expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', {
       entityId: 'cam-1',
       mode: 'sideScroller',
-      sideScrollerDistance: 12,
+      targetEntity: null,
+      zOffset: 12,
+    });
+  });
+
+  it('drops camera config keys no engine camera variant has', async () => {
+    const ctx = makeCtx();
+    const result = await sceneCreateExecutor.execute({
+      name: 'Arena',
+      cameraMode: 'top-down',
+      cameraConfig: {
+        entityId: 'cam-1',
+        topDownHeight: 20,
+        // Names the old hand-written allowlist accepted and dispatched flat.
+        topDownAngle: 45,
+        sideScrollerHeight: 6,
+        followLookAhead: 2,
+      },
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'cam-1',
+      mode: 'topDown',
+      targetEntity: null,
+      height: 20,
     });
   });
 
