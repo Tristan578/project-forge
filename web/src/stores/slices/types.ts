@@ -893,24 +893,32 @@ export interface MobileTouchConfig {
   autoReduceQuality: boolean;
 }
 
-// Game camera modes matching Rust's GameCameraMode enum
+// Game camera modes. These strings ARE the engine's wire vocabulary —
+// `GameCameraMode::FLAT_MODES` in engine/src/core/game_camera.rs.
 export type GameCameraMode = 'thirdPersonFollow' | 'firstPerson' | 'sideScroller' | 'topDown' | 'fixed' | 'orbital';
 
-// Game camera data matching Rust's GameCameraData struct
+/**
+ * Authoring shape for a game camera — the vocabulary the inspector labels read
+ * ("Distance", "Height", "Smoothing"), NOT the engine's.
+ *
+ * The engine speaks `offset` / `damping` / `eyeHeight` / `zOffset` / `radius`.
+ * Translation between the two lives in `@/lib/game/gameCameraPayload`, which
+ * pins this interface for completeness — adding a field here fails the build
+ * until its engine mapping is decided there. Never spread one of these straight
+ * into `dispatchCommand('set_game_camera', …)`; the engine drops every key it
+ * does not recognize, silently and without an error.
+ */
 export interface GameCameraData {
   mode: GameCameraMode;
   targetEntity: string | null;
   // Mode-specific params
   followDistance?: number;
   followHeight?: number;
-  followLookAhead?: number;
   followSmoothing?: number;
   firstPersonHeight?: number;
   firstPersonMouseSensitivity?: number;
   sideScrollerDistance?: number;
-  sideScrollerHeight?: number;
   topDownHeight?: number;
-  topDownAngle?: number;
   orbitalDistance?: number;
   orbitalAutoRotateSpeed?: number;
 }

@@ -5,14 +5,38 @@ import { Camera, Zap } from 'lucide-react';
 import { useEditorStore, type GameCameraData, type GameCameraMode } from '@/stores/editorStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 
+/**
+ * Per-mode starting values. Every one of these MUST match the engine default in
+ * `GameCameraMode::from_flat` (engine/src/core/game_camera.rs) — a mismatch here
+ * is invisible, because `dispatchCommand` returns `void` and the engine happily
+ * accepts an in-range-but-wrong number.
+ *
+ * `firstPersonMouseSensitivity` is DEGREES of yaw per pixel of mouse delta
+ * (`fp_state.yaw -= delta.dx * sensitivity`), so the engine's 0.1 turns a
+ * 900-pixel sweep through 90°. This panel shipped `2`, which turned the same
+ * sweep through 1800° — five full rotations, i.e. unusable.
+ */
 const MODE_DEFAULTS: Record<GameCameraMode, Partial<GameCameraData>> = {
-  thirdPersonFollow: { followDistance: 5, followHeight: 2, followLookAhead: 1, followSmoothing: 5 },
-  firstPerson: { firstPersonHeight: 1.7, firstPersonMouseSensitivity: 2 },
-  sideScroller: { sideScrollerDistance: 10, sideScrollerHeight: 2 },
-  topDown: { topDownHeight: 15, topDownAngle: 60 },
+  thirdPersonFollow: { followDistance: 5, followHeight: 2, followSmoothing: 5 },
+  firstPerson: { firstPersonHeight: 1.7, firstPersonMouseSensitivity: 0.1 },
+  sideScroller: { sideScrollerDistance: 10 },
+  topDown: { topDownHeight: 15 },
   fixed: {},
   orbital: { orbitalDistance: 5, orbitalAutoRotateSpeed: 0 },
 };
+
+/**
+ * Parse a number input, keeping the previous value when the field is not a
+ * finite number.
+ *
+ * `parseFloat(v) || 0` — the shape this panel used everywhere — collapses both
+ * an empty field and a typo to `0`, silently dispatching a real 0 to the engine
+ * (a 0 follow distance puts the camera inside the player).
+ */
+function parseNumberInput(raw: string, fallback: number): number {
+  const parsed = parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
 
 const MODE_LABELS: Record<GameCameraMode, string> = {
   thirdPersonFollow: '3rd Person Follow',
@@ -38,12 +62,15 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
       const defaults = MODE_DEFAULTS[mode];
       const newData: GameCameraData = {
         mode,
-        targetEntity: null,
+        // Keep whatever the camera already follows. Switching mode is a framing
+        // change, not a retargeting one, and nulling this silently detached the
+        // camera from the player every time the user tried another mode.
+        targetEntity: primaryGameCamera?.targetEntity ?? null,
         ...defaults,
       };
       setGameCamera(primaryId, newData);
     },
-    [primaryId, setGameCamera]
+    [primaryId, primaryGameCamera, setGameCamera]
   );
 
   const handleParamChange = useCallback(
@@ -178,7 +205,11 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
                 type="number"
                 step="0.1"
                 value={primaryGameCamera.followDistance ?? 5}
-                onChange={(e) => handleParamChange({ followDistance: parseFloat(e.target.value) || 0 })}
+                onChange={(e) =>
+                  handleParamChange({
+                    followDistance: parseNumberInput(e.target.value, primaryGameCamera.followDistance ?? 5),
+                  })
+                }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                   focus:ring-1 focus:ring-blue-500"
               />
@@ -192,21 +223,11 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
                 type="number"
                 step="0.1"
                 value={primaryGameCamera.followHeight ?? 2}
-                onChange={(e) => handleParamChange({ followHeight: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Look Ahead</label>
-                <InfoTooltip term="gameCameraLookAhead" />
-              </div>
-              <input
-                type="number"
-                step="0.1"
-                value={primaryGameCamera.followLookAhead ?? 1}
-                onChange={(e) => handleParamChange({ followLookAhead: parseFloat(e.target.value) || 0 })}
+                onChange={(e) =>
+                  handleParamChange({
+                    followHeight: parseNumberInput(e.target.value, primaryGameCamera.followHeight ?? 2),
+                  })
+                }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                   focus:ring-1 focus:ring-blue-500"
               />
@@ -220,7 +241,11 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
                 type="number"
                 step="0.1"
                 value={primaryGameCamera.followSmoothing ?? 5}
-                onChange={(e) => handleParamChange({ followSmoothing: parseFloat(e.target.value) || 0 })}
+                onChange={(e) =>
+                  handleParamChange({
+                    followSmoothing: parseNumberInput(e.target.value, primaryGameCamera.followSmoothing ?? 5),
+                  })
+                }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                   focus:ring-1 focus:ring-blue-500"
               />
@@ -239,7 +264,11 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
                 type="number"
                 step="0.1"
                 value={primaryGameCamera.firstPersonHeight ?? 1.7}
-                onChange={(e) => handleParamChange({ firstPersonHeight: parseFloat(e.target.value) || 0 })}
+                onChange={(e) =>
+                  handleParamChange({
+                    firstPersonHeight: parseNumberInput(e.target.value, primaryGameCamera.firstPersonHeight ?? 1.7),
+                  })
+                }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                   focus:ring-1 focus:ring-blue-500"
               />
@@ -251,9 +280,16 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
               </div>
               <input
                 type="number"
-                step="0.1"
-                value={primaryGameCamera.firstPersonMouseSensitivity ?? 2}
-                onChange={(e) => handleParamChange({ firstPersonMouseSensitivity: parseFloat(e.target.value) || 0 })}
+                step="0.01"
+                value={primaryGameCamera.firstPersonMouseSensitivity ?? 0.1}
+                onChange={(e) =>
+                  handleParamChange({
+                    firstPersonMouseSensitivity: parseNumberInput(
+                      e.target.value,
+                      primaryGameCamera.firstPersonMouseSensitivity ?? 0.1
+                    ),
+                  })
+                }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                   focus:ring-1 focus:ring-blue-500"
               />
@@ -272,21 +308,11 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
                 type="number"
                 step="0.1"
                 value={primaryGameCamera.sideScrollerDistance ?? 10}
-                onChange={(e) => handleParamChange({ sideScrollerDistance: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Height</label>
-                <InfoTooltip term="gameCameraSideScrollHeight" />
-              </div>
-              <input
-                type="number"
-                step="0.1"
-                value={primaryGameCamera.sideScrollerHeight ?? 2}
-                onChange={(e) => handleParamChange({ sideScrollerHeight: parseFloat(e.target.value) || 0 })}
+                onChange={(e) =>
+                  handleParamChange({
+                    sideScrollerDistance: parseNumberInput(e.target.value, primaryGameCamera.sideScrollerDistance ?? 10),
+                  })
+                }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                   focus:ring-1 focus:ring-blue-500"
               />
@@ -305,21 +331,11 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
                 type="number"
                 step="0.1"
                 value={primaryGameCamera.topDownHeight ?? 15}
-                onChange={(e) => handleParamChange({ topDownHeight: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Angle</label>
-                <InfoTooltip term="gameCameraTopDownAngle" />
-              </div>
-              <input
-                type="number"
-                step="1"
-                value={primaryGameCamera.topDownAngle ?? 60}
-                onChange={(e) => handleParamChange({ topDownAngle: parseFloat(e.target.value) || 0 })}
+                onChange={(e) =>
+                  handleParamChange({
+                    topDownHeight: parseNumberInput(e.target.value, primaryGameCamera.topDownHeight ?? 15),
+                  })
+                }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                   focus:ring-1 focus:ring-blue-500"
               />
@@ -338,7 +354,11 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
                 type="number"
                 step="0.1"
                 value={primaryGameCamera.orbitalDistance ?? 5}
-                onChange={(e) => handleParamChange({ orbitalDistance: parseFloat(e.target.value) || 0 })}
+                onChange={(e) =>
+                  handleParamChange({
+                    orbitalDistance: parseNumberInput(e.target.value, primaryGameCamera.orbitalDistance ?? 5),
+                  })
+                }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                   focus:ring-1 focus:ring-blue-500"
               />
@@ -352,7 +372,14 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
                 type="number"
                 step="0.1"
                 value={primaryGameCamera.orbitalAutoRotateSpeed ?? 0}
-                onChange={(e) => handleParamChange({ orbitalAutoRotateSpeed: parseFloat(e.target.value) || 0 })}
+                onChange={(e) =>
+                  handleParamChange({
+                    orbitalAutoRotateSpeed: parseNumberInput(
+                      e.target.value,
+                      primaryGameCamera.orbitalAutoRotateSpeed ?? 0
+                    ),
+                  })
+                }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                   focus:ring-1 focus:ring-blue-500"
               />
