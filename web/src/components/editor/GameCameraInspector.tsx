@@ -4,6 +4,7 @@ import { memo, useCallback } from 'react';
 import { Camera, Zap } from 'lucide-react';
 import { useEditorStore, type GameCameraData, type GameCameraMode } from '@/stores/editorStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
+import { ENGINE_CAMERA_DEFAULTS } from '@/lib/game/gameCameraPayload';
 
 /**
  * Per-mode starting values. Every one of these MUST match the engine default in
@@ -209,10 +210,10 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
               <input
                 type="number"
                 step="0.1"
-                value={primaryGameCamera.followDistance ?? 5}
+                value={primaryGameCamera.followDistance ?? ENGINE_CAMERA_DEFAULTS.followDistance}
                 onChange={(e) =>
                   handleParamChange({
-                    followDistance: parseNumberInput(e.target.value, primaryGameCamera.followDistance ?? 5),
+                    followDistance: parseNumberInput(e.target.value, primaryGameCamera.followDistance ?? ENGINE_CAMERA_DEFAULTS.followDistance),
                   })
                 }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -227,10 +228,10 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
               <input
                 type="number"
                 step="0.1"
-                value={primaryGameCamera.followHeight ?? 2}
+                value={primaryGameCamera.followHeight ?? ENGINE_CAMERA_DEFAULTS.followHeight}
                 onChange={(e) =>
                   handleParamChange({
-                    followHeight: parseNumberInput(e.target.value, primaryGameCamera.followHeight ?? 2),
+                    followHeight: parseNumberInput(e.target.value, primaryGameCamera.followHeight ?? ENGINE_CAMERA_DEFAULTS.followHeight),
                   })
                 }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -245,10 +246,10 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
               <input
                 type="number"
                 step="0.1"
-                value={primaryGameCamera.followSmoothing ?? 5}
+                value={primaryGameCamera.followSmoothing ?? ENGINE_CAMERA_DEFAULTS.followSmoothing}
                 onChange={(e) =>
                   handleParamChange({
-                    followSmoothing: parseNumberInput(e.target.value, primaryGameCamera.followSmoothing ?? 5),
+                    followSmoothing: parseNumberInput(e.target.value, primaryGameCamera.followSmoothing ?? ENGINE_CAMERA_DEFAULTS.followSmoothing),
                   })
                 }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -268,10 +269,10 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
               <input
                 type="number"
                 step="0.1"
-                value={primaryGameCamera.firstPersonHeight ?? 1.7}
+                value={primaryGameCamera.firstPersonHeight ?? ENGINE_CAMERA_DEFAULTS.firstPersonHeight}
                 onChange={(e) =>
                   handleParamChange({
-                    firstPersonHeight: parseNumberInput(e.target.value, primaryGameCamera.firstPersonHeight ?? 1.7),
+                    firstPersonHeight: parseNumberInput(e.target.value, primaryGameCamera.firstPersonHeight ?? ENGINE_CAMERA_DEFAULTS.firstPersonHeight),
                   })
                 }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -286,12 +287,12 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
               <input
                 type="number"
                 step="0.01"
-                value={primaryGameCamera.firstPersonMouseSensitivity ?? 0.1}
+                value={primaryGameCamera.firstPersonMouseSensitivity ?? ENGINE_CAMERA_DEFAULTS.firstPersonMouseSensitivity}
                 onChange={(e) =>
                   handleParamChange({
                     firstPersonMouseSensitivity: parseNumberInput(
                       e.target.value,
-                      primaryGameCamera.firstPersonMouseSensitivity ?? 0.1
+                      primaryGameCamera.firstPersonMouseSensitivity ?? ENGINE_CAMERA_DEFAULTS.firstPersonMouseSensitivity
                     ),
                   })
                 }
@@ -312,10 +313,10 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
               <input
                 type="number"
                 step="0.1"
-                value={primaryGameCamera.sideScrollerDistance ?? 10}
+                value={primaryGameCamera.sideScrollerDistance ?? ENGINE_CAMERA_DEFAULTS.sideScrollerDistance}
                 onChange={(e) =>
                   handleParamChange({
-                    sideScrollerDistance: parseNumberInput(e.target.value, primaryGameCamera.sideScrollerDistance ?? 10),
+                    sideScrollerDistance: parseNumberInput(e.target.value, primaryGameCamera.sideScrollerDistance ?? ENGINE_CAMERA_DEFAULTS.sideScrollerDistance),
                   })
                 }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -335,10 +336,10 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
               <input
                 type="number"
                 step="0.1"
-                value={primaryGameCamera.topDownHeight ?? 15}
+                value={primaryGameCamera.topDownHeight ?? ENGINE_CAMERA_DEFAULTS.topDownHeight}
                 onChange={(e) =>
                   handleParamChange({
-                    topDownHeight: parseNumberInput(e.target.value, primaryGameCamera.topDownHeight ?? 15),
+                    topDownHeight: parseNumberInput(e.target.value, primaryGameCamera.topDownHeight ?? ENGINE_CAMERA_DEFAULTS.topDownHeight),
                   })
                 }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -358,10 +359,10 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
               <input
                 type="number"
                 step="0.1"
-                value={primaryGameCamera.orbitalDistance ?? 5}
+                value={primaryGameCamera.orbitalDistance ?? ENGINE_CAMERA_DEFAULTS.orbitalDistance}
                 onChange={(e) =>
                   handleParamChange({
-                    orbitalDistance: parseNumberInput(e.target.value, primaryGameCamera.orbitalDistance ?? 5),
+                    orbitalDistance: parseNumberInput(e.target.value, primaryGameCamera.orbitalDistance ?? ENGINE_CAMERA_DEFAULTS.orbitalDistance),
                   })
                 }
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -376,12 +377,12 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
               <input
                 type="number"
                 step="0.1"
-                value={primaryGameCamera.orbitalAutoRotateSpeed ?? 0}
+                value={primaryGameCamera.orbitalAutoRotateSpeed ?? ENGINE_CAMERA_DEFAULTS.orbitalAutoRotateSpeed}
                 onChange={(e) =>
                   handleParamChange({
                     orbitalAutoRotateSpeed: parseNumberInput(
                       e.target.value,
-                      primaryGameCamera.orbitalAutoRotateSpeed ?? 0
+                      primaryGameCamera.orbitalAutoRotateSpeed ?? ENGINE_CAMERA_DEFAULTS.orbitalAutoRotateSpeed
                     ),
                   })
                 }

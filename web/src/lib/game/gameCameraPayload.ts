@@ -97,9 +97,31 @@ const TRANSLATED_FIELDS = {
 /** Runtime view of {@link TRANSLATED_FIELDS}. */
 export const TRANSLATED_CAMERA_FIELDS = Object.keys(TRANSLATED_FIELDS) as (keyof GameCameraData)[];
 
-/** Engine defaults for the two components that compose `offset`, kept in sync with `from_flat`. */
-const DEFAULT_FOLLOW_HEIGHT = 2;
-const DEFAULT_FOLLOW_DISTANCE = 5;
+/**
+ * The engine's own per-field defaults, mirrored from `GameCameraMode::from_flat`.
+ *
+ * These are what the camera actually uses for any parameter the payload omits,
+ * so they are also the only correct placeholder for an unset field in the UI.
+ * The inspector used to carry its own copy and had drifted on two of them —
+ * orbital distance read 5 against the engine's 8, and orbital auto-rotate speed
+ * read 0 against the engine's 15 — so an orbital camera the user never touched
+ * ran at a distance and speed the panel never showed. Import from here rather
+ * than re-typing a number next to a `??`.
+ */
+export const ENGINE_CAMERA_DEFAULTS = {
+  followDistance: 5,
+  followHeight: 2,
+  followSmoothing: 5,
+  firstPersonHeight: 1.7,
+  firstPersonMouseSensitivity: 0.1,
+  sideScrollerDistance: 10,
+  topDownHeight: 15,
+  orbitalDistance: 8,
+  orbitalAutoRotateSpeed: 15,
+} as const satisfies Record<Exclude<keyof GameCameraData, 'mode' | 'targetEntity'>, number>;
+
+const DEFAULT_FOLLOW_HEIGHT = ENGINE_CAMERA_DEFAULTS.followHeight;
+const DEFAULT_FOLLOW_DISTANCE = ENGINE_CAMERA_DEFAULTS.followDistance;
 
 /**
  * Read one own, finite number off an authoring object.
