@@ -349,7 +349,13 @@ export function presetToGameCameraData(preset: CameraPreset): GameCameraData {
       break;
     case 'firstPerson':
       data.firstPersonHeight = preset.followHeight;
-      data.firstPersonMouseSensitivity = 2;
+      // Mouse sensitivity is deliberately NOT set: `CameraPreset` carries no
+      // such field, so any value here is invented. This used to be `2` — twenty
+      // times the engine's 0.1, i.e. five full rotations per 900px sweep — and
+      // it reached the engine as soon as the payload started deserializing.
+      // Omitting the field makes `from_flat` apply its own default, which is
+      // the same number the inspector shows as the placeholder, with no second
+      // copy of it here to drift.
       break;
     case 'sideScroller':
       // `SideScroller` is z_offset/follow_y/y_bounds/damping — there is no height
@@ -362,7 +368,9 @@ export function presetToGameCameraData(preset: CameraPreset): GameCameraData {
       break;
     case 'orbital':
       data.orbitalDistance = preset.followDistance;
-      data.orbitalAutoRotateSpeed = 0;
+      // Auto-rotate speed has no preset counterpart either. `0` is not a
+      // neutral omission — it is an explicit "never rotate" that would have
+      // overridden the engine's 15 the moment the payload started landing.
       break;
     case 'fixed':
       // Position comes from the camera entity's own transform.

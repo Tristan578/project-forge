@@ -7,23 +7,37 @@ import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { ENGINE_CAMERA_DEFAULTS } from '@/lib/game/gameCameraPayload';
 
 /**
- * Per-mode starting values. Every one of these MUST match the engine default in
- * `GameCameraMode::from_flat` (engine/src/core/game_camera.rs) — a mismatch here
- * is invisible, because `dispatchCommand` returns `void` and the engine happily
- * accepts an in-range-but-wrong number.
+ * Which parameters each mode starts with. Every VALUE is read from
+ * `ENGINE_CAMERA_DEFAULTS` rather than re-typed, because a number that merely
+ * looks right here is invisible when wrong: `dispatchCommand` returns `void`,
+ * and the engine accepts an in-range-but-wrong value without complaint. These
+ * are explicit non-undefined entries, so they are dispatched, and they then
+ * become what the inputs display — a drifted literal is both the value in
+ * effect and the value shown, which is why nothing surfaces it.
  *
- * `firstPersonMouseSensitivity` is DEGREES of yaw per pixel of mouse delta
- * (`fp_state.yaw -= delta.dx * sensitivity`), so the engine's 0.1 turns a
- * 900-pixel sweep through 90°. This panel shipped `2`, which turned the same
- * sweep through 1800° — five full rotations, i.e. unusable.
+ * It shipped drifted twice over. Orbital read distance 5 / auto-rotate 0
+ * against the engine's 8 / 15, and `firstPersonMouseSensitivity` read 2 against
+ * the engine's 0.1 — that field is DEGREES of yaw per pixel of mouse delta
+ * (`fp_state.yaw -= delta.dx * sensitivity`), so 0.1 turns a 900-pixel sweep
+ * through 90° and 2 turns it through 1800°: five full rotations, unusable.
  */
 const MODE_DEFAULTS: Record<GameCameraMode, Partial<GameCameraData>> = {
-  thirdPersonFollow: { followDistance: 5, followHeight: 2, followSmoothing: 5 },
-  firstPerson: { firstPersonHeight: 1.7, firstPersonMouseSensitivity: 0.1 },
-  sideScroller: { sideScrollerDistance: 10 },
-  topDown: { topDownHeight: 15 },
+  thirdPersonFollow: {
+    followDistance: ENGINE_CAMERA_DEFAULTS.followDistance,
+    followHeight: ENGINE_CAMERA_DEFAULTS.followHeight,
+    followSmoothing: ENGINE_CAMERA_DEFAULTS.followSmoothing,
+  },
+  firstPerson: {
+    firstPersonHeight: ENGINE_CAMERA_DEFAULTS.firstPersonHeight,
+    firstPersonMouseSensitivity: ENGINE_CAMERA_DEFAULTS.firstPersonMouseSensitivity,
+  },
+  sideScroller: { sideScrollerDistance: ENGINE_CAMERA_DEFAULTS.sideScrollerDistance },
+  topDown: { topDownHeight: ENGINE_CAMERA_DEFAULTS.topDownHeight },
   fixed: {},
-  orbital: { orbitalDistance: 5, orbitalAutoRotateSpeed: 0 },
+  orbital: {
+    orbitalDistance: ENGINE_CAMERA_DEFAULTS.orbitalDistance,
+    orbitalAutoRotateSpeed: ENGINE_CAMERA_DEFAULTS.orbitalAutoRotateSpeed,
+  },
 };
 
 /**

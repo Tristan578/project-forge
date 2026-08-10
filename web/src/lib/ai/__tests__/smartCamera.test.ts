@@ -226,7 +226,11 @@ describe('cameraToCommands', () => {
       mode: 'firstPerson',
       targetEntity: null,
       eyeHeight: 1.7,
-      mouseSensitivity: 2,
+      // No `mouseSensitivity`: `CameraPreset` has no such field, so any value
+      // here would be invented, and an omitted parameter is what makes
+      // `from_flat` apply the engine's own 0.1. This assertion is `toEqual`,
+      // so the absence is part of what it pins — a reintroduced literal fails
+      // here rather than shipping as a 20× sensitivity.
     });
   });
 
@@ -257,7 +261,9 @@ describe('cameraToCommands', () => {
       mode: 'orbital',
       targetEntity: null,
       radius: 12,
-      autoRotateSpeed: 0,
+      // No `autoRotateSpeed` either — and `0` in particular is not a neutral
+      // stand-in for "unset": it is an explicit "never rotate" that overrides
+      // the engine's 15.
     });
   });
 

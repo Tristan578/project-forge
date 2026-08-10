@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   buildSetGameCameraPayload,
   parseGameCameraWire,
+  ENGINE_CAMERA_DEFAULTS,
   TRANSLATED_CAMERA_FIELDS,
   type SetGameCameraPayload,
 } from '../gameCameraPayload';
@@ -593,5 +596,97 @@ describe('gameCameraPayload', () => {
         );
       }
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-language pin.
+//
+// `ENGINE_CAMERA_DEFAULTS` is a hand-mirrored copy of numbers that live in
+// Rust. Nothing checked it, and it had already drifted on two of the eight
+// (orbital distance 5 vs 8, auto-rotate 0 vs 15) before this landed. The drift
+// is invisible by construction: the inspector dispatches these values, so the
+// number in effect and the number displayed are the same wrong number, and
+// `dispatchCommand` returns `void` so neither is ever contradicted.
+//
+// Reading the Rust source is the only check available here — a native `cargo
+// test` cannot see the TS constant, and the TS suite cannot call `from_flat`.
+// Deliberately textual, and it fails closed: an unreadable file, a missing
+// match arm, or a default it cannot parse is a failure, never a skip.
+// ---------------------------------------------------------------------------
+
+describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
+  const RUST = join(
+    __dirname, '..', '..', '..', '..', '..',
+    'engine', 'src', 'core', 'game_camera.rs',
+  );
+
+  /** The `"<mode>" => Ok(Self::Variant { … })` arm body, by mode name. */
+  function fromFlatArms(): Record<string, string> {
+    const source = readFileSync(RUST, 'utf8');
+    const start = source.indexOf('pub fn from_flat');
+    expect(start, `no from_flat in ${RUST}`).toBeGreaterThan(-1);
+    const body = source.slice(start);
+
+    const arms: Record<string, string> = {};
+    const armRe = /"(\w+)" => Ok\(Self::\w+ \{([\s\S]*?)\n {12}\}\)/g;
+    let m: RegExpExecArray | null;
+    while ((m = armRe.exec(body)) !== null) arms[m[1]!] = m[2]!;
+    return arms;
+  }
+
+  /** The literal default in `flat_f32(params, "<wireKey>", <default>)`. */
+  function rustDefault(arm: string, wireKey: string): number {
+    const m = new RegExp(
+      `flat_f32\\(params, "${wireKey}", (-?[0-9]+(?:\\.[0-9]+)?)\\)`,
+    ).exec(arm);
+    expect(m, `no flat_f32 default for "${wireKey}"`).not.toBeNull();
+    return Number(m![1]);
+  }
+
+  const arms = fromFlatArms();
+
+  /** Authoring field -> the mode arm and wire key it takes its default from. */
+  const SCALAR_SOURCES = {
+    followSmoothing: ['thirdPersonFollow', 'damping'],
+    firstPersonHeight: ['firstPerson', 'eyeHeight'],
+    firstPersonMouseSensitivity: ['firstPerson', 'mouseSensitivity'],
+    sideScrollerDistance: ['sideScroller', 'zOffset'],
+    topDownHeight: ['topDown', 'height'],
+    orbitalDistance: ['orbital', 'radius'],
+    orbitalAutoRotateSpeed: ['orbital', 'autoRotateSpeed'],
+  } as const satisfies Partial<Record<keyof typeof ENGINE_CAMERA_DEFAULTS, [string, string]>>;
+
+  it.each(Object.entries(SCALAR_SOURCES))(
+    '%s equals the engine default',
+    (field, [mode, wireKey]) => {
+      const arm = arms[mode];
+      expect(arm, `no "${mode}" arm in from_flat`).toBeDefined();
+      expect(ENGINE_CAMERA_DEFAULTS[field as keyof typeof ENGINE_CAMERA_DEFAULTS])
+        .toBe(rustDefault(arm!, wireKey));
+    },
+  );
+
+  // `followDistance`/`followHeight` are not scalars engine-side: they are the Z
+  // and Y components of one `offset` vector, so they need the Vec3 literal.
+  it('followHeight and followDistance equal the thirdPersonFollow offset default', () => {
+    const arm = arms['thirdPersonFollow'];
+    expect(arm, 'no "thirdPersonFollow" arm in from_flat').toBeDefined();
+
+    const m = /unwrap_or\(Vec3::new\((-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\)\)/.exec(arm!);
+    expect(m, 'no Vec3 default for `offset`').not.toBeNull();
+
+    expect(ENGINE_CAMERA_DEFAULTS.followHeight).toBe(Number(m![2]));
+    // The payload builder emits `offset: [0, height, -distance]`, so the
+    // engine's Z is the negated authoring distance.
+    expect(ENGINE_CAMERA_DEFAULTS.followDistance).toBe(-Number(m![3]));
+  });
+
+  // Every default must be covered by one of the two checks above, or a newly
+  // added field could sit here permanently unpinned.
+  it('pins every field in ENGINE_CAMERA_DEFAULTS', () => {
+    expect(Object.keys(ENGINE_CAMERA_DEFAULTS).sort()).toEqual(
+      [...Object.keys(SCALAR_SOURCES), 'followHeight', 'followDistance'].sort(),
+    );
   });
 });
