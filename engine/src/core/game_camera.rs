@@ -771,3 +771,303 @@ mod flat_wire_tests {
         assert_eq!(GameCameraMode::from_flat(name, &flat).unwrap(), default);
     }
 }
+
+/// Covers `from_flat` field-by-field: exact wire values, per-field default fallback on a
+/// partial payload, the unknown-mode error contract, zero-as-a-legitimate-value, malformed
+/// `offset` arrays, and that the scene-file (externally-tagged) `Deserialize` impl still
+/// accepts whatever `from_flat` builds. `flat_wire_tests` above proves the flat form round
+/// trips through itself; this module proves the underlying struct fields are actually
+/// correct, not just self-consistent.
+#[cfg(test)]
+mod from_flat_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// `.forge` scene files persist `GameCameraMode` through its derived, externally-tagged
+    /// `Serialize`/`Deserialize` impl (e.g. `{"ThirdPersonFollow": {...}}`) — a completely
+    /// different code path from `from_flat`/`to_flat`. Every mode this module builds must
+    /// still round-trip through THAT impl, or a camera configured via the command layer would
+    /// fail to reload from a saved scene.
+    fn assert_scene_file_round_trip(mode: &GameCameraMode) {
+        let tagged = serde_json::to_value(mode)
+            .unwrap_or_else(|e| panic!("mode must serialize to its externally-tagged form: {}", e));
+        let back: GameCameraMode = serde_json::from_value(tagged.clone()).unwrap_or_else(|e| {
+            panic!(
+                "externally-tagged form must deserialize back through the derived impl: {} (form: {})",
+                e, tagged
+            )
+        });
+        assert_eq!(&back, mode, "scene-file round trip altered the mode");
+    }
+
+    // ---- One test per variant: exact field values from a fully-populated flat payload ----
+
+    #[test]
+    fn third_person_follow_fields_match_the_wire_values() {
+        let mode = GameCameraMode::from_flat("thirdPersonFollow", &json!({
+            "offset": [1.0, 2.0, 3.0],
+            "damping": 4.0,
+            "minDistance": 1.5,
+            "maxDistance": 12.0,
+            "lookAtTarget": false,
+            "collisionAvoidance": false,
+        })).unwrap();
+        match &mode {
+            GameCameraMode::ThirdPersonFollow {
+                offset, damping, min_distance, max_distance, look_at_target, collision_avoidance,
+            } => {
+                // Distinct x/y/z values catch a component-order swap that a symmetric offset would hide.
+                assert_eq!(*offset, Vec3::new(1.0, 2.0, 3.0), "offset component order drifted");
+                assert_eq!(*damping, 4.0);
+                assert_eq!(*min_distance, 1.5);
+                assert_eq!(*max_distance, 12.0);
+                assert_eq!(*look_at_target, false);
+                assert_eq!(*collision_avoidance, false);
+            }
+            other => panic!("expected ThirdPersonFollow, got {:?}", other),
+        }
+        assert_scene_file_round_trip(&mode);
+    }
+
+    #[test]
+    fn first_person_fields_match_the_wire_values() {
+        let mode = GameCameraMode::from_flat("firstPerson", &json!({
+            "eyeHeight": 1.9,
+            "mouseSensitivity": 0.25,
+            "fov": 90.0,
+            "pitchClamp": [-70.0, 60.0],
+        })).unwrap();
+        match &mode {
+            GameCameraMode::FirstPerson { eye_height, mouse_sensitivity, fov, pitch_clamp } => {
+                assert_eq!(*eye_height, 1.9);
+                assert_eq!(*mouse_sensitivity, 0.25);
+                assert_eq!(*fov, 90.0);
+                assert_eq!(*pitch_clamp, (-70.0, 60.0), "pitchClamp component order drifted");
+            }
+            other => panic!("expected FirstPerson, got {:?}", other),
+        }
+        assert_scene_file_round_trip(&mode);
+    }
+
+    #[test]
+    fn side_scroller_fields_match_the_wire_values() {
+        let mode = GameCameraMode::from_flat("sideScroller", &json!({
+            "zOffset": 14.0,
+            "followY": false,
+            "yBounds": [-2.0, 8.0],
+            "damping": 3.0,
+        })).unwrap();
+        match &mode {
+            GameCameraMode::SideScroller { z_offset, follow_y, y_bounds, damping } => {
+                assert_eq!(*z_offset, 14.0);
+                assert_eq!(*follow_y, false);
+                assert_eq!(*y_bounds, Some((-2.0, 8.0)), "yBounds component order drifted");
+                assert_eq!(*damping, 3.0);
+            }
+            other => panic!("expected SideScroller, got {:?}", other),
+        }
+        assert_scene_file_round_trip(&mode);
+    }
+
+    #[test]
+    fn top_down_fields_match_the_wire_values() {
+        let mode = GameCameraMode::from_flat("topDown", &json!({
+            "height": 22.0,
+            "damping": 2.5,
+            "followRotation": true,
+        })).unwrap();
+        match &mode {
+            GameCameraMode::TopDown { height, damping, follow_rotation } => {
+                assert_eq!(*height, 22.0);
+                assert_eq!(*damping, 2.5);
+                assert_eq!(*follow_rotation, true);
+            }
+            other => panic!("expected TopDown, got {:?}", other),
+        }
+        assert_scene_file_round_trip(&mode);
+    }
+
+    #[test]
+    fn fixed_fields_match_the_wire_values() {
+        let mode = GameCameraMode::from_flat("fixed", &json!({
+            "lookAt": [4.0, 5.0, 6.0],
+        })).unwrap();
+        match &mode {
+            GameCameraMode::Fixed { look_at } => {
+                assert_eq!(*look_at, Some(Vec3::new(4.0, 5.0, 6.0)), "lookAt component order drifted");
+            }
+            other => panic!("expected Fixed, got {:?}", other),
+        }
+        assert_scene_file_round_trip(&mode);
+    }
+
+    #[test]
+    fn orbital_fields_match_the_wire_values() {
+        let mode = GameCameraMode::from_flat("orbital", &json!({
+            "radius": 11.0,
+            "autoRotate": false,
+            "autoRotateSpeed": 30.0,
+        })).unwrap();
+        match &mode {
+            GameCameraMode::Orbital { radius, auto_rotate, auto_rotate_speed } => {
+                assert_eq!(*radius, 11.0);
+                assert_eq!(*auto_rotate, false);
+                assert_eq!(*auto_rotate_speed, 30.0);
+            }
+            other => panic!("expected Orbital, got {:?}", other),
+        }
+        assert_scene_file_round_trip(&mode);
+    }
+
+    // ---- Per-field default fallback on a PARTIAL payload ----
+    //
+    // This is the failure mode the whole ticket exists to kill: a payload that only sets ONE
+    // field must not reset an entity's other, previously-configured fields to their defaults.
+    // Each test below sets exactly one field and asserts every sibling field is still the
+    // variant's documented default, not a wholesale `..Default::default()`.
+
+    #[test]
+    fn third_person_follow_partial_payload_only_overrides_the_sent_field() {
+        let mode = GameCameraMode::from_flat("thirdPersonFollow", &json!({"damping": 9.0})).unwrap();
+        match mode {
+            GameCameraMode::ThirdPersonFollow {
+                offset, damping, min_distance, max_distance, look_at_target, collision_avoidance,
+            } => {
+                assert_eq!(damping, 9.0, "the sent field must take the sent value");
+                assert_eq!(offset, Vec3::new(0.0, 2.0, -5.0), "unset offset must not be reset");
+                assert_eq!(min_distance, 2.0, "unset minDistance must not be reset");
+                assert_eq!(max_distance, 10.0, "unset maxDistance must not be reset");
+                assert_eq!(look_at_target, true, "unset lookAtTarget must not be reset");
+                assert_eq!(collision_avoidance, true, "unset collisionAvoidance must not be reset");
+            }
+            other => panic!("expected ThirdPersonFollow, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn first_person_partial_payload_only_overrides_the_sent_field() {
+        let mode = GameCameraMode::from_flat("firstPerson", &json!({"fov": 100.0})).unwrap();
+        match mode {
+            GameCameraMode::FirstPerson { eye_height, mouse_sensitivity, fov, pitch_clamp } => {
+                assert_eq!(fov, 100.0);
+                assert_eq!(eye_height, 1.7, "unset eyeHeight must not be reset");
+                assert_eq!(mouse_sensitivity, 0.1, "unset mouseSensitivity must not be reset");
+                assert_eq!(pitch_clamp, (-89.0, 89.0), "unset pitchClamp must not be reset");
+            }
+            other => panic!("expected FirstPerson, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn side_scroller_partial_payload_only_overrides_the_sent_field() {
+        let mode = GameCameraMode::from_flat("sideScroller", &json!({"followY": false})).unwrap();
+        match mode {
+            GameCameraMode::SideScroller { z_offset, follow_y, y_bounds, damping } => {
+                assert_eq!(follow_y, false);
+                assert_eq!(z_offset, 10.0, "unset zOffset must not be reset");
+                assert_eq!(y_bounds, None, "unset yBounds must not be reset");
+                assert_eq!(damping, 5.0, "unset damping must not be reset");
+            }
+            other => panic!("expected SideScroller, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn top_down_partial_payload_only_overrides_the_sent_field() {
+        let mode = GameCameraMode::from_flat("topDown", &json!({"damping": 1.0})).unwrap();
+        match mode {
+            GameCameraMode::TopDown { height, damping, follow_rotation } => {
+                assert_eq!(damping, 1.0);
+                assert_eq!(height, 15.0, "unset height must not be reset");
+                assert_eq!(follow_rotation, false, "unset followRotation must not be reset");
+            }
+            other => panic!("expected TopDown, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn orbital_partial_payload_only_overrides_the_sent_field() {
+        let mode = GameCameraMode::from_flat("orbital", &json!({"radius": 20.0})).unwrap();
+        match mode {
+            GameCameraMode::Orbital { radius, auto_rotate, auto_rotate_speed } => {
+                assert_eq!(radius, 20.0);
+                assert_eq!(auto_rotate, true, "unset autoRotate must not be reset");
+                assert_eq!(auto_rotate_speed, 15.0, "unset autoRotateSpeed must not be reset");
+            }
+            other => panic!("expected Orbital, got {:?}", other),
+        }
+    }
+
+    // ---- Unrecognized mode: an error naming the offending mode, never a silent default ----
+
+    #[test]
+    fn unrecognized_mode_is_an_error_not_a_silent_third_person_default() {
+        let err = GameCameraMode::from_flat("cinematic", &json!({})).unwrap_err();
+        assert!(err.contains("cinematic"), "error must name the offending mode: {}", err);
+        assert!(
+            GameCameraMode::FLAT_MODES.iter().any(|m| err.contains(m)),
+            "error should list the valid modes so a typo is self-correcting: {}",
+            err
+        );
+    }
+
+    // ---- 0.0 is a legitimate value, not "absent" ----
+
+    #[test]
+    fn zero_is_preserved_not_treated_as_absent() {
+        let orbital = GameCameraMode::from_flat("orbital", &json!({"autoRotateSpeed": 0.0})).unwrap();
+        match orbital {
+            GameCameraMode::Orbital { auto_rotate_speed, .. } => {
+                assert_eq!(auto_rotate_speed, 0.0, "an exact 0.0 auto-rotate speed (no-op orbit) must survive");
+            }
+            other => panic!("expected Orbital, got {:?}", other),
+        }
+
+        let third_person = GameCameraMode::from_flat("thirdPersonFollow", &json!({"damping": 0.0})).unwrap();
+        match third_person {
+            GameCameraMode::ThirdPersonFollow { damping, .. } => {
+                assert_eq!(damping, 0.0, "an exact 0.0 damping (instant snap) must survive");
+            }
+            other => panic!("expected ThirdPersonFollow, got {:?}", other),
+        }
+    }
+
+    // ---- null on a numeric field falls back to the default, never NaN ----
+
+    #[test]
+    fn explicit_null_on_a_numeric_field_falls_back_to_default_not_nan() {
+        let mode = GameCameraMode::from_flat("orbital", &json!({"radius": null})).unwrap();
+        match mode {
+            GameCameraMode::Orbital { radius, .. } => {
+                assert!(!radius.is_nan(), "null must never produce NaN");
+                assert_eq!(radius, 8.0, "null must take the documented default, same as omitting the key");
+            }
+            other => panic!("expected Orbital, got {:?}", other),
+        }
+    }
+
+    // ---- offset: malformed input is an error, never a panic ----
+
+    #[test]
+    fn malformed_offset_is_an_error_never_a_panic() {
+        // Not an array at all.
+        let err = GameCameraMode::from_flat("thirdPersonFollow", &json!({"offset": "north"})).unwrap_err();
+        assert!(err.contains("offset"), "error must name `offset`: {}", err);
+
+        // Wrong length (too short).
+        let err = GameCameraMode::from_flat("thirdPersonFollow", &json!({"offset": [1.0]})).unwrap_err();
+        assert!(err.contains("offset"), "error must name `offset`: {}", err);
+
+        // Wrong length (too long).
+        let err = GameCameraMode::from_flat("thirdPersonFollow", &json!({"offset": [1.0, 2.0, 3.0, 4.0]})).unwrap_err();
+        assert!(err.contains("offset"), "error must name `offset`: {}", err);
+
+        // A null entry inside an otherwise well-formed array.
+        let err = GameCameraMode::from_flat("thirdPersonFollow", &json!({"offset": [1.0, null, 3.0]})).unwrap_err();
+        assert!(err.contains("offset"), "error must name `offset`: {}", err);
+
+        // A non-numeric entry inside an otherwise well-formed array.
+        let err = GameCameraMode::from_flat("thirdPersonFollow", &json!({"offset": [1.0, true, 3.0]})).unwrap_err();
+        assert!(err.contains("offset"), "error must name `offset`: {}", err);
+    }
+}
