@@ -53,7 +53,11 @@ impl Default for GameCameraData {
     }
 }
 
-#[derive(Reflect, Clone, Debug, Serialize, Deserialize)]
+// `PartialEq` is what lets the flat-wire round trip be asserted directly (see `flat_wire_tests`).
+// Every field is a plain `f32`/`bool`/`Vec3`, and the f32 -> JSON -> f32 direction is lossless, so
+// mode equality is an exact check. (The reverse is not: a literal like `1.9` does not survive f64 ->
+// f32 unchanged, which is why the tests compare wire values at f32 precision rather than by bytes.)
+#[derive(Reflect, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum GameCameraMode {
     /// Third-person follow camera with collision avoidance.
     ThirdPersonFollow {
@@ -120,6 +124,206 @@ pub enum GameCameraMode {
         /// Rotation speed (degrees per second).
         auto_rotate_speed: f32,
     },
+}
+
+/// Read an optional `f32` from a flat command payload.
+///
+/// An absent (or explicitly null) key takes the variant's default. A key that is present but
+/// not a number is an error rather than a silent fall back — `dispatchCommand` returns void,
+/// so a rejected error message is the only signal a caller who mistyped a parameter will get.
+fn flat_f32(params: &serde_json::Value, key: &str, default: f32) -> Result<f32, String> {
+    match params.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(default),
+        Some(v) => v
+            .as_f64()
+            .map(|n| n as f32)
+            .ok_or_else(|| format!("`{}` must be a number", key)),
+    }
+}
+
+/// Read an optional `bool` from a flat command payload. Same absent/wrong-type contract as [`flat_f32`].
+fn flat_bool(params: &serde_json::Value, key: &str, default: bool) -> Result<bool, String> {
+    match params.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(default),
+        Some(v) => v
+            .as_bool()
+            .ok_or_else(|| format!("`{}` must be a boolean", key)),
+    }
+}
+
+/// Read an optional fixed-length numeric array (`offset: [x, y, z]`, `pitchClamp: [min, max]`).
+///
+/// Returns `None` when absent so each call site can apply its own default. A wrong length is an
+/// error: silently padding or truncating would let `offset: [0, 2]` configure a camera the
+/// caller never asked for.
+fn flat_numbers<const N: usize>(
+    params: &serde_json::Value,
+    key: &str,
+) -> Result<Option<[f32; N]>, String> {
+    let Some(v) = params.get(key) else {
+        return Ok(None);
+    };
+    if v.is_null() {
+        return Ok(None);
+    }
+    let arr = v
+        .as_array()
+        .ok_or_else(|| format!("`{}` must be an array of {} numbers", key, N))?;
+    if arr.len() != N {
+        return Err(format!(
+            "`{}` must be an array of {} numbers, got {}",
+            key,
+            N,
+            arr.len()
+        ));
+    }
+    let mut out = [0.0f32; N];
+    for (i, item) in arr.iter().enumerate() {
+        out[i] = item
+            .as_f64()
+            .ok_or_else(|| format!("`{}[{}]` must be a number", key, i))? as f32;
+    }
+    Ok(Some(out))
+}
+
+impl GameCameraMode {
+    /// Every mode discriminator the flat wire form accepts, in declaration order.
+    pub const FLAT_MODES: [&'static str; 6] = [
+        "thirdPersonFollow",
+        "firstPerson",
+        "sideScroller",
+        "topDown",
+        "fixed",
+        "orbital",
+    ];
+
+    /// Build a mode from the flat wire form: a `mode` discriminator string plus sibling params.
+    ///
+    /// This enum is externally tagged with struct variants, and `GameCameraData` is persisted
+    /// into `.forge` scene files — so its serde representation is load-bearing and must not be
+    /// retagged to match the wire. The translation lives here, at the command boundary, and
+    /// [`to_flat`](Self::to_flat) is its inverse for the event and query paths.
+    ///
+    /// Every parameter is optional and falls back to this variant's default, so a bare
+    /// `{"mode": "topDown"}` is a complete, valid payload.
+    pub fn from_flat(mode: &str, params: &serde_json::Value) -> Result<Self, String> {
+        match mode {
+            "thirdPersonFollow" => Ok(Self::ThirdPersonFollow {
+                offset: flat_numbers::<3>(params, "offset")?
+                    .map(Vec3::from)
+                    .unwrap_or(Vec3::new(0.0, 2.0, -5.0)),
+                damping: flat_f32(params, "damping", 5.0)?,
+                min_distance: flat_f32(params, "minDistance", 2.0)?,
+                max_distance: flat_f32(params, "maxDistance", 10.0)?,
+                look_at_target: flat_bool(params, "lookAtTarget", true)?,
+                collision_avoidance: flat_bool(params, "collisionAvoidance", true)?,
+            }),
+            "firstPerson" => Ok(Self::FirstPerson {
+                eye_height: flat_f32(params, "eyeHeight", 1.7)?,
+                mouse_sensitivity: flat_f32(params, "mouseSensitivity", 0.1)?,
+                fov: flat_f32(params, "fov", 75.0)?,
+                pitch_clamp: flat_numbers::<2>(params, "pitchClamp")?
+                    .map(|c| (c[0], c[1]))
+                    .unwrap_or((-89.0, 89.0)),
+            }),
+            "sideScroller" => Ok(Self::SideScroller {
+                z_offset: flat_f32(params, "zOffset", 10.0)?,
+                follow_y: flat_bool(params, "followY", true)?,
+                y_bounds: flat_numbers::<2>(params, "yBounds")?.map(|b| (b[0], b[1])),
+                damping: flat_f32(params, "damping", 5.0)?,
+            }),
+            "topDown" => Ok(Self::TopDown {
+                height: flat_f32(params, "height", 15.0)?,
+                damping: flat_f32(params, "damping", 5.0)?,
+                follow_rotation: flat_bool(params, "followRotation", false)?,
+            }),
+            "fixed" => Ok(Self::Fixed {
+                look_at: flat_numbers::<3>(params, "lookAt")?.map(Vec3::from),
+            }),
+            "orbital" => Ok(Self::Orbital {
+                radius: flat_f32(params, "radius", 8.0)?,
+                auto_rotate: flat_bool(params, "autoRotate", true)?,
+                auto_rotate_speed: flat_f32(params, "autoRotateSpeed", 15.0)?,
+            }),
+            other => Err(format!(
+                "unknown camera mode `{}`, expected one of {}",
+                other,
+                Self::FLAT_MODES.join(", ")
+            )),
+        }
+    }
+
+    /// Flatten back to the wire form, so an event or query answer carries the same shape the
+    /// caller sent. Without this the engine emits the externally-tagged enum and every JS
+    /// consumer reads `mode` as an object where it expects a string.
+    pub fn to_flat(&self) -> serde_json::Value {
+        match self {
+            Self::ThirdPersonFollow {
+                offset,
+                damping,
+                min_distance,
+                max_distance,
+                look_at_target,
+                collision_avoidance,
+            } => serde_json::json!({
+                "mode": "thirdPersonFollow",
+                "offset": [offset.x, offset.y, offset.z],
+                "damping": damping,
+                "minDistance": min_distance,
+                "maxDistance": max_distance,
+                "lookAtTarget": look_at_target,
+                "collisionAvoidance": collision_avoidance,
+            }),
+            Self::FirstPerson {
+                eye_height,
+                mouse_sensitivity,
+                fov,
+                pitch_clamp,
+            } => serde_json::json!({
+                "mode": "firstPerson",
+                "eyeHeight": eye_height,
+                "mouseSensitivity": mouse_sensitivity,
+                "fov": fov,
+                "pitchClamp": [pitch_clamp.0, pitch_clamp.1],
+            }),
+            Self::SideScroller {
+                z_offset,
+                follow_y,
+                y_bounds,
+                damping,
+            } => serde_json::json!({
+                "mode": "sideScroller",
+                "zOffset": z_offset,
+                "followY": follow_y,
+                "yBounds": y_bounds.map(|b| vec![b.0, b.1]),
+                "damping": damping,
+            }),
+            Self::TopDown {
+                height,
+                damping,
+                follow_rotation,
+            } => serde_json::json!({
+                "mode": "topDown",
+                "height": height,
+                "damping": damping,
+                "followRotation": follow_rotation,
+            }),
+            Self::Fixed { look_at } => serde_json::json!({
+                "mode": "fixed",
+                "lookAt": look_at.map(|p| vec![p.x, p.y, p.z]),
+            }),
+            Self::Orbital {
+                radius,
+                auto_rotate,
+                auto_rotate_speed,
+            } => serde_json::json!({
+                "mode": "orbital",
+                "radius": radius,
+                "autoRotate": auto_rotate,
+                "autoRotateSpeed": auto_rotate_speed,
+            }),
+        }
+    }
 }
 
 /// Tracks yaw/pitch for FirstPerson mode (not serialized).
@@ -435,4 +639,135 @@ fn update_orbital(
 
     camera_transform.translation = target_transform.translation + offset;
     camera_transform.look_at(target_transform.translation, Vec3::Y);
+}
+
+#[cfg(test)]
+mod flat_wire_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Every discriminator the command layer accepts must round-trip back to itself, or an event
+    /// consumer would read a mode the caller can never re-send.
+    #[test]
+    fn every_mode_round_trips_through_flat_form() {
+        for name in GameCameraMode::FLAT_MODES {
+            let mode = GameCameraMode::from_flat(name, &json!({}))
+                .unwrap_or_else(|e| panic!("`{}` must be constructible from a bare payload: {}", name, e));
+            let flat = mode.to_flat();
+            assert_eq!(flat["mode"], json!(name), "flattened discriminator drifted for `{}`", name);
+
+            let back = GameCameraMode::from_flat(name, &flat)
+                .unwrap_or_else(|e| panic!("`{}` failed to re-parse its own flat form: {}", name, e));
+            assert_eq!(back, mode, "`{}` did not survive the round trip", name);
+        }
+    }
+
+    /// Re-render a JSON value at f32 precision so a wire literal can be compared against the value
+    /// that came back through an `f32` field. A JSON number is an f64, and narrowing it is lossy
+    /// (`1.9` becomes `1.899999976158142`) — that is storage precision, not a lost value, so
+    /// comparing at f32 is the honest check. Everything else is compared unchanged.
+    fn at_f32_precision(v: &serde_json::Value) -> serde_json::Value {
+        match v {
+            serde_json::Value::Number(n) => n
+                .as_f64()
+                .and_then(|f| serde_json::Number::from_f64(f as f32 as f64))
+                .map(serde_json::Value::Number)
+                .unwrap_or_else(|| v.clone()),
+            serde_json::Value::Array(items) => {
+                serde_json::Value::Array(items.iter().map(at_f32_precision).collect())
+            }
+            other => other.clone(),
+        }
+    }
+
+    /// Every mode-specific parameter must survive the round trip. A key the flattener omits is a
+    /// value silently lost from every event and query answer.
+    #[test]
+    fn mode_specific_params_survive_the_round_trip() {
+        let cases = [
+            ("thirdPersonFollow", json!({
+                "offset": [1.0, 3.0, -7.0], "damping": 4.0, "minDistance": 1.5,
+                "maxDistance": 12.0, "lookAtTarget": false, "collisionAvoidance": false,
+            })),
+            ("firstPerson", json!({
+                "eyeHeight": 1.9, "mouseSensitivity": 0.25, "fov": 90.0, "pitchClamp": [-70.0, 70.0],
+            })),
+            ("sideScroller", json!({
+                "zOffset": 14.0, "followY": false, "yBounds": [-2.0, 8.0], "damping": 3.0,
+            })),
+            ("topDown", json!({"height": 22.0, "damping": 2.5, "followRotation": true})),
+            ("fixed", json!({"lookAt": [4.0, 0.0, -1.0]})),
+            ("orbital", json!({"radius": 11.0, "autoRotate": false, "autoRotateSpeed": 30.0})),
+        ];
+
+        for (name, params) in cases {
+            let mode = GameCameraMode::from_flat(name, &params)
+                .unwrap_or_else(|e| panic!("`{}` rejected its own documented params: {}", name, e));
+            let flat = mode.to_flat();
+
+            for (key, sent) in params.as_object().expect("params is an object") {
+                assert_eq!(
+                    at_f32_precision(&flat[key]),
+                    at_f32_precision(sent),
+                    "`{}` lost or altered `{}` on the way back out",
+                    name,
+                    key
+                );
+            }
+            assert_eq!(
+                GameCameraMode::from_flat(name, &flat).expect("re-parse"),
+                mode,
+                "`{}` did not survive the round trip with params",
+                name
+            );
+        }
+    }
+
+    /// An absent parameter takes the variant default; a present-but-wrong-typed one is an error.
+    /// `dispatchCommand` returns void, so this error string is the only signal a caller who
+    /// mistyped a parameter will ever get — silently defaulting would configure the wrong camera.
+    #[test]
+    fn wrong_typed_params_are_errors_not_silent_defaults() {
+        let err = GameCameraMode::from_flat("topDown", &json!({"height": "tall"})).unwrap_err();
+        assert!(err.contains("height"), "error must name the offending key: {}", err);
+
+        let err = GameCameraMode::from_flat("topDown", &json!({"followRotation": "yes"})).unwrap_err();
+        assert!(err.contains("followRotation"), "error must name the offending key: {}", err);
+
+        let err = GameCameraMode::from_flat("thirdPersonFollow", &json!({"offset": [0.0, 2.0]})).unwrap_err();
+        assert!(err.contains("offset"), "error must name the offending key: {}", err);
+
+        let err = GameCameraMode::from_flat("thirdPersonFollow", &json!({"offset": [0.0, 2.0, "z"]})).unwrap_err();
+        assert!(err.contains("offset"), "error must name the offending key: {}", err);
+    }
+
+    /// An explicit null is "not supplied", so a serializer that emits every optional key as null
+    /// cannot accidentally override a default.
+    #[test]
+    fn null_params_take_the_default() {
+        let with_null = GameCameraMode::from_flat("topDown", &json!({"height": null})).unwrap();
+        let absent = GameCameraMode::from_flat("topDown", &json!({})).unwrap();
+        assert_eq!(with_null, absent);
+    }
+
+    /// The optional-array modes must distinguish "no bounds" from a supplied pair in both directions.
+    #[test]
+    fn absent_optional_arrays_flatten_to_null() {
+        let side = GameCameraMode::from_flat("sideScroller", &json!({})).unwrap();
+        assert_eq!(side.to_flat()["yBounds"], json!(null));
+
+        let fixed = GameCameraMode::from_flat("fixed", &json!({})).unwrap();
+        assert_eq!(fixed.to_flat()["lookAt"], json!(null));
+    }
+
+    /// The default mode a camera is created with must itself be expressible on the wire, or a
+    /// freshly-spawned camera would emit a state no caller could reproduce.
+    #[test]
+    fn default_mode_flattens_to_a_reparseable_form() {
+        let default = GameCameraData::default().mode;
+        let flat = default.to_flat();
+        let name = flat["mode"].as_str().expect("flattened mode is a string");
+        assert!(GameCameraMode::FLAT_MODES.contains(&name), "default mode `{}` is not on the wire", name);
+        assert_eq!(GameCameraMode::from_flat(name, &flat).unwrap(), default);
+    }
 }

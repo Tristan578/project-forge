@@ -627,15 +627,22 @@ pub fn emit_raycast_result(request_id: &str, hit_entity: Option<&str>, point: [f
 }
 
 /// Emit a game camera changed event.
+///
+/// The mode is flattened to the same wire form `set_game_camera` accepts — a `mode` string plus
+/// sibling params. Serializing `GameCameraMode` directly would emit the externally-tagged
+/// `{"ThirdPersonFollow": {...}}` object, which no JS consumer parses (`gameEvents.ts` reads
+/// `mode` as a string), and would drop every mode-specific parameter on the floor.
 pub fn emit_game_camera_changed(entity_id: &str, mode: &crate::core::game_camera::GameCameraMode, target_entity: &Option<String>) {
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct GameCameraPayload<'a> {
-        entity_id: &'a str,
-        mode: &'a crate::core::game_camera::GameCameraMode,
-        target_entity: &'a Option<String>,
+    let mut payload = serde_json::json!({
+        "entityId": entity_id,
+        "targetEntity": target_entity,
+    });
+    if let (Some(dst), Some(src)) = (payload.as_object_mut(), mode.to_flat().as_object()) {
+        for (key, value) in src {
+            dst.insert(key.clone(), value.clone());
+        }
     }
-    emit_event("GAME_CAMERA_CHANGED", &GameCameraPayload { entity_id, mode, target_entity });
+    emit_event("GAME_CAMERA_CHANGED", &payload);
 }
 
 /// Emit an active game camera changed event.

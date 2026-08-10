@@ -2,7 +2,8 @@
  * Event handlers for game components, game cameras, input bindings, play tick.
  */
 
-import { useEditorStore, type GameCameraData, firePlayTick } from '@/stores/editorStore';
+import { useEditorStore, firePlayTick } from '@/stores/editorStore';
+import { parseGameCameraWire } from '@/lib/game/gameCameraPayload';
 import { getScriptGameEventCallback } from '@/lib/scripting/useScriptRunner';
 import { castPayload, type SetFn, type GetFn } from './types';
 
@@ -25,12 +26,14 @@ export function handleGameEvent(
     }
 
     case 'GAME_CAMERA_CHANGED': {
-      const payload = castPayload<{ entityId: string; mode: string; targetEntity: string | null }>(data);
-      const gameCameraData: GameCameraData = {
-        mode: payload.mode as GameCameraData['mode'],
-        targetEntity: payload.targetEntity || null,
-      };
-      useEditorStore.getState().setEntityGameCamera(payload.entityId, gameCameraData);
+      // The engine answers in its own flat vocabulary (`offset`, `damping`,
+      // `eyeHeight`, …). Casting `payload.mode` into the union hid every one of
+      // those params AND made an engine-side rename invisible to the type
+      // checker. A null parse means "unrecognized mode", NOT "clear the camera".
+      const parsed = parseGameCameraWire(data);
+      if (!parsed) return true;
+      const payload = castPayload<{ entityId: string }>(data);
+      useEditorStore.getState().setEntityGameCamera(payload.entityId, parsed);
       return true;
     }
 

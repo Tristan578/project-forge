@@ -15,6 +15,7 @@ import {
   toStoreComponentType,
   normalizeGameComponent,
 } from '@/lib/engine/gameComponentWire';
+import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 
 export interface GameSlice {
   allGameComponents: Record<string, GameComponentData[]>;
@@ -186,7 +187,11 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   },
   setGameCamera: (entityId, data) => {
     set(state => ({ allGameCameras: { ...state.allGameCameras, [entityId]: data } }));
-    if (dispatchCommand) dispatchCommand('set_game_camera', { entityId, ...data });
+    // Spreading `data` here sent the engine nothing it could read — the store's
+    // authoring vocabulary (`followDistance`, `topDownHeight`, …) shares no key
+    // with the engine's wire form beyond `mode`, and the mode itself was the
+    // camelCase variant, which `serde` rejected outright. See gameCameraPayload.ts.
+    if (dispatchCommand) dispatchCommand('set_game_camera', buildSetGameCameraPayload(entityId, data));
   },
   removeGameCamera: (entityId) => {
     set(state => {
@@ -202,7 +207,18 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   cameraShake: (entityId, intensity, duration) => {
     if (dispatchCommand) dispatchCommand('camera_shake', { entityId, intensity, duration });
   },
-  setEntityGameCamera: (_entityId, data) => set({ primaryGameCamera: data }),
+  // Inbound engine event. The entityId was previously ignored entirely, so a
+  // camera change on ANY entity overwrote the inspector's primary camera and
+  // `allGameCameras` was never populated from the engine at all.
+  setEntityGameCamera: (entityId, data) => set(state => {
+    const allGameCameras = { ...state.allGameCameras };
+    if (data) allGameCameras[entityId] = data;
+    else delete allGameCameras[entityId];
+    return {
+      allGameCameras,
+      primaryGameCamera: state.primaryId === entityId ? data : state.primaryGameCamera,
+    };
+  }),
   setActiveGameCameraId: (entityId) => set({ activeGameCameraId: entityId }),
   setMobileTouchConfig: (config) => set({ mobileTouchConfig: config }),
   updateMobileTouchConfig: (partial) => {
