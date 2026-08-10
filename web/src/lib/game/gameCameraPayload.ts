@@ -223,30 +223,55 @@ function wireNum(params: Record<string, unknown>, key: string): number | undefin
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-const CAMERA_MODES: readonly GameCameraMode[] = [
-  'thirdPersonFollow',
-  'firstPerson',
-  'sideScroller',
-  'topDown',
-  'fixed',
-  'orbital',
-];
+/**
+ * Every mode the engine's `from_flat` recognizes, and the module's single copy
+ * of that list.
+ *
+ * An object with `satisfies Record<GameCameraMode, true>` rather than an array:
+ * on an array, `satisfies readonly GameCameraMode[]` only proves each entry is a
+ * valid mode, never that the list is complete, so a mode added to the union
+ * would silently go unrecognized at runtime. On an object the check runs both
+ * ways — a missing key fails the build.
+ *
+ * Three call sites re-typed this list before PF-1126. They agreed, but nothing
+ * made them agree, and the parameter lists beside them had already drifted.
+ */
+export const CAMERA_MODES = {
+  thirdPersonFollow: true,
+  firstPerson: true,
+  sideScroller: true,
+  topDown: true,
+  fixed: true,
+  orbital: true,
+} satisfies Record<GameCameraMode, true>;
+
+/** Narrow an arbitrary string to a camera mode the engine will accept. */
+export function isCameraMode(value: unknown): value is GameCameraMode {
+  return typeof value === 'string' && Object.hasOwn(CAMERA_MODES, value);
+}
 
 /**
  * Translate an engine wire payload back into the store's authoring vocabulary.
  *
- * The engine answers `GAME_CAMERA_CHANGED` and `QUERY_GAME_CAMERA` in the same
- * flat form `set_game_camera` accepts, so this is the exact inverse of
- * {@link buildSetGameCameraPayload}. Returns `null` for an unrecognized mode
+ * The engine emits the same flat form `set_game_camera` accepts, so this is the
+ * exact inverse of {@link buildSetGameCameraPayload}.
+ *
+ * `GAME_CAMERA_CHANGED` carries those keys at the top level and can be passed
+ * here directly. `QUERY_GAME_CAMERA` does NOT: it nests them one level down
+ * under `gameCameraData` (and sends `null` there when the entity has no camera),
+ * so a caller must unwrap that key first — handing this the event payload would
+ * find no `mode` and return `null`. Nothing on the JS side reads
+ * `QUERY_GAME_CAMERA` today, which is why the difference has never been felt.
+ *
+ * Returns `null` for an unrecognized mode
  * rather than casting a string into the union — the previous handler asserted
  * `payload.mode as GameCameraData['mode']`, which made every engine-side rename
  * invisible to the type checker.
  */
 export function parseGameCameraWire(payload: Record<string, unknown>): GameCameraData | null {
   const rawMode = payload.mode;
-  if (typeof rawMode !== 'string') return null;
-  const mode = CAMERA_MODES.find(m => m === rawMode);
-  if (!mode) return null;
+  if (!isCameraMode(rawMode)) return null;
+  const mode = rawMode;
 
   // An empty string is normalized to null, as the legacy handler did. Nothing
   // downstream distinguishes "" from "no target", and leaving it as a string

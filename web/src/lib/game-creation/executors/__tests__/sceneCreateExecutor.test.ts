@@ -149,6 +149,32 @@ describe('sceneCreateExecutor', () => {
     });
   });
 
+  it('does not read pending camera params off the prototype chain', async () => {
+    const ctx = makeCtx();
+    // Same input, the other branch: with no `entityId` there is no camera entity
+    // to dispatch against, so the config is filtered into `pendingCameraConfig`
+    // for a downstream step instead. That second loop is a separate read and had
+    // no pin of its own.
+    //
+    // Measured, not assumed: stripping the loop's `Object.hasOwn` leaves this
+    // test green, because Zod's `z.record()` parse rebuilds the input as a plain
+    // object before either loop sees it and `execute()` offers no seam past it.
+    // So this pins the PROPERTY — an inherited param never reaches downstream —
+    // and the loop guard is the independently-true local version, held so the
+    // read stays correct if the schema is ever loosened to passthrough. Same
+    // honest shape as the dispatch-path test above.
+    const cameraConfig = Object.create({ topDownHeight: 999 }) as Record<string, unknown>;
+
+    const result = await sceneCreateExecutor.execute({
+      name: 'Arena',
+      cameraMode: 'top-down',
+      cameraConfig,
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.output?.pendingCameraConfig).toEqual({ mode: 'topDown', config: {} });
+  });
+
   it('aborts before touching persisted scenes', async () => {
     const controller = new AbortController();
     controller.abort();

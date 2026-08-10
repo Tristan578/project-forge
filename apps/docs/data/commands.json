@@ -4475,7 +4475,7 @@
             },
             "minItems": 2,
             "maxItems": 2,
-            "description": "Sculpt center [x, z] in WORLD space — the engine subtracts the terrain entity's transform to find the brush cell, so an offset terrain sculpts where you clicked, not where it would have been at the origin"
+            "description": "Sculpt center [x, z] in WORLD space \u2014 the engine subtracts the terrain entity's transform to find the brush cell, so an offset terrain sculpts where you clicked, not where it would have been at the origin"
           },
           "radius": {
             "type": "number",
@@ -5419,47 +5419,99 @@
               "fixed",
               "orbital"
             ],
-            "description": "Camera mode"
+            "description": "Camera mode. Selects which of the parameters below apply; every parameter is optional and an omitted one takes the engine's default for that mode"
           },
           "targetEntity": {
             "type": "string",
             "description": "Entity ID to follow/track (optional)"
           },
-          "followDistance": {
-            "type": "number",
-            "description": "Distance behind target (3rd person)"
+          "offset": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Camera offset from target as [x, y, z] (thirdPersonFollow, default [0, 2, -5])"
           },
-          "followHeight": {
+          "damping": {
             "type": "number",
-            "description": "Height above target (3rd person)"
+            "description": "Movement smoothing (thirdPersonFollow / sideScroller / topDown, default 5)"
           },
-          "followSmoothing": {
+          "minDistance": {
             "type": "number",
-            "description": "Movement smoothing (3rd person)"
+            "description": "Closest the camera may sit to its target (thirdPersonFollow, default 2)"
           },
-          "firstPersonHeight": {
+          "maxDistance": {
             "type": "number",
-            "description": "Eye height (1st person)"
+            "description": "Furthest the camera may sit from its target; must not be below minDistance (thirdPersonFollow, default 10)"
           },
-          "firstPersonMouseSensitivity": {
-            "type": "number",
-            "description": "Mouse look sensitivity (1st person)"
+          "lookAtTarget": {
+            "type": "boolean",
+            "description": "Aim the camera at its target rather than holding a fixed rotation (thirdPersonFollow, default true)"
           },
-          "sideScrollerDistance": {
-            "type": "number",
-            "description": "Distance from plane (side scroller)"
+          "collisionAvoidance": {
+            "type": "boolean",
+            "description": "Pull the camera in when geometry blocks the shot (thirdPersonFollow, default true)"
           },
-          "topDownHeight": {
+          "eyeHeight": {
             "type": "number",
-            "description": "Height above target (top down)"
+            "description": "Eye height above the entity origin (firstPerson, default 1.7)"
           },
-          "orbitalDistance": {
+          "mouseSensitivity": {
             "type": "number",
-            "description": "Orbit radius (orbital)"
+            "description": "Mouse look sensitivity (firstPerson, default 0.1)"
           },
-          "orbitalAutoRotateSpeed": {
+          "fov": {
             "type": "number",
-            "description": "Auto-rotation speed (orbital)"
+            "description": "Vertical field of view in degrees (firstPerson, default 75)"
+          },
+          "pitchClamp": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Pitch limits as [min, max] degrees, min <= max (firstPerson, default [-89, 89])"
+          },
+          "zOffset": {
+            "type": "number",
+            "description": "Distance from the play plane (sideScroller, default 10)"
+          },
+          "followY": {
+            "type": "boolean",
+            "description": "Track the target vertically as well as horizontally (sideScroller, default true)"
+          },
+          "yBounds": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Vertical travel limits as [min, max], min <= max (sideScroller, unbounded when omitted)"
+          },
+          "height": {
+            "type": "number",
+            "description": "Height above the target (topDown, default 15)"
+          },
+          "followRotation": {
+            "type": "boolean",
+            "description": "Rotate with the target instead of holding world axes (topDown, default false)"
+          },
+          "lookAt": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "World point the camera aims at as [x, y, z] (fixed; holds its current rotation when omitted)"
+          },
+          "radius": {
+            "type": "number",
+            "description": "Orbit radius (orbital, default 8)"
+          },
+          "autoRotate": {
+            "type": "boolean",
+            "description": "Orbit continuously without input (orbital, default true)"
+          },
+          "autoRotateSpeed": {
+            "type": "number",
+            "description": "Auto-rotation speed in degrees per second (orbital, default 15)"
           }
         },
         "required": [

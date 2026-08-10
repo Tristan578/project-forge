@@ -633,17 +633,31 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
     'engine', 'src', 'core', 'game_camera.rs',
   );
 
-  /** The `"<mode>" => Ok(Self::Variant { … })` arm body, by mode name. */
+  /** The body of each `"<mode>" => …` match arm, by mode name. */
   function fromFlatArms(): Record<string, string> {
     const source = readFileSync(RUST, 'utf8');
     const start = source.indexOf('pub fn from_flat');
     expect(start, `no from_flat in ${RUST}`).toBeGreaterThan(-1);
     const body = source.slice(start);
 
+    // Delimit each arm by the NEXT arm head rather than by a closing-brace
+    // shape. An arm may be a bare `Ok(Self::V { … })` expression or a `{ … }`
+    // block that validates before constructing, and the earlier
+    // `Ok\(Self::\w+ \{ … \n {12}\}\)` pattern matched only the first form —
+    // so the day `thirdPersonFollow` grew a range check, its arm vanished from
+    // this map entirely. It failed loudly, as intended, but a head-to-head cut
+    // does not care what the arm body looks like.
+    const heads = [...body.matchAll(/^ {12}(?:"(\w+)"|other) =>/gm)];
+    expect(heads.length, 'no from_flat match arms found').toBeGreaterThan(0);
+
     const arms: Record<string, string> = {};
-    const armRe = /"(\w+)" => Ok\(Self::\w+ \{([\s\S]*?)\n {12}\}\)/g;
-    let m: RegExpExecArray | null;
-    while ((m = armRe.exec(body)) !== null) arms[m[1]!] = m[2]!;
+    heads.forEach((head, i) => {
+      const mode = head[1];
+      if (!mode) return; // the `other =>` fallback — a bound, not an arm
+      const from = head.index! + head[0].length;
+      const to = i + 1 < heads.length ? heads[i + 1]!.index! : body.length;
+      arms[mode] = body.slice(from, to);
+    });
     return arms;
   }
 

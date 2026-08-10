@@ -9,9 +9,13 @@
 
 import type { Cutscene, CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
 import { useCutsceneStore } from '@/stores/cutsceneStore';
-import { buildSetGameCameraPayload, TRANSLATED_CAMERA_FIELDS } from '@/lib/game/gameCameraPayload';
+import {
+  buildSetGameCameraPayload,
+  isCameraMode,
+  TRANSLATED_CAMERA_FIELDS,
+} from '@/lib/game/gameCameraPayload';
 import type { SetGameCameraPayload } from '@/lib/game/gameCameraPayload';
-import type { GameCameraData, GameCameraMode } from '@/stores/slices/types';
+import type { GameCameraData } from '@/stores/slices/types';
 
 // ============================================================================
 // Types
@@ -61,22 +65,6 @@ export function applyEasing(t: number, easing: CutsceneKeyframe['easing']): numb
 // ============================================================================
 
 /**
- * The modes a camera keyframe may name.
- *
- * An object rather than an array, and `satisfies Record<GameCameraMode, true>`
- * rather than an annotation: this way a mode added to the union fails the build
- * here instead of silently becoming an unrecognized string at runtime.
- */
-const CAMERA_KEYFRAME_MODES = {
-  thirdPersonFollow: true,
-  firstPerson: true,
-  sideScroller: true,
-  topDown: true,
-  fixed: true,
-  orbital: true,
-} satisfies Record<GameCameraMode, true>;
-
-/**
  * The numeric authoring params a camera keyframe may carry.
  *
  * Derived from the translator's own field list, so a new `GameCameraData`
@@ -109,15 +97,20 @@ function buildCameraCommandPayload(
   if (!entityId) return null;
 
   const rawMode = payload.mode;
-  if (typeof rawMode !== 'string' || !Object.hasOwn(CAMERA_KEYFRAME_MODES, rawMode)) return null;
+  if (!isCameraMode(rawMode)) return null;
 
   const rawTarget = payload.targetEntity;
   const data: GameCameraData = {
-    mode: rawMode as GameCameraMode,
+    mode: rawMode,
     targetEntity: typeof rawTarget === 'string' && rawTarget !== '' ? rawTarget : null,
   };
 
   for (const key of CAMERA_KEYFRAME_PARAMS) {
+    // Own keys only. Keyframe payloads are model-authored, and a bare read walks
+    // the prototype chain — the value picked up there is then written as an OWN
+    // property on `data`, so `buildSetGameCameraPayload`'s own `Object.hasOwn`
+    // check downstream cannot tell it apart from one the author really set.
+    if (!Object.hasOwn(payload, key)) continue;
     const value = payload[key];
     if (typeof value === 'number' && Number.isFinite(value)) data[key] = value;
   }

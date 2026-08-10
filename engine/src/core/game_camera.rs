@@ -134,10 +134,21 @@ pub enum GameCameraMode {
 fn flat_f32(params: &serde_json::Value, key: &str, default: f32) -> Result<f32, String> {
     match params.get(key) {
         None | Some(serde_json::Value::Null) => Ok(default),
-        Some(v) => v
-            .as_f64()
-            .map(|n| n as f32)
-            .ok_or_else(|| format!("`{}` must be a number", key)),
+        Some(v) => {
+            let n = v
+                .as_f64()
+                .ok_or_else(|| format!("`{}` must be a number", key))? as f32;
+            // `as f32` is a SATURATING narrowing cast, so a perfectly finite JSON
+            // literal like `1e39` arrives here as `f32::INFINITY`. No amount of
+            // `Number.isFinite()` on the JS side can catch that — the overflow
+            // happens after the wire, on this line. An infinite camera parameter
+            // is never meaningful, and one that reaches a `clamp` bound panics
+            // the whole WASM instance.
+            if !n.is_finite() {
+                return Err(format!("`{}` must be a finite number", key));
+            }
+            Ok(n)
+        }
     }
 }
 
@@ -179,11 +190,55 @@ fn flat_numbers<const N: usize>(
     }
     let mut out = [0.0f32; N];
     for (i, item) in arr.iter().enumerate() {
-        out[i] = item
+        let n = item
             .as_f64()
             .ok_or_else(|| format!("`{}[{}]` must be a number", key, i))? as f32;
+        // Same saturating-cast trap as `flat_f32`, and it matters more here:
+        // these arrays are the clamp bounds.
+        if !n.is_finite() {
+            return Err(format!("`{}[{}]` must be a finite number", key, i));
+        }
+        out[i] = n;
     }
     Ok(Some(out))
+}
+
+/// Read an optional `(min, max)` pair, rejecting an inverted range.
+///
+/// `pitchClamp` and `yBounds` are fed straight to [`f32::clamp`], which PANICS
+/// when `min > max` — and a panic inside a Bevy system poisons the WASM
+/// instance, so the user loses the page and any unsaved scene with it.
+///
+/// The wire is the only place an inversion can be recognised: downstream it is
+/// two independently-valid numbers, and nothing there can tell `[89, -89]` from
+/// a range the caller meant.
+fn flat_range(params: &serde_json::Value, key: &str) -> Result<Option<(f32, f32)>, String> {
+    let Some([min, max]) = flat_numbers::<2>(params, key)? else {
+        return Ok(None);
+    };
+    if min > max {
+        return Err(format!(
+            "`{}` must be [min, max] with min <= max, got [{}, {}]",
+            key, min, max
+        ));
+    }
+    Ok(Some((min, max)))
+}
+
+/// Clamp with bounds that are not trusted to be ordered or finite.
+///
+/// [`GameCameraMode::from_flat`] rejects an inverted range at the command
+/// boundary, but that is not the only way one arrives: `.forge` scene files
+/// deserialize straight into the struct through the derived impl and never pass
+/// through `from_flat` at all. So the consume sites order the bounds themselves
+/// rather than trusting the field — a bad range should frame the shot wrongly,
+/// never take the engine down.
+fn clamp_ordered(value: f32, a: f32, b: f32) -> f32 {
+    let (lo, hi) = (a.min(b), a.max(b));
+    if !lo.is_finite() || !hi.is_finite() {
+        return value;
+    }
+    value.clamp(lo, hi)
 }
 
 impl GameCameraMode {
@@ -208,28 +263,40 @@ impl GameCameraMode {
     /// `{"mode": "topDown"}` is a complete, valid payload.
     pub fn from_flat(mode: &str, params: &serde_json::Value) -> Result<Self, String> {
         match mode {
-            "thirdPersonFollow" => Ok(Self::ThirdPersonFollow {
-                offset: flat_numbers::<3>(params, "offset")?
-                    .map(Vec3::from)
-                    .unwrap_or(Vec3::new(0.0, 2.0, -5.0)),
-                damping: flat_f32(params, "damping", 5.0)?,
-                min_distance: flat_f32(params, "minDistance", 2.0)?,
-                max_distance: flat_f32(params, "maxDistance", 10.0)?,
-                look_at_target: flat_bool(params, "lookAtTarget", true)?,
-                collision_avoidance: flat_bool(params, "collisionAvoidance", true)?,
-            }),
+            "thirdPersonFollow" => {
+                let min_distance = flat_f32(params, "minDistance", 2.0)?;
+                let max_distance = flat_f32(params, "maxDistance", 10.0)?;
+                // Not a `clamp` today — the follow system reads only `min_distance`
+                // — but an inverted range is meaningless in either direction, and
+                // the day a revision clamps between them it is the `pitchClamp`
+                // panic again. Rejecting at the wire is the cheap half of that.
+                if min_distance > max_distance {
+                    return Err(format!(
+                        "`minDistance` ({}) must not exceed `maxDistance` ({})",
+                        min_distance, max_distance
+                    ));
+                }
+                Ok(Self::ThirdPersonFollow {
+                    offset: flat_numbers::<3>(params, "offset")?
+                        .map(Vec3::from)
+                        .unwrap_or(Vec3::new(0.0, 2.0, -5.0)),
+                    damping: flat_f32(params, "damping", 5.0)?,
+                    min_distance,
+                    max_distance,
+                    look_at_target: flat_bool(params, "lookAtTarget", true)?,
+                    collision_avoidance: flat_bool(params, "collisionAvoidance", true)?,
+                })
+            }
             "firstPerson" => Ok(Self::FirstPerson {
                 eye_height: flat_f32(params, "eyeHeight", 1.7)?,
                 mouse_sensitivity: flat_f32(params, "mouseSensitivity", 0.1)?,
                 fov: flat_f32(params, "fov", 75.0)?,
-                pitch_clamp: flat_numbers::<2>(params, "pitchClamp")?
-                    .map(|c| (c[0], c[1]))
-                    .unwrap_or((-89.0, 89.0)),
+                pitch_clamp: flat_range(params, "pitchClamp")?.unwrap_or((-89.0, 89.0)),
             }),
             "sideScroller" => Ok(Self::SideScroller {
                 z_offset: flat_f32(params, "zOffset", 10.0)?,
                 follow_y: flat_bool(params, "followY", true)?,
-                y_bounds: flat_numbers::<2>(params, "yBounds")?.map(|b| (b[0], b[1])),
+                y_bounds: flat_range(params, "yBounds")?,
                 damping: flat_f32(params, "damping", 5.0)?,
             }),
             "topDown" => Ok(Self::TopDown {
@@ -388,7 +455,7 @@ fn first_person_mouse_look(
 
         // Pitch: clamp to prevent gimbal lock
         let (min_pitch, max_pitch) = pitch_clamp;
-        fp_state.pitch = fp_state.pitch.clamp(min_pitch, max_pitch);
+        fp_state.pitch = clamp_ordered(fp_state.pitch, min_pitch, max_pitch);
     }
 }
 
@@ -594,7 +661,7 @@ fn update_side_scroller(
     if follow_y {
         let mut target_y = target_transform.translation.y;
         if let Some((min_y, max_y)) = y_bounds {
-            target_y = target_y.clamp(min_y, max_y);
+            target_y = clamp_ordered(target_y, min_y, max_y);
         }
         desired_pos.y = target_y;
     }
@@ -1069,5 +1136,64 @@ mod from_flat_tests {
         // A non-numeric entry inside an otherwise well-formed array.
         let err = GameCameraMode::from_flat("thirdPersonFollow", &json!({"offset": [1.0, true, 3.0]})).unwrap_err();
         assert!(err.contains("offset"), "error must name `offset`: {}", err);
+    }
+
+    /// `f32::clamp` panics when `min > max`, and a panic inside a Bevy system
+    /// poisons the WASM instance — the user loses the page and any unsaved
+    /// scene. Both clamp bounds on this enum come from caller-supplied pairs, so
+    /// an inverted range has to be refused before it is ever stored.
+    #[test]
+    fn rejects_inverted_ranges() {
+        for (mode, key, payload) in [
+            ("firstPerson", "pitchClamp", json!({"pitchClamp": [89.0, -89.0]})),
+            ("sideScroller", "yBounds", json!({"yBounds": [8.0, -2.0]})),
+        ] {
+            let err = GameCameraMode::from_flat(mode, &payload).unwrap_err();
+            assert!(err.contains(key), "error must name `{}`: {}", key, err);
+        }
+
+        // Equal bounds are a degenerate but legal range — `clamp(x, 5, 5)` is 5,
+        // not a panic — so this must be accepted, not swept up by the check.
+        assert!(GameCameraMode::from_flat("firstPerson", &json!({"pitchClamp": [5.0, 5.0]})).is_ok());
+
+        // Not a clamp today, but the same nonsense, and rejected on the same terms.
+        let err = GameCameraMode::from_flat(
+            "thirdPersonFollow",
+            &json!({"minDistance": 12.0, "maxDistance": 3.0}),
+        )
+        .unwrap_err();
+        assert!(err.contains("minDistance"), "error must name the pair: {}", err);
+    }
+
+    /// `as f32` is a saturating cast, so a FINITE JSON number can arrive as
+    /// `f32::INFINITY`. This is the half no JS-side `Number.isFinite()` can
+    /// cover: the value is finite right up until it crosses into `f32`.
+    #[test]
+    fn rejects_values_that_saturate_to_infinity() {
+        let err = GameCameraMode::from_flat("topDown", &json!({"height": 1e39})).unwrap_err();
+        assert!(err.contains("finite"), "error must say finite: {}", err);
+
+        // Inside an array the stakes are higher — these are the clamp bounds, and
+        // `[1e39, -1e39]` narrows to `(inf, -inf)`, which is ordered on the JS
+        // side and inverted by the time it is an `f32`.
+        let err =
+            GameCameraMode::from_flat("firstPerson", &json!({"pitchClamp": [1e39, -1e39]})).unwrap_err();
+        assert!(err.contains("finite"), "error must say finite: {}", err);
+    }
+
+    /// `from_flat` guards the command path, but `.forge` scene files deserialize
+    /// through the derived impl and never touch it — so the consume sites must
+    /// survive a bad range on their own.
+    #[test]
+    fn clamp_ordered_never_panics_on_bad_bounds() {
+        // Inverted: ordered, then applied.
+        assert_eq!(clamp_ordered(50.0, 89.0, -89.0), 50.0);
+        assert_eq!(clamp_ordered(200.0, 89.0, -89.0), 89.0);
+        assert_eq!(clamp_ordered(-200.0, 89.0, -89.0), -89.0);
+        // Ordinary bounds still behave exactly like `clamp`.
+        assert_eq!(clamp_ordered(200.0, -89.0, 89.0), 89.0);
+        // Unusable bounds frame the shot wrongly rather than taking the engine down.
+        assert_eq!(clamp_ordered(7.0, f32::NAN, f32::NAN), 7.0);
+        assert_eq!(clamp_ordered(7.0, f32::INFINITY, f32::NEG_INFINITY), 7.0);
     }
 }

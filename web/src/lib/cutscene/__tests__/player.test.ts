@@ -124,6 +124,18 @@ describe('buildCommand', () => {
     expect(cmd?.payload).toEqual({ entityId: 'cam1', mode: 'topDown', targetEntity: null });
   });
 
+  it('camera track does not read params off the prototype chain', () => {
+    // Keyframe payloads are model-authored, so a `__proto__` entry in that JSON
+    // produces exactly this object. The inherited value must not reach the wire:
+    // once picked it would be written as an OWN property on the camera data, so
+    // the `Object.hasOwn` check further down the payload builder cannot catch it.
+    const payload = Object.create({ topDownHeight: 999 }) as Record<string, unknown>;
+    payload.mode = 'topDown';
+
+    const cmd = buildCommand('camera', 'cam1', makeKF(payload), 0.5);
+    expect(cmd?.payload).toEqual({ entityId: 'cam1', mode: 'topDown', targetEntity: null });
+  });
+
   it('camera track returns null when entityId is null', () => {
     const cmd = buildCommand('camera', null, makeKF({ mode: 'orbital' }), 0.5);
     expect(cmd).toBeNull();
