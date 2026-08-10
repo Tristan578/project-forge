@@ -33,6 +33,11 @@ export function handleGameEvent(
       const parsed = parseGameCameraWire(data);
       if (!parsed) return true;
       const payload = castPayload<{ entityId: string }>(data);
+      // `castPayload` is an unchecked assertion, and this id becomes a KEY in
+      // `allGameCameras`. An absent one would key the record under the string
+      // "undefined", which no `primaryId` ever equals — so the inspector would
+      // read null while the store held the camera under a phantom entity.
+      if (typeof payload.entityId !== 'string' || payload.entityId === '') return true;
       useEditorStore.getState().setEntityGameCamera(payload.entityId, parsed);
       return true;
     }

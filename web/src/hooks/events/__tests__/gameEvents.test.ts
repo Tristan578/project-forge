@@ -194,6 +194,21 @@ describe('handleGameEvent', () => {
       });
     });
 
+    it.each([
+      ['a missing entityId', { mode: 'fixed', targetEntity: null }],
+      ['an empty entityId', { entityId: '', mode: 'fixed', targetEntity: null }],
+      ['a non-string entityId', { entityId: 7, mode: 'fixed', targetEntity: null }],
+    ])('ignores a camera event with %s', (_label, payload) => {
+      // The id becomes a KEY in `allGameCameras`. Storing under "undefined"
+      // (or "") would put the camera where no `primaryId` can ever match it:
+      // the inspector reads null while the store holds a camera for a phantom
+      // entity. `castPayload` asserts without checking, so this is the check.
+      const result = handleGameEvent('GAME_CAMERA_CHANGED', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(result).toBe(true);
+      expect(actions.setEntityGameCamera).not.toHaveBeenCalled();
+    });
+
     it('converts empty string targetEntity to null', () => {
       const result = handleGameEvent(
         'GAME_CAMERA_CHANGED',
