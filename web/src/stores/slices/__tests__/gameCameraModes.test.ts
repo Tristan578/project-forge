@@ -26,7 +26,6 @@ describe('gameCameraModes', () => {
       targetEntity: 'player-1',
       followDistance: 8.0,
       followHeight: 3.0,
-      followLookAhead: 2.0,
       followSmoothing: 0.9,
     };
 
@@ -38,16 +37,21 @@ describe('gameCameraModes', () => {
       expect(cam.targetEntity).toBe('player-1');
       expect(cam.followDistance).toBe(8.0);
       expect(cam.followHeight).toBe(3.0);
-      expect(cam.followLookAhead).toBe(2.0);
       expect(cam.followSmoothing).toBe(0.9);
     });
 
-    it('should dispatch with all mode parameters', () => {
+    it('should dispatch the engine wire vocabulary, not the authoring one', () => {
       store.getState().setGameCamera('cam-1', thirdPerson);
 
+      // Asserted as a full literal, not `{ entityId, ...thirdPerson }`. The old
+      // spread form is what the slice actually did, so the assertion agreed with
+      // the bug: the engine reads `offset`/`damping` and drops every authoring key.
       expect(mockDispatch).toHaveBeenCalledWith('set_game_camera', {
         entityId: 'cam-1',
-        ...thirdPerson,
+        mode: 'thirdPersonFollow',
+        targetEntity: 'player-1',
+        offset: [0, 3.0, -8.0],
+        damping: 0.9,
       });
     });
   });
@@ -69,12 +73,15 @@ describe('gameCameraModes', () => {
       expect(cam.firstPersonMouseSensitivity).toBe(0.3);
     });
 
-    it('should dispatch firstPerson camera correctly', () => {
+    it('should dispatch firstPerson in the engine wire vocabulary', () => {
       store.getState().setGameCamera('cam-1', firstPerson);
 
       expect(mockDispatch).toHaveBeenCalledWith('set_game_camera', {
         entityId: 'cam-1',
-        ...firstPerson,
+        mode: 'firstPerson',
+        targetEntity: 'player-1',
+        eyeHeight: 1.7,
+        mouseSensitivity: 0.3,
       });
     });
   });
@@ -84,7 +91,6 @@ describe('gameCameraModes', () => {
       mode: 'sideScroller',
       targetEntity: 'player-1',
       sideScrollerDistance: 15.0,
-      sideScrollerHeight: 2.0,
     };
 
     it('should store sideScroller parameters', () => {
@@ -93,7 +99,17 @@ describe('gameCameraModes', () => {
       const cam = store.getState().allGameCameras['cam-1'];
       expect(cam.mode).toBe('sideScroller');
       expect(cam.sideScrollerDistance).toBe(15.0);
-      expect(cam.sideScrollerHeight).toBe(2.0);
+    });
+
+    it('should dispatch sideScroller distance as zOffset', () => {
+      store.getState().setGameCamera('cam-1', sideScroller);
+
+      expect(mockDispatch).toHaveBeenCalledWith('set_game_camera', {
+        entityId: 'cam-1',
+        mode: 'sideScroller',
+        targetEntity: 'player-1',
+        zOffset: 15.0,
+      });
     });
   });
 
@@ -102,7 +118,6 @@ describe('gameCameraModes', () => {
       mode: 'topDown',
       targetEntity: 'player-1',
       topDownHeight: 20.0,
-      topDownAngle: 75.0,
     };
 
     it('should store topDown parameters', () => {
@@ -111,7 +126,17 @@ describe('gameCameraModes', () => {
       const cam = store.getState().allGameCameras['cam-1'];
       expect(cam.mode).toBe('topDown');
       expect(cam.topDownHeight).toBe(20.0);
-      expect(cam.topDownAngle).toBe(75.0);
+    });
+
+    it('should dispatch topDown height as the engine height key', () => {
+      store.getState().setGameCamera('cam-1', topDown);
+
+      expect(mockDispatch).toHaveBeenCalledWith('set_game_camera', {
+        entityId: 'cam-1',
+        mode: 'topDown',
+        targetEntity: 'player-1',
+        height: 20.0,
+      });
     });
   });
 
@@ -269,8 +294,10 @@ describe('gameCameraModes', () => {
     });
   });
 
-  describe('Primary Game Camera', () => {
-    it('should set primaryGameCamera via setEntityGameCamera', () => {
+  // The inspector derives its view from `allGameCameras[primaryId]`; there is no
+  // separate `primaryGameCamera` field for an inbound engine event to write.
+  describe('Inbound engine camera events', () => {
+    it('should record the camera against its own entity via setEntityGameCamera', () => {
       const cam: GameCameraData = {
         mode: 'thirdPersonFollow',
         targetEntity: 'player',
@@ -281,12 +308,12 @@ describe('gameCameraModes', () => {
 
       store.getState().setEntityGameCamera('cam-1', cam);
 
-      expect(store.getState().primaryGameCamera).toEqual(cam);
+      expect(store.getState().allGameCameras['cam-1']).toEqual(cam);
       // Should not dispatch (state-only operation)
       expect(mockDispatch).not.toHaveBeenCalled();
     });
 
-    it('should clear primaryGameCamera with null', () => {
+    it('should clear the entity camera with null', () => {
       store.getState().setEntityGameCamera('cam-1', {
         mode: 'orbital',
         targetEntity: 'item',
@@ -295,7 +322,7 @@ describe('gameCameraModes', () => {
 
       store.getState().setEntityGameCamera('cam-1', null);
 
-      expect(store.getState().primaryGameCamera).toBeNull();
+      expect(store.getState().allGameCameras['cam-1']).toBeUndefined();
     });
 
     it('should set activeGameCameraId without dispatch', () => {

@@ -49,7 +49,12 @@ const MODE_LABELS: Record<GameCameraMode, string> = {
 
 export const GameCameraInspector = memo(function GameCameraInspector() {
   const primaryId = useEditorStore((s) => s.primaryId);
-  const primaryGameCamera = useEditorStore((s) => s.primaryGameCamera);
+  // Derived from the per-entity record rather than a parallel `primaryGameCamera`
+  // field. That field could only ever be written by the inbound engine event, and
+  // `set_game_camera` never reached the engine (PF-1126), so it was permanently
+  // null and this inspector rendered its empty state no matter what was configured.
+  // Reading the record instead reflects both local edits and engine echoes.
+  const primaryGameCamera = useEditorStore((s) => (s.primaryId ? s.allGameCameras[s.primaryId] ?? null : null));
   const activeGameCameraId = useEditorStore((s) => s.activeGameCameraId);
   const setGameCamera = useEditorStore((s) => s.setGameCamera);
   const setActiveGameCamera = useEditorStore((s) => s.setActiveGameCamera);

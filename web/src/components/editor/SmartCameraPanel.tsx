@@ -160,7 +160,9 @@ function presetToGameCameraData(preset: CameraPreset): GameCameraData {
     case 'thirdPersonFollow':
       data.followDistance = preset.followDistance;
       data.followHeight = preset.followHeight;
-      data.followLookAhead = preset.lookAhead;
+      // `preset.lookAhead` has no engine counterpart — `ThirdPersonFollow` carries
+      // offset/damping/min_distance/max_distance/look_at_target/collision_avoidance
+      // and nothing else. It used to be assigned here and dropped on the wire.
       data.followSmoothing = preset.followSmoothing;
       break;
     case 'firstPerson':
@@ -168,12 +170,13 @@ function presetToGameCameraData(preset: CameraPreset): GameCameraData {
       data.firstPersonMouseSensitivity = 2;
       break;
     case 'sideScroller':
+      // `SideScroller` is z_offset/follow_y/y_bounds/damping — there is no height
+      // to set; vertical framing comes from follow_y.
       data.sideScrollerDistance = preset.followDistance;
-      data.sideScrollerHeight = preset.followHeight;
       break;
     case 'topDown':
+      // `TopDown` is height/damping/follow_rotation — it has no angle.
       data.topDownHeight = preset.followHeight;
-      data.topDownAngle = 60;
       break;
     case 'orbital':
       data.orbitalDistance = preset.followDistance;

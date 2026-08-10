@@ -22,7 +22,6 @@ export interface GameSlice {
   primaryGameComponents: GameComponentData[] | null;
   allGameCameras: Record<string, GameCameraData>;
   activeGameCameraId: string | null;
-  primaryGameCamera: GameCameraData | null;
   mobileTouchConfig: MobileTouchConfig;
   hudElements: HudElement[];
   engineMode: EngineMode;
@@ -120,7 +119,6 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   primaryGameComponents: null,
   allGameCameras: {},
   activeGameCameraId: null,
-  primaryGameCamera: null,
   mobileTouchConfig: {
     enabled: true,
     autoDetect: true,
@@ -209,15 +207,15 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   },
   // Inbound engine event. The entityId was previously ignored entirely, so a
   // camera change on ANY entity overwrote the inspector's primary camera and
-  // `allGameCameras` was never populated from the engine at all.
+  // `allGameCameras` was never populated from the engine at all. The inspector
+  // now derives its view from this record keyed by the selected entity, so there
+  // is no parallel `primaryGameCamera` field to keep in sync (and no reason for
+  // this slice to reach across into the selection slice to do it).
   setEntityGameCamera: (entityId, data) => set(state => {
     const allGameCameras = { ...state.allGameCameras };
     if (data) allGameCameras[entityId] = data;
     else delete allGameCameras[entityId];
-    return {
-      allGameCameras,
-      primaryGameCamera: state.primaryId === entityId ? data : state.primaryGameCamera,
-    };
+    return { allGameCameras };
   }),
   setActiveGameCameraId: (entityId) => set({ activeGameCameraId: entityId }),
   setMobileTouchConfig: (config) => set({ mobileTouchConfig: config }),

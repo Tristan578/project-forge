@@ -226,7 +226,11 @@ export function parseGameCameraWire(payload: Record<string, unknown>): GameCamer
   const mode = CAMERA_MODES.find(m => m === rawMode);
   if (!mode) return null;
 
-  const targetEntity = typeof payload.targetEntity === 'string' ? payload.targetEntity : null;
+  // An empty string is normalized to null, as the legacy handler did. Nothing
+  // downstream distinguishes "" from "no target", and leaving it as a string
+  // would make `targetEntity` truthy-but-unresolvable in every consumer.
+  const rawTarget = payload.targetEntity;
+  const targetEntity = typeof rawTarget === 'string' && rawTarget !== '' ? rawTarget : null;
   const data: GameCameraData = { mode, targetEntity };
 
   switch (mode) {

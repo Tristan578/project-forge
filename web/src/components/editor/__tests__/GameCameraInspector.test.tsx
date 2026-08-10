@@ -27,7 +27,6 @@ const baseGameCamera: GameCameraData = {
   targetEntity: null,
   followDistance: 5,
   followHeight: 2,
-  followLookAhead: 1,
   followSmoothing: 5,
 };
 
@@ -44,9 +43,11 @@ describe('GameCameraInspector', () => {
   } = {}) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(useEditorStore).mockImplementation((selector: any) => {
+      // The component derives its camera from `allGameCameras[primaryId]` — there
+      // is no `primaryGameCamera` field on the store (PF-1126).
       const state = {
         primaryId,
-        primaryGameCamera,
+        allGameCameras: primaryId && primaryGameCamera ? { [primaryId]: primaryGameCamera } : {},
         activeGameCameraId,
         setGameCamera: mockSetGameCamera,
         setActiveGameCamera: mockSetActiveGameCamera,
@@ -106,8 +107,11 @@ describe('GameCameraInspector', () => {
     setupStore();
     render(<GameCameraInspector />);
     expect(screen.getByText('Distance')).toBeInTheDocument();
-    expect(screen.getByText('Look Ahead')).toBeInTheDocument();
+    expect(screen.getByText('Height')).toBeInTheDocument();
     expect(screen.getByText('Smoothing')).toBeInTheDocument();
+    // "Look Ahead" is gone: `ThirdPersonFollow` has no such engine parameter, so
+    // the control edited a value that could never leave the browser.
+    expect(screen.queryByText('Look Ahead')).not.toBeInTheDocument();
   });
 
   it('renders Test Shake button', () => {
