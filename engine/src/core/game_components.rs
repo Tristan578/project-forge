@@ -832,6 +832,7 @@ fn system_character_controller(
     time: Res<Time>,
     input: Option<Res<super::input::InputState>>,
     runtime: Option<Res<GameComponentRuntime>>,
+    project_type: Option<Res<super::project_type::ProjectType>>,
     mut entities: Query<(&EntityId, &GameComponents, &mut Transform)>,
 ) {
 
@@ -839,6 +840,13 @@ fn system_character_controller(
     let Some(input) = input else { return; };
     let Some(_runtime) = runtime else { return; };
     let dt = time.delta_secs();
+
+    // The resource is absent until the first `set_project_type`, and the
+    // engine's own default is 3D — so absent must behave exactly like 3D.
+    let is_2d = matches!(
+        project_type.as_deref(),
+        Some(super::project_type::ProjectType::TwoD)
+    );
 
     for (_eid, gc, mut transform) in entities.iter_mut() {
         for comp in &gc.components {
@@ -859,22 +867,34 @@ fn system_character_controller(
                     }
                 }
 
-                // Forward/backward movement (Z axis)
+                // Forward/backward movement. In 3D this is depth. In a 2D scene
+                // the sprites live in the XY plane under an orthographic camera
+                // looking down -Z, so depth is invisible — the same input has to
+                // move the player along Y instead, or pressing "up" walks the
+                // sprite toward the camera and nothing appears to happen
+                // (PF-1124).
+                let mut forward_amount = 0.0;
                 let vertical = input.get_axis("move_vertical");
                 if vertical.abs() > 0.01 {
-                    movement.z = -vertical; // Invert for forward = negative Z
+                    forward_amount = vertical;
                 } else {
                     let forward = input.get_axis("move_forward");
                     if forward.abs() > 0.01 {
-                        movement.z = -forward;
+                        forward_amount = forward;
                     } else {
                         if input.is_action_active("move_forward") {
-                            movement.z -= 1.0;
+                            forward_amount += 1.0;
                         }
                         if input.is_action_active("move_backward") {
-                            movement.z += 1.0;
+                            forward_amount -= 1.0;
                         }
                     }
+                }
+
+                if is_2d {
+                    movement.y = forward_amount;
+                } else {
+                    movement.z = -forward_amount; // Invert for forward = negative Z
                 }
 
                 if movement.length_squared() > 0.0 {
@@ -2477,5 +2497,144 @@ mod build_game_component_tests {
             };
             assert_eq!(data.value, 1, "{bag} leaves the default standing");
         }
+    }
+}
+
+#[cfg(test)]
+mod character_controller_axis_tests {
+    use super::{
+        system_character_controller, CharacterControllerData, GameComponentData,
+        GameComponentRuntime, GameComponents,
+    };
+    use crate::core::entity_id::EntityId;
+    use crate::core::input::{ActionValue, InputState};
+    use crate::core::project_type::ProjectType;
+    use bevy::prelude::*;
+    use std::time::Duration;
+
+    /// `system_character_controller` is the ONLY input-driven movement system the
+    /// engine has — there is no 2D counterpart — so a generated 2D player has to
+    /// use it. But it was written for 3D: it maps the vertical axis onto Z, which
+    /// in a 2D scene is depth. An orthographic 2D camera looks down -Z, so
+    /// pressing "up" in a generated top-down 2D game moved the sprite toward or
+    /// away from the camera and NOTHING appeared to happen (PF-1124).
+    fn player(controller: CharacterControllerData) -> (EntityId, GameComponents, Transform) {
+        let mut gc = GameComponents::default();
+        gc.components
+            .push(GameComponentData::CharacterController(controller));
+        (EntityId::new("player"), gc, Transform::default())
+    }
+
+    fn action(name: &str, pressed: bool, axis_value: f32) -> InputState {
+        let mut input = InputState::default();
+        input.actions.insert(
+            name.to_string(),
+            ActionValue { pressed, just_pressed: false, just_released: false, axis_value },
+        );
+        input
+    }
+
+    fn axis(name: &str, value: f32) -> InputState {
+        action(name, false, value)
+    }
+
+    fn held(name: &str) -> InputState {
+        action(name, true, 0.0)
+    }
+
+    /// Runs one frame with a non-zero delta. `Time::default()` has a zero delta,
+    /// which multiplies every movement to nothing — a test that forgets to
+    /// advance it passes whatever the mapping does.
+    fn run_frame(project_type: Option<ProjectType>, input: InputState) -> Vec3 {
+        let mut world = World::new();
+        let mut time = Time::<()>::default();
+        time.advance_by(Duration::from_millis(100));
+        world.insert_resource(time);
+        world.insert_resource(GameComponentRuntime::default());
+        world.insert_resource(input);
+        if let Some(pt) = project_type {
+            world.insert_resource(pt);
+        }
+
+        let entity = world
+            .spawn(player(CharacterControllerData { speed: 10.0, ..Default::default() }))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_character_controller);
+        schedule.run(&mut world);
+
+        world.get::<Transform>(entity).expect("player still exists").translation
+    }
+
+    #[test]
+    fn in_3d_the_vertical_axis_moves_along_z() {
+        let moved = run_frame(Some(ProjectType::ThreeD), axis("move_vertical", 1.0));
+        assert!(moved.z < 0.0, "forward is -Z in 3D, got {moved:?}");
+        assert_eq!(moved.y, 0.0, "3D vertical input must not lift the player");
+        assert_eq!(moved.x, 0.0);
+    }
+
+    /// The resource is absent in unit contexts and until the first
+    /// `set_project_type`, and the engine's own `ProjectType::default()` is
+    /// `ThreeD`, so absent must behave exactly like 3D rather than picking the 2D
+    /// mapping by accident.
+    #[test]
+    fn an_absent_project_type_keeps_the_3d_mapping() {
+        let moved = run_frame(None, axis("move_vertical", 1.0));
+        assert!(moved.z < 0.0, "absent must match ThreeD, got {moved:?}");
+        assert_eq!(moved.y, 0.0);
+    }
+
+    #[test]
+    fn in_2d_the_vertical_axis_moves_along_y() {
+        let moved = run_frame(Some(ProjectType::TwoD), axis("move_vertical", 1.0));
+        assert!(moved.y > 0.0, "up is +Y in 2D, got {moved:?}");
+        assert_eq!(moved.z, 0.0, "2D movement must never touch depth");
+        assert_eq!(moved.x, 0.0);
+    }
+
+    /// The digital fallback is a separate code path from the analog axis, and it
+    /// is the one a keyboard preset actually exercises.
+    #[test]
+    fn in_2d_the_digital_forward_action_moves_along_y() {
+        let moved = run_frame(Some(ProjectType::TwoD), held("move_forward"));
+        assert!(moved.y > 0.0, "move_forward is up in 2D, got {moved:?}");
+        assert_eq!(moved.z, 0.0);
+    }
+
+    #[test]
+    fn in_2d_the_digital_backward_action_moves_down_y() {
+        let moved = run_frame(Some(ProjectType::TwoD), held("move_backward"));
+        assert!(moved.y < 0.0, "move_backward is down in 2D, got {moved:?}");
+        assert_eq!(moved.z, 0.0);
+    }
+
+    /// The analog `move_forward` axis is a third path again — distinct from both
+    /// `move_vertical` and the digital actions.
+    #[test]
+    fn in_2d_the_analog_forward_axis_moves_along_y() {
+        let moved = run_frame(Some(ProjectType::TwoD), axis("move_forward", 1.0));
+        assert!(moved.y > 0.0, "got {moved:?}");
+        assert_eq!(moved.z, 0.0);
+    }
+
+    /// Horizontal is the one axis both project types agree on, so it is also the
+    /// one a mapping change could silently break.
+    #[test]
+    fn horizontal_movement_is_identical_in_both_project_types() {
+        let in_2d = run_frame(Some(ProjectType::TwoD), axis("move_horizontal", 1.0));
+        let in_3d = run_frame(Some(ProjectType::ThreeD), axis("move_horizontal", 1.0));
+        assert!(in_2d.x > 0.0, "got {in_2d:?}");
+        assert_eq!(in_2d, in_3d);
+    }
+
+    /// Speed still scales the 2D vector. Without this, a mapping that wrote a raw
+    /// `1.0` into Y would satisfy every assertion above.
+    #[test]
+    fn the_2d_vertical_distance_scales_with_speed() {
+        let moved = run_frame(Some(ProjectType::TwoD), axis("move_vertical", 1.0));
+        // 10.0 speed over 0.1s, normalized to a unit vector first.
+        assert!((moved.y - 1.0).abs() < 1e-5, "expected 1.0 unit of travel, got {moved:?}");
     }
 }
