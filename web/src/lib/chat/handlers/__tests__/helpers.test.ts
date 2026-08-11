@@ -184,9 +184,18 @@ describe('buildGameComponentFromInput', () => {
   });
 
   it('should build win_condition', () => {
-    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'collect_all' }) as Record<string, unknown>;
+    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'collectAll' }) as Record<string, unknown>;
     expect(comp.type).toBe('winCondition');
-    expect((comp.winCondition as Record<string, unknown>).conditionType).toBe('collect_all');
+    expect((comp.winCondition as Record<string, unknown>).conditionType).toBe('collectAll');
+  });
+
+  it('falls back to the engine default for a conditionType the engine cannot parse', () => {
+    // `'collect_all'` is not a member — the engine's `match` has no arm for it and
+    // falls through to `WinConditionType::Score`. Storing the string verbatim (what
+    // the old unvalidated cast did) left the inspector and the running game
+    // describing different win conditions with nothing to report the split.
+    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'collect_all' }) as Record<string, unknown>;
+    expect((comp.winCondition as Record<string, unknown>).conditionType).toBe('score');
   });
 
   it('should return null for unknown types', () => {

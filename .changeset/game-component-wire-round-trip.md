@@ -9,9 +9,11 @@ heard of used to be kept verbatim by the editor while the engine quietly
 simulated something else entirely, and nothing anywhere reported the
 disagreement.
 
-The inspector also reads game components correctly for the first time. The
-engine sends each component in its own flat, tagged form, which the editor was
-casting into a differently-shaped type — so every component the engine reported
-arrived with an empty data bag, and the panel threw while rendering it rather
-than showing the component at all. Attaching a component in the engine now shows
+The inspector also reads game components correctly for the first time, and this
+half is the more visible one: the Game Components panel was replaced by a "failed
+to render" message whose Retry button re-rendered the same crash. The engine sends
+each component in its own flat, tagged form, which the editor was casting into a
+differently-shaped type, so every component the engine reported arrived with an
+empty data bag and the panel threw while rendering it. Any add, update or removal
+of a game component put the panel into that state. Attaching a component now shows
 its real values in the inspector.

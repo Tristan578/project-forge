@@ -143,6 +143,41 @@ describe('handleGameEvent', () => {
       });
     });
 
+    it('warns once per unrepresentable type so a dropped component leaves a trace', () => {
+      // Dropping is right — a half-parsed component crashes the inspector section
+      // that renders it — but the entity still HAS the component in the engine, and
+      // `attachedTypes` is derived from the same store slice, so the type also
+      // reappears in the "Add" menu. Silence there is what makes it unfindable.
+      // Distinct type names per case: the reporter dedupes on the raw discriminant
+      // for the life of the module, which is the point of the second dispatch below.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const payload = {
+          entityId: 'entity-1',
+          components: [{ type: 'wallRun', clingSecs: 2 }, { type: 'wallRun', clingSecs: 3 }],
+        };
+
+        handleGameEvent('GAME_COMPONENT_CHANGED', payload, mockSetGet.set, mockSetGet.get);
+        // Twice in one payload, then again in a later event: still one warning.
+        handleGameEvent('GAME_COMPONENT_CHANGED', payload, mockSetGet.set, mockSetGet.get);
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0]![0]).toContain('"wallRun"');
+
+        // A different type is a different mismatch and gets its own line.
+        handleGameEvent(
+          'GAME_COMPONENT_CHANGED',
+          { entityId: 'entity-1', components: [{ type: 'grindRail' }] },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+        expect(warn).toHaveBeenCalledTimes(2);
+        expect(warn.mock.calls[1]![0]).toContain('"grindRail"');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     it('clamps an out-of-range emitted value to the bound the engine enforces', () => {
       // `prop_f32(&props, "rotateSpeed", -100.0, 100.0)` — the engine cannot be
       // simulating 500, so the store must not claim it is.

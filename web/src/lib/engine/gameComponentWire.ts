@@ -144,8 +144,10 @@ export function toWireComponent(component: GameComponentData): GameComponentWire
  * tool call is exactly as untrusted as one arriving from the LLM, and `buildStoreComponent`
  * is where every field gets range-checked against the engine's own bounds.
  *
- * Returns `null` for an unrecognised `componentType` or a `properties` that is not an
- * object, matching `build_game_component`'s two hard errors.
+ * Returns `null` for an unrecognised `componentType` or a `properties` that is present
+ * but not a plain object, matching `build_game_component`'s two hard errors. An ABSENT
+ * `properties` is not an error — it yields a fully-defaulted component, because the
+ * engine substitutes an empty object for a missing key. See the note on that split below.
  */
 export function parseGameComponentWire(payload: {
   componentType: string;
@@ -388,8 +390,32 @@ const vec3List = (v: unknown, fallback: [number, number, number][]): [number, nu
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T =>
   typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
 
-const PLATFORM_LOOP_MODES: readonly PlatformLoopMode[] = ['pingPong', 'loop', 'once'];
-const WIN_CONDITION_TYPES: readonly WinConditionType[] = ['score', 'collectAll', 'reachGoal'];
+/**
+ * The two enum vocabularies, built from objects rather than array literals.
+ *
+ * `readonly PlatformLoopMode[]` proves every element is a valid member; it cannot
+ * prove the list is complete. Deleting `'collectAll'` from an array literal type-checks
+ * fine and every collect-all win condition silently collapses to `'score'` on the next
+ * store write — `normalizeGameComponent` runs on all of them. `satisfies Record<T, true>`
+ * on an object is bidirectional: a missing key fails the `Record` constraint and an
+ * invented one fails the excess-property check.
+ *
+ * The values are pinned against the Rust by `gameComponentWire.test.ts`. Note the
+ * fallback member is deliberately absent from the engine's `match`: `pingPong` and
+ * `score` are its `_ =>` arms, so they round-trip through the fallback rather than
+ * through an explicit arm.
+ */
+export const PLATFORM_LOOP_MODES = Object.keys({
+  pingPong: true,
+  loop: true,
+  once: true,
+} satisfies Record<PlatformLoopMode, true>) as readonly PlatformLoopMode[];
+
+export const WIN_CONDITION_TYPES = Object.keys({
+  score: true,
+  collectAll: true,
+  reachGoal: true,
+} satisfies Record<WinConditionType, true>) as readonly WinConditionType[];
 
 /**
  * Coerce a whole-number field the same way the engine's `prop_u32` does.

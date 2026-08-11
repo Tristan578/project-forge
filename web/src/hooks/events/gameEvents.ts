@@ -7,6 +7,36 @@ import { parseEmittedGameComponent } from '@/lib/engine/gameComponentWire';
 import { getScriptGameEventCallback } from '@/lib/scripting/useScriptRunner';
 import { castPayload, type SetFn, type GetFn } from './types';
 
+/**
+ * Types already reported, so a per-frame event stream warns once rather than every tick.
+ * Keyed by the raw discriminant, which is what a reader needs to identify the mismatch.
+ */
+const reportedUnrepresentable = new Set<string>();
+
+/**
+ * A component the engine holds but this bundle cannot represent must not vanish silently.
+ *
+ * The realistic trigger is a WASM build ahead of the web bundle: the engine emits a
+ * component type this JS has never heard of, the entity still has it attached, and the
+ * inspector simply stops listing it. `attachedTypes` is derived from the same store
+ * slice, so the type also reappears in the "Add" menu and a second `add_game_component`
+ * can be sent for a component the engine already holds. Dropping is still the right
+ * call — a half-parsed component would crash the inspector section that renders it —
+ * but it has to leave a trace someone can find.
+ */
+function reportUnrepresentableComponent(entry: unknown): void {
+  const type =
+    typeof entry === 'object' && entry !== null && typeof (entry as { type?: unknown }).type === 'string'
+      ? (entry as { type: string }).type
+      : `<${entry === null ? 'null' : typeof entry}>`;
+  if (reportedUnrepresentable.has(type)) return;
+  reportedUnrepresentable.add(type);
+  console.warn(
+    `[gameEvents] Engine reported a game component this build cannot represent: "${type}". ` +
+      'It is not shown in the inspector. This usually means the engine binary is ahead of the web bundle.'
+  );
+}
+
 export function handleGameEvent(
   type: string,
   data: Record<string, unknown>,
@@ -19,9 +49,13 @@ export function handleGameEvent(
       // The engine sends its own `GameComponentData`, which is an internally-tagged
       // serde enum — flat, with engine field names. It is NOT the store's nested
       // shape, so it cannot be cast into one; see `parseEmittedGameComponent`.
-      const components = (Array.isArray(raw.components) ? raw.components : [])
-        .map(parseEmittedGameComponent)
-        .filter((component): component is GameComponentData => component !== null);
+      const emitted = Array.isArray(raw.components) ? raw.components : [];
+      const components: GameComponentData[] = [];
+      for (const entry of emitted) {
+        const parsed = parseEmittedGameComponent(entry);
+        if (parsed === null) reportUnrepresentableComponent(entry);
+        else components.push(parsed);
+      }
       const payload = { entityId: raw.entityId, components };
       const state = useEditorStore.getState();
       // Update allGameComponents

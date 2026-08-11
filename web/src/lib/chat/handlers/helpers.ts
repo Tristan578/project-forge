@@ -5,6 +5,8 @@
 import { z } from 'zod';
 import type { MaterialData, LightData, PhysicsData, SceneNode } from './types';
 import { zVec2, zVec3, zVec4 } from './types';
+import { buildStoreComponent } from '@/lib/engine/gameComponentWire';
+import type { GameComponentData } from '@/stores/slices/types';
 
 // ===== Compound Action Types =====
 
@@ -81,85 +83,6 @@ const zPartialPhysics = z.object({
   lockRotationY: z.boolean().optional(),
   lockRotationZ: z.boolean().optional(),
   isSensor: z.boolean().optional(),
-}).passthrough();
-
-// Per-case game component prop schemas
-const zCharacterControllerProps = z.object({
-  speed: z.number().optional(),
-  jumpHeight: z.number().optional(),
-  gravityScale: z.number().optional(),
-  canDoubleJump: z.boolean().optional(),
-}).passthrough();
-
-const zHealthProps = z.object({
-  maxHp: z.number().optional(),
-  currentHp: z.number().optional(),
-  invincibilitySecs: z.number().optional(),
-  respawnOnDeath: z.boolean().optional(),
-  respawnPoint: zVec3.optional(),
-  despawnOnDeath: z.boolean().optional(),
-}).passthrough();
-
-const zCollectibleProps = z.object({
-  value: z.number().optional(),
-  destroyOnCollect: z.boolean().optional(),
-  pickupSoundAsset: z.string().nullable().optional(),
-  rotateSpeed: z.number().optional(),
-}).passthrough();
-
-const zDamageZoneProps = z.object({
-  damagePerSecond: z.number().optional(),
-  oneShot: z.boolean().optional(),
-}).passthrough();
-
-const zCheckpointProps = z.object({
-  autoSave: z.boolean().optional(),
-}).passthrough();
-
-const zTeleporterProps = z.object({
-  targetPosition: zVec3.optional(),
-  cooldownSecs: z.number().optional(),
-}).passthrough();
-
-const zMovingPlatformProps = z.object({
-  speed: z.number().optional(),
-  waypoints: z.array(zVec3).optional(),
-  pauseDuration: z.number().optional(),
-  loopMode: z.enum(['pingPong', 'loop', 'once']).optional(),
-}).passthrough();
-
-const zTriggerZoneProps = z.object({
-  eventName: z.string().optional(),
-  oneShot: z.boolean().optional(),
-}).passthrough();
-
-const zSpawnerProps = z.object({
-  entityType: z.string().optional(),
-  intervalSecs: z.number().optional(),
-  maxCount: z.number().optional(),
-  spawnOffset: zVec3.optional(),
-  onTrigger: z.string().nullable().optional(),
-}).passthrough();
-
-const zFollowerProps = z.object({
-  targetEntityId: z.string().nullable().optional(),
-  speed: z.number().optional(),
-  stopDistance: z.number().optional(),
-  lookAtTarget: z.boolean().optional(),
-}).passthrough();
-
-const zProjectileProps = z.object({
-  speed: z.number().optional(),
-  damage: z.number().optional(),
-  lifetimeSecs: z.number().optional(),
-  gravity: z.boolean().optional(),
-  destroyOnHit: z.boolean().optional(),
-}).passthrough();
-
-const zWinConditionProps = z.object({
-  conditionType: z.string().optional(),
-  targetScore: z.number().nullable().optional(),
-  targetEntityId: z.string().nullable().optional(),
 }).passthrough();
 
 // ===== Builder Functions =====
@@ -267,154 +190,22 @@ export function buildPhysicsFromPartial(partialPhysics: Record<string, unknown>)
 
 /**
  * Build GameComponentData from input type and properties.
+ *
+ * A thin alias for `buildStoreComponent`, which is the single place every
+ * game-component field is coerced the way the engine coerces it. This function
+ * used to carry its own switch, and the two copies had already diverged: the
+ * `win_condition` case cast `conditionType` straight through, so an LLM answering
+ * `'collect_all'` (or `'survive'`, or anything at all) was stored verbatim while
+ * the engine's `match` fell through to `WinConditionType::Score`. Nothing reported
+ * the disagreement — `dispatchCommand` returns `void` — so the inspector showed one
+ * win condition and the running game used another. The same divergence was open on
+ * every numeric field, which the old copy passed through unranged.
  */
 export function buildGameComponentFromInput(
   type: string,
   props: Record<string, unknown>
-): import('@/stores/editorStore').GameComponentData | null {
-  switch (type) {
-    case 'character_controller': {
-      const p = zCharacterControllerProps.parse(props);
-      return {
-        type: 'characterController',
-        characterController: {
-          speed: p.speed ?? 5,
-          jumpHeight: p.jumpHeight ?? 8,
-          gravityScale: p.gravityScale ?? 1,
-          canDoubleJump: p.canDoubleJump ?? false,
-        },
-      };
-    }
-    case 'health': {
-      const p = zHealthProps.parse(props);
-      return {
-        type: 'health',
-        health: {
-          maxHp: p.maxHp ?? 100,
-          currentHp: p.currentHp ?? p.maxHp ?? 100,
-          invincibilitySecs: p.invincibilitySecs ?? 0.5,
-          respawnOnDeath: p.respawnOnDeath ?? true,
-          respawnPoint: p.respawnPoint ?? [0, 1, 0],
-          despawnOnDeath: p.despawnOnDeath ?? true,
-        },
-      };
-    }
-    case 'collectible': {
-      const p = zCollectibleProps.parse(props);
-      return {
-        type: 'collectible',
-        collectible: {
-          value: p.value ?? 1,
-          destroyOnCollect: p.destroyOnCollect ?? true,
-          pickupSoundAsset: p.pickupSoundAsset ?? null,
-          rotateSpeed: p.rotateSpeed ?? 90,
-        },
-      };
-    }
-    case 'damage_zone': {
-      const p = zDamageZoneProps.parse(props);
-      return {
-        type: 'damageZone',
-        damageZone: {
-          damagePerSecond: p.damagePerSecond ?? 25,
-          oneShot: p.oneShot ?? false,
-        },
-      };
-    }
-    case 'checkpoint': {
-      const p = zCheckpointProps.parse(props);
-      return {
-        type: 'checkpoint',
-        checkpoint: {
-          autoSave: p.autoSave ?? true,
-        },
-      };
-    }
-    case 'teleporter': {
-      const p = zTeleporterProps.parse(props);
-      return {
-        type: 'teleporter',
-        teleporter: {
-          targetPosition: p.targetPosition ?? [0, 1, 0],
-          cooldownSecs: p.cooldownSecs ?? 1,
-        },
-      };
-    }
-    case 'moving_platform': {
-      const p = zMovingPlatformProps.parse(props);
-      return {
-        type: 'movingPlatform',
-        movingPlatform: {
-          speed: p.speed ?? 2,
-          waypoints: p.waypoints ?? [[0, 0, 0], [0, 3, 0]],
-          pauseDuration: p.pauseDuration ?? 0.5,
-          loopMode: p.loopMode ?? 'pingPong',
-        },
-      };
-    }
-    case 'trigger_zone': {
-      const p = zTriggerZoneProps.parse(props);
-      return {
-        type: 'triggerZone',
-        triggerZone: {
-          eventName: p.eventName ?? 'trigger',
-          oneShot: p.oneShot ?? false,
-        },
-      };
-    }
-    case 'spawner': {
-      const p = zSpawnerProps.parse(props);
-      return {
-        type: 'spawner',
-        spawner: {
-          entityType: p.entityType ?? 'cube',
-          intervalSecs: p.intervalSecs ?? 3,
-          maxCount: p.maxCount ?? 5,
-          spawnOffset: p.spawnOffset ?? [0, 1, 0],
-          onTrigger: p.onTrigger ?? null,
-        },
-      };
-    }
-    case 'follower': {
-      const p = zFollowerProps.parse(props);
-      return {
-        type: 'follower',
-        follower: {
-          targetEntityId: p.targetEntityId ?? null,
-          speed: p.speed ?? 3,
-          stopDistance: p.stopDistance ?? 1.5,
-          lookAtTarget: p.lookAtTarget ?? true,
-        },
-      };
-    }
-    case 'projectile': {
-      const p = zProjectileProps.parse(props);
-      return {
-        type: 'projectile',
-        projectile: {
-          speed: p.speed ?? 15,
-          damage: p.damage ?? 10,
-          lifetimeSecs: p.lifetimeSecs ?? 5,
-          gravity: p.gravity ?? false,
-          destroyOnHit: p.destroyOnHit ?? true,
-        },
-      };
-    }
-    case 'win_condition': {
-      const p = zWinConditionProps.parse(props);
-      return {
-        type: 'winCondition',
-        winCondition: {
-          conditionType: (p.conditionType ?? 'score') as 'score' | 'collectAll' | 'reachGoal',
-          targetScore: p.targetScore ?? 10,
-          targetEntityId: p.targetEntityId ?? null,
-        },
-      };
-    }
-
-    default:
-      return null;
-  }
+): GameComponentData | null {
+  return buildStoreComponent(type, props);
 }
 
 // ===== Analysis Functions =====

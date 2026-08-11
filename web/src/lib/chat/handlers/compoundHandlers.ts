@@ -23,7 +23,8 @@ import type {
   SceneNode,
 } from './types';
 import { parseArgs, zSetupGameFromDescription } from './types';
-import type { GameComponentData, PlatformLoopMode, WinConditionType } from '@/stores/editorStore';
+import type { GameComponentData } from '@/stores/editorStore';
+import { buildStoreComponent } from '@/lib/engine/gameComponentWire';
 import { getPresetById } from '@/lib/materialPresets';
 import { buildEntityIndex, findEntityByName } from '@/lib/engine/entityIndex';
 
@@ -217,132 +218,17 @@ function wallFromStartEnd(
   };
 }
 
-function buildGameComponentFromInput(
-  type: string,
-  props: Record<string, unknown>
-): GameComponentData | null {
-  switch (type) {
-    case 'character_controller':
-      return {
-        type: 'characterController',
-        characterController: {
-          speed: (props.speed as number) ?? 5,
-          jumpHeight: (props.jumpHeight as number) ?? 8,
-          gravityScale: (props.gravityScale as number) ?? 1,
-          canDoubleJump: (props.canDoubleJump as boolean) ?? false,
-        },
-      };
-    case 'health':
-      return {
-        type: 'health',
-        health: {
-          maxHp: (props.maxHp as number) ?? 100,
-          currentHp: (props.currentHp as number) ?? ((props.maxHp as number) ?? 100),
-          invincibilitySecs: (props.invincibilitySecs as number) ?? 0.5,
-          respawnOnDeath: (props.respawnOnDeath as boolean) ?? true,
-          respawnPoint: (props.respawnPoint as [number, number, number]) ?? [0, 1, 0],
-          despawnOnDeath: (props.despawnOnDeath as boolean) ?? true,
-        },
-      };
-    case 'collectible':
-      return {
-        type: 'collectible',
-        collectible: {
-          value: (props.value as number) ?? 1,
-          destroyOnCollect: (props.destroyOnCollect as boolean) ?? true,
-          pickupSoundAsset: (props.pickupSoundAsset as string | null) ?? null,
-          rotateSpeed: (props.rotateSpeed as number) ?? 90,
-        },
-      };
-    case 'damage_zone':
-      return {
-        type: 'damageZone',
-        damageZone: {
-          damagePerSecond: (props.damagePerSecond as number) ?? 25,
-          oneShot: (props.oneShot as boolean) ?? false,
-        },
-      };
-    case 'checkpoint':
-      return {
-        type: 'checkpoint',
-        checkpoint: {
-          autoSave: (props.autoSave as boolean) ?? true,
-        },
-      };
-    case 'teleporter':
-      return {
-        type: 'teleporter',
-        teleporter: {
-          targetPosition: (props.targetPosition as [number, number, number]) ?? [0, 1, 0],
-          cooldownSecs: (props.cooldownSecs as number) ?? 1,
-        },
-      };
-    case 'moving_platform':
-      return {
-        type: 'movingPlatform',
-        movingPlatform: {
-          speed: (props.speed as number) ?? 2,
-          waypoints: (props.waypoints as [number, number, number][]) ?? [
-            [0, 0, 0],
-            [0, 3, 0],
-          ],
-          pauseDuration: (props.pauseDuration as number) ?? 0.5,
-          loopMode: (props.loopMode as PlatformLoopMode) ?? 'pingPong',
-        },
-      };
-    case 'trigger_zone':
-      return {
-        type: 'triggerZone',
-        triggerZone: {
-          eventName: (props.eventName as string) ?? 'trigger',
-          oneShot: (props.oneShot as boolean) ?? false,
-        },
-      };
-    case 'spawner':
-      return {
-        type: 'spawner',
-        spawner: {
-          entityType: (props.entityType as string) ?? 'cube',
-          intervalSecs: (props.intervalSecs as number) ?? 3,
-          maxCount: (props.maxCount as number) ?? 5,
-          spawnOffset: (props.spawnOffset as [number, number, number]) ?? [0, 1, 0],
-          onTrigger: (props.onTrigger as string | null) ?? null,
-        },
-      };
-    case 'follower':
-      return {
-        type: 'follower',
-        follower: {
-          targetEntityId: (props.targetEntityId as string | null) ?? null,
-          speed: (props.speed as number) ?? 3,
-          stopDistance: (props.stopDistance as number) ?? 1.5,
-          lookAtTarget: (props.lookAtTarget as boolean) ?? true,
-        },
-      };
-    case 'projectile':
-      return {
-        type: 'projectile',
-        projectile: {
-          speed: (props.speed as number) ?? 15,
-          damage: (props.damage as number) ?? 10,
-          lifetimeSecs: (props.lifetimeSecs as number) ?? 5,
-          gravity: (props.gravity as boolean) ?? false,
-          destroyOnHit: (props.destroyOnHit as boolean) ?? true,
-        },
-      };
-    case 'win_condition':
-      return {
-        type: 'winCondition',
-        winCondition: {
-          conditionType: (props.conditionType as WinConditionType) ?? 'score',
-          targetScore: (props.targetScore as number | null) ?? 10,
-          targetEntityId: (props.targetEntityId as string | null) ?? null,
-        },
-      };
-    default:
-      return null;
-  }
-}
+/**
+ * Build a complete store component from a partial properties bag.
+ *
+ * A thin alias for `buildStoreComponent`, which is the single place every
+ * game-component field is coerced the way the engine coerces it. This file used to
+ * carry its own copy of the switch, and it cast every field straight through — a
+ * `loopMode` of `'bounce'` or a `conditionType` of `'collect_all'` was stored
+ * verbatim while the engine's `match` fell through to its own default, and
+ * `dispatchCommand` returns `void`, so nothing reported the split.
+ */
+const buildGameComponentFromInput = buildStoreComponent;
 
 // ===== setup_game_from_description planner =====
 
