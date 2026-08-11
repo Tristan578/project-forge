@@ -135,6 +135,17 @@ export const TOOLTIP_DICTIONARY: Record<string, string> = {
   lockTranslation: 'Prevents the object from moving along specific axes',
   lockRotation: 'Prevents the object from rotating around specific axes',
 
+  // ── Physics (2D) ──
+  // Separate keys from their 3D namesakes because the 2D inspector is a
+  // different panel with its own vocabulary — a shared key would force one
+  // wording to describe both.
+  bodyType2d: 'How the 2D body moves — Dynamic (affected by forces), Fixed (immovable), Kinematic (scripted movement)',
+  colliderShape2d: 'The invisible 2D outline used for collision detection — a box, a circle, or the sprite\'s own shape',
+  mass2d: 'Weight of the 2D body — heavier objects push lighter ones',
+  friction2d: 'How much 2D surfaces resist sliding — 0 = ice, 1 = sandpaper',
+  restitution2d: 'Bounciness in 2D — 0 = no bounce, 1 = full bounce like a rubber ball',
+  gravityScale2d: 'Multiplier for 2D gravity — 0 = weightless (good for top-down games), 1 = normal, 2 = double',
+
   // ── Lighting ──
   shadowDepthBias: 'Prevents shadow flickering on surfaces — increase if you see stripy shadow artifacts',
   shadowNormalBias: 'Prevents shadows from leaking through thin objects — increase if shadows look wrong',
@@ -276,6 +287,30 @@ export const TOOLTIP_DICTIONARY: Record<string, string> = {
   gcWinType: 'What the player needs to do to win — reach a score, collect all items, or reach a goal',
   gcTargetScore: 'The score needed to win the game',
   gcGoalId: 'The ID of the object the player must reach to win',
+
+  // ── Game Camera ──
+  // Every one of these was referenced by GameCameraInspector and absent here,
+  // so `InfoTooltip` returned null and the whole panel shipped with no help
+  // text at all. Nothing surfaced it: an unresolved term renders nothing rather
+  // than failing, so a missing entry looks identical to a control that was
+  // never given a tooltip.
+  gameCameraActive: 'Whether this is the camera the player looks through during play. Only one camera can be active at a time',
+  gameCameraMode: 'How the camera frames the action — follow behind the player, see through their eyes, track them side-on, look down from above, stay put, or circle around',
+  gameCameraTarget: 'The ID of the object the camera follows. Leave blank to follow whatever is selected',
+  gameCameraFollowDist: 'How far behind the player the camera sits',
+  gameCameraFollowHeight: 'How far above the player the camera sits',
+  gameCameraSmoothing: 'How quickly the camera catches up to the player — lower is floatier, higher is snappier',
+  gameCameraFPHeight: 'Eye height above the player\'s feet — around 1.7 matches an adult human',
+  gameCameraMouseSens: 'How far the view turns for each bit of mouse movement, in degrees per pixel. Small numbers here go a long way',
+  gameCameraSideScrollDist: 'How far out from the action the camera sits, toward the viewer',
+  gameCameraSideScrollSmoothing: 'How quickly the camera catches up to the player — lower is floatier, higher is snappier',
+  gameCameraSideScrollFollowY: 'Whether the camera rises and falls with the player. Turn this off for a classic platformer where the player jumps within a fixed frame',
+  gameCameraSideScrollYBounds: 'Lowest and highest the camera is allowed to travel. Leave blank to let it follow the player anywhere',
+  gameCameraTopDownHeight: 'How high above the action the camera floats',
+  gameCameraTopDownSmoothing: 'How quickly the camera catches up to the player — lower is floatier, higher is snappier',
+  gameCameraTopDownFollowRotation: 'Whether the view turns as the player turns. Leave this off to keep a fixed compass, as in most twin-stick and tactics games',
+  gameCameraOrbitalDist: 'How far the camera orbits from its target',
+  gameCameraAutoRotate: 'How fast the camera circles its target on its own, in degrees per second. 0 keeps it still',
 
   // ── Script ──
   script: 'Custom code that runs on this object during gameplay',

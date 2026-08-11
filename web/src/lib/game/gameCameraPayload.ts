@@ -123,36 +123,63 @@ export type SetGameCameraPayload = {
   targetEntity: string | null;
 } & GameCameraWireParams;
 
+/** The value shape each authoring field holds. */
+type AuthoringShape = 'mode' | 'target' | 'number' | 'bool' | 'pair' | 'params';
+
 /**
- * Every authoring field this module knows how to translate.
+ * Every authoring field this module knows how to translate, and what it holds.
  *
- * The `satisfies Record<keyof GameCameraData, true>` is load-bearing in BOTH
- * directions: a key that is not on `GameCameraData` fails excess-property
+ * The `satisfies Record<keyof GameCameraData, AuthoringShape>` is load-bearing in
+ * BOTH directions: a key that is not on `GameCameraData` fails excess-property
  * checking, and a `GameCameraData` field missing from here fails the
  * missing-property check. So adding a camera parameter to the store type breaks
  * the build until its engine mapping is decided here.
  *
  * An object, not an array: `as const satisfies readonly (keyof GameCameraData)[]`
  * would only prove the listed keys are VALID, never that the list is COMPLETE.
+ *
+ * The values were a flat `true` until PF-1139. That encoded an unstated
+ * assumption — "everything that is not `mode`, `targetEntity` or `engineParams`
+ * is a number" — in two more places that nothing kept in step with it: a
+ * type-level `Exclude` and a runtime `Set` of the same three names. The first
+ * boolean authoring field would have been silently admitted to
+ * {@link NUMERIC_CAMERA_FIELDS}, where the blend loop would interpolate it into
+ * a number and the builder would hand the engine a `bool` slot holding `0.5`.
+ * Naming the shape once and deriving both views is the same idiom
+ * {@link WIRE_PARAM_SHAPES} already uses for the other side of the wire.
  */
-const TRANSLATED_FIELDS = {
-  mode: true,
-  targetEntity: true,
-  followDistance: true,
-  followHeight: true,
-  followOffsetX: true,
-  followSmoothing: true,
-  firstPersonHeight: true,
-  firstPersonMouseSensitivity: true,
-  sideScrollerDistance: true,
-  topDownHeight: true,
-  orbitalDistance: true,
-  orbitalAutoRotateSpeed: true,
-  engineParams: true,
-} satisfies Record<keyof GameCameraData, true>;
+const AUTHORING_FIELD_SHAPES = {
+  mode: 'mode',
+  targetEntity: 'target',
+  followDistance: 'number',
+  followHeight: 'number',
+  followOffsetX: 'number',
+  followSmoothing: 'number',
+  firstPersonHeight: 'number',
+  firstPersonMouseSensitivity: 'number',
+  sideScrollerDistance: 'number',
+  sideScrollerSmoothing: 'number',
+  sideScrollerFollowY: 'bool',
+  sideScrollerYBounds: 'pair',
+  topDownHeight: 'number',
+  topDownSmoothing: 'number',
+  topDownFollowRotation: 'bool',
+  orbitalDistance: 'number',
+  orbitalAutoRotateSpeed: 'number',
+  engineParams: 'params',
+} as const satisfies Record<keyof GameCameraData, AuthoringShape>;
 
-/** Runtime view of {@link TRANSLATED_FIELDS}. */
-export const TRANSLATED_CAMERA_FIELDS = Object.keys(TRANSLATED_FIELDS) as (keyof GameCameraData)[];
+/** Runtime view of {@link AUTHORING_FIELD_SHAPES}. */
+export const TRANSLATED_CAMERA_FIELDS = Object.keys(
+  AUTHORING_FIELD_SHAPES,
+) as (keyof GameCameraData)[];
+
+/** The authoring fields declared with shape `S`. */
+type FieldsWithShape<S extends AuthoringShape> = {
+  [K in keyof typeof AUTHORING_FIELD_SHAPES]: (typeof AUTHORING_FIELD_SHAPES)[K] extends S
+    ? K
+    : never;
+}[keyof typeof AUTHORING_FIELD_SHAPES];
 
 /**
  * The authoring fields that hold a plain number.
@@ -164,15 +191,24 @@ export const TRANSLATED_CAMERA_FIELDS = Object.keys(TRANSLATED_FIELDS) as (keyof
  * `engineParams`. A missed one is not a type error — it is a `number` field
  * quietly assigned a non-number.
  */
-export type NumericCameraField = Exclude<
-  keyof GameCameraData,
-  'mode' | 'targetEntity' | 'engineParams'
->;
+export type NumericCameraField = FieldsWithShape<'number'>;
 
-const NON_NUMERIC_FIELDS = new Set<string>(['mode', 'targetEntity', 'engineParams']);
+/** The authoring fields that hold a boolean. */
+export type BooleanCameraField = FieldsWithShape<'bool'>;
+
+/** The authoring fields that hold a `[min, max]` pair. */
+export type PairCameraField = FieldsWithShape<'pair'>;
 
 export const NUMERIC_CAMERA_FIELDS = TRANSLATED_CAMERA_FIELDS.filter(
-  (field): field is NumericCameraField => !NON_NUMERIC_FIELDS.has(field),
+  (field): field is NumericCameraField => AUTHORING_FIELD_SHAPES[field] === 'number',
+);
+
+export const BOOLEAN_CAMERA_FIELDS = TRANSLATED_CAMERA_FIELDS.filter(
+  (field): field is BooleanCameraField => AUTHORING_FIELD_SHAPES[field] === 'bool',
+);
+
+export const PAIR_CAMERA_FIELDS = TRANSLATED_CAMERA_FIELDS.filter(
+  (field): field is PairCameraField => AUTHORING_FIELD_SHAPES[field] === 'pair',
 );
 
 /**
@@ -194,10 +230,28 @@ export const ENGINE_CAMERA_DEFAULTS = {
   firstPersonHeight: 1.7,
   firstPersonMouseSensitivity: 0.1,
   sideScrollerDistance: 10,
+  sideScrollerSmoothing: 5,
   topDownHeight: 15,
+  topDownSmoothing: 5,
   orbitalDistance: 8,
   orbitalAutoRotateSpeed: 15,
 } as const satisfies Record<NumericCameraField, number>;
+
+/**
+ * The engine's own per-field defaults for the boolean authoring parameters.
+ *
+ * Separate from {@link ENGINE_CAMERA_DEFAULTS} rather than folded in: that table
+ * is what the blend loop reads for an unset endpoint, and a boolean has no
+ * meaningful midpoint. Keeping the two apart means the `Record<…, number>`
+ * constraint above stays honest instead of widening to `number | boolean`.
+ *
+ * There is deliberately no pair table. `y_bounds` is an `Option` in the engine
+ * with no default — absent means unbounded, and no `[min, max]` expresses that.
+ */
+export const ENGINE_CAMERA_BOOL_DEFAULTS = {
+  sideScrollerFollowY: true,
+  topDownFollowRotation: false,
+} as const satisfies Record<BooleanCameraField, boolean>;
 
 const DEFAULT_FOLLOW_HEIGHT = ENGINE_CAMERA_DEFAULTS.followHeight;
 const DEFAULT_FOLLOW_DISTANCE = ENGINE_CAMERA_DEFAULTS.followDistance;
@@ -216,6 +270,37 @@ function num(data: Partial<GameCameraData>, key: keyof GameCameraData): number |
   if (!Object.hasOwn(data, key)) return undefined;
   const value = data[key];
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/** Read one own boolean off an authoring object. See {@link num} on `Object.hasOwn`. */
+function bool(data: Partial<GameCameraData>, key: keyof GameCameraData): boolean | undefined {
+  if (!Object.hasOwn(data, key)) return undefined;
+  const value = data[key];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+/**
+ * Read one own `[min, max]` pair off an authoring object, ordered ascending.
+ *
+ * The reordering is not tidiness. `flat_range` REJECTS an inverted pair, because
+ * the values feed `f32::clamp`, which panics on `min > max` — and a panic in a
+ * Bevy system poisons the WASM instance for the rest of the session. A rejected
+ * command is silent (`dispatchCommand` returns `void`), so an inversion that
+ * exists for one keystroke while a user retypes the lower bound would drop the
+ * ENTIRE camera command, not just this parameter. Sorting here means the two
+ * numbers can be entered in any order and still name the same interval.
+ */
+function pair(
+  data: Partial<GameCameraData>,
+  key: keyof GameCameraData,
+): [number, number] | undefined {
+  if (!Object.hasOwn(data, key)) return undefined;
+  const value = data[key];
+  if (!Array.isArray(value) || value.length !== 2) return undefined;
+  const [a, b] = value as unknown[];
+  if (typeof a !== 'number' || !Number.isFinite(a)) return undefined;
+  if (typeof b !== 'number' || !Number.isFinite(b)) return undefined;
+  return a <= b ? [a, b] : [b, a];
 }
 
 /**
@@ -296,6 +381,21 @@ export function blendGameCameraData(
     blended[key] = a + (b - a) * progress;
   }
 
+  // Non-numeric parameters are not interpolable — a half-applied `followY` is
+  // not a state the engine has — so they take the destination's value for the
+  // whole move. Copying them is what preserves the documented invariant that
+  // `blend(from, to, 1)` behaves exactly like dispatching `to` alone; dropping
+  // them would instead let `from_flat` reapply its default (`followY: true`) for
+  // every frame of a move whose destination turned vertical tracking off.
+  for (const key of BOOLEAN_CAMERA_FIELDS) {
+    const value = bool(to, key);
+    if (value !== undefined) blended[key] = value;
+  }
+  for (const key of PAIR_CAMERA_FIELDS) {
+    const value = pair(to, key);
+    if (value !== undefined) blended[key] = value;
+  }
+
   return blended;
 }
 
@@ -357,11 +457,21 @@ export function buildSetGameCameraPayload(
     case 'sideScroller': {
       const distance = num(data, 'sideScrollerDistance');
       if (distance !== undefined) payload.zOffset = distance;
+      const smoothing = num(data, 'sideScrollerSmoothing');
+      if (smoothing !== undefined) payload.damping = smoothing;
+      const followY = bool(data, 'sideScrollerFollowY');
+      if (followY !== undefined) payload.followY = followY;
+      const yBounds = pair(data, 'sideScrollerYBounds');
+      if (yBounds !== undefined) payload.yBounds = yBounds;
       break;
     }
     case 'topDown': {
       const height = num(data, 'topDownHeight');
       if (height !== undefined) payload.height = height;
+      const smoothing = num(data, 'topDownSmoothing');
+      if (smoothing !== undefined) payload.damping = smoothing;
+      const followRotation = bool(data, 'topDownFollowRotation');
+      if (followRotation !== undefined) payload.followRotation = followRotation;
       break;
     }
     case 'orbital': {
@@ -422,6 +532,23 @@ function wireNum(params: Record<string, unknown>, key: string): number | undefin
   if (!Object.hasOwn(params, key)) return undefined;
   const value = params[key];
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Read one finite `[min, max]` pair out of an engine wire payload, ascending.
+ *
+ * Ordered for the same reason {@link pair} is: whatever the engine reported, the
+ * value round-trips straight back out through the builder, and an inverted pair
+ * is a command the engine refuses in silence.
+ */
+function wirePair(params: Record<string, unknown>, key: string): [number, number] | undefined {
+  if (!Object.hasOwn(params, key)) return undefined;
+  const value = params[key];
+  if (!Array.isArray(value) || value.length !== 2) return undefined;
+  const [a, b] = value as unknown[];
+  if (typeof a !== 'number' || !Number.isFinite(a)) return undefined;
+  if (typeof b !== 'number' || !Number.isFinite(b)) return undefined;
+  return a <= b ? [a, b] : [b, a];
 }
 
 /**
@@ -503,11 +630,24 @@ export function parseGameCameraWire(payload: Record<string, unknown>): GameCamer
     case 'sideScroller': {
       const zOffset = wireNum(payload, 'zOffset');
       if (zOffset !== undefined) data.sideScrollerDistance = zOffset;
+      const damping = wireNum(payload, 'damping');
+      if (damping !== undefined) data.sideScrollerSmoothing = damping;
+      if (typeof payload.followY === 'boolean') data.sideScrollerFollowY = payload.followY;
+      // `to_flat` emits `yBounds: null` when the engine holds no clamp, so an
+      // absent range and a reported-absent range both leave the field unset —
+      // which is what "unbounded" is in this vocabulary.
+      const yBounds = wirePair(payload, 'yBounds');
+      if (yBounds !== undefined) data.sideScrollerYBounds = yBounds;
       break;
     }
     case 'topDown': {
       const height = wireNum(payload, 'height');
       if (height !== undefined) data.topDownHeight = height;
+      const damping = wireNum(payload, 'damping');
+      if (damping !== undefined) data.topDownSmoothing = damping;
+      if (typeof payload.followRotation === 'boolean') {
+        data.topDownFollowRotation = payload.followRotation;
+      }
       break;
     }
     case 'orbital': {
@@ -524,8 +664,8 @@ export function parseGameCameraWire(payload: Record<string, unknown>): GameCamer
       break;
   }
 
-  // Keep the wire parameters this authoring vocabulary has no field for. Twelve
-  // of the engine's twenty-one are in that position, and every one of them used
+  // Keep the wire parameters this authoring vocabulary has no field for. Seven
+  // of the engine's nineteen are in that position, and every one of them used
   // to be dropped here — which is not "leave it alone" but "reset it", because
   // `set_game_camera` replaces the whole component and every parameter the next
   // payload omits comes back as `from_flat`'s default.

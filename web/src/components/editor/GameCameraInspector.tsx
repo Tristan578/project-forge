@@ -4,12 +4,20 @@ import { memo, useCallback, useId } from 'react';
 import { Camera, Zap } from 'lucide-react';
 import { useEditorStore, type GameCameraData, type GameCameraMode } from '@/stores/editorStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
-// `NumericCameraField` is imported, not re-derived. This file used to spell its
-// own `Exclude<keyof GameCameraData, 'mode' | 'targetEntity'>`, and the day
+// The field-shape types are imported, not re-derived. This file used to spell
+// its own `Exclude<keyof GameCameraData, 'mode' | 'targetEntity'>`, and the day
 // `GameCameraData` grew a non-numeric field the local copy swept it into the
 // numeric row type while the shared one did not — a divergence that only
-// surfaced as an index error against `ENGINE_CAMERA_DEFAULTS`.
-import { ENGINE_CAMERA_DEFAULTS, type NumericCameraField } from '@/lib/game/gameCameraPayload';
+// surfaced as an index error against `ENGINE_CAMERA_DEFAULTS`. All three unions
+// now come from the one shape table in `gameCameraPayload`, so a field can only
+// ever be rendered by the row component matching the shape the translator uses.
+import {
+  ENGINE_CAMERA_DEFAULTS,
+  ENGINE_CAMERA_BOOL_DEFAULTS,
+  type NumericCameraField,
+  type BooleanCameraField,
+  type PairCameraField,
+} from '@/lib/game/gameCameraPayload';
 
 /**
  * Which parameters each mode starts with. Every VALUE is read from
@@ -36,8 +44,19 @@ const MODE_DEFAULTS: Record<GameCameraMode, Partial<GameCameraData>> = {
     firstPersonHeight: ENGINE_CAMERA_DEFAULTS.firstPersonHeight,
     firstPersonMouseSensitivity: ENGINE_CAMERA_DEFAULTS.firstPersonMouseSensitivity,
   },
-  sideScroller: { sideScrollerDistance: ENGINE_CAMERA_DEFAULTS.sideScrollerDistance },
-  topDown: { topDownHeight: ENGINE_CAMERA_DEFAULTS.topDownHeight },
+  sideScroller: {
+    sideScrollerDistance: ENGINE_CAMERA_DEFAULTS.sideScrollerDistance,
+    sideScrollerSmoothing: ENGINE_CAMERA_DEFAULTS.sideScrollerSmoothing,
+    sideScrollerFollowY: ENGINE_CAMERA_BOOL_DEFAULTS.sideScrollerFollowY,
+    // No `sideScrollerYBounds`. Its absence is the engine's own state — a
+    // camera with no Y clamp — and there is no pair that expresses "unbounded",
+    // so seeding one here would silently impose a clamp nobody asked for.
+  },
+  topDown: {
+    topDownHeight: ENGINE_CAMERA_DEFAULTS.topDownHeight,
+    topDownSmoothing: ENGINE_CAMERA_DEFAULTS.topDownSmoothing,
+    topDownFollowRotation: ENGINE_CAMERA_BOOL_DEFAULTS.topDownFollowRotation,
+  },
   fixed: {},
   orbital: {
     orbitalDistance: ENGINE_CAMERA_DEFAULTS.orbitalDistance,
@@ -57,6 +76,17 @@ function parseNumberInput(raw: string, fallback: number): number {
   const parsed = parseFloat(raw);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
+
+/**
+ * The window a range parameter opens with when it is switched on.
+ *
+ * Deliberately NOT read from `ENGINE_CAMERA_DEFAULTS`: the engine has no
+ * default for a range, because absence is how it says "unbounded". This is a
+ * starting window for the user to adjust, chosen non-degenerate — `[0, 0]`
+ * would be a valid clamp meaning "pin the camera's height", which is a real
+ * instruction and a startling thing to apply the instant a box is ticked.
+ */
+const DEFAULT_RANGE: [number, number] = [0, 10];
 
 
 /**
@@ -110,6 +140,130 @@ function NumberParamRow({
         }
         className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
           focus:ring-1 focus:ring-blue-500"
+      />
+    </div>
+  );
+}
+
+/**
+ * One labelled boolean parameter row.
+ *
+ * Reads its unset value from `ENGINE_CAMERA_BOOL_DEFAULTS` for the same reason
+ * `NumberParamRow` reads `ENGINE_CAMERA_DEFAULTS`: an unset field means the
+ * engine is applying its own default, so showing anything else would display a
+ * state the engine is not in. The two default tables are separate so the
+ * numeric one can keep its `Record<NumericCameraField, number>` constraint.
+ */
+function BooleanParamRow({
+  label,
+  term,
+  field,
+  camera,
+  onChange,
+}: {
+  label: string;
+  term: string;
+  field: BooleanCameraField;
+  camera: GameCameraData;
+  onChange: (patch: Partial<GameCameraData>) => void;
+}) {
+  const id = useId();
+  const current = camera[field] ?? ENGINE_CAMERA_BOOL_DEFAULTS[field];
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex w-20 shrink-0 items-center gap-1">
+        <label htmlFor={id} className="text-xs text-zinc-400">{label}</label>
+        <InfoTooltip term={term} />
+      </div>
+      <input
+        id={id}
+        type="checkbox"
+        checked={current}
+        onChange={(e) => onChange({ [field]: e.target.checked } as Partial<GameCameraData>)}
+        className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500
+          focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
+      />
+    </div>
+  );
+}
+
+/**
+ * A `[min, max]` clamp whose ABSENCE is a meaningful third state.
+ *
+ * The engine holds `y_bounds` as an `Option` with no default, so there is no
+ * pair that means "unbounded" — the only way to say it is to send no key at
+ * all. That is why this row carries an explicit enable checkbox rather than
+ * two inputs with a placeholder: clearing both numbers would otherwise be
+ * indistinguishable from clamping to `[0, 0]`, which is a real (and very
+ * different) instruction to pin the camera's height.
+ *
+ * The two numbers are NOT sorted here. Ordering happens once, in the payload
+ * builder, so a transient inversion while typing a range backwards (max first)
+ * cannot be committed to the wire — the engine REJECTS an inverted pair, and a
+ * rejected command is silent, so it would drop the whole camera update.
+ */
+function RangeParamRow({
+  label,
+  term,
+  field,
+  camera,
+  onChange,
+}: {
+  label: string;
+  term: string;
+  field: PairCameraField;
+  camera: GameCameraData;
+  onChange: (patch: Partial<GameCameraData>) => void;
+}) {
+  const id = useId();
+  const current = camera[field];
+  const [min, max] = current ?? DEFAULT_RANGE;
+
+  const setRange = (next: [number, number] | undefined) =>
+    onChange({ [field]: next } as Partial<GameCameraData>);
+
+  return (
+    <div className="flex items-center gap-2" role="group" aria-label={label}>
+      <div className="flex w-20 shrink-0 items-center gap-1">
+        <label htmlFor={`${id}-on`} className="text-xs text-zinc-400">{label}</label>
+        <InfoTooltip term={term} />
+      </div>
+      <input
+        id={`${id}-on`}
+        type="checkbox"
+        // Named distinctly from the enclosing group, which is also called
+        // `label`. Without this the checkbox and its own group resolve to the
+        // same accessible name, so "Y Bounds" is ambiguous to anyone — or any
+        // test — asking for the control by name. The visible text is still a
+        // prefix of this name, so WCAG 2.5.3 Label in Name holds.
+        aria-label={`${label} enabled`}
+        checked={current !== undefined}
+        onChange={(e) => setRange(e.target.checked ? DEFAULT_RANGE : undefined)}
+        className="h-3.5 w-3.5 shrink-0 rounded border-zinc-600 bg-zinc-800 text-blue-500
+          focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
+      />
+      <label htmlFor={`${id}-min`} className="sr-only">{`${label} minimum`}</label>
+      <input
+        id={`${id}-min`}
+        type="number"
+        step="0.1"
+        value={min}
+        disabled={current === undefined}
+        onChange={(e) => setRange([parseNumberInput(e.target.value, min), max])}
+        className="w-full min-w-0 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
+          focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+      />
+      <label htmlFor={`${id}-max`} className="sr-only">{`${label} maximum`}</label>
+      <input
+        id={`${id}-max`}
+        type="number"
+        step="0.1"
+        value={max}
+        disabled={current === undefined}
+        onChange={(e) => setRange([min, parseNumberInput(e.target.value, max)])}
+        className="w-full min-w-0 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
+          focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
       />
     </div>
   );
@@ -298,11 +452,20 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
         )}
 
         {primaryGameCamera.mode === 'sideScroller' && (
-          <NumberParamRow label="Distance" term="gameCameraSideScrollDist" field="sideScrollerDistance" camera={primaryGameCamera} onChange={handleParamChange} />
+          <>
+            <NumberParamRow label="Distance" term="gameCameraSideScrollDist" field="sideScrollerDistance" camera={primaryGameCamera} onChange={handleParamChange} />
+            <NumberParamRow label="Smoothing" term="gameCameraSideScrollSmoothing" field="sideScrollerSmoothing" camera={primaryGameCamera} onChange={handleParamChange} />
+            <BooleanParamRow label="Follow Y" term="gameCameraSideScrollFollowY" field="sideScrollerFollowY" camera={primaryGameCamera} onChange={handleParamChange} />
+            <RangeParamRow label="Y Bounds" term="gameCameraSideScrollYBounds" field="sideScrollerYBounds" camera={primaryGameCamera} onChange={handleParamChange} />
+          </>
         )}
 
         {primaryGameCamera.mode === 'topDown' && (
-          <NumberParamRow label="Height" term="gameCameraTopDownHeight" field="topDownHeight" camera={primaryGameCamera} onChange={handleParamChange} />
+          <>
+            <NumberParamRow label="Height" term="gameCameraTopDownHeight" field="topDownHeight" camera={primaryGameCamera} onChange={handleParamChange} />
+            <NumberParamRow label="Smoothing" term="gameCameraTopDownSmoothing" field="topDownSmoothing" camera={primaryGameCamera} onChange={handleParamChange} />
+            <BooleanParamRow label="Follow Turn" term="gameCameraTopDownFollowRotation" field="topDownFollowRotation" camera={primaryGameCamera} onChange={handleParamChange} />
+          </>
         )}
 
         {primaryGameCamera.mode === 'orbital' && (

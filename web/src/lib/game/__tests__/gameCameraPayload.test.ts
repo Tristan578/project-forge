@@ -6,11 +6,16 @@ import {
   buildSetGameCameraPayload,
   parseGameCameraWire,
   ENGINE_CAMERA_DEFAULTS,
+  ENGINE_CAMERA_BOOL_DEFAULTS,
   NUMERIC_CAMERA_FIELDS,
+  BOOLEAN_CAMERA_FIELDS,
+  PAIR_CAMERA_FIELDS,
   TRANSLATED_CAMERA_FIELDS,
   GAME_CAMERA_WIRE_KEYS,
   type SetGameCameraPayload,
   type NumericCameraField,
+  type BooleanCameraField,
+  type PairCameraField,
 } from '../gameCameraPayload';
 import type { GameCameraData, GameCameraMode } from '@/stores/slices/types';
 
@@ -161,7 +166,12 @@ describe('gameCameraPayload', () => {
         firstPersonHeight: 1.7,
         firstPersonMouseSensitivity: 0.3,
         sideScrollerDistance: 15,
+        sideScrollerSmoothing: 2,
+        sideScrollerFollowY: false,
+        sideScrollerYBounds: [1, 9],
         topDownHeight: 20,
+        topDownSmoothing: 3,
+        topDownFollowRotation: true,
         orbitalDistance: 5,
         orbitalAutoRotateSpeed: 0.5,
       } satisfies Partial<GameCameraData>;
@@ -169,8 +179,8 @@ describe('gameCameraPayload', () => {
       const cases: Array<{ mode: GameCameraMode; expectedKeys: (keyof SetGameCameraPayload)[] }> = [
         { mode: 'thirdPersonFollow', expectedKeys: ['entityId', 'mode', 'targetEntity', 'offset', 'damping'] },
         { mode: 'firstPerson', expectedKeys: ['entityId', 'mode', 'targetEntity', 'eyeHeight', 'mouseSensitivity'] },
-        { mode: 'sideScroller', expectedKeys: ['entityId', 'mode', 'targetEntity', 'zOffset'] },
-        { mode: 'topDown', expectedKeys: ['entityId', 'mode', 'targetEntity', 'height'] },
+        { mode: 'sideScroller', expectedKeys: ['entityId', 'mode', 'targetEntity', 'zOffset', 'damping', 'followY', 'yBounds'] },
+        { mode: 'topDown', expectedKeys: ['entityId', 'mode', 'targetEntity', 'height', 'damping', 'followRotation'] },
         { mode: 'orbital', expectedKeys: ['entityId', 'mode', 'targetEntity', 'radius', 'autoRotateSpeed', 'autoRotate'] },
         { mode: 'fixed', expectedKeys: ['entityId', 'mode', 'targetEntity'] },
       ];
@@ -453,11 +463,19 @@ describe('gameCameraPayload', () => {
           mode: 'sideScroller',
           targetEntity: 'player-1',
           sideScrollerDistance: 15,
+          sideScrollerSmoothing: 2,
+          // Both non-defaults on purpose: a field that happens to equal the
+          // engine default round-trips even when the mapping is missing in one
+          // direction, because the parse side would reconstruct it by accident.
+          sideScrollerFollowY: false,
+          sideScrollerYBounds: [1, 9],
         },
         topDown: {
           mode: 'topDown',
           targetEntity: 'player-1',
           topDownHeight: 20,
+          topDownSmoothing: 3,
+          topDownFollowRotation: true,
         },
         fixed: {
           // `fov` has no authoring field, so it exercises the preservation bag:
@@ -616,11 +634,28 @@ describe('gameCameraPayload', () => {
         'firstPersonHeight',
         'firstPersonMouseSensitivity',
         'sideScrollerDistance',
+        'sideScrollerSmoothing',
+        'sideScrollerFollowY',
+        'sideScrollerYBounds',
         'topDownHeight',
+        'topDownSmoothing',
+        'topDownFollowRotation',
         'orbitalDistance',
         'orbitalAutoRotateSpeed',
         'engineParams',
       ]);
+    });
+
+    // The three shape unions partition the authoring vocabulary. If a field is
+    // added to `AUTHORING_FIELD_SHAPES` under a shape whose runtime array is not
+    // derived here, it would fall out of all three and be invisible to every
+    // per-shape guard below while still passing the list check above.
+    it('partitions every mode-specific field into exactly one shape', () => {
+      const byShape = [...NUMERIC_CAMERA_FIELDS, ...BOOLEAN_CAMERA_FIELDS, ...PAIR_CAMERA_FIELDS];
+      expect(new Set(byShape).size, 'a field appears under two shapes').toBe(byShape.length);
+      expect([...byShape].sort()).toEqual(
+        TRANSLATED_CAMERA_FIELDS.filter((f) => !GENERIC_FIELDS.includes(f)).sort(),
+      );
     });
 
     // `mode` and `targetEntity` are generic — set on every payload regardless
@@ -629,9 +664,16 @@ describe('gameCameraPayload', () => {
     // completeness check, not translated by a switch case.
     const GENERIC_FIELDS: readonly (keyof GameCameraData)[] = ['mode', 'targetEntity', 'engineParams'];
 
+    type ModeSpecificField = NumericCameraField | BooleanCameraField | PairCameraField;
+
     // Every remaining field, paired with the one mode whose engine variant
     // reads it. Read straight from the switch statement in the module.
-    const FIELD_MODE: Record<NumericCameraField, GameCameraMode> = {
+    //
+    // Typed across all three shapes, not just `NumericCameraField`. When this
+    // was `Record<NumericCameraField, …>` a new BOOLEAN field satisfied the
+    // record without appearing here at all, so the "actually changes the
+    // payload" probe below would never have run against it.
+    const FIELD_MODE: Record<ModeSpecificField, GameCameraMode> = {
       followDistance: 'thirdPersonFollow',
       followHeight: 'thirdPersonFollow',
       followOffsetX: 'thirdPersonFollow',
@@ -639,10 +681,35 @@ describe('gameCameraPayload', () => {
       firstPersonHeight: 'firstPerson',
       firstPersonMouseSensitivity: 'firstPerson',
       sideScrollerDistance: 'sideScroller',
+      sideScrollerSmoothing: 'sideScroller',
+      sideScrollerFollowY: 'sideScroller',
+      sideScrollerYBounds: 'sideScroller',
       topDownHeight: 'topDown',
+      topDownSmoothing: 'topDown',
+      topDownFollowRotation: 'topDown',
       orbitalDistance: 'orbital',
       orbitalAutoRotateSpeed: 'orbital',
     };
+
+    /**
+     * A value of the right SHAPE for the probe below.
+     *
+     * The probe used to write a bare `7` into every field. A `7` in a boolean
+     * slot is not a boolean and a `7` in a pair slot is not a pair, so both
+     * would be rejected by the builder's own readers and the probe would report
+     * "did not change the payload" for a field that is wired perfectly well —
+     * a false FAIL that reads exactly like a real one.
+     *
+     * Booleans probe the NON-default so the value carries information beyond
+     * its mere presence.
+     */
+    function probeValue(field: ModeSpecificField): number | boolean | [number, number] {
+      if ((BOOLEAN_CAMERA_FIELDS as readonly string[]).includes(field)) {
+        return !ENGINE_CAMERA_BOOL_DEFAULTS[field as BooleanCameraField];
+      }
+      if ((PAIR_CAMERA_FIELDS as readonly string[]).includes(field)) return [1, 9];
+      return 7;
+    }
 
     it('every mode-specific field is accounted for by FIELD_MODE (no field silently uncovered by this guard)', () => {
       const modeSpecificFields = TRANSLATED_CAMERA_FIELDS.filter(
@@ -652,12 +719,12 @@ describe('gameCameraPayload', () => {
     });
 
     it('every mode-specific field actually changes the built payload for its mode — proves it is read, not merely declared', () => {
-      for (const [field, mode] of Object.entries(FIELD_MODE) as [keyof GameCameraData, GameCameraMode][]) {
+      for (const [field, mode] of Object.entries(FIELD_MODE) as [ModeSpecificField, GameCameraMode][]) {
         const withoutField = buildSetGameCameraPayload('cam-1', { mode, targetEntity: null });
         const withField = buildSetGameCameraPayload('cam-1', {
           mode,
           targetEntity: null,
-          [field]: 7,
+          [field]: probeValue(field),
         } as Partial<GameCameraData> & { mode: GameCameraMode });
 
         expect(withField, `field "${field}" did not change the built payload for mode "${mode}"`).not.toEqual(
@@ -670,9 +737,10 @@ describe('gameCameraPayload', () => {
   // -------------------------------------------------------------------------
   // Round-trip preservation.
   //
-  // The engine reads twenty-one camera parameters; this authoring vocabulary
-  // names nine. `set_game_camera` REPLACES the whole component, so the twelve
-  // with no authoring field are not merely "not shown" — before `engineParams`
+  // The engine reads nineteen distinct camera parameters; this authoring
+  // vocabulary reaches twelve of them. `set_game_camera` REPLACES the whole
+  // component, so the seven with no authoring field are not merely "not shown"
+  // — before `engineParams`
   // they were reset to `from_flat`'s defaults by the next dispatch from any
   // surface at all. An MCP client sets `fov: 100`, the user nudges Eye Height,
   // the rebuilt payload omits `fov`, and the field of view silently returns to
@@ -945,7 +1013,9 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
     firstPersonHeight: ['firstPerson', 'eyeHeight'],
     firstPersonMouseSensitivity: ['firstPerson', 'mouseSensitivity'],
     sideScrollerDistance: ['sideScroller', 'zOffset'],
+    sideScrollerSmoothing: ['sideScroller', 'damping'],
     topDownHeight: ['topDown', 'height'],
+    topDownSmoothing: ['topDown', 'damping'],
     orbitalDistance: ['orbital', 'radius'],
     orbitalAutoRotateSpeed: ['orbital', 'autoRotateSpeed'],
   } as const satisfies Partial<Record<keyof typeof ENGINE_CAMERA_DEFAULTS, [string, string]>>;
@@ -978,6 +1048,31 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
     // engine's Z is the negated authoring distance.
     expect(ENGINE_CAMERA_DEFAULTS.followDistance).toBe(-parseRustF32(m![3]!, 'offset.z'));
   });
+
+  /** The literal default in `flat_bool(params, "<wireKey>", <default>)`. */
+  function rustBoolDefault(arm: string, wireKey: string): boolean {
+    const m = new RegExp(`flat_bool\\(params, "${wireKey}", (true|false)\\)`).exec(arm);
+    expect(m, `no flat_bool default for "${wireKey}"`).not.toBeNull();
+    return m![1] === 'true';
+  }
+
+  // Booleans need the same Rust-sourced pin as the scalars, and arguably more:
+  // a boolean default that drifts has no plausible-looking wrong value to catch
+  // the eye in review, it is simply inverted.
+  const BOOL_SOURCES = {
+    sideScrollerFollowY: ['sideScroller', 'followY'],
+    topDownFollowRotation: ['topDown', 'followRotation'],
+  } as const satisfies Record<keyof typeof ENGINE_CAMERA_BOOL_DEFAULTS, [string, string]>;
+
+  it.each(Object.entries(BOOL_SOURCES))(
+    '%s equals the engine default',
+    (field, [mode, wireKey]) => {
+      const arm = arms[mode];
+      expect(arm, `no "${mode}" arm in from_flat`).toBeDefined();
+      expect(ENGINE_CAMERA_BOOL_DEFAULTS[field as keyof typeof ENGINE_CAMERA_BOOL_DEFAULTS])
+        .toBe(rustBoolDefault(arm!, wireKey));
+    },
+  );
 
   // Every default must be covered by one of the two checks above, or a newly
   // added field could sit here permanently unpinned.

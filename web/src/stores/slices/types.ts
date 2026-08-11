@@ -931,15 +931,44 @@ export interface GameCameraData {
   firstPersonHeight?: number;
   firstPersonMouseSensitivity?: number;
   sideScrollerDistance?: number;
+  /** sideScroller: follow damping. Engine default 5. */
+  sideScrollerSmoothing?: number;
+  /**
+   * sideScroller: whether the camera tracks the target vertically at all.
+   * Engine default `true`; `false` pins the camera's Y and lets the target rise
+   * and fall within frame, which is what a classic single-screen platformer does.
+   */
+  sideScrollerFollowY?: boolean;
+  /**
+   * sideScroller: `[min, max]` clamp on the camera's Y. Absent means unbounded —
+   * the engine's own `y_bounds` is an `Option` with no default, so there is no
+   * value that means "no clamp".
+   *
+   * Always ordered ascending by the builder. The engine's `flat_range` REJECTS an
+   * inverted pair (the values feed `f32::clamp`, which panics on `min > max`, and
+   * a panic in a Bevy system poisons the WASM instance) — and a rejected command
+   * is silent, so a transient inversion while typing into two number inputs would
+   * drop the whole camera command rather than report anything.
+   */
+  sideScrollerYBounds?: [number, number];
   topDownHeight?: number;
+  /** topDown: follow damping. Engine default 5. */
+  topDownSmoothing?: number;
+  /**
+   * topDown: whether the camera yaws with the target's facing. Engine default
+   * `false` — a fixed compass, the usual choice for a twin-stick or tactics view.
+   */
+  topDownFollowRotation?: boolean;
   orbitalDistance?: number;
   orbitalAutoRotateSpeed?: number;
   /**
    * Engine wire parameters this authoring vocabulary has no field for, kept
    * verbatim so they survive a round trip.
    *
-   * The engine reads 21 camera parameters; the nine above are the ones the
-   * inspector exposes. Without this bag the other twelve are lost the first time
+   * The engine reads nineteen mode parameters; the fields above own twelve of
+   * them. Without this bag the other seven — `minDistance`, `maxDistance`,
+   * `lookAtTarget`, `collisionAvoidance`, `fov`, `pitchClamp`, `lookAt` — are
+   * lost the first time
    * anything re-dispatches: an MCP client sets `fov: 100`, the engine reports it,
    * the store drops it, the user nudges Eye Height, and the rebuilt payload omits
    * `fov` — so `from_flat` hands back 75 and the insert replaces the component.

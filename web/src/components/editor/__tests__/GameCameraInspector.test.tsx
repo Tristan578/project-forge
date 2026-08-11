@@ -162,6 +162,79 @@ describe('GameCameraInspector', () => {
     expect(checkbox.checked).toBe(true);
   });
 
+  // `set_game_camera` REPLACES the whole component engine-side, so a row that
+  // renders but dispatches nothing is not "inert" — the next dispatch from any
+  // other row rebuilds the payload without that field and the engine resets it
+  // to `from_flat`'s default. These rows therefore need their write path
+  // asserted, not just their presence.
+  describe('boolean and range rows write back', () => {
+    it('toggling a boolean row dispatches the new value', () => {
+      setupStore({ primaryGameCamera: { ...baseGameCamera, mode: 'topDown' } });
+      render(<GameCameraInspector />);
+
+      // Engine default for `followRotation` is false, and the row shows the
+      // engine default when the field is unset — so the first click sets true.
+      fireEvent.click(screen.getByLabelText('Follow Turn'));
+
+      expect(mockSetGameCamera).toHaveBeenCalledWith(
+        'entity-1',
+        expect.objectContaining({ topDownFollowRotation: true }),
+      );
+    });
+
+    it('a range row starts unset, with both bounds disabled', () => {
+      setupStore({ primaryGameCamera: { ...baseGameCamera, mode: 'sideScroller' } });
+      render(<GameCameraInspector />);
+
+      expect((screen.getByLabelText('Y Bounds enabled') as HTMLInputElement).checked).toBe(false);
+      expect((screen.getByLabelText('Y Bounds minimum') as HTMLInputElement).disabled).toBe(true);
+      expect((screen.getByLabelText('Y Bounds maximum') as HTMLInputElement).disabled).toBe(true);
+    });
+
+    it('enabling a range row dispatches an opening window rather than [0, 0]', () => {
+      setupStore({ primaryGameCamera: { ...baseGameCamera, mode: 'sideScroller' } });
+      render(<GameCameraInspector />);
+
+      fireEvent.click(screen.getByLabelText('Y Bounds enabled'));
+
+      // `[0, 0]` would be a perfectly valid clamp meaning "pin the camera's
+      // height", which is a real instruction and a startling thing to apply the
+      // instant a box is ticked.
+      expect(mockSetGameCamera).toHaveBeenCalledWith(
+        'entity-1',
+        expect.objectContaining({ sideScrollerYBounds: [0, 10] }),
+      );
+    });
+
+    it('disabling a range row clears it, rather than sending a degenerate pair', () => {
+      setupStore({
+        primaryGameCamera: { ...baseGameCamera, mode: 'sideScroller', sideScrollerYBounds: [0, 10] },
+      });
+      render(<GameCameraInspector />);
+
+      fireEvent.click(screen.getByLabelText('Y Bounds enabled'));
+
+      // Absence is the ONLY way to say "unbounded" — the engine's `y_bounds` is
+      // an Option with no default, so no [min, max] can express it.
+      const [, patch] = mockSetGameCamera.mock.lastCall as [string, GameCameraData];
+      expect(patch.sideScrollerYBounds).toBeUndefined();
+    });
+
+    it('editing one bound keeps the other', () => {
+      setupStore({
+        primaryGameCamera: { ...baseGameCamera, mode: 'sideScroller', sideScrollerYBounds: [2, 8] },
+      });
+      render(<GameCameraInspector />);
+
+      fireEvent.change(screen.getByLabelText('Y Bounds minimum'), { target: { value: '3' } });
+
+      expect(mockSetGameCamera).toHaveBeenCalledWith(
+        'entity-1',
+        expect.objectContaining({ sideScrollerYBounds: [3, 8] }),
+      );
+    });
+  });
+
   describe('accessible names', () => {
     /**
      * Every control's name as a screen reader would resolve it — `aria-label`,
@@ -189,8 +262,12 @@ describe('GameCameraInspector', () => {
     const MODE_CONTROLS: Array<[GameCameraData['mode'], string[]]> = [
       ['thirdPersonFollow', ['Distance', 'Height', 'Smoothing']],
       ['firstPerson', ['Height', 'Mouse Sens.']],
-      ['sideScroller', ['Distance']],
-      ['topDown', ['Height']],
+      // The Y Bounds row is three controls, not one: an enable checkbox plus the
+      // two bounds. The bounds carry `sr-only` labels because the row's visible
+      // label names the pair, and "Y Bounds" repeated on both inputs would tell
+      // a screen-reader user nothing about which end they are editing.
+      ['sideScroller', ['Distance', 'Smoothing', 'Follow Y', 'Y Bounds enabled', 'Y Bounds minimum', 'Y Bounds maximum']],
+      ['topDown', ['Height', 'Smoothing', 'Follow Turn']],
       ['fixed', []],
       ['orbital', ['Distance', 'Auto Rotate']],
     ];
