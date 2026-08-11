@@ -129,11 +129,43 @@ const SYSTEM_KEYWORDS: Record<SystemCategory, { keywords: string[]; defaultType:
 };
 
 /**
+ * The keywords an entry matched, counting each textual signal once.
+ *
+ * A plain `keywords.filter(kw => text.includes(kw))` counts one word several
+ * times wherever the table's keywords nest — and they nest all over it:
+ * `platform` ⊂ `platformer`, `jump` ⊂ `jumping`, `run` ⊂ `runner`,
+ * `race` ⊂ `racing`, `shoot` ⊂ `shooter`, `pixel` ⊂ `pixel art`. The inflated
+ * count then decides two things it should not. It picks the winning entry, so
+ * the word "jumping" alone outscored an explicit "top-down" and every such
+ * prompt was classified as a platformer; and it sets `priority`, so a single
+ * word promoted its category to `core` as if two independent signals had been
+ * found.
+ *
+ * A keyword that is a substring of another matched keyword carries no evidence
+ * the longer one does not already carry, so it is dropped.
+ */
+function distinctMatches(keywords: string[], text: string): string[] {
+  const matched = [...new Set(keywords.filter(kw => text.includes(kw)))];
+  return matched.filter(kw => !matched.some(other => other !== kw && other.includes(kw)));
+}
+
+/** Length of the longest matched keyword — the specificity of a match set. */
+function specificityOf(matched: string[]): number {
+  return matched.reduce((longest, kw) => Math.max(longest, kw.length), 0);
+}
+
+/**
  * Decompose a game description prompt into composable systems.
  *
  * Returns detected systems sorted by confidence (number of keyword matches).
  * Systems with 0 matches are not included. Every game gets at least 'input'
  * and 'camera' as core defaults if no explicit matches are found.
+ *
+ * Within a category, entries compete first on how many distinct keywords they
+ * matched and then — the tie-break that actually decides most real prompts — on
+ * the longest keyword matched. Specificity, not the order the entries happen to
+ * sit in the table: "a top-down game where you jump" matches one keyword in
+ * each of two entries, and `top-down` is the more specific claim.
  *
  * @param prompt - Natural language game description
  * @returns SystemDecomposition with detected systems and summary
@@ -145,11 +177,19 @@ export function decomposeIntoSystems(prompt: string): SystemDecomposition {
   for (const [category, entries] of Object.entries(SYSTEM_KEYWORDS) as [SystemCategory, typeof SYSTEM_KEYWORDS[SystemCategory]][]) {
     let bestEntry: { defaultType: string; matchedKeywords: string[] } | null = null;
     let bestScore = 0;
+    let bestSpecificity = 0;
 
     for (const entry of entries) {
-      const matched = entry.keywords.filter(kw => lower.includes(kw));
-      if (matched.length > bestScore) {
+      const matched = distinctMatches(entry.keywords, lower);
+      if (matched.length === 0) continue;
+
+      const specificity = specificityOf(matched);
+      const wins =
+        matched.length > bestScore ||
+        (matched.length === bestScore && specificity > bestSpecificity);
+      if (wins) {
         bestScore = matched.length;
+        bestSpecificity = specificity;
         bestEntry = { defaultType: entry.defaultType, matchedKeywords: matched };
       }
     }

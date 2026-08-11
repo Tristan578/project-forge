@@ -135,6 +135,54 @@ describe('decomposeIntoSystems', () => {
   });
 });
 
+describe('decomposeIntoSystems — keyword scoring', () => {
+  it('picks the more specific keyword when two entries match one keyword each', () => {
+    const result = decomposeIntoSystems('a top-down game where you jump');
+    const movement = result.systems.find(s => s.category === 'movement');
+    // Both the platformer entry ('jump') and the top-down entry ('top-down')
+    // match exactly one keyword. Entry order used to decide it; specificity does.
+    expect(movement!.type).toBe('top-down');
+    expect(movement!.matchedKeywords).toEqual(['top-down']);
+  });
+
+  it('does not let one word beat a rival entry by matching nested keywords', () => {
+    // 'jumping' contains 'jump', so the platformer entry used to score 2 here
+    // and win outright — a result no reordering of the table could fix.
+    const result = decomposeIntoSystems('a top-down game with jumping');
+    const movement = result.systems.find(s => s.category === 'movement');
+    expect(movement!.type).toBe('top-down');
+  });
+
+  it('does not promote a category to core on a single word', () => {
+    const result = decomposeIntoSystems('a game with jumping');
+    const movement = result.systems.find(s => s.category === 'movement');
+    expect(movement!.matchedKeywords).toEqual(['jumping']);
+    expect(movement!.priority).toBe('secondary');
+  });
+
+  it('reports only the longest of a set of nested matches', () => {
+    const result = decomposeIntoSystems('a platformer game');
+    const movement = result.systems.find(s => s.category === 'movement');
+    expect(movement!.matchedKeywords).toEqual(['platformer']);
+    expect(movement!.matchedKeywords).not.toContain('platform');
+  });
+
+  it('resolves the camera the same way — "2d" loses to "top-down"', () => {
+    const result = decomposeIntoSystems('a 2d top-down game');
+    const camera = result.systems.find(s => s.category === 'camera');
+    expect(camera!.type).toBe('top-down');
+  });
+
+  it('still lets two independent matches beat one longer match', () => {
+    // 'over-the-shoulder' is the longest keyword in the camera table, but two
+    // distinct signals outrank it — count dominates, specificity only ties.
+    const result = decomposeIntoSystems('a first-person fps over-the-shoulder view');
+    const camera = result.systems.find(s => s.category === 'camera');
+    expect(camera!.type).toBe('first-person');
+    expect(camera!.matchedKeywords).toEqual(['first-person', 'fps']);
+  });
+});
+
 describe('getSystemLabel', () => {
   it('returns "custom game" when no core systems detected', () => {
     const label = getSystemLabel({ systems: [], summary: '' });
