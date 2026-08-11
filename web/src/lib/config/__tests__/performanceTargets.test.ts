@@ -6,8 +6,8 @@ import {
   CWV_EDITOR_LCP_MS,
   CWV_EDITOR_INP_MS,
   CWV_EDITOR_CLS,
-  BUNDLE_FIRST_LOAD_WARN,
-  BUNDLE_FIRST_LOAD_FAIL,
+  BUNDLE_ROUTE_FIRST_LOAD_WARN,
+  BUNDLE_ROUTE_FIRST_LOAD_FAIL,
   BUNDLE_TOTAL_WARN,
   BUNDLE_TOTAL_FAIL,
   WASM_BINARY_WARN,
@@ -21,16 +21,16 @@ import {
 } from '../performanceTargets';
 
 describe('performanceTargets ordering invariants', () => {
-  it('bundle warn < fail for first-load JS', () => {
-    expect(BUNDLE_FIRST_LOAD_WARN).toBeLessThan(BUNDLE_FIRST_LOAD_FAIL);
+  it('bundle warn < fail for route first-load JS', () => {
+    expect(BUNDLE_ROUTE_FIRST_LOAD_WARN).toBeLessThan(BUNDLE_ROUTE_FIRST_LOAD_FAIL);
   });
 
   it('bundle warn < fail for total JS', () => {
     expect(BUNDLE_TOTAL_WARN).toBeLessThan(BUNDLE_TOTAL_FAIL);
   });
 
-  it('first-load fail <= total warn (first-load is a subset of total)', () => {
-    expect(BUNDLE_FIRST_LOAD_FAIL).toBeLessThanOrEqual(BUNDLE_TOTAL_WARN);
+  it('route first-load fail <= total warn (a route\'s chunks are a subset of all chunks)', () => {
+    expect(BUNDLE_ROUTE_FIRST_LOAD_FAIL).toBeLessThanOrEqual(BUNDLE_TOTAL_WARN);
   });
 
   it('WASM binary warn < fail', () => {
@@ -71,7 +71,7 @@ describe('performanceTargets values are positive', () => {
   });
 
   it('all bundle thresholds are positive', () => {
-    expect(BUNDLE_FIRST_LOAD_WARN).toBeGreaterThan(0);
+    expect(BUNDLE_ROUTE_FIRST_LOAD_WARN).toBeGreaterThan(0);
     expect(BUNDLE_TOTAL_FAIL).toBeGreaterThan(0);
     expect(WASM_BINARY_WARN).toBeGreaterThan(0);
   });

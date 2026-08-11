@@ -12,7 +12,9 @@
  * ## Consumer files (update when changing thresholds)
  *
  * These files duplicate numeric values because they cannot import TypeScript:
- * - `web/scripts/check-bundle-size.js` — BUNDLE_* constants (CJS script)
+ * - `web/scripts/check-bundle-size.js` — BUNDLE_* constants (CJS script).
+ *   This one is PINNED: `scripts/__tests__/check-bundle-size.test.ts` asserts
+ *   the script's copies equal the constants below, so it cannot drift silently.
  * - `web/e2e/tests/load-budget.spec.ts` — EDITOR_* constants (Playwright)
  * - `.lighthouserc.js` — CWV_MARKETING_* constants (LHCI config)
  * - `.github/workflows/quality-gates.yml` — WASM_BINARY_* constants (bash)
@@ -22,8 +24,13 @@
  * 2026-03-31: Initial creation. Bundle thresholds set at 4.75/5.25/5/5.5 MB
  *   (current build: ~4.56 MB first-load). Previous thresholds: 4/4.75/5/5.5 MB.
  *   WASM thresholds set to match existing CI gate (45 MB warn / 49.5 MB fail).
+ * 2026-08-10 (PF-1132): `BUNDLE_FIRST_LOAD_*` replaced by
+ *   `BUNDLE_ROUTE_FIRST_LOAD_*`. The old pair was applied to a number that was
+ *   never a first-load figure (see the constants below and the header of
+ *   `check-bundle-size.js`). `BUNDLE_TOTAL_*` keeps its original values — that
+ *   number is unchanged, only its label was wrong.
  *
- * Updated: 2026-03-31
+ * Updated: 2026-08-10
  */
 
 // ---------------------------------------------------------------------------
@@ -92,18 +99,33 @@ export const GPU_INIT_TARGET_MS = 3000;
 // ---------------------------------------------------------------------------
 
 /**
- * First-load JS warning threshold (current build: ~5.28 MB as of 2026-07-04).
- * Re-baselined for dockview-react 7: its accessibility pack (ARIA roles,
- * keyboard nav, live regions) adds ~27.5 KB minified and is not tree-shakeable
- * in 7.0.2 (dockview-modules opt-out is unpublished). Prior baseline (~4.56 MB,
- * 2026-03-31) had already been consumed to ~5.24 MB — creep tracked in #8910.
+ * Warning threshold for the HEAVIEST route's first-load JS: the root chunks
+ * plus that route's client entry chunks, de-duplicated, as recorded by Next in
+ * `build-manifest.json` and the route's `page_client-reference-manifest.js`.
+ *
+ * Measured on origin/main 2026-08-10 (production build, 27 routes):
+ *   /editor/[id]  1.95 MB (23 chunks) — heaviest
+ *   /sign-up      1.59 MB — runner-up
+ *
+ * Replaces `BUNDLE_FIRST_LOAD_WARN`/`_FAIL` (PF-1132). Those were applied to
+ * the sum of every top-level file in `.next/static/chunks`, which under
+ * Turbopack counts lazily-loaded chunks and counts a module graph once per
+ * client entry that reaches it — so it moved by ~50 KB steps on chunk-grouping
+ * changes that shipped no new bytes to any route. The prior re-baselines
+ * (~4.56 MB 2026-03-31, ~5.28 MB 2026-07-04, creep tracked in #8910) were
+ * chasing that accounting artefact as much as real growth.
  */
-export const BUNDLE_FIRST_LOAD_WARN = 5.3 * 1024 * 1024;
+export const BUNDLE_ROUTE_FIRST_LOAD_WARN = 2.1 * 1024 * 1024;
 
-/** First-load JS hard failure threshold */
-export const BUNDLE_FIRST_LOAD_FAIL = 5.5 * 1024 * 1024;
+/** Heaviest-route first-load JS hard failure threshold */
+export const BUNDLE_ROUTE_FIRST_LOAD_FAIL = 2.3 * 1024 * 1024;
 
-/** Total JS warning threshold (must be >= BUNDLE_FIRST_LOAD_FAIL) */
+/**
+ * Total JS warning threshold — every `.js` under `.next/static/chunks`,
+ * recursively. This is a whole-output ceiling, NOT a first-load figure; it is
+ * the number the old `BUNDLE_FIRST_LOAD_*` pair was really measuring. Values
+ * unchanged since 2026-03-31 (measured 5.49 MB on origin/main 2026-08-10).
+ */
 export const BUNDLE_TOTAL_WARN = 5.5 * 1024 * 1024;
 
 /** Total JS hard failure threshold */

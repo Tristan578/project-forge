@@ -7,7 +7,11 @@ Every agent MUST follow these procedures. Violations of these rules have caused 
 Before writing any code, read:
 1. **This file** — common operations and anti-pattern avoidance
 2. **`.claude/rules/docs-registry.md`** — first-party documentation URLs
-3. **`memory/project_lessons_learned.md`** — 29+ anti-patterns from real bugs
+3. **`~/.claude/projects/-Users-tristannolan-project-forge/memory/project_lessons_learned.md`** —
+   29+ anti-patterns from real bugs. This lives in the USER-level memory directory, NOT in the
+   repo: a bare `memory/project_lessons_learned.md` does not resolve from the repo root and
+   silently sends agents looking for a file that isn't there. `MEMORY.md` in the same directory
+   is the index.
 
 ## Taskboard Ownership
 
