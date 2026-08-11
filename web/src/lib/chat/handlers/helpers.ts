@@ -5,6 +5,8 @@
 import { z } from 'zod';
 import type { MaterialData, LightData, PhysicsData, SceneNode } from './types';
 import { F32_SAFE_MAX, zVec2, zVec3, zVec4 } from './types';
+import { parseGameComponentWire } from '@/lib/engine/gameComponentWire';
+import type { GameComponentData } from '@/stores/slices/types';
 
 // ===== Compound Action Types =====
 
@@ -165,124 +167,6 @@ const zPartialPhysics = z.object({
   isSensor: zOpt(z.boolean()),
 }).passthrough();
 
-// Per-case game component prop schemas
-/**
- * An identifier or asset key. Dropped rather than truncated when it runs long:
- * half an entity id names the wrong entity, where no id at all falls back to
- * the field's default.
- */
-const zName = zOpt(z.string().max(256));
-const zNullableName = zOpt(z.string().max(256).nullable());
-
-// Every bound below is the engine's own, read from `build_game_component` in
-// `engine/src/core/game_components.rs` rather than reasoned about here. That
-// function reads each field through `prop_f32(props, key, min, max)` or
-// `prop_u32(props, key, max)`, which clamp on the Rust side — so a looser bound
-// here is not merely permissive, it is a divergence: the Zustand store, the
-// inspector, undo history and scene export would all record a value the running
-// entity never holds, with nothing reported on either side. Keep these in step
-// with that file; where a range reads oddly (jumpHeight caps at 100 while speed
-// caps at 1000) it is the engine's reading that wins.
-
-const zCharacterControllerProps = z.object({
-  speed: zNum(0, 1000),
-  jumpHeight: zNum(0, 100),
-  gravityScale: zNum(-10, 10),
-  canDoubleJump: zOpt(z.boolean()),
-}).passthrough();
-
-const zHealthProps = z.object({
-  // 0 max HP is an entity that is dead the frame it spawns; the engine floors
-  // it at 1 and would show a full bar against a maxHp the store said was 0.
-  maxHp: zNum(1, 1_000_000),
-  currentHp: zNum(0, 1_000_000),
-  invincibilitySecs: zNum(0, 60),
-  respawnOnDeath: zOpt(z.boolean()),
-  respawnPoint: zOpt(zVec3),
-  despawnOnDeath: zOpt(z.boolean()),
-}).passthrough();
-
-const zCollectibleProps = z.object({
-  // `CollectibleData::value` is a u32 and the engine rounds it; rounding here
-  // as well is what keeps the store's copy and the engine's copy the same
-  // number rather than 1.5 against 2.
-  value: zInt(0, 1_000_000),
-  destroyOnCollect: zOpt(z.boolean()),
-  pickupSoundAsset: zNullableName,
-  // Degrees per second; the sign picks the direction.
-  rotateSpeed: zNum(-100, 100),
-}).passthrough();
-
-const zDamageZoneProps = z.object({
-  damagePerSecond: zNum(0, 10_000),
-  oneShot: zOpt(z.boolean()),
-}).passthrough();
-
-const zCheckpointProps = z.object({
-  autoSave: zOpt(z.boolean()),
-}).passthrough();
-
-const zTeleporterProps = z.object({
-  targetPosition: zOpt(zVec3),
-  cooldownSecs: zNum(0, 300),
-}).passthrough();
-
-const zMovingPlatformProps = z.object({
-  speed: zNum(0, 1000),
-  // The engine's mover early-returns below two waypoints, so a one-point path
-  // is a platform that silently never moves. Dropping the field takes the
-  // builder's default instead, which is the same nothing but an honest one.
-  // Bounded above because it is the only field here whose cardinality the
-  // model picks, and the array is serialized into every scene export.
-  waypoints: zOpt(z.array(zVec3).min(2).max(1000)),
-  pauseDuration: zNum(0, 60),
-  loopMode: zOpt(z.enum(['pingPong', 'loop', 'once'])),
-}).passthrough();
-
-const zTriggerZoneProps = z.object({
-  eventName: zName,
-  oneShot: zOpt(z.boolean()),
-}).passthrough();
-
-const zSpawnerProps = z.object({
-  entityType: zName,
-  // A zero interval spawns every frame until max_count, which reads as a hang.
-  intervalSecs: zNum(0.1, 3600),
-  // `SpawnerData::max_count` is a u32, rounded and clamped by the engine.
-  maxCount: zInt(0, 1000),
-  spawnOffset: zOpt(zVec3),
-  onTrigger: zNullableName,
-}).passthrough();
-
-const zFollowerProps = z.object({
-  targetEntityId: zNullableName,
-  speed: zNum(0, 1000),
-  stopDistance: zNum(0, 1000),
-  lookAtTarget: zOpt(z.boolean()),
-}).passthrough();
-
-const zProjectileProps = z.object({
-  speed: zNum(0, 10_000),
-  damage: zNum(0, 100_000),
-  lifetimeSecs: zNum(0, 300),
-  gravity: zOpt(z.boolean()),
-  destroyOnHit: zOpt(z.boolean()),
-}).passthrough();
-
-const zWinConditionProps = z.object({
-  // The engine matches these three spellings and falls through to `Score` for
-  // anything else — so `collect_all`, the snake_case the model has just used
-  // for every component type in the same call, silently turns "collect all the
-  // coins" into "reach 10 points". Rejecting it here leaves the builder's own
-  // default standing, which is the same `score`, but keeps the store honest
-  // about what the entity is rather than recording a type it cannot be.
-  conditionType: zOpt(z.enum(['score', 'collectAll', 'reachGoal'])),
-  // `WinConditionData::target_score` is an Option<u32>, rounded and clamped by
-  // the engine to at most u32::MAX.
-  targetScore: zInt(0, 4_294_967_295),
-  targetEntityId: zNullableName,
-}).passthrough();
-
 // ===== Builder Functions =====
 
 /**
@@ -388,154 +272,28 @@ export function buildPhysicsFromPartial(partialPhysics: Record<string, unknown>)
 
 /**
  * Build GameComponentData from input type and properties.
+ *
+ * A thin alias for `buildStoreComponent`, which is the single place every
+ * game-component field is coerced the way the engine coerces it. This function
+ * used to carry its own switch, and the two copies had already diverged: the
+ * `win_condition` case cast `conditionType` straight through, so an LLM answering
+ * `'collect_all'` (or `'survive'`, or anything at all) was stored verbatim while
+ * the engine's `match` fell through to `WinConditionType::Score`. Nothing reported
+ * the disagreement — `dispatchCommand` returns `void` — so the inspector showed one
+ * win condition and the running game used another. The same divergence was open on
+ * every numeric field, which the old copy passed through unranged.
  */
 export function buildGameComponentFromInput(
   type: string,
   props: Record<string, unknown>
-): import('@/stores/editorStore').GameComponentData | null {
-  switch (type) {
-    case 'character_controller': {
-      const p = parsePartial(zCharacterControllerProps, props);
-      return {
-        type: 'characterController',
-        characterController: {
-          speed: p.speed ?? 5,
-          jumpHeight: p.jumpHeight ?? 8,
-          gravityScale: p.gravityScale ?? 1,
-          canDoubleJump: p.canDoubleJump ?? false,
-        },
-      };
-    }
-    case 'health': {
-      const p = parsePartial(zHealthProps, props);
-      return {
-        type: 'health',
-        health: {
-          maxHp: p.maxHp ?? 100,
-          currentHp: p.currentHp ?? p.maxHp ?? 100,
-          invincibilitySecs: p.invincibilitySecs ?? 0.5,
-          respawnOnDeath: p.respawnOnDeath ?? true,
-          respawnPoint: p.respawnPoint ?? [0, 1, 0],
-          despawnOnDeath: p.despawnOnDeath ?? true,
-        },
-      };
-    }
-    case 'collectible': {
-      const p = parsePartial(zCollectibleProps, props);
-      return {
-        type: 'collectible',
-        collectible: {
-          value: p.value ?? 1,
-          destroyOnCollect: p.destroyOnCollect ?? true,
-          pickupSoundAsset: p.pickupSoundAsset ?? null,
-          rotateSpeed: p.rotateSpeed ?? 90,
-        },
-      };
-    }
-    case 'damage_zone': {
-      const p = parsePartial(zDamageZoneProps, props);
-      return {
-        type: 'damageZone',
-        damageZone: {
-          damagePerSecond: p.damagePerSecond ?? 25,
-          oneShot: p.oneShot ?? false,
-        },
-      };
-    }
-    case 'checkpoint': {
-      const p = parsePartial(zCheckpointProps, props);
-      return {
-        type: 'checkpoint',
-        checkpoint: {
-          autoSave: p.autoSave ?? true,
-        },
-      };
-    }
-    case 'teleporter': {
-      const p = parsePartial(zTeleporterProps, props);
-      return {
-        type: 'teleporter',
-        teleporter: {
-          targetPosition: p.targetPosition ?? [0, 1, 0],
-          cooldownSecs: p.cooldownSecs ?? 1,
-        },
-      };
-    }
-    case 'moving_platform': {
-      const p = parsePartial(zMovingPlatformProps, props);
-      return {
-        type: 'movingPlatform',
-        movingPlatform: {
-          speed: p.speed ?? 2,
-          waypoints: p.waypoints ?? [[0, 0, 0], [0, 3, 0]],
-          pauseDuration: p.pauseDuration ?? 0.5,
-          loopMode: p.loopMode ?? 'pingPong',
-        },
-      };
-    }
-    case 'trigger_zone': {
-      const p = parsePartial(zTriggerZoneProps, props);
-      return {
-        type: 'triggerZone',
-        triggerZone: {
-          eventName: p.eventName ?? 'trigger',
-          oneShot: p.oneShot ?? false,
-        },
-      };
-    }
-    case 'spawner': {
-      const p = parsePartial(zSpawnerProps, props);
-      return {
-        type: 'spawner',
-        spawner: {
-          entityType: p.entityType ?? 'cube',
-          intervalSecs: p.intervalSecs ?? 3,
-          maxCount: p.maxCount ?? 5,
-          spawnOffset: p.spawnOffset ?? [0, 1, 0],
-          onTrigger: p.onTrigger ?? null,
-        },
-      };
-    }
-    case 'follower': {
-      const p = parsePartial(zFollowerProps, props);
-      return {
-        type: 'follower',
-        follower: {
-          targetEntityId: p.targetEntityId ?? null,
-          speed: p.speed ?? 3,
-          stopDistance: p.stopDistance ?? 1.5,
-          lookAtTarget: p.lookAtTarget ?? true,
-        },
-      };
-    }
-    case 'projectile': {
-      const p = parsePartial(zProjectileProps, props);
-      return {
-        type: 'projectile',
-        projectile: {
-          speed: p.speed ?? 15,
-          damage: p.damage ?? 10,
-          lifetimeSecs: p.lifetimeSecs ?? 5,
-          gravity: p.gravity ?? false,
-          destroyOnHit: p.destroyOnHit ?? true,
-        },
-      };
-    }
-    case 'win_condition': {
-      const p = parsePartial(zWinConditionProps, props);
-      return {
-        type: 'winCondition',
-        winCondition: {
-          conditionType: p.conditionType ?? 'score',
-          targetScore: p.targetScore ?? 10,
-          targetEntityId: p.targetEntityId ?? null,
-        },
-      };
-    }
-
-    default:
-      return null;
-  }
+): GameComponentData | null {
+  // `parseGameComponentWire`, not `buildStoreComponent`: every caller here speaks
+  // the ENGINE's vocabulary — `dialogue_trigger` with `interactionRadius` and
+  // `autoStart` — and `dialogueTrigger` is the one component whose store field
+  // names diverge from the Rust struct's. `buildStoreComponent` reads store names,
+  // so it would answer a fully-defaulted dialogue trigger for a bag that specified
+  // every field, and nothing downstream reports the difference.
+  return parseGameComponentWire({ componentType: type, properties: props });
 }
 
 // ===== Analysis Functions =====

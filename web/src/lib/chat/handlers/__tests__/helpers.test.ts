@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
+import { toWireComponent } from '@/lib/engine/gameComponentWire';
 import {
   buildCompoundResult,
   buildMaterialFromPartial,
@@ -192,6 +193,15 @@ describe('buildGameComponentFromInput', () => {
     const comp = buildGameComponentFromInput('win_condition', { conditionType: 'collectAll' }) as Record<string, unknown>;
     expect(comp.type).toBe('winCondition');
     expect((comp.winCondition as Record<string, unknown>).conditionType).toBe('collectAll');
+  });
+
+  it('falls back to the engine default for a conditionType the engine cannot parse', () => {
+    // `'collect_all'` is not a member — the engine's `match` has no arm for it and
+    // falls through to `WinConditionType::Score`. Storing the string verbatim (what
+    // the old unvalidated cast did) left the inspector and the running game
+    // describing different win conditions with nothing to report the split.
+    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'collect_all' }) as Record<string, unknown>;
+    expect((comp.winCondition as Record<string, unknown>).conditionType).toBe('score');
   });
 
   it('should return null for unknown types', () => {
@@ -529,11 +539,16 @@ describe('game-component bounds match the engine, field by field', () => {
     expect(new Set(covered.map((b) => b.component)).size).toBeGreaterThanOrEqual(10);
   });
 
+  // Read the value back in the ENGINE's vocabulary, which is what `bounds` is
+  // keyed by. Indexing the store bag under the engine's key silently answers
+  // `undefined` for `dialogue_trigger`, the one component whose store field names
+  // diverge from the Rust struct's (`interactionRadius` is `triggerRadius` in the
+  // store) — and `undefined` is not `b.max`, so the drift reads as a clamp bug.
+  // Going back out through `toWireComponent` also asserts the number the engine
+  // actually receives rather than the one the store happens to hold.
   const read = (component: string, key: string, value: number): unknown => {
-    const built = buildGameComponentFromInput(component, { [key]: value }) as
-      | (Record<string, Record<string, unknown>> & { type: string })
-      | null;
-    return built === null ? null : built[built.type][key];
+    const built = buildGameComponentFromInput(component, { [key]: value });
+    return built === null ? null : toWireComponent(built).properties[key];
   };
 
   it.each(covered.map((b) => [`${b.component}.${b.key}`, b] as const))(

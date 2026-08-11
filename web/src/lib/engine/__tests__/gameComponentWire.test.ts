@@ -13,6 +13,8 @@ import {
   ENGINE_COMPONENT_CATALOG,
   ENGINE_PROP_RANGES,
   ENGINE_PROP_MAXIMA,
+  PLATFORM_LOOP_MODES,
+  WIN_CONDITION_TYPES,
 } from '../gameComponentWire';
 import type { GameComponentData } from '@/stores/slices/types';
 
@@ -459,18 +461,27 @@ describe('gameComponentWire', () => {
     it('rejects a double the engine cannot hold as an f32', () => {
       // `as_f64() as f32` overflows to infinity in Rust and the entry is dropped.
       // `Number.isFinite(1e300)` is true, so a plain finite check kept it.
-      expect(built({ waypoints: [[1e300, 0, 0], [1, 2, 3]] })).toEqual([[1, 2, 3]]);
+      // Three points in, two out: the survivors have to clear the two-point
+      // minimum below, or the default route would mask which entry was dropped.
+      expect(built({ waypoints: [[1e300, 0, 0], [1, 2, 3], [7, 8, 9]] })).toEqual([
+        [1, 2, 3],
+        [7, 8, 9],
+      ]);
     });
 
-    it('falls back to the Rust default route when nothing survives', () => {
-      // `if !waypoints.is_empty()` in the engine — an empty list would leave
-      // `system_moving_platform` refusing to move the platform at all.
+    it('falls back to the Rust default route when fewer than two points survive', () => {
+      // `system_moving_platform` early-returns at `data.waypoints.len() < 2`, so a
+      // route with one usable point is a platform the store draws and the engine
+      // never moves — and `dispatchCommand` returns `void`, so nothing reports it.
+      // The default route is what both sides then hold.
       const fallback = [
         [0, 0, 0],
         [0, 3, 0],
       ];
       expect(built({ waypoints: ['junk', []] })).toEqual(fallback);
       expect(built({ waypoints: [] })).toEqual(fallback);
+      expect(built({ waypoints: [[1, 2, 3]] })).toEqual(fallback);
+      expect(built({ waypoints: [[1, 2, 3], 'junk'] })).toEqual(fallback);
       expect(built({ waypoints: 'not an array' })).toEqual(fallback);
     });
 
@@ -488,13 +499,19 @@ describe('gameComponentWire', () => {
       // as `undefined` and crosses the wire as `null`; the engine's `as_f64()`
       // returns `None` for that and drops the point, while the store keeps it.
       // The hole below is deliberate — it IS the input under test.
-      expect(built({ waypoints: [[0, , 0], [4, 5, 6]] })).toEqual([[4, 5, 6]]);
+      expect(built({ waypoints: [[0, , 0], [4, 5, 6], [7, 8, 9]] })).toEqual([
+        [4, 5, 6],
+        [7, 8, 9],
+      ]);
     });
 
     it('drops a waypoint that is nothing but holes', () => {
       // `new Array(3)` — a pre-sized accumulator whose slots were never all
       // filled in — is all holes, and so passes `.every` outright.
-      expect(built({ waypoints: [new Array(3), [4, 5, 6]] })).toEqual([[4, 5, 6]]);
+      expect(built({ waypoints: [new Array(3), [4, 5, 6], [7, 8, 9]] })).toEqual([
+        [4, 5, 6],
+        [7, 8, 9],
+      ]);
     });
 
     it('does not let a sparse waypoint eat the cap budget', () => {
@@ -535,8 +552,12 @@ describe('gameComponentWire', () => {
    * waypoint cap above is: a hand-copied bound is a second copy that drifts, and
    * this particular drift is silent by construction. Adding a clamped field to
    * `build_game_component` without adding it to the TypeScript table fails here.
+   *
+   * The two string enums are the same category of hand-mirrored table, so they
+   * are pinned out of the same scan at the end of this block rather than from a
+   * second read of the file.
    */
-  describe('numeric ranges, pinned against the engine', () => {
+  describe('tables pinned against the engine source', () => {
     const rustSource = readFileSync(
       resolve(__dirname, '../../../../../engine/src/core/game_components.rs'),
       'utf8',
@@ -568,8 +589,11 @@ describe('gameComponentWire', () => {
     for (let match = armHeader.exec(body); match !== null; match = armHeader.exec(body)) {
       armStarts.push({ name: match[1], start: match.index });
     }
+    /** Each arm's own source text, so the enum scans below read the same slices. */
+    const armText: Record<string, string> = {};
     armStarts.forEach((arm, i) => {
       const text = body.slice(arm.start, armStarts[i + 1]?.start ?? body.length);
+      armText[arm.name] = text;
       for (const [, key, min, max] of text.matchAll(
         /prop_f32\(&props,\s*"(\w+)",\s*([^,]+),\s*([^)]+)\)/g,
       )) {
@@ -750,6 +774,71 @@ describe('gameComponentWire', () => {
         },
       });
     });
+
+    /**
+     * Both helpers go through the real production path rather than calling `oneOf`
+     * directly. Every `collectAll` elsewhere in the suite is a hand-built object
+     * literal that never touches coercion, so nothing proved the vocabulary was
+     * reachable — only that its declared members were well-typed.
+     */
+    const oneOfLoopMode = (v: unknown) => {
+      const c = parseGameComponentWire({
+        componentType: 'moving_platform',
+        properties: { loopMode: v },
+      });
+      return c?.type === 'movingPlatform' ? c.movingPlatform.loopMode : null;
+    };
+    const oneOfConditionType = (v: unknown) => {
+      const c = parseGameComponentWire({
+        componentType: 'win_condition',
+        properties: { conditionType: v },
+      });
+      return c?.type === 'winCondition' ? c.winCondition.conditionType : null;
+    };
+
+    it('round-trips every declared enum member through coercion', () => {
+      // Each member must survive `oneOf` as itself. A member deleted from the
+      // vocabulary collapses to the fallback here, which is the failure the type
+      // system cannot see.
+      for (const mode of PLATFORM_LOOP_MODES) expect(oneOfLoopMode(mode)).toBe(mode);
+      for (const type of WIN_CONDITION_TYPES) expect(oneOfConditionType(type)).toBe(type);
+    });
+
+    /**
+     * The two string enums are the same category of hand-mirrored table as the
+     * numeric bounds above, so they get the same treatment. The engine's `match`
+     * lists only the non-default members; its `_ =>` arm supplies the rest. So the
+     * vocabulary the TypeScript must accept is `explicit arms ∪ {fallback}`, and
+     * its own fallback must be the Rust's. Renaming `collectAll` on either side
+     * alone fails here.
+     */
+    const rustEnum = (arm: string, enumName: string): { members: string[]; fallback: string } => {
+      const members = [
+        ...arm.matchAll(new RegExp(String.raw`"(\w+)"\s*=>\s*${enumName}::(\w+)`, 'g')),
+      ].map(m => m[1]);
+      const fallbackMatch = arm.match(new RegExp(String.raw`_\s*=>\s*${enumName}::(\w+)`));
+      if (!fallbackMatch) throw new Error(`no \`_ =>\` fallback arm found for ${enumName}`);
+      // Rust variant `PingPong` ⇒ wire member `pingPong`; the enum derives camelCase.
+      const fallback = fallbackMatch[1].charAt(0).toLowerCase() + fallbackMatch[1].slice(1);
+      return { members, fallback };
+    };
+
+    it('accepts exactly the platform loop modes the engine understands', () => {
+      const { members, fallback } = rustEnum(armText.moving_platform, 'PlatformLoopMode');
+      expect(members.length, 'no explicit loopMode arms found — the scan broke').toBeGreaterThan(0);
+      expect([...PLATFORM_LOOP_MODES].sort()).toEqual([...new Set([...members, fallback])].sort());
+      // The fallback is what an unknown string collapses to on both sides.
+      expect(oneOfLoopMode('nonsense')).toBe(fallback);
+    });
+
+    it('accepts exactly the win condition types the engine understands', () => {
+      const { members, fallback } = rustEnum(armText.win_condition, 'WinConditionType');
+      expect(members.length, 'no explicit conditionType arms found — the scan broke').toBeGreaterThan(
+        0,
+      );
+      expect([...WIN_CONDITION_TYPES].sort()).toEqual([...new Set([...members, fallback])].sort());
+      expect(oneOfConditionType('nonsense')).toBe(fallback);
+    });
   });
 
   describe('sparse vec3 fields', () => {
@@ -871,9 +960,20 @@ describe('store -> wire -> store round trip', () => {
     },
   };
 
-  /** The component's own data object, whichever key it hangs off. */
+  /**
+   * The component's own data object, whichever key it hangs off.
+   *
+   * The `!` this used to carry made the helper fail open: a component whose data bag
+   * is missing yielded `undefined`, and the completeness loop below then iterated zero
+   * keys and passed having asserted nothing. Throw instead — a missing bag is the
+   * failure, not a reason to skip.
+   */
   function dataOf(component: GameComponentData): Record<string, unknown> {
-    return (component as unknown as Record<string, Record<string, unknown>>)[component.type]!;
+    const bag = (component as unknown as Record<string, Record<string, unknown> | undefined>)[
+      component.type
+    ];
+    if (bag === undefined) throw new Error(`component "${component.type}" has no data bag`);
+    return bag;
   }
 
   it('covers every component type', () => {
@@ -959,6 +1059,10 @@ describe('out-of-range values are clamped, not stored verbatim', () => {
     expect(roundTrip(componentType, key, 2.6)).toBe(3);
     expect(roundTrip(componentType, key, -5)).toBe(0);
     expect(roundTrip(componentType, key, max + 1000)).toBe(max);
+    // The exact bounds, which the f32 sweep covers and this one used to skip: an
+    // off-by-one in the clamp is invisible to a max+1000 probe.
+    expect(roundTrip(componentType, key, max)).toBe(max);
+    expect(roundTrip(componentType, key, 0)).toBe(0);
   });
 });
 

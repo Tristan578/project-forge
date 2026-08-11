@@ -143,8 +143,10 @@ export function toWireComponent(component: GameComponentData): GameComponentWire
  * tool call is exactly as untrusted as one arriving from the LLM, and `buildStoreComponent`
  * is where every field gets range-checked against the engine's own bounds.
  *
- * Returns `null` for an unrecognised `componentType` or a `properties` that is not an
- * object, matching `build_game_component`'s two hard errors.
+ * Returns `null` for an unrecognised `componentType` or a `properties` that is present
+ * but not a plain object, matching `build_game_component`'s two hard errors. An ABSENT
+ * `properties` is not an error — it yields a fully-defaulted component, because the
+ * engine substitutes an empty object for a missing key. See the note on that split below.
  */
 export function parseGameComponentWire(payload: {
   componentType: string;
@@ -278,7 +280,21 @@ export const ENGINE_COMPONENT_CATALOG: readonly { name: string; description: str
   }));
 
 const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
-const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v : fallback);
+
+/**
+ * The longest string any of these fields is allowed to carry.
+ *
+ * These are identifiers and event names — an entity id, a sound asset, a
+ * dialogue tree key. None has a legitimate 300-character form, and the ones
+ * that name something (`targetEntityId`, `onTrigger`) are matched for equality
+ * on the engine side, so a value that is too long is not a value that half
+ * works: it names nothing. The bound is a rejection, never a truncation —
+ * half an entity id names the WRONG entity, which is worse than no id at all.
+ */
+const MAX_STRING_LEN = 256;
+
+const str = (v: unknown, fallback: string): string =>
+  typeof v === 'string' && v.length <= MAX_STRING_LEN ? v : fallback;
 /**
  * Finite as the engine sees it, not as JS sees it.
  *
@@ -316,7 +332,9 @@ const vec3 = (v: unknown, fallback: [number, number, number]): [number, number, 
   return isEngineFinite(x) && isEngineFinite(y) && isEngineFinite(z) ? [x, y, z] : fallback;
 };
 const nullableStr = (v: unknown, fallback: string | null): string | null =>
-  v === null ? null : typeof v === 'string' ? v : fallback;
+  v === null ? null
+    : typeof v === 'string' && v.length <= MAX_STRING_LEN ? v
+      : fallback;
 
 /** An engine `prop_f32` range: both bounds inclusive, both applied by clamping. */
 export interface EngineRange {
@@ -463,8 +481,52 @@ const waypointList = (
   // `if !waypoints.is_empty()` in the engine: an all-malformed list leaves the
   // Rust `Default` route standing rather than an empty one, which
   // `system_moving_platform` would refuse to move at all.
-  return out.length > 0 ? out : fallback;
+  //
+  // Two, not one. `system_moving_platform` early-returns below two waypoints and
+  // reports nothing, so a surviving single point is a platform the store shows a
+  // route for and the engine never moves — the same silent divergence an empty
+  // list produces, just harder to see in the inspector.
+  return out.length >= 2 ? out : fallback;
 };
+
+/**
+ * A value from a closed vocabulary, or the fallback.
+ *
+ * The engine parses both of these with a trailing `_ =>` arm, so an unrecognised
+ * string is not rejected there — it quietly becomes `PingPong` or `Score`. That
+ * makes an unvalidated cast here worse than a hard error would be: the store kept
+ * whatever string it was handed (`'bounce'`, `'PingPong'`, `'survive'`) and the
+ * engine ran its own default, and the two only disagree at runtime.
+ */
+const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T =>
+  typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
+
+/**
+ * The two enum vocabularies, built from objects rather than array literals.
+ *
+ * `readonly PlatformLoopMode[]` proves every element is a valid member; it cannot
+ * prove the list is complete. Deleting `'collectAll'` from an array literal type-checks
+ * fine and every collect-all win condition silently collapses to `'score'` on the next
+ * store write — `normalizeGameComponent` runs on all of them. `satisfies Record<T, true>`
+ * on an object is bidirectional: a missing key fails the `Record` constraint and an
+ * invented one fails the excess-property check.
+ *
+ * The values are pinned against the Rust by `gameComponentWire.test.ts`. Note the
+ * fallback member is deliberately absent from the engine's `match`: `pingPong` and
+ * `score` are its `_ =>` arms, so they round-trip through the fallback rather than
+ * through an explicit arm.
+ */
+export const PLATFORM_LOOP_MODES = Object.keys({
+  pingPong: true,
+  loop: true,
+  once: true,
+} satisfies Record<PlatformLoopMode, true>) as readonly PlatformLoopMode[];
+
+export const WIN_CONDITION_TYPES = Object.keys({
+  score: true,
+  collectAll: true,
+  reachGoal: true,
+} satisfies Record<WinConditionType, true>) as readonly WinConditionType[];
 
 /**
  * Coerce a whole-number field the same way the engine's `prop_u32` does.
@@ -494,21 +556,6 @@ const int = (v: unknown, fallback: number, max: number): number =>
  */
 const nullableInt = (v: unknown, fallback: number | null, max: number): number | null =>
   v === null ? null : typeof v === 'number' && Number.isFinite(v) ? int(v, 0, max) : fallback;
-
-/**
- * A value from a closed vocabulary, or the fallback.
- *
- * The engine parses both of these with a trailing `_ =>` arm, so an unrecognised
- * string is not rejected there — it quietly becomes `PingPong` or `Score`. That
- * makes an unvalidated cast here worse than a hard error would be: the store kept
- * whatever string it was handed (`'bounce'`, `'PingPong'`, `'survive'`) and the
- * engine ran its own default, and the two only disagree at runtime.
- */
-const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T =>
-  typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
-
-const PLATFORM_LOOP_MODES: readonly PlatformLoopMode[] = ['pingPong', 'loop', 'once'];
-const WIN_CONDITION_TYPES: readonly WinConditionType[] = ['score', 'collectAll', 'reachGoal'];
 
 /**
  * Build a COMPLETE store component from a partial properties bag.

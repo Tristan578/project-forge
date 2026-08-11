@@ -1251,20 +1251,39 @@ describe('compoundHandlers', () => {
         .toBe(0);
     });
 
+    const controllerFrom = (store: { addGameComponent: unknown }): Record<string, number> => {
+      const calls = (store.addGameComponent as ReturnType<typeof vi.fn>).mock.calls;
+      const controller = calls.find(([, c]) => (c as { type?: string }).type === 'characterController');
+      return (controller?.[1] as { characterController: Record<string, number> }).characterController;
+    };
+
     it('validates game component props reaching setup_character too', async () => {
       const { store } = await invoke('setup_character', {
-        controller: { speed: 1e40, jumpHeight: -5 },
+        controller: { speed: 1e6, jumpHeight: -5 },
       }, {
         spawnEntity: vi.fn(() => 'char-1'),
       });
 
-      const calls = (store.addGameComponent as ReturnType<typeof vi.fn>).mock.calls;
-      const controller = calls.find(([, c]) => (c as { type?: string }).type === 'characterController');
-      const cc = (controller?.[1] as { characterController: Record<string, number> }).characterController;
       // 1000 is the engine's own ceiling for `speed`, not a number chosen here
       // — `helpers.test.ts` reads every one of these bounds out of the Rust.
+      const cc = controllerFrom(store);
       expect(cc.speed).toBe(1000);
       expect(cc.jumpHeight).toBe(0);
+    });
+
+    it('takes the engine default, not the ceiling, for a value f32 cannot hold', async () => {
+      // `prop_f32` is `as_f64() as f32` then `is_finite().then(|| clamp(..))`, so a
+      // double that overflows f32 answers `None` and the field keeps its `Default`
+      // — it is never clamped to `max`. Clamping here instead would leave the store
+      // showing 1000 for a controller the engine is running at 5, which is the exact
+      // silent split this whole module exists to close.
+      const { store } = await invoke('setup_character', {
+        controller: { speed: 1e40 },
+      }, {
+        spawnEntity: vi.fn(() => 'char-1'),
+      });
+
+      expect(controllerFrom(store).speed).toBe(5);
     });
 
     // Each compound tool reaches the builders by its own path, and the defect
