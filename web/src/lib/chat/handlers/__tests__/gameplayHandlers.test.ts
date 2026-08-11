@@ -630,6 +630,21 @@ describe('get_game_camera', () => {
     const data = result.result as { isActive: boolean };
     expect(data.isActive).toBe(false);
   });
+
+  // `entityId` is model-chosen and `zEntityId` is `z.string().min(1)`, so any
+  // `Object.prototype` key reaches the lookup. A bare `allGameCameras[entityId]`
+  // returns the inherited FUNCTION for these, and the handler would report it as
+  // the entity's camera. The other cases in this block use ids that miss as own
+  // keys AND miss on the prototype, so they pass with or without the guard —
+  // this is the one that distinguishes them.
+  it.each(['constructor', 'toString', '__proto__', 'hasOwnProperty'])(
+    'reports no camera for the inherited key %s',
+    async (entityId) => {
+      const { result } = await invokeHandler(gameplayHandlers, 'get_game_camera', { entityId });
+      expect(result.success).toBe(true);
+      expect(result.result).toEqual({ camera: null, isActive: false });
+    },
+  );
 });
 
 // ===========================================================================
