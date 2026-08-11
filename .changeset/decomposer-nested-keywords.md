@@ -1,5 +1,5 @@
 ---
-"spawnforge-web": patch
+"web": patch
 ---
 
 Match GDD system keywords at word boundaries instead of anywhere in the prompt.
