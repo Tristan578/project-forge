@@ -153,11 +153,31 @@ describe('decomposeIntoSystems — keyword scoring', () => {
     expect(movement!.type).toBe('top-down');
   });
 
-  it('does not promote a category to core on a single word', () => {
-    const result = decomposeIntoSystems('a game with jumping');
+  it('reports one keyword but still scores a one-word genre prompt as core', () => {
+    // Deduplication must not leak into `priority`. 'platformer' trips both
+    // 'platformer' and 'platform', and that raw count is what has always meant
+    // "core". Dedup it too and this drops to `secondary`, which getSystemLabel
+    // renders as 'custom game' — the panel answering "no idea" to a prompt that
+    // named its genre outright.
+    const result = decomposeIntoSystems('a platformer where you collect coins');
     const movement = result.systems.find(s => s.category === 'movement');
-    expect(movement!.matchedKeywords).toEqual(['jumping']);
-    expect(movement!.priority).toBe('secondary');
+    expect(movement!.matchedKeywords).toEqual(['platformer']);
+    expect(movement!.priority).toBe('core');
+    expect(getSystemLabel(result)).toBe('walk & jump');
+  });
+
+  it('keeps the label for one-word genre prompts across the table', () => {
+    // The same demotion would have hit every entry whose genre noun contains a
+    // shorter keyword, so pin a spread of them rather than one example.
+    const cases: [string, string][] = [
+      ['an endless runner with coins to collect', 'auto-run'],
+      ['a first-person shooter with zombies', 'ranged combat'],
+      ['a fighting game with combos', 'combat'],
+      ['a 2d pixel art puzzle game', 'visual'],
+    ];
+    for (const [prompt, label] of cases) {
+      expect(getSystemLabel(decomposeIntoSystems(prompt))).toBe(label);
+    }
   });
 
   it('reports only the longest of a set of nested matches', () => {

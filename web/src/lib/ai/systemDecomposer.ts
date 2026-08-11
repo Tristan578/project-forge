@@ -129,24 +129,33 @@ const SYSTEM_KEYWORDS: Record<SystemCategory, { keywords: string[]; defaultType:
 };
 
 /**
- * The keywords an entry matched, counting each textual signal once.
+ * How one keyword entry scored against the prompt.
  *
- * A plain `keywords.filter(kw => text.includes(kw))` counts one word several
- * times wherever the table's keywords nest — and they nest all over it:
- * `platform` ⊂ `platformer`, `jump` ⊂ `jumping`, `run` ⊂ `runner`,
- * `race` ⊂ `racing`, `shoot` ⊂ `shooter`, `pixel` ⊂ `pixel art`. The inflated
- * count then decides two things it should not. It picks the winning entry, so
- * the word "jumping" alone outscored an explicit "top-down" and every such
- * prompt was classified as a platformer; and it sets `priority`, so a single
- * word promoted its category to `core` as if two independent signals had been
- * found.
+ * The two numbers answer different questions, and conflating them is the bug
+ * this function exists to prevent.
  *
- * A keyword that is a substring of another matched keyword carries no evidence
- * the longer one does not already carry, so it is dropped.
+ * `matched` counts each textual signal once. The table's keywords nest all over
+ * it — `platform` ⊂ `platformer`, `jump` ⊂ `jumping`, `run` ⊂ `runner`,
+ * `race` ⊂ `racing`, `shoot` ⊂ `shooter`, `pixel` ⊂ `pixel art` — so a plain
+ * `keywords.filter(kw => text.includes(kw))` counts one word several times. Used
+ * to pick between entries, that inflation is decisive and wrong: the single word
+ * "jumping" scored 2 and beat an explicit "top-down", so those prompts were
+ * classified as platformers. A keyword that is a substring of another matched
+ * keyword carries no evidence the longer one does not already carry, so it is
+ * dropped.
+ *
+ * `hits` keeps the raw count, and only `priority` reads it. A prompt that trips
+ * several of an entry's keywords — including inflected forms of one word — is
+ * leaning on that entry's own vocabulary, which is the signal `priority` has
+ * always meant by "core". Deduplicating here instead would quietly demote most
+ * one-word genre prompts ("a platformer…", "an endless runner…") to `secondary`,
+ * and `getSystemLabel` renders only `core` systems — so the panel would answer
+ * "custom game" to a prompt that named its genre outright.
  */
-function distinctMatches(keywords: string[], text: string): string[] {
-  const matched = [...new Set(keywords.filter(kw => text.includes(kw)))];
-  return matched.filter(kw => !matched.some(other => other !== kw && other.includes(kw)));
+function scoreEntry(keywords: string[], text: string): { matched: string[]; hits: number } {
+  const hit = [...new Set(keywords.filter(kw => text.includes(kw)))];
+  const matched = hit.filter(kw => !hit.some(other => other !== kw && other.includes(kw)));
+  return { matched, hits: hit.length };
 }
 
 /** Length of the longest matched keyword — the specificity of a match set. */
@@ -167,6 +176,10 @@ function specificityOf(matched: string[]): number {
  * sit in the table: "a top-down game where you jump" matches one keyword in
  * each of two entries, and `top-down` is the more specific claim.
  *
+ * `priority` deliberately keeps reading the raw hit count rather than the
+ * deduplicated one — see `scoreEntry`. Which entry wins and how confident we
+ * are in it are separate questions.
+ *
  * @param prompt - Natural language game description
  * @returns SystemDecomposition with detected systems and summary
  */
@@ -178,9 +191,10 @@ export function decomposeIntoSystems(prompt: string): SystemDecomposition {
     let bestEntry: { defaultType: string; matchedKeywords: string[] } | null = null;
     let bestScore = 0;
     let bestSpecificity = 0;
+    let bestHits = 0;
 
     for (const entry of entries) {
-      const matched = distinctMatches(entry.keywords, lower);
+      const { matched, hits } = scoreEntry(entry.keywords, lower);
       if (matched.length === 0) continue;
 
       const specificity = specificityOf(matched);
@@ -190,6 +204,7 @@ export function decomposeIntoSystems(prompt: string): SystemDecomposition {
       if (wins) {
         bestScore = matched.length;
         bestSpecificity = specificity;
+        bestHits = hits;
         bestEntry = { defaultType: entry.defaultType, matchedKeywords: matched };
       }
     }
@@ -198,7 +213,7 @@ export function decomposeIntoSystems(prompt: string): SystemDecomposition {
       detected.push({
         category,
         type: bestEntry.defaultType,
-        priority: bestScore >= 2 ? 'core' : 'secondary',
+        priority: bestHits >= 2 ? 'core' : 'secondary',
         matchedKeywords: bestEntry.matchedKeywords,
       });
     }
