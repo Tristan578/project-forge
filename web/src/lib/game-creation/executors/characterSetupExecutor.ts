@@ -85,29 +85,36 @@ export const characterSetupExecutor: ExecutorDefinition = {
       ? characterControllerFromProfile(resolvePhysicsProfile(feel.data, systemConfig))
       : DEFAULT_CONTROLLER;
 
-    // [B5] Route based on project type
+    // The CharacterController is what makes the player movable, and it is not a
+    // 3D-only concern: `system_character_controller` is the only input-driven
+    // movement system the engine has, and `core/commands/sprites.rs` exposes no
+    // movement verb at all (`set_2d_body_type` / `set_2d_collider_shape` are
+    // rapier2d body and collider config, which no input touches). The 2D branch
+    // used to add no movement component whatsoever, so every generated 2D game
+    // shipped a player that could not move — silently, because the failure is a
+    // command that was never sent. The engine maps this controller onto Y under
+    // `ProjectType::TwoD` (PF-1124).
+    //
+    // The properties bag must be COMPLETE. `build_game_component` deserializes
+    // it with strict serde, and `CharacterControllerData` declares no serde
+    // defaults, so a bag missing even one field fails to deserialize and the
+    // component is dropped — leaving the generated player unable to move, with
+    // no error surfaced (`dispatchCommand` returns void). Building the store
+    // value and converting keeps every field accounted for by the typechecker.
+    ctx.dispatchCommand('add_game_component', {
+      entityId,
+      ...toWireComponent({
+        type: 'characterController',
+        characterController: { ...controller, canDoubleJump: false },
+      }),
+    });
+
     if (projectType === '2d') {
-      // 2D: create the skeleton for skeletal animation. `skeletonData` is optional
-      // and the engine defaults it, so an empty rig needs no payload beyond the
-      // entity. (This used to dispatch `set_skeleton_2d`, which is not a command
-      // the engine implements — the rig was never created.)
+      // 2D also gets the skeleton for skeletal animation. `skeletonData` is
+      // optional and the engine defaults it, so an empty rig needs no payload
+      // beyond the entity. (This used to dispatch `set_skeleton_2d`, which is
+      // not a command the engine implements — the rig was never created.)
       ctx.dispatchCommand('create_skeleton2d', { entityId });
-    } else {
-      // 3D: add the CharacterController that makes the player movable.
-      //
-      // The properties bag must be COMPLETE. `build_game_component` deserializes
-      // it with strict serde, and `CharacterControllerData` declares no serde
-      // defaults, so a bag missing even one field fails to deserialize and the
-      // component is dropped — leaving the generated player unable to move, with
-      // no error surfaced (`dispatchCommand` returns void). Building the store
-      // value and converting keeps every field accounted for by the typechecker.
-      ctx.dispatchCommand('add_game_component', {
-        entityId,
-        ...toWireComponent({
-          type: 'characterController',
-          characterController: { ...controller, canDoubleJump: false },
-        }),
-      });
     }
 
     return successResult({

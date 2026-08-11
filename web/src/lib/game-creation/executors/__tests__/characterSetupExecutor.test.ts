@@ -88,6 +88,84 @@ describe('characterSetupExecutor', () => {
     });
   });
 
+  // A skeleton is an animation rig, not a movement component. The 2D branch
+  // dispatched only `create_skeleton2d`, so every generated 2D game shipped a
+  // player that could not move — and nothing surfaced it, because the missing
+  // command is a command never sent (PF-1124).
+  //
+  // `characterController` is the only option the engine offers, not a 3D
+  // convenience: `system_character_controller` is its only input-driven
+  // movement system, and `core/commands/sprites.rs` exposes no movement verb at
+  // all (`set_2d_body_type` / `set_2d_collider_shape` are rapier2d body and
+  // collider config, which no input touches). The engine maps that controller
+  // onto Y under `ProjectType::TwoD`.
+  describe('2D players get a movement component', () => {
+    it('adds the CharacterController alongside the skeleton', async () => {
+      const ctx = makeCtx();
+      const result = await characterSetupExecutor.execute({
+        entity: { name: 'Sprite', role: 'player' },
+        projectType: '2d',
+        entityId: 'ent_2d',
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', {
+        entityId: 'ent_2d',
+        componentType: 'character_controller',
+        properties: { speed: 5, jumpHeight: 2, gravityScale: 1, canDoubleJump: false },
+      });
+      expect(ctx.dispatchCommand).toHaveBeenCalledTimes(2);
+    });
+
+    // One resolver, not a second table: the 2D controller comes from the same
+    // `resolvePhysicsProfile` the 3D branch uses, so the two cannot drift.
+    it('derives the 2D controller from the feel directive', async () => {
+      const ctx = makeCtx();
+      await characterSetupExecutor.execute({
+        entity: { name: 'Sprite', role: 'player' },
+        projectType: '2d',
+        entityId: 'ent_2d_floaty',
+        feelDirective: {
+          mood: 'dreamy',
+          pacing: 'medium',
+          weight: 'floaty',
+          referenceGames: [],
+          oneLiner: 'drifting through the dark',
+        },
+      }, ctx);
+
+      // floaty + medium -> platformer_floaty, identical to the 3D case.
+      expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', {
+        entityId: 'ent_2d_floaty',
+        componentType: 'character_controller',
+        properties: { speed: 6, jumpHeight: 8, gravityScale: 0.5, canDoubleJump: false },
+      });
+    });
+
+    it('produces different 2D movement for a different feel', async () => {
+      const ctx = makeCtx();
+      await characterSetupExecutor.execute({
+        entity: { name: 'Knight', role: 'player' },
+        projectType: '2d',
+        entityId: 'ent_2d_heavy',
+        feelDirective: {
+          mood: 'grim',
+          pacing: 'medium',
+          weight: 'heavy',
+          referenceGames: [],
+          oneLiner: 'every step costs you',
+        },
+      }, ctx);
+
+      // heavy + medium -> rpg_weighty.
+      expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', {
+        entityId: 'ent_2d_heavy',
+        componentType: 'character_controller',
+        properties: { speed: 4, jumpHeight: 12, gravityScale: 2, canDoubleJump: false },
+      });
+    });
+  });
+
   // The entity is no longer defaulted. A default named 'Player' silently bound
   // the rig to whatever happened to carry that name — or to nothing at all,
   // since the GDD names its own characters.
