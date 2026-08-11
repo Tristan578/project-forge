@@ -165,7 +165,10 @@ describe('movement system', () => {
 });
 
 describe('camera system', () => {
-  it('produces scene_create step with camera config', () => {
+  // Repointed from `scene_create` in PF-1125: scene creation runs before any
+  // entity is spawned, so it had no camera entity to configure and the directive
+  // was dropped for every generated game.
+  it('produces camera_setup step with camera config', () => {
     const def = SYSTEM_REGISTRY.get('camera')!;
     const system = makeSystem({ category: 'camera', type: 'follow', config: { smoothing: 0.8 } });
     const gdd = makeGDD();
@@ -173,7 +176,7 @@ describe('camera system', () => {
     const steps = def.setupSteps(system, gdd, makeCtx());
 
     expect(steps).toHaveLength(1);
-    expect(steps[0].executor).toBe('scene_create');
+    expect(steps[0].executor).toBe('camera_setup');
     expect(steps[0].input).toEqual({ cameraMode: 'follow', cameraConfig: { smoothing: 0.8 } });
   });
 });

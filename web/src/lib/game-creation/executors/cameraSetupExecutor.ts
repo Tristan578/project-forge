@@ -1,0 +1,109 @@
+import { z } from 'zod';
+import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
+import { makeStepError, successResult, failResult } from './shared';
+import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
+import {
+  filterCameraNumerics,
+  normalizeCameraMode,
+  resolveCameraEntityId,
+} from '../cameraResolution';
+// Type-only: erased at compile time, so this adds no module edge into `@/stores`
+// (see `__tests__/serverSafeImports.test.ts` — this file is reachable from an
+// API route and a value-import of the store would break the RSC build).
+import type { GameCameraData, GameCameraMode } from '@/stores/slices/types';
+
+/**
+ * Apply the GDD's camera directive to the scene's camera entity.
+ *
+ * This executor exists because the directive used to be DROPPED. The camera
+ * system's setup step pointed at `scene_create`, whose camera branch fires only
+ * when `cameraConfig.entityId` is a string — and the GDD never supplies one,
+ * because at plan time no camera entity exists yet. So the directive was
+ * normalized, allowlist-filtered, and returned as `pendingCameraConfig` for a
+ * consumer that was never written: grep found zero production readers. Every
+ * generated game got the engine's default `thirdPersonFollow`, including the 2D
+ * ones, and no test or log could see it (PF-1125).
+ *
+ * A separate executor rather than a fix inside `scene_create`: the two run at
+ * different times. Scene creation happens before any entity is spawned; camera
+ * configuration can only happen after, which is precisely the ordering
+ * `scene_create` could not express.
+ */
+
+const inputSchema = z.object({
+  cameraMode: z.string().optional(),
+  cameraConfig: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const cameraSetupExecutor: ExecutorDefinition = {
+  name: 'camera_setup',
+  inputSchema,
+  userFacingErrorMessage:
+    'Could not configure the game camera. Your game is playable — the camera uses engine defaults.',
+
+  async execute(
+    input: Record<string, unknown>,
+    ctx: ExecutorContext,
+  ): Promise<ExecutorResult> {
+    const parsed = inputSchema.safeParse(input);
+    if (!parsed.success) {
+      return failResult(
+        makeStepError('INVALID_INPUT', parsed.error.message, this.userFacingErrorMessage),
+      );
+    }
+
+    if (ctx.signal.aborted) {
+      return failResult(
+        makeStepError(
+          'ABORTED',
+          'Executor was aborted before running',
+          this.userFacingErrorMessage,
+        ),
+      );
+    }
+
+    const mode: GameCameraMode = normalizeCameraMode(parsed.data.cameraMode);
+
+    // Live read. The camera entity is spawned by an earlier step in the same
+    // pipeline, so a snapshot taken at pipeline start cannot see it — and
+    // `set_game_camera` against an id the engine does not have is a silent no-op
+    // (PF-1118).
+    const entityId = resolveCameraEntityId(Object.values(ctx.getStore().sceneGraph.nodes));
+
+    if (!entityId) {
+      // Not a failure: the game still plays on the engine's default camera, and
+      // failing the step would abort a pipeline over a cosmetic gap. But it is
+      // reported rather than swallowed, so the directive going unapplied is
+      // visible in the step output instead of being indistinguishable from
+      // success — which is how PF-1125 stayed invisible for as long as it did.
+      return successResult({
+        cameraMode: mode,
+        applied: false,
+        warning: 'No camera entity found in the scene — camera directive not applied',
+      });
+    }
+
+    // Spread of an already-projected object, not of the raw GDD config:
+    // `filterCameraNumerics` returns only own, finite values under keys drawn from
+    // the translator's own field list, so this carries nothing the model chose.
+    // The wire form is then PICKED key-by-key by `buildSetGameCameraPayload` —
+    // a `satisfies` on a spread is inert, so picking is the only construction
+    // that actually constrains what reaches the engine (PF-1126).
+    const cameraData: Partial<GameCameraData> & { mode: GameCameraMode } = {
+      mode,
+      targetEntity: null,
+      ...filterCameraNumerics(parsed.data.cameraConfig),
+    };
+
+    ctx.dispatchCommand('set_game_camera', buildSetGameCameraPayload(entityId, cameraData));
+    // Configuring a camera the engine is not rendering through would be a no-op
+    // from the player's point of view, so activation is part of the same step.
+    ctx.dispatchCommand('set_active_game_camera', { entityId });
+
+    return successResult({
+      cameraMode: mode,
+      cameraEntityId: entityId,
+      applied: true,
+    });
+  },
+};

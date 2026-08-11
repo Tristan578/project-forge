@@ -20,6 +20,7 @@ export type ExecutorName =
   | 'plan_present'
   | 'scene_create'
   | 'physics_profile'
+  | 'camera_setup'
   | 'character_setup'
   | 'entity_setup'
   | 'asset_generate'

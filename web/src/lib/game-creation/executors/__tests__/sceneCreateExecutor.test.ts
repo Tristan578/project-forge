@@ -70,7 +70,7 @@ describe('sceneCreateExecutor', () => {
     const ctx = makeCtx();
     const before = loadProjectScenes().scenes.length;
 
-    const result = await sceneCreateExecutor.execute({ cameraMode: 'top-down' }, ctx);
+    const result = await sceneCreateExecutor.execute({ worldType: 'tiled' }, ctx);
 
     expect(result.success).toBe(true);
     expect(loadProjectScenes().scenes.length).toBe(before);
@@ -78,7 +78,14 @@ describe('sceneCreateExecutor', () => {
     expect(ctx.getStore().setScenes).not.toHaveBeenCalled();
   });
 
-  it('still applies camera config on a primary creation step', async () => {
+  // Camera configuration moved out of this executor in PF-1125 — it lives in
+  // `camera_setup`, which runs after entities exist. `cameraMode`/`cameraConfig`
+  // were REMOVED from the schema rather than ignored, so a step that still sends
+  // them is a visible no-op instead of a value that vanishes: `z.object` strips
+  // unknown keys, and an accepted-but-unread field is the silent-drop defect
+  // itself. This pins that neither the dispatch nor the old `pendingCameraConfig`
+  // output can come back here.
+  it('ignores camera fields entirely — no dispatch, no pending output', async () => {
     const ctx = makeCtx();
     const result = await sceneCreateExecutor.execute({
       name: 'Arena',
@@ -87,92 +94,10 @@ describe('sceneCreateExecutor', () => {
     }, ctx);
 
     expect(result.success).toBe(true);
-    // Translated into the engine's vocabulary — `sideScrollerDistance` is the
-    // store's authoring name for the engine's `zOffset`, and the engine drops
-    // every name it does not recognize without an error (PF-1126).
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', {
-      entityId: 'cam-1',
-      mode: 'sideScroller',
-      targetEntity: null,
-      zOffset: 12,
-    });
-  });
+    expect(result.output).toEqual({ sceneName: 'Arena', worldType: null });
 
-  it('drops camera config keys no engine camera variant has', async () => {
-    const ctx = makeCtx();
-    const result = await sceneCreateExecutor.execute({
-      name: 'Arena',
-      cameraMode: 'top-down',
-      cameraConfig: {
-        entityId: 'cam-1',
-        topDownHeight: 20,
-        // Names the old hand-written allowlist accepted and dispatched flat.
-        topDownAngle: 45,
-        sideScrollerHeight: 6,
-        followLookAhead: 2,
-      },
-    }, ctx);
-
-    expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', {
-      entityId: 'cam-1',
-      mode: 'topDown',
-      targetEntity: null,
-      height: 20,
-    });
-  });
-
-  it('does not read camera params off the prototype chain', async () => {
-    const ctx = makeCtx();
-    // `cameraConfig` is GDD-derived, so the model controls its keys, and a
-    // `__proto__` entry in that JSON produces exactly this object.
-    //
-    // Pins the PROPERTY, not one implementation of it: two independent guards
-    // hold here — Zod's `z.record()` parse rebuilds the input as a plain object,
-    // and the param loop reads own keys only — so this passes with either one
-    // alone and only fails if BOTH go. That is weaker than a single-guard test
-    // would be, and it is the honest shape given where the guards live.
-    const cameraConfig = Object.create({ topDownHeight: 999 }) as Record<string, unknown>;
-    cameraConfig['entityId'] = 'cam-1';
-
-    const result = await sceneCreateExecutor.execute({
-      name: 'Arena',
-      cameraMode: 'top-down',
-      cameraConfig,
-    }, ctx);
-
-    expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', {
-      entityId: 'cam-1',
-      mode: 'topDown',
-      targetEntity: null,
-    });
-  });
-
-  it('does not read pending camera params off the prototype chain', async () => {
-    const ctx = makeCtx();
-    // Same input, the other branch: with no `entityId` there is no camera entity
-    // to dispatch against, so the config is filtered into `pendingCameraConfig`
-    // for a downstream step instead. That second loop is a separate read and had
-    // no pin of its own.
-    //
-    // Measured, not assumed: stripping the loop's `Object.hasOwn` leaves this
-    // test green, because Zod's `z.record()` parse rebuilds the input as a plain
-    // object before either loop sees it and `execute()` offers no seam past it.
-    // So this pins the PROPERTY — an inherited param never reaches downstream —
-    // and the loop guard is the independently-true local version, held so the
-    // read stays correct if the schema is ever loosened to passthrough. Same
-    // honest shape as the dispatch-path test above.
-    const cameraConfig = Object.create({ topDownHeight: 999 }) as Record<string, unknown>;
-
-    const result = await sceneCreateExecutor.execute({
-      name: 'Arena',
-      cameraMode: 'top-down',
-      cameraConfig,
-    }, ctx);
-
-    expect(result.success).toBe(true);
-    expect(result.output?.pendingCameraConfig).toEqual({ mode: 'topDown', config: {} });
+    const commands = (ctx.dispatchCommand as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+    expect(commands).toEqual(['new_scene']);
   });
 
   it('aborts before touching persisted scenes', async () => {
