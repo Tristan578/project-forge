@@ -76,6 +76,27 @@ describe('sceneCreateExecutor', () => {
     expect(loadProjectScenes().scenes.length).toBe(before);
     expect(ctx.dispatchCommand).not.toHaveBeenCalledWith('new_scene', {});
     expect(ctx.getStore().setScenes).not.toHaveBeenCalled();
+    expect(result.output).toEqual({ sceneName: 'Untitled Scene', worldType: 'tiled' });
+  });
+
+  // `worldConfig` is accepted by the schema and then goes nowhere: there is no
+  // scene-level world build command to send it to. The executor used to carry an
+  // empty `if (worldType === 'tiled' || worldConfig) {}` with a comment claiming
+  // the config was "stored in step output for downstream use", which is exactly
+  // the shape a real handler would have. Assert the full output rather than a
+  // subset, so the drop is a stated fact here instead of a gap a reader has to
+  // notice — and so wiring it up later fails this test rather than passing
+  // quietly.
+  it('drops worldConfig — it reaches no engine command and no step output', async () => {
+    const ctx = makeCtx();
+    const result = await sceneCreateExecutor.execute({
+      worldType: 'tiled',
+      worldConfig: { tileSize: 32, gridWidth: 40, gridHeight: 24 },
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.output).toEqual({ sceneName: 'Untitled Scene', worldType: 'tiled' });
+    expect(ctx.dispatchCommand).not.toHaveBeenCalled();
   });
 
   // Camera configuration moved out of this executor in PF-1125 — it lives in
