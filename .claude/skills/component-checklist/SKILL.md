@@ -32,3 +32,28 @@ When adding a **new ECS component**, update these domain-scoped files:
 16. `mcp-server/manifest/commands.json` — MCP commands. Set `visibility: 'public'` or `'internal'` (mandatory)
 17. `web/src/data/commands.json` — **COPY of #16** (keep in sync)
 18. `TESTING.md` — Manual test cases
+
+## Game Components (a much shorter list — do NOT run the 18 above)
+
+A **game component** (health, damage, characterController, …) is a variant of one
+existing enum, not a new ECS component. Adding a 14th type touches six places:
+
+1. `engine/src/core/game_components.rs` — `GameComponentData` variant + its data struct
+   (the enum is `#[serde(tag = "type", rename_all = "camelCase")]`, so the variant name
+   IS the wire tag)
+2. `engine/src/core/game_components.rs` — the `build_game_component` match arm, using
+   `prop_f32` / `prop_u32` for every numeric field so the engine clamps it
+3. `web/src/stores/slices/types.ts` — the member of the `GameComponentData` union
+4. `web/src/lib/engine/gameComponentWire.ts` — `ENGINE_TYPE_BY_STORE_TYPE` (the
+   snake_case command name ↔ camelCase serde tag pair) and, for every numeric field,
+   an entry in `F32_RANGES` / `U32_MAXES` mirroring the Rust bounds
+5. `web/src/lib/engine/__tests__/gameComponentWire.test.ts` — the tables there are
+   pinned against the Rust by a textual scan with a COUNT assertion, so a new
+   `prop_f32` / `prop_u32` call site FAILS the suite until it is mirrored. The prose
+   counts in the coercer doc comments are pinned too — update the sentence, not just
+   the table
+6. `web/src/components/editor/GameComponentInspector.tsx` — the editing UI
+
+Everything between the store and the engine — both directions — goes through
+`gameComponentWire.ts`. Never hand-build a component payload and never cast an
+emitted one: see `rules/gotchas.md` → "`dispatchCommand` returns `void`".

@@ -48,7 +48,8 @@ export function handleGameEvent(
       const raw = castPayload<{ entityId: string; components?: unknown }>(data);
       // The engine sends its own `GameComponentData`, which is an internally-tagged
       // serde enum — flat, with engine field names. It is NOT the store's nested
-      // shape, so it cannot be cast into one; see `parseEmittedGameComponent`.
+      // shape, so it must not be cast into one — a cast type-checks and is wrong
+      // at runtime, which is the bug this replaced; see `parseEmittedGameComponent`.
       const emitted = Array.isArray(raw.components) ? raw.components : [];
       const components: GameComponentData[] = [];
       for (const entry of emitted) {

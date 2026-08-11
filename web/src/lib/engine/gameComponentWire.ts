@@ -343,7 +343,7 @@ export const U32_MAXES = {
  * Coerce a float field the same way the engine's `prop_f32` does.
  *
  * The range is required rather than optional because every float on this wire has
- * one — the engine clamps all thirteen of them. Making it a parameter that could
+ * one — the engine clamps all eighteen of them. Making it a parameter that could
  * be left off would let a new field be added with no clamp at all, which is the
  * state this replaced: `num` checked only `Number.isFinite`, so a `speed` of
  * `1e9` or a `gravityScale` of `-500` was stored verbatim while the engine

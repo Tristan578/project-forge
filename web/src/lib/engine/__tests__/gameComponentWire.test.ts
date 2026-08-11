@@ -566,6 +566,41 @@ describe('clamp tables match build_game_component', () => {
   it('U32_MAXES matches every prop_u32 call site, and no others', () => {
     expect(U32_MAXES).toEqual(rustU32);
   });
+
+  // `num` and `int` each open by telling a reader how many fields they cover,
+  // which is the number someone adding the nineteenth float would check before
+  // deciding whether the clamp is optional. Those two sentences are the only
+  // claims in the module that no type and no other assertion can reach: the
+  // tables above are pinned to the Rust, the prose beside them was not, and it
+  // said "thirteen" against a table of eighteen for as long as it existed.
+  it('the counts stated in the coercer doc comments match the tables', () => {
+    const source = readFileSync(
+      join(__dirname, '..', 'gameComponentWire.ts'),
+      'utf8',
+    );
+    const WORDS = [
+      'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+      'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+      'seventeen', 'eighteen', 'nineteen', 'twenty',
+    ];
+    const alternation = WORDS.join('|');
+    // Fails closed: a reworded sentence stops matching and reports here rather
+    // than quietly pinning nothing.
+    const stated = (pattern: RegExp, label: string) => {
+      const match = source.match(pattern);
+      expect(match, `${label} — reword the doc comment or this pin, not neither`).not.toBeNull();
+      return WORDS.indexOf(match![1].toLowerCase());
+    };
+    const size = (table: Record<string, Record<string, unknown>>) =>
+      Object.values(table).reduce((n, fields) => n + Object.keys(fields).length, 0);
+
+    expect(
+      stated(new RegExp(String.raw`engine clamps all (${alternation}) of them`, 'i'), 'float count'),
+    ).toBe(size(F32_RANGES));
+    expect(
+      stated(new RegExp(String.raw`(${alternation}) fields on this wire are \`u32\``, 'i'), 'u32 count'),
+    ).toBe(size(U32_MAXES));
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -838,15 +873,19 @@ describe('parseEmittedGameComponent', () => {
   });
 
   it('round-trips every component type back out through toWireComponent', () => {
-    // The emitted shape is exactly `{type, ...engineProps}`, so flattening a
-    // wire command produces a faithful stand-in for what the engine sends. If
-    // the two vocabularies are wired together correctly, this is an identity.
+    // The emitted shape is `{type, ...engineProps}` where `type` is the serde
+    // tag — camelCase, the same spelling as the store's own discriminant, NOT
+    // the snake_case command name `toWireComponent` produces. Building the
+    // stand-in from `built.type` rather than `wire.componentType` is what makes
+    // it the shape the engine really sends; the snake_case spelling parses too,
+    // but that is `toStoreComponentType`'s tolerance (covered above), not this.
+    // If the two vocabularies are wired together correctly, this is an identity.
     for (const engineName of ENGINE_COMPONENT_TYPES) {
       const built = buildStoreComponent(engineName);
       expect(built, `no store shape for ${engineName}`).not.toBeNull();
 
       const wire = toWireComponent(built!);
-      const emitted = { type: wire.componentType, ...wire.properties };
+      const emitted = { type: built!.type, ...wire.properties };
       expect(parseEmittedGameComponent(emitted), `round trip for ${engineName}`).toEqual(built);
     }
   });

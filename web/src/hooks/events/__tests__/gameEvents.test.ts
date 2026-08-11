@@ -217,7 +217,7 @@ describe('handleGameEvent', () => {
 
     it('merges with existing allGameComponents entries', () => {
       const existingComponents = {
-        'entity-0': [{ type: 'health', health: { maxHp: 50, currentHp: 50, invincibilitySecs: 0, respawnOnDeath: false, respawnPoint: null, despawnOnDeath: false } }],
+        'entity-0': [{ type: 'health', health: { maxHp: 50, currentHp: 50, invincibilitySecs: 0, respawnOnDeath: false, respawnPoint: [0, 0, 0], despawnOnDeath: false } }],
       };
       vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: existingComponents } as unknown as StoreState);
 
@@ -246,7 +246,7 @@ describe('handleGameEvent', () => {
     });
 
     it('handles empty components array', () => {
-      const stale = [{ type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0, respawnOnDeath: false, respawnPoint: null, despawnOnDeath: false } }];
+      const stale = [{ type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0, respawnOnDeath: false, respawnPoint: [0, 0, 0], despawnOnDeath: false } }];
       vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: stale, allGameComponents: {} } as unknown as StoreState);
 
       const payload = {
