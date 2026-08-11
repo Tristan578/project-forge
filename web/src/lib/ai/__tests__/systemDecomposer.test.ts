@@ -169,15 +169,23 @@ describe('decomposeIntoSystems — keyword scoring', () => {
   it('keeps the label for one-word genre prompts across the table', () => {
     // The same demotion would have hit every entry whose genre noun contains a
     // shorter keyword, so pin a spread of them rather than one example.
-    const cases: [string, string][] = [
-      ['an endless runner with coins to collect', 'auto-run'],
-      ['a first-person shooter with zombies', 'ranged combat'],
-      ['a fighting game with combos', 'combat'],
-      ['a 2d pixel art puzzle game', 'visual'],
+    // Compared as one map rather than in a loop of bare assertions, so a failure
+    // names the prompt that regressed instead of just the label it produced.
+    const prompts = [
+      'an endless runner with coins to collect',
+      'a first-person shooter with zombies',
+      'a fighting game with combos',
+      'a 2d pixel art puzzle game',
     ];
-    for (const [prompt, label] of cases) {
-      expect(getSystemLabel(decomposeIntoSystems(prompt))).toBe(label);
-    }
+    const labels = Object.fromEntries(
+      prompts.map(p => [p, getSystemLabel(decomposeIntoSystems(p))])
+    );
+    expect(labels).toEqual({
+      'an endless runner with coins to collect': 'auto-run',
+      'a first-person shooter with zombies': 'ranged combat',
+      'a fighting game with combos': 'combat',
+      'a 2d pixel art puzzle game': 'visual',
+    });
   });
 
   it('reports only the longest of a set of nested matches', () => {
