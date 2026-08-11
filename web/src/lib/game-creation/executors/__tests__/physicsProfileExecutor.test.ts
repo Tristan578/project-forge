@@ -290,4 +290,97 @@ describe('physicsProfileExecutor', () => {
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('INVALID_INPUT');
   });
+
+  // Every case above runs `projectType: '3d'`, which is how this executor's
+  // half of the 2D gap stayed invisible: 2D players had no CharacterController
+  // at all, so there was nothing for `applyPhysicsProfile` to tune and no test
+  // asked. Now that `character_setup` adds one for 2D, the profile step has to
+  // actually find it — the discovery path is `allGameComponents` and the scene
+  // graph, neither of which is project-type-aware, and these cases pin that.
+  describe('2D projects', () => {
+    it('forwards a 2D player CharacterController to applyPhysicsProfile', async () => {
+      const ctx = makeCtx({ projectType: '2d' });
+
+      // What `character_setup` writes for a 2D player, mid-pipeline.
+      const components = {
+        sprite_1: [
+          {
+            type: 'characterController',
+            characterController: { speed: 7, jumpHeight: 10, gravityScale: 1, canDoubleJump: false },
+          },
+        ],
+      } as unknown as Record<string, GameComponentData[]>;
+      seedLiveGameComponents(components);
+
+      const result = await physicsProfileExecutor.execute({
+        feelDirective: makeFeelDirective(),
+        projectType: '2d',
+        entityIds: ['sprite_1'],
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(mockApplyPhysicsProfile).toHaveBeenCalledWith(
+        expect.any(Object),
+        ctx.dispatchCommand,
+        ['sprite_1'],
+        components,
+      );
+    });
+
+    it('discovers a 2D player through the live scene graph with no entityIds', async () => {
+      const ctx = makeCtx({ projectType: '2d' });
+
+      seedLiveSceneGraph({
+        sprite_1: makeNode('sprite_1', 'Sprite', ['PhysicsData']),
+        deco: makeNode('deco', 'Background', []),
+      });
+      seedLiveGameComponents({
+        sprite_1: [
+          {
+            type: 'characterController',
+            characterController: { speed: 7, jumpHeight: 10, gravityScale: 1, canDoubleJump: false },
+          },
+        ],
+      } as unknown as Record<string, GameComponentData[]>);
+
+      const result = await physicsProfileExecutor.execute({
+        feelDirective: makeFeelDirective(),
+        projectType: '2d',
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(mockApplyPhysicsProfile).toHaveBeenCalledWith(
+        expect.any(Object),
+        ctx.dispatchCommand,
+        ['sprite_1'],
+        useEditorStore.getState().allGameComponents,
+      );
+      const output = result.output as { entityCount: number };
+      expect(output.entityCount).toBe(1);
+    });
+
+    // The feel directive has to reach a 2D game the same way it reaches a 3D
+    // one. If the profile resolved differently per project type, a floaty 2D
+    // game and a weighty 2D game would move identically — the exact defect the
+    // shared resolver exists to prevent.
+    it('resolves the same profile for 2D as for 3D', async () => {
+      const feelDirective = makeFeelDirective({ weight: 'floaty', pacing: 'medium' });
+
+      await physicsProfileExecutor.execute(
+        { feelDirective, projectType: '3d', entityIds: ['e1'] },
+        makeCtx(),
+      );
+      const threeD = mockApplyPhysicsProfile.mock.calls[0][0];
+
+      mockApplyPhysicsProfile.mockClear();
+
+      await physicsProfileExecutor.execute(
+        { feelDirective, projectType: '2d', entityIds: ['e1'] },
+        makeCtx({ projectType: '2d' }),
+      );
+      const twoD = mockApplyPhysicsProfile.mock.calls[0][0];
+
+      expect(twoD).toEqual(threeD);
+    });
+  });
 });

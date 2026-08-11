@@ -835,8 +835,6 @@ fn system_character_controller(
     project_type: Option<Res<super::project_type::ProjectType>>,
     mut entities: Query<(&EntityId, &GameComponents, &mut Transform)>,
 ) {
-
-
     let Some(input) = input else { return; };
     let Some(_runtime) = runtime else { return; };
     let dt = time.delta_secs();
@@ -2542,13 +2540,51 @@ mod character_controller_axis_tests {
         action(name, true, 0.0)
     }
 
+    /// Several actions at once — the cancellation and diagonal cases need more
+    /// than one entry, and `action` builds a fresh map each call.
+    fn combined(parts: &[(&str, bool, f32)]) -> InputState {
+        let mut input = InputState::default();
+        for (name, pressed, axis_value) in parts {
+            input.actions.insert(
+                (*name).to_string(),
+                ActionValue {
+                    pressed: *pressed,
+                    just_pressed: false,
+                    just_released: false,
+                    axis_value: *axis_value,
+                },
+            );
+        }
+        input
+    }
+
+    /// Jump reads `is_action_just_pressed`, which `held` does not set.
+    fn jump_tapped() -> InputState {
+        let mut input = InputState::default();
+        input.actions.insert(
+            "jump".to_string(),
+            ActionValue { pressed: true, just_pressed: true, just_released: false, axis_value: 0.0 },
+        );
+        input
+    }
+
+    /// Speed × dt must not come out to 1.0. At 10.0 over 0.1 s it does, and then
+    /// every distance assertion below is numerically identical to the raw
+    /// unscaled input — deleting the `* speed * dt` scaling entirely would keep
+    /// the suite green. 7.0 over 0.1 s gives 0.7, which only the real scaling
+    /// produces.
+    const TEST_SPEED: f32 = 7.0;
+    const TEST_DT_MS: u64 = 100;
+    /// The distance a full-throttle single-axis frame must cover.
+    const EXPECTED_TRAVEL: f32 = 0.7;
+
     /// Runs one frame with a non-zero delta. `Time::default()` has a zero delta,
     /// which multiplies every movement to nothing — a test that forgets to
     /// advance it passes whatever the mapping does.
     fn run_frame(project_type: Option<ProjectType>, input: InputState) -> Vec3 {
         let mut world = World::new();
         let mut time = Time::<()>::default();
-        time.advance_by(Duration::from_millis(100));
+        time.advance_by(Duration::from_millis(TEST_DT_MS));
         world.insert_resource(time);
         world.insert_resource(GameComponentRuntime::default());
         world.insert_resource(input);
@@ -2557,7 +2593,7 @@ mod character_controller_axis_tests {
         }
 
         let entity = world
-            .spawn(player(CharacterControllerData { speed: 10.0, ..Default::default() }))
+            .spawn(player(CharacterControllerData { speed: TEST_SPEED, ..Default::default() }))
             .id();
 
         let mut schedule = Schedule::default();
@@ -2634,7 +2670,112 @@ mod character_controller_axis_tests {
     #[test]
     fn the_2d_vertical_distance_scales_with_speed() {
         let moved = run_frame(Some(ProjectType::TwoD), axis("move_vertical", 1.0));
-        // 10.0 speed over 0.1s, normalized to a unit vector first.
-        assert!((moved.y - 1.0).abs() < 1e-5, "expected 1.0 unit of travel, got {moved:?}");
+        assert!(
+            (moved.y - EXPECTED_TRAVEL).abs() < 1e-5,
+            "expected {EXPECTED_TRAVEL} units of travel, got {moved:?}"
+        );
+    }
+
+    // The three input paths — analog `move_vertical`, analog `move_forward`, and
+    // the digital `move_forward`/`move_backward` fallback — are three separate
+    // branches, and this change rewrote the fallback chain that feeds all of
+    // them. Covering them only under `TwoD` would let a 3D regression through:
+    // collapsing the whole chain back to a bare `move_vertical` read keeps every
+    // 2D assertion green while deleting keyboard forward/back from every 3D game.
+
+    #[test]
+    fn in_3d_the_digital_forward_action_moves_along_z() {
+        let moved = run_frame(Some(ProjectType::ThreeD), held("move_forward"));
+        assert!(moved.z < 0.0, "digital forward is -Z in 3D, got {moved:?}");
+        assert_eq!(moved.y, 0.0, "walking must not lift the player");
+    }
+
+    #[test]
+    fn in_3d_the_digital_backward_action_moves_along_positive_z() {
+        let moved = run_frame(Some(ProjectType::ThreeD), held("move_backward"));
+        assert!(moved.z > 0.0, "digital backward is +Z in 3D, got {moved:?}");
+        assert_eq!(moved.y, 0.0);
+    }
+
+    #[test]
+    fn in_3d_the_analog_forward_axis_moves_along_z() {
+        let moved = run_frame(Some(ProjectType::ThreeD), axis("move_forward", 1.0));
+        assert!(moved.z < 0.0, "analog forward is -Z in 3D, got {moved:?}");
+        assert_eq!(moved.y, 0.0);
+    }
+
+    #[test]
+    fn in_2d_a_negative_vertical_axis_moves_down_y() {
+        let moved = run_frame(Some(ProjectType::TwoD), axis("move_vertical", -1.0));
+        assert!(
+            (moved.y + EXPECTED_TRAVEL).abs() < 1e-5,
+            "a full-throttle pull-down must travel {EXPECTED_TRAVEL} down, got {moved:?}"
+        );
+        assert_eq!(moved.z, 0.0);
+    }
+
+    /// The digital fallback accumulates with `+=` / `-=`, so holding both must
+    /// cancel rather than pick a winner — in either project type.
+    #[test]
+    fn holding_forward_and_backward_together_cancels() {
+        let both = combined(&[("move_forward", true, 0.0), ("move_backward", true, 0.0)]);
+        assert_eq!(run_frame(Some(ProjectType::TwoD), both), Vec3::ZERO);
+
+        let both = combined(&[("move_forward", true, 0.0), ("move_backward", true, 0.0)]);
+        assert_eq!(run_frame(Some(ProjectType::ThreeD), both), Vec3::ZERO);
+    }
+
+    /// A diagonal is the only case where `normalize()` does real work: two
+    /// full-throttle axes must still cover one frame's worth of distance, not
+    /// √2 times it. In 2D both components land in the screen plane, so this is
+    /// also what proves the 2D mapping shares the same vector as X rather than
+    /// being scaled separately.
+    #[test]
+    fn in_2d_a_diagonal_is_normalized_to_one_frame_of_travel() {
+        let diagonal = combined(&[("move_horizontal", false, 1.0), ("move_vertical", false, 1.0)]);
+        let moved = run_frame(Some(ProjectType::TwoD), diagonal);
+        assert!(
+            (moved.length() - EXPECTED_TRAVEL).abs() < 1e-5,
+            "a diagonal must cover {EXPECTED_TRAVEL}, got {moved:?} (len {})",
+            moved.length()
+        );
+        assert!((moved.x - moved.y).abs() < 1e-5, "a 45° diagonal is symmetric, got {moved:?}");
+        assert_eq!(moved.z, 0.0, "2D movement must never touch depth");
+    }
+
+    /// Jump writes Y directly, which under `TwoD` is now the same axis walking
+    /// writes. Pinning the sum keeps that collision honest: a jump adds to a
+    /// walk instead of replacing it, and a jump alone still leaves X and Z
+    /// untouched.
+    ///
+    /// This pins the CURRENT jump, which is a frame-rate-scaled instant nudge
+    /// with no velocity and no gravity — broken identically in 3D, tracked
+    /// separately. The assertion is deliberately written against
+    /// `jump_height * 0.5 * dt` so that giving jump a real arc fails here and
+    /// has to be looked at, rather than silently changing 2D walking.
+    #[test]
+    fn in_2d_a_jump_adds_to_the_vertical_walk_on_the_same_axis() {
+        let default_jump_height = CharacterControllerData::default().jump_height;
+        let dt = TEST_DT_MS as f32 / 1000.0;
+        let jump_rise = default_jump_height * 0.5 * dt;
+
+        let jump_only = run_frame(Some(ProjectType::TwoD), jump_tapped());
+        assert!(
+            (jump_only.y - jump_rise).abs() < 1e-5,
+            "a bare jump rises {jump_rise}, got {jump_only:?}"
+        );
+        assert_eq!(jump_only.x, 0.0, "a jump must not drift sideways");
+        assert_eq!(jump_only.z, 0.0, "a jump must not touch depth in 2D");
+
+        let mut walk_and_jump = combined(&[("move_vertical", false, 1.0)]);
+        walk_and_jump.actions.insert(
+            "jump".to_string(),
+            ActionValue { pressed: true, just_pressed: true, just_released: false, axis_value: 0.0 },
+        );
+        let both = run_frame(Some(ProjectType::TwoD), walk_and_jump);
+        assert!(
+            (both.y - (EXPECTED_TRAVEL + jump_rise)).abs() < 1e-5,
+            "walk and jump share Y in 2D and must sum, got {both:?}"
+        );
     }
 }

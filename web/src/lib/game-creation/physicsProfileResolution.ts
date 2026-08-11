@@ -91,13 +91,40 @@ export function resolvePhysicsProfile(
 
   return {
     ...baseProfile,
-    ...(typeof config?.['moveSpeed'] === 'number' && Number.isFinite(config['moveSpeed'])
-      ? { moveSpeed: config['moveSpeed'] as number }
+    ...(usableOverride(config?.['moveSpeed'], ENGINE_SPEED_MAX)
+      ? { moveSpeed: config!['moveSpeed'] as number }
       : {}),
-    ...(typeof config?.['jumpForce'] === 'number' && Number.isFinite(config['jumpForce'])
-      ? { jumpForce: config['jumpForce'] as number }
+    ...(usableOverride(config?.['jumpForce'], ENGINE_JUMP_HEIGHT_MAX)
+      ? { jumpForce: config!['jumpForce'] as number }
       : {}),
   };
+}
+
+/**
+ * The engine's own clamps on the fields these two overrides become
+ * (`build_game_component`, `engine/src/core/game_components.rs`): `speed` is
+ * clamped to `0.0..=1000.0` and `jumpHeight` to `0.0..=100.0`.
+ */
+const ENGINE_SPEED_MAX = 1000;
+const ENGINE_JUMP_HEIGHT_MAX = 100;
+
+/**
+ * Whether a config override is a value the engine will actually honour.
+ *
+ * `Number.isFinite` alone was not enough. `systemConfig` is raw GDD config, i.e.
+ * LLM-authored, and a plausible design phrase ("reverse controls", "moves
+ * backward") is enough to produce `"moveSpeed": -8`. A negative speed passed
+ * both guards, reached `add_game_component`, and was clamped by `prop_f32` to
+ * `0.0` — reproducing exactly the immovable player this whole path exists to
+ * fix, with no error raised anywhere. Zero is rejected for the same reason.
+ *
+ * Out-of-range is rejected rather than clamped here on purpose: silently
+ * substituting a number nobody chose is what makes this defect class invisible.
+ * Falling back to the preset value keeps the player playable AND keeps the
+ * preset's coherent relationship between speed, jump and gravity intact.
+ */
+function usableOverride(value: unknown, max: number): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= max;
 }
 
 /**

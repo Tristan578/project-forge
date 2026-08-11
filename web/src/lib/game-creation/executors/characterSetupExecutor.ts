@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
-import { toWireComponent } from '@/lib/engine/gameComponentWire';
+import { resolveInputPreset } from '../inputPresetResolution';
+import { PHYSICS_PRESETS } from '@/lib/ai/physicsFeel';
 import {
   characterControllerFromProfile,
+  DEFAULT_PRESET_KEY,
   feelDirectiveSchema,
   resolvePhysicsProfile,
 } from '../physicsProfileResolution';
@@ -11,8 +13,18 @@ import {
 /**
  * What the controller looks like when no usable feel directive reached this
  * step — a direct invocation, or a plan whose GDD carried a malformed one.
+ *
+ * DERIVED, not hardcoded. This used to be a third table of movement numbers
+ * (`{ speed: 5, jumpHeight: 2, gravityScale: 1 }`) sitting alongside
+ * `PHYSICS_PRESETS` and `CharacterControllerData::default()` in Rust, and it had
+ * already drifted from both — its `jumpHeight` of 2 against the engine's 8 and
+ * `arcade_classic`'s 10. Deriving it from `DEFAULT_PRESET_KEY` means the
+ * no-directive fallback and the unrecognized-feel fallback produce the same
+ * player, which is the property the shared resolver exists to guarantee.
  */
-const DEFAULT_CONTROLLER = { speed: 5, jumpHeight: 2, gravityScale: 1 };
+const DEFAULT_CONTROLLER = characterControllerFromProfile(
+  PHYSICS_PRESETS[DEFAULT_PRESET_KEY],
+);
 
 const inputSchema = z.object({
   // Both required. The engine addresses entities by their `EntityId` component
@@ -71,7 +83,7 @@ export const characterSetupExecutor: ExecutorDefinition = {
     // lookup ran against a graph that did not yet contain the entity it wanted
     // and returned ENTITY_NOT_FOUND — which, on a non-optional step, abandoned
     // the whole build.
-    const { entity, entityId, projectType, systemConfig } = parsed.data;
+    const { entity, entityId, projectType, systemConfig, movementType } = parsed.data;
 
     // The GDD's feel directive reaches every system step (planBuilder injects
     // it), but it used to stop here: the plan runs `physics_profile` first and
@@ -95,19 +107,36 @@ export const characterSetupExecutor: ExecutorDefinition = {
     // command that was never sent. The engine maps this controller onto Y under
     // `ProjectType::TwoD` (PF-1124).
     //
-    // The properties bag must be COMPLETE. `build_game_component` deserializes
-    // it with strict serde, and `CharacterControllerData` declares no serde
-    // defaults, so a bag missing even one field fails to deserialize and the
-    // component is dropped — leaving the generated player unable to move, with
-    // no error surfaced (`dispatchCommand` returns void). Building the store
-    // value and converting keeps every field accounted for by the typechecker.
-    ctx.dispatchCommand('add_game_component', {
-      entityId,
-      ...toWireComponent({
-        type: 'characterController',
-        characterController: { ...controller, canDoubleJump: false },
-      }),
+    // The properties bag must be COMPLETE, but not for the reason it is tempting
+    // to assume. `build_game_component` does NOT strict-deserialize it: it starts
+    // from `CharacterControllerData::default()` and merges each key it recognises
+    // via `prop_f32`, so a missing field is not rejected — it silently keeps the
+    // ENGINE's default, which is a different table from this file's
+    // (`jump_height` defaults to 8.0 there against `DEFAULT_CONTROLLER`'s 2). A
+    // dropped key therefore produces a player that moves with numbers no one
+    // chose, and `dispatchCommand` returns void so nothing reports the
+    // divergence. Building the store value and converting keeps every field
+    // accounted for by the typechecker.
+    //
+    // Routed through the store rather than `ctx.dispatchCommand` so the two do
+    // not disagree: `addGameComponent` normalizes, writes
+    // `allGameComponents`, and dispatches the SAME
+    // `add_game_component` payload itself. Dispatching directly left the store
+    // with no controller for the generated player — the Inspector showed none,
+    // so the speed and jump the GDD asked for could not be seen or tuned, and a
+    // later store-driven `update_game_component` (`applyPhysicsProfile`) would
+    // reason from a store that disagreed with the engine.
+    ctx.getStore().addGameComponent(entityId, {
+      type: 'characterController',
+      characterController: { ...controller, canDoubleJump: false },
     });
+
+    // A controller with no bindings is still an immovable player: the engine
+    // ships an EMPTY `InputMap` and `capture_input` has no fallback to
+    // `default_bindings()`, so nothing drives the controller until
+    // `set_input_preset` is dispatched — which nothing on the generation
+    // pipeline ever did. See `inputPresetResolution.ts`.
+    ctx.getStore().setInputPreset(resolveInputPreset(projectType, movementType));
 
     if (projectType === '2d') {
       // 2D also gets the skeleton for skeletal animation. `skeletonData` is
