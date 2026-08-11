@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   toWireComponent,
   parseGameComponentWire,
+  parseEmittedGameComponent,
   toEngineComponentType,
   toStoreComponentType,
   buildStoreComponent,
@@ -447,7 +448,10 @@ describe('clamp tables match build_game_component', () => {
 
   for (const [name, arm] of Object.entries(arms)) {
     for (const m of arm.matchAll(
-      new RegExp(String.raw`prop_f32\(&props, "(\w+)", (${RUST_NUM}), (${RUST_NUM})\)`, 'g'),
+      new RegExp(
+        String.raw`prop_f32\(\s*&props\s*,\s*"(\w+)"\s*,\s*(${RUST_NUM})\s*,\s*(${RUST_NUM})\s*\)`,
+        'g',
+      ),
     )) {
       (rustF32[name] ??= {})[m[1]!] = [
         parseRustNum(m[2]!, `${name}.${m[1]} min`),
@@ -455,7 +459,7 @@ describe('clamp tables match build_game_component', () => {
       ];
     }
     for (const m of arm.matchAll(
-      new RegExp(String.raw`prop_u32\(&props, "(\w+)", (${RUST_NUM})\)`, 'g'),
+      new RegExp(String.raw`prop_u32\(\s*&props\s*,\s*"(\w+)"\s*,\s*(${RUST_NUM})\s*\)`, 'g'),
     )) {
       (rustU32[name] ??= {})[m[1]!] = parseRustNum(m[2]!, `${name}.${m[1]} max`);
     }
@@ -464,6 +468,33 @@ describe('clamp tables match build_game_component', () => {
   it('finds the call sites at all (guards against a vacuous scan)', () => {
     expect(Object.keys(rustF32).length).toBeGreaterThan(0);
     expect(Object.keys(rustU32).length).toBeGreaterThan(0);
+  });
+
+  // A "not zero" guard is not enough. Every extraction step above can drop a
+  // call site QUIETLY: an arm head re-indented out of the 8-space anchor takes
+  // its whole arm with it, and a call site spelled in a way the regex does not
+  // match just is not seen. Either way the two `toEqual`s below still pass —
+  // they compare the table against a scan that no longer covers the file, which
+  // is the same failure mode the tables exist to prevent, one level up.
+  //
+  // So pin the COUNT: every `prop_f32(&props, …)` / `prop_u32(&props, …)` in
+  // the file must be accounted for by exactly one extracted entry. A call site
+  // added outside `build_game_component` fails this too — deliberately. That is
+  // a human decision about what the scan should cover, not something a test
+  // should absorb silently.
+  it('accounts for every prop_f32 / prop_u32 call site in the file', () => {
+    const source = readFileSync(RUST, 'utf8');
+    const occurrences = (fn: string) =>
+      [...source.matchAll(new RegExp(String.raw`\b${fn}\(\s*&props\b`, 'g'))].length;
+    const extracted = (table: Record<string, Record<string, unknown>>) =>
+      Object.values(table).reduce((n, fields) => n + Object.keys(fields).length, 0);
+
+    expect(extracted(rustF32), 'prop_f32 call sites the scan did not reach').toBe(
+      occurrences('prop_f32'),
+    );
+    expect(extracted(rustU32), 'prop_u32 call sites the scan did not reach').toBe(
+      occurrences('prop_u32'),
+    );
   });
 
   // `toEqual` in both directions at once: a bound that drifted fails, a field
@@ -704,5 +735,118 @@ describe('unvalidated values do not reach the engine', () => {
     expect(respawn([1, 2, 3, 4])).toEqual([0, 1, 0]);
     expect(respawn([1, 2, Number.NaN])).toEqual([0, 1, 0]);
     expect(respawn(['1', '2', '3'])).toEqual([0, 1, 0]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The read direction.
+//
+// `emit_game_component_changed` sends the engine's own `GameComponentData`,
+// which is `#[serde(tag = "type", rename_all = "camelCase")]` — an internally
+// tagged enum, so every component arrives FLAT: engine field names sitting
+// beside a camelCase discriminant. That is a third vocabulary, neither the
+// store's nested shape nor the `{componentType, properties}` command shape, and
+// casting one into another type-checks while being wrong at runtime.
+// ---------------------------------------------------------------------------
+
+describe('parseEmittedGameComponent', () => {
+  it('turns the engine’s flat emitted shape into the store’s nested one', () => {
+    expect(
+      parseEmittedGameComponent({
+        type: 'characterController',
+        speed: 7,
+        jumpHeight: 12,
+        gravityScale: 2,
+        canDoubleJump: true,
+      }),
+    ).toEqual({
+      type: 'characterController',
+      characterController: { speed: 7, jumpHeight: 12, gravityScale: 2, canDoubleJump: true },
+    });
+  });
+
+  it('round-trips every component type back out through toWireComponent', () => {
+    // The emitted shape is exactly `{type, ...engineProps}`, so flattening a
+    // wire command produces a faithful stand-in for what the engine sends. If
+    // the two vocabularies are wired together correctly, this is an identity.
+    for (const engineName of ENGINE_COMPONENT_TYPES) {
+      const built = buildStoreComponent(engineName);
+      expect(built, `no store shape for ${engineName}`).not.toBeNull();
+
+      const wire = toWireComponent(built!);
+      const emitted = { type: wire.componentType, ...wire.properties };
+      expect(parseEmittedGameComponent(emitted), `round trip for ${engineName}`).toEqual(built);
+    }
+  });
+
+  it('clamps an emitted value the engine could never be holding', () => {
+    // Nothing guarantees a well-formed payload on this path either — a stale
+    // WASM binary or a hand-crafted event is enough. Storing 500 would show the
+    // inspector a number the simulation cannot have.
+    expect(parseEmittedGameComponent({ type: 'collectible', rotateSpeed: 500 })).toEqual({
+      type: 'collectible',
+      collectible: { value: 1, destroyOnCollect: true, pickupSoundAsset: null, rotateSpeed: 100 },
+    });
+  });
+
+  it('rejects anything that is not a tagged component object', () => {
+    expect(parseEmittedGameComponent(null)).toBeNull();
+    expect(parseEmittedGameComponent('health')).toBeNull();
+    expect(parseEmittedGameComponent(42)).toBeNull();
+    expect(parseEmittedGameComponent([{ type: 'health' }])).toBeNull();
+    expect(parseEmittedGameComponent({ maxHp: 100 })).toBeNull(); // no discriminant
+    expect(parseEmittedGameComponent({ type: 7 })).toBeNull();
+    expect(parseEmittedGameComponent({ type: 'grappleHook' })).toBeNull();
+  });
+
+  it('does not read a component type off the prototype chain', () => {
+    // A bare `in` check reported `toString` and `constructor` as component
+    // types; both probes use `Object.hasOwn` for that reason.
+    expect(parseEmittedGameComponent({ type: 'toString' })).toBeNull();
+    expect(parseEmittedGameComponent({ type: 'constructor' })).toBeNull();
+    expect(parseEmittedGameComponent({ type: 'hasOwnProperty' })).toBeNull();
+  });
+
+  it('ignores the sibling discriminant rather than merging it as a property', () => {
+    // The flat object doubles as the properties bag, so `type` travels with it.
+    // No component has a `type` field, and the builder reads named keys only.
+    const parsed = parseEmittedGameComponent({ type: 'checkpoint', autoSave: false });
+    expect(parsed).toEqual({ type: 'checkpoint', checkpoint: { autoSave: false } });
+  });
+});
+
+describe('parseGameComponentWire properties handling', () => {
+  it('treats an absent properties key as an empty bag, as the engine does', () => {
+    // `handle_add_game_component` does
+    // `payload.get("properties").cloned().unwrap_or(Value::Object(Map::new()))`,
+    // so a missing key really is `{}` and every field takes its Rust default.
+    expect(parseGameComponentWire({ componentType: 'checkpoint' })).toEqual({
+      type: 'checkpoint',
+      checkpoint: { autoSave: true },
+    });
+  });
+
+  it('rejects an explicit null, which the engine also rejects', () => {
+    // An explicit `null` survives that `unwrap_or` untouched and reaches
+    // `build_game_component` as `Value::Null`, which fails its
+    // `!props.is_object()` guard and errors out with nothing applied. Handing
+    // back a fully-defaulted component here would show the store a component
+    // the engine threw away.
+    expect(parseGameComponentWire({ componentType: 'checkpoint', properties: null })).toBeNull();
+  });
+
+  it('rejects a properties bag that is not a plain object', () => {
+    expect(parseGameComponentWire({ componentType: 'checkpoint', properties: [] })).toBeNull();
+    expect(parseGameComponentWire({ componentType: 'checkpoint', properties: 'autoSave' })).toBeNull();
+    expect(parseGameComponentWire({ componentType: 'checkpoint', properties: 3 })).toBeNull();
+  });
+
+  it('still returns null for a component type it does not know', () => {
+    // `buildStoreComponent`'s switch carries no `default:` arm and no trailing
+    // `return`, so a fourteenth component type is a TS2366 compile error rather
+    // than a silent `null`. This pins that unknown NAMES keep answering null.
+    expect(parseGameComponentWire({ componentType: 'grappleHook', properties: {} })).toBeNull();
+    expect(buildStoreComponent('grappleHook')).toBeNull();
+    expect(buildStoreComponent('')).toBeNull();
   });
 });

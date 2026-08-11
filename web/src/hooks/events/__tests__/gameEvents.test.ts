@@ -48,11 +48,15 @@ describe('handleGameEvent', () => {
       // Entity is not the primary selected entity
       vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'other-entity', primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
 
+      // The engine's `GameComponentData` is `#[serde(tag = "type", rename_all =
+      // "camelCase")]`, so what arrives is FLAT — engine field names sitting beside
+      // the discriminant, not nested under a key. Every fixture here is written in
+      // that shape, because that is the only shape the editor ever receives.
       const payload = {
         entityId: 'entity-1',
         components: [
-          { type: 'Health', config: { maxHealth: 100, currentHealth: 100 } },
-          { type: 'Collectible', config: { value: 10, type: 'coin' } },
+          { type: 'health', maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true },
+          { type: 'collectible', value: 10, destroyOnCollect: true, pickupSoundAsset: null, rotateSpeed: 90 },
         ],
       };
 
@@ -66,7 +70,10 @@ describe('handleGameEvent', () => {
       expect(result).toBe(true);
       expect(useEditorStore.setState).toHaveBeenCalledWith({
         allGameComponents: {
-          'entity-1': payload.components,
+          'entity-1': [
+            { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true } },
+            { type: 'collectible', collectible: { value: 10, destroyOnCollect: true, pickupSoundAsset: null, rotateSpeed: 90 } },
+          ],
         },
         primaryGameComponents: [], // stays unchanged since entity-1 is not primary
       });
@@ -76,13 +83,46 @@ describe('handleGameEvent', () => {
       // Entity IS the primary selected entity
       vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
 
-      const components = [
-        { type: 'CharacterController', config: { speed: 5, jumpForce: 10 } },
-      ];
-
       const payload = {
         entityId: 'entity-1',
-        components,
+        components: [
+          { type: 'characterController', speed: 7, jumpHeight: 12, gravityScale: 2, canDoubleJump: true },
+        ],
+      };
+
+      const result = handleGameEvent(
+        'GAME_COMPONENT_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      const expected = [
+        { type: 'characterController', characterController: { speed: 7, jumpHeight: 12, gravityScale: 2, canDoubleJump: true } },
+      ];
+
+      expect(result).toBe(true);
+      expect(useEditorStore.setState).toHaveBeenCalledWith({
+        allGameComponents: {
+          'entity-1': expected,
+        },
+        primaryGameComponents: expected, // updated since entity-1 IS primary
+      });
+    });
+
+    it('drops components the store cannot represent instead of storing them raw', () => {
+      // A component type this build has no store shape for, a non-object element,
+      // and a prototype-chain name must all vanish rather than reach the inspector
+      // as a component with an `undefined` data bag.
+      const payload = {
+        entityId: 'entity-1',
+        components: [
+          { type: 'grappleHook', range: 20 },
+          'not-an-object',
+          { type: 'toString' },
+          { speed: 5 },
+          { type: 'collectible', value: 3, destroyOnCollect: false, pickupSoundAsset: 'coin.ogg', rotateSpeed: 45 },
+        ],
       };
 
       const result = handleGameEvent(
@@ -95,21 +135,60 @@ describe('handleGameEvent', () => {
       expect(result).toBe(true);
       expect(useEditorStore.setState).toHaveBeenCalledWith({
         allGameComponents: {
-          'entity-1': components,
+          'entity-1': [
+            { type: 'collectible', collectible: { value: 3, destroyOnCollect: false, pickupSoundAsset: 'coin.ogg', rotateSpeed: 45 } },
+          ],
         },
-        primaryGameComponents: components, // updated since entity-1 IS primary
+        primaryGameComponents: [],
+      });
+    });
+
+    it('clamps an out-of-range emitted value to the bound the engine enforces', () => {
+      // `prop_f32(&props, "rotateSpeed", -100.0, 100.0)` — the engine cannot be
+      // simulating 500, so the store must not claim it is.
+      const payload = {
+        entityId: 'entity-1',
+        components: [
+          { type: 'collectible', value: 1, destroyOnCollect: true, pickupSoundAsset: null, rotateSpeed: 500 },
+        ],
+      };
+
+      handleGameEvent('GAME_COMPONENT_CHANGED', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(useEditorStore.setState).toHaveBeenCalledWith({
+        allGameComponents: {
+          'entity-1': [
+            { type: 'collectible', collectible: { value: 1, destroyOnCollect: true, pickupSoundAsset: null, rotateSpeed: 100 } },
+          ],
+        },
+        primaryGameComponents: [],
+      });
+    });
+
+    it('treats a missing components key as an empty list', () => {
+      const result = handleGameEvent(
+        'GAME_COMPONENT_CHANGED',
+        { entityId: 'entity-1' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(useEditorStore.setState).toHaveBeenCalledWith({
+        allGameComponents: { 'entity-1': [] },
+        primaryGameComponents: [],
       });
     });
 
     it('merges with existing allGameComponents entries', () => {
       const existingComponents = {
-        'entity-0': [{ type: 'Health', config: { maxHealth: 50, currentHealth: 50 } }],
+        'entity-0': [{ type: 'health', health: { maxHp: 50, currentHp: 50, invincibilitySecs: 0, respawnOnDeath: false, respawnPoint: null, despawnOnDeath: false } }],
       };
       vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: existingComponents } as unknown as StoreState);
 
       const payload = {
         entityId: 'entity-1',
-        components: [{ type: 'Collectible', config: { value: 25 } }],
+        components: [{ type: 'collectible', value: 25, destroyOnCollect: true, pickupSoundAsset: null, rotateSpeed: 0 }],
       };
 
       const result = handleGameEvent(
@@ -123,14 +202,17 @@ describe('handleGameEvent', () => {
       expect(useEditorStore.setState).toHaveBeenCalledWith({
         allGameComponents: {
           'entity-0': existingComponents['entity-0'],
-          'entity-1': payload.components,
+          'entity-1': [
+            { type: 'collectible', collectible: { value: 25, destroyOnCollect: true, pickupSoundAsset: null, rotateSpeed: 0 } },
+          ],
         },
         primaryGameComponents: [],
       });
     });
 
     it('handles empty components array', () => {
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: [{ type: 'Health', config: {} }], allGameComponents: {} } as unknown as StoreState);
+      const stale = [{ type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0, respawnOnDeath: false, respawnPoint: null, despawnOnDeath: false } }];
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: stale, allGameComponents: {} } as unknown as StoreState);
 
       const payload = {
         entityId: 'entity-1',

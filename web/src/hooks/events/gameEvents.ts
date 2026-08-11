@@ -2,7 +2,8 @@
  * Event handlers for game components, game cameras, input bindings, play tick.
  */
 
-import { useEditorStore, type GameCameraData, firePlayTick } from '@/stores/editorStore';
+import { useEditorStore, type GameCameraData, type GameComponentData, firePlayTick } from '@/stores/editorStore';
+import { parseEmittedGameComponent } from '@/lib/engine/gameComponentWire';
 import { getScriptGameEventCallback } from '@/lib/scripting/useScriptRunner';
 import { castPayload, type SetFn, type GetFn } from './types';
 
@@ -14,7 +15,14 @@ export function handleGameEvent(
 ): boolean {
   switch (type) {
     case 'GAME_COMPONENT_CHANGED': {
-      const payload = castPayload<{ entityId: string; components: import('@/stores/editorStore').GameComponentData[] }>(data);
+      const raw = castPayload<{ entityId: string; components?: unknown }>(data);
+      // The engine sends its own `GameComponentData`, which is an internally-tagged
+      // serde enum — flat, with engine field names. It is NOT the store's nested
+      // shape, so it cannot be cast into one; see `parseEmittedGameComponent`.
+      const components = (Array.isArray(raw.components) ? raw.components : [])
+        .map(parseEmittedGameComponent)
+        .filter((component): component is GameComponentData => component !== null);
+      const payload = { entityId: raw.entityId, components };
       const state = useEditorStore.getState();
       // Update allGameComponents
       const newAll = { ...state.allGameComponents, [payload.entityId]: payload.components };
