@@ -1,11 +1,16 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   toWireComponent,
+  parseGameComponentWire,
   toEngineComponentType,
   toStoreComponentType,
   buildStoreComponent,
   ENGINE_COMPONENT_TYPES,
   ENGINE_COMPONENT_CATALOG,
+  F32_RANGES,
+  U32_MAXES,
 } from '../gameComponentWire';
 import type { GameComponentData } from '@/stores/slices/types';
 
@@ -361,5 +366,343 @@ describe('gameComponentWire', () => {
         interactionKey: 'interact',
       });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The clamp tables, pinned against the Rust that defines them.
+//
+// `F32_RANGES` and `U32_MAXES` are a hand-mirrored copy of the `prop_f32` /
+// `prop_u32` call sites in `engine/src/core/game_components.rs`, and a
+// hand-mirrored copy is exactly the thing that drifts: the engine widens a
+// bound, nothing here hears about it, and the store starts clamping values the
+// engine would have accepted — or worse, the engine narrows one and the store
+// keeps storing a number the simulation never sees.
+//
+// A native `cargo test` cannot read the TypeScript table and the TS suite
+// cannot call `prop_f32`, so reading the Rust source is the only check
+// available. Deliberately textual, and it fails closed: an unreadable file, a
+// missing match, a literal it cannot parse, or a scan that finds nothing is a
+// failure, never a skip.
+// ---------------------------------------------------------------------------
+
+describe('clamp tables match build_game_component', () => {
+  const RUST = join(
+    __dirname, '..', '..', '..', '..', '..',
+    'engine', 'src', 'core', 'game_components.rs',
+  );
+
+  /**
+   * A Rust numeric literal as written at these call sites, plus the one
+   * symbolic bound the file uses.
+   *
+   * Wider than `-?[0-9.]+` on purpose: `1_000_000.0`, `3600.0`, `0.1` and a
+   * possible `1e3` or `5.0_f32` are all the same value to rustc, so a narrow
+   * pattern stops matching the day someone re-spells a bound for readability —
+   * and because the extractor asserts on a null match, that reads as "the call
+   * site is gone", pointing at the wrong problem entirely.
+   */
+  const RUST_NUM = String.raw`u32::MAX|-?\d[\d_]*(?:\.(?:\d[\d_]*)?)?(?:[eE][+-]?\d+)?(?:_?f32)?`;
+
+  function parseRustNum(literal: string, what: string): number {
+    if (literal === 'u32::MAX') return 4294967295;
+    const value = Number(literal.replace(/_?f32$/, '').replace(/_/g, ''));
+    expect(
+      Number.isFinite(value),
+      `unparseable Rust numeric literal for ${what}: "${literal}"`,
+    ).toBe(true);
+    return value;
+  }
+
+  /** The body of each `"<engine_name>" => …` arm of `match component_type`. */
+  function componentArms(): Record<string, string> {
+    const source = readFileSync(RUST, 'utf8');
+    const start = source.indexOf('match component_type {');
+    expect(start, `no "match component_type" in ${RUST}`).toBeGreaterThan(-1);
+    const body = source.slice(start);
+
+    // Cut head-to-head rather than by a closing-brace shape: an arm's body is
+    // whatever it happens to be, and the `other =>` fallback is what bounds the
+    // last real arm.
+    const heads = [...body.matchAll(/^ {8}(?:"(\w+)"|other) =>/gm)];
+    expect(heads.length, 'no component match arms found').toBeGreaterThan(0);
+
+    const arms: Record<string, string> = {};
+    heads.forEach((head, i) => {
+      const name = head[1];
+      if (!name) return; // the `other =>` fallback — a bound, not an arm
+      const from = head.index! + head[0].length;
+      const to = i + 1 < heads.length ? heads[i + 1]!.index! : body.length;
+      arms[name] = body.slice(from, to);
+    });
+    return arms;
+  }
+
+  const arms = componentArms();
+
+  /** `{ component: { key: [min, max] } }`, read straight off the Rust. */
+  const rustF32: Record<string, Record<string, [number, number]>> = {};
+  /** `{ component: { key: max } }`, likewise. */
+  const rustU32: Record<string, Record<string, number>> = {};
+
+  for (const [name, arm] of Object.entries(arms)) {
+    for (const m of arm.matchAll(
+      new RegExp(String.raw`prop_f32\(&props, "(\w+)", (${RUST_NUM}), (${RUST_NUM})\)`, 'g'),
+    )) {
+      (rustF32[name] ??= {})[m[1]!] = [
+        parseRustNum(m[2]!, `${name}.${m[1]} min`),
+        parseRustNum(m[3]!, `${name}.${m[1]} max`),
+      ];
+    }
+    for (const m of arm.matchAll(
+      new RegExp(String.raw`prop_u32\(&props, "(\w+)", (${RUST_NUM})\)`, 'g'),
+    )) {
+      (rustU32[name] ??= {})[m[1]!] = parseRustNum(m[2]!, `${name}.${m[1]} max`);
+    }
+  }
+
+  it('finds the call sites at all (guards against a vacuous scan)', () => {
+    expect(Object.keys(rustF32).length).toBeGreaterThan(0);
+    expect(Object.keys(rustU32).length).toBeGreaterThan(0);
+  });
+
+  // `toEqual` in both directions at once: a bound that drifted fails, a field
+  // the engine clamps and the table omits fails, and a table entry naming a
+  // field the engine does not clamp fails too. That last one matters — it is
+  // how a clamp survives in TypeScript after the engine dropped it, quietly
+  // narrowing values the simulation would have taken.
+  it('F32_RANGES matches every prop_f32 call site, and no others', () => {
+    expect(F32_RANGES).toEqual(rustF32);
+  });
+
+  it('U32_MAXES matches every prop_u32 call site, and no others', () => {
+    expect(U32_MAXES).toEqual(rustU32);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round trip.
+//
+// Every other test in this file compares the builder's output against a table
+// written by hand next to it, which cannot catch the two vocabularies being
+// wired to each other wrongly — only the two vocabularies being *described*
+// wrongly. A round trip can: `dialogueTrigger`'s five renamed fields and its
+// inverted `autoStart` either survive store -> wire -> store or they do not.
+// ---------------------------------------------------------------------------
+
+describe('store -> wire -> store round trip', () => {
+  /**
+   * Store-vocabulary props per component, every field set away from its
+   * default and inside the engine's clamps.
+   *
+   * Non-default throughout on purpose: a fixture that leaves a field alone
+   * round-trips through a mapping that drops it, because both ends then hold
+   * the same default. The completeness test below enforces it.
+   */
+  const NON_DEFAULT_PROPS: Record<string, Record<string, unknown>> = {
+    character_controller: { speed: 7.5, jumpHeight: 12, gravityScale: 2.5, canDoubleJump: true },
+    health: {
+      maxHp: 250,
+      currentHp: 120,
+      invincibilitySecs: 1.25,
+      respawnOnDeath: false,
+      respawnPoint: [1, 2, 3],
+      despawnOnDeath: false,
+    },
+    collectible: {
+      value: 25,
+      destroyOnCollect: false,
+      pickupSoundAsset: 'asset-7',
+      rotateSpeed: -45,
+    },
+    damage_zone: { damagePerSecond: 60, oneShot: true },
+    checkpoint: { autoSave: false },
+    teleporter: { targetPosition: [4, 5, 6], cooldownSecs: 12 },
+    moving_platform: {
+      speed: 6,
+      waypoints: [[1, 1, 1], [2, 2, 2], [3, 3, 3]],
+      pauseDuration: 2,
+      loopMode: 'once',
+    },
+    trigger_zone: { eventName: 'boss-door', oneShot: true },
+    spawner: {
+      entityType: 'sphere',
+      intervalSecs: 0.5,
+      maxCount: 40,
+      spawnOffset: [0, 2, 0],
+      onTrigger: 'wave-start',
+    },
+    follower: { targetEntityId: 'entity-9', speed: 8, stopDistance: 4, lookAtTarget: false },
+    projectile: { speed: 40, damage: 75, lifetimeSecs: 2, gravity: true, destroyOnHit: false },
+    win_condition: { conditionType: 'reachGoal', targetScore: 99, targetEntityId: 'goal-1' },
+    dialogue_trigger: {
+      treeId: 'tree-3',
+      triggerRadius: 8,
+      requireInteract: false,
+      interactKey: 'use',
+      oneShot: true,
+    },
+  };
+
+  /** The component's own data object, whichever key it hangs off. */
+  function dataOf(component: GameComponentData): Record<string, unknown> {
+    return (component as unknown as Record<string, Record<string, unknown>>)[component.type]!;
+  }
+
+  it('covers every component type', () => {
+    expect(Object.keys(NON_DEFAULT_PROPS).sort()).toEqual([...ENGINE_COMPONENT_TYPES].sort());
+  });
+
+  it.each(ENGINE_COMPONENT_TYPES)('%s moves every field off its default', (name) => {
+    const base = dataOf(buildStoreComponent(name)!);
+    const moved = dataOf(buildStoreComponent(name, NON_DEFAULT_PROPS[name]!)!);
+
+    for (const key of Object.keys(base)) {
+      expect(moved[key], `${name}.${key} is still at its default`).not.toEqual(base[key]);
+    }
+  });
+
+  it.each(ENGINE_COMPONENT_TYPES)('%s survives the trip unchanged', (name) => {
+    const original = buildStoreComponent(name, NON_DEFAULT_PROPS[name]!)!;
+    expect(parseGameComponentWire(toWireComponent(original))).toEqual(original);
+  });
+
+  it('rejects a payload the engine would reject', () => {
+    // The engine's two hard errors: a type it has no systems for, and a body
+    // that is not a JSON object.
+    expect(parseGameComponentWire({ componentType: 'jetpack', properties: {} })).toBeNull();
+    expect(parseGameComponentWire({ componentType: 'collectible', properties: [] })).toBeNull();
+    expect(parseGameComponentWire({ componentType: 'collectible', properties: 'nope' })).toBeNull();
+  });
+
+  it('treats an absent properties bag as "all defaults"', () => {
+    expect(parseGameComponentWire({ componentType: 'collectible' }))
+      .toEqual(buildStoreComponent('collectible'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The clamps themselves, exercised through the wire.
+//
+// Driven off the tables rather than written out per field, so a field added to
+// the engine (and therefore to the pinned table above) is covered the moment it
+// appears, instead of waiting for someone to remember this block.
+// ---------------------------------------------------------------------------
+
+describe('out-of-range values are clamped, not stored verbatim', () => {
+  /** Send one engine-vocabulary property and read it back out of the wire. */
+  function roundTrip(componentType: string, key: string, value: unknown): unknown {
+    const parsed = parseGameComponentWire({ componentType, properties: { [key]: value } });
+    expect(parsed, `${componentType} did not parse`).not.toBeNull();
+    return toWireComponent(parsed!).properties[key];
+  }
+
+  function engineDefault(componentType: string, key: string): unknown {
+    return toWireComponent(buildStoreComponent(componentType)!).properties[key];
+  }
+
+  const f32Cases = Object.entries(F32_RANGES).flatMap(([componentType, fields]) =>
+    Object.entries(fields).map(([key, [min, max]]) =>
+      [componentType, key, min, max] as const),
+  );
+
+  it.each(f32Cases)('%s.%s clamps to [%d, %d]', (componentType, key, min, max) => {
+    expect(roundTrip(componentType, key, min - 1000)).toBe(min);
+    expect(roundTrip(componentType, key, max + 1000)).toBe(max);
+    expect(roundTrip(componentType, key, min)).toBe(min);
+    expect(roundTrip(componentType, key, max)).toBe(max);
+  });
+
+  it.each(f32Cases)('%s.%s falls back to the default for a non-number', (componentType, key) => {
+    const fallback = engineDefault(componentType, key);
+    expect(roundTrip(componentType, key, Number.NaN)).toBe(fallback);
+    expect(roundTrip(componentType, key, Number.POSITIVE_INFINITY)).toBe(fallback);
+    expect(roundTrip(componentType, key, '5')).toBe(fallback);
+    expect(roundTrip(componentType, key, null)).toBe(fallback);
+  });
+
+  const u32Cases = Object.entries(U32_MAXES).flatMap(([componentType, fields]) =>
+    Object.entries(fields).map(([key, max]) => [componentType, key, max] as const),
+  );
+
+  it.each(u32Cases)('%s.%s rounds and clamps to [0, %d]', (componentType, key, max) => {
+    // `prop_u32` parses through `as_f64`, so a fractional value rounds rather
+    // than being rejected — and because `as_f64` accepts negatives, the engine
+    // floors at zero explicitly.
+    expect(roundTrip(componentType, key, 2.6)).toBe(3);
+    expect(roundTrip(componentType, key, -5)).toBe(0);
+    expect(roundTrip(componentType, key, max + 1000)).toBe(max);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The three casts these functions used to carry, and the prototype chain the
+// name lookups used to walk.
+// ---------------------------------------------------------------------------
+
+describe('unvalidated values do not reach the engine', () => {
+  it('does not report inherited Object properties as component names', () => {
+    // The lookup tables come from object literals, so every one of these was
+    // `true` under a bare `in` — and `toEngineComponentType` returned the name
+    // verbatim, producing an `add_game_component` the engine has no systems
+    // for. `dispatchCommand` returns void, so it was discarded in silence.
+    for (const inherited of ['toString', 'constructor', 'valueOf', 'hasOwnProperty']) {
+      expect(toEngineComponentType(inherited), inherited).toBeNull();
+      expect(toStoreComponentType(inherited), inherited).toBeNull();
+      expect(buildStoreComponent(inherited), inherited).toBeNull();
+    }
+  });
+
+  it('drops waypoints that are not finite 3-vectors', () => {
+    const waypoints = (props: unknown) =>
+      (buildStoreComponent('moving_platform', { waypoints: props }) as
+        Extract<GameComponentData, { type: 'movingPlatform' }>).movingPlatform.waypoints;
+
+    // Matches `build_game_component`'s `filter_map`: bad entries are dropped,
+    // the rest are kept.
+    expect(waypoints([[1, 1, 1], 'nope', [2, 2], [3, 3, 3], [4, 4, Number.NaN]]))
+      .toEqual([[1, 1, 1], [3, 3, 3]]);
+
+    // ...and a list with nothing usable left leaves the default standing,
+    // rather than producing a platform with nowhere to go.
+    const fallback = waypoints(undefined);
+    expect(waypoints(['a', 'b'])).toEqual(fallback);
+    expect(waypoints([])).toEqual(fallback);
+    expect(waypoints('not a list')).toEqual(fallback);
+  });
+
+  it('replaces an unknown enum string with the engine default', () => {
+    // The engine parses both of these with a trailing `_ =>` arm, so an
+    // unrecognised string is not rejected there — it quietly becomes `PingPong`
+    // or `Score`. An unvalidated cast here is therefore worse than a hard
+    // error: the store keeps `'bounce'`, the engine runs ping-pong, and the two
+    // only disagree at runtime.
+    const platform = (loopMode: unknown) =>
+      (buildStoreComponent('moving_platform', { loopMode }) as
+        Extract<GameComponentData, { type: 'movingPlatform' }>).movingPlatform.loopMode;
+    expect(platform('bounce')).toBe('pingPong');
+    expect(platform('PingPong')).toBe('pingPong'); // the Rust spelling, not the store's
+    expect(platform(7)).toBe('pingPong');
+    expect(platform('once')).toBe('once');
+
+    const win = (conditionType: unknown) =>
+      (buildStoreComponent('win_condition', { conditionType }) as
+        Extract<GameComponentData, { type: 'winCondition' }>).winCondition.conditionType;
+    expect(win('survive')).toBe('score');
+    expect(win('CollectAll')).toBe('score');
+    expect(win('reachGoal')).toBe('reachGoal');
+  });
+
+  it('keeps a vec3 all-or-nothing, as prop_vec3 does', () => {
+    const respawn = (respawnPoint: unknown) =>
+      (buildStoreComponent('health', { respawnPoint }) as
+        Extract<GameComponentData, { type: 'health' }>).health.respawnPoint;
+    expect(respawn([1, 2, 3])).toEqual([1, 2, 3]);
+    // A partial or malformed vector is not partially applied — the engine's
+    // `prop_vec3` answers `None` for all of these, leaving its default.
+    expect(respawn([1, 2])).toEqual([0, 1, 0]);
+    expect(respawn([1, 2, 3, 4])).toEqual([0, 1, 0]);
+    expect(respawn([1, 2, Number.NaN])).toEqual([0, 1, 0]);
+    expect(respawn(['1', '2', '3'])).toEqual([0, 1, 0]);
   });
 });

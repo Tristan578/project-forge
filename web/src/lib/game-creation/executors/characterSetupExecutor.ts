@@ -95,12 +95,14 @@ export const characterSetupExecutor: ExecutorDefinition = {
     } else {
       // 3D: add the CharacterController that makes the player movable.
       //
-      // The properties bag must be COMPLETE. `build_game_component` deserializes
-      // it with strict serde, and `CharacterControllerData` declares no serde
-      // defaults, so a bag missing even one field fails to deserialize and the
-      // component is dropped — leaving the generated player unable to move, with
-      // no error surfaced (`dispatchCommand` returns void). Building the store
-      // value and converting keeps every field accounted for by the typechecker.
+      // The properties bag must be COMPLETE. `build_game_component` is
+      // permissive: it merges each recognised key onto
+      // `CharacterControllerData::default()` and leaves the default standing for
+      // anything missing. So an incomplete bag is not rejected — it silently
+      // overwrites the omitted fields with engine defaults while the store keeps
+      // whatever it had, and nothing reports the split (`dispatchCommand`
+      // returns void). Building the store value and converting keeps every field
+      // accounted for by the typechecker.
       ctx.dispatchCommand('add_game_component', {
         entityId,
         ...toWireComponent({

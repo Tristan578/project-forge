@@ -46,10 +46,12 @@ export interface FixChange {
   /**
    * The entity's other current properties, captured when the fix was generated.
    *
-   * The engine deserializes a game component's properties bag with strict serde,
-   * so a dispatch has to carry EVERY field. Without this, applying a fix would
-   * reset the entity's untouched fields to the Rust defaults instead of leaving
-   * them alone.
+   * A dispatch has to carry EVERY field. `build_game_component` is permissive,
+   * not strict: it merges each recognised key onto the type's `Default` and
+   * leaves the default standing for anything missing. So a partial bag does not
+   * fail — it silently resets the entity's untouched fields to the Rust
+   * defaults while the store keeps showing the old values, and the two disagree
+   * for the rest of the session.
    */
   properties?: Record<string, unknown>;
 }
@@ -557,12 +559,13 @@ export function applyFixes(
         change.command === 'add_game_component' ||
         change.command === 'update_game_component'
       ) {
-        // A game component cannot be dispatched as a single property. The engine
-        // deserializes the bag with strict serde, so a one-key payload fails to
-        // deserialize and the whole component is dropped — silently, since
-        // dispatch returns void. Merge the change over the entity's captured
-        // properties and let buildStoreComponent fill whatever is still missing
-        // with the same defaults the Rust struct uses.
+        // A game component cannot be dispatched as a single property.
+        // `build_game_component` merges each recognised key onto the type's
+        // `Default`, so a one-key payload is accepted and every OTHER field is
+        // reset to the Rust default — silently, since dispatch returns void.
+        // Merge the change over the entity's captured properties and let
+        // buildStoreComponent fill whatever is still missing with the same
+        // defaults the Rust struct uses.
         //
         // This also normalizes the type name: these changes used to carry the
         // literal string 'game_component', which matches no component type in
