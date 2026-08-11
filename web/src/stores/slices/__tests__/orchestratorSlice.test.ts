@@ -6,7 +6,14 @@ import {
   _getGateResolver,
 } from '../orchestratorSlice';
 import type { OrchestratorSlice } from '../orchestratorSlice';
-import type { OrchestratorPlan, PlanStep, ApprovalGate, TokenEstimate } from '@/lib/game-creation/types';
+import type {
+  OrchestratorPlan,
+  PlanStep,
+  ApprovalGate,
+  TokenEstimate,
+  ExecutorResult,
+} from '@/lib/game-creation/types';
+import type { PipelineCallbacks } from '@/lib/game-creation/pipelineRunner';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -141,6 +148,7 @@ describe('orchestratorSlice', () => {
       expect(state.tokenEstimate).toBeNull();
       expect(state.reservationId).toBeNull();
       expect(state.orchestratorError).toBeNull();
+      expect(state.orchestratorWarnings).toEqual([]);
     });
   });
 
@@ -387,6 +395,9 @@ describe('orchestratorSlice', () => {
       store.setState({
         orchestratorStatus: 'completed',
         orchestratorError: 'some error',
+        orchestratorWarnings: [
+          { stepId: 'step_1', executor: 'camera_setup', message: 'it will not move' },
+        ],
         currentStepIndex: 5,
         reservationId: 'res-123',
       });
@@ -402,6 +413,7 @@ describe('orchestratorSlice', () => {
       expect(state.tokenEstimate).toBeNull();
       expect(state.reservationId).toBeNull();
       expect(state.orchestratorError).toBeNull();
+      expect(state.orchestratorWarnings).toEqual([]);
     });
   });
 
@@ -448,6 +460,115 @@ describe('orchestratorSlice', () => {
       await store.getState().runPipelineFromPlan();
 
       expect(runPipeline).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('step warnings', () => {
+    /**
+     * A step that could only do part of its job reports that on its OUTPUT and
+     * still returns `success: true`. `onStepComplete` used to read `result.success`
+     * and discard the rest, so every one of those notes was computed and thrown
+     * away — the same "value with no consumer" defect the notes exist to warn
+     * about (PF-1125).
+     */
+    async function runWithStepResults(
+      results: Array<[string, ExecutorResult]>,
+      planOverride?: OrchestratorPlan,
+    ): Promise<void> {
+      const plan = planOverride ?? makeMockPlan();
+      // step_1 is the camera step here so the recorded executor is the one whose
+      // label the panel shows next to the note.
+      plan.steps[1] = { ...plan.steps[1], executor: 'camera_setup' };
+      store.getState().setPlan(plan);
+
+      const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+      (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async (
+          _plan: unknown,
+          _registry: unknown,
+          _ctx: unknown,
+          callbacks: PipelineCallbacks,
+        ) => {
+          for (const [stepId, result] of results) {
+            callbacks.onStepComplete?.(stepId, result);
+          }
+          return plan;
+        },
+      );
+
+      await store.getState().runPipelineFromPlan();
+    }
+
+    it('records a partially-applied step against its executor', async () => {
+      await runWithStepResults([
+        [
+          'step_1',
+          {
+            success: true,
+            output: {
+              cameraMode: 'sideScroller',
+              applied: true,
+              warning: 'Camera set to sideScroller but nothing was given for it to follow — it will not move.',
+            },
+          },
+        ],
+      ]);
+
+      expect(store.getState().orchestratorWarnings).toEqual([
+        {
+          stepId: 'step_1',
+          executor: 'camera_setup',
+          message: 'Camera set to sideScroller but nothing was given for it to follow — it will not move.',
+        },
+      ]);
+      // The step succeeded and the run finished — a note is not a failure.
+      expect(store.getState().stepStatuses['step_1']).toBe('completed');
+      expect(store.getState().orchestratorError).toBeNull();
+    });
+
+    it('reads the plural `warnings` array too', async () => {
+      // `verifyExecutor` reports a list, `cameraSetupExecutor` a single string.
+      // Both spellings are already in the tree; neither reached the user.
+      await runWithStepResults([
+        ['step_1', { success: true, output: { warnings: ['Scene has no entities', 'No camera entity found in scene'] } }],
+      ]);
+
+      expect(store.getState().orchestratorWarnings.map((w) => w.message)).toEqual([
+        'Scene has no entities',
+        'No camera entity found in scene',
+      ]);
+    });
+
+    it('accumulates across steps rather than overwriting', async () => {
+      await runWithStepResults([
+        ['step_1', { success: true, output: { warning: 'first note' } }],
+        ['step_2', { success: true, output: { warning: 'second note' } }],
+      ]);
+
+      expect(store.getState().orchestratorWarnings).toEqual([
+        { stepId: 'step_1', executor: 'camera_setup', message: 'first note' },
+        { stepId: 'step_2', executor: 'entity_setup', message: 'second note' },
+      ]);
+    });
+
+    it('stays empty when every step applied cleanly', async () => {
+      await runWithStepResults([
+        ['step_1', { success: true, output: { cameraMode: 'sideScroller', applied: true } }],
+        ['step_2', { success: true }],
+      ]);
+
+      expect(store.getState().orchestratorWarnings).toEqual([]);
+    });
+
+    it('drops the previous run notes when the plan is run again', async () => {
+      await runWithStepResults([['step_1', { success: true, output: { warning: 'stale note' } }]]);
+      expect(store.getState().orchestratorWarnings).toHaveLength(1);
+
+      // Same plan, second attempt: showing the first attempt's notes would tell
+      // the user a problem persists after they fixed it.
+      await runWithStepResults([['step_2', { success: true, output: { warning: 'fresh note' } }]]);
+
+      expect(store.getState().orchestratorWarnings.map((w) => w.message)).toEqual(['fresh note']);
     });
   });
 });
