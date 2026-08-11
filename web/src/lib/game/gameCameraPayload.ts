@@ -219,6 +219,21 @@ function num(data: Partial<GameCameraData>, key: keyof GameCameraData): number |
 }
 
 /**
+ * Coerce a follow target to the one shape the engine and the store agree on.
+ *
+ * An empty string is not a target. The engine resolves `targetEntity` by name
+ * and finds nothing, so the camera reports a target it can never follow, and
+ * every JS consumer that asks `if (targetEntity)` gets `true` for it. The read
+ * side has always collapsed `''` to `null`; the write side used `?? null`, which
+ * passes `''` straight through — so a target cleared in the inspector went out
+ * on the wire as `''` and came back as `null`, and the two sides disagreed about
+ * what the camera was doing. Both directions go through here now.
+ */
+function normalizeTargetEntity(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/**
  * Build a `set_game_camera` payload in the engine's own vocabulary.
  *
  * Use this instead of spreading a store object into the dispatch. A `satisfies
@@ -238,7 +253,7 @@ export function buildSetGameCameraPayload(
   const payload: SetGameCameraPayload = {
     entityId,
     mode: data.mode,
-    targetEntity: data.targetEntity ?? null,
+    targetEntity: normalizeTargetEntity(data.targetEntity),
   };
 
   switch (data.mode) {
@@ -393,11 +408,7 @@ export function parseGameCameraWire(payload: Record<string, unknown>): GameCamer
   if (!isCameraMode(rawMode)) return null;
   const mode = rawMode;
 
-  // An empty string is normalized to null, as the legacy handler did. Nothing
-  // downstream distinguishes "" from "no target", and leaving it as a string
-  // would make `targetEntity` truthy-but-unresolvable in every consumer.
-  const rawTarget = payload.targetEntity;
-  const targetEntity = typeof rawTarget === 'string' && rawTarget !== '' ? rawTarget : null;
+  const targetEntity = normalizeTargetEntity(payload.targetEntity);
   const data: GameCameraData = { mode, targetEntity };
 
   switch (mode) {
