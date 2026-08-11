@@ -124,6 +124,29 @@ describe('gameCameraPayload', () => {
       });
     });
 
+    it('sends a cleared target as null, the same shape the read side produces', () => {
+      // An inspector that clears the target field hands back '', not null. The
+      // engine resolves targetEntity by name, so '' becomes a target it can
+      // never find, and every `if (targetEntity)` in JS reads it as set. The
+      // parse side has always collapsed it; the build side has to agree or a
+      // clear does not survive its own round trip.
+      const payload = buildSetGameCameraPayload('cam-1', {
+        mode: 'thirdPersonFollow',
+        targetEntity: '',
+      });
+
+      expect(payload.targetEntity).toBeNull();
+      expect(parseGameCameraWire(payload as unknown as Record<string, unknown>)?.targetEntity).toBeNull();
+    });
+
+    it('round-trips a cleared target through the wire unchanged', () => {
+      const cleared = parseGameCameraWire({ mode: 'topDown', targetEntity: '', height: 12 });
+      expect(cleared?.targetEntity).toBeNull();
+
+      const rebuilt = buildSetGameCameraPayload('cam-1', cleared!);
+      expect(rebuilt.targetEntity).toBeNull();
+    });
+
     describe('cross-mode authoring fields never leak onto the wire', () => {
       // Every optional field GameCameraData can carry, regardless of the
       // active mode — the way a UI might leave stale fields around after a
