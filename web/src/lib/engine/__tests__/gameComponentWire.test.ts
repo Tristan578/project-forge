@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   toWireComponent,
@@ -360,6 +362,118 @@ describe('gameComponentWire', () => {
         oneShot: false,
         interactionKey: 'interact',
       });
+    });
+  });
+
+  /**
+   * `waypoints` is the one field on this wire that is a list, and it was
+   * unbounded and unvalidated on the JS side while the engine `filter_map`ped
+   * every entry and (as of PF-1143) caps the result.
+   *
+   * The cap is read out of the Rust rather than re-typed here. A hand-copied
+   * number is exactly the kind of second copy that drifts, and because
+   * `dispatchCommand` returns `void` the drift would be silent: the store would
+   * hold one route and the engine another, with nothing to report it.
+   */
+  describe('waypoint cap, pinned against the engine', () => {
+    const rustSource = readFileSync(
+      resolve(__dirname, '../../../../../engine/src/core/game_components.rs'),
+      'utf8',
+    );
+
+    const capMatch = rustSource.match(/^pub const MAX_WAYPOINTS: usize = (\d+);$/m);
+    const RUST_MAX = Number(capMatch?.[1]);
+
+    const route = (n: number): [number, number, number][] =>
+      Array.from({ length: n }, (_, i) => [i, 0, 0] as [number, number, number]);
+
+    // Narrows rather than casts: a `!` here would type-check even if
+    // `buildStoreComponent` stopped returning a movingPlatform at all, and the
+    // waypoint reads below would then be against `undefined`.
+    const built = (props: Record<string, unknown>) => {
+      const component = buildStoreComponent('moving_platform', props);
+      if (component?.type !== 'movingPlatform') {
+        throw new Error(`expected a movingPlatform component, got ${component?.type ?? 'null'}`);
+      }
+      return component.movingPlatform.waypoints;
+    };
+
+    it('finds the cap in the engine source', () => {
+      // Self-check. Without it, a renamed constant makes `RUST_MAX` NaN and every
+      // comparison below silently passes on nothing.
+      expect(capMatch, 'MAX_WAYPOINTS not found in game_components.rs').not.toBeNull();
+      expect(Number.isInteger(RUST_MAX)).toBe(true);
+      expect(RUST_MAX).toBeGreaterThan(2);
+    });
+
+    it('applies the engine cap to the constant it also applies', () => {
+      // The point of the scan: the store must truncate at whatever the Rust
+      // says, not at whatever was typed into the TS file.
+      expect(built({ waypoints: route(RUST_MAX + 10) })).toHaveLength(RUST_MAX);
+    });
+
+    it('leaves a route exactly at the cap intact', () => {
+      // Off-by-one guard in the other direction — a cap applied as `>` rather
+      // than `>=`, or a `slice(0, n - 1)`, would pass the truncation test alone.
+      const exact = route(RUST_MAX);
+      expect(built({ waypoints: exact })).toEqual(exact);
+    });
+
+    it('truncates from the front, keeping the route the author authored', () => {
+      const kept = built({ waypoints: route(RUST_MAX + 5) });
+      expect(kept[0]).toEqual([0, 0, 0]);
+      expect(kept[RUST_MAX - 1]).toEqual([RUST_MAX - 1, 0, 0]);
+      // The tail is what goes, not the head — asserting the last kept point is
+      // what makes this test fail if the cap stops truncating at all.
+      expect(kept.at(-1)).toEqual([RUST_MAX - 1, 0, 0]);
+    });
+
+    it('counts only waypoints the platform can visit toward the cap', () => {
+      // The engine `take`s AFTER the `filter_map`, so malformed entries must not
+      // eat the budget. Interleaving junk with a full-length route has to leave
+      // a full-length route.
+      const interleaved: unknown[] = [];
+      for (const point of route(RUST_MAX)) {
+        interleaved.push('not a point', [1, 2], point);
+      }
+      expect(built({ waypoints: interleaved })).toHaveLength(RUST_MAX);
+    });
+
+    it('drops entries the engine drops instead of showing a route it will not follow', () => {
+      // Mirrors the engine's `filter_map`: 3-element arrays of finite numbers.
+      expect(
+        built({
+          waypoints: [[0, 0, 0], [1, 2], 'nope', [1, 'x', 3], [Infinity, 0, 0], [4, 5, 6], null],
+        }),
+      ).toEqual([
+        [0, 0, 0],
+        [4, 5, 6],
+      ]);
+    });
+
+    it('rejects a double the engine cannot hold as an f32', () => {
+      // `as_f64() as f32` overflows to infinity in Rust and the entry is dropped.
+      // `Number.isFinite(1e300)` is true, so a plain finite check kept it.
+      expect(built({ waypoints: [[1e300, 0, 0], [1, 2, 3]] })).toEqual([[1, 2, 3]]);
+    });
+
+    it('falls back to the Rust default route when nothing survives', () => {
+      // `if !waypoints.is_empty()` in the engine — an empty list would leave
+      // `system_moving_platform` refusing to move the platform at all.
+      const fallback = [
+        [0, 0, 0],
+        [0, 3, 0],
+      ];
+      expect(built({ waypoints: ['junk', []] })).toEqual(fallback);
+      expect(built({ waypoints: [] })).toEqual(fallback);
+      expect(built({ waypoints: 'not an array' })).toEqual(fallback);
+    });
+
+    it('survives the round trip to the wire at the cap', () => {
+      const wire = toWireComponent(
+        buildStoreComponent('moving_platform', { waypoints: route(RUST_MAX + 100) })!,
+      );
+      expect(wire.properties.waypoints).toHaveLength(RUST_MAX);
     });
   });
 });

@@ -177,8 +177,22 @@ const num = (v: unknown, fallback: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
 const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v : fallback);
+/**
+ * Finite as the engine sees it, not as JS sees it.
+ *
+ * Every numeric field crosses the wire as JSON, which the engine reads with
+ * `as_f64() as f32` and then tests with `is_finite()`. A double the size of
+ * `1e300` survives `Number.isFinite` here and becomes `f32::INFINITY` there, so
+ * a plain finite check accepted values the engine drops on the floor — the store
+ * showing a waypoint the running platform never visits.
+ *
+ * `Math.fround` is the same narrowing, so this is the engine's own test.
+ */
+const isEngineFinite = (v: unknown): v is number =>
+  typeof v === 'number' && Number.isFinite(Math.fround(v));
+
 const vec3 = (v: unknown, fallback: [number, number, number]): [number, number, number] =>
-  Array.isArray(v) && v.length === 3 && v.every(n => typeof n === 'number' && Number.isFinite(n))
+  Array.isArray(v) && v.length === 3 && v.every(isEngineFinite)
     ? (v as [number, number, number])
     : fallback;
 const nullableStr = (v: unknown, fallback: string | null): string | null =>
@@ -193,6 +207,47 @@ const U32_MAX = 4294967295;
 const COLLECTIBLE_VALUE_MAX = 1_000_000;
 const SPAWNER_MAX_COUNT_MAX = 1000;
 const TARGET_SCORE_MAX = U32_MAX;
+
+/**
+ * The engine's `MAX_WAYPOINTS`, mirrored so the store truncates identically.
+ *
+ * Must equal `pub const MAX_WAYPOINTS` in `engine/src/core/game_components.rs`;
+ * `__tests__/gameComponentWire.test.ts` reads that line and fails if the two
+ * drift. Truncating on one side only would leave the store and the engine
+ * holding different routes, and `dispatchCommand` returns `void`, so nothing
+ * anywhere would report the disagreement.
+ */
+const MAX_WAYPOINTS = 64;
+
+/**
+ * Mirror the engine's waypoint parse: keep the first `MAX_WAYPOINTS` entries
+ * that are 3-element arrays of engine-finite numbers, and fall back to the
+ * default route if that leaves nothing.
+ *
+ * The store used to cast `props.waypoints` through untouched. The engine
+ * `filter_map`s each entry, so an array carrying a 2-element point or a string
+ * left the store showing a route the platform does not follow — and an
+ * arbitrarily long one left it holding a `Vec` walked every frame and written
+ * into every scene save.
+ */
+const waypointList = (
+  v: unknown,
+  fallback: [number, number, number][],
+): [number, number, number][] => {
+  if (!Array.isArray(v)) return fallback;
+  const out: [number, number, number][] = [];
+  for (const point of v) {
+    // Cap first: `take` after `filter_map` on the Rust side stops the iterator
+    // once the cap is reached, so neither side visits the rest of the array.
+    if (out.length >= MAX_WAYPOINTS) break;
+    if (!Array.isArray(point) || point.length !== 3 || !point.every(isEngineFinite)) continue;
+    out.push([point[0], point[1], point[2]]);
+  }
+  // `if !waypoints.is_empty()` in the engine: an all-malformed list leaves the
+  // Rust `Default` route standing rather than an empty one, which
+  // `system_moving_platform` would refuse to move at all.
+  return out.length > 0 ? out : fallback;
+};
 
 /**
  * Coerce a whole-number field the same way the engine's `prop_u32` does.
@@ -294,9 +349,10 @@ export function buildStoreComponent(
         type: 'movingPlatform',
         movingPlatform: {
           speed: num(props.speed, 2),
-          waypoints: Array.isArray(props.waypoints)
-            ? (props.waypoints as [number, number, number][])
-            : [[0, 0, 0], [0, 3, 0]],
+          waypoints: waypointList(props.waypoints, [
+            [0, 0, 0],
+            [0, 3, 0],
+          ]),
           pauseDuration: num(props.pauseDuration, 0.5),
           loopMode: (props.loopMode as PlatformLoopMode) ?? 'pingPong',
         },
