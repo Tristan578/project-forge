@@ -89,18 +89,30 @@ describe('decomposeIntoSystems', () => {
     expect(movement!.type).toBe('walk+jump');
   });
 
-  it('marks systems with 2+ keyword matches as core priority', () => {
+  it('marks a system the prompt named as core priority', () => {
     const result = decomposeIntoSystems('a platformer jump side-scroller game');
     const movement = result.systems.find(s => s.category === 'movement');
     expect(movement).toBeDefined();
     expect(movement!.priority).toBe('core');
   });
 
-  it('marks systems with 1 keyword match as secondary priority', () => {
+  it('marks a system named by a single word as core too', () => {
+    // This asserted `secondary` while priority meant "matched 2+ keywords". That
+    // count was mostly measuring how densely the table nests its own vocabulary
+    // rather than anything about the prompt, and span matching removes the
+    // duplicates it was counting. The prompt says "physics"; nothing about
+    // saying it once makes the physics system less asked-for.
     const result = decomposeIntoSystems('a game with physics');
     const physics = result.systems.find(s => s.category === 'physics');
     expect(physics).toBeDefined();
-    expect(physics!.priority).toBe('secondary');
+    expect(physics!.priority).toBe('core');
+    expect(physics!.matchedKeywords).toEqual(['physics']);
+  });
+
+  it('marks only the injected input/camera defaults as secondary', () => {
+    const result = decomposeIntoSystems('a game with things in it');
+    expect(result.systems.every(s => s.priority === 'secondary')).toBe(true);
+    expect(result.systems.map(s => s.category)).toEqual(['input', 'camera']);
   });
 
   it('sorts systems by confidence (most keywords first)', () => {
@@ -153,24 +165,19 @@ describe('decomposeIntoSystems — keyword scoring', () => {
     expect(movement!.type).toBe('top-down');
   });
 
-  it('reports one keyword but still scores a one-word genre prompt as core', () => {
-    // Deduplication must not leak into `priority`. 'platformer' trips both
-    // 'platformer' and 'platform', and that raw count is what has always meant
-    // "core". Dedup it too and this drops to `secondary`, which getSystemLabel
-    // renders as 'custom game' — the panel answering "no idea" to a prompt that
-    // named its genre outright.
+  it('scores a one-word genre prompt as core and labels it', () => {
     const result = decomposeIntoSystems('a platformer where you collect coins');
     const movement = result.systems.find(s => s.category === 'movement');
     expect(movement!.matchedKeywords).toEqual(['platformer']);
     expect(movement!.priority).toBe('core');
-    expect(getSystemLabel(result)).toBe('walk & jump');
+    expect(getSystemLabel(result)).toBe('walk & jump + collectibles');
   });
 
-  it('keeps the label for one-word genre prompts across the table', () => {
-    // The same demotion would have hit every entry whose genre noun contains a
-    // shorter keyword, so pin a spread of them rather than one example.
-    // Compared as one map rather than in a loop of bare assertions, so a failure
-    // names the prompt that regressed instead of just the label it produced.
+  it('labels one-word genre prompts across the table', () => {
+    // Every entry whose genre noun contains a shorter keyword was scored by that
+    // nesting, so pin a spread of them rather than one example. Compared as one
+    // map rather than in a loop of bare assertions, so a failure names the prompt
+    // that regressed instead of just the label it produced.
     const prompts = [
       'an endless runner with coins to collect',
       'a first-person shooter with zombies',
@@ -181,14 +188,16 @@ describe('decomposeIntoSystems — keyword scoring', () => {
       prompts.map(p => [p, getSystemLabel(decomposeIntoSystems(p))])
     );
     expect(labels).toEqual({
-      'an endless runner with coins to collect': 'auto-run',
+      'an endless runner with coins to collect': 'auto run + collectibles',
       'a first-person shooter with zombies': 'ranged combat',
-      'a fighting game with combos': 'combat',
-      'a 2d pixel art puzzle game': 'visual',
+      'a fighting game with combos': 'combat + combo system',
+      // Named 'visual' — the category, not the detection — until getSystemLabel
+      // stopped falling back to the category for everything but four cases.
+      'a 2d pixel art puzzle game': 'puzzle + pixel art',
     });
   });
 
-  it('reports only the longest of a set of nested matches', () => {
+  it('reports only the longest of a set of overlapping matches', () => {
     const result = decomposeIntoSystems('a platformer game');
     const movement = result.systems.find(s => s.category === 'movement');
     expect(movement!.matchedKeywords).toEqual(['platformer']);
@@ -208,6 +217,51 @@ describe('decomposeIntoSystems — keyword scoring', () => {
     const camera = result.systems.find(s => s.category === 'camera');
     expect(camera!.type).toBe('first-person');
     expect(camera!.matchedKeywords).toEqual(['first-person', 'fps']);
+  });
+
+  it('does not match a keyword buried inside an unrelated word', () => {
+    // Each of these was a live misclassification: substring matching found 'car'
+    // in "scary", 'star' in "start", 'click' in "clicker" and 'run' in "runner",
+    // so the prompt was answered from a word it never used.
+    const cases = [
+      ['a scary horror game', 'movement'],
+      ['a game where you start the level', 'entities'],
+    ] as const;
+    for (const [prompt, absent] of cases) {
+      const categories = decomposeIntoSystems(prompt).systems
+        .filter(s => s.priority === 'core')
+        .map(s => s.category);
+      expect(categories, prompt).not.toContain(absent);
+    }
+
+    const clicker = decomposeIntoSystems('an idle clicker where you tap');
+    expect(clicker.systems.find(s => s.category === 'input')!.type).toBe('touch');
+
+    const runner = decomposeIntoSystems('an endless runner where you move fast');
+    expect(runner.systems.find(s => s.category === 'movement')!.type).toBe('auto-run');
+  });
+
+  it('matches a keyword the prompt wrote in the plural', () => {
+    // The table lists singular nouns and prompts describe several of the thing.
+    const result = decomposeIntoSystems('collect coins and stars, dodge the bosses');
+    const entities = result.systems.find(s => s.category === 'entities');
+    // 'boss' and 'star'/'coin' are separate entries; the pickups outnumber it.
+    expect(entities!.type).toBe('collectibles');
+    expect(entities!.matchedKeywords).toEqual(['coin', 'star']);
+  });
+
+  it('counts a keyword twice when it appears in two places', () => {
+    // Overlap resolution drops a keyword covered by a longer match, not a keyword
+    // that also matched elsewhere — two mentions really are two signals.
+    const result = decomposeIntoSystems('a platformer with moving platforms');
+    const movement = result.systems.find(s => s.category === 'movement');
+    expect(movement!.matchedKeywords).toEqual(['platformer', 'platform']);
+  });
+
+  it('does not read a narrative "cinematic" as a camera rig', () => {
+    const result = decomposeIntoSystems('an fps with cinematic cutscenes');
+    expect(result.systems.find(s => s.category === 'camera')!.type).toBe('first-person');
+    expect(result.systems.find(s => s.category === 'narrative')!.type).toBe('story');
   });
 });
 
