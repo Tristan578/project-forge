@@ -96,6 +96,18 @@ export const autoPolishExecutor: ExecutorDefinition = {
             targetEntity,
           }),
         });
+        // Configuring a camera the engine is not rendering through changes
+        // nothing a player can see. `game_camera_system`, `first_person_look_system`
+        // and `orbital_system` are each `With<ActiveGameCamera>`, and the ONLY
+        // things that insert that marker are `set_active_game_camera` and a
+        // snapshot restore of a camera that was already active — so
+        // `set_game_camera` alone leaves this repair inert in exactly the way it
+        // was written to prevent. `camera_setup` pairs the two commands for the
+        // same reason.
+        commands.push({
+          command: 'set_active_game_camera',
+          payload: { entityId: cameraEntityId },
+        });
         fixes.push(
           targetEntity
             ? `Configured camera as ${mode}`

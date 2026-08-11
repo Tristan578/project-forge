@@ -110,6 +110,168 @@ describe('cameraSetupExecutor', () => {
     });
   });
 
+  it('dispatches exactly two commands, configuring before activating', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    await cameraSetupExecutor.execute(
+      { cameraMode: 'third-person', targetEntityId: 'player-1' },
+      ctx,
+    );
+
+    // `toHaveBeenCalledWith` is blind to whatever else was dispatched alongside,
+    // so every other case here would stay green with a stray `delete_entity` in
+    // the middle. The ORDER matters too: activating a camera the engine has not
+    // been told the mode of would render one frame of the previous camera.
+    expect(dispatch.mock.calls.map((c) => c[0])).toEqual([
+      'set_game_camera',
+      'set_active_game_camera',
+    ]);
+  });
+
+  // ---------------------------------------------------------------------------
+  // The producer's vocabulary — the aliases that were missing
+  // ---------------------------------------------------------------------------
+
+  /**
+   * `systemDecomposer.ts` picks its camera `defaultType` from a fixed list, and
+   * three of those spellings had no alias entry: `side-scroll`, `orbit` and
+   * `follow`. Each fell through to the unknown-mode fallback, so EVERY 2D
+   * side-scroller the decomposer produced was configured as a third-person
+   * follow camera — the exact defect PF-1125 was filed to fix, surviving the fix.
+   * `cameraModeVocabulary.test.ts` guards the list; these guard the translation.
+   */
+  it.each([
+    ['side-scroll', 'sideScroller'],
+    ['orbit', 'orbital'],
+    ['follow', 'thirdPersonFollow'],
+    ['top-down', 'topDown'],
+    ['first-person', 'firstPerson'],
+  ])('normalizes the decomposer spelling %s to %s', async (raw, normalized) => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    await cameraSetupExecutor.execute({ cameraMode: raw, targetEntityId: 'p' }, ctx);
+
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: normalized,
+      targetEntity: 'p',
+    });
+  });
+
+  it('falls back to sideScroller, not thirdPersonFollow, in a 2D project', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE, { projectType: '2d' });
+
+    await cameraSetupExecutor.execute(
+      { cameraMode: 'cinematic-dolly', targetEntityId: 'p' },
+      ctx,
+    );
+
+    // A third-person camera orbiting a flat scene is not a sane default for a 2D
+    // game, and `autoPolishExecutor` has always branched this way when it repairs
+    // a missing camera — the authoring path disagreeing with the repair path meant
+    // the same game got two different cameras depending on which one ran.
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: 'sideScroller',
+      targetEntity: 'p',
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // The GDD's config vocabulary: mapped where the units match, reported otherwise
+  // ---------------------------------------------------------------------------
+
+  it('maps the GDD spelling altitude onto topDownHeight', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    const result = await cameraSetupExecutor.execute(
+      { cameraMode: 'top-down', cameraConfig: { altitude: 18 }, targetEntityId: 'p' },
+      ctx,
+    );
+
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: 'topDown',
+      targetEntity: 'p',
+      height: 18,
+    });
+    expect(result.output?.warning).toBeUndefined();
+  });
+
+  it('lets an explicit engine field beat the aliased GDD spelling', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    const result = await cameraSetupExecutor.execute(
+      {
+        cameraMode: 'top-down',
+        cameraConfig: { altitude: 18, topDownHeight: 25 },
+        targetEntityId: 'p',
+      },
+      ctx,
+    );
+
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: 'topDown',
+      targetEntity: 'p',
+      height: 25,
+    });
+    // The alias was accepted-then-overridden, which from the user's side is still
+    // "this key did nothing", so it is reported rather than quietly discarded.
+    expect(result.output?.warning).toContain('altitude');
+  });
+
+  it('reports the config keys the engine has no parameter for', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    // The real vocabulary the GDD generator emits. Before PF-1125's second half,
+    // `filterCameraNumerics` returned `{}` for input like this — 100% of it
+    // dropped — while the step still reported `applied: true`.
+    const result = await cameraSetupExecutor.execute(
+      {
+        cameraMode: 'side-scroll',
+        cameraConfig: { smoothing: 0.1, leadAhead: 3, locked: true },
+        targetEntityId: 'p',
+      },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: 'sideScroller',
+      targetEntity: 'p',
+    });
+    for (const key of ['smoothing', 'leadAhead', 'locked']) {
+      expect(result.output?.warning).toContain(key);
+    }
+  });
+
+  it('reports a real field carrying a value that cannot be sent', async () => {
+    const { ctx } = makeCtx(CAMERA_NODE);
+
+    const result = await cameraSetupExecutor.execute(
+      { cameraMode: 'top-down', cameraConfig: { topDownHeight: '25' }, targetEntityId: 'p' },
+      ctx,
+    );
+
+    // Naming a real parameter is not the same as setting it: a string is dropped
+    // by the allowlist exactly like an unknown key, so the user hears about it.
+    expect(result.output?.warning).toContain('topDownHeight');
+  });
+
+  it('combines the targetless and ignored-key warnings into one report', async () => {
+    const { ctx } = makeCtx(CAMERA_NODE);
+
+    const result = await cameraSetupExecutor.execute(
+      { cameraMode: 'follow', cameraConfig: { smoothing: 0.2 } },
+      ctx,
+    );
+
+    expect(result.output?.warning).toContain('will not move');
+    expect(result.output?.warning).toContain('smoothing');
+  });
+
   // ---------------------------------------------------------------------------
   // Entity resolution
   // ---------------------------------------------------------------------------
@@ -273,11 +435,18 @@ describe('cameraSetupExecutor', () => {
     });
   });
 
-  it('does not read camera parameters off Object.prototype', async () => {
+  it('does not read camera parameters off the prototype chain', async () => {
     const { ctx, dispatch } = makeCtx(CAMERA_NODE);
 
+    // `Object.create`, NOT `JSON.parse('{"__proto__":…}')`. JSON.parse builds the
+    // key with CreateDataProperty and never invokes the `__proto__` setter, so
+    // that fixture yields a plain OWN property named `__proto__` — a key the
+    // allowlist ignores for the same reason it ignores `arbitraryKey`. It passes
+    // whether or not the own-key guards exist, which makes it a test of nothing.
+    const config = Object.create({ topDownHeight: 99, altitude: 42 }) as Record<string, unknown>;
+
     const result = await cameraSetupExecutor.execute(
-      { cameraMode: 'top-down', cameraConfig: JSON.parse('{"__proto__":{"topDownHeight":99}}') },
+      { cameraMode: 'top-down', cameraConfig: config },
       ctx,
     );
 
@@ -287,6 +456,9 @@ describe('cameraSetupExecutor', () => {
       mode: 'topDown',
       targetEntity: null,
     });
+    // An inherited key is not something the user asked for, so it is not reported
+    // as ignored either — `Object.keys` sees own keys only.
+    expect(result.output?.warning).not.toContain('altitude');
   });
 
   // ---------------------------------------------------------------------------

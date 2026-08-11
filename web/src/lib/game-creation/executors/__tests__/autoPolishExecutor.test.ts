@@ -137,6 +137,17 @@ describe('autoPolishExecutor', () => {
       // default. Omitting the field is how the payload asks for that default, and
       // it keeps no second copy of the number here to drift from the engine's.
     });
+    // Configuring a camera the engine does not render through is a repair the
+    // player cannot see: `game_camera_system` is `With<ActiveGameCamera>`, and
+    // only `set_active_game_camera` inserts that marker on a freshly configured
+    // camera. Asserted as an ORDERED call list rather than another
+    // `toHaveBeenCalledWith`, because the latter is blind to a missing sibling —
+    // which is how this stayed absent through the suite that was written for it.
+    expect(
+      vi.mocked(ctx.dispatchCommand).mock.calls
+        .map((c: unknown[]) => c[0])
+        .filter((name: unknown) => String(name).includes('camera')),
+    ).toEqual(['set_game_camera', 'set_active_game_camera']);
   });
 
   it('configures camera as sideScroller in 2D', async () => {

@@ -21,7 +21,7 @@ registerSystem({
   category: 'camera',
   setupSteps(
     system: GameSystem,
-    _gdd: OrchestratorGDD,
+    gdd: OrchestratorGDD,
     ctx: SystemStepContext,
   ): SystemStepInput[] {
     // Every follow mode is inert without a target — the engine skips its whole
@@ -30,7 +30,11 @@ registerSystem({
     // same way `movement.ts` binds it for `character_setup`; the engine matches
     // on the `EntityId` component, so the id is the only usable handle.
     const player = ctx.entities.find(e => e.entity.role === 'player');
-    const mode = normalizeCameraMode(system.type);
+    // Same fallback the executor will apply, so the plan-time warning below is
+    // decided on the mode the engine actually ends up in: a 2D game with an
+    // unrecognized mode becomes `sideScroller`, which still needs a target, but
+    // the two must agree or the warning fires for a mode that never ships.
+    const mode = normalizeCameraMode(system.type, gdd.projectType);
 
     if (!player && cameraModeNeedsTarget(mode)) {
       // Still plan the step: the mode itself is worth recording, and a camera

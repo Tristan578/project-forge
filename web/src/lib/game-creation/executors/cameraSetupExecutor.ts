@@ -7,9 +7,10 @@ import {
   filterCameraNumerics,
   normalizeCameraMode,
   resolveCameraEntityId,
+  unmappedCameraConfigKeys,
 } from '../cameraResolution';
 // Type-only: erased at compile time, so this adds no module edge into `@/stores`
-// (see `__tests__/serverSafeImports.test.ts` — this file is reachable from an
+// (see `../__tests__/serverSafeImports.test.ts` — this file is reachable from an
 // API route and a value-import of the store would break the RSC build).
 import type { GameCameraData, GameCameraMode } from '@/stores/slices/types';
 
@@ -72,7 +73,12 @@ export const cameraSetupExecutor: ExecutorDefinition = {
       );
     }
 
-    const mode: GameCameraMode = normalizeCameraMode(parsed.data.cameraMode);
+    // Project-type aware: an unrecognized mode in a 2D game means `sideScroller`,
+    // not a third-person camera orbiting a flat scene. `autoPolishExecutor` has
+    // always branched this way when it repairs a missing camera, so a shared
+    // fallback is also what stops the authoring path and the repair path
+    // producing two different cameras for the same game.
+    const mode: GameCameraMode = normalizeCameraMode(parsed.data.cameraMode, ctx.projectType);
 
     // Live read. The camera entity is spawned by an earlier step in the same
     // pipeline, so a snapshot taken at pipeline start cannot see it — and
@@ -118,18 +124,32 @@ export const cameraSetupExecutor: ExecutorDefinition = {
     // `applied: true` stand in for "the player will see what the GDD asked
     // for" — the plan-time warning in `systems/camera.ts` catches the case the
     // plan can see, and this catches the rest.
-    const targetless = targetEntity === null && cameraModeNeedsTarget(mode);
+    const warnings: string[] = [];
+
+    if (targetEntity === null && cameraModeNeedsTarget(mode)) {
+      warnings.push(
+        `Camera set to ${mode} but nothing was given for it to follow — it will not move.`,
+      );
+    }
+
+    // The GDD's camera vocabulary and the engine's parameter list were authored
+    // independently and barely overlap, so most directives carry keys that reach
+    // the engine as nothing. Dropping them is the honest outcome — a guessed unit
+    // conversion would aim the camera wrongly rather than not at all — but
+    // dropping them SILENTLY is the PF-1125 defect itself, one field down.
+    const ignored = unmappedCameraConfigKeys(parsed.data.cameraConfig);
+    if (ignored.length > 0) {
+      warnings.push(
+        `Camera settings the engine has no parameter for were ignored: ${ignored.join(', ')}.`,
+      );
+    }
 
     return successResult({
       cameraMode: mode,
       cameraEntityId: entityId,
       targetEntityId: targetEntity,
       applied: true,
-      ...(targetless
-        ? {
-            warning: `Camera set to ${mode} but nothing was given for it to follow — it will not move.`,
-          }
-        : {}),
+      ...(warnings.length > 0 ? { warning: warnings.join(' ') } : {}),
     });
   },
 };
