@@ -1,5 +1,5 @@
 ---
-"spawnforge-web": patch
+"web": patch
 ---
 
 Fix cutscene dialogue beats doing nothing. A dialogue keyframe builds a
