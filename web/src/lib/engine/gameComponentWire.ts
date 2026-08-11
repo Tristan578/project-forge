@@ -428,11 +428,15 @@ export const ENGINE_PROP_MAXIMA = {
  * Coerce a float field the same way `prop_f32` does: drop what the engine cannot
  * hold, clamp what it can.
  *
- * The range is a required argument rather than an optional one. Every numeric
- * field the engine reads is bounded, so a call site with no range is a field the
- * engine is clamping and the store is not — the divergence this whole module
- * exists to close, and making it a type error is cheaper than a test that has to
- * notice the omission.
+ * The range is a required argument rather than an optional one, because every
+ * float on this wire has one — the engine clamps all eighteen of them. A call
+ * site with no range would be a field the engine is clamping and the store is
+ * not, which is the state this replaced: `num` checked only `Number.isFinite`,
+ * so a `speed` of `1e9` or a `gravityScale` of `-500` was stored verbatim while
+ * the engine simulated `1000` and `-10`. `dispatchCommand` returns void, so
+ * nothing anywhere reported the disagreement — the inspector kept showing the
+ * number the user typed and the game kept playing by a different one. Making the
+ * omission a type error is cheaper than a test that has to notice it.
  */
 const num = (v: unknown, fallback: number, range: EngineRange): number =>
   isEngineFinite(v) ? Math.min(Math.max(v, range.min), range.max) : fallback;
