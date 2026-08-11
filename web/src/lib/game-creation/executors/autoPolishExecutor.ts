@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
+import { resolveCameraEntityId } from '../cameraResolution';
 
 // [B4] diagnoseIssues() requires GameMetrics (avgPlayTime, completionRate, etc.)
 // which do not exist on a freshly-built game. auto_polish uses STRUCTURAL
@@ -60,13 +61,12 @@ export const autoPolishExecutor: ExecutorDefinition = {
       // is dispatched straight to the engine. A snapshot taken before the
       // pipeline started names entities that no longer exist, and
       // `set_game_camera` against a despawned id is a silent no-op (PF-1118).
-      const nodes = Object.values(ctx.getStore().sceneGraph.nodes);
-      const cameraNode = nodes.find(n => {
-        const lower = n.name.toLowerCase();
-        return lower === 'camera' || lower.endsWith('camera') || lower.endsWith('_cam');
-      });
+      // Same heuristic as `camera_setup`, shared rather than copied — two
+      // executors resolving "the scene's camera" by different rules is how one
+      // of them silently configures nothing.
+      const cameraEntityId = resolveCameraEntityId(Object.values(ctx.getStore().sceneGraph.nodes));
 
-      if (cameraNode) {
+      if (cameraEntityId) {
         const mode = parsed.data.projectType === '2d' ? 'sideScroller' : 'thirdPersonFollow';
         // Translated, never flat: the store's authoring names share no key with
         // the engine's wire form, and the engine drops every key it does not
@@ -80,7 +80,7 @@ export const autoPolishExecutor: ExecutorDefinition = {
         // engine default, and it carries no second copy of that number to drift.
         commands.push({
           command: 'set_game_camera',
-          payload: buildSetGameCameraPayload(cameraNode.entityId, {
+          payload: buildSetGameCameraPayload(cameraEntityId, {
             mode,
             targetEntity: null,
           }),
