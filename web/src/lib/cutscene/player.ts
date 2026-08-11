@@ -10,8 +10,10 @@
 import type { Cutscene, CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
 import { useCutsceneStore } from '@/stores/cutsceneStore';
 import {
+  blendGameCameraData,
   buildSetGameCameraPayload,
   isCameraMode,
+  normalizeTargetEntity,
   NUMERIC_CAMERA_FIELDS,
 } from '@/lib/game/gameCameraPayload';
 import type { SetGameCameraPayload } from '@/lib/game/gameCameraPayload';
@@ -36,8 +38,30 @@ interface ScheduledKeyframe {
   trackType: CutsceneTrack['type'];
   entityId: string | null;
   keyframe: CutsceneKeyframe;
+  /**
+   * The keyframe before this one ON THE SAME TRACK, or null for a track's first.
+   *
+   * Linked while the track is still intact, because the schedule is flattened
+   * across every track and sorted by timestamp — after that, "the previous
+   * element" is whichever track happened to fire last, which is not a state this
+   * one is moving from.
+   */
+  prev: CutsceneKeyframe | null;
   fired: boolean;
 }
+
+/**
+ * Track types whose command is a state to interpolate rather than an event.
+ *
+ * A duration-based keyframe re-dispatches on every animation frame so easing can
+ * be stepped, and that is only meaningful where the command sets a state the
+ * next dispatch can supersede — today, the camera. `play_audio`, `play_animation`
+ * and `start_dialogue` are one-shot triggers: re-sending them 60 times a second
+ * for the length of the keyframe restarts the sound, the clip and the dialogue
+ * on every frame. That is what this scheduler did to every non-camera track with
+ * a duration, which is most of them.
+ */
+const INTERPOLATED_TRACK_TYPES = new Set<CutsceneTrack['type']>(['camera']);
 
 // ============================================================================
 // Easing utilities
@@ -65,7 +89,7 @@ export function applyEasing(t: number, easing: CutsceneKeyframe['easing']): numb
 // ============================================================================
 
 /**
- * Read a camera keyframe's payload into a `set_game_camera` command payload.
+ * Read a camera keyframe's payload into the authoring vocabulary.
  *
  * Keyframe payloads are `Record<string, unknown>` written by the cutscene
  * generator — i.e. model output. They are read field by field against an
@@ -73,24 +97,16 @@ export function applyEasing(t: number, easing: CutsceneKeyframe['easing']): numb
  * whatever keys the model invented, and every key the engine does not
  * recognize is dropped with no error, no log and no failing test.
  *
- * Returns null when the track names no camera entity, or when the payload's
- * mode is absent or unrecognized. `set_game_camera` configures a specific
- * camera entity, so there is nothing to address without one — the same reason
- * the animation and audio tracks return null without an `entityId`.
+ * Returns null when the payload's mode is absent or unrecognized — there is no
+ * camera state to describe without one.
  */
-function buildCameraCommandPayload(
-  entityId: string | null,
-  payload: Record<string, unknown>,
-): SetGameCameraPayload | null {
-  if (!entityId) return null;
-
+function readCameraData(payload: Record<string, unknown>): GameCameraData | null {
   const rawMode = payload.mode;
   if (!isCameraMode(rawMode)) return null;
 
-  const rawTarget = payload.targetEntity;
   const data: GameCameraData = {
     mode: rawMode,
-    targetEntity: typeof rawTarget === 'string' && rawTarget !== '' ? rawTarget : null,
+    targetEntity: normalizeTargetEntity(payload.targetEntity),
   };
 
   // `NUMERIC_CAMERA_FIELDS` rather than a locally filtered list: the translator
@@ -106,7 +122,32 @@ function buildCameraCommandPayload(
     if (typeof value === 'number' && Number.isFinite(value)) data[key] = value;
   }
 
-  return buildSetGameCameraPayload(entityId, data);
+  return data;
+}
+
+/**
+ * Build the `set_game_camera` payload for one frame of a camera keyframe.
+ *
+ * Returns null when the track names no camera entity: `set_game_camera`
+ * configures a specific camera entity, so there is nothing to address without
+ * one — the same reason the animation and audio tracks return null without an
+ * `entityId`.
+ */
+function buildCameraCommandPayload(
+  entityId: string | null,
+  keyframe: CutsceneKeyframe,
+  prevKeyframe: CutsceneKeyframe | null,
+  progress: number,
+): SetGameCameraPayload | null {
+  if (!entityId) return null;
+
+  const target = readCameraData(keyframe.payload);
+  if (!target) return null;
+
+  const from = prevKeyframe ? readCameraData(prevKeyframe.payload) : null;
+  const eased = applyEasing(progress, keyframe.easing);
+
+  return buildSetGameCameraPayload(entityId, blendGameCameraData(from, target, eased));
 }
 
 /**
@@ -117,20 +158,26 @@ export function buildCommand(
   trackType: CutsceneTrack['type'],
   entityId: string | null,
   keyframe: CutsceneKeyframe,
-  // Nothing consumes playback progress today. The camera command used to carry
-  // it as `_easedProgress`, a field no engine command has ever read and nothing
-  // on the JS side consumed either — so easing a camera keyframe has always been
-  // a no-op. Interpolating would mean lerping the camera between its current and
-  // target state JS-side and dispatching each step; `set_game_camera` is an
-  // absolute set with no interpolation of its own. The parameter stays so the
-  // scheduler's call sites keep their shape when that lands.
-  _progress: number,
+  /**
+   * Raw playback progress through this keyframe's duration, 0..1. Only the
+   * camera track reads it — see {@link INTERPOLATED_TRACK_TYPES}. The keyframe's
+   * own easing curve is applied inside the camera builder, so callers pass the
+   * linear fraction, not an eased one.
+   */
+  progress: number,
+  /**
+   * The preceding keyframe on the same track, when there is one. Camera state is
+   * blended from it; the command used to carry the progress as `_easedProgress`
+   * instead — a field no engine command has ever read and nothing on the JS side
+   * consumed either, so easing a camera keyframe was a no-op for its whole life.
+   */
+  prevKeyframe: CutsceneKeyframe | null = null,
 ): { command: string; payload: unknown } | null {
   const { payload } = keyframe;
 
   switch (trackType) {
     case 'camera': {
-      const cameraPayload = buildCameraCommandPayload(entityId, payload);
+      const cameraPayload = buildCameraCommandPayload(entityId, keyframe, prevKeyframe, progress);
       if (!cameraPayload) return null;
       return { command: 'set_game_camera', payload: cameraPayload };
     }
@@ -143,18 +190,28 @@ export function buildCommand(
       };
     }
     case 'dialogue': {
-      // Dialogue keyframes mutate the dialogue store directly via the dispatcher
+      // `start_dialogue` is routed by nothing — not `core/commands`, not any JS
+      // dispatcher — so a dialogue keyframe reaches no handler. The comment here
+      // used to claim these keyframes "mutate the dialogue store directly via the
+      // dispatcher"; the dispatcher is the engine's, and `useDialogueStore` is
+      // driven from the narrative panels, never from playback. Wiring it up is
+      // PF-1140. Until then a `treeId` that is not a string is refused rather
+      // than sent as `undefined`, so the command names a tree or is not built.
+      const treeId = typeof payload.treeId === 'string' ? payload.treeId : '';
+      if (!treeId) return null;
       return {
         command: 'start_dialogue',
-        payload: { treeId: payload.treeId, entityId: entityId ?? undefined },
+        payload: { treeId, entityId: entityId ?? undefined },
       };
     }
     case 'audio': {
       if (!entityId) return null;
-      return {
-        command: 'play_audio',
-        payload: { entityId, ...payload },
-      };
+      // `handle_play_audio` reads `entityId` and nothing else — volume, fade and
+      // every other key a generated keyframe carries were spread onto the command
+      // and dropped by the engine without an error. Sending only the field the
+      // handler reads makes that a visible gap instead of a payload that looks
+      // like it configures playback.
+      return { command: 'play_audio', payload: { entityId } };
     }
     case 'wait':
       return null;
@@ -268,12 +325,18 @@ export class CutscenePlayer {
     const items: ScheduledKeyframe[] = [];
     for (const track of cutscene.tracks) {
       if (track.muted) continue;
-      for (const keyframe of track.keyframes) {
+      // Per track, in the track's own timestamp order, so `prev` is the state
+      // this keyframe moves FROM. A track's keyframes are not guaranteed to be
+      // authored in order, and the flattened schedule below is interleaved with
+      // every other track, so neither array order alone would do.
+      const ordered = [...track.keyframes].sort((a, b) => a.timestamp - b.timestamp);
+      for (const [index, keyframe] of ordered.entries()) {
         items.push({
           trackId: track.id,
           trackType: track.type,
           entityId: track.entityId,
           keyframe,
+          prev: index > 0 ? ordered[index - 1] : null,
           fired: false,
         });
       }
@@ -313,23 +376,35 @@ export class CutscenePlayer {
 
       const elapsed = time - item.keyframe.timestamp;
 
-      if (item.keyframe.duration > 0) {
-        // Duration-based keyframe: re-fire every frame while within the window
-        // so that easing interpolation is applied continuously.
+      // A duration only means "step this over time" for a track whose command
+      // sets a state. For everything else the duration describes how long the
+      // triggered thing lasts, and re-triggering it each frame restarts it.
+      const interpolates =
+        item.keyframe.duration > 0 && INTERPOLATED_TRACK_TYPES.has(item.trackType);
+
+      if (interpolates) {
+        // Re-fire every frame while within the window so that easing
+        // interpolation is applied continuously.
         // Once elapsed exceeds duration AND we've already dispatched progress=1.0,
         // skip further processing. The `fired` flag ensures the final frame is
         // always dispatched even when rAF skips past the exact end boundary.
         if (elapsed > item.keyframe.duration && item.fired) continue;
         const progress = Math.min(elapsed / item.keyframe.duration, 1);
-        const cmd = buildCommand(item.trackType, item.entityId, item.keyframe, progress);
+        const cmd = buildCommand(
+          item.trackType,
+          item.entityId,
+          item.keyframe,
+          progress,
+          item.prev,
+        );
         if (cmd) {
           this.options.dispatchCommand(cmd.command, cmd.payload);
         }
         if (progress >= 1) item.fired = true;
       } else {
-        // Instantaneous keyframe: fire once only to avoid duplicate commands.
+        // One-shot keyframe: fire once only to avoid duplicate commands.
         if (item.fired) continue;
-        const cmd = buildCommand(item.trackType, item.entityId, item.keyframe, 1);
+        const cmd = buildCommand(item.trackType, item.entityId, item.keyframe, 1, item.prev);
         if (cmd) {
           this.options.dispatchCommand(cmd.command, cmd.payload);
         }

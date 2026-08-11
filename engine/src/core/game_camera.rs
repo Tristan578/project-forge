@@ -53,6 +53,33 @@ impl Default for GameCameraData {
     }
 }
 
+impl GameCameraData {
+    /// Build the component for an authored `set_game_camera`, carrying the
+    /// entity's runtime state across from what it already had.
+    ///
+    /// `set_game_camera` is an absolute set of the AUTHORED configuration — the
+    /// mode and its parameters, and the follow target. The three shake fields
+    /// sitting alongside them are not authored at all: `camera_shake` writes
+    /// them and `update_camera_shake` counts them down. Rebuilding the component
+    /// with `..Default::default()` zeroed all three, so any `set_game_camera`
+    /// that arrived mid-shake cancelled the shake with no error and no trace —
+    /// and a cutscene camera keyframe, which is stepped frame by frame, cancels
+    /// it on every frame for the length of the move.
+    pub fn configured(
+        existing: Option<&GameCameraData>,
+        mode: GameCameraMode,
+        target_entity: Option<String>,
+    ) -> Self {
+        Self {
+            mode,
+            target_entity,
+            shake_intensity: existing.map_or(0.0, |d| d.shake_intensity),
+            shake_duration: existing.map_or(0.0, |d| d.shake_duration),
+            shake_timer: existing.map_or(0.0, |d| d.shake_timer),
+        }
+    }
+}
+
 // `PartialEq` is what lets the flat-wire round trip be asserted directly (see `flat_wire_tests`).
 // Every field is a plain `f32`/`bool`/`Vec3`, and the f32 -> JSON -> f32 direction is lossless, so
 // mode equality is an exact check. (The reverse is not: a literal like `1.9` does not survive f64 ->
@@ -1201,5 +1228,77 @@ mod from_flat_tests {
         // Unusable bounds frame the shot wrongly rather than taking the engine down.
         assert_eq!(clamp_ordered(7.0, f32::NAN, f32::NAN), 7.0);
         assert_eq!(clamp_ordered(7.0, f32::INFINITY, f32::NEG_INFINITY), 7.0);
+    }
+}
+
+/// `set_game_camera` rebuilds the whole component from the request, so anything on it that the
+/// request does not carry has to be preserved deliberately. These cover the two things that are
+/// NOT authored: the shake fields, and (in the bridge) the accumulated look state.
+#[cfg(test)]
+mod configured_tests {
+    use super::*;
+
+    fn shaking() -> GameCameraData {
+        GameCameraData {
+            shake_intensity: 0.4,
+            shake_duration: 1.5,
+            shake_timer: 0.9,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn keeps_a_running_shake_across_a_reconfiguration() {
+        let existing = shaking();
+        let next = GameCameraData::configured(
+            Some(&existing),
+            GameCameraMode::TopDown { height: 30.0, damping: 5.0, follow_rotation: false },
+            Some("player".to_string()),
+        );
+
+        assert_eq!(next.shake_intensity, 0.4);
+        assert_eq!(next.shake_duration, 1.5);
+        assert_eq!(next.shake_timer, 0.9);
+    }
+
+    #[test]
+    fn takes_mode_and_target_from_the_request() {
+        let existing = shaking();
+        let next = GameCameraData::configured(
+            Some(&existing),
+            GameCameraMode::TopDown { height: 30.0, damping: 5.0, follow_rotation: false },
+            Some("player".to_string()),
+        );
+
+        assert_eq!(next.mode, GameCameraMode::TopDown { height: 30.0, damping: 5.0, follow_rotation: false });
+        assert_eq!(next.target_entity.as_deref(), Some("player"));
+    }
+
+    #[test]
+    fn a_cleared_target_clears_it() {
+        let existing = GameCameraData {
+            target_entity: Some("player".to_string()),
+            ..Default::default()
+        };
+        let next = GameCameraData::configured(
+            Some(&existing),
+            GameCameraMode::TopDown { height: 30.0, damping: 5.0, follow_rotation: false },
+            None,
+        );
+
+        assert_eq!(next.target_entity, None);
+    }
+
+    #[test]
+    fn a_camera_with_no_prior_component_starts_unshaken() {
+        let next = GameCameraData::configured(
+            None,
+            GameCameraMode::TopDown { height: 30.0, damping: 5.0, follow_rotation: false },
+            None,
+        );
+
+        assert_eq!(next.shake_intensity, 0.0);
+        assert_eq!(next.shake_duration, 0.0);
+        assert_eq!(next.shake_timer, 0.0);
     }
 }

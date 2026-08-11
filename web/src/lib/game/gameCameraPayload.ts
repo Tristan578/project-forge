@@ -229,8 +229,61 @@ function num(data: Partial<GameCameraData>, key: keyof GameCameraData): number |
  * on the wire as `''` and came back as `null`, and the two sides disagreed about
  * what the camera was doing. Both directions go through here now.
  */
-function normalizeTargetEntity(value: unknown): string | null {
+export function normalizeTargetEntity(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/**
+ * Interpolate a camera's numeric parameters from one authored state toward another.
+ *
+ * `set_game_camera` is an absolute set — the engine holds no notion of a
+ * transition, so a camera move that is supposed to take three seconds has to be
+ * stepped JS-side and dispatched frame by frame. This produces the state for one
+ * such step; `t` is already-eased progress, not raw time.
+ *
+ * A blend needs a start state, and there is exactly one case where this module
+ * can honestly name it: the previous keyframe on the same track, in the same
+ * mode. Without a predecessor the camera's prior state is whatever the rest of
+ * the app last set — unknowable from here — and across a mode change the two
+ * sides do not even share a parameter vocabulary, so blending `orbitalDistance`
+ * into `topDownHeight` would be arithmetic on unrelated quantities. Both cases
+ * return `to` unchanged: a cut, which is what already happens today and is at
+ * least not a lie about where the camera was.
+ *
+ * A field the predecessor left unset blends from {@link ENGINE_CAMERA_DEFAULTS},
+ * not from the target — that keyframe's own dispatch omitted the field too, so
+ * the engine's `from_flat` default is what the camera is genuinely sitting at.
+ * A field the TARGET leaves unset is omitted rather than blended, so it keeps
+ * resolving to that same default instead of being pinned to a computed number.
+ */
+export function blendGameCameraData(
+  from: Partial<GameCameraData> | null,
+  to: Partial<GameCameraData> & { mode: GameCameraMode },
+  t: number,
+): Partial<GameCameraData> & { mode: GameCameraMode } {
+  if (!from || from.mode !== to.mode) return to;
+
+  const progress = Math.max(0, Math.min(1, t));
+
+  // Built key by key rather than spread. `to` is an authoring object, and the
+  // result feeds `buildSetGameCameraPayload` — the one place a stray key would
+  // be silently dropped by the engine instead of rejected here.
+  const blended: Partial<GameCameraData> & { mode: GameCameraMode } = {
+    mode: to.mode,
+    targetEntity: normalizeTargetEntity(to.targetEntity),
+  };
+  if (Object.hasOwn(to, 'engineParams') && to.engineParams) {
+    blended.engineParams = to.engineParams;
+  }
+
+  for (const key of NUMERIC_CAMERA_FIELDS) {
+    const target = num(to, key);
+    if (target === undefined) continue;
+    const start = num(from, key) ?? ENGINE_CAMERA_DEFAULTS[key];
+    blended[key] = start + (target - start) * progress;
+  }
+
+  return blended;
 }
 
 /**
