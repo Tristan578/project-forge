@@ -1093,7 +1093,13 @@ mod from_flat_tests {
         let third_person = GameCameraMode::from_flat("thirdPersonFollow", &json!({"damping": 0.0})).unwrap();
         match third_person {
             GameCameraMode::ThirdPersonFollow { damping, .. } => {
-                assert_eq!(damping, 0.0, "an exact 0.0 damping (instant snap) must survive");
+                // Damping is a RATE PER SECOND, not a 0..1 blend factor: the follow
+                // systems compute `t = (damping * delta).min(1.0)`, so 0.0 yields
+                // t = 0 and the camera never converges on its target — it freezes
+                // where it is. That is a legitimate thing to ask for and a
+                // completely different outcome from the 5.0 default, which is
+                // exactly why it must not be silently treated as "absent".
+                assert_eq!(damping, 0.0, "an exact 0.0 damping (frozen follow) must survive");
             }
             other => panic!("expected ThirdPersonFollow, got {:?}", other),
         }

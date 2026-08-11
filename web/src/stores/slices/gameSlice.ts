@@ -212,10 +212,21 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   // is no parallel `primaryGameCamera` field to keep in sync (and no reason for
   // this slice to reach across into the selection slice to do it).
   setEntityGameCamera: (entityId, data) => set(state => {
-    const allGameCameras = { ...state.allGameCameras };
-    if (data) allGameCameras[entityId] = data;
-    else delete allGameCameras[entityId];
-    return { allGameCameras };
+    // The set branch defines the key in an object literal rather than assigning
+    // `record[entityId] = data`. A plain assignment is `Set`, which walks the
+    // prototype chain, so an entityId of `"__proto__"` would hit the inherited
+    // setter instead: the camera would silently fail to store AND the record
+    // would be reparented to it, after which every miss-lookup resolves through
+    // the prototype and returns that camera for entities that have none. A
+    // computed key in a literal is `DefineOwnProperty` and does neither.
+    //
+    // `"__proto__"` is a reachable entity id, not a hypothetical: `zEntityId` is
+    // `z.string().min(1)`, and the engine's `is_valid_override_id` rejects only
+    // empty, over-64-byte and control-character ids — so a model can name an
+    // entity that and the engine will emit `GAME_CAMERA_CHANGED` for it.
+    if (data) return { allGameCameras: { ...state.allGameCameras, [entityId]: data } };
+    const { [entityId]: _removed, ...rest } = state.allGameCameras;
+    return { allGameCameras: rest };
   }),
   setActiveGameCameraId: (entityId) => set({ activeGameCameraId: entityId }),
   setMobileTouchConfig: (config) => set({ mobileTouchConfig: config }),

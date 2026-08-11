@@ -5,7 +5,7 @@ import { createScene, loadProjectScenes, saveProjectScenes } from '@/lib/scenes/
 import {
   buildSetGameCameraPayload,
   isCameraMode,
-  TRANSLATED_CAMERA_FIELDS,
+  NUMERIC_CAMERA_FIELDS,
 } from '@/lib/game/gameCameraPayload';
 // Type-only: erased at compile time, so this adds no module edge into `@/stores`
 // (see `__tests__/serverSafeImports.test.ts` — this file is reachable from an
@@ -132,8 +132,7 @@ export const sceneCreateExecutor: ExecutorDefinition = {
         // damping) and `topDownAngle` (TopDown is height/damping/follow_rotation).
         const cameraData: GameCameraData = { mode: validMode, targetEntity: null };
         const rawConfig = (cameraConfig ?? {}) as Record<string, unknown>;
-        for (const key of TRANSLATED_CAMERA_FIELDS) {
-          if (key === 'mode' || key === 'targetEntity') continue;
+        for (const key of NUMERIC_CAMERA_FIELDS) {
           // Own keys only. `cameraConfig` is GDD-derived, so the model controls
           // its keys. Zod's `z.record()` parse already rebuilds it as a plain
           // object, which strips any inherited property — this is the local,
@@ -175,8 +174,7 @@ export const sceneCreateExecutor: ExecutorDefinition = {
       // which one does.
       pendingFilteredConfig = {};
       const raw = cameraConfig as Record<string, unknown>;
-      for (const key of TRANSLATED_CAMERA_FIELDS) {
-        if (key === 'mode' || key === 'targetEntity') continue;
+      for (const key of NUMERIC_CAMERA_FIELDS) {
         // Own keys only, for the same reason as the dispatch path above — a bare
         // read walks the prototype chain, and this object is GDD-derived.
         if (!Object.hasOwn(raw, key)) continue;

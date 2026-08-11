@@ -61,6 +61,61 @@ export interface GameCameraWireParams {
   autoRotateSpeed?: number;
 }
 
+/**
+ * The value shape the engine reads for each wire parameter.
+ *
+ * `satisfies Record<keyof GameCameraWireParams, WireShape>` makes this complete
+ * in both directions, so a parameter cannot be added to the wire interface
+ * without declaring how to validate it. That matters because this table — not
+ * the interface, which is erased — is what the round-trip preservation below
+ * checks values against, and what the Rust-source pin in
+ * `__tests__/gameCameraPayload.test.ts` compares `from_flat` against. Before it
+ * existed, nothing required a `flat_f32(params, "newKey", …)` added to a Rust
+ * arm to have any TypeScript counterpart at all: the completeness checks in this
+ * module all ran TS→TS.
+ */
+const WIRE_PARAM_SHAPES = {
+  offset: 'vec3',
+  damping: 'number',
+  minDistance: 'number',
+  maxDistance: 'number',
+  lookAtTarget: 'bool',
+  collisionAvoidance: 'bool',
+  eyeHeight: 'number',
+  mouseSensitivity: 'number',
+  fov: 'number',
+  pitchClamp: 'pair',
+  zOffset: 'number',
+  followY: 'bool',
+  yBounds: 'pair',
+  height: 'number',
+  followRotation: 'bool',
+  lookAt: 'vec3',
+  radius: 'number',
+  autoRotate: 'bool',
+  autoRotateSpeed: 'number',
+} satisfies Record<keyof GameCameraWireParams, 'number' | 'bool' | 'pair' | 'vec3'>;
+
+/** Runtime view of {@link WIRE_PARAM_SHAPES}. */
+export const GAME_CAMERA_WIRE_KEYS = Object.keys(
+  WIRE_PARAM_SHAPES,
+) as (keyof GameCameraWireParams)[];
+
+/** Is `value` a well-formed value for the wire parameter `key`? */
+function isWireValue(key: keyof GameCameraWireParams, value: unknown): boolean {
+  const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
+  switch (WIRE_PARAM_SHAPES[key]) {
+    case 'number':
+      return finite(value);
+    case 'bool':
+      return typeof value === 'boolean';
+    case 'pair':
+      return Array.isArray(value) && value.length === 2 && value.every(finite);
+    case 'vec3':
+      return Array.isArray(value) && value.length === 3 && value.every(finite);
+  }
+}
+
 /** The exact object shape `dispatchCommand('set_game_camera', …)` accepts. */
 export type SetGameCameraPayload = {
   entityId: string;
@@ -92,10 +147,32 @@ const TRANSLATED_FIELDS = {
   topDownHeight: true,
   orbitalDistance: true,
   orbitalAutoRotateSpeed: true,
+  engineParams: true,
 } satisfies Record<keyof GameCameraData, true>;
 
 /** Runtime view of {@link TRANSLATED_FIELDS}. */
 export const TRANSLATED_CAMERA_FIELDS = Object.keys(TRANSLATED_FIELDS) as (keyof GameCameraData)[];
+
+/**
+ * The authoring fields that hold a plain number.
+ *
+ * Every caller that reads model-authored camera parameters wants exactly this
+ * list, so it is derived once here rather than re-filtered per call site: three
+ * places used to strip `mode` and `targetEntity` with their own inline
+ * `key === … || key === …` guards, and each would have needed editing again for
+ * `engineParams`. A missed one is not a type error — it is a `number` field
+ * quietly assigned a non-number.
+ */
+export type NumericCameraField = Exclude<
+  keyof GameCameraData,
+  'mode' | 'targetEntity' | 'engineParams'
+>;
+
+const NON_NUMERIC_FIELDS = new Set<string>(['mode', 'targetEntity', 'engineParams']);
+
+export const NUMERIC_CAMERA_FIELDS = TRANSLATED_CAMERA_FIELDS.filter(
+  (field): field is NumericCameraField => !NON_NUMERIC_FIELDS.has(field),
+);
 
 /**
  * The engine's own per-field defaults, mirrored from `GameCameraMode::from_flat`.
@@ -118,7 +195,7 @@ export const ENGINE_CAMERA_DEFAULTS = {
   topDownHeight: 15,
   orbitalDistance: 8,
   orbitalAutoRotateSpeed: 15,
-} as const satisfies Record<Exclude<keyof GameCameraData, 'mode' | 'targetEntity'>, number>;
+} as const satisfies Record<NumericCameraField, number>;
 
 const DEFAULT_FOLLOW_HEIGHT = ENGINE_CAMERA_DEFAULTS.followHeight;
 const DEFAULT_FOLLOW_DISTANCE = ENGINE_CAMERA_DEFAULTS.followDistance;
@@ -200,17 +277,51 @@ export function buildSetGameCameraPayload(
     case 'orbital': {
       const radius = num(data, 'orbitalDistance');
       if (radius !== undefined) payload.radius = radius;
-      // Only the speed is exposed. The engine's `autoRotate` defaults to `true`,
-      // but its update is `angle += speed.to_radians() * dt`, so a speed of 0 is
-      // an exact no-op — sending the speed alone is faithful to a UI that has no
-      // separate on/off control.
+      // Only the speed is exposed to the author; `autoRotate` is derived from it
+      // rather than left out. The two are behaviourally interchangeable — the
+      // update is `angle += speed.to_radians() * dt`, so speed 0 is an exact
+      // no-op — but leaving the flag unwritten means this vocabulary does not
+      // OWN it, and an unowned wire key is one the round-trip preservation below
+      // keeps verbatim. A camera the engine reported as `autoRotate: false` would
+      // then carry that flag forward forever, silently defeating the next
+      // nonzero speed the author sets. Writing it makes the ownership real.
       const speed = num(data, 'orbitalAutoRotateSpeed');
-      if (speed !== undefined) payload.autoRotateSpeed = speed;
+      if (speed !== undefined) {
+        payload.autoRotateSpeed = speed;
+        payload.autoRotate = speed !== 0;
+      }
       break;
     }
     case 'fixed':
       // Position comes from the camera entity's own transform.
       break;
+  }
+
+  // Re-emit engine parameters this authoring vocabulary cannot express, so a
+  // round trip through the store does not quietly reset them. `set_game_camera`
+  // replaces the whole component — every parameter the payload omits comes back
+  // as `from_flat`'s default — so dropping a value here is not "leave it alone",
+  // it is "reset it".
+  //
+  // Authoring wins: a key the switch above already wrote is never overwritten,
+  // which is what keeps a user edit authoritative over the last engine report.
+  // Values are checked key by key against the wire shape table rather than
+  // spread: this bag comes from the engine today, but it lands in the store,
+  // and the store is written by things this module does not control.
+  const preserved = data.engineParams;
+  if (preserved) {
+    for (const key of GAME_CAMERA_WIRE_KEYS) {
+      if (Object.hasOwn(payload, key)) continue;
+      if (!Object.hasOwn(preserved, key)) continue;
+      const value = preserved[key];
+      if (!isWireValue(key, value)) continue;
+      // Each branch of `isWireValue` proves the property's declared type, but it
+      // proves it for a key the compiler only knows as a union, so the write
+      // cannot be expressed as a direct indexed assignment. `Object.assign` of a
+      // one-key object is the narrowing-free way to say it; casting the payload
+      // to an index signature would also erase every real key from the checker.
+      Object.assign(payload, { [key]: value });
+    }
   }
 
   return payload;
@@ -322,6 +433,30 @@ export function parseGameCameraWire(payload: Record<string, unknown>): GameCamer
     case 'fixed':
       break;
   }
+
+  // Keep the wire parameters this authoring vocabulary has no field for. Twelve
+  // of the engine's twenty-one are in that position, and every one of them used
+  // to be dropped here — which is not "leave it alone" but "reset it", because
+  // `set_game_camera` replaces the whole component and every parameter the next
+  // payload omits comes back as `from_flat`'s default.
+  //
+  // Which keys the switch above already covers is asked of the BUILDER rather
+  // than written down: round-tripping the authoring data reproduces exactly the
+  // keys the authoring path owns for this mode, so the two directions cannot
+  // disagree about the split. A hand-maintained "unmapped keys" list would be a
+  // third vocabulary to keep in step with the other two — and a key that fell
+  // off it would be silently reset, the very failure this exists to stop.
+  //
+  // The entityId is irrelevant to that question, hence the placeholder.
+  const authoringOwns = buildSetGameCameraPayload('', data);
+  const engineParams: Record<string, unknown> = {};
+  for (const key of GAME_CAMERA_WIRE_KEYS) {
+    if (Object.hasOwn(authoringOwns, key)) continue;
+    if (!Object.hasOwn(payload, key)) continue;
+    const value = payload[key];
+    if (isWireValue(key, value)) engineParams[key] = value;
+  }
+  if (Object.keys(engineParams).length > 0) data.engineParams = engineParams;
 
   return data;
 }

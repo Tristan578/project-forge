@@ -76,6 +76,10 @@ describe('buildCommand', () => {
       targetEntity: 'hero',
       radius: 12,
       autoRotateSpeed: 20,
+      // Derived from the speed, not authored: emitting it makes the authoring
+      // vocabulary the owner of `autoRotate`, so a stale flag from an earlier
+      // engine report cannot survive a round trip and mute this rotation.
+      autoRotate: true,
     });
   });
 

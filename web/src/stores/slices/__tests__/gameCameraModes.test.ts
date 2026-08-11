@@ -325,6 +325,45 @@ describe('gameCameraModes', () => {
       expect(store.getState().allGameCameras['cam-1']).toBeUndefined();
     });
 
+    // `"__proto__"` is a reachable entity id, not a hypothetical: `zEntityId` is
+    // `z.string().min(1)` and the engine's `is_valid_override_id` rejects only
+    // empty, over-64-byte and control-character ids, so a model can name an
+    // entity that and the engine will emit `GAME_CAMERA_CHANGED` for it. A plain
+    // `record[entityId] = data` is `Set`, which walks the prototype chain and
+    // would hit the inherited setter instead — dropping the write AND reparenting
+    // the record, after which every miss-lookup resolves through the prototype
+    // and hands back this camera for entities that have none.
+    describe('an entityId of "__proto__" cannot pollute the record', () => {
+      const cam: GameCameraData = { mode: 'fixed', targetEntity: null };
+
+      it('stores it as an own property, readable back', () => {
+        store.getState().setEntityGameCamera('__proto__', cam);
+
+        const cameras = store.getState().allGameCameras;
+        expect(Object.hasOwn(cameras, '__proto__')).toBe(true);
+        expect(cameras['__proto__']).toEqual(cam);
+      });
+
+      it('leaves an unrelated entity without a camera', () => {
+        store.getState().setEntityGameCamera('__proto__', cam);
+
+        expect(store.getState().allGameCameras['no-such-entity']).toBeUndefined();
+      });
+
+      it('does not reparent the record', () => {
+        store.getState().setEntityGameCamera('__proto__', cam);
+
+        expect(Object.getPrototypeOf(store.getState().allGameCameras)).toBe(Object.prototype);
+      });
+
+      it('clears it again with null', () => {
+        store.getState().setEntityGameCamera('__proto__', cam);
+        store.getState().setEntityGameCamera('__proto__', null);
+
+        expect(Object.hasOwn(store.getState().allGameCameras, '__proto__')).toBe(false);
+      });
+    });
+
     it('should set activeGameCameraId without dispatch', () => {
       store.getState().setActiveGameCameraId('cam-1');
       expect(store.getState().activeGameCameraId).toBe('cam-1');

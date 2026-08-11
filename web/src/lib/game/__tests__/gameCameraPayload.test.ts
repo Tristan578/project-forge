@@ -6,7 +6,9 @@ import {
   parseGameCameraWire,
   ENGINE_CAMERA_DEFAULTS,
   TRANSLATED_CAMERA_FIELDS,
+  GAME_CAMERA_WIRE_KEYS,
   type SetGameCameraPayload,
+  type NumericCameraField,
 } from '../gameCameraPayload';
 import type { GameCameraData, GameCameraMode } from '@/stores/slices/types';
 
@@ -102,6 +104,10 @@ describe('gameCameraPayload', () => {
         targetEntity: 'showcase-item',
         radius: 5,
         autoRotateSpeed: 0.5,
+        // Derived from the speed rather than left unwritten: an unowned wire key
+        // is one the round-trip preservation keeps verbatim, so a stale
+        // `autoRotate: false` would otherwise outlive the speed that replaced it.
+        autoRotate: true,
       });
     });
 
@@ -140,7 +146,7 @@ describe('gameCameraPayload', () => {
         { mode: 'firstPerson', expectedKeys: ['entityId', 'mode', 'targetEntity', 'eyeHeight', 'mouseSensitivity'] },
         { mode: 'sideScroller', expectedKeys: ['entityId', 'mode', 'targetEntity', 'zOffset'] },
         { mode: 'topDown', expectedKeys: ['entityId', 'mode', 'targetEntity', 'height'] },
-        { mode: 'orbital', expectedKeys: ['entityId', 'mode', 'targetEntity', 'radius', 'autoRotateSpeed'] },
+        { mode: 'orbital', expectedKeys: ['entityId', 'mode', 'targetEntity', 'radius', 'autoRotateSpeed', 'autoRotate'] },
         { mode: 'fixed', expectedKeys: ['entityId', 'mode', 'targetEntity'] },
       ];
 
@@ -244,10 +250,20 @@ describe('gameCameraPayload', () => {
         targetEntity: null,
         radius: 5,
         autoRotateSpeed: 0,
+        // Speed 0 and `autoRotate: false` are the same behaviour — the update is
+        // `angle += speed.to_radians() * dt` — so the flag is emitted to match,
+        // making this vocabulary the owner of it rather than leaving it to be
+        // preserved from whatever the engine last reported.
+        autoRotate: false,
       });
     });
 
-    it('preserves zero followSmoothing (instant snap) instead of dropping it as falsy', () => {
+    // `damping` is a rate per second, not a 0..1 blend factor — the engine
+    // computes `t = (damping * delta).min(1.0)` — so 0 freezes the camera where
+    // it stands rather than snapping it to the target. Either way it is a real
+    // value the author asked for, and dropping it as falsy would substitute the
+    // engine's 5.0 default for it.
+    it('preserves zero followSmoothing (frozen follow) instead of dropping it as falsy', () => {
       const payload = buildSetGameCameraPayload('cam-1', {
         mode: 'thirdPersonFollow',
         targetEntity: null,
@@ -415,8 +431,12 @@ describe('gameCameraPayload', () => {
           topDownHeight: 20,
         },
         fixed: {
+          // `fov` has no authoring field, so it exercises the preservation bag:
+          // it survives the round trip only because `parseGameCameraWire` keeps
+          // it and `buildSetGameCameraPayload` re-emits it.
           mode: 'fixed',
           targetEntity: null,
+          engineParams: { fov: 100 },
         },
         orbital: {
           mode: 'orbital',
@@ -565,17 +585,19 @@ describe('gameCameraPayload', () => {
         'topDownHeight',
         'orbitalDistance',
         'orbitalAutoRotateSpeed',
+        'engineParams',
       ]);
     });
 
     // `mode` and `targetEntity` are generic — set on every payload regardless
-    // of mode — so they are documented here as authoring-only with respect to
-    // this per-mode completeness check, not translated by a switch case.
-    const GENERIC_FIELDS: readonly (keyof GameCameraData)[] = ['mode', 'targetEntity'];
+    // of mode — and `engineParams` is an overlay applied after the switch, for
+    // every mode. All three are documented here as outside this per-mode
+    // completeness check, not translated by a switch case.
+    const GENERIC_FIELDS: readonly (keyof GameCameraData)[] = ['mode', 'targetEntity', 'engineParams'];
 
     // Every remaining field, paired with the one mode whose engine variant
     // reads it. Read straight from the switch statement in the module.
-    const FIELD_MODE: Record<Exclude<keyof GameCameraData, 'mode' | 'targetEntity'>, GameCameraMode> = {
+    const FIELD_MODE: Record<NumericCameraField, GameCameraMode> = {
       followDistance: 'thirdPersonFollow',
       followHeight: 'thirdPersonFollow',
       followSmoothing: 'thirdPersonFollow',
@@ -607,6 +629,138 @@ describe('gameCameraPayload', () => {
           withoutField,
         );
       }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Round-trip preservation.
+  //
+  // The engine reads twenty-one camera parameters; this authoring vocabulary
+  // names nine. `set_game_camera` REPLACES the whole component, so the twelve
+  // with no authoring field are not merely "not shown" — before `engineParams`
+  // they were reset to `from_flat`'s defaults by the next dispatch from any
+  // surface at all. An MCP client sets `fov: 100`, the user nudges Eye Height,
+  // the rebuilt payload omits `fov`, and the field of view silently returns to
+  // 75. That is the destructive-full-replace shape of PF-1123, on the surface
+  // the published manifest advertises.
+  // -------------------------------------------------------------------------
+  describe('engineParams round-trip preservation', () => {
+    it('keeps a wire parameter the authoring vocabulary has no field for', () => {
+      const parsed = parseGameCameraWire({
+        mode: 'firstPerson',
+        targetEntity: 'player-1',
+        eyeHeight: 1.7,
+        fov: 100,
+      });
+
+      expect(parsed).toEqual({
+        mode: 'firstPerson',
+        targetEntity: 'player-1',
+        firstPersonHeight: 1.7,
+        engineParams: { fov: 100 },
+      });
+    });
+
+    it('re-emits the preserved parameter on the next dispatch, so a full-replace does not reset it', () => {
+      const parsed = parseGameCameraWire({
+        mode: 'firstPerson',
+        targetEntity: 'player-1',
+        eyeHeight: 1.7,
+        fov: 100,
+      })!;
+
+      // The user nudges eye height. Everything else must survive.
+      const payload = buildSetGameCameraPayload('cam-1', { ...parsed, firstPersonHeight: 2 });
+
+      expect(payload).toEqual({
+        entityId: 'cam-1',
+        mode: 'firstPerson',
+        targetEntity: 'player-1',
+        eyeHeight: 2,
+        fov: 100,
+      });
+    });
+
+    it('does not capture a parameter the authoring path already owns — no second copy to go stale', () => {
+      const parsed = parseGameCameraWire({
+        mode: 'thirdPersonFollow',
+        targetEntity: null,
+        offset: [0, 3, -8],
+        damping: 0.9,
+      });
+
+      // `offset` and `damping` map onto followHeight/followDistance/
+      // followSmoothing, so they must NOT also appear in the bag.
+      expect(parsed).toEqual({
+        mode: 'thirdPersonFollow',
+        targetEntity: null,
+        followDistance: 8,
+        followHeight: 3,
+        followSmoothing: 0.9,
+      });
+    });
+
+    it('authoring wins over a preserved key of the same name', () => {
+      // A stale bag naming a key the current mode DOES translate must not
+      // override the live authoring value — otherwise a user edit would be
+      // silently reverted to the last value the engine reported.
+      const payload = buildSetGameCameraPayload('cam-1', {
+        mode: 'firstPerson',
+        targetEntity: null,
+        firstPersonHeight: 2,
+        engineParams: { eyeHeight: 99, fov: 100 },
+      });
+
+      expect(payload).toEqual({
+        entityId: 'cam-1',
+        mode: 'firstPerson',
+        targetEntity: null,
+        eyeHeight: 2,
+        fov: 100,
+      });
+    });
+
+    describe('values are validated by shape, never spread', () => {
+      // The bag reaches the builder through the store, and the store is written
+      // by things this module does not control — the inbound event path casts
+      // with `castPayload`, which is an unchecked `as T`.
+      it.each([
+        ['wrong primitive type', { fov: 'wide' }],
+        ['non-finite number', { fov: Infinity }],
+        ['boolean where a number belongs', { fov: true }],
+        ['number where a boolean belongs', { autoRotate: 1 }],
+        ['pair of the wrong length', { pitchClamp: [1] }],
+        ['vec3 with a non-numeric member', { lookAt: [0, 'x', 0] }],
+        ['unknown key the engine never reads', { notAWireKey: 5 }],
+      ])('drops a %s on capture', (_label, bad) => {
+        const parsed = parseGameCameraWire({ mode: 'fixed', targetEntity: null, ...bad });
+        expect(parsed).toEqual({ mode: 'fixed', targetEntity: null });
+      });
+
+      it.each([
+        ['wrong primitive type', { fov: 'wide' }],
+        ['non-finite number', { fov: Infinity }],
+        ['pair of the wrong length', { pitchClamp: [1, 2, 3] }],
+        ['unknown key the engine never reads', { notAWireKey: 5 }],
+      ])('drops a %s on re-emit', (_label, bad) => {
+        const payload = buildSetGameCameraPayload('cam-1', {
+          mode: 'fixed',
+          targetEntity: null,
+          engineParams: bad,
+        });
+        expect(payload).toEqual({ entityId: 'cam-1', mode: 'fixed', targetEntity: null });
+      });
+
+      it('reads own properties only — an inherited key is not re-emitted', () => {
+        const inherited = Object.create({ fov: 100 }) as Record<string, unknown>;
+        const payload = buildSetGameCameraPayload('cam-1', {
+          mode: 'fixed',
+          targetEntity: null,
+          engineParams: inherited,
+        });
+
+        expect(payload).toEqual({ entityId: 'cam-1', mode: 'fixed', targetEntity: null });
+      });
     });
   });
 });
@@ -661,16 +815,69 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
     return arms;
   }
 
+  /**
+   * A Rust `f32` literal, as written in source.
+   *
+   * Deliberately wider than `-?[0-9]+(\.[0-9]+)?`, which was the pattern here
+   * first: Rust spells this number four interchangeable ways and that one
+   * accepted only the plainest. `5.0_f32`, `5f32`, `1_000.0` and `1e3` are all
+   * the same value to rustc, so the day someone annotates a default for
+   * readability the regex stops matching — and because {@link rustDefault}
+   * asserts on a null match, that reads as "the default is missing", pointing at
+   * the wrong file entirely. Matching the whole literal keeps the failure mode
+   * honest: a genuinely absent default still fails, a re-spelled one does not.
+   */
+  const RUST_F32 = String.raw`-?\d[\d_]*(?:\.(?:\d[\d_]*)?)?(?:[eE][+-]?\d+)?(?:_?f32)?`;
+
+  /** Read a captured Rust literal as a number, rejecting anything unparseable. */
+  function parseRustF32(literal: string, what: string): number {
+    const value = Number(literal.replace(/_?f32$/, '').replace(/_/g, ''));
+    expect(
+      Number.isFinite(value),
+      `unparseable Rust f32 literal for ${what}: "${literal}"`,
+    ).toBe(true);
+    return value;
+  }
+
   /** The literal default in `flat_f32(params, "<wireKey>", <default>)`. */
   function rustDefault(arm: string, wireKey: string): number {
     const m = new RegExp(
-      `flat_f32\\(params, "${wireKey}", (-?[0-9]+(?:\\.[0-9]+)?)\\)`,
+      `flat_f32\\(params, "${wireKey}", (${RUST_F32})\\)`,
     ).exec(arm);
     expect(m, `no flat_f32 default for "${wireKey}"`).not.toBeNull();
-    return Number(m![1]);
+    return parseRustF32(m![1]!, `flat_f32 "${wireKey}"`);
   }
 
   const arms = fromFlatArms();
+
+  // Every completeness check elsewhere in this file runs TS->TS: the `satisfies`
+  // constraints prove the TypeScript tables agree with each other, and nothing
+  // required a `flat_f32(params, "newKey", …)` added to a Rust arm to have any
+  // TypeScript counterpart at all. That is the direction the drift actually
+  // travels — the engine grows a parameter, the wire table never hears about it,
+  // and `parseGameCameraWire` silently drops it on every round trip, which under
+  // a full-replace command means resetting it.
+  describe('GAME_CAMERA_WIRE_KEYS matches the keys from_flat reads', () => {
+    /** Every `"<key>"` passed to a `flat_*` reader inside a from_flat arm. */
+    const rustKeys = new Set(
+      [...Object.values(arms).join('\n').matchAll(
+        /flat_(?:f32|bool|range|numbers::<\d+>)\(params, "(\w+)"/g,
+      )].map(m => m[1]!),
+    );
+
+    it('finds the readers at all (guards against a silently vacuous scan)', () => {
+      expect(rustKeys.size).toBeGreaterThan(0);
+    });
+
+    it('declares every key the engine reads', () => {
+      expect([...rustKeys].filter(k => !GAME_CAMERA_WIRE_KEYS.includes(k as never)))
+        .toEqual([]);
+    });
+
+    it('declares no key the engine does not read', () => {
+      expect(GAME_CAMERA_WIRE_KEYS.filter(k => !rustKeys.has(k))).toEqual([]);
+    });
+  });
 
   /** Authoring field -> the mode arm and wire key it takes its default from. */
   const SCALAR_SOURCES = {
@@ -699,13 +906,15 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
     const arm = arms['thirdPersonFollow'];
     expect(arm, 'no "thirdPersonFollow" arm in from_flat').toBeDefined();
 
-    const m = /unwrap_or\(Vec3::new\((-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\)\)/.exec(arm!);
+    const m = new RegExp(
+      `unwrap_or\\(Vec3::new\\((${RUST_F32}), (${RUST_F32}), (${RUST_F32})\\)\\)`,
+    ).exec(arm!);
     expect(m, 'no Vec3 default for `offset`').not.toBeNull();
 
-    expect(ENGINE_CAMERA_DEFAULTS.followHeight).toBe(Number(m![2]));
+    expect(ENGINE_CAMERA_DEFAULTS.followHeight).toBe(parseRustF32(m![2]!, 'offset.y'));
     // The payload builder emits `offset: [0, height, -distance]`, so the
     // engine's Z is the negated authoring distance.
-    expect(ENGINE_CAMERA_DEFAULTS.followDistance).toBe(-Number(m![3]));
+    expect(ENGINE_CAMERA_DEFAULTS.followDistance).toBe(-parseRustF32(m![3]!, 'offset.z'));
   });
 
   // Every default must be covered by one of the two checks above, or a newly

@@ -68,17 +68,21 @@ export const autoPolishExecutor: ExecutorDefinition = {
 
       if (cameraNode) {
         const mode = parsed.data.projectType === '2d' ? 'sideScroller' : 'thirdPersonFollow';
-        // Translated, never flat: `followSmoothing` is the store's authoring name
-        // for the engine's `damping`, and the engine drops every key it does not
-        // recognize without an error (PF-1126). Note the smoothing only survives
-        // the 3D branch — `GameCameraData` has no side-scroller damping field, so
-        // a 2D camera takes the engine's default of 5.
+        // Translated, never flat: the store's authoring names share no key with
+        // the engine's wire form, and the engine drops every key it does not
+        // recognize without an error (PF-1126).
+        //
+        // No `followSmoothing` here. It used to send 0.8, read as a 0..1 blend
+        // factor — but the engine's `damping` is a RATE PER SECOND
+        // (`let t = (damping * delta).min(1.0)`), so 0.8 is roughly six times
+        // slower than the default 5.0, and every auto-polished 3D game shipped a
+        // sluggish follow camera. Omitting the field is how you ask for the
+        // engine default, and it carries no second copy of that number to drift.
         commands.push({
           command: 'set_game_camera',
           payload: buildSetGameCameraPayload(cameraNode.entityId, {
             mode,
             targetEntity: null,
-            followSmoothing: 0.8,
           }),
         });
         fixes.push(`Configured camera as ${mode}`);

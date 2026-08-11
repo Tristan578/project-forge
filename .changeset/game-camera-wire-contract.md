@@ -19,3 +19,17 @@ Values that saturate to infinity and inverted `[min, max]` ranges are rejected,
 and the two sites that clamp between a pair order their bounds first — an
 inverted pair reached `f32::clamp`, whose panic takes down the whole WASM
 instance and loses the unsaved scene.
+
+Camera parameters the editor's authoring vocabulary has no field for — twelve of
+the engine's twenty-one, including field of view and the look-at target — now
+survive a round trip through the store. `set_game_camera` replaces the whole
+component, so a parameter the next payload omits comes back as the engine's
+default: dropping these on read was not leaving them alone, it was resetting
+them. An entity named `__proto__` can also no longer reparent the camera record,
+which previously made every camera-less entity report the polluting camera as
+its own.
+
+Fixes the 3D auto-polish camera, which sent a follow smoothing of 0.8 as though
+it were a 0..1 blend factor. The engine reads it as a rate per second, so every
+auto-polished 3D game shipped a follow camera roughly six times slower than the
+default.

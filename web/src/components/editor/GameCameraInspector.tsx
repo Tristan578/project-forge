@@ -4,7 +4,12 @@ import { memo, useCallback, useId } from 'react';
 import { Camera, Zap } from 'lucide-react';
 import { useEditorStore, type GameCameraData, type GameCameraMode } from '@/stores/editorStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
-import { ENGINE_CAMERA_DEFAULTS } from '@/lib/game/gameCameraPayload';
+// `NumericCameraField` is imported, not re-derived. This file used to spell its
+// own `Exclude<keyof GameCameraData, 'mode' | 'targetEntity'>`, and the day
+// `GameCameraData` grew a non-numeric field the local copy swept it into the
+// numeric row type while the shared one did not — a divergence that only
+// surfaced as an index error against `ENGINE_CAMERA_DEFAULTS`.
+import { ENGINE_CAMERA_DEFAULTS, type NumericCameraField } from '@/lib/game/gameCameraPayload';
 
 /**
  * Which parameters each mode starts with. Every VALUE is read from
@@ -53,8 +58,6 @@ function parseNumberInput(raw: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-/** Every camera parameter that is a plain number, i.e. every row below. */
-type NumericCameraField = Exclude<keyof GameCameraData, 'mode' | 'targetEntity'>;
 
 /**
  * One labelled numeric parameter row.

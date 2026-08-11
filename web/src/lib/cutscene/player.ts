@@ -12,7 +12,7 @@ import { useCutsceneStore } from '@/stores/cutsceneStore';
 import {
   buildSetGameCameraPayload,
   isCameraMode,
-  TRANSLATED_CAMERA_FIELDS,
+  NUMERIC_CAMERA_FIELDS,
 } from '@/lib/game/gameCameraPayload';
 import type { SetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 import type { GameCameraData } from '@/stores/slices/types';
@@ -65,18 +65,6 @@ export function applyEasing(t: number, easing: CutsceneKeyframe['easing']): numb
 // ============================================================================
 
 /**
- * The numeric authoring params a camera keyframe may carry.
- *
- * Derived from the translator's own field list, so a new `GameCameraData`
- * parameter becomes readable here the moment its engine mapping is decided —
- * there is no second list to remember to update.
- */
-type CameraKeyframeParam = Exclude<keyof GameCameraData, 'mode' | 'targetEntity'>;
-const CAMERA_KEYFRAME_PARAMS = TRANSLATED_CAMERA_FIELDS.filter(
-  (field): field is CameraKeyframeParam => field !== 'mode' && field !== 'targetEntity',
-);
-
-/**
  * Read a camera keyframe's payload into a `set_game_camera` command payload.
  *
  * Keyframe payloads are `Record<string, unknown>` written by the cutscene
@@ -105,7 +93,10 @@ function buildCameraCommandPayload(
     targetEntity: typeof rawTarget === 'string' && rawTarget !== '' ? rawTarget : null,
   };
 
-  for (const key of CAMERA_KEYFRAME_PARAMS) {
+  // `NUMERIC_CAMERA_FIELDS` rather than a locally filtered list: the translator
+  // owns which of its fields hold a number, so a non-numeric one added there
+  // cannot end up assigned a number here.
+  for (const key of NUMERIC_CAMERA_FIELDS) {
     // Own keys only. Keyframe payloads are model-authored, and a bare read walks
     // the prototype chain — the value picked up there is then written as an OWN
     // property on `data`, so `buildSetGameCameraPayload`'s own `Object.hasOwn`
