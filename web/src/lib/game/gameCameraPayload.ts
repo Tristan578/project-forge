@@ -140,6 +140,7 @@ const TRANSLATED_FIELDS = {
   targetEntity: true,
   followDistance: true,
   followHeight: true,
+  followOffsetX: true,
   followSmoothing: true,
   firstPersonHeight: true,
   firstPersonMouseSensitivity: true,
@@ -188,6 +189,7 @@ export const NUMERIC_CAMERA_FIELDS = TRANSLATED_CAMERA_FIELDS.filter(
 export const ENGINE_CAMERA_DEFAULTS = {
   followDistance: 5,
   followHeight: 2,
+  followOffsetX: 0,
   followSmoothing: 5,
   firstPersonHeight: 1.7,
   firstPersonMouseSensitivity: 0.1,
@@ -199,6 +201,7 @@ export const ENGINE_CAMERA_DEFAULTS = {
 
 const DEFAULT_FOLLOW_HEIGHT = ENGINE_CAMERA_DEFAULTS.followHeight;
 const DEFAULT_FOLLOW_DISTANCE = ENGINE_CAMERA_DEFAULTS.followDistance;
+const DEFAULT_FOLLOW_OFFSET_X = ENGINE_CAMERA_DEFAULTS.followOffsetX;
 
 /**
  * Read one own, finite number off an authoring object.
@@ -242,13 +245,19 @@ export function buildSetGameCameraPayload(
     case 'thirdPersonFollow': {
       const distance = num(data, 'followDistance');
       const height = num(data, 'followHeight');
+      const offsetX = num(data, 'followOffsetX');
       // `offset` is a single vector, so it is all-or-nothing on the wire: sending
-      // it with only one component known would reset the other to 0 rather than
-      // leave it alone. Fill the gap with the engine's own default — which is
+      // it with only one component known would reset the others to 0 rather than
+      // leave them alone. Fill each gap with the engine's own default — which is
       // exactly `[0, 2, -5]`, i.e. this UI's height 2 / distance 5.
-      if (distance !== undefined || height !== undefined) {
+      //
+      // The X slot was a literal `0` until PF-1125: it is the one component this
+      // vocabulary has no control for, so a shoulder offset from an MCP client or
+      // a scene file was reset the first time a user touched either of the other
+      // two. `followOffsetX` carries it through instead.
+      if (distance !== undefined || height !== undefined || offsetX !== undefined) {
         payload.offset = [
-          0,
+          offsetX ?? DEFAULT_FOLLOW_OFFSET_X,
           height ?? DEFAULT_FOLLOW_HEIGHT,
           -(distance ?? DEFAULT_FOLLOW_DISTANCE),
         ];
@@ -395,7 +404,11 @@ export function parseGameCameraWire(payload: Record<string, unknown>): GameCamer
     case 'thirdPersonFollow': {
       const offset = payload.offset;
       if (Array.isArray(offset) && offset.length === 3) {
-        const [, y, z] = offset as unknown[];
+        // X is read even though no control edits it. It used to be discarded here
+        // and hardcoded to 0 on the way back out, so reading a camera and then
+        // nudging its height silently straightened a shoulder offset.
+        const [x, y, z] = offset as unknown[];
+        if (typeof x === 'number' && Number.isFinite(x)) data.followOffsetX = x;
         if (typeof y === 'number' && Number.isFinite(y)) data.followHeight = y;
         if (typeof z === 'number' && Number.isFinite(z)) data.followDistance = -z;
       }

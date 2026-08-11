@@ -914,6 +914,19 @@ export interface GameCameraData {
   // Mode-specific params
   followDistance?: number;
   followHeight?: number;
+  /**
+   * Sideways component of the follow offset. No inspector control — it exists so
+   * the value SURVIVES.
+   *
+   * `followDistance`/`followHeight` describe two of the three components of the
+   * engine's single `offset` vector, and the builder has to send that vector
+   * whole. So a shoulder offset set by an MCP client or a scene file was read
+   * back as height and distance, and the next nudge of either control rebuilt
+   * `offset` with a hardcoded `0` in this slot — the destructive-full-replace
+   * shape of PF-1123, reached through the one wire key the `engineParams` bag
+   * cannot preserve piecemeal.
+   */
+  followOffsetX?: number;
   followSmoothing?: number;
   firstPersonHeight?: number;
   firstPersonMouseSensitivity?: number;

@@ -130,6 +130,23 @@ export interface CameraCandidateNode {
 }
 
 /**
+ * Whether an entity name reads as the scene's camera.
+ *
+ * Exported so `verify_all_scenes` decides "this scene has no camera" by the same
+ * rule `camera_setup` and `auto_polish` use to FIND one. Three copies of this
+ * heuristic drifting apart is how verification comes to report a missing camera
+ * that the next step then configures — or worse, passes a scene whose camera
+ * neither of the other two can see.
+ *
+ * No exact-`camera` disjunct: `'camera'.endsWith('camera')` is already true, so
+ * it would read as a third rule that never decides anything.
+ */
+export function looksLikeCameraName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith('camera') || lower.endsWith('_cam');
+}
+
+/**
  * Find the scene's camera entity by name.
  *
  * Callers MUST pass nodes read live at the moment of dispatch, never a snapshot
@@ -139,12 +156,7 @@ export interface CameraCandidateNode {
  * no-op (PF-1118).
  */
 export function resolveCameraEntityId(nodes: readonly CameraCandidateNode[]): string | null {
-  const match = nodes.find((n) => {
-    const lower = n.name.toLowerCase();
-    // No exact-`camera` disjunct: `'camera'.endsWith('camera')` is already true,
-    // so it would read as a third rule that never decides anything.
-    return lower.endsWith('camera') || lower.endsWith('_cam');
-  });
+  const match = nodes.find((n) => looksLikeCameraName(n.name));
   if (!match) return null;
   return typeof match.entityId === 'string' && match.entityId.trim().length > 0
     ? match.entityId

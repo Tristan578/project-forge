@@ -462,6 +462,60 @@ describe('set_game_camera', () => {
     });
   });
 
+  // The authoring numerics need the same carry-forward as `engineParams` above,
+  // for the same reason: this verb replaces the whole `GameCameraData`, so a field
+  // the caller left out came back as the engine's default. `followOffsetX` makes
+  // it concrete — no schema key and no inspector control can restate it, so
+  // dropping it here is the only outcome and it is permanent.
+  it('carries existing authoring parameters forward, and explicit arguments win', async () => {
+    const { store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
+      entityId: 'cam-1',
+      mode: 'thirdPersonFollow',
+      followHeight: 4,
+    }, {
+      allGameCameras: {
+        'cam-1': {
+          mode: 'thirdPersonFollow',
+          targetEntity: null,
+          followDistance: 8,
+          followHeight: 3,
+          followOffsetX: 1.5,
+          followSmoothing: 6,
+        },
+      },
+    });
+    expect(store.setGameCamera).toHaveBeenCalledWith('cam-1', {
+      mode: 'thirdPersonFollow',
+      targetEntity: null,
+      followDistance: 8,
+      // The one field this call names is the one field that changes.
+      followHeight: 4,
+      followOffsetX: 1.5,
+      followSmoothing: 6,
+    });
+  });
+
+  it('ignores a non-finite stored parameter rather than carrying NaN into the engine', async () => {
+    const { store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
+      entityId: 'cam-1',
+      mode: 'thirdPersonFollow',
+    }, {
+      allGameCameras: {
+        'cam-1': {
+          mode: 'thirdPersonFollow',
+          targetEntity: null,
+          followDistance: Number.NaN,
+          followHeight: 3,
+        },
+      },
+    });
+    expect(store.setGameCamera).toHaveBeenCalledWith('cam-1', {
+      mode: 'thirdPersonFollow',
+      targetEntity: null,
+      followHeight: 3,
+    });
+  });
+
   it('forwards every supported authoring parameter', async () => {
     const { store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
       entityId: 'cam-1',

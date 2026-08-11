@@ -9,6 +9,7 @@ import { zEntityId, zVec3, parseArgs } from './types';
 import type { GameCameraData, EntityType } from '@/stores/editorStore';
 import { MATERIAL_PRESETS, getPresetsByCategory, saveCustomMaterial, deleteCustomMaterial, loadCustomMaterials } from '@/lib/materialPresets';
 import { buildStoreComponent, ENGINE_COMPONENT_TYPES, ENGINE_COMPONENT_CATALOG } from '@/lib/engine/gameComponentWire';
+import { NUMERIC_CAMERA_FIELDS } from '@/lib/game/gameCameraPayload';
 
 // Derived, not hand-listed: the hand-written list had silently fallen one type
 // behind the engine (it omitted `dialogue_trigger`), so the AI was told that type
@@ -114,6 +115,34 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     // shape into the engine's wire form via `buildSetGameCameraPayload`.
     const d = p.data;
     const cameraData: GameCameraData = { mode: d.mode, targetEntity: d.targetEntity ?? null };
+
+    // Carry the EXISTING camera forward before applying this call's arguments.
+    // This is an UPDATE verb but it replaces the whole `GameCameraData`, so every
+    // field the caller left out came back as the engine's default: the LLM says
+    // "raise the camera" and the follow smoothing the user tuned a turn ago is
+    // gone. Same destructive-full-replace shape as PF-1123, and it reaches
+    // `followOffsetX` — the one field with no control at all, whose entire job is
+    // to survive — so a shoulder offset set here was lost on the next call.
+    //
+    // `NUMERIC_CAMERA_FIELDS` rather than a spread: the store's copy can come from
+    // a loaded scene file, and the translator owns which of its fields hold a
+    // number. `Object.hasOwn` on the map because `entityId` is LLM-chosen.
+    if (Object.hasOwn(ctx.store.allGameCameras, d.entityId)) {
+      const existing = ctx.store.allGameCameras[d.entityId];
+      if (existing) {
+        for (const key of NUMERIC_CAMERA_FIELDS) {
+          const value = existing[key];
+          if (typeof value === 'number' && Number.isFinite(value)) cameraData[key] = value;
+        }
+        // Engine-owned params the schema above cannot name (the schema covers 7 of
+        // the engine's 19 wire params): an MCP client sets `fov: 100`, the user
+        // then says "raise the camera to eye level 1.8", and without this the fov
+        // is silently back to 75 — persisted, because `GameCameraData` is written
+        // into `EntitySnapshot` and scene export.
+        if (existing.engineParams) cameraData.engineParams = existing.engineParams;
+      }
+    }
+
     if (d.followDistance !== undefined) cameraData.followDistance = d.followDistance;
     if (d.followHeight !== undefined) cameraData.followHeight = d.followHeight;
     if (d.followSmoothing !== undefined) cameraData.followSmoothing = d.followSmoothing;
@@ -123,20 +152,6 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     if (d.topDownHeight !== undefined) cameraData.topDownHeight = d.topDownHeight;
     if (d.orbitalDistance !== undefined) cameraData.orbitalDistance = d.orbitalDistance;
     if (d.orbitalAutoRotateSpeed !== undefined) cameraData.orbitalAutoRotateSpeed = d.orbitalAutoRotateSpeed;
-
-    // This is an UPDATE verb on an existing camera, and the schema above covers
-    // 7 of the engine's 19 wire params. `apply_set_game_camera_requests` inserts
-    // a whole new `GameCameraData`, so anything the payload omits comes back as
-    // `from_flat`'s default: an MCP client sets `fov: 100`, the user then says
-    // "raise the camera to eye level 1.8", and the fov is silently back to 75 —
-    // persisted, because `GameCameraData` is written into `EntitySnapshot` and
-    // scene export. Carry the engine-owned params the schema cannot name.
-    // `Object.hasOwn`, not a bare read: `entityId` is LLM-chosen, so `toString`
-    // or `constructor` would otherwise resolve up the prototype chain.
-    if (Object.hasOwn(ctx.store.allGameCameras, d.entityId)) {
-      const existing = ctx.store.allGameCameras[d.entityId];
-      if (existing?.engineParams) cameraData.engineParams = existing.engineParams;
-    }
 
     ctx.store.setGameCamera(d.entityId, cameraData);
     return { success: true, result: { message: `Game camera set to ${d.mode} on entity ${d.entityId}` } };

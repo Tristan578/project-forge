@@ -162,7 +162,7 @@ describe('handleGameEvent', () => {
     it('translates a thirdPersonFollow payload into the authoring vocabulary', () => {
       const result = handleGameEvent(
         'GAME_CAMERA_CHANGED',
-        { entityId: 'cam-1', mode: 'thirdPersonFollow', targetEntity: 'player-entity', offset: [0, 3, -8], damping: 0.9 },
+        { entityId: 'cam-1', mode: 'thirdPersonFollow', targetEntity: 'player-entity', offset: [1.5, 3, -8], damping: 0.9 },
         mockSetGet.set,
         mockSetGet.get
       );
@@ -173,6 +173,10 @@ describe('handleGameEvent', () => {
         targetEntity: 'player-entity',
         followHeight: 3,
         followDistance: 8,
+        // All three components of `offset`, including the sideways one no control
+        // edits: what the engine reports has to come back in full, or the next
+        // command the user sends rebuilds the vector without it (PF-1125).
+        followOffsetX: 1.5,
         followSmoothing: 0.9,
       });
     });

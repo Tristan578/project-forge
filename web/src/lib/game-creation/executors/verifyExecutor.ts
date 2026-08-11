@@ -1,18 +1,12 @@
 import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, failResult } from './shared';
+// The same predicate `camera_setup` and `auto_polish` use to find the camera, so
+// "this scene has no camera" cannot disagree with "here is the camera".
+import { looksLikeCameraName } from '../cameraResolution';
 
 // The verify executor takes no structured input — it reads the live store
 const inputSchema = z.object({}).passthrough();
-
-/**
- * Checks whether an entity name suggests it is a camera entity.
- * Convention: entities named "Camera", "camera", or ending with "Camera"/"_cam".
- */
-function looksLikeCamera(name: string): boolean {
-  const lower = name.toLowerCase();
-  return lower === 'camera' || lower.endsWith('camera') || lower.endsWith('_cam');
-}
 
 export const verifyExecutor: ExecutorDefinition = {
   name: 'verify_all_scenes',
@@ -61,7 +55,7 @@ export const verifyExecutor: ExecutorDefinition = {
     }
 
     // Check 2: No camera entity present
-    const hasCamera = nodes.some(node => looksLikeCamera(node.name));
+    const hasCamera = nodes.some(node => looksLikeCameraName(node.name));
     if (!hasCamera && nodes.length > 0) {
       warnings.push('No camera entity found in scene');
       issues.push('no_camera_on_player');
