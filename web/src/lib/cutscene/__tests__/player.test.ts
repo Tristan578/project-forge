@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { applyEasing, buildCommand, CutscenePlayer, type CommandDispatcher } from '../player';
 import type { CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
 import { useCutsceneStore } from '@/stores/cutsceneStore';
@@ -171,12 +171,23 @@ describe('buildCommand', () => {
   it('dialogue track returns start_dialogue', () => {
     const cmd = buildCommand('dialogue', 'npc1', makeKF({ treeId: 'tree_1' }), 0);
     expect(cmd?.command).toBe('start_dialogue');
+    expect(cmd?.payload).toEqual({ treeId: 'tree_1', entityId: 'npc1' });
   });
 
-  it('audio track returns play_audio', () => {
-    const cmd = buildCommand('audio', 'sfx1', makeKF({ volume: 0.8 }), 0);
+  it('dialogue track returns null when the payload names no tree', () => {
+    // A command carrying `treeId: undefined` names nothing to start. Building it
+    // anyway produced a dispatch that could only ever be a no-op.
+    expect(buildCommand('dialogue', 'npc1', makeKF(), 0)).toBeNull();
+    expect(buildCommand('dialogue', 'npc1', makeKF({ treeId: 42 }), 0)).toBeNull();
+  });
+
+  it('audio track sends only the field play_audio reads', () => {
+    // `handle_play_audio` reads `entityId` and stops. The rest of the keyframe
+    // payload used to be spread onto the command and dropped by the engine with
+    // no error — a payload that looked like it configured playback.
+    const cmd = buildCommand('audio', 'sfx1', makeKF({ volume: 0.8, fadeIn: 2 }), 0);
     expect(cmd?.command).toBe('play_audio');
-    expect((cmd?.payload as Record<string, unknown>).entityId).toBe('sfx1');
+    expect(cmd?.payload).toEqual({ entityId: 'sfx1' });
   });
 
   it('audio track returns null when entityId is null', () => {
@@ -187,6 +198,68 @@ describe('buildCommand', () => {
   it('wait track returns null', () => {
     const cmd = buildCommand('wait', null, makeKF(), 0.5);
     expect(cmd).toBeNull();
+  });
+});
+
+// ============================================================================
+// Camera easing
+//
+// `set_game_camera` is an absolute set — the engine has no notion of a
+// transition — so a camera move that is meant to take time has to be stepped
+// JS-side. It never was: the command carried the eased progress as
+// `_easedProgress`, a field no engine command reads and nothing on the JS side
+// consumed, so `applyEasing` had no production caller at all and a three-second
+// eased move snapped on its first frame.
+// ============================================================================
+
+describe('buildCommand — camera easing', () => {
+  const cam = (payload: Record<string, unknown>, easing: CutsceneKeyframe['easing'] = 'linear') =>
+    ({ timestamp: 0, duration: 2, easing, payload }) satisfies CutsceneKeyframe;
+
+  it('blends from the previous keyframe on the same track', () => {
+    const cmd = buildCommand(
+      'camera',
+      'cam1',
+      cam({ mode: 'topDown', topDownHeight: 30 }),
+      0.5,
+      cam({ mode: 'topDown', topDownHeight: 10 }),
+    );
+
+    expect(cmd?.payload).toEqual({
+      entityId: 'cam1',
+      mode: 'topDown',
+      targetEntity: null,
+      height: 20,
+    });
+  });
+
+  it('applies the keyframe easing curve, not raw progress', () => {
+    // ease_in at t=0.5 is 0.25, so a 0 -> 100 move is a quarter of the way in.
+    const cmd = buildCommand(
+      'camera',
+      'cam1',
+      cam({ mode: 'topDown', topDownHeight: 100 }, 'ease_in'),
+      0.5,
+      cam({ mode: 'topDown', topDownHeight: 0 }),
+    );
+
+    expect((cmd?.payload as Record<string, unknown>).height).toBeCloseTo(25);
+  });
+
+  it('cuts to the target with no predecessor — the prior state is unknowable here', () => {
+    const cmd = buildCommand('camera', 'cam1', cam({ mode: 'topDown', topDownHeight: 30 }), 0.5);
+    expect((cmd?.payload as Record<string, unknown>).height).toBe(30);
+  });
+
+  it('cuts across a mode change rather than blending unrelated parameters', () => {
+    const cmd = buildCommand(
+      'camera',
+      'cam1',
+      cam({ mode: 'topDown', topDownHeight: 30 }),
+      0.5,
+      cam({ mode: 'orbital', orbitalDistance: 200 }),
+    );
+    expect((cmd?.payload as Record<string, unknown>).height).toBe(30);
   });
 });
 
@@ -273,6 +346,109 @@ describe('CutscenePlayer', () => {
     expect(useCutsceneStore.getState().playbackTime).toBe(0);
     player.seek(100);
     expect(useCutsceneStore.getState().playbackTime).toBe(10);
+  });
+
+  // --------------------------------------------------------------------------
+  // Scheduling
+  //
+  // These drive the real rAF loop against a stubbed clock. A duration-based
+  // keyframe re-dispatches on every frame so easing can be stepped, and that
+  // only makes sense where the command sets a state the next dispatch
+  // supersedes. Every other track type is a one-shot trigger, so the same loop
+  // was restarting the sound, the clip and the dialogue ~60 times a second for
+  // the length of the keyframe.
+  // --------------------------------------------------------------------------
+  describe('duration-based keyframes', () => {
+    let advance: (ms: number) => void;
+
+    beforeEach(() => {
+      let now = 0;
+      let pending: FrameRequestCallback[] = [];
+      vi.stubGlobal('performance', { now: () => now });
+      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+        pending.push(cb);
+        return pending.length;
+      });
+      vi.stubGlobal('cancelAnimationFrame', () => {});
+      advance = (ms: number) => {
+        now += ms;
+        const due = pending;
+        pending = [];
+        for (const cb of due) cb(now);
+      };
+      player = new CutscenePlayer({ dispatchCommand: dispatch, onComplete, onStop });
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function loadTracks(...tracks: CutsceneTrack[]) {
+      player.load({
+        id: 'cs1', name: 'Test', duration: 10, tracks, createdAt: 0, updatedAt: 0,
+      });
+      player.play();
+    }
+
+    const dispatched = () => (dispatch as ReturnType<typeof vi.fn>).mock.calls;
+
+    it('re-dispatches a camera keyframe each frame, stepping toward the target', () => {
+      loadTracks({
+        id: 't1', type: 'camera', entityId: 'cam1', muted: false,
+        keyframes: [
+          { timestamp: 0, duration: 0, easing: 'linear', payload: { mode: 'topDown', topDownHeight: 10 } },
+          { timestamp: 1, duration: 2, easing: 'linear', payload: { mode: 'topDown', topDownHeight: 30 } },
+        ],
+      });
+
+      advance(1000); // t=1 — the move begins, still at the previous height
+      advance(1000); // t=2 — halfway through a 2s move
+      advance(1000); // t=3 — arrived
+
+      const heights = dispatched()
+        .filter(([command]) => command === 'set_game_camera')
+        .map(([, payload]) => (payload as Record<string, unknown>).height);
+
+      expect(heights).toEqual([10, 10, 20, 30]);
+    });
+
+    it('fires a one-shot track once, however long its keyframe lasts', () => {
+      loadTracks({
+        id: 't1', type: 'audio', entityId: 'sfx1', muted: false,
+        keyframes: [{ timestamp: 0, duration: 5, easing: 'linear', payload: {} }],
+      });
+
+      advance(1000);
+      advance(1000);
+      advance(1000);
+
+      expect(dispatched()).toEqual([['play_audio', { entityId: 'sfx1' }]]);
+    });
+
+    it('links each keyframe to its own track, not to whatever fired before it', () => {
+      // The schedule is flattened across every track and sorted by timestamp, so
+      // the element before cam2's keyframe belongs to a different camera. Blending
+      // from it would move cam2 out of a state it was never in.
+      loadTracks(
+        {
+          id: 't1', type: 'camera', entityId: 'cam1', muted: false,
+          keyframes: [{ timestamp: 0, duration: 0, easing: 'linear', payload: { mode: 'topDown', topDownHeight: 10 } }],
+        },
+        {
+          id: 't2', type: 'camera', entityId: 'cam2', muted: false,
+          keyframes: [{ timestamp: 0, duration: 2, easing: 'linear', payload: { mode: 'topDown', topDownHeight: 30 } }],
+        },
+      );
+
+      advance(1000); // t=1 — halfway through cam2's window, were it blending
+
+      const cam2Heights = dispatched()
+        .map(([, payload]) => payload as Record<string, unknown>)
+        .filter((payload) => payload.entityId === 'cam2')
+        .map((payload) => payload.height);
+
+      expect(cam2Heights).toEqual([30]);
+    });
   });
 
   it('muted tracks are not scheduled', () => {

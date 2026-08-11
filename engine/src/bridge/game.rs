@@ -145,31 +145,52 @@ pub(super) fn process_game_component_queries(
 
 // ---- Game Camera Apply Systems ----
 
+/// What `set_game_camera` needs to read off a candidate entity: its id, whatever camera
+/// configuration it already carries (for the runtime state that is not authored), and whether the
+/// per-mode look state exists yet.
+type GameCameraRow = (
+    Entity,
+    &'static EntityId,
+    Option<&'static GameCameraData>,
+    Has<FirstPersonState>,
+    Has<OrbitalState>,
+);
+
 pub(super) fn apply_set_game_camera_requests(
     mut pending: ResMut<PendingCommands>,
-    mut entity_query: Query<(Entity, &EntityId, Option<&GameCameraData>)>,
+    entity_query: Query<GameCameraRow>,
     mut commands: Commands,
 ) {
     let requests: Vec<_> = pending.set_game_camera_requests.drain(..).collect();
     for request in requests {
-        let Some((entity, _eid, _existing)) = entity_query.iter_mut().find(|(_, eid, _)| eid.0 == request.entity_id) else {
+        let Some((entity, _eid, existing, has_first_person, has_orbital)) =
+            entity_query.iter().find(|(_, eid, _, _, _)| eid.0 == request.entity_id)
+        else {
             continue;
         };
 
-        let camera_data = GameCameraData {
-            mode: request.mode.clone(),
-            target_entity: request.target_entity.clone(),
-            ..Default::default()
-        };
+        // Runtime shake state is carried across rather than reset — see
+        // `GameCameraData::configured`.
+        let camera_data = GameCameraData::configured(
+            existing,
+            request.mode.clone(),
+            request.target_entity.clone(),
+        );
 
         commands.entity(entity).insert(camera_data);
 
-        // Insert state components if needed
+        // Insert state components if needed.
+        //
+        // Only when they are ABSENT: both accumulate where the player is
+        // looking, so re-inserting the default snaps the view back to its
+        // starting angle. A camera reconfigured mid-play — or stepped frame by
+        // frame through a cutscene keyframe — would otherwise have its look
+        // direction reset on every dispatch.
         match &request.mode {
-            GameCameraMode::FirstPerson { .. } => {
+            GameCameraMode::FirstPerson { .. } if !has_first_person => {
                 commands.entity(entity).insert(FirstPersonState::default());
             }
-            GameCameraMode::Orbital { .. } => {
+            GameCameraMode::Orbital { .. } if !has_orbital => {
                 commands.entity(entity).insert(OrbitalState::default());
             }
             _ => {}
