@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { characterSetupExecutor } from '../characterSetupExecutor';
-import type { ExecutorContext } from '../../types';
+import type { ExecutorContext, FeelDirective } from '../../types';
+import {
+  resolvePhysicsProfile,
+  characterControllerFromProfile,
+} from '../../physicsProfileResolution';
 
 /**
  * `store` is a TEST-ONLY override key: it seeds what `ctx.getStore()` returns.
@@ -517,6 +521,19 @@ describe('characterSetupExecutor', () => {
     // hardcoded default was a third, drifted table. Deriving the default from
     // `DEFAULT_PRESET_KEY` is what makes them agree by construction.
     it('agrees with the unrecognized-feel fallback', async () => {
+      // Asserted against the RESOLVER, not against a second executor run with a
+      // bogus weight. `feelDirectiveSchema` gates `weight` on a `z.enum`, so an
+      // out-of-enum weight makes the executor discard the whole directive — both
+      // runs would then take the SAME no-directive branch and the comparison
+      // would be self-versus-self, green even if the two tables had drifted.
+      const rogue = {
+        mood: 'odd',
+        pacing: 'medium',
+        weight: 'gaseous',
+        referenceGames: [],
+        oneLiner: 'unclassifiable',
+      } as unknown as FeelDirective;
+
       const noDirective = makeCtx();
       await characterSetupExecutor.execute({
         entity: { name: 'A', role: 'player' },
@@ -524,25 +541,14 @@ describe('characterSetupExecutor', () => {
         entityId: 'ent_a',
       }, noDirective);
 
-      const oddWeight = makeCtx();
-      await characterSetupExecutor.execute({
-        entity: { name: 'B', role: 'player' },
-        projectType: '3d',
-        entityId: 'ent_b',
-        feelDirective: {
-          mood: 'odd',
-          pacing: 'medium',
-          weight: 'gaseous',
-          referenceGames: [],
-          oneLiner: 'unclassifiable',
-        },
-      }, oddWeight);
-
       const props = (store: TestStore) =>
         (store.addGameComponent.mock.calls[0]?.[1] as { characterController: unknown })
           .characterController;
 
-      expect(props(storeOf(noDirective))).toEqual(props(storeOf(oddWeight)));
+      expect(props(storeOf(noDirective))).toEqual({
+        ...characterControllerFromProfile(resolvePhysicsProfile(rogue)),
+        canDoubleJump: false,
+      });
     });
   });
 

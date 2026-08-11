@@ -852,16 +852,31 @@ fn system_character_controller(
                 // Movement
                 let mut movement = Vec3::ZERO;
 
-                // Horizontal movement (X axis)
+                // Horizontal movement (X axis). Reads the same three-tier
+                // fallback as the forward branch below, and the middle tier is
+                // load-bearing: the `fps` preset binds `move_right` as an AXIS
+                // (D positive, A negative) and binds no `move_left` at all.
+                // `capture_input` sets `pressed = axis_value.abs() > 0.0` for an
+                // axis, so a digital-only read saw A as "move_right pressed" and
+                // added +1.0 — both keys strafed the SAME way and moving left was
+                // impossible in every generated 3D game (PF-1124).
                 let horizontal = input.get_axis("move_horizontal");
                 if horizontal.abs() > 0.01 {
                     movement.x = horizontal;
                 } else {
-                    if input.is_action_active("move_right") {
-                        movement.x += 1.0;
-                    }
-                    if input.is_action_active("move_left") {
-                        movement.x -= 1.0;
+                    // Safe for a digital `move_right` too: `capture_input` gives a
+                    // digital action `axis_value = if pressed { 1.0 } else { 0.0 }`,
+                    // so an unpressed key falls through to the reads below.
+                    let right_axis = input.get_axis("move_right");
+                    if right_axis.abs() > 0.01 {
+                        movement.x = right_axis;
+                    } else {
+                        if input.is_action_active("move_right") {
+                            movement.x += 1.0;
+                        }
+                        if input.is_action_active("move_left") {
+                            movement.x -= 1.0;
+                        }
                     }
                 }
 
@@ -2776,6 +2791,79 @@ mod character_controller_axis_tests {
         assert!(
             (both.y - (EXPECTED_TRAVEL + jump_rise)).abs() < 1e-5,
             "walk and jump share Y in 2D and must sum, got {both:?}"
+        );
+    }
+
+    /// The `fps` preset — the preset every generated 3D game is now bound to —
+    /// binds `move_right` as an AXIS with A on the negative side, and binds no
+    /// `move_left` at all. `capture_input` marks an axis `pressed` whenever
+    /// `axis_value.abs() > 0.0`, so this is byte-for-byte what a real A press
+    /// produces: pressed AND negative.
+    ///
+    /// Reading only the digital form saw that as "move_right is pressed" and
+    /// added +1.0, so A and D both strafed right and moving left was impossible.
+    /// The `+ EXPECTED_TRAVEL` form is deliberate — it fails on the old
+    /// behaviour rather than merely on a zero.
+    #[test]
+    fn a_negative_move_right_axis_strafes_left() {
+        let moved = run_frame(Some(ProjectType::ThreeD), action("move_right", true, -1.0));
+        assert!(
+            (moved.x + EXPECTED_TRAVEL).abs() < 1e-5,
+            "a negative move_right axis must travel {EXPECTED_TRAVEL} to -X, got {moved:?}"
+        );
+        assert_eq!(moved.z, 0.0, "strafing must not move the player in depth");
+    }
+
+    #[test]
+    fn a_positive_move_right_axis_strafes_right() {
+        let moved = run_frame(Some(ProjectType::ThreeD), action("move_right", true, 1.0));
+        assert!(
+            (moved.x - EXPECTED_TRAVEL).abs() < 1e-5,
+            "a positive move_right axis must travel {EXPECTED_TRAVEL} to +X, got {moved:?}"
+        );
+    }
+
+    /// The digital horizontal arm is what `platformer` and `topdown` reach when a
+    /// binding is digital rather than an axis, and it survived the axis fix
+    /// above only because the axis read falls through on `axis_value == 0.0`.
+    #[test]
+    fn the_digital_right_action_moves_along_positive_x() {
+        let moved = run_frame(Some(ProjectType::TwoD), held("move_right"));
+        assert!(
+            (moved.x - EXPECTED_TRAVEL).abs() < 1e-5,
+            "digital move_right is +X, got {moved:?}"
+        );
+        assert_eq!(moved.y, 0.0);
+    }
+
+    #[test]
+    fn the_digital_left_action_moves_along_negative_x() {
+        let moved = run_frame(Some(ProjectType::TwoD), held("move_left"));
+        assert!(
+            (moved.x + EXPECTED_TRAVEL).abs() < 1e-5,
+            "digital move_left is -X, got {moved:?}"
+        );
+        assert_eq!(moved.y, 0.0);
+    }
+
+    /// Same `+=` / `-=` accumulation as the forward pair, so the same
+    /// cancellation has to hold.
+    #[test]
+    fn holding_left_and_right_together_cancels() {
+        let both = combined(&[("move_right", true, 0.0), ("move_left", true, 0.0)]);
+        assert_eq!(run_frame(Some(ProjectType::TwoD), both), Vec3::ZERO);
+    }
+
+    /// `move_horizontal` must still win over `move_right`, or a preset binding
+    /// both would be resolved by whichever branch happened to run first.
+    #[test]
+    fn the_horizontal_axis_takes_priority_over_move_right() {
+        let conflicting =
+            combined(&[("move_horizontal", true, -1.0), ("move_right", true, 1.0)]);
+        let moved = run_frame(Some(ProjectType::ThreeD), conflicting);
+        assert!(
+            (moved.x + EXPECTED_TRAVEL).abs() < 1e-5,
+            "move_horizontal must win, got {moved:?}"
         );
     }
 }

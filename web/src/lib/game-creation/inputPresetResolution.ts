@@ -21,6 +21,27 @@
 export type EngineInputPreset = 'fps' | 'platformer' | 'topdown' | 'racing';
 
 /**
+ * The subset of those presets whose bindings `system_character_controller`
+ * actually reads.
+ *
+ * `racing` is deliberately excluded, and the exclusion is a TYPE rather than a
+ * comment so it cannot be undone by accident. `InputPreset::Racing` binds
+ * `throttle`, `brake`, `steer`, `nitro` and `reset`; the controller reads
+ * `move_horizontal`, `move_vertical`, `move_forward`, `move_right`, `move_left`
+ * and `jump`. The two sets are disjoint, so binding `racing` to an entity that
+ * carries a `CharacterController` produces a player that cannot move at all —
+ * the exact defect this module exists to prevent, and silent, because
+ * `InputPreset::from_str` accepts the string happily.
+ *
+ * `racing` becomes usable here only once a vehicle controller exists that reads
+ * the racing actions, or for an entity that gets no `CharacterController`.
+ */
+export type ControllerInputPreset = Extract<
+  EngineInputPreset,
+  'fps' | 'platformer' | 'topdown'
+>;
+
+/**
  * The vocabulary is matched loosely on purpose. `movementType` is
  * `GameSystem.type`, which `systemDecomposer` fills from a keyword table
  * (`walk+jump`, `top-down`, `auto-run`, `vehicle`, `flight`, `walk`) but which
@@ -33,9 +54,11 @@ function normalize(movementType: string | undefined): string {
   return (movementType ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-const VEHICLE_HINTS = ['vehicle', 'racing', 'race', 'driving', 'kart', 'car'];
 const TOPDOWN_HINTS = ['topdown', 'overhead', 'isometric', 'twinstick', 'zelda'];
-const PLATFORMER_HINTS = ['walkjump', 'platformer', 'sidescroll', 'sidescroller', 'jump'];
+// `sidescroller` is omitted deliberately: every string containing it also
+// contains `sidescroll`, so the longer entry could never change an answer and no
+// test could pin it.
+const PLATFORMER_HINTS = ['walkjump', 'platformer', 'sidescroll', 'jump'];
 
 /**
  * Pick the preset whose bindings the character controller can actually read.
@@ -58,16 +81,19 @@ const PLATFORMER_HINTS = ['walkjump', 'platformer', 'sidescroll', 'sidescroller'
  * The 2D fallback is `topdown` rather than `platformer`: with an unrecognized
  * movement type, two working axes is the outcome that leaves the player
  * controllable in the widest range of designs.
+ *
+ * Vehicle and racing vocabulary gets NO special case, and that is deliberate —
+ * see `ControllerInputPreset`. A vehicle game's player still carries a
+ * `CharacterController`, so it needs bindings that controller reads; `racing`
+ * would give it none and leave the player frozen. `topdown` / `fps` steering is
+ * an imperfect fit for a kart game but it is a game the player can move in.
  */
 export function resolveInputPreset(
   projectType: '2d' | '3d',
   movementType?: string,
-): EngineInputPreset {
+): ControllerInputPreset {
   const kind = normalize(movementType);
   const matches = (hints: string[]) => hints.some(h => kind.includes(h));
-
-  // Racing is its own control scheme in both project types.
-  if (matches(VEHICLE_HINTS)) return 'racing';
 
   if (matches(TOPDOWN_HINTS)) return 'topdown';
 

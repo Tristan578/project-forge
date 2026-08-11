@@ -87,17 +87,31 @@ describe('resolveInputPreset', () => {
     });
   });
 
-  // Racing is its own control scheme (throttle/brake/steer), so it wins over the
-  // project-type split in both dimensions.
+  // `racing` is never an answer, and this block is the pin on that. The preset
+  // binds throttle/brake/steer/nitro/reset; `system_character_controller` reads
+  // move_horizontal/move_vertical/move_forward/move_right/move_left/jump. The
+  // sets are disjoint, so a kart game's player bound to `racing` cannot move at
+  // all — the very defect this module exists to prevent, and silent, because
+  // `InputPreset::from_str` accepts the string.
   describe('vehicles', () => {
-    it('maps the vehicle vocabulary to racing in both project types', () => {
-      expect(resolveInputPreset('3d', 'vehicle')).toBe('racing');
-      expect(resolveInputPreset('2d', 'vehicle')).toBe('racing');
+    it('gives vehicle vocabulary the project-type default, not racing', () => {
+      expect(resolveInputPreset('3d', 'vehicle')).toBe('fps');
+      expect(resolveInputPreset('2d', 'vehicle')).toBe('topdown');
     });
 
-    it('maps looser driving phrasing to racing', () => {
-      expect(resolveInputPreset('3d', 'kart racing')).toBe('racing');
-      expect(resolveInputPreset('2d', 'top-down driving')).toBe('racing');
+    it('keeps looser driving phrasing on readable bindings', () => {
+      expect(resolveInputPreset('3d', 'kart racing')).toBe('fps');
+      // `top-down driving` still matches the topdown hint, which is the right
+      // answer for a 2D kart game for an independent reason.
+      expect(resolveInputPreset('2d', 'top-down driving')).toBe('topdown');
+      expect(resolveInputPreset('3d', 'top-down driving')).toBe('topdown');
+    });
+
+    it('does not treat a `car` substring as vehicle vocabulary', () => {
+      // The removed VEHICLE_HINTS list contained `car`, which `normalize` made a
+      // bare substring match — `cart pushing` and `cardboard maze` both hit it.
+      expect(resolveInputPreset('2d', 'cart pushing')).toBe('topdown');
+      expect(resolveInputPreset('3d', 'cardboard puzzle')).toBe('fps');
     });
   });
 
@@ -110,11 +124,16 @@ describe('resolveInputPreset', () => {
       expect(resolveInputPreset('2d', 'TOP_DOWN')).toBe('topdown');
       expect(resolveInputPreset('2d', 'Top Down')).toBe('topdown');
       expect(resolveInputPreset('2d', '  top—down  ')).toBe('topdown');
-      expect(resolveInputPreset('3d', 'Vehicle / Racing')).toBe('racing');
+      expect(resolveInputPreset('2d', 'Walk + Jump')).toBe('platformer');
+      expect(resolveInputPreset('3d', 'Twin-Stick / Arena')).toBe('topdown');
     });
 
-    it('never answers with a name the engine would reject', () => {
-      const valid = new Set(['fps', 'platformer', 'topdown', 'racing']);
+    it('never answers with a preset the character controller cannot read', () => {
+      // Deliberately the THREE controller-readable presets, not all four the
+      // engine's `from_str` accepts. `racing` parses fine and binds nothing the
+      // controller reads, so accepting it here would make this assertion pass on
+      // an immovable player.
+      const valid = new Set(['fps', 'platformer', 'topdown']);
       const phrasings = [
         undefined, '', 'walk', 'walk+jump', 'top-down', 'auto-run', 'vehicle',
         'flight', 'swimming', 'grid movement', 'zelda-like', 'twin stick',

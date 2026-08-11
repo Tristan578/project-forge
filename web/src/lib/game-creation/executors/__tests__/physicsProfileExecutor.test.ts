@@ -9,15 +9,19 @@ import type { ExecutorContext } from '../../types';
 
 // Mock the physics module
 const mockApplyPhysicsProfile = vi.fn();
+// Every preset carries a DISTINCT `jumpForce` as well as a distinct `moveSpeed`.
+// The stub used to omit `jumpForce` entirely, which made any assertion about a
+// rejected `jumpForce` override vacuous — `undefined` equalled `undefined`
+// whether the guard fired or not.
 vi.mock('@/lib/ai/physicsFeel', () => ({
   PHYSICS_PRESETS: {
-    space_zero_g: { gravity: 0, moveSpeed: 2 },
-    platformer_floaty: { gravity: 5, moveSpeed: 6 },
-    platformer_snappy: { gravity: 15, moveSpeed: 8 },
-    underwater: { gravity: 3, moveSpeed: 3 },
-    puzzle_precise: { gravity: 10, moveSpeed: 4 },
-    arcade_classic: { gravity: 10, moveSpeed: 7 },
-    rpg_weighty: { gravity: 12, moveSpeed: 5 },
+    space_zero_g: { gravity: 0, moveSpeed: 2, jumpForce: 21 },
+    platformer_floaty: { gravity: 5, moveSpeed: 6, jumpForce: 26 },
+    platformer_snappy: { gravity: 15, moveSpeed: 8, jumpForce: 28 },
+    underwater: { gravity: 3, moveSpeed: 3, jumpForce: 23 },
+    puzzle_precise: { gravity: 10, moveSpeed: 4, jumpForce: 24 },
+    arcade_classic: { gravity: 10, moveSpeed: 7, jumpForce: 27 },
+    rpg_weighty: { gravity: 12, moveSpeed: 5, jumpForce: 25 },
   },
   applyPhysicsProfile: (...args: unknown[]) => mockApplyPhysicsProfile(...args),
 }));
@@ -253,10 +257,32 @@ describe('physicsProfileExecutor', () => {
       config: { moveSpeed: 'fast', jumpForce: NaN },
     }, ctx);
 
+    // Exact preset values, not `typeof === 'number'`. A shape assertion passes
+    // on any number the guard happens to forward, including the `0` the engine
+    // would clamp a bad override to — which is the immovable player this path
+    // exists to prevent. `medium`/`medium` resolves to `arcade_classic`.
     const appliedProfile = mockApplyPhysicsProfile.mock.calls[0][0];
-    // Should use preset value, not the invalid overrides
-    expect(typeof appliedProfile.moveSpeed).toBe('number');
-    expect(Number.isFinite(appliedProfile.moveSpeed)).toBe(true);
+    expect(appliedProfile.moveSpeed).toBe(7);
+    expect(appliedProfile.jumpForce).toBe(27);
+  });
+
+  it('ignores out-of-range and non-positive config overrides', async () => {
+    const ctx = makeCtx();
+    seedLiveSceneGraph({ e1: makeNode('e1', 'Player', ['PhysicsData']) });
+
+    await physicsProfileExecutor.execute({
+      feelDirective: makeFeelDirective(),
+      projectType: '3d',
+      // -8 is the LLM-authored "reverse controls" case that used to arrive at the
+      // engine and be clamped to 0.0; 150 is under the speed ceiling but over the
+      // jump ceiling, so it only falls back if each field is checked against its
+      // own engine limit.
+      config: { moveSpeed: -8, jumpForce: 150 },
+    }, ctx);
+
+    const appliedProfile = mockApplyPhysicsProfile.mock.calls[0][0];
+    expect(appliedProfile.moveSpeed).toBe(7);
+    expect(appliedProfile.jumpForce).toBe(27);
   });
 
   it('rejects invalid feel directive', async () => {

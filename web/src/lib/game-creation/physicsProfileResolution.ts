@@ -89,14 +89,22 @@ export function resolvePhysicsProfile(
   const presetKey = resolvePresetFromFeel(feel);
   const baseProfile = PHYSICS_PRESETS[presetKey] ?? PHYSICS_PRESETS[DEFAULT_PRESET_KEY];
 
+  // Hoisted into locals so `usableOverride`'s type predicate narrows them for
+  // real. Reading `config!['moveSpeed'] as number` inside the spread needed a
+  // non-null assertion AND a cast to compile, and both of those launder exactly
+  // the check this guard exists to enforce — a later edit to the guard would go
+  // on compiling while forwarding `undefined` or a string to the engine.
+  //
+  // Read behind `Object.hasOwn`: a bare `config?.['moveSpeed']` walks the
+  // prototype chain, so an inherited value the GDD never set would be forwarded
+  // to the engine as though a designer had chosen it.
+  const rawSpeed = own(config, 'moveSpeed');
+  const rawJump = own(config, 'jumpForce');
+
   return {
     ...baseProfile,
-    ...(usableOverride(config?.['moveSpeed'], ENGINE_SPEED_MAX)
-      ? { moveSpeed: config!['moveSpeed'] as number }
-      : {}),
-    ...(usableOverride(config?.['jumpForce'], ENGINE_JUMP_HEIGHT_MAX)
-      ? { jumpForce: config!['jumpForce'] as number }
-      : {}),
+    ...(usableOverride(rawSpeed, ENGINE_SPEED_MAX) ? { moveSpeed: rawSpeed } : {}),
+    ...(usableOverride(rawJump, ENGINE_JUMP_HEIGHT_MAX) ? { jumpForce: rawJump } : {}),
   };
 }
 
@@ -123,7 +131,12 @@ const ENGINE_JUMP_HEIGHT_MAX = 100;
  * Falling back to the preset value keeps the player playable AND keeps the
  * preset's coherent relationship between speed, jump and gravity intact.
  */
-function usableOverride(value: unknown, max: number): boolean {
+/** An OWN property of `config`, or `undefined` — never anything inherited. */
+function own(config: Record<string, unknown> | undefined, key: string): unknown {
+  return config && Object.hasOwn(config, key) ? config[key] : undefined;
+}
+
+function usableOverride(value: unknown, max: number): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= max;
 }
 

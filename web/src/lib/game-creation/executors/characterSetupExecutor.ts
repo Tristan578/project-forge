@@ -111,10 +111,10 @@ export const characterSetupExecutor: ExecutorDefinition = {
     // to assume. `build_game_component` does NOT strict-deserialize it: it starts
     // from `CharacterControllerData::default()` and merges each key it recognises
     // via `prop_f32`, so a missing field is not rejected — it silently keeps the
-    // ENGINE's default, which is a different table from this file's
-    // (`jump_height` defaults to 8.0 there against `DEFAULT_CONTROLLER`'s 2). A
-    // dropped key therefore produces a player that moves with numbers no one
-    // chose, and `dispatchCommand` returns void so nothing reports the
+    // ENGINE's default, which is a different table from the resolved one
+    // (`jump_height` defaults to 8.0 there against the 10 `arcade_classic`
+    // yields). A dropped key therefore produces a player that moves with numbers
+    // no one chose, and `dispatchCommand` returns void so nothing reports the
     // divergence. Building the store value and converting keeps every field
     // accounted for by the typechecker.
     //

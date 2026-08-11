@@ -502,15 +502,25 @@ describe('orchestratorSlice', () => {
         plan.gdd.projectType = '2d';
         store.getState().setPlan(plan);
 
+        // The observation is CAPTURED inside the mock and asserted afterwards,
+        // never asserted inside it. `runPipelineFromPlan` wraps the call in a
+        // try/catch that turns any throw into `orchestratorStatus: 'failed'`, so
+        // an `expect` in here would have its AssertionError swallowed and the
+        // test would pass no matter which order the two calls happened in.
+        let projectTypeCallsBeforePipeline = -1;
         const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
         (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
-          expect(mockEditorState.setProjectType).toHaveBeenCalledWith('2d');
+          projectTypeCallsBeforePipeline = mockEditorState.setProjectType.mock.calls.length;
           return makeMockPlan();
         });
 
         await store.getState().runPipelineFromPlan();
 
         expect(runPipeline).toHaveBeenCalled();
+        expect(projectTypeCallsBeforePipeline).toBe(1);
+        expect(mockEditorState.setProjectType).toHaveBeenCalledWith('2d');
+        // And the run really completed — a swallowed throw would leave 'failed'.
+        expect(store.getState().orchestratorStatus).not.toBe('failed');
       });
 
       it('does not touch the project type when there is no plan', async () => {
