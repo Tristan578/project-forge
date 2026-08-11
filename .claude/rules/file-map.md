@@ -106,6 +106,7 @@ EditorLayout, SceneHierarchy, InspectorPanel, MaterialInspector, LightInspector,
 - `chat/executor.ts` — Handler registry dispatcher, delegates to `chat/handlers/` (all handlers fully migrated)
 - `chat/handlers/` — 29 domain tool handler files (transform, material, entity, physics, audio, audioEntity, animation, sprite, shader, scene, script, query, export, asset, compound, generation, gameplay, economy, dialogue, cutscene, localization, idea, world, uiBuilder, pixelArt, editMode, performance, security, leaderboard + types/helpers)
 - `chat/context.ts` — Scene context for AI
+- `cutscene/` — rAF playback. `player.ts` builds one command per keyframe and dispatches it; `dispatch.ts` is the routing seam that sends browser-only commands (`start_dialogue` → `dialogueStore`) to their real handler instead of the engine, injected at the `play_cutscene` call site. `__tests__/dispatch.test.ts` pins that every command a track can emit is routed by something (PF-1140 — see `rules/gotchas.md` → Engine & Game Loop)
 - `scripting/` — Web Worker sandbox, forge.* API types, templates
 - `audio/` — Web Audio API manager (spatial, per-entity nodes)
 - `export/` — Export pipeline (scriptBundler, assetPackager, gameTemplate)

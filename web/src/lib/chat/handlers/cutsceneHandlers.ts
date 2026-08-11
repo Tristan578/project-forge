@@ -97,8 +97,8 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
 
     const player = new CutscenePlayer({
       // Not ctx.dispatchCommand directly: a dialogue keyframe emits a command the
-      // engine does not know, and the engine drops what it does not know without
-      // a sound. See lib/cutscene/dispatch.ts.
+      // engine does not know, and an engine rejection logs for a developer but
+      // plays nothing for the viewer. See lib/cutscene/dispatch.ts.
       dispatchCommand: createCutsceneDispatcher(ctx.dispatchCommand),
       onComplete: () => {
         activePlayer = null;
