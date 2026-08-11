@@ -151,6 +151,23 @@ function buildCameraCommandPayload(
 }
 
 /**
+ * Whether a camera keyframe has anything to step frame by frame.
+ *
+ * `blendGameCameraData` can only blend from the previous keyframe on the same
+ * track in the same mode; with no predecessor, or across a mode change, it
+ * returns the target unchanged. Re-dispatching that identical payload every
+ * animation frame changes nothing in the engine while re-running the whole
+ * `GAME_CAMERA_CHANGED` → store → React path ~60 times a second, so a keyframe
+ * that cannot blend cuts and fires once, like every other one-shot.
+ */
+function cameraKeyframeBlends(item: ScheduledKeyframe): boolean {
+  if (!item.prev) return false;
+  const to = item.keyframe.payload.mode;
+  const from = item.prev.payload.mode;
+  return isCameraMode(to) && isCameraMode(from) && to === from;
+}
+
+/**
  * Translate a keyframe payload into an engine command for the given track type.
  * Returns null if the track type is 'wait' (no command to dispatch).
  */
@@ -380,7 +397,9 @@ export class CutscenePlayer {
       // sets a state. For everything else the duration describes how long the
       // triggered thing lasts, and re-triggering it each frame restarts it.
       const interpolates =
-        item.keyframe.duration > 0 && INTERPOLATED_TRACK_TYPES.has(item.trackType);
+        item.keyframe.duration > 0 &&
+        INTERPOLATED_TRACK_TYPES.has(item.trackType) &&
+        (item.trackType !== 'camera' || cameraKeyframeBlends(item));
 
       if (interpolates) {
         // Re-fire every frame while within the window so that easing

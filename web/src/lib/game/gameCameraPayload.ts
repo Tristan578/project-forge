@@ -250,11 +250,15 @@ export function normalizeTargetEntity(value: unknown): string | null {
  * return `to` unchanged: a cut, which is what already happens today and is at
  * least not a lie about where the camera was.
  *
- * A field the predecessor left unset blends from {@link ENGINE_CAMERA_DEFAULTS},
- * not from the target — that keyframe's own dispatch omitted the field too, so
- * the engine's `from_flat` default is what the camera is genuinely sitting at.
- * A field the TARGET leaves unset is omitted rather than blended, so it keeps
- * resolving to that same default instead of being pinned to a computed number.
+ * A field EITHER side leaves unset blends from {@link ENGINE_CAMERA_DEFAULTS}.
+ * That side's own dispatch omits the field, and `GameCameraMode::from_flat`
+ * reads every parameter as `flat_f32(params, key, DEFAULT)` — so sending the
+ * default and omitting the key are the same command, and the default is where
+ * the camera genuinely sits. Dropping the field instead, because the target
+ * happens not to name it, would let the engine apply that default on the FIRST
+ * frame of the move: a cut in the middle of an ease, which is the whole defect
+ * this function exists to remove. It would also break the invariant that
+ * `blend(from, to, 1)` behaves exactly like dispatching `to` alone.
  */
 export function blendGameCameraData(
   from: Partial<GameCameraData> | null,
@@ -263,7 +267,12 @@ export function blendGameCameraData(
 ): Partial<GameCameraData> & { mode: GameCameraMode } {
   if (!from || from.mode !== to.mode) return to;
 
-  const progress = Math.max(0, Math.min(1, t));
+  // A non-finite `t` (a zero-length keyframe divided into elapsed time, say)
+  // would otherwise make every field NaN. `buildSetGameCameraPayload` drops a
+  // non-finite number, the engine falls back to its defaults, and the camera
+  // silently resets mid-move. Land on the destination instead — the end of the
+  // move is the one state that is definitely correct once time is meaningless.
+  const progress = Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : 1;
 
   // Built key by key rather than spread. `to` is an authoring object, and the
   // result feeds `buildSetGameCameraPayload` — the one place a stray key would
@@ -277,10 +286,14 @@ export function blendGameCameraData(
   }
 
   for (const key of NUMERIC_CAMERA_FIELDS) {
+    const start = num(from, key);
     const target = num(to, key);
-    if (target === undefined) continue;
-    const start = num(from, key) ?? ENGINE_CAMERA_DEFAULTS[key];
-    blended[key] = start + (target - start) * progress;
+    // Neither side names it: leave it off the payload entirely, so the engine
+    // keeps resolving it to the same default both keyframes were relying on.
+    if (start === undefined && target === undefined) continue;
+    const a = start ?? ENGINE_CAMERA_DEFAULTS[key];
+    const b = target ?? ENGINE_CAMERA_DEFAULTS[key];
+    blended[key] = a + (b - a) * progress;
   }
 
   return blended;

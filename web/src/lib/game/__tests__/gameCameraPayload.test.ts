@@ -1051,16 +1051,39 @@ describe('blendGameCameraData', () => {
     expect(blended.topDownHeight).toBe(ENGINE_CAMERA_DEFAULTS.topDownHeight + 5);
   });
 
-  // Omitted, not blended: the field keeps resolving to the engine default on
-  // every frame instead of being pinned to a computed number the author never
-  // asked for.
-  it('omits a field the target leaves unset even when the predecessor set it', () => {
+  // The target omitting a field is not "leave it alone" — its own dispatch would
+  // have the engine apply the default. Dropping the field mid-blend applies that
+  // default on the FIRST frame, i.e. a cut in the middle of an ease. It has to be
+  // stepped toward the default like any other value.
+  it('eases toward the engine default for a field the target leaves unset', () => {
+    const from = { mode: 'topDown' as const, topDownHeight: 40 };
+    const to = { mode: 'topDown' as const };
+    const target = ENGINE_CAMERA_DEFAULTS.topDownHeight;
+
+    expect(blendGameCameraData(from, to, 0).topDownHeight).toBe(40);
+    expect(blendGameCameraData(from, to, 0.5).topDownHeight).toBe(40 + (target - 40) * 0.5);
+    // t=1 must be behaviourally identical to dispatching `to` alone: `from_flat`
+    // reads every parameter as `flat_f32(params, key, DEFAULT)`, so sending the
+    // default and omitting the key are the same command.
+    expect(blendGameCameraData(from, to, 1).topDownHeight).toBe(target);
+  });
+
+  it('omits a field neither side names', () => {
     const blended = blendGameCameraData(
-      { mode: 'topDown', topDownHeight: 40 },
+      { mode: 'topDown' },
       { mode: 'topDown' },
       0.5,
     );
     expect(blended).toEqual({ mode: 'topDown', targetEntity: null });
+  });
+
+  // Every field NaN would be dropped by `buildSetGameCameraPayload`, the engine
+  // would apply its defaults, and the camera would silently reset mid-move.
+  it('lands on the destination rather than NaN when progress is not finite', () => {
+    const from = { mode: 'topDown' as const, topDownHeight: 40 };
+    const to = { mode: 'topDown' as const, topDownHeight: 60 };
+    expect(blendGameCameraData(from, to, NaN).topDownHeight).toBe(60);
+    expect(blendGameCameraData(from, to, Infinity).topDownHeight).toBe(60);
   });
 
   it('takes the target entity from the target keyframe and normalizes a cleared one', () => {

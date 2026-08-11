@@ -151,33 +151,53 @@ pub(super) fn process_game_component_queries(
 type GameCameraRow = (
     Entity,
     &'static EntityId,
-    Option<&'static GameCameraData>,
+    Option<&'static mut GameCameraData>,
     Has<FirstPersonState>,
     Has<OrbitalState>,
 );
 
 pub(super) fn apply_set_game_camera_requests(
     mut pending: ResMut<PendingCommands>,
-    entity_query: Query<GameCameraRow>,
+    mut entity_query: Query<GameCameraRow>,
     mut commands: Commands,
 ) {
     let requests: Vec<_> = pending.set_game_camera_requests.drain(..).collect();
     for request in requests {
         let Some((entity, _eid, existing, has_first_person, has_orbital)) =
-            entity_query.iter().find(|(_, eid, _, _, _)| eid.0 == request.entity_id)
+            entity_query.iter_mut().find(|(_, eid, _, _, _)| eid.0 == request.entity_id)
         else {
             continue;
         };
 
         // Runtime shake state is carried across rather than reset — see
         // `GameCameraData::configured`.
-        let camera_data = GameCameraData::configured(
-            existing,
-            request.mode.clone(),
-            request.target_entity.clone(),
-        );
-
-        commands.entity(entity).insert(camera_data);
+        //
+        // Written THROUGH the query when the component is already present rather
+        // than re-inserted via `Commands`: a deferred insert is applied at the
+        // schedule's next sync point, which is after `apply_camera_shake_requests`
+        // has mutated the live component, so a `camera_shake` issued in the same
+        // frame as a `set_game_camera` was overwritten by this system's older
+        // snapshot. Nothing orders the two systems (they merely serialize on
+        // `PendingCommands`), so that was a silent loss in whichever order the
+        // scheduler picked. Now both mutate the same component immediately and
+        // neither can discard the other's write.
+        match existing {
+            Some(mut data) => {
+                let merged = GameCameraData::configured(
+                    Some(&data),
+                    request.mode.clone(),
+                    request.target_entity.clone(),
+                );
+                *data = merged;
+            }
+            None => {
+                commands.entity(entity).insert(GameCameraData::configured(
+                    None,
+                    request.mode.clone(),
+                    request.target_entity.clone(),
+                ));
+            }
+        }
 
         // Insert state components if needed.
         //
