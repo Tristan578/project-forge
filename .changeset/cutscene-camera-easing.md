@@ -13,6 +13,11 @@ dialogue about sixty times a second. Those now fire once. An audio keyframe also
 stops sending volume and fade settings that the engine discards, and a dialogue
 keyframe that names no dialogue tree is no longer sent at all.
 
+Seeking a cutscene past a camera keyframe now applies it. Jumping over a camera
+move left the camera wherever it happened to be, so seeking into a move showed
+it and seeking one frame past the same move showed nothing. Sounds, animations
+and dialogue are still not replayed by a seek.
+
 Reconfiguring a game camera mid-play no longer cancels a camera shake that is
 still running — including one triggered in the same frame — or snaps a
 first-person or orbital camera back to its starting angle.

@@ -51,17 +51,23 @@ interface ScheduledKeyframe {
 }
 
 /**
- * Track types whose command is a state to interpolate rather than an event.
+ * Track types whose command sets a state rather than triggering an event.
  *
- * A duration-based keyframe re-dispatches on every animation frame so easing can
- * be stepped, and that is only meaningful where the command sets a state the
- * next dispatch can supersede — today, the camera. `play_audio`, `play_animation`
- * and `start_dialogue` are one-shot triggers: re-sending them 60 times a second
- * for the length of the keyframe restarts the sound, the clip and the dialogue
- * on every frame. That is what this scheduler did to every non-camera track with
- * a duration, which is most of them.
+ * The distinction decides two things. A duration-based keyframe re-dispatches on
+ * every animation frame so easing can be stepped, and that is only meaningful
+ * where the command sets a state the next dispatch can supersede — today, the
+ * camera. `play_audio`, `play_animation` and `start_dialogue` are one-shot
+ * triggers: re-sending them 60 times a second for the length of the keyframe
+ * restarts the sound, the clip and the dialogue on every frame. That is what
+ * this scheduler did to every non-camera track with a duration, which is most
+ * of them.
+ *
+ * It also decides what a seek re-applies — see {@link CutscenePlayer.seek}. A
+ * state the viewer should be looking at has to be re-sent after jumping over the
+ * keyframe that set it; a trigger must not be, or scrubbing replays every sound
+ * the cutscene has already played.
  */
-const INTERPOLATED_TRACK_TYPES = new Set<CutsceneTrack['type']>(['camera']);
+const STATE_TRACK_TYPES = new Set<CutsceneTrack['type']>(['camera']);
 
 // ============================================================================
 // Easing utilities
@@ -177,7 +183,7 @@ export function buildCommand(
   keyframe: CutsceneKeyframe,
   /**
    * Raw playback progress through this keyframe's duration, 0..1. Only the
-   * camera track reads it — see {@link INTERPOLATED_TRACK_TYPES}. The keyframe's
+   * camera track reads it — see {@link STATE_TRACK_TYPES}. The keyframe's
    * own easing curve is applied inside the camera builder, so callers pass the
    * linear fraction, not an eased one.
    */
@@ -318,15 +324,29 @@ export class CutscenePlayer {
     }
   }
 
-  /** Seek to a specific time in seconds. */
+  /**
+   * Seek to a specific time in seconds.
+   *
+   * What a seek must do with a keyframe it jumped over depends on whether that
+   * keyframe was a trigger or a state — see {@link STATE_TRACK_TYPES}. A trigger
+   * is suppressed: scrubbing forward past a `play_audio` keyframe must not fire
+   * the sound the viewer has already heard (or, seeking backwards, has not
+   * reached yet). A state has to be re-applied, because it describes what the
+   * scene should LOOK like at the seek target, and nothing else will send it —
+   * so those keyframes are left unfired and the next frame re-dispatches them in
+   * timestamp order, last one winning. Marking them fired is what stranded the
+   * camera on whatever state it happened to hold: seeking INTO a blend applied
+   * it, seeking just PAST the same blend applied nothing.
+   */
   seek(timeSecs: number): void {
     if (!this.cutscene) return;
     const clamped = Math.max(0, Math.min(timeSecs, this.cutscene.duration));
     this.currentTime = clamped;
     useCutsceneStore.getState().setPlaybackTime(clamped);
-    // Re-mark keyframes before the seek point as fired so they don't replay
     for (const item of this.scheduled) {
-      item.fired = item.keyframe.timestamp <= clamped;
+      item.fired = STATE_TRACK_TYPES.has(item.trackType)
+        ? false
+        : item.keyframe.timestamp <= clamped;
     }
     if (this.startTime !== null) {
       this.startTime = performance.now() - clamped * 1000;
@@ -401,7 +421,7 @@ export class CutscenePlayer {
       // triggered thing lasts, and re-triggering it each frame restarts it.
       const interpolates =
         item.keyframe.duration > 0 &&
-        INTERPOLATED_TRACK_TYPES.has(item.trackType) &&
+        STATE_TRACK_TYPES.has(item.trackType) &&
         (item.trackType !== 'camera' || cameraKeyframeBlends(item));
 
       if (interpolates) {

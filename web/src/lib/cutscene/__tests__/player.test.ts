@@ -487,6 +487,65 @@ describe('CutscenePlayer', () => {
 
       expect(orbital).toHaveLength(1);
     });
+
+    // ------------------------------------------------------------------------
+    // A seek marked every keyframe before the target as already fired, which is
+    // right for a trigger and wrong for a state: the camera keeps whatever it
+    // held when the seek happened, so seeking INTO a blend applied it and
+    // seeking one frame PAST the same blend applied nothing at all.
+    // ------------------------------------------------------------------------
+    describe('seeking over keyframes', () => {
+      const heights = () =>
+        dispatched()
+          .filter(([command]) => command === 'set_game_camera')
+          .map(([, payload]) => (payload as Record<string, unknown>).height);
+
+      it('applies a camera blend the seek jumped clean over', () => {
+        loadTracks({
+          id: 't1', type: 'camera', entityId: 'cam1', muted: false,
+          keyframes: [
+            { timestamp: 0, duration: 0, easing: 'linear', payload: { mode: 'topDown', topDownHeight: 10 } },
+            { timestamp: 1, duration: 2, easing: 'linear', payload: { mode: 'topDown', topDownHeight: 30 } },
+          ],
+        });
+
+        advance(500); // t=0.5 — only the first keyframe has fired
+        player.seek(5); // past the blend's end at t=3 entirely
+        advance(16);
+
+        expect(heights().at(-1)).toBe(30);
+      });
+
+      it('applies a camera cut the seek jumped over', () => {
+        // No predecessor, so this takes the one-shot path — the branch a seek
+        // suppressed just as thoroughly as the blending one.
+        loadTracks({
+          id: 't1', type: 'camera', entityId: 'cam1', muted: false,
+          keyframes: [
+            { timestamp: 1, duration: 5, easing: 'linear', payload: { mode: 'topDown', topDownHeight: 30 } },
+          ],
+        });
+
+        advance(500); // t=0.5 — before the keyframe
+        player.seek(8);
+        advance(16);
+
+        expect(heights()).toEqual([30]);
+      });
+
+      it('does not replay a trigger the seek jumped over', () => {
+        loadTracks({
+          id: 't1', type: 'audio', entityId: 'sfx1', muted: false,
+          keyframes: [{ timestamp: 0, duration: 0, easing: 'linear', payload: {} }],
+        });
+
+        advance(500);
+        player.seek(5);
+        advance(16);
+
+        expect(dispatched()).toEqual([['play_audio', { entityId: 'sfx1' }]]);
+      });
+    });
   });
 
   it('muted tracks are not scheduled', () => {
