@@ -409,6 +409,59 @@ describe('set_game_camera', () => {
     });
   });
 
+  // `set_game_camera` is an UPDATE verb on an existing camera, so it must not
+  // discard engine-owned wire params it has no vocabulary for. Dropping them
+  // silently reverts those params to `from_flat`'s defaults, and because
+  // `GameCameraData` is persisted in `EntitySnapshot` and scene export, the
+  // loss is written into the `.forge` file. Chat is the primary authoring
+  // surface here, so this is the likelier of the two paths (the inspector's
+  // is already covered).
+  it('carries engineParams forward when updating an existing camera', async () => {
+    const { store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
+      entityId: 'cam-1',
+      mode: 'firstPerson',
+      firstPersonHeight: 1.8,
+    }, {
+      allGameCameras: {
+        'cam-1': {
+          mode: 'firstPerson',
+          targetEntity: null,
+          engineParams: { fov: 100, near: 0.05 },
+        },
+      },
+    });
+    expect(store.setGameCamera).toHaveBeenCalledWith('cam-1', {
+      mode: 'firstPerson',
+      targetEntity: null,
+      firstPersonHeight: 1.8,
+      engineParams: { fov: 100, near: 0.05 },
+    });
+  });
+
+  it('omits engineParams when the entity has no existing camera', async () => {
+    const { store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
+      entityId: 'cam-new',
+      mode: 'topDown',
+    });
+    expect(store.setGameCamera).toHaveBeenCalledWith('cam-new', {
+      mode: 'topDown',
+      targetEntity: null,
+    });
+  });
+
+  // `entityId` is LLM-chosen, so an inherited `Object.prototype` key must not
+  // be mistaken for a stored camera and have its properties read off.
+  it('does not read engineParams off Object.prototype for a prototype-chain entityId', async () => {
+    const { store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
+      entityId: 'constructor',
+      mode: 'topDown',
+    });
+    expect(store.setGameCamera).toHaveBeenCalledWith('constructor', {
+      mode: 'topDown',
+      targetEntity: null,
+    });
+  });
+
   it('forwards every supported authoring parameter', async () => {
     const { store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
       entityId: 'cam-1',

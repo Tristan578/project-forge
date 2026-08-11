@@ -124,6 +124,20 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     if (d.orbitalDistance !== undefined) cameraData.orbitalDistance = d.orbitalDistance;
     if (d.orbitalAutoRotateSpeed !== undefined) cameraData.orbitalAutoRotateSpeed = d.orbitalAutoRotateSpeed;
 
+    // This is an UPDATE verb on an existing camera, and the schema above covers
+    // 7 of the engine's 19 wire params. `apply_set_game_camera_requests` inserts
+    // a whole new `GameCameraData`, so anything the payload omits comes back as
+    // `from_flat`'s default: an MCP client sets `fov: 100`, the user then says
+    // "raise the camera to eye level 1.8", and the fov is silently back to 75 —
+    // persisted, because `GameCameraData` is written into `EntitySnapshot` and
+    // scene export. Carry the engine-owned params the schema cannot name.
+    // `Object.hasOwn`, not a bare read: `entityId` is LLM-chosen, so `toString`
+    // or `constructor` would otherwise resolve up the prototype chain.
+    if (Object.hasOwn(ctx.store.allGameCameras, d.entityId)) {
+      const existing = ctx.store.allGameCameras[d.entityId];
+      if (existing?.engineParams) cameraData.engineParams = existing.engineParams;
+    }
+
     ctx.store.setGameCamera(d.entityId, cameraData);
     return { success: true, result: { message: `Game camera set to ${d.mode} on entity ${d.entityId}` } };
   },
@@ -149,7 +163,12 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
   get_game_camera: async (args, ctx) => {
     const p = parseArgs(z.object({ entityId: zEntityId }), args);
     if (p.error) return p.error;
-    const camera = ctx.store.allGameCameras[p.data.entityId];
+    // `Object.hasOwn` guard: `entityId` is LLM-chosen, and a bare read of
+    // `toString`/`constructor` walks the prototype chain and would report an
+    // inherited function as this entity's camera.
+    const camera = Object.hasOwn(ctx.store.allGameCameras, p.data.entityId)
+      ? ctx.store.allGameCameras[p.data.entityId]
+      : undefined;
     const isActive = ctx.store.activeGameCameraId === p.data.entityId;
     return { success: true, result: { camera: camera || null, isActive } };
   },
