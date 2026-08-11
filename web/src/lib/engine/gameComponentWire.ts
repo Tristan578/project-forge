@@ -154,8 +154,15 @@ export function parseGameComponentWire(payload: {
   if (storeType === null) return null;
 
   const properties = payload.properties;
-  if (properties === undefined || properties === null) return buildStoreComponent(storeType);
-  if (typeof properties !== 'object' || Array.isArray(properties)) return null;
+  // An ABSENT `properties` and an explicit `null` are different payloads to the
+  // engine and must be different here. `handle_add_game_component` substitutes an
+  // empty object only when the key is missing (`.cloned().unwrap_or(Object)`), so
+  // an explicit `null` reaches `build_game_component` as `Value::Null`, fails its
+  // `props.is_object()` guard and errors out with nothing applied. Treating the
+  // two alike would hand back a fully-defaulted component for a payload the engine
+  // threw away — the store would show a component that does not exist.
+  if (properties === undefined) return buildStoreComponent(storeType);
+  if (properties === null || typeof properties !== 'object' || Array.isArray(properties)) return null;
 
   const props = properties as Record<string, unknown>;
   if (storeType !== 'dialogueTrigger') return buildStoreComponent(storeType, props);
@@ -171,6 +178,44 @@ export function parseGameComponentWire(payload: {
     requireInteract: typeof props.autoStart === 'boolean' ? !props.autoStart : undefined,
     interactKey: props.interactionKey,
     oneShot: props.oneShot,
+  });
+}
+
+/**
+ * Read one component out of a `GAME_COMPONENT_CHANGED` event.
+ *
+ * The engine emits `GameComponentData` itself, and that enum is
+ * `#[serde(tag = "type", rename_all = "camelCase")]` — INTERNALLY tagged, so each
+ * component arrives FLAT, with the struct's own camelCase fields sitting beside a
+ * `type` discriminant:
+ *
+ *     { type: 'characterController', speed: 5, jumpHeight: 8, gravityScale: 1, canDoubleJump: false }
+ *
+ * That is neither of this module's two vocabularies. It carries the store's
+ * discriminant and the engine's field names, and the payload is not nested under a
+ * key. `gameEvents.ts` used to cast the array straight to `GameComponentData[]`,
+ * which type-checks and is wrong: `comp.characterController` is `undefined` on every
+ * component the engine has ever emitted, so the inspector rendered an attached
+ * component with no data in it.
+ *
+ * Returns `null` for anything that is not an object carrying a `type` this build
+ * knows, so a component the editor cannot represent is dropped rather than written
+ * into the store as a hole.
+ */
+export function parseEmittedGameComponent(raw: unknown): GameComponentData | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+
+  const { type } = raw as { type?: unknown };
+  if (typeof type !== 'string') return null;
+
+  const storeType = toStoreComponentType(type);
+  if (storeType === null) return null;
+
+  // The flat object doubles as the properties bag: `buildStoreComponent` reads
+  // named engine keys only, so the sibling `type` is ignored rather than merged.
+  return parseGameComponentWire({
+    componentType: storeType,
+    properties: raw as Record<string, unknown>,
   });
 }
 
@@ -646,13 +691,11 @@ export function buildStoreComponent(
     case null:
       return null;
   }
-
-  // Unreachable while `toStoreComponentType` answers only with a key of the
-  // mapping or `null` — but the declared return type says `| null`, and without
-  // this the function returned `undefined` for anything the switch did not
-  // recognise. It sits after the switch rather than in a `default:` arm on
-  // purpose: a `default:` satisfies TypeScript's exhaustiveness check, so adding
-  // a fourteenth component type would compile silently and go out over the wire
-  // as whatever the default happened to be.
-  return null;
+  // No `default:` arm and no trailing `return` — both are the same mistake. A
+  // switch over the union is total today, so TypeScript is satisfied; add a
+  // fourteenth component type and the function can fall off its end, which is
+  // TS2366. Either a `default: return null` or a bare `return null` down here
+  // answers that error and lets the new type ship as a silent `null`, so the
+  // absence of both is what makes the miss a compile failure. Verified against
+  // this repo's tsc, not assumed.
 }
