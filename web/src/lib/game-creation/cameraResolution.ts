@@ -57,6 +57,35 @@ export function normalizeCameraMode(raw: unknown): GameCameraMode {
   return isCameraMode(aliased) ? aliased : 'thirdPersonFollow';
 }
 
+/**
+ * The camera modes that do NOTHING without a target entity.
+ *
+ * This is not a style preference — it is the engine's control flow. In
+ * `engine/src/core/game_camera.rs`, `target_transform` is `None` whenever
+ * `target_entity` is `None`, and the ThirdPersonFollow, FirstPerson,
+ * SideScroller, TopDown and Orbital arms are each wrapped in
+ * `if let Some(target_t) = target_transform`. So a targetless camera in any of
+ * those modes never has its transform touched: it sits motionless for the whole
+ * game while `set_game_camera` reports success and the store shows the mode the
+ * GDD asked for. That is the same "looks applied, does nothing" symptom PF-1125
+ * was filed to fix, one layer further down.
+ *
+ * `fixed` is the sole mode that works targetless — it reads `look_at`, a Vec3,
+ * which is not a numeric field and so cannot arrive through `cameraConfig`.
+ */
+const CAMERA_MODES_REQUIRING_TARGET: ReadonlySet<GameCameraMode> = new Set<GameCameraMode>([
+  'thirdPersonFollow',
+  'firstPerson',
+  'sideScroller',
+  'topDown',
+  'orbital',
+]);
+
+/** Whether `mode` is inert unless `targetEntity` names a live entity. */
+export function cameraModeNeedsTarget(mode: GameCameraMode): boolean {
+  return CAMERA_MODES_REQUIRING_TARGET.has(mode);
+}
+
 /** The minimum a scene-graph node must expose for camera resolution. */
 export interface CameraCandidateNode {
   name: string;
@@ -75,7 +104,9 @@ export interface CameraCandidateNode {
 export function resolveCameraEntityId(nodes: readonly CameraCandidateNode[]): string | null {
   const match = nodes.find((n) => {
     const lower = n.name.toLowerCase();
-    return lower === 'camera' || lower.endsWith('camera') || lower.endsWith('_cam');
+    // No exact-`camera` disjunct: `'camera'.endsWith('camera')` is already true,
+    // so it would read as a third rule that never decides anything.
+    return lower.endsWith('camera') || lower.endsWith('_cam');
   });
   if (!match) return null;
   return typeof match.entityId === 'string' && match.entityId.trim().length > 0

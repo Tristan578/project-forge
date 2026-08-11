@@ -45,7 +45,11 @@ describe('cameraSetupExecutor', () => {
     const { ctx, dispatch } = makeCtx(CAMERA_NODE);
 
     const result = await cameraSetupExecutor.execute(
-      { cameraMode: 'side-scroller', cameraConfig: { sideScrollerDistance: 14 } },
+      {
+        cameraMode: 'side-scroller',
+        cameraConfig: { sideScrollerDistance: 14 },
+        targetEntityId: 'player-1',
+      },
       ctx,
     );
 
@@ -53,7 +57,7 @@ describe('cameraSetupExecutor', () => {
     expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
       entityId: 'e-9',
       mode: 'sideScroller',
-      targetEntity: null,
+      targetEntity: 'player-1',
       zOffset: 14,
     });
     expect(dispatch).toHaveBeenCalledWith('set_active_game_camera', { entityId: 'e-9' });
@@ -66,6 +70,7 @@ describe('cameraSetupExecutor', () => {
       {
         cameraMode: 'first_person',
         cameraConfig: { firstPersonHeight: 1.8, firstPersonMouseSensitivity: 0.25 },
+        targetEntityId: 'player-1',
       },
       ctx,
     );
@@ -76,7 +81,7 @@ describe('cameraSetupExecutor', () => {
     expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
       entityId: 'e-9',
       mode: 'firstPerson',
-      targetEntity: null,
+      targetEntity: 'player-1',
       eyeHeight: 1.8,
       mouseSensitivity: 0.25,
     });
@@ -86,7 +91,11 @@ describe('cameraSetupExecutor', () => {
     const { ctx, dispatch } = makeCtx(CAMERA_NODE);
 
     await cameraSetupExecutor.execute(
-      { cameraMode: 'third-person', cameraConfig: { followDistance: 7, followHeight: 3 } },
+      {
+        cameraMode: 'third-person',
+        cameraConfig: { followDistance: 7, followHeight: 3 },
+        targetEntityId: 'player-1',
+      },
       ctx,
     );
 
@@ -96,7 +105,7 @@ describe('cameraSetupExecutor', () => {
     expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
       entityId: 'e-9',
       mode: 'thirdPersonFollow',
-      targetEntity: null,
+      targetEntity: 'player-1',
       offset: [0, 3, -7],
     });
   });
@@ -120,13 +129,78 @@ describe('cameraSetupExecutor', () => {
     };
     nodes = { 'spawned-later': { entityId: 'spawned-later', name: 'PlayerCamera' } };
 
-    await cameraSetupExecutor.execute({ cameraMode: 'top-down' }, ctx);
+    await cameraSetupExecutor.execute(
+      { cameraMode: 'top-down', targetEntityId: 'player-1' },
+      ctx,
+    );
 
     expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
       entityId: 'spawned-later',
       mode: 'topDown',
+      targetEntity: 'player-1',
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // The follow target: every mode but `fixed` is INERT without one
+  // ---------------------------------------------------------------------------
+
+  /**
+   * `engine/src/core/game_camera.rs` resolves `target_transform` to `None` when
+   * `target_entity` is `None`, and wraps the ThirdPersonFollow, FirstPerson,
+   * SideScroller, TopDown and Orbital update arms in
+   * `if let Some(target_t) = target_transform`. So a targetless camera in any of
+   * those modes never has its transform touched — it reports success, stores the
+   * mode the GDD asked for, and sits motionless for the whole game. That is the
+   * PF-1125 symptom one layer down, so it is reported rather than passed off as
+   * a clean apply.
+   */
+  it.each([
+    ['side-scroller', 'sideScroller'],
+    ['first_person', 'firstPerson'],
+    ['third-person', 'thirdPersonFollow'],
+    ['top-down', 'topDown'],
+    ['orbital', 'orbital'],
+  ])('warns that a targetless %s camera will not move', async (raw, normalized) => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    const result = await cameraSetupExecutor.execute({ cameraMode: raw }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.output?.applied).toBe(true);
+    expect(result.output?.targetEntityId).toBeNull();
+    expect(result.output?.warning).toContain('will not move');
+    // The mode is still worth recording — engine defaults beat failing a
+    // non-optional step and discarding the whole build.
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: normalized,
       targetEntity: null,
     });
+  });
+
+  it('does not warn for a targetless fixed camera — the one mode that works', async () => {
+    const { ctx } = makeCtx(CAMERA_NODE);
+
+    const result = await cameraSetupExecutor.execute({ cameraMode: 'fixed' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.output?.warning).toBeUndefined();
+  });
+
+  it('rejects an empty target id rather than sending one that can never match', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    // An empty string is not "no target" — it is a target id the engine will
+    // look up and miss, silently, the way every other id miss fails here.
+    const result = await cameraSetupExecutor.execute(
+      { cameraMode: 'top-down', targetEntityId: '' },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('INVALID_INPUT');
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it('succeeds with a warning and dispatches nothing when the scene has no camera', async () => {

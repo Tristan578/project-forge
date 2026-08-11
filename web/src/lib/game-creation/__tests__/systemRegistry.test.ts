@@ -213,11 +213,14 @@ describe('SYSTEM_REGISTRY', () => {
       const def = SYSTEM_REGISTRY.get('camera')!;
       const system = makeSystem('camera', 'orbit');
       system.config = { fov: 60 };
-      const steps = def.setupSteps(system, makeGdd(), makeCtx());
+      const steps = def.setupSteps(system, makeGdd(), makePlayerCtx());
       expect(steps[0].executor).toBe('camera_setup');
-      expect(steps[0].input).toMatchObject({
+      // Full shape, not `toMatchObject`: the follow target is what stops this
+      // step being inert, and a partial matcher cannot see it go missing.
+      expect(steps[0].input).toEqual({
         cameraMode: system.type,
         cameraConfig: system.config,
+        targetEntityId: 'id-hero',
       });
     });
   });

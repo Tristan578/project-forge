@@ -66,6 +66,17 @@ export const autoPolishExecutor: ExecutorDefinition = {
       // of them silently configures nothing.
       const cameraEntityId = resolveCameraEntityId(Object.values(ctx.getStore().sceneGraph.nodes));
 
+      // The issue being fixed is `no_camera_on_player`, and both modes below are
+      // follow modes: the engine skips their entire update arm when
+      // `target_entity` is `None`, so a targetless "fix" produces a motionless
+      // camera while reporting `Configured camera as …` in the user-visible fix
+      // list. `character_setup` is the step that rigged the player, and its
+      // output carries the id the plan minted for it.
+      const playerEntityId = ctx.resolveStepOutput('character_setup')?.['entityId'];
+      const targetEntity = typeof playerEntityId === 'string' && playerEntityId.length > 0
+        ? playerEntityId
+        : null;
+
       if (cameraEntityId) {
         const mode = parsed.data.projectType === '2d' ? 'sideScroller' : 'thirdPersonFollow';
         // Translated, never flat: the store's authoring names share no key with
@@ -82,10 +93,14 @@ export const autoPolishExecutor: ExecutorDefinition = {
           command: 'set_game_camera',
           payload: buildSetGameCameraPayload(cameraEntityId, {
             mode,
-            targetEntity: null,
+            targetEntity,
           }),
         });
-        fixes.push(`Configured camera as ${mode}`);
+        fixes.push(
+          targetEntity
+            ? `Configured camera as ${mode}`
+            : `Configured camera as ${mode}, but found no player for it to follow — it will not move`,
+        );
       } else {
         fixes.push('Warning: no camera entity found to configure');
       }

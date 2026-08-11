@@ -3,6 +3,7 @@ import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../typ
 import { makeStepError, successResult, failResult } from './shared';
 import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 import {
+  cameraModeNeedsTarget,
   filterCameraNumerics,
   normalizeCameraMode,
   resolveCameraEntityId,
@@ -33,6 +34,15 @@ import type { GameCameraData, GameCameraMode } from '@/stores/slices/types';
 const inputSchema = z.object({
   cameraMode: z.string().optional(),
   cameraConfig: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * The entity the camera follows. Bound at plan time by `systems/camera.ts`
+   * from the player-role entity, because the engine addresses entities by their
+   * `EntityId` component and no name is usable here.
+   *
+   * `.min(1)`: an empty string is not "no target", it is a target id that can
+   * never match, and it would reach `set_game_camera` as one.
+   */
+  targetEntityId: z.string().min(1).optional(),
 });
 
 export const cameraSetupExecutor: ExecutorDefinition = {
@@ -89,9 +99,11 @@ export const cameraSetupExecutor: ExecutorDefinition = {
     // The wire form is then PICKED key-by-key by `buildSetGameCameraPayload` —
     // a `satisfies` on a spread is inert, so picking is the only construction
     // that actually constrains what reaches the engine (PF-1126).
+    const targetEntity = parsed.data.targetEntityId ?? null;
+
     const cameraData: Partial<GameCameraData> & { mode: GameCameraMode } = {
       mode,
-      targetEntity: null,
+      targetEntity,
       ...filterCameraNumerics(parsed.data.cameraConfig),
     };
 
@@ -100,10 +112,24 @@ export const cameraSetupExecutor: ExecutorDefinition = {
     // from the player's point of view, so activation is part of the same step.
     ctx.dispatchCommand('set_active_game_camera', { entityId });
 
+    // A follow mode with no target is the failure this executor exists to
+    // prevent, one layer down: the engine skips its entire update arm, so the
+    // camera keeps the mode and never moves. Report it rather than letting
+    // `applied: true` stand in for "the player will see what the GDD asked
+    // for" — the plan-time warning in `systems/camera.ts` catches the case the
+    // plan can see, and this catches the rest.
+    const targetless = targetEntity === null && cameraModeNeedsTarget(mode);
+
     return successResult({
       cameraMode: mode,
       cameraEntityId: entityId,
+      targetEntityId: targetEntity,
       applied: true,
+      ...(targetless
+        ? {
+            warning: `Camera set to ${mode} but nothing was given for it to follow — it will not move.`,
+          }
+        : {}),
     });
   },
 };

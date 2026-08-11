@@ -842,15 +842,26 @@ describe('auto_polish executor', () => {
       } as unknown as EditorState['sceneGraph'],
     });
     const ctx = makeMockCtx({ projectType: '2d', store: storeWithCamera });
-    vi.mocked(ctx.resolveStepOutput).mockReturnValue({ issues: ['no_camera_on_player'] });
+    // Answered PER STEP NAME. A blanket mock hands the verify output to every
+    // lookup, so `character_setup` comes back without an `entityId` and the
+    // camera silently ends up following nothing.
+    vi.mocked(ctx.resolveStepOutput).mockImplementation((name: string) =>
+      name === 'verify_all_scenes'
+        ? { issues: ['no_camera_on_player'] }
+        : { entityId: 'player-entity-1' },
+    );
     const result = await executor.execute({ ...baseInput, projectType: '2d' }, ctx);
 
     expect(result.success).toBe(true);
-    // Should dispatch set_game_camera with the camera entity's ID and valid mode
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', expect.objectContaining({
+    // Full shape, not `objectContaining`: SideScroller's engine update arm is
+    // skipped entirely when `target_entity` is `None`, so a missing target is
+    // the difference between a working camera and a motionless one — and a
+    // partial matcher is blind to exactly that.
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', {
       entityId: 'cam-entity-1',
       mode: 'sideScroller', // 2D project type
-    }));
+      targetEntity: 'player-entity-1',
+    });
     const fixes = result.output?.['fixesApplied'] as string[];
     expect(fixes).toContain('Configured camera as sideScroller');
   });
