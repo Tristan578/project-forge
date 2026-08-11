@@ -14,5 +14,5 @@ stops sending volume and fade settings that the engine discards, and a dialogue
 keyframe that names no dialogue tree is no longer sent at all.
 
 Reconfiguring a game camera mid-play no longer cancels a camera shake that is
-still running, or snaps a first-person or orbital camera back to its starting
-angle.
+still running — including one triggered in the same frame — or snaps a
+first-person or orbital camera back to its starting angle.

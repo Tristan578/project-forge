@@ -449,6 +449,44 @@ describe('CutscenePlayer', () => {
 
       expect(cam2Heights).toEqual([30]);
     });
+
+    it('fires a camera keyframe that cannot blend once, not on every frame', () => {
+      // No predecessor, so every frame would dispatch the identical payload —
+      // no change in the engine, and ~60 GAME_CAMERA_CHANGED round trips a
+      // second through the store and React.
+      loadTracks({
+        id: 't1', type: 'camera', entityId: 'cam1', muted: false,
+        keyframes: [
+          { timestamp: 0, duration: 5, easing: 'linear', payload: { mode: 'topDown', topDownHeight: 30 } },
+        ],
+      });
+
+      advance(1000);
+      advance(1000);
+      advance(1000);
+
+      expect(dispatched().filter(([command]) => command === 'set_game_camera')).toHaveLength(1);
+    });
+
+    it('fires a camera keyframe once across a mode change, which it cannot blend', () => {
+      loadTracks({
+        id: 't1', type: 'camera', entityId: 'cam1', muted: false,
+        keyframes: [
+          { timestamp: 0, duration: 0, easing: 'linear', payload: { mode: 'topDown', topDownHeight: 10 } },
+          { timestamp: 1, duration: 4, easing: 'linear', payload: { mode: 'orbital', orbitalDistance: 30 } },
+        ],
+      });
+
+      advance(1000);
+      advance(1000);
+      advance(1000);
+
+      const orbital = dispatched()
+        .map(([, payload]) => payload as Record<string, unknown>)
+        .filter((payload) => payload.mode === 'orbital');
+
+      expect(orbital).toHaveLength(1);
+    });
   });
 
   it('muted tracks are not scheduled', () => {
