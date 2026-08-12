@@ -153,95 +153,109 @@ describe('handleGameEvent', () => {
   });
 
   describe('GAME_CAMERA_CHANGED', () => {
-    it('calls setEntityGameCamera with ThirdPerson mode and target', () => {
-      const payload = {
-        entityId: 'cam-1',
-        mode: 'ThirdPerson',
-        targetEntity: 'player-entity',
-      };
-
+    // The engine answers in the same flat wire vocabulary `set_game_camera`
+    // accepts (`offset`, `damping`, `eyeHeight`, `zOffset`, `height`, `radius`),
+    // with camelCase mode names. These assertions used to pass the raw payload
+    // straight through and asserted PascalCase modes like `ThirdPerson` — a
+    // spelling no engine variant has ever had — because the handler cast the
+    // string into the union instead of parsing it.
+    it('translates a thirdPersonFollow payload into the authoring vocabulary', () => {
       const result = handleGameEvent(
         'GAME_CAMERA_CHANGED',
-        payload,
+        { entityId: 'cam-1', mode: 'thirdPersonFollow', targetEntity: 'player-entity', offset: [0, 3, -8], damping: 0.9 },
         mockSetGet.set,
         mockSetGet.get
       );
 
       expect(result).toBe(true);
       expect(actions.setEntityGameCamera).toHaveBeenCalledWith('cam-1', {
-        mode: 'ThirdPerson',
+        mode: 'thirdPersonFollow',
         targetEntity: 'player-entity',
+        followHeight: 3,
+        followDistance: 8,
+        followSmoothing: 0.9,
       });
     });
 
-    it('handles FirstPerson mode with null target', () => {
-      const payload = {
-        entityId: 'cam-2',
-        mode: 'FirstPerson',
-        targetEntity: null,
-      };
-
+    it('handles firstPerson with a null target', () => {
       const result = handleGameEvent(
         'GAME_CAMERA_CHANGED',
-        payload,
+        { entityId: 'cam-2', mode: 'firstPerson', targetEntity: null, eyeHeight: 1.7, mouseSensitivity: 0.2 },
         mockSetGet.set,
         mockSetGet.get
       );
 
       expect(result).toBe(true);
       expect(actions.setEntityGameCamera).toHaveBeenCalledWith('cam-2', {
-        mode: 'FirstPerson',
+        mode: 'firstPerson',
         targetEntity: null,
+        firstPersonHeight: 1.7,
+        firstPersonMouseSensitivity: 0.2,
       });
     });
 
-    it('converts empty string targetEntity to null', () => {
-      const payload = {
-        entityId: 'cam-3',
-        mode: 'Fixed',
-        targetEntity: '',
-      };
+    it.each([
+      ['a missing entityId', { mode: 'fixed', targetEntity: null }],
+      ['an empty entityId', { entityId: '', mode: 'fixed', targetEntity: null }],
+      ['a non-string entityId', { entityId: 7, mode: 'fixed', targetEntity: null }],
+    ])('ignores a camera event with %s', (_label, payload) => {
+      // The id becomes a KEY in `allGameCameras`. Storing under "undefined"
+      // (or "") would put the camera where no `primaryId` can ever match it:
+      // the inspector reads null while the store holds a camera for a phantom
+      // entity. `castPayload` asserts without checking, so this is the check.
+      const result = handleGameEvent('GAME_CAMERA_CHANGED', payload, mockSetGet.set, mockSetGet.get);
 
+      expect(result).toBe(true);
+      expect(actions.setEntityGameCamera).not.toHaveBeenCalled();
+    });
+
+    it('converts empty string targetEntity to null', () => {
       const result = handleGameEvent(
         'GAME_CAMERA_CHANGED',
-        payload,
+        { entityId: 'cam-3', mode: 'fixed', targetEntity: '' },
         mockSetGet.set,
         mockSetGet.get
       );
 
       expect(result).toBe(true);
       expect(actions.setEntityGameCamera).toHaveBeenCalledWith('cam-3', {
-        mode: 'Fixed',
+        mode: 'fixed',
         targetEntity: null,
       });
     });
 
-    it('handles all camera modes', () => {
-      const modes = ['ThirdPerson', 'FirstPerson', 'SideScroller', 'TopDown', 'Fixed', 'Orbital'];
+    it('handles all six camera modes', () => {
+      const modes = ['thirdPersonFollow', 'firstPerson', 'sideScroller', 'topDown', 'fixed', 'orbital'];
 
       for (const mode of modes) {
         vi.clearAllMocks();
         vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
 
-        const payload = {
-          entityId: 'cam-mode-test',
-          mode,
-          targetEntity: null,
-        };
-
         const result = handleGameEvent(
           'GAME_CAMERA_CHANGED',
-          payload,
+          { entityId: 'cam-mode-test', mode, targetEntity: null },
           mockSetGet.set,
           mockSetGet.get
         );
 
         expect(result).toBe(true);
-        expect(actions.setEntityGameCamera).toHaveBeenCalledWith('cam-mode-test', {
-          mode,
-          targetEntity: null,
-        });
+        expect(actions.setEntityGameCamera).toHaveBeenCalledWith('cam-mode-test', { mode, targetEntity: null });
       }
+    });
+
+    it('ignores an unrecognized mode rather than clearing the camera', () => {
+      const result = handleGameEvent(
+        'GAME_CAMERA_CHANGED',
+        { entityId: 'cam-4', mode: 'ThirdPerson', targetEntity: null },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      // Handled (the event is ours) but not applied — a mode the store cannot
+      // represent must not be cast into the union, and must not be read as a
+      // request to delete the entity's camera.
+      expect(result).toBe(true);
+      expect(actions.setEntityGameCamera).not.toHaveBeenCalled();
     });
   });
 

@@ -27,7 +27,6 @@ const baseGameCamera: GameCameraData = {
   targetEntity: null,
   followDistance: 5,
   followHeight: 2,
-  followLookAhead: 1,
   followSmoothing: 5,
 };
 
@@ -44,9 +43,11 @@ describe('GameCameraInspector', () => {
   } = {}) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(useEditorStore).mockImplementation((selector: any) => {
+      // The component derives its camera from `allGameCameras[primaryId]` — there
+      // is no `primaryGameCamera` field on the store (PF-1126).
       const state = {
         primaryId,
-        primaryGameCamera,
+        allGameCameras: primaryId && primaryGameCamera ? { [primaryId]: primaryGameCamera } : {},
         activeGameCameraId,
         setGameCamera: mockSetGameCamera,
         setActiveGameCamera: mockSetActiveGameCamera,
@@ -106,8 +107,11 @@ describe('GameCameraInspector', () => {
     setupStore();
     render(<GameCameraInspector />);
     expect(screen.getByText('Distance')).toBeInTheDocument();
-    expect(screen.getByText('Look Ahead')).toBeInTheDocument();
+    expect(screen.getByText('Height')).toBeInTheDocument();
     expect(screen.getByText('Smoothing')).toBeInTheDocument();
+    // "Look Ahead" is gone: `ThirdPersonFollow` has no such engine parameter, so
+    // the control edited a value that could never leave the browser.
+    expect(screen.queryByText('Look Ahead')).not.toBeInTheDocument();
   });
 
   it('renders Test Shake button', () => {
@@ -156,5 +160,58 @@ describe('GameCameraInspector', () => {
     render(<GameCameraInspector />);
     const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
     expect(checkbox.checked).toBe(true);
+  });
+
+  describe('accessible names', () => {
+    /**
+     * Every control's name as a screen reader would resolve it — `aria-label`,
+     * else the text of the `<label for>` pointing at it. An empty string means
+     * the control is announced as an unlabelled edit box.
+     *
+     * This is a structural sweep rather than a list of `getByLabelText` calls
+     * because the panel grew eleven controls, none of which was associated with
+     * the label sitting next to it: the labels were visually adjacent and read
+     * fine sighted. A per-name test would have to be remembered for each new
+     * parameter; this one fails automatically.
+     */
+    function controlNames(container: HTMLElement): string[] {
+      return Array.from(container.querySelectorAll('input, select, textarea')).map((control) => {
+        const aria = control.getAttribute('aria-label');
+        if (aria) return aria.trim();
+        const id = control.getAttribute('id');
+        if (!id) return '';
+        return container.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent?.trim() ?? '';
+      });
+    }
+
+    // The three shared controls, then whatever the mode adds. Counting as well as
+    // naming catches a row that renders with no control at all.
+    const MODE_CONTROLS: Array<[GameCameraData['mode'], string[]]> = [
+      ['thirdPersonFollow', ['Distance', 'Height', 'Smoothing']],
+      ['firstPerson', ['Height', 'Mouse Sens.']],
+      ['sideScroller', ['Distance']],
+      ['topDown', ['Height']],
+      ['fixed', []],
+      ['orbital', ['Distance', 'Auto Rotate']],
+    ];
+
+    it.each(MODE_CONTROLS)('labels every control in %s mode', (mode, params) => {
+      setupStore({ primaryGameCamera: { ...baseGameCamera, mode } });
+      const { container } = render(<GameCameraInspector />);
+
+      expect(controlNames(container)).toEqual(['Active', 'Mode', 'Target ID', ...params]);
+    });
+
+    it('gives each control its own id', () => {
+      setupStore({ primaryGameCamera: { ...baseGameCamera, mode: 'thirdPersonFollow' } });
+      const { container } = render(<GameCameraInspector />);
+
+      // Two labels can carry the same text ("Distance" and "Height" each appear
+      // in three modes), so the ids must be per-control rather than slugged from
+      // the label — a duplicate would point two labels at one input.
+      const ids = Array.from(container.querySelectorAll('input, select')).map((c) => c.getAttribute('id'));
+      expect(ids.every((id) => id)).toBe(true);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
   });
 });

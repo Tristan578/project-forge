@@ -1,18 +1,119 @@
 'use client';
 
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useId } from 'react';
 import { Camera, Zap } from 'lucide-react';
 import { useEditorStore, type GameCameraData, type GameCameraMode } from '@/stores/editorStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
+// `NumericCameraField` is imported, not re-derived. This file used to spell its
+// own `Exclude<keyof GameCameraData, 'mode' | 'targetEntity'>`, and the day
+// `GameCameraData` grew a non-numeric field the local copy swept it into the
+// numeric row type while the shared one did not — a divergence that only
+// surfaced as an index error against `ENGINE_CAMERA_DEFAULTS`.
+import { ENGINE_CAMERA_DEFAULTS, type NumericCameraField } from '@/lib/game/gameCameraPayload';
 
+/**
+ * Which parameters each mode starts with. Every VALUE is read from
+ * `ENGINE_CAMERA_DEFAULTS` rather than re-typed, because a number that merely
+ * looks right here is invisible when wrong: `dispatchCommand` returns `void`,
+ * and the engine accepts an in-range-but-wrong value without complaint. These
+ * are explicit non-undefined entries, so they are dispatched, and they then
+ * become what the inputs display — a drifted literal is both the value in
+ * effect and the value shown, which is why nothing surfaces it.
+ *
+ * It shipped drifted twice over. Orbital read distance 5 / auto-rotate 0
+ * against the engine's 8 / 15, and `firstPersonMouseSensitivity` read 2 against
+ * the engine's 0.1 — that field is DEGREES of yaw per pixel of mouse delta
+ * (`fp_state.yaw -= delta.dx * sensitivity`), so 0.1 turns a 900-pixel sweep
+ * through 90° and 2 turns it through 1800°: five full rotations, unusable.
+ */
 const MODE_DEFAULTS: Record<GameCameraMode, Partial<GameCameraData>> = {
-  thirdPersonFollow: { followDistance: 5, followHeight: 2, followLookAhead: 1, followSmoothing: 5 },
-  firstPerson: { firstPersonHeight: 1.7, firstPersonMouseSensitivity: 2 },
-  sideScroller: { sideScrollerDistance: 10, sideScrollerHeight: 2 },
-  topDown: { topDownHeight: 15, topDownAngle: 60 },
+  thirdPersonFollow: {
+    followDistance: ENGINE_CAMERA_DEFAULTS.followDistance,
+    followHeight: ENGINE_CAMERA_DEFAULTS.followHeight,
+    followSmoothing: ENGINE_CAMERA_DEFAULTS.followSmoothing,
+  },
+  firstPerson: {
+    firstPersonHeight: ENGINE_CAMERA_DEFAULTS.firstPersonHeight,
+    firstPersonMouseSensitivity: ENGINE_CAMERA_DEFAULTS.firstPersonMouseSensitivity,
+  },
+  sideScroller: { sideScrollerDistance: ENGINE_CAMERA_DEFAULTS.sideScrollerDistance },
+  topDown: { topDownHeight: ENGINE_CAMERA_DEFAULTS.topDownHeight },
   fixed: {},
-  orbital: { orbitalDistance: 5, orbitalAutoRotateSpeed: 0 },
+  orbital: {
+    orbitalDistance: ENGINE_CAMERA_DEFAULTS.orbitalDistance,
+    orbitalAutoRotateSpeed: ENGINE_CAMERA_DEFAULTS.orbitalAutoRotateSpeed,
+  },
 };
+
+/**
+ * Parse a number input, keeping the previous value when the field is not a
+ * finite number.
+ *
+ * `parseFloat(v) || 0` — the shape this panel used everywhere — collapses both
+ * an empty field and a typo to `0`, silently dispatching a real 0 to the engine
+ * (a 0 follow distance puts the camera inside the player).
+ */
+function parseNumberInput(raw: string, fallback: number): number {
+  const parsed = parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+
+/**
+ * One labelled numeric parameter row.
+ *
+ * Extracted because eight rows differed only by label, field and step, and the
+ * duplication was hiding two things: none of the eleven controls in this panel
+ * was associated with its label (no `htmlFor`, no `id`, no `aria-label`), and
+ * each row re-typed its own `?? default` twice. Both are structural here — a
+ * new parameter cannot be added without an association or with a stray default.
+ *
+ * The labels are not unique across modes ("Distance", "Height" each appear in
+ * three), so `useId` per row rather than a slug: only one mode renders at a
+ * time today, but a duplicate `id` would silently point two labels at one input.
+ */
+function NumberParamRow({
+  label,
+  term,
+  field,
+  step = '0.1',
+  camera,
+  onChange,
+}: {
+  label: string;
+  term: string;
+  field: NumericCameraField;
+  step?: string;
+  camera: GameCameraData;
+  onChange: (patch: Partial<GameCameraData>) => void;
+}) {
+  const id = useId();
+  // An unset field means the engine is applying its own default, so that is
+  // what the input must show — see ENGINE_CAMERA_DEFAULTS.
+  const current = camera[field] ?? ENGINE_CAMERA_DEFAULTS[field];
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex w-20 shrink-0 items-center gap-1">
+        <label htmlFor={id} className="text-xs text-zinc-400">{label}</label>
+        <InfoTooltip term={term} />
+      </div>
+      <input
+        id={id}
+        type="number"
+        step={step}
+        value={current}
+        onChange={(e) =>
+          // A computed key widens to `{ [x: string]: number }`, which is why
+          // this needs the assertion; `field` is constrained above.
+          onChange({ [field]: parseNumberInput(e.target.value, current) } as Partial<GameCameraData>)
+        }
+        className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
+          focus:ring-1 focus:ring-blue-500"
+      />
+    </div>
+  );
+}
 
 const MODE_LABELS: Record<GameCameraMode, string> = {
   thirdPersonFollow: '3rd Person Follow',
@@ -25,12 +126,20 @@ const MODE_LABELS: Record<GameCameraMode, string> = {
 
 export const GameCameraInspector = memo(function GameCameraInspector() {
   const primaryId = useEditorStore((s) => s.primaryId);
-  const primaryGameCamera = useEditorStore((s) => s.primaryGameCamera);
+  // Derived from the per-entity record rather than a parallel `primaryGameCamera`
+  // field. That field could only ever be written by the inbound engine event, and
+  // `set_game_camera` never reached the engine (PF-1126), so it was permanently
+  // null and this inspector rendered its empty state no matter what was configured.
+  // Reading the record instead reflects both local edits and engine echoes.
+  const primaryGameCamera = useEditorStore((s) => (s.primaryId ? s.allGameCameras[s.primaryId] ?? null : null));
   const activeGameCameraId = useEditorStore((s) => s.activeGameCameraId);
   const setGameCamera = useEditorStore((s) => s.setGameCamera);
   const setActiveGameCamera = useEditorStore((s) => s.setActiveGameCamera);
   const removeGameCamera = useEditorStore((s) => s.removeGameCamera);
   const cameraShake = useEditorStore((s) => s.cameraShake);
+  // One base per instance, suffixed per control. The numeric rows mint their own
+  // (see `NumberParamRow`); these three are one-offs and share this prefix.
+  const baseId = useId();
 
   const handleModeChange = useCallback(
     (mode: GameCameraMode) => {
@@ -38,12 +147,15 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
       const defaults = MODE_DEFAULTS[mode];
       const newData: GameCameraData = {
         mode,
-        targetEntity: null,
+        // Keep whatever the camera already follows. Switching mode is a framing
+        // change, not a retargeting one, and nulling this silently detached the
+        // camera from the player every time the user tried another mode.
+        targetEntity: primaryGameCamera?.targetEntity ?? null,
         ...defaults,
       };
       setGameCamera(primaryId, newData);
     },
-    [primaryId, setGameCamera]
+    [primaryId, primaryGameCamera, setGameCamera]
   );
 
   const handleParamChange = useCallback(
@@ -118,10 +230,11 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
         {/* Active toggle */}
         <div className="flex items-center gap-2">
           <div className="flex w-20 shrink-0 items-center gap-1">
-            <label className="text-xs text-zinc-400">Active</label>
+            <label htmlFor={`${baseId}-active`} className="text-xs text-zinc-400">Active</label>
             <InfoTooltip term="gameCameraActive" />
           </div>
           <input
+            id={`${baseId}-active`}
             type="checkbox"
             checked={isActive}
             onChange={(e) => handleToggleActive(e.target.checked)}
@@ -133,10 +246,11 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
         {/* Mode selector */}
         <div className="flex items-center gap-2">
           <div className="flex w-20 shrink-0 items-center gap-1">
-            <label className="text-xs text-zinc-400">Mode</label>
+            <label htmlFor={`${baseId}-mode`} className="text-xs text-zinc-400">Mode</label>
             <InfoTooltip term="gameCameraMode" />
           </div>
           <select
+            id={`${baseId}-mode`}
             value={primaryGameCamera.mode}
             onChange={(e) => handleModeChange(e.target.value as GameCameraMode)}
             className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -153,10 +267,11 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
         {/* Target entity */}
         <div className="flex items-center gap-2">
           <div className="flex w-20 shrink-0 items-center gap-1">
-            <label className="text-xs text-zinc-400">Target ID</label>
+            <label htmlFor={`${baseId}-target`} className="text-xs text-zinc-400">Target ID</label>
             <InfoTooltip term="gameCameraTarget" />
           </div>
           <input
+            id={`${baseId}-target`}
             type="text"
             value={primaryGameCamera.targetEntity ?? ''}
             onChange={(e) => handleParamChange({ targetEntity: e.target.value || null })}
@@ -169,194 +284,31 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
         {/* Mode-specific params */}
         {primaryGameCamera.mode === 'thirdPersonFollow' && (
           <>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Distance</label>
-                <InfoTooltip term="gameCameraFollowDist" />
-              </div>
-              <input
-                type="number"
-                step="0.1"
-                value={primaryGameCamera.followDistance ?? 5}
-                onChange={(e) => handleParamChange({ followDistance: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Height</label>
-                <InfoTooltip term="gameCameraFollowHeight" />
-              </div>
-              <input
-                type="number"
-                step="0.1"
-                value={primaryGameCamera.followHeight ?? 2}
-                onChange={(e) => handleParamChange({ followHeight: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Look Ahead</label>
-                <InfoTooltip term="gameCameraLookAhead" />
-              </div>
-              <input
-                type="number"
-                step="0.1"
-                value={primaryGameCamera.followLookAhead ?? 1}
-                onChange={(e) => handleParamChange({ followLookAhead: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Smoothing</label>
-                <InfoTooltip term="gameCameraSmoothing" />
-              </div>
-              <input
-                type="number"
-                step="0.1"
-                value={primaryGameCamera.followSmoothing ?? 5}
-                onChange={(e) => handleParamChange({ followSmoothing: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
+            <NumberParamRow label="Distance" term="gameCameraFollowDist" field="followDistance" camera={primaryGameCamera} onChange={handleParamChange} />
+            <NumberParamRow label="Height" term="gameCameraFollowHeight" field="followHeight" camera={primaryGameCamera} onChange={handleParamChange} />
+            <NumberParamRow label="Smoothing" term="gameCameraSmoothing" field="followSmoothing" camera={primaryGameCamera} onChange={handleParamChange} />
           </>
         )}
 
         {primaryGameCamera.mode === 'firstPerson' && (
           <>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Height</label>
-                <InfoTooltip term="gameCameraFPHeight" />
-              </div>
-              <input
-                type="number"
-                step="0.1"
-                value={primaryGameCamera.firstPersonHeight ?? 1.7}
-                onChange={(e) => handleParamChange({ firstPersonHeight: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Mouse Sens.</label>
-                <InfoTooltip term="gameCameraMouseSens" />
-              </div>
-              <input
-                type="number"
-                step="0.1"
-                value={primaryGameCamera.firstPersonMouseSensitivity ?? 2}
-                onChange={(e) => handleParamChange({ firstPersonMouseSensitivity: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
+            <NumberParamRow label="Height" term="gameCameraFPHeight" field="firstPersonHeight" camera={primaryGameCamera} onChange={handleParamChange} />
+            <NumberParamRow label="Mouse Sens." term="gameCameraMouseSens" field="firstPersonMouseSensitivity" step="0.01" camera={primaryGameCamera} onChange={handleParamChange} />
           </>
         )}
 
         {primaryGameCamera.mode === 'sideScroller' && (
-          <>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Distance</label>
-                <InfoTooltip term="gameCameraSideScrollDist" />
-              </div>
-              <input
-                type="number"
-                step="0.1"
-                value={primaryGameCamera.sideScrollerDistance ?? 10}
-                onChange={(e) => handleParamChange({ sideScrollerDistance: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Height</label>
-                <InfoTooltip term="gameCameraSideScrollHeight" />
-              </div>
-              <input
-                type="number"
-                step="0.1"
-                value={primaryGameCamera.sideScrollerHeight ?? 2}
-                onChange={(e) => handleParamChange({ sideScrollerHeight: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-          </>
+          <NumberParamRow label="Distance" term="gameCameraSideScrollDist" field="sideScrollerDistance" camera={primaryGameCamera} onChange={handleParamChange} />
         )}
 
         {primaryGameCamera.mode === 'topDown' && (
-          <>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Height</label>
-                <InfoTooltip term="gameCameraTopDownHeight" />
-              </div>
-              <input
-                type="number"
-                step="0.1"
-                value={primaryGameCamera.topDownHeight ?? 15}
-                onChange={(e) => handleParamChange({ topDownHeight: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Angle</label>
-                <InfoTooltip term="gameCameraTopDownAngle" />
-              </div>
-              <input
-                type="number"
-                step="1"
-                value={primaryGameCamera.topDownAngle ?? 60}
-                onChange={(e) => handleParamChange({ topDownAngle: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-          </>
+          <NumberParamRow label="Height" term="gameCameraTopDownHeight" field="topDownHeight" camera={primaryGameCamera} onChange={handleParamChange} />
         )}
 
         {primaryGameCamera.mode === 'orbital' && (
           <>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Distance</label>
-                <InfoTooltip term="gameCameraOrbitalDist" />
-              </div>
-              <input
-                type="number"
-                step="0.1"
-                value={primaryGameCamera.orbitalDistance ?? 5}
-                onChange={(e) => handleParamChange({ orbitalDistance: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex w-20 shrink-0 items-center gap-1">
-                <label className="text-xs text-zinc-400">Auto Rotate</label>
-                <InfoTooltip term="gameCameraAutoRotate" />
-              </div>
-              <input
-                type="number"
-                step="0.1"
-                value={primaryGameCamera.orbitalAutoRotateSpeed ?? 0}
-                onChange={(e) => handleParamChange({ orbitalAutoRotateSpeed: parseFloat(e.target.value) || 0 })}
-                className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                  focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
+            <NumberParamRow label="Distance" term="gameCameraOrbitalDist" field="orbitalDistance" camera={primaryGameCamera} onChange={handleParamChange} />
+            <NumberParamRow label="Auto Rotate" term="gameCameraAutoRotate" field="orbitalAutoRotateSpeed" camera={primaryGameCamera} onChange={handleParamChange} />
           </>
         )}
 

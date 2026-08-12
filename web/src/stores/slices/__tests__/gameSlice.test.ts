@@ -39,7 +39,6 @@ describe('gameSlice', () => {
       const state = store.getState();
       expect(state.allGameCameras).toEqual({});
       expect(state.activeGameCameraId).toBeNull();
-      expect(state.primaryGameCamera).toBeNull();
     });
 
     it('should have default mobile touch config', () => {
@@ -325,9 +324,13 @@ describe('gameSlice', () => {
       const state = store.getState();
       expect(state.allGameCameras['entity-1']).toEqual(thirdPersonCamera);
 
+      // The store keeps the authoring vocabulary; the wire carries the engine's.
       expect(mockDispatch).toHaveBeenCalledWith('set_game_camera', {
         entityId: 'entity-1',
-        ...thirdPersonCamera,
+        mode: 'thirdPersonFollow',
+        targetEntity: null,
+        offset: [0, 2.0, -5.0],
+        damping: 0.8,
       });
     });
 
@@ -382,23 +385,23 @@ describe('gameSlice', () => {
       });
     });
 
-    it('should set entity game camera (primaryGameCamera) without dispatch', () => {
+    it('should set entity game camera without dispatch', () => {
       store.getState().setEntityGameCamera('entity-1', thirdPersonCamera);
 
       const state = store.getState();
-      expect(state.primaryGameCamera).toEqual(thirdPersonCamera);
+      expect(state.allGameCameras['entity-1']).toEqual(thirdPersonCamera);
 
       expect(mockDispatch).not.toHaveBeenCalled();
     });
 
     it('should clear entity game camera with null', () => {
       store.getState().setEntityGameCamera('entity-1', thirdPersonCamera);
-      expect(store.getState().primaryGameCamera).toEqual(thirdPersonCamera);
+      expect(store.getState().allGameCameras['entity-1']).toEqual(thirdPersonCamera);
 
       store.getState().setEntityGameCamera('entity-1', null);
 
       const state = store.getState();
-      expect(state.primaryGameCamera).toBeNull();
+      expect(state.allGameCameras['entity-1']).toBeUndefined();
     });
 
     it('should set active game camera ID without dispatch', () => {

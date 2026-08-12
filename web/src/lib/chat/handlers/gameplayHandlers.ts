@@ -82,6 +82,14 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     return { success: true, result: { types: ENGINE_COMPONENT_CATALOG } };
   },
 
+  // The schema below IS the vocabulary the AI is taught, so a parameter it can
+  // name but the engine cannot receive is worse than no parameter at all — the
+  // model keeps emitting it and every call silently loses that intent. It listed
+  // three such phantoms: `followLookAhead` (`ThirdPersonFollow` is
+  // offset/damping/min_distance/max_distance/look_at_target/collision_avoidance
+  // and nothing else), `sideScrollerHeight` (`SideScroller` is
+  // z_offset/follow_y/y_bounds/damping — vertical framing comes from follow_y),
+  // and `topDownAngle` (`TopDown` is height/damping/follow_rotation, no angle).
   set_game_camera: async (args, ctx) => {
     const p = parseArgs(z.object({
       entityId: zEntityId,
@@ -89,27 +97,49 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       targetEntity: z.string().optional(),
       followDistance: z.number().optional(),
       followHeight: z.number().optional(),
-      followLookAhead: z.number().optional(),
       followSmoothing: z.number().optional(),
       firstPersonHeight: z.number().optional(),
       firstPersonMouseSensitivity: z.number().optional(),
       sideScrollerDistance: z.number().optional(),
-      sideScrollerHeight: z.number().optional(),
       topDownHeight: z.number().optional(),
-      topDownAngle: z.number().optional(),
       orbitalDistance: z.number().optional(),
       orbitalAutoRotateSpeed: z.number().optional(),
     }), args);
     if (p.error) return p.error;
 
-    const { entityId, mode, targetEntity, ...rest } = p.data;
-    const cameraData: GameCameraData = {
-      mode,
-      targetEntity: targetEntity ?? null,
-      ...rest,
-    };
-    ctx.store.setGameCamera(entityId, cameraData);
-    return { success: true, result: { message: `Game camera set to ${mode} on entity ${entityId}` } };
+    // Built key-by-key, never `{ ...rest }`: TypeScript's excess-property check
+    // does not apply to properties introduced by a spread, so a spread would
+    // type-check happily while carrying any key the schema happened to declare
+    // straight into the store. `setGameCamera` then translates this authoring
+    // shape into the engine's wire form via `buildSetGameCameraPayload`.
+    const d = p.data;
+    const cameraData: GameCameraData = { mode: d.mode, targetEntity: d.targetEntity ?? null };
+    if (d.followDistance !== undefined) cameraData.followDistance = d.followDistance;
+    if (d.followHeight !== undefined) cameraData.followHeight = d.followHeight;
+    if (d.followSmoothing !== undefined) cameraData.followSmoothing = d.followSmoothing;
+    if (d.firstPersonHeight !== undefined) cameraData.firstPersonHeight = d.firstPersonHeight;
+    if (d.firstPersonMouseSensitivity !== undefined) cameraData.firstPersonMouseSensitivity = d.firstPersonMouseSensitivity;
+    if (d.sideScrollerDistance !== undefined) cameraData.sideScrollerDistance = d.sideScrollerDistance;
+    if (d.topDownHeight !== undefined) cameraData.topDownHeight = d.topDownHeight;
+    if (d.orbitalDistance !== undefined) cameraData.orbitalDistance = d.orbitalDistance;
+    if (d.orbitalAutoRotateSpeed !== undefined) cameraData.orbitalAutoRotateSpeed = d.orbitalAutoRotateSpeed;
+
+    // This is an UPDATE verb on an existing camera, and the schema above covers
+    // 7 of the engine's 19 wire params. `apply_set_game_camera_requests` inserts
+    // a whole new `GameCameraData`, so anything the payload omits comes back as
+    // `from_flat`'s default: an MCP client sets `fov: 100`, the user then says
+    // "raise the camera to eye level 1.8", and the fov is silently back to 75 —
+    // persisted, because `GameCameraData` is written into `EntitySnapshot` and
+    // scene export. Carry the engine-owned params the schema cannot name.
+    // `Object.hasOwn`, not a bare read: `entityId` is LLM-chosen, so `toString`
+    // or `constructor` would otherwise resolve up the prototype chain.
+    if (Object.hasOwn(ctx.store.allGameCameras, d.entityId)) {
+      const existing = ctx.store.allGameCameras[d.entityId];
+      if (existing?.engineParams) cameraData.engineParams = existing.engineParams;
+    }
+
+    ctx.store.setGameCamera(d.entityId, cameraData);
+    return { success: true, result: { message: `Game camera set to ${d.mode} on entity ${d.entityId}` } };
   },
 
   set_active_game_camera: async (args, ctx) => {
@@ -133,7 +163,12 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
   get_game_camera: async (args, ctx) => {
     const p = parseArgs(z.object({ entityId: zEntityId }), args);
     if (p.error) return p.error;
-    const camera = ctx.store.allGameCameras[p.data.entityId];
+    // `Object.hasOwn` guard: `entityId` is LLM-chosen, and a bare read of
+    // `toString`/`constructor` walks the prototype chain and would report an
+    // inherited function as this entity's camera.
+    const camera = Object.hasOwn(ctx.store.allGameCameras, p.data.entityId)
+      ? ctx.store.allGameCameras[p.data.entityId]
+      : undefined;
     const isActive = ctx.store.activeGameCameraId === p.data.entityId;
     return { success: true, result: { camera: camera || null, isActive } };
   },
