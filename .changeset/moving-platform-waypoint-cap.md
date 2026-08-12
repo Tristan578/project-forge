@@ -14,7 +14,10 @@ survive `Number.isFinite` in JavaScript but overflow to infinity as an `f32`.
 Also fixed three validators that were passing arrays they exist to reject.
 `Array.prototype.every` skips array holes, so `[1, , 3]` cleared every one of
 them without the missing slot being checked. On the engine wire that shipped the
-gap as a `null` the engine drops and the store keeps; in dialogue an `and` group
-with a missing condition reported itself satisfied, and a `null` condition in an
-imported tree crashed playback; in the effect system an incomplete binding was
-accepted, then silently vanished the next time it was loaded from storage.
+gap as a `null` the engine drops and the store keeps. In dialogue an `and` group
+with a missing condition reported itself satisfied; separately, a `null`
+condition, node or choice in an imported or persisted tree crashed playback, so
+both `JSON.parse` boundaries now drop members the declared types say cannot
+exist. In the effect system an incomplete binding was accepted by a type guard
+whose narrowing promises the opposite, leaving `applyBinding` — which iterates
+with `for...of`, and so does not skip the gap — to throw on it at gameplay time.

@@ -127,8 +127,8 @@ describe('isValidBinding', () => {
   });
 
   it('returns false when every effect slot is a hole', () => {
-    // `new Array(n)` is the shape a length-preserving `.map()` over a filtered
-    // list produces, and it passes `.every` outright.
+    // `new Array(n)` — a pre-sized accumulator whose slots were never all filled
+    // in — is all holes, and so passes `.every` outright.
     expect(isValidBinding({
       event: { name: 'x', category: 'combat' },
       effects: new Array(2),
@@ -136,8 +136,9 @@ describe('isValidBinding', () => {
   });
 
   it('returns false when an effect is null', () => {
-    // Unlike a hole, this one is reachable from `loadBindings`' `JSON.parse` —
-    // and it is what a hole becomes once `JSON.stringify` has written it out.
+    // Coverage, not a regression test: the pre-fix `.every` callback already
+    // rejected `null` (only holes skipped it). Kept because this is the shape
+    // `loadBindings`' `JSON.parse` can actually produce.
     expect(isValidBinding({
       event: { name: 'x', category: 'combat' },
       effects: [null],
@@ -386,23 +387,25 @@ describe('generateEffectBindings', () => {
     await expect(generateEffectBindings('test', fetcher)).rejects.toThrow('network failure');
   });
 
-  it('never hands back a binding that would not survive being saved', async () => {
-    // The consequence of the guard skipping a hole, end to end: `.map` preserves
-    // holes, so the gap crossed `generateEffectBindings` untouched, reached
-    // `JSON.stringify` in `saveBindings` as `null`, and the next `loadBindings`
-    // rejected the whole binding — the user's effect vanished between sessions,
-    // with nothing anywhere reporting it.
+  it('never hands back a binding with a gap in its effects', async () => {
+    // `.filter(isValidBinding)` is what drops the holed binding, and `.map`
+    // preserves holes — so before the guard was fixed, the gap crossed
+    // `generateEffectBindings` untouched and reached `applyBinding`, whose
+    // `for...of` yields `undefined` for a hole rather than skipping it.
     //
-    // Asserting on the serialized form rather than with `.every`, for the same
-    // reason: the obvious check is the bug, and would report clean here.
+    // `Array.from` is doing real work in the assertion below: it materializes a
+    // hole as an explicit `undefined`, where the obvious check — `.every` over
+    // the effects — is the bug itself and would report clean.
     const mockBindings = [
       { event: { name: 'holed', category: 'combat' }, effects: [{ type: 'flash', intensity: 0.5, duration: 0.1 }, , ] },
       { event: { name: 'dense', category: 'combat' }, effects: [{ type: 'flash', intensity: 0.5, duration: 0.1 }] },
     ];
     const fetcher = vi.fn().mockResolvedValue(mockBindings);
     const result = await generateEffectBindings('test', fetcher);
-    expect(JSON.stringify(result)).not.toContain('null');
     expect(result.map((b) => b.event.name)).toEqual(['dense']);
+    expect(result.flatMap((b) => Array.from(b.effects))).toEqual([
+      { type: 'flash', intensity: 0.5, duration: 0.1 },
+    ]);
   });
 });
 

@@ -76,13 +76,13 @@ export function isValidBinding(binding: unknown): binding is EffectBinding {
   const validCategories: EventCategory[] = ['combat', 'collection', 'movement', 'ui', 'environment'];
   if (!validCategories.includes(evt.category as EventCategory)) return false;
   if (!Array.isArray(b.effects)) return false;
-  // Indexed rather than `.every`, which SKIPS holes: `[valid, , valid]` would
-  // clear the check without the missing slot being seen, and this function is a
-  // type guard — it would narrow to `EffectBinding`, whose `effects: Effect[]`
-  // promises every element is an `Effect`. `map` preserves holes too, so the gap
-  // survives `generateEffectBindings` untouched and reaches `JSON.stringify`,
-  // which writes it as `null`; the next `loadBindings` then rejects the binding
-  // outright and the user's effect silently disappears between sessions.
+  // Indexed rather than `.every`, which SKIPS holes: `[valid, , valid]` cleared
+  // the check without the missing slot being seen. That matters because this is
+  // a type guard — it narrows to `EffectBinding`, whose `effects: Effect[]`
+  // promises every element is an `Effect`, and consumers are written against
+  // that promise. `applyBinding` iterates with `for...of`, which unlike `.every`
+  // does NOT skip holes: it yields `undefined`, and `applyEffect` then reads
+  // `.type` off it and throws at gameplay time.
   const effects = b.effects as unknown[];
   for (let i = 0; i < effects.length; i += 1) {
     const e = effects[i];

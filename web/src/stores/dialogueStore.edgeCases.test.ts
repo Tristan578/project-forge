@@ -1112,9 +1112,9 @@ describe('dialogueStore — edge cases (PF-360)', () => {
      * Run a condition node and report which branch it took.
      *
      * `Condition` cannot describe a hole or a `null` member, which is the whole
-     * point — the store accepts trees from `addTree`/`updateTree` and from
-     * imported JSON, and neither is bound by the type. The cast is what lets the
-     * test express the shape the runtime actually has to survive.
+     * point: the casts below are what let the test express the shape the runtime
+     * actually has to survive. See `allOf` / `anyOf` in `dialogueStore.ts` for
+     * where each shape comes from and why the callback methods miss it.
      */
     const branchTaken = (condition: unknown): string | null => {
       const treeId = useDialogueStore.getState().addTree('Gap', 'Start');
@@ -1178,11 +1178,20 @@ describe('dialogueStore — edge cases (PF-360)', () => {
     });
 
     it('does not let a hole or a null satisfy an OR group', () => {
-      // `some` skips holes in the safe direction, but the `null` member is the
-      // one that threw. Neither may stand in for a satisfied term.
+      // Every member is a gap, so the false branch can only mean that neither a
+      // hole nor a `null` stood in for a satisfied term — no real condition is
+      // present that could have produced it instead.
       // The hole below is deliberate — it IS the input under test.
-      const gaps = [, null, { type: 'equals', variable: 'a', value: 999 }];
+      const gaps = [, null];
       expect(branchTaken({ type: 'or', conditions: gaps })).toBe('no');
+    });
+
+    it('treats a missing or non-array conditions list as unsatisfied', () => {
+      // Reachable from an imported tree, and one level up from the element
+      // guards: reading `.length` off `undefined` threw mid-playback.
+      expect(branchTaken({ type: 'and' })).toBe('no');
+      expect(branchTaken({ type: 'or', conditions: null })).toBe('no');
+      expect(branchTaken({ type: 'and', conditions: 'nope' })).toBe('no');
     });
 
     it('still takes the true branch when an OR member is satisfied', () => {
@@ -1192,6 +1201,80 @@ describe('dialogueStore — edge cases (PF-360)', () => {
           conditions: [null, { type: 'equals', variable: 'a', value: 1 }],
         })
       ).toBe('yes');
+    });
+  });
+
+  describe('null members in imported and persisted trees', () => {
+    // `JSON.parse` produces `null` freely, and both entry points used to cast
+    // the result to `DialogueTree` without checking anything. Every reader
+    // downstream — `nodes.find`, `choices.filter`, `for (const action of ...)` —
+    // dereferences the element on the strength of that cast.
+    const treeWithNulls = {
+      id: 't1',
+      name: 'Imported',
+      startNodeId: 'start',
+      variables: {},
+      nodes: [
+        null,
+        { id: 'start', type: 'text', speaker: 'A', text: 'hi', next: 'pick' },
+        { id: 'pick', type: 'choice', choices: [null, { id: 'c1', text: 'go', nextNodeId: null }] },
+        { id: 'act', type: 'action', actions: null, next: null },
+        { id: 'noChoices', type: 'choice' },
+      ],
+    };
+
+    it('drops null nodes on import and still plays the tree', () => {
+      const treeId = useDialogueStore.getState().importTree(JSON.stringify(treeWithNulls));
+      expect(treeId).not.toBeNull();
+
+      const tree = useDialogueStore.getState().dialogueTrees[treeId as string];
+      expect(tree.nodes.map(n => n.id)).toEqual(['start', 'pick', 'act', 'noChoices']);
+
+      // The whole point: starting playback used to throw on `nodes.find`.
+      useDialogueStore.getState().startDialogue(treeId as string);
+      expect(useDialogueStore.getState().runtime.currentNodeId).toBe('start');
+      useDialogueStore.getState().advanceDialogue();
+      expect(useDialogueStore.getState().runtime.currentChoices.map(c => c.id)).toEqual(['c1']);
+    });
+
+    it('gives a choice node with no choices key an empty list', () => {
+      const treeId = useDialogueStore.getState().importTree(JSON.stringify(treeWithNulls));
+      const tree = useDialogueStore.getState().dialogueTrees[treeId as string];
+      const noChoices = tree.nodes.find(n => n.id === 'noChoices');
+      expect(noChoices && 'choices' in noChoices ? noChoices.choices : null).toEqual([]);
+      const act = tree.nodes.find(n => n.id === 'act');
+      expect(act && 'actions' in act ? act.actions : null).toEqual([]);
+    });
+
+    it('drops null nodes when loading from localStorage', () => {
+      localStorage.setItem('forge_dialogue_trees', JSON.stringify({ t1: treeWithNulls }));
+      useDialogueStore.getState().loadFromLocalStorage();
+      expect(useDialogueStore.getState().dialogueTrees.t1.nodes.map(n => n.id)).toEqual([
+        'start',
+        'pick',
+        'act',
+        'noChoices',
+      ]);
+    });
+
+    it('ignores a stored payload that is not an object', () => {
+      localStorage.setItem('forge_dialogue_trees', '"just a string"');
+      useDialogueStore.getState().loadFromLocalStorage();
+      expect(useDialogueStore.getState().dialogueTrees).toEqual({});
+    });
+
+    it('refuses to import a payload that is not an object', () => {
+      expect(useDialogueStore.getState().importTree('42')).toBeNull();
+      expect(useDialogueStore.getState().importTree('null')).toBeNull();
+    });
+
+    it('keeps a well-formed tree untouched', () => {
+      // Positive control: a sanitizer that dropped everything passes the above.
+      const good = { ...treeWithNulls, nodes: [treeWithNulls.nodes[1]] };
+      const treeId = useDialogueStore.getState().importTree(JSON.stringify(good));
+      const tree = useDialogueStore.getState().dialogueTrees[treeId as string];
+      expect(tree.nodes).toEqual([treeWithNulls.nodes[1]]);
+      expect(tree.name).toBe('Imported (Imported)');
     });
   });
 });

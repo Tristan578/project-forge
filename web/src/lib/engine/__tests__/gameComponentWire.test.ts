@@ -487,8 +487,8 @@ describe('gameComponentWire', () => {
     });
 
     it('drops a waypoint that is nothing but holes', () => {
-      // `new Array(3)` is the shape a length-preserving `.map()` over a filtered
-      // list produces, and it passes `.every` outright.
+      // `new Array(3)` — a pre-sized accumulator whose slots were never all
+      // filled in — is all holes, and so passes `.every` outright.
       expect(built({ waypoints: [new Array(3), [4, 5, 6]] })).toEqual([[4, 5, 6]]);
     });
 
