@@ -224,9 +224,14 @@ function collectOgSources(dir: string, match: (name: string) => boolean): string
  * covers what it cannot reach: `play/[userId]/[slug]` needs a database, and a
  * shared module is only exercised through whoever imports it.
  *
- * `Extended_Pictographic` is the property satori's own emoji segmentation keys
- * on, so it flags the same characters that would be routed to the emoji CDN —
- * and not ordinary typography (`—` is not pictographic).
+ * It scans for `Extended_Pictographic`, which is deliberately NOT the property
+ * satori keys on — satori keys on `Emoji`, and the two differ by 43 codepoints
+ * (see `stripEmoji`). This is a source-hygiene net, not a model of the
+ * classifier: it catches the glyph a developer would actually paste into a
+ * source file, and it stays quiet on ordinary typography (`—` is not
+ * pictographic) and on the digits and `#`/`*` that `Emoji` also covers, which
+ * appear in this codebase constantly and are harmless. The runtime guarantee is
+ * the offline render above; this only keeps the source clean.
  *
  * The scan reads raw source, comments included. That is deliberately one notch
  * stricter than the real rule: stripping comments first would need a

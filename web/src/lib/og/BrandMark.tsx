@@ -19,17 +19,31 @@
  *
  * `size` is the `fontSize` the glyph was rendered at, so each badge keeps the
  * proportions it had.
+ *
+ * On the drawing: this is ONE closed path, not a head shape plus a handle
+ * shape. The first attempt was two disjoint rectangles and it read as a paint
+ * roller — a wide pill with a stub under it is a roller, a stamp or a flag
+ * long before it is a hammer, and at 16px it collapsed into a blob. It was
+ * caught by rendering the real component through satori at all three
+ * production sizes and looking, which is the only check that can see it: every
+ * assertion in `BrandMark.test.tsx` passed on the roller.
+ *
+ * Two properties make it survive the downscale, and both are load-bearing:
+ * the outline is continuous, so nothing thin has to stay attached to anything
+ * else as pixels drop out; and it is swung off the vertical, so the diagonal
+ * says "tool" before any detail resolves. This is also the OG card's only
+ * pictorial mark and the only icon any social platform shows for the product —
+ * there is no icon in the app header or the landing nav to fall back on.
  */
 export function BrandMark({ size }: { size: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32">
-      {/* Head — squared on the claw side, rounded on the striking face. */}
-      <path
-        d="M6 5 L26 5 A3 3 0 0 1 29 8 L29 12 A3 3 0 0 1 26 15 L6 15 A1 1 0 0 1 5 14 L5 6 A1 1 0 0 1 6 5 Z"
-        fill="#ffffff"
-      />
-      {/* Handle, set off-centre so the silhouette reads as a hammer. */}
-      <rect x="9" y="15" width="4.5" height="12.5" rx="1.6" fill="#ffffff" />
+      <g transform="rotate(-38 16 16)">
+        <path
+          d="M8 3 L24 3 A3 3 0 0 1 27 6 L27 9 A3 3 0 0 1 24 12 L19.5 12 L19.5 27 A2 2 0 0 1 17.5 29 L14.5 29 A2 2 0 0 1 12.5 27 L12.5 12 L8 12 A3 3 0 0 1 5 9 L5 6 A3 3 0 0 1 8 3 Z"
+          fill="#ffffff"
+        />
+      </g>
     </svg>
   );
 }
