@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readdirSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { join, relative } from 'path';
 
 describe('Root OG Image', () => {
   beforeEach(() => {
@@ -183,9 +183,19 @@ describe('OG sources carry no emoji codepoints', () => {
     ...collectOgSources(OG_LIB_DIR, (n) => /\.(tsx|ts)$/.test(n)),
   ];
 
-  it('finds the OG sources at all', () => {
-    // Fail closed: a moved directory must not pass this suite vacuously.
-    expect(sources.length).toBeGreaterThanOrEqual(4);
+  it('scans exactly the files it is supposed to scan', () => {
+    // Pinned to the list, not to a floor. A floor of 4 against 6 real files let
+    // two of them leave the scan silently — a route renamed off the filename
+    // pattern above is enough, and the remaining files keep the suite green.
+    // Adding an OG route means adding it here, which is the intent.
+    expect(sources.map((f) => relative(join(__dirname, '..', '..'), f)).sort()).toEqual([
+      'app/community/opengraph-image.tsx',
+      'app/opengraph-image.tsx',
+      'app/play/[userId]/[slug]/opengraph-image.tsx',
+      'app/pricing/opengraph-image.tsx',
+      'lib/og/BrandMark.tsx',
+      'lib/og/text.ts',
+    ]);
   });
 
   it.each(sources)('%s', (file) => {
