@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og';
 import { TIER_PLANS } from '@/lib/billing/tierPlans';
+import { BrandMark } from '@/lib/og/BrandMark';
 
 // This route runs on the Edge runtime, so `tierPlans` must stay a pure
 // constants module — it is, deliberately.
@@ -32,10 +33,9 @@ export default function Image() {
             borderRadius: 16,
             background: 'linear-gradient(135deg, #f97316, #ea580c)',
             marginBottom: 24,
-            fontSize: 44,
           }}
         >
-          ⚒
+          <BrandMark size={44} />
         </div>
 
         <div

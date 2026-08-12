@@ -1,5 +1,7 @@
 import { ImageResponse } from 'next/og';
 
+import { BrandMark } from '@/lib/og/BrandMark';
+
 export const alt = 'SpawnForge Community Gallery — Discover and Play Games';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
@@ -29,10 +31,9 @@ export default function Image() {
             borderRadius: 16,
             background: 'linear-gradient(135deg, #f97316, #ea580c)',
             marginBottom: 24,
-            fontSize: 44,
           }}
         >
-          ⚒
+          <BrandMark size={44} />
         </div>
 
         <div

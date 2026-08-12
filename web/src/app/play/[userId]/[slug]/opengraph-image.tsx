@@ -2,6 +2,8 @@ import { ImageResponse } from 'next/og';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { BrandMark } from '@/lib/og/BrandMark';
+import { initialFor, stripPictographic } from '@/lib/og/text';
 
 export const alt = 'SpawnForge Game';
 export const size = { width: 1200, height: 630 };
@@ -53,9 +55,21 @@ function renderFallback() {
   );
 }
 
-export default async function Image({ params }: Props) {
-  const { userId: clerkId, slug } = await params;
+interface CardData {
+  title: string;
+  creatorName: string;
+  description: string;
+}
 
+/**
+ * Loads the card's text, or `null` when there is nothing to show.
+ *
+ * The try/catch stays around the query and nothing else: constructing JSX
+ * inside one is misleading (React renders lazily, so a render error is never
+ * caught there) and `react-hooks/error-boundaries` rejects it outright once the
+ * tree contains a component rather than only host elements.
+ */
+async function loadCard(clerkId: string, slug: string): Promise<CardData | null> {
   try {
     const [user] = await queryWithResilience(() =>
       getDb()
@@ -65,7 +79,7 @@ export default async function Image({ params }: Props) {
         .limit(1)
     );
 
-    if (!user) return renderFallback();
+    if (!user) return null;
 
     const [game] = await queryWithResilience(() =>
       getDb()
@@ -84,120 +98,129 @@ export default async function Image({ params }: Props) {
         .limit(1)
     );
 
-    if (!game) return renderFallback();
+    if (!game) return null;
 
-    const creatorName = user.displayName || 'Unknown Creator';
-    const description = game.description || 'Play this game on SpawnForge';
-    const truncatedDesc = description.length > 120
-      ? description.slice(0, 117) + '...'
-      : description;
+    // Every string here reaches satori, and satori resolves emoji through a
+    // third-party CDN. These three are the only user-supplied text on the card.
+    const description = stripPictographic(game.description ?? '') || 'Play this game on SpawnForge';
+    return {
+      title: stripPictographic(game.title) || 'Untitled Game',
+      creatorName: stripPictographic(user.displayName ?? '') || 'Unknown Creator',
+      // Truncate after stripping — the emoji are gone by now, so this slice can
+      // no longer cut one in half.
+      description: description.length > 120 ? description.slice(0, 117) + '...' : description,
+    };
+  } catch {
+    return null;
+  }
+}
 
-    return new ImageResponse(
-      (
+export default async function Image({ params }: Props) {
+  const { userId: clerkId, slug } = await params;
+
+  const card = await loadCard(clerkId, slug);
+  if (!card) return renderFallback();
+
+  const { title, creatorName, description: truncatedDesc } = card;
+
+  return new ImageResponse(
+    (
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          background: getGradient(slug),
+          padding: 60,
+        }}
+      >
+        {/* Top: game info */}
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <div
+            style={{
+              fontSize: 56,
+              fontWeight: 800,
+              color: '#ffffff',
+              letterSpacing: -1,
+              lineHeight: 1.1,
+              maxWidth: 900,
+            }}
+          >
+            {title}
+          </div>
+          <div
+            style={{
+              fontSize: 24,
+              color: 'rgba(255, 255, 255, 0.65)',
+              marginTop: 20,
+              maxWidth: 800,
+              lineHeight: 1.4,
+            }}
+          >
+            {truncatedDesc}
+          </div>
+        </div>
+
+        {/* Bottom: creator + SpawnForge branding */}
         <div
           style={{
-            width: '100%',
-            height: '100%',
             display: 'flex',
-            flexDirection: 'column',
+            alignItems: 'center',
             justifyContent: 'space-between',
-            background: getGradient(slug),
-            padding: 60,
           }}
         >
-          {/* Top: game info */}
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <div
-              style={{
-                fontSize: 56,
-                fontWeight: 800,
-                color: '#ffffff',
-                letterSpacing: -1,
-                lineHeight: 1.1,
-                maxWidth: 900,
-              }}
-            >
-              {game.title}
-            </div>
-            <div
-              style={{
-                fontSize: 24,
-                color: 'rgba(255, 255, 255, 0.65)',
-                marginTop: 20,
-                maxWidth: 800,
-                lineHeight: 1.4,
-              }}
-            >
-              {truncatedDesc}
-            </div>
-          </div>
-
-          {/* Bottom: creator + SpawnForge branding */}
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'space-between',
+              gap: 12,
             }}
           >
             <div
               style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                background: 'rgba(255,255,255,0.15)',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 12,
+                justifyContent: 'center',
+                fontSize: 20,
+                color: '#ffffff',
               }}
             >
-              <div
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 20,
-                  background: 'rgba(255,255,255,0.15)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 20,
-                  color: '#ffffff',
-                }}
-              >
-                {creatorName[0]?.toUpperCase() ?? '?'}
-              </div>
-              <div style={{ fontSize: 22, color: 'rgba(255,255,255,0.8)' }}>
-                {creatorName}
-              </div>
+              {initialFor(creatorName)}
             </div>
+            <div style={{ fontSize: 22, color: 'rgba(255,255,255,0.8)' }}>{creatorName}</div>
+          </div>
 
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
             <div
               style={{
+                width: 28,
+                height: 28,
+                borderRadius: 6,
+                background: 'linear-gradient(135deg, #f97316, #ea580c)',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8,
+                justifyContent: 'center',
               }}
             >
-              <div
-                style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: 6,
-                  background: 'linear-gradient(135deg, #f97316, #ea580c)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 16,
-                }}
-              >
-                ⚒
-              </div>
-              <div style={{ fontSize: 20, color: 'rgba(255,255,255,0.6)' }}>
-                SpawnForge
-              </div>
+              <BrandMark size={16} />
             </div>
+            <div style={{ fontSize: 20, color: 'rgba(255,255,255,0.6)' }}>SpawnForge</div>
           </div>
         </div>
-      ),
-      { ...size }
-    );
-  } catch {
-    return renderFallback();
-  }
+      </div>
+    ),
+    { ...size }
+  );
 }
