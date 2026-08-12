@@ -1106,4 +1106,92 @@ describe('dialogueStore — edge cases (PF-360)', () => {
       expect(useDialogueStore.getState().runtime.typewriterComplete).toBe(false);
     });
   });
+
+  describe('condition groups with an absent member', () => {
+    /**
+     * Run a condition node and report which branch it took.
+     *
+     * `Condition` cannot describe a hole or a `null` member, which is the whole
+     * point — the store accepts trees from `addTree`/`updateTree` and from
+     * imported JSON, and neither is bound by the type. The cast is what lets the
+     * test express the shape the runtime actually has to survive.
+     */
+    const branchTaken = (condition: unknown): string | null => {
+      const treeId = useDialogueStore.getState().addTree('Gap', 'Start');
+      useDialogueStore.getState().updateTree(treeId, { variables: { a: 1 } });
+      const startNodeId = useDialogueStore.getState().dialogueTrees[treeId].startNodeId;
+
+      useDialogueStore.getState().addNode(treeId, {
+        id: 'cond',
+        type: 'condition',
+        condition: condition as ConditionNode['condition'],
+        onTrue: 'yes',
+        onFalse: 'no',
+      } as ConditionNode);
+      for (const id of ['yes', 'no']) {
+        useDialogueStore.getState().addNode(treeId, {
+          id,
+          type: 'text',
+          speaker: 'System',
+          text: id,
+          next: null,
+        } as TextNode);
+      }
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'cond' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+      return useDialogueStore.getState().runtime.currentNodeId;
+    };
+
+    it('does not let a hole satisfy an AND group', () => {
+      // `Array.prototype.every` skips holes, so this group reported itself
+      // satisfied without the missing slot ever being evaluated — a gate opening
+      // because one of its terms was absent.
+      // The hole below is deliberate — it IS the input under test.
+      const withHole = [{ type: 'equals', variable: 'a', value: 1 }, , ];
+      expect(withHole).toHaveLength(2);
+      expect(branchTaken({ type: 'and', conditions: withHole })).toBe('no');
+    });
+
+    it('does not let a null member satisfy an AND group', () => {
+      // Unlike a hole, this one survives `JSON.parse`, so it arrives from any
+      // imported tree — and `evaluateCondition` reads `.type` off its argument,
+      // so before this it threw mid-playback rather than resolving either way.
+      expect(
+        branchTaken({
+          type: 'and',
+          conditions: [{ type: 'equals', variable: 'a', value: 1 }, null],
+        })
+      ).toBe('no');
+    });
+
+    it('still takes the true branch when every AND member is present', () => {
+      // Without this, an `allOf` that returned `false` unconditionally would pass
+      // both tests above.
+      expect(
+        branchTaken({
+          type: 'and',
+          conditions: [{ type: 'equals', variable: 'a', value: 1 }],
+        })
+      ).toBe('yes');
+    });
+
+    it('does not let a hole or a null satisfy an OR group', () => {
+      // `some` skips holes in the safe direction, but the `null` member is the
+      // one that threw. Neither may stand in for a satisfied term.
+      // The hole below is deliberate — it IS the input under test.
+      const gaps = [, null, { type: 'equals', variable: 'a', value: 999 }];
+      expect(branchTaken({ type: 'or', conditions: gaps })).toBe('no');
+    });
+
+    it('still takes the true branch when an OR member is satisfied', () => {
+      expect(
+        branchTaken({
+          type: 'or',
+          conditions: [null, { type: 'equals', variable: 'a', value: 1 }],
+        })
+      ).toBe('yes');
+    });
+  });
 });

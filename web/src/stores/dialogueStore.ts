@@ -151,6 +151,37 @@ function generateId(prefix: string): string {
   return `${prefix}_${timestamp}_${random}`;
 }
 
+/**
+ * `and` / `or` over a nested condition list, written as indexed loops.
+ *
+ * Two things a `.every` / `.some` callback cannot see:
+ *
+ * - **Holes.** Both methods SKIP them, so `[c1, , c2]` reports the whole AND-group
+ *   satisfied without the missing slot ever being evaluated — the fail-OPEN
+ *   direction for something whose job is to gate. `JSON.parse` cannot produce a
+ *   hole, but `addTree`/`updateTree` take a caller-built array.
+ * - **A `null` element.** That one IS reachable from an imported tree, and
+ *   `evaluateCondition` reads `.type` off its argument, so it threw mid-playback.
+ *
+ * An absent or unusable condition is treated as unsatisfied in both groups: it
+ * cannot open an `and`, and it cannot satisfy an `or`.
+ */
+function allOf(conditions: Condition[], variables: Record<string, unknown>): boolean {
+  for (let i = 0; i < conditions.length; i += 1) {
+    const condition = conditions[i];
+    if (!condition || !evaluateCondition(condition, variables)) return false;
+  }
+  return true;
+}
+
+function anyOf(conditions: Condition[], variables: Record<string, unknown>): boolean {
+  for (let i = 0; i < conditions.length; i += 1) {
+    const condition = conditions[i];
+    if (condition && evaluateCondition(condition, variables)) return true;
+  }
+  return false;
+}
+
 function evaluateCondition(condition: Condition, variables: Record<string, unknown>): boolean {
   switch (condition.type) {
     case 'equals':
@@ -168,9 +199,9 @@ function evaluateCondition(condition: Condition, variables: Record<string, unkno
       return Array.isArray(items) && items.includes(condition.itemId);
     }
     case 'and':
-      return condition.conditions.every(c => evaluateCondition(c, variables));
+      return allOf(condition.conditions, variables);
     case 'or':
-      return condition.conditions.some(c => evaluateCondition(c, variables));
+      return anyOf(condition.conditions, variables);
     default:
       return false;
   }

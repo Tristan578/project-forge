@@ -113,6 +113,45 @@ describe('isValidBinding', () => {
   it('accepts binding with empty effects array', () => {
     expect(isValidBinding({ event: { name: 'x', category: 'ui' }, effects: [] })).toBe(true);
   });
+
+  it('returns false when an effect slot is a hole', () => {
+    // `Array.prototype.every` SKIPS holes, so `[valid, , valid]` cleared the
+    // check without the missing slot ever being handed to the callback — and
+    // this is a type guard, so it narrowed to `EffectBinding`, whose
+    // `effects: Effect[]` promises every element is an `Effect`. The hole below
+    // is deliberate — it IS the input under test.
+    expect(isValidBinding({
+      event: { name: 'x', category: 'combat' },
+      effects: [createEffect('flash', 0.5, 0.1), , createEffect('flash', 0.5, 0.1)],
+    })).toBe(false);
+  });
+
+  it('returns false when every effect slot is a hole', () => {
+    // `new Array(n)` is the shape a length-preserving `.map()` over a filtered
+    // list produces, and it passes `.every` outright.
+    expect(isValidBinding({
+      event: { name: 'x', category: 'combat' },
+      effects: new Array(2),
+    })).toBe(false);
+  });
+
+  it('returns false when an effect is null', () => {
+    // Unlike a hole, this one is reachable from `loadBindings`' `JSON.parse` —
+    // and it is what a hole becomes once `JSON.stringify` has written it out.
+    expect(isValidBinding({
+      event: { name: 'x', category: 'combat' },
+      effects: [null],
+    })).toBe(false);
+  });
+
+  it('accepts a dense multi-effect binding', () => {
+    // Without this, an `isValidBinding` that rejected every array of length > 1
+    // — or returned `false` unconditionally — passes all three tests above.
+    expect(isValidBinding({
+      event: { name: 'x', category: 'combat' },
+      effects: [createEffect('flash', 0.5, 0.1), createEffect('sound', 0.2, 0.3)],
+    })).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -345,6 +384,25 @@ describe('generateEffectBindings', () => {
   it('propagates fetcher errors', async () => {
     const fetcher = vi.fn().mockRejectedValue(new Error('network failure'));
     await expect(generateEffectBindings('test', fetcher)).rejects.toThrow('network failure');
+  });
+
+  it('never hands back a binding that would not survive being saved', async () => {
+    // The consequence of the guard skipping a hole, end to end: `.map` preserves
+    // holes, so the gap crossed `generateEffectBindings` untouched, reached
+    // `JSON.stringify` in `saveBindings` as `null`, and the next `loadBindings`
+    // rejected the whole binding — the user's effect vanished between sessions,
+    // with nothing anywhere reporting it.
+    //
+    // Asserting on the serialized form rather than with `.every`, for the same
+    // reason: the obvious check is the bug, and would report clean here.
+    const mockBindings = [
+      { event: { name: 'holed', category: 'combat' }, effects: [{ type: 'flash', intensity: 0.5, duration: 0.1 }, , ] },
+      { event: { name: 'dense', category: 'combat' }, effects: [{ type: 'flash', intensity: 0.5, duration: 0.1 }] },
+    ];
+    const fetcher = vi.fn().mockResolvedValue(mockBindings);
+    const result = await generateEffectBindings('test', fetcher);
+    expect(JSON.stringify(result)).not.toContain('null');
+    expect(result.map((b) => b.event.name)).toEqual(['dense']);
   });
 });
 
