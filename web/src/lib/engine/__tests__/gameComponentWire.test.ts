@@ -475,5 +475,93 @@ describe('gameComponentWire', () => {
       );
       expect(wire.properties.waypoints).toHaveLength(RUST_MAX);
     });
+
+    it('drops a waypoint with a hole in it, which the length check alone lets through', () => {
+      // `[0, , 0]` has `length === 3`, and `Array.prototype.every` SKIPS holes —
+      // so the callback never sees index 1 and the entry cleared the guard. The
+      // tuple was then built by re-reading the same indices, where the hole reads
+      // as `undefined` and crosses the wire as `null`; the engine's `as_f64()`
+      // returns `None` for that and drops the point, while the store keeps it.
+      // The hole below is deliberate — it IS the input under test.
+      expect(built({ waypoints: [[0, , 0], [4, 5, 6]] })).toEqual([[4, 5, 6]]);
+    });
+
+    it('drops a waypoint that is nothing but holes', () => {
+      // `new Array(3)` is the shape a length-preserving `.map()` over a filtered
+      // list produces, and it passes `.every` outright.
+      expect(built({ waypoints: [new Array(3), [4, 5, 6]] })).toEqual([[4, 5, 6]]);
+    });
+
+    it('does not let a sparse waypoint eat the cap budget', () => {
+      // Same rule as the malformed-entry test above: the engine `take`s after the
+      // `filter_map`, so an entry it drops must not cost a slot here either.
+      // Asserting the CONTENT, not just the length: 64 sparse entries kept in
+      // place of the real ones also produce a length of 64, so `toHaveLength`
+      // alone passes on exactly the behaviour this test exists to reject.
+      const interleaved: unknown[] = [];
+      for (const point of route(RUST_MAX)) {
+        interleaved.push(new Array(3), point);
+      }
+      expect(built({ waypoints: interleaved })).toEqual(route(RUST_MAX));
+    });
+
+    it('keeps no hole anywhere in the route it hands the engine', () => {
+      // The assertion this test would naturally reach for —
+      // `kept.every((p) => p.every(Number.isFinite))` — is the very bug: it skips
+      // holes and reports `true` on the array that caused this ticket. Serializing
+      // is the check that cannot skip anything, because `JSON.stringify` writes a
+      // hole as `null` exactly as the wire does.
+      const kept = built({ waypoints: [[1, 2, 3], new Array(3), [4, 5, 6]] });
+      expect(JSON.stringify(kept)).not.toContain('null');
+      expect(kept).toEqual([
+        [1, 2, 3],
+        [4, 5, 6],
+      ]);
+    });
+  });
+
+  describe('sparse vec3 fields', () => {
+    // `vec3` backs three fields, and each one was reached by the same defect:
+    // validate with `.every`, then re-read by index. A field is not covered by
+    // its siblings — they are three separate call sites.
+    const propOf = (type: string, props: Record<string, unknown>) =>
+      toWireComponent(buildStoreComponent(type, props)!).properties;
+
+    it('falls back when respawnPoint has a hole', () => {
+      // The hole below is deliberate — it IS the input under test.
+      expect(propOf('health', { respawnPoint: [1, , 3] }).respawnPoint).toEqual([0, 1, 0]);
+    });
+
+    it('falls back when targetPosition has a hole', () => {
+      expect(propOf('teleporter', { targetPosition: new Array(3) }).targetPosition).toEqual([
+        0, 1, 0,
+      ]);
+    });
+
+    it('falls back when spawnOffset has a hole', () => {
+      // The hole below is deliberate — it IS the input under test.
+      expect(propOf('spawner', { spawnOffset: [, 1, 2] }).spawnOffset).toEqual([0, 1, 0]);
+    });
+
+    it('still accepts a well-formed vector', () => {
+      // Without this, a `vec3` that returned the fallback unconditionally passes
+      // all three tests above.
+      expect(propOf('health', { respawnPoint: [7, 8, 9] }).respawnPoint).toEqual([7, 8, 9]);
+    });
+
+    it('reads each slot once, so a getter cannot answer differently the second time', () => {
+      // Validate-then-re-read is a TOCTOU seam as well as a hole seam: the value
+      // that passed the check need not be the value that crosses the wire. This
+      // array answers finite on the first read of index 1 and `NaN` on the second,
+      // which is a shape only the capture-first form is immune to.
+      let reads = 0;
+      const shifty = [0, 0, 0];
+      Object.defineProperty(shifty, 1, {
+        configurable: true,
+        get: () => (reads++ === 0 ? 5 : NaN),
+      });
+      expect(propOf('health', { respawnPoint: shifty }).respawnPoint).toEqual([0, 5, 0]);
+      expect(reads).toBe(1);
+    });
   });
 });

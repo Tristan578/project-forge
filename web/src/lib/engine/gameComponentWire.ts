@@ -191,10 +191,28 @@ const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v
 const isEngineFinite = (v: unknown): v is number =>
   typeof v === 'number' && Number.isFinite(Math.fround(v));
 
-const vec3 = (v: unknown, fallback: [number, number, number]): [number, number, number] =>
-  Array.isArray(v) && v.length === 3 && v.every(isEngineFinite)
-    ? (v as [number, number, number])
-    : fallback;
+/**
+ * Read each slot ONCE, and read it before deciding.
+ *
+ * `Array.prototype.every` **skips holes**, so `[1, , 3]` has `length === 3` and
+ * passes `.every(isEngineFinite)` without the callback ever seeing index 1. The
+ * tuple was then built by re-reading the same indices, where a hole reads as
+ * `undefined` and `JSON.stringify` writes `null` — which the engine's `as_f64()`
+ * returns `None` for, so the point is dropped there and kept here. That is the
+ * exact store/engine divergence this module exists to close, arriving through the
+ * guard meant to prevent it. `some`, `filter` and `forEach` skip holes too, so no
+ * callback form fixes this; destructuring is an indexed read and yields
+ * `undefined` for a hole, which `isEngineFinite` rejects.
+ *
+ * Capturing first also closes the validate-then-re-read TOCTOU seam: a getter or
+ * Proxy is free to answer differently on the second read, so a value that passed
+ * the check need not be the value that crosses the wire.
+ */
+const vec3 = (v: unknown, fallback: [number, number, number]): [number, number, number] => {
+  if (!Array.isArray(v) || v.length !== 3) return fallback;
+  const [x, y, z] = v as unknown[];
+  return isEngineFinite(x) && isEngineFinite(y) && isEngineFinite(z) ? [x, y, z] : fallback;
+};
 const nullableStr = (v: unknown, fallback: string | null): string | null =>
   v === null ? null : typeof v === 'string' ? v : fallback;
 
@@ -240,8 +258,14 @@ const waypointList = (
     // Cap first: `take` after `filter_map` on the Rust side stops the iterator
     // once the cap is reached, so neither side visits the rest of the array.
     if (out.length >= MAX_WAYPOINTS) break;
-    if (!Array.isArray(point) || point.length !== 3 || !point.every(isEngineFinite)) continue;
-    out.push([point[0], point[1], point[2]]);
+    if (!Array.isArray(point) || point.length !== 3) continue;
+    // Destructure rather than `.every` + re-read, for the reason `vec3` above
+    // documents: `every` skips holes, so `[0, , 0]` cleared the check and was
+    // pushed as `[0, undefined, 0]` — `[0, null, 0]` on the wire, dropped by the
+    // engine and kept by the store.
+    const [x, y, z] = point as unknown[];
+    if (!isEngineFinite(x) || !isEngineFinite(y) || !isEngineFinite(z)) continue;
+    out.push([x, y, z]);
   }
   // `if !waypoints.is_empty()` in the engine: an all-malformed list leaves the
   // Rust `Default` route standing rather than an empty one, which
