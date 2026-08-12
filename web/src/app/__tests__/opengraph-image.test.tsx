@@ -114,11 +114,20 @@ describe('play OG route renders offline with emoji-laden user text', () => {
     vi.doUnmock('@/lib/db/client');
   });
 
-  it('reaches no remote host and still produces an image', async () => {
-    const rocket = String.fromCodePoint(0x1f680);
+  // One case per class of character satori routes to the emoji CDN. They are
+  // NOT all `Extended_Pictographic` — see the note on `stripEmoji`.
+  // Every one of these was measured reaching jsDelivr through the real bundle.
+  it.each([
+    ['pictographic', String.fromCodePoint(0x1f680)],
+    ['regional-indicator flag', '\u{1F1FA}\u{1F1F8}'],
+    ['keycap sequence', '1️⃣'],
+    ['lone skin-tone modifier', String.fromCodePoint(0x1f3fb)],
+    ['ZWJ sequence', '\u{1F468}‍\u{1F4BB}'],
+    ['tag sequence flag', '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}'],
+  ])('reaches no remote host with a %s in user text', async (_class, glyph) => {
     const rows = [
-      [{ id: 'u1', displayName: `${rocket}Ada` }],
-      [{ title: `${rocket} Space Game`, description: `Blast off ${rocket}` }],
+      [{ id: 'u1', displayName: `${glyph}Ada` }],
+      [{ title: `${glyph} Space Game`, description: `Blast off ${glyph}` }],
     ];
     let call = 0;
     vi.doMock('@/lib/db/client', () => ({
@@ -135,14 +144,63 @@ describe('play OG route renders offline with emoji-laden user text', () => {
       })
     );
 
-    // Both queries ran, so the route rendered the real card. Without this the
-    // test passes vacuously: the route catches any DB error and falls back to a
-    // card built from constants, which of course renders offline.
+    // `call` reaching 2 says both queries ran. It does NOT say the real card
+    // rendered — everything after the second query is inside `loadCard`'s
+    // catch. `opengraph-card-content.test.tsx` is what pins that.
+    expect(call).toBe(2);
+    expect(remote).toEqual([]);
+    expect(bytes).toBeGreaterThan(0);
+  });
+
+  it('reaches no remote host when a long description is truncated', async () => {
+    // Truncation is the other way a sanitised string can still reach a CDN: cut
+    // an astral character's surrogate pair in half and satori resolves the
+    // leftover through Google Fonts. This case only proves the cut itself is
+    // harmless for text the bundled font covers — see the note below for why an
+    // astral character cannot be tested here at all.
+    const rows = [
+      [{ id: 'u1', displayName: 'Ada' }],
+      [{ title: 'Space Game', description: 'x'.repeat(400) }],
+    ];
+    let call = 0;
+    vi.doMock('@/lib/db/client', () => ({
+      getDb: () => {
+        throw new Error('getDb should not run: queryWithResilience is mocked');
+      },
+      queryWithResilience: async () => rows[call++],
+    }));
+
+    const mod = await import('../play/[userId]/[slug]/opengraph-image');
+    const { remote, bytes } = await renderOffline(() =>
+      mod.default({
+        params: Promise.resolve({ userId: 'clerk_1', slug: 'space-game' }),
+      })
+    );
+
     expect(call).toBe(2);
     expect(remote).toEqual([]);
     expect(bytes).toBeGreaterThan(0);
   });
 });
+
+/*
+ * Why the truncation guard is not an offline-render test.
+ *
+ * The obvious case — an astral non-emoji astride the cut — cannot be asserted
+ * here. Satori fetched `fonts.googleapis.com/css2?family=Noto+Sans+Math` for
+ * U+1D400 even when the pair arrived whole: `@vercel/og`'s bundled font is
+ * Latin-only, so ANY codepoint outside its coverage is resolved remotely,
+ * whether or not our truncation damaged it. Both spellings fail this suite
+ * identically, so it can discriminate nothing.
+ *
+ * That remote font fetch is pre-existing and outside this change: it is the
+ * documented behaviour of `@vercel/og` for non-Latin text, it affects only the
+ * on-demand play card (never `next build`), and it is the same for a CJK title
+ * today as it was before. What it does mean is that codepoint-safe truncation
+ * has to be pinned structurally instead — `opengraph-card-content.test.tsx`
+ * reads the rendered element tree for a lone surrogate, and `lib/og/text` tests
+ * `truncateChars` directly.
+ */
 
 const APP_DIR = join(__dirname, '..');
 const OG_LIB_DIR = join(__dirname, '..', '..', 'lib', 'og');

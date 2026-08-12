@@ -85,7 +85,7 @@ describe('play OG card content', () => {
     const { text, queries } = await playCardText(FOUND);
     expect(queries).toBe(2);
     // The distinguishing assertion. `expect(call).toBe(2)` alone cannot make it:
-    // everything after the second query — three `stripPictographic` calls and the
+    // everything after the second query — three `stripEmoji` calls and the
     // truncation — runs inside `loadCard`'s catch, so a throw there still leaves
     // `call` at 2 and renders this same fallback.
     expect(text).not.toContain('Game not found');
@@ -154,7 +154,7 @@ describe('play OG card content', () => {
   });
 
   it('falls back when a row is missing the one field with no null guard', async () => {
-    // `game.title` is read as `stripPictographic(game.title)` with no `?? ''`,
+    // `game.title` is read as `stripEmoji(game.title)` with no `?? ''`,
     // unlike description and displayName. A row without it throws inside
     // `loadCard` — which must degrade to the fallback, not to a 500.
     const { text } = await playCardText([

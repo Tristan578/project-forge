@@ -3,7 +3,7 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { BrandMark } from '@/lib/og/BrandMark';
-import { initialFor, stripPictographic } from '@/lib/og/text';
+import { initialFor, stripEmoji, truncateChars } from '@/lib/og/text';
 
 export const alt = 'SpawnForge Game';
 export const size = { width: 1200, height: 630 };
@@ -102,13 +102,15 @@ async function loadCard(clerkId: string, slug: string): Promise<CardData | null>
 
     // Every string here reaches satori, and satori resolves emoji through a
     // third-party CDN. These three are the only user-supplied text on the card.
-    const description = stripPictographic(game.description ?? '') || 'Play this game on SpawnForge';
+    const description = stripEmoji(game.description ?? '') || 'Play this game on SpawnForge';
     return {
-      title: stripPictographic(game.title) || 'Untitled Game',
-      creatorName: stripPictographic(user.displayName ?? '') || 'Unknown Creator',
-      // Truncate after stripping — the emoji are gone by now, so this slice can
-      // no longer cut one in half.
-      description: description.length > 120 ? description.slice(0, 117) + '...' : description,
+      title: stripEmoji(game.title) || 'Untitled Game',
+      creatorName: stripEmoji(user.displayName ?? '') || 'Unknown Creator',
+      // Truncate after stripping — the emoji are gone by now, so the cut can no
+      // longer land inside one. `truncateChars` counts codepoints, so it cannot
+      // bisect a surrogate pair either (an astral non-emoji is untouched by the
+      // strip and would still be cut in half by `slice`).
+      description: truncateChars(description, 120),
     };
   } catch {
     return null;
