@@ -10,3 +10,11 @@ scene save. Both sides now cap at a single `MAX_WAYPOINTS` constant, parsed out
 of the Rust by the TypeScript test so the two cannot drift apart silently. Points
 the engine would discard are also discarded in the store, including doubles that
 survive `Number.isFinite` in JavaScript but overflow to infinity as an `f32`.
+
+Also fixed three validators that were passing arrays they exist to reject.
+`Array.prototype.every` skips array holes, so `[1, , 3]` cleared every one of
+them without the missing slot being checked. On the engine wire that shipped the
+gap as a `null` the engine drops and the store keeps; in dialogue an `and` group
+with a missing condition reported itself satisfied, and a `null` condition in an
+imported tree crashed playback; in the effect system an incomplete binding was
+accepted, then silently vanished the next time it was loaded from storage.
