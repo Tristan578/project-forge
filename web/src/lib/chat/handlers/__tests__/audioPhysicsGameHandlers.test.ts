@@ -1107,12 +1107,31 @@ describe('gameplayHandlers', () => {
       const { result, store } = await invokeHandler(gameplayHandlers, 'add_game_component', {
         entityId: 'coin',
         componentType: 'collectible',
-        properties: { value: 10, rotateSpeed: 180 },
+        properties: { value: 10, rotateSpeed: 60 },
       });
       expect(result.success).toBe(true);
       expect(store.addGameComponent).toHaveBeenCalledWith('coin', expect.objectContaining({
         type: 'collectible',
-        collectible: expect.objectContaining({ value: 10, rotateSpeed: 180 }),
+        collectible: expect.objectContaining({ value: 10, rotateSpeed: 60 }),
+      }));
+    });
+
+    // The handler is a second call site into the wire layer, and it is the one a
+    // model actually reaches. A range the wire unit tests pin is only enforced
+    // here if the handler routes through `buildGameComponent` rather than
+    // forwarding `properties` as authored — so the clamp is asserted on the path
+    // the model uses, not only on the module that owns the table.
+    it('clamps an out-of-range collectible rotateSpeed the way the engine does', async () => {
+      const { result, store } = await invokeHandler(gameplayHandlers, 'add_game_component', {
+        entityId: 'coin',
+        componentType: 'collectible',
+        // `prop_f32(&props, "rotateSpeed", -100.0, 100.0)` in `build_game_component`.
+        properties: { rotateSpeed: 180 },
+      });
+      expect(result.success).toBe(true);
+      expect(store.addGameComponent).toHaveBeenCalledWith('coin', expect.objectContaining({
+        type: 'collectible',
+        collectible: expect.objectContaining({ rotateSpeed: 100 }),
       }));
     });
 
