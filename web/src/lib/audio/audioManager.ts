@@ -98,6 +98,11 @@ const PITCH_RANGE = { min: 0.25, max: 4, fallback: 1 } as const;
 const MAX_DISTANCE_RANGE = { min: 1, max: 100000, fallback: 50 } as const;
 const REF_DISTANCE_RANGE = { min: 0.1, max: 100000, fallback: 1 } as const;
 const ROLLOFF_RANGE = { min: 0, max: 10, fallback: 1 } as const;
+/**
+ * Normalized 0-1 controls (music intensity, occlusion amount). The fallback is
+ * the inert end of each: calm music, no muffling.
+ */
+const NORMALIZED_RANGE = { min: 0, max: 1, fallback: 0 } as const;
 
 class AudioManager {
   private ctx: AudioContext | null = null;
@@ -1138,7 +1143,11 @@ class AudioManager {
       return;
     }
 
-    const clamped = Math.max(0, Math.min(1, intensity));
+    // `Math.max(0, Math.min(1, NaN))` is NaN — a min/max clamp does not exclude
+    // non-finite input, and a NaN intensity reaches `linearRampToValueAtTime`
+    // through `computeStemVolume` and throws. `forge.audio.setMusicIntensity`
+    // hands this whatever a user script passed.
+    const clamped = clampFinite(intensity, NORMALIZED_RANGE.min, NORMALIZED_RANGE.max, NORMALIZED_RANGE.fallback);
     track.intensity = clamped;
 
     const ctx = this.ctx;
@@ -1331,7 +1340,12 @@ class AudioManager {
     const filter = this.occlusionFilters.get(entityId);
     if (!filter || !this.ctx) return;
 
-    const clamped = Math.max(0, Math.min(1, amount));
+    // Same non-finite hole as `setMusicIntensity`, and this one has a live
+    // caller: `physicsEvents` derives the amount as `1 - distance/total` off a
+    // raycast payload, and every comparison it guards with fails for NaN. A NaN
+    // here becomes a NaN frequency and `linearRampToValueAtTime` throws out of
+    // an event hub that has no catch.
+    const clamped = clampFinite(amount, NORMALIZED_RANGE.min, NORMALIZED_RANGE.max, NORMALIZED_RANGE.fallback);
     const now = this.ctx.currentTime;
 
     // Frequency: 5000 Hz (clear) to 200 Hz (fully occluded) — exponential interpolation

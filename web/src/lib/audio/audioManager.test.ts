@@ -17,6 +17,12 @@ interface AudioInstance {
   pauseOffset: number;
   loop: boolean;
   bus: string;
+  /**
+   * Pitch is stored on the instance rather than only on the source node, so
+   * that `play()` can stamp it onto each source it builds. A field missing from
+   * this hand-written mirror is invisible to every assertion in the file.
+   */
+  pitch: number;
 }
 
 interface AudioManagerInternal {
@@ -355,6 +361,66 @@ describe('audioManager', () => {
       expect(instance!.pannerNode).toBeDefined();
       expect(instance!.source).toBeDefined();
     });
+
+    // Every number below arrives from one of two places that do not check it:
+    // an LLM tool call, which `audioEntityHandlers` copies off `args` on a bare
+    // `!== undefined`, or the engine, which emits these without clamping. Web
+    // Audio setters throw a RangeError on a non-finite or out-of-range value,
+    // and `useEngineEvents` has no catch — so one bad number would take down
+    // the whole event dispatch rather than one sound.
+    it('clamps out-of-range spatial numbers rather than passing them to Web Audio', () => {
+      audioManager.createInstance('entity1', 'test-asset', {
+        volume: 0.8,
+        pitch: 1.0,
+        loopAudio: false,
+        spatial: true,
+        maxDistance: 0,
+        refDistance: 1,
+        rolloffFactor: -5,
+        bus: 'sfx',
+      });
+
+      const panner = getInternal().instances.get('entity1')!.pannerNode!;
+      expect(panner.maxDistance).toBe(1);
+      expect(panner.rolloffFactor).toBe(0);
+    });
+
+    it('falls back for non-finite numbers, which no min/max clamp excludes', () => {
+      audioManager.createInstance('entity1', 'test-asset', {
+        volume: Number.NaN,
+        pitch: Number.NaN,
+        loopAudio: false,
+        spatial: true,
+        maxDistance: Number.NaN,
+        refDistance: Number.NaN,
+        rolloffFactor: Number.NaN,
+        bus: 'sfx',
+      });
+
+      const instance = getInternal().instances.get('entity1')!;
+      expect(instance.pitch).toBe(1);
+      expect(instance.gainNode.gain.value).toBe(1);
+      expect(instance.pannerNode!.maxDistance).toBe(50);
+      expect(instance.pannerNode!.refDistance).toBe(1);
+      expect(instance.pannerNode!.rolloffFactor).toBe(1);
+    });
+
+    it('carries the created pitch onto the source play builds', () => {
+      audioManager.createInstance('entity1', 'test-asset', {
+        volume: 0.8,
+        pitch: 0.5,
+        loopAudio: false,
+        spatial: false,
+        maxDistance: 50,
+        refDistance: 1,
+        rolloffFactor: 1,
+        bus: 'sfx',
+      });
+
+      audioManager.play('entity1');
+
+      expect(getInternal().instances.get('entity1')!.source!.playbackRate.value).toBe(0.5);
+    });
   });
 
   describe('stop', () => {
@@ -443,6 +509,12 @@ describe('audioManager', () => {
     });
   });
 
+  // Pitch is the one setting that used to live ONLY on the
+  // `AudioBufferSourceNode`, which `play()` rebuilds from scratch every time.
+  // So a pitch set before playback was written to a node that did not exist
+  // yet, and a pitch set during playback was discarded by the next `stop()` /
+  // `play()`. It now lives on the instance, and `play()` stamps it onto each
+  // new source — these cases pin both halves of that.
   describe('setPitch', () => {
     beforeEach(async () => {
       const data = new ArrayBuffer(100);
@@ -457,14 +529,65 @@ describe('audioManager', () => {
         rolloffFactor: 1,
         bus: 'sfx',
       });
-      audioManager.play('entity1');
     });
 
     it('adjusts playbackRate', () => {
+      audioManager.play('entity1');
+
       audioManager.setPitch('entity1', 1.5);
 
       const instance = getInternal().instances.get('entity1');
       expect(instance!.source!.playbackRate.value).toBe(1.5);
+    });
+
+    it('applies a pitch set before playback to the source play creates', () => {
+      audioManager.setPitch('entity1', 1.5);
+
+      audioManager.play('entity1');
+
+      const instance = getInternal().instances.get('entity1');
+      expect(instance!.source!.playbackRate.value).toBe(1.5);
+    });
+
+    it('keeps the pitch across a stop and a replay', () => {
+      audioManager.play('entity1');
+      audioManager.setPitch('entity1', 2.0);
+      const firstSource = getInternal().instances.get('entity1')!.source;
+
+      audioManager.stop('entity1');
+      audioManager.play('entity1');
+
+      const secondSource = getInternal().instances.get('entity1')!.source;
+      // A genuinely new node, so this is not the first one still reading 2.0.
+      expect(secondSource).not.toBe(firstSource);
+      expect(secondSource!.playbackRate.value).toBe(2.0);
+    });
+
+    it('clamps to the range the inspector offers', () => {
+      audioManager.play('entity1');
+
+      audioManager.setPitch('entity1', 99);
+      expect(getInternal().instances.get('entity1')!.pitch).toBe(4);
+
+      audioManager.setPitch('entity1', 0);
+      expect(getInternal().instances.get('entity1')!.pitch).toBe(0.25);
+    });
+
+    it('falls back to 1 for a non-finite pitch', () => {
+      // `Math.max(min, Math.min(max, NaN))` is NaN, and Web Audio throws a
+      // RangeError on a NaN playbackRate — the clamp has to reject non-finite
+      // input explicitly, not merely bound it.
+      audioManager.play('entity1');
+
+      audioManager.setPitch('entity1', Number.NaN);
+
+      const instance = getInternal().instances.get('entity1');
+      expect(instance!.pitch).toBe(1);
+      expect(instance!.source!.playbackRate.value).toBe(1);
+    });
+
+    it('does nothing for an entity with no instance', () => {
+      expect(() => audioManager.setPitch('never-created', 1.5)).not.toThrow();
     });
   });
 
@@ -678,6 +801,20 @@ describe('audioManager', () => {
       audioManager.addLayer('entity1', 'layer1', 'test-asset', { volume: 0.5, loop: true });
 
       expect(getInternal().instances.has('entity1:layer1')).toBe(true);
+    });
+
+    it('honours the pitch the caller passed', () => {
+      // `options.pitch` was in this signature and read by nothing, so a layer's
+      // pitch was dropped on the floor at every call site.
+      audioManager.addLayer('entity1', 'layer1', 'test-asset', { pitch: 0.75 });
+
+      expect(getInternal().instances.get('entity1:layer1')!.pitch).toBe(0.75);
+    });
+
+    it('defaults a layer with no pitch to 1', () => {
+      audioManager.addLayer('entity1', 'layer1', 'test-asset');
+
+      expect(getInternal().instances.get('entity1:layer1')!.pitch).toBe(1);
     });
 
     it('caps layers at 8 per entity', () => {
