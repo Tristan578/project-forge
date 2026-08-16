@@ -3,8 +3,10 @@
  *
  * Covers gaps not addressed by dialogueStore.test.ts:
  * - Broken startNodeId (orphan start reference)
- * - Deeply nested AND/OR conditions (3+ levels)
+ * - Deeply nested AND/OR conditions (3 levels, and the depth cap past which
+ *   they are treated as unsatisfied rather than overflowing the stack)
  * - Cyclic condition/action chains and the hop cap that bounds them (PF-1146)
+ * - Dangling node references from text, condition and action nodes
  * - Empty-text typewriter state
  * - duplicate tree with choice and action nodes
  * - Corrupted localStorage data
@@ -20,8 +22,9 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
-import { useDialogueStore, MAX_DIALOGUE_HOPS } from './dialogueStore';
+import { useDialogueStore, MAX_DIALOGUE_HOPS, MAX_CONDITION_DEPTH } from './dialogueStore';
 import type {
+  Condition,
   DialogueNode,
   TextNode,
   ChoiceNode,
@@ -1386,7 +1389,10 @@ describe('dialogueStore — edge cases (PF-360)', () => {
 
       expect(() => useDialogueStore.getState().startDialogue(treeId)).not.toThrow();
       expect(useDialogueStore.getState().runtime.isActive).toBe(false);
-      expect(errorSpy).toHaveBeenCalled();
+      // Specifically the cap, not one of the other paths that also ends the
+      // dialogue with a log — otherwise this passes even if the walk bailed
+      // early for an unrelated reason.
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('exceeded'));
     });
 
     it('stops a self-looping action node after exactly MAX_DIALOGUE_HOPS passes', () => {
@@ -1460,6 +1466,171 @@ describe('dialogueStore — edge cases (PF-360)', () => {
         expect.stringContaining('unrecognized type'),
         'monologue'
       );
+    });
+
+    it('ends the dialogue when an action routes to a node id that is not in the tree', () => {
+      // Same provenance as the unrecognized-type case above: nothing validates
+      // that `next` names a node that exists. Leaving the dialogue active on a
+      // node that cannot render is the stuck state the guard exists to avoid.
+      const act: ActionNode = {
+        id: 'act',
+        type: 'action',
+        actions: [{ type: 'set_state', key: 'flag', value: true }],
+        next: 'ghost',
+      };
+
+      const treeId = seedTree([act]);
+      useDialogueStore.getState().startDialogue(treeId);
+
+      expect(useDialogueStore.getState().runtime.isActive).toBe(false);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('not in the tree'),
+        'ghost'
+      );
+    });
+
+    it('ends the dialogue when a condition routes to a node id that is not in the tree', () => {
+      const cond: ConditionNode = {
+        id: 'cond',
+        type: 'condition',
+        condition: { type: 'equals', variable: 'flag', value: true },
+        onTrue: 'ghost',
+        onFalse: 'ghost',
+      };
+
+      const treeId = seedTree([cond]);
+      useDialogueStore.getState().startDialogue(treeId);
+
+      expect(useDialogueStore.getState().runtime.isActive).toBe(false);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('not in the tree'),
+        'ghost'
+      );
+    });
+
+    it('ends the dialogue when a text node advances to a node id that is not in the tree', () => {
+      // The dangling reference does not have to come from a routing node —
+      // `advanceDialogue` writes `text.next` straight into the runtime, so this
+      // reaches the guard on the walk's very first pass.
+      const intro: TextNode = {
+        id: 'intro',
+        type: 'text',
+        speaker: 'Guide',
+        text: 'Follow me.',
+        next: 'ghost',
+      };
+
+      const treeId = seedTree([intro]);
+      useDialogueStore.getState().startDialogue(treeId);
+      expect(useDialogueStore.getState().runtime.isActive).toBe(true);
+
+      useDialogueStore.getState().advanceDialogue();
+
+      expect(useDialogueStore.getState().runtime.isActive).toBe(false);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('not in the tree'),
+        'ghost'
+      );
+    });
+  });
+
+  describe('condition nesting depth (PF-1146)', () => {
+    /** An `and` chain nested `depth` levels deep around a single leaf test. */
+    function nest(depth: number): Condition {
+      let condition: Condition = { type: 'equals', variable: 'flag', value: true };
+      for (let i = 0; i < depth; i++) {
+        condition = { type: 'and', conditions: [condition] };
+      }
+      return condition;
+    }
+
+    it('evaluates a condition nested up to the depth limit', () => {
+      // One below the cap still descends all the way to the leaf, so the cap
+      // is not quietly swallowing conditions a real author could write.
+      const cond: ConditionNode = {
+        id: 'cond',
+        type: 'condition',
+        condition: nest(MAX_CONDITION_DEPTH - 1),
+        onTrue: 'yes',
+        onFalse: 'no',
+      };
+      const yes: TextNode = { id: 'yes', type: 'text', speaker: 'A', text: 'yes', next: null };
+      const no: TextNode = { id: 'no', type: 'text', speaker: 'A', text: 'no', next: null };
+
+      useDialogueStore.setState({
+        dialogueTrees: {
+          tree_depth: {
+            id: 'tree_depth',
+            name: 'Depth',
+            nodes: [cond, yes, no],
+            startNodeId: 'cond',
+            variables: { flag: true },
+          },
+        },
+      });
+      useDialogueStore.getState().startDialogue('tree_depth');
+
+      expect(useDialogueStore.getState().runtime.currentNodeId).toBe('yes');
+    });
+
+    it('treats a condition nested past the stack limit as unsatisfied instead of throwing', () => {
+      // `JSON.parse` is iterative and the evaluator is not, so `importTree`
+      // accepts nesting thousands of levels deep that then overflows the stack.
+      // 3000 is past where that happens unguarded; the cap must answer long
+      // before it, and answer `false` rather than throw.
+      const cond: ConditionNode = {
+        id: 'cond',
+        type: 'condition',
+        condition: nest(3000),
+        onTrue: 'yes',
+        onFalse: 'no',
+      };
+      const yes: TextNode = { id: 'yes', type: 'text', speaker: 'A', text: 'yes', next: null };
+      const no: TextNode = { id: 'no', type: 'text', speaker: 'A', text: 'no', next: null };
+
+      useDialogueStore.setState({
+        dialogueTrees: {
+          tree_deep: {
+            id: 'tree_deep',
+            name: 'Deep',
+            nodes: [cond, yes, no],
+            startNodeId: 'cond',
+            variables: { flag: true },
+          },
+        },
+      });
+
+      expect(() => useDialogueStore.getState().startDialogue('tree_deep')).not.toThrow();
+      expect(useDialogueStore.getState().runtime.currentNodeId).toBe('no');
+    });
+
+    it('hides a choice whose condition is nested past the stack limit', () => {
+      // The other call site. An unevaluable gate must stay shut, not open.
+      const choice: ChoiceNode = {
+        id: 'pick',
+        type: 'choice',
+        speaker: 'Guide',
+        text: 'Well?',
+        choices: [
+          { id: 'plain', text: 'Plain', nextNodeId: null },
+          { id: 'gated', text: 'Gated', nextNodeId: null, condition: nest(3000) },
+        ],
+      };
+
+      useDialogueStore.setState({
+        dialogueTrees: {
+          tree_choice: {
+            id: 'tree_choice',
+            name: 'Choice',
+            nodes: [choice],
+            startNodeId: 'pick',
+            variables: { flag: true },
+          },
+        },
+      });
+
+      expect(() => useDialogueStore.getState().startDialogue('tree_choice')).not.toThrow();
+      expect(useDialogueStore.getState().runtime.currentChoices.map(c => c.id)).toEqual(['plain']);
     });
   });
 });
