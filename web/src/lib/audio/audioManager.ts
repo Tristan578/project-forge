@@ -68,6 +68,37 @@ interface AdaptiveMusicTrack {
   bus: string;
 }
 
+/**
+ * Coerce a number into a range Web Audio will accept.
+ *
+ * Every numeric below reaches a Web Audio setter that throws `RangeError` on a
+ * non-finite or out-of-range value — `maxDistance <= 0`, a negative
+ * `refDistance` or `rolloffFactor` — and the values arrive from two places that
+ * cannot be trusted to have checked. An LLM tool call reaches
+ * `audioEntityHandlers` which copies the numbers off `args` on a bare
+ * `!== undefined`, and the engine emits them without clamping either (contrast
+ * `commands/audio.rs`'s bus path, which does `clamp(0.0, 1.0)`). A throw here
+ * lands in `useEngineEvents`, which has no catch, so one bad number would take
+ * down the whole event dispatch rather than one sound.
+ *
+ * `NaN` fails every comparison, so it is caught by the `Number.isFinite` guard
+ * rather than by the clamp — this is the `||`-vs-`??` trap in numeric form.
+ */
+function clampFinite(value: number | undefined, min: number, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * The ranges the inspector's own controls offer, so a clamped value is always
+ * one the user could have dialled in by hand.
+ */
+const VOLUME_RANGE = { min: 0, max: 1, fallback: 1 } as const;
+const PITCH_RANGE = { min: 0.25, max: 4, fallback: 1 } as const;
+const MAX_DISTANCE_RANGE = { min: 1, max: 100000, fallback: 50 } as const;
+const REF_DISTANCE_RANGE = { min: 0.1, max: 100000, fallback: 1 } as const;
+const ROLLOFF_RANGE = { min: 0, max: 10, fallback: 1 } as const;
+
 class AudioManager {
   private ctx: AudioContext | null = null;
   private instances: Map<string, AudioInstance> = new Map();
@@ -222,16 +253,16 @@ class AudioManager {
 
     // Create gain node for volume control
     const gainNode = ctx.createGain();
-    gainNode.gain.value = audioData.volume;
+    gainNode.gain.value = clampFinite(audioData.volume, VOLUME_RANGE.min, VOLUME_RANGE.max, VOLUME_RANGE.fallback);
 
     // Create panner node if spatial
     let pannerNode: PannerNode | null = null;
     if (audioData.spatial) {
       pannerNode = ctx.createPanner();
       pannerNode.distanceModel = 'inverse';
-      pannerNode.refDistance = audioData.refDistance;
-      pannerNode.maxDistance = audioData.maxDistance;
-      pannerNode.rolloffFactor = audioData.rolloffFactor;
+      pannerNode.refDistance = clampFinite(audioData.refDistance, REF_DISTANCE_RANGE.min, REF_DISTANCE_RANGE.max, REF_DISTANCE_RANGE.fallback);
+      pannerNode.maxDistance = clampFinite(audioData.maxDistance, MAX_DISTANCE_RANGE.min, MAX_DISTANCE_RANGE.max, MAX_DISTANCE_RANGE.fallback);
+      pannerNode.rolloffFactor = clampFinite(audioData.rolloffFactor, ROLLOFF_RANGE.min, ROLLOFF_RANGE.max, ROLLOFF_RANGE.fallback);
     }
 
     // Create instance
@@ -247,7 +278,10 @@ class AudioManager {
       pauseOffset: 0,
       loop: audioData.loopAudio,
       bus: audioData.bus ?? 'sfx',
-      pitch: audioData.pitch,
+      // Clamped here as well as in `setPitch`, because `play()` writes this
+      // straight onto `source.playbackRate` — a `pitch: 0` off a tool call
+      // would otherwise be permanent silence with no error anywhere.
+      pitch: clampFinite(audioData.pitch, PITCH_RANGE.min, PITCH_RANGE.max, PITCH_RANGE.fallback),
     };
 
     this.instances.set(key, instance);
@@ -394,7 +428,9 @@ class AudioManager {
     const key = this.instanceKey(entityId, slot);
     const instance = this.instances.get(key);
     if (!instance) return;
-    instance.gainNode.gain.value = Math.max(0, Math.min(1, volume));
+    // `Math.max(0, Math.min(1, NaN))` is `NaN`, which the gain setter rejects —
+    // a clamp expressed with min/max alone does not exclude non-finite input.
+    instance.gainNode.gain.value = clampFinite(volume, VOLUME_RANGE.min, VOLUME_RANGE.max, VOLUME_RANGE.fallback);
   }
 
   /**
@@ -408,7 +444,7 @@ class AudioManager {
     const key = this.instanceKey(entityId, slot);
     const instance = this.instances.get(key);
     if (!instance) return;
-    const clamped = Math.max(0.25, Math.min(4, rate));
+    const clamped = clampFinite(rate, PITCH_RANGE.min, PITCH_RANGE.max, PITCH_RANGE.fallback);
     instance.pitch = clamped;
     if (instance.source) instance.source.playbackRate.value = clamped;
   }
@@ -420,6 +456,10 @@ class AudioManager {
     const key = this.instanceKey(entityId, slot);
     const instance = this.instances.get(key);
     if (!instance?.pannerNode) return;
+    // Skip the frame rather than falling back to the origin: a non-finite
+    // coordinate is a bad reading, and teleporting the sound to (0,0,0) would
+    // be audible where holding the last good position is not.
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
     instance.pannerNode.positionX.value = x;
     instance.pannerNode.positionY.value = y;
     instance.pannerNode.positionZ.value = z;
@@ -436,6 +476,9 @@ class AudioManager {
     fy: number,
     fz: number
   ): void {
+    // Same reasoning as `updatePosition`: a bad camera reading should leave the
+    // listener where it was, not throw out of the per-frame update.
+    if (![x, y, z, fx, fy, fz].every(Number.isFinite)) return;
     const ctx = this.ensureContext();
     const listener = ctx.listener;
 
@@ -534,7 +577,7 @@ class AudioManager {
       this.destroyInstance(entityId, slotName);
     }
     const gainNode = ctx.createGain();
-    gainNode.gain.value = options?.volume ?? 1.0;
+    gainNode.gain.value = clampFinite(options?.volume, VOLUME_RANGE.min, VOLUME_RANGE.max, VOLUME_RANGE.fallback);
     let pannerNode: PannerNode | null = null;
     if (options?.spatial) {
       pannerNode = ctx.createPanner();
@@ -564,7 +607,7 @@ class AudioManager {
       bus: options?.bus ?? 'sfx',
       // `options.pitch` was accepted by this signature and read by nothing — a
       // layer's pitch was dropped on the floor at every call site.
-      pitch: options?.pitch ?? 1.0,
+      pitch: clampFinite(options?.pitch, PITCH_RANGE.min, PITCH_RANGE.max, PITCH_RANGE.fallback),
     };
     this.instances.set(key, instance);
     // Auto-play the layer
@@ -673,11 +716,11 @@ class AudioManager {
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.loop = false;
-    if (options?.pitch) {
-      source.playbackRate.value = Math.max(0.25, Math.min(4, options.pitch));
+    if (options?.pitch !== undefined) {
+      source.playbackRate.value = clampFinite(options.pitch, PITCH_RANGE.min, PITCH_RANGE.max, PITCH_RANGE.fallback);
     }
     const gainNode = ctx.createGain();
-    gainNode.gain.value = Math.max(0, Math.min(1, options?.volume ?? 1.0));
+    gainNode.gain.value = clampFinite(options?.volume, VOLUME_RANGE.min, VOLUME_RANGE.max, VOLUME_RANGE.fallback);
     let pannerNode: PannerNode | null = null;
     if (options?.position) {
       pannerNode = ctx.createPanner();
@@ -685,9 +728,11 @@ class AudioManager {
       pannerNode.refDistance = 1;
       pannerNode.maxDistance = 50;
       pannerNode.rolloffFactor = 1;
-      pannerNode.positionX.value = options.position[0];
-      pannerNode.positionY.value = options.position[1];
-      pannerNode.positionZ.value = options.position[2];
+      // A coordinate is unbounded but must still be finite: `positionX.value`
+      // rejects `NaN`, and this array comes straight off a tool call.
+      pannerNode.positionX.value = clampFinite(options.position[0], -Infinity, Infinity, 0);
+      pannerNode.positionY.value = clampFinite(options.position[1], -Infinity, Infinity, 0);
+      pannerNode.positionZ.value = clampFinite(options.position[2], -Infinity, Infinity, 0);
     }
     const busName = options?.bus ?? 'sfx';
     const bus = this.buses.get(busName) ?? this.buses.get('sfx')!;

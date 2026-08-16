@@ -27,11 +27,20 @@
  *    and is tracked separately; the alias is what makes the audio audible
  *    without one.
  *
- * The queue is bounded and take-once. Bounded because an `ASSET_IMPORTED` that
- * never arrives — a rejected file, a dropped command — would otherwise pin
- * whole decoded files in memory forever. Take-once because `decodeAudioData`
- * DETACHES the `ArrayBuffer` it is handed: a second decode of the same buffer
- * fails, so an entry that is consumed must leave.
+ * The queue is bounded and take-once. Bounded by BOTH entry count and total
+ * bytes, because an `ASSET_IMPORTED` that never arrives — a rejected file, a
+ * dropped command — would otherwise pin whole decoded files in memory forever,
+ * and 32 uncompressed WAVs is a count a byte budget would have refused. Take-
+ * once because `decodeAudioData` DETACHES the `ArrayBuffer` it is handed: a
+ * second decode of the same buffer fails, so an entry that is consumed must
+ * leave.
+ *
+ * The alias is name-keyed, so re-importing a name already in use rebinds it to
+ * the newer asset — which is what re-importing a file means everywhere else in
+ * the asset panel. The byte queue is unaffected: same-named imports each get
+ * their own id and their own bytes, in dispatch order. Entities already holding
+ * an instance keep it, since instances are keyed by entity and are only rebuilt
+ * when that entity's own `AudioData` changes.
  */
 
 import type { AudioData } from '@/stores/slices/types';
@@ -44,6 +53,12 @@ import { audioManager } from './audioManager';
  */
 const MAX_PENDING_IMPORTS = 32;
 
+/**
+ * And how many bytes, which is the budget that actually matters: 32 entries is
+ * a few hundred KB of MP3 or well over half a gigabyte of uncompressed WAV.
+ */
+const MAX_PENDING_BYTES = 64 * 1024 * 1024;
+
 interface PendingImport {
   name: string;
   data: ArrayBuffer;
@@ -53,6 +68,17 @@ const pendingImports: PendingImport[] = [];
 
 /** Import name → the asset id the engine minted for it. See problem 2 above. */
 const assetIdByImportName = new Map<string, string>();
+
+/**
+ * Entity → the graph state last applied for it.
+ *
+ * `createInstance` destroys the previous instance and every layer attached to
+ * it, so rebuilding on an unchanged component is not a no-op — it stops the
+ * sound. The engine re-emits `AUDIO_CHANGED` on every selection change
+ * (`emit_audio_on_selection`) and on every audio query, so clicking an entity
+ * in the hierarchy during Play would otherwise tear down its own music.
+ */
+const appliedSignatures = new Map<string, string>();
 
 /**
  * Decode a base64 payload into bytes, tolerating a `data:…;base64,` prefix.
@@ -81,10 +107,16 @@ export function decodeBase64ToArrayBuffer(base64: string): ArrayBuffer | null {
 /** Hold an import's bytes until `ASSET_IMPORTED` names it. */
 export function queueAudioImport(name: string, data: ArrayBuffer): void {
   pendingImports.push({ name, data });
-  // Drop the OLDEST first: an entry that has outlived this many later imports
-  // is the one that was never going to be claimed.
-  while (pendingImports.length > MAX_PENDING_IMPORTS) {
-    pendingImports.shift();
+  // Drop the OLDEST first, on either budget: an entry that has outlived this
+  // many later imports is the one that was never going to be claimed. The
+  // just-queued entry is always kept, even if it alone exceeds the byte
+  // budget — dropping it would make a large import silently unimportable.
+  let queuedBytes = pendingImports.reduce((total, entry) => total + entry.data.byteLength, 0);
+  while (
+    pendingImports.length > 1 &&
+    (pendingImports.length > MAX_PENDING_IMPORTS || queuedBytes > MAX_PENDING_BYTES)
+  ) {
+    queuedBytes -= pendingImports.shift()!.data.byteLength;
   }
 }
 
@@ -106,6 +138,31 @@ export function registerImportedAudioAsset(assetId: string, name: string): void 
 }
 
 /**
+ * Drop every alias pointing at a deleted asset.
+ *
+ * Without this the map only ever grows, and a name reused after its asset was
+ * deleted would resolve to the dead id — handing `createInstance` an id with no
+ * decoded buffer, i.e. a permanently silent entity.
+ */
+export function forgetImportedAudioAsset(assetId: string): void {
+  for (const [name, id] of assetIdByImportName) {
+    if (id === assetId) assetIdByImportName.delete(name);
+  }
+}
+
+/**
+ * Forget an entity's graph state so the next sync rebuilds it.
+ *
+ * Deleting an entity, or loading a new scene, leaves an instance connected to
+ * the bus graph for the life of the tab; the engine emits no per-entity delete
+ * event, so removal has to be driven from the JS side.
+ */
+export function releaseEntityAudio(entityId: string): void {
+  appliedSignatures.delete(entityId);
+  audioManager.destroyInstance(entityId);
+}
+
+/**
  * Map whatever an entity calls its clip onto the id the buffer is keyed under.
  * An id that is already an asset id passes through untouched.
  */
@@ -116,17 +173,31 @@ export function resolveAudioAssetId(idOrName: string): string {
 /**
  * Make the graph match one entity's `AudioData`.
  *
- * Creating an instance is idempotent from the caller's side — `createInstance`
- * destroys any previous one — so this is safe to call on every `AUDIO_CHANGED`.
- * If the buffer has not been decoded yet, `createInstance` warns and returns;
- * `syncEntitiesUsingAudioAsset` re-runs it once the bytes land.
+ * Rebuilds only when the entity's component actually differs from what is
+ * already applied, because `createInstance` is destructive: it tears down the
+ * previous instance AND every layer on it, stopping whatever was playing. The
+ * engine re-emits `AUDIO_CHANGED` on selection and on query, so an unguarded
+ * rebuild would silence an entity every time the user clicked it.
+ *
+ * `force` is for the one case where nothing about the component changed but the
+ * graph did: the buffer finished decoding after the component arrived, so the
+ * earlier `createInstance` bailed on a missing buffer and has to be re-run.
  */
-export function syncEntityAudioInstance(entityId: string, audio: AudioData | null): void {
-  if (!audio || audio.assetId === null) {
+export function syncEntityAudioInstance(
+  entityId: string,
+  audio: AudioData | null,
+  options?: { force?: boolean }
+): void {
+  const assetId = audio && audio.assetId !== null ? resolveAudioAssetId(audio.assetId) : null;
+  const signature = assetId === null ? 'none' : `${assetId} ${JSON.stringify(audio)}`;
+  if (!options?.force && appliedSignatures.get(entityId) === signature) return;
+  appliedSignatures.set(entityId, signature);
+
+  if (assetId === null || !audio) {
     audioManager.destroyInstance(entityId);
     return;
   }
-  audioManager.createInstance(entityId, resolveAudioAssetId(audio.assetId), audio);
+  audioManager.createInstance(entityId, assetId, audio);
 }
 
 /**
@@ -143,7 +214,8 @@ export function syncEntitiesUsingAudioAsset(
 ): void {
   for (const [entityId, audio] of Object.entries(entityAudio)) {
     if (audio.assetId !== null && resolveAudioAssetId(audio.assetId) === assetId) {
-      syncEntityAudioInstance(entityId, audio);
+      // Forced: the component is unchanged — the buffer is what just arrived.
+      syncEntityAudioInstance(entityId, audio, { force: true });
     }
   }
 }
@@ -179,8 +251,25 @@ export async function ingestImportedAudioAsset(
   syncEntitiesUsingAudioAsset(assetId, getEntityAudio());
 }
 
-/** Test seam: drop all queued imports and name aliases. */
+/**
+ * Drop every queued import, name alias, and applied-graph record.
+ *
+ * Called on scene load, where every entity id in the outgoing scene is about to
+ * become meaningless, and by tests between cases.
+ */
 export function resetEntityAudioGraph(): void {
   pendingImports.length = 0;
   assetIdByImportName.clear();
+  appliedSignatures.clear();
+}
+
+/**
+ * Scene load: the above, plus every instance the outgoing scene built.
+ *
+ * Separate from `resetEntityAudioGraph` so tests can clear module state without
+ * reaching into the Web Audio graph.
+ */
+export function resetEntityAudioGraphForScene(): void {
+  audioManager.destroyAll();
+  resetEntityAudioGraph();
 }

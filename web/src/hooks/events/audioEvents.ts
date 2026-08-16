@@ -3,7 +3,7 @@
  */
 
 import { useEditorStore, type ScriptData, type AudioData, type AudioBusDef, type ReverbZoneData, type ReverbShape, type InputBinding, type InputPreset, type AssetMetadata } from '@/stores/editorStore';
-import { ingestImportedAudioAsset, syncEntityAudioInstance } from '@/lib/audio/entityAudioGraph';
+import { forgetImportedAudioAsset, ingestImportedAudioAsset, syncEntityAudioInstance } from '@/lib/audio/entityAudioGraph';
 import { castPayload, type SetFn, type GetFn } from './types';
 
 export function handleAudioEvent(
@@ -13,9 +13,28 @@ export function handleAudioEvent(
   _get: GetFn
 ): boolean {
   switch (type) {
+    // Both arms below read the component NESTED under its own key, because that
+    // is what the engine emits: `ScriptPayload { entity_id, script }` and
+    // `AudioPayload { entity_id, audio }` in `engine/src/bridge/events.rs`,
+    // neither carrying `#[serde(flatten)]`. Reading these fields flat off the
+    // payload — as both arms used to — is the mirror image of the documented
+    // `dispatchCommand` wire-shape class: every field resolves to `undefined`,
+    // nothing throws, and the store quietly records an empty component. The
+    // sibling `emit_material_changed` DOES flatten, which is exactly why the
+    // shape has to be read from the emitter rather than assumed.
     case 'SCRIPT_CHANGED': {
-      const payload = castPayload<{ entityId: string; source: string; enabled: boolean; template: string | null }>(data);
-      const script: ScriptData = { source: payload.source, enabled: payload.enabled, template: payload.template };
+      const payload = castPayload<{
+        entityId: string;
+        script?: { source?: string; enabled?: boolean; template?: string | null } | null;
+      }>(data);
+      const source = payload.script;
+      const script: ScriptData | null = source
+        ? {
+          source: source.source ?? '',
+          enabled: source.enabled ?? false,
+          template: source.template ?? null,
+        }
+        : null;
       useEditorStore.getState().setEntityScript(payload.entityId, script);
       return true;
     }
@@ -23,31 +42,35 @@ export function handleAudioEvent(
     case 'AUDIO_CHANGED': {
       const payload = castPayload<{
         entityId: string;
-        assetId?: string | null;
-        volume?: number;
-        pitch?: number;
-        loopAudio?: boolean;
-        spatial?: boolean;
-        maxDistance?: number;
-        refDistance?: number;
-        rolloffFactor?: number;
-        autoplay?: boolean;
-        bus?: string;
+        audio?: {
+          assetId?: string | null;
+          volume?: number;
+          pitch?: number;
+          loopAudio?: boolean;
+          spatial?: boolean;
+          maxDistance?: number;
+          refDistance?: number;
+          rolloffFactor?: number;
+          autoplay?: boolean;
+          bus?: string;
+        } | null;
       }>(data);
-      const { entityId, ...audioData } = payload;
-      // If assetId is defined (even if null), it means audio exists
-      const audio: AudioData | null = audioData.assetId !== undefined
+      const { entityId } = payload;
+      // Absent or null means the entity has no audio component at all — the
+      // engine omits the key rather than sending an empty object.
+      const source = payload.audio;
+      const audio: AudioData | null = source
         ? {
-          assetId: audioData.assetId ?? null,
-          volume: audioData.volume ?? 1.0,
-          pitch: audioData.pitch ?? 1.0,
-          loopAudio: audioData.loopAudio ?? false,
-          spatial: audioData.spatial ?? false,
-          maxDistance: audioData.maxDistance ?? 50,
-          refDistance: audioData.refDistance ?? 1,
-          rolloffFactor: audioData.rolloffFactor ?? 1,
-          autoplay: audioData.autoplay ?? false,
-          bus: audioData.bus ?? 'sfx',
+          assetId: source.assetId ?? null,
+          volume: source.volume ?? 1.0,
+          pitch: source.pitch ?? 1.0,
+          loopAudio: source.loopAudio ?? false,
+          spatial: source.spatial ?? false,
+          maxDistance: source.maxDistance ?? 50,
+          refDistance: source.refDistance ?? 1,
+          rolloffFactor: source.rolloffFactor ?? 1,
+          autoplay: source.autoplay ?? false,
+          bus: source.bus ?? 'sfx',
         }
         : null;
       useEditorStore.getState().setEntityAudio(entityId, audio);
@@ -169,6 +192,9 @@ export function handleAudioEvent(
     case 'ASSET_DELETED': {
       const payload = castPayload<{ assetId: string }>(data);
       useEditorStore.getState().removeAssetFromRegistry(payload.assetId);
+      // A name alias outliving its asset would resolve to an id with no decoded
+      // buffer, which reads as a permanently silent entity rather than an error.
+      forgetImportedAudioAsset(payload.assetId);
       return true;
     }
 
