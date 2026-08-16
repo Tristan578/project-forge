@@ -168,15 +168,82 @@ describe('buildCommand', () => {
     expect(cmd).toBeNull();
   });
 
+  it('animation track drops keys the engine cannot receive', () => {
+    const cmd = buildCommand(
+      'animation',
+      'entity1',
+      makeKF({ clipName: 'run', crossfadeSecs: 0.25, loop: true, speed: 2 }),
+      1,
+    );
+    expect(cmd?.payload).toEqual({ entityId: 'entity1', clipName: 'run', crossfadeSecs: 0.25 });
+  });
+
+  it.each([
+    ['names no clip', {}],
+    ['names the empty clip', { clipName: '' }],
+    ['gives a non-string clip name', { clipName: 42 }],
+  ])('animation track returns null when the payload %s', (_case, payload) => {
+    // This used to dispatch `play_animation` for the empty clip, which the
+    // engine can only ignore — a no-op indistinguishable in a log from a hit.
+    expect(buildCommand('animation', 'entity1', makeKF(payload), 1)).toBeNull();
+  });
+
+  it('animation track forwards no crossfade the model did not give it', () => {
+    const cmd = buildCommand(
+      'animation',
+      'entity1',
+      makeKF({ clipName: 'run', crossfadeSecs: 'quickly' }),
+      1,
+    );
+    // Not the string, and not `NaN` from coercing it: the `??` fallback is
+    // reading an absent field rather than papering over a bad one.
+    expect(cmd?.payload).toEqual({ entityId: 'entity1', clipName: 'run', crossfadeSecs: 0 });
+  });
+
   it('dialogue track returns start_dialogue', () => {
     const cmd = buildCommand('dialogue', 'npc1', makeKF({ treeId: 'tree_1' }), 0);
     expect(cmd?.command).toBe('start_dialogue');
+    expect(cmd?.payload).toEqual({ treeId: 'tree_1', entityId: 'npc1' });
+  });
+
+  it('dialogue track still fires without an entity, since narration has no speaker', () => {
+    const cmd = buildCommand('dialogue', null, makeKF({ treeId: 'tree_1' }), 0);
+    expect(cmd?.payload).toEqual({ treeId: 'tree_1', entityId: undefined });
+  });
+
+  it.each([
+    ['names no tree', {}],
+    ['names the empty tree', { treeId: '' }],
+    ['gives a non-string tree id', { treeId: { id: 'tree_1' } }],
+  ])('dialogue track returns null when the payload %s', (_case, payload) => {
+    // `treeId` used to be forwarded unread, so a missing one started a dialogue
+    // named `undefined` rather than declining to start one.
+    expect(buildCommand('dialogue', 'npc1', makeKF(payload), 0)).toBeNull();
   });
 
   it('audio track returns play_audio', () => {
     const cmd = buildCommand('audio', 'sfx1', makeKF({ volume: 0.8 }), 0);
     expect(cmd?.command).toBe('play_audio');
     expect((cmd?.payload as Record<string, unknown>).entityId).toBe('sfx1');
+  });
+
+  it('audio track drops keys the engine cannot receive', () => {
+    // The whole payload used to be spread into the command, so every key below
+    // reached the engine — including one that renames the entity the track
+    // addresses, which is the track's own field and not the payload's to set.
+    const cmd = buildCommand(
+      'audio',
+      'sfx1',
+      makeKF({
+        volume: 0.8,
+        pitch: 1.2,
+        clipUrl: 'https://example.invalid/a.mp3',
+        loop: true,
+        entityId: 'someone-elses-entity',
+      }),
+      0,
+    );
+    expect(cmd?.payload).toEqual({ entityId: 'sfx1', volume: 0.8, pitch: 1.2 });
   });
 
   it('audio track returns null when entityId is null', () => {

@@ -16,6 +16,7 @@ import {
 } from '@/lib/game/gameCameraPayload';
 import type { SetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 import type { GameCameraData } from '@/stores/slices/types';
+import { sanitizeKeyframePayload } from './keyframePayload';
 
 // ============================================================================
 // Types
@@ -101,6 +102,12 @@ function buildCameraCommandPayload(
     // the prototype chain — the value picked up there is then written as an OWN
     // property on `data`, so `buildSetGameCameraPayload`'s own `Object.hasOwn`
     // check downstream cannot tell it apart from one the author really set.
+    //
+    // `sanitizeKeyframePayload` now runs ahead of this and would have dropped
+    // such a key already. This stays because the guarantee is the caller's, not
+    // this function's: the parameter says `Record<string, unknown>`, and a second
+    // call site that reads a payload from somewhere else would inherit the hole
+    // rather than a type error.
     if (!Object.hasOwn(payload, key)) continue;
     const value = payload[key];
     if (typeof value === 'number' && Number.isFinite(value)) data[key] = value;
@@ -126,7 +133,12 @@ export function buildCommand(
   // scheduler's call sites keep their shape when that lands.
   _progress: number,
 ): { command: string; payload: unknown } | null {
-  const { payload } = keyframe;
+  // Read against the track type's vocabulary before anything below touches it.
+  // This is the dispatch boundary, and it does not get to assume its input came
+  // from the generator: the store also takes keyframes from the timeline editor
+  // and from a saved project, neither of which passes through the parse-time
+  // check. What arrives here is `Record<string, unknown>` and nothing more.
+  const payload = sanitizeKeyframePayload(trackType, keyframe.payload);
 
   switch (trackType) {
     case 'camera': {
@@ -136,23 +148,41 @@ export function buildCommand(
     }
     case 'animation': {
       if (!entityId) return null;
-      const clipName = typeof payload.clipName === 'string' ? payload.clipName : '';
+      // No clip names nothing to play. This used to fall back to `''` and
+      // dispatch anyway — a `play_animation` for the empty clip, which the
+      // engine can only ignore, indistinguishable in a log from one that worked.
+      const { clipName } = payload;
+      if (typeof clipName !== 'string') return null;
       return {
         command: 'play_animation',
+        // `crossfadeSecs` is a non-negative finite number or absent by the time
+        // it gets here, so `??` is reading an absent field rather than papering
+        // over a bad one — it used to forward whatever the model wrote, string
+        // or object included.
         payload: { entityId, clipName, crossfadeSecs: payload.crossfadeSecs ?? 0 },
       };
     }
     case 'dialogue': {
-      // Dialogue keyframes mutate the dialogue store directly via the dispatcher
+      // Dialogue keyframes mutate the dialogue store directly via the dispatcher.
+      // Unlike the other tracks this one does not need an entity — a cutscene can
+      // narrate without anyone speaking — but it does need a tree to start, and
+      // `treeId` used to be forwarded unread, so a missing one started a dialogue
+      // named `undefined`.
+      const { treeId } = payload;
+      if (typeof treeId !== 'string') return null;
       return {
         command: 'start_dialogue',
-        payload: { treeId: payload.treeId, entityId: entityId ?? undefined },
+        payload: { treeId, entityId: entityId ?? undefined },
       };
     }
     case 'audio': {
       if (!entityId) return null;
       return {
         command: 'play_audio',
+        // Spreading is safe here only because `payload` is now built key by key
+        // from the audio vocabulary rather than being the model's own object.
+        // The same line over the raw payload was the "never spread LLM objects
+        // into engine commands" gotcha, with a model on the other end of it.
         payload: { entityId, ...payload },
       };
     }
