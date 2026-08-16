@@ -173,8 +173,6 @@ export const ENGINE_COMPONENT_CATALOG: readonly { name: string; description: str
     description: DESCRIPTIONS[storeType],
   }));
 
-const num = (v: unknown, fallback: number): number =>
-  typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
 const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v : fallback);
 /**
@@ -216,15 +214,106 @@ const vec3 = (v: unknown, fallback: [number, number, number]): [number, number, 
 const nullableStr = (v: unknown, fallback: string | null): string | null =>
   v === null ? null : typeof v === 'string' ? v : fallback;
 
+/** An engine `prop_f32` range: both bounds inclusive, both applied by clamping. */
+export interface EngineRange {
+  readonly min: number;
+  readonly max: number;
+}
+
+const U32_MAX = 4294967295;
+
+/**
+ * The engine's range for every float field on this wire, keyed by the engine's
+ * own component name and serde field name.
+ *
+ * `build_game_component` reads each of these through
+ * `prop_f32(&props, key, min, max)`, which CLAMPS rather than rejects — a `speed`
+ * of `1e9` becomes `1000` there, while a plain finite check kept it verbatim
+ * here. `dispatchCommand` returns `void`, so nothing reports the disagreement:
+ * the inspector shows `1e9`, the platform moves at `1000`, and every surface that
+ * reads one describes a different game than the one being played.
+ *
+ * Clamping is also why the finite check has to be the ENGINE's one. A `1e300`
+ * passes `Number.isFinite` but is `f32::INFINITY` after the engine's `as f32`, so
+ * the engine drops it and leaves its default standing; clamped here without that
+ * check it would land on `max` instead, and the two sides would part company on
+ * the very value the range exists to reconcile.
+ *
+ * These numbers are a second copy of the Rust literals, which is the kind of copy
+ * that drifts. `__tests__/gameComponentWire.test.ts` parses every `prop_f32` call
+ * out of `game_components.rs` and fails if this table disagrees, omits one, or
+ * carries one the engine no longer has.
+ */
+export const ENGINE_PROP_RANGES = {
+  character_controller: {
+    speed: { min: 0, max: 1000 },
+    jumpHeight: { min: 0, max: 100 },
+    // Signed on purpose: a negative gravity scale is how an entity falls upward.
+    gravityScale: { min: -10, max: 10 },
+  },
+  health: {
+    // Floor of 1, not 0 — an entity that starts at zero max HP is dead on spawn.
+    maxHp: { min: 1, max: 1_000_000 },
+    currentHp: { min: 0, max: 1_000_000 },
+    invincibilitySecs: { min: 0, max: 60 },
+  },
+  collectible: {
+    // Signed: the sign is the spin direction, there is no separate flag.
+    rotateSpeed: { min: -100, max: 100 },
+  },
+  damage_zone: {
+    damagePerSecond: { min: 0, max: 10_000 },
+  },
+  teleporter: {
+    cooldownSecs: { min: 0, max: 300 },
+  },
+  moving_platform: {
+    speed: { min: 0, max: 1000 },
+    pauseDuration: { min: 0, max: 60 },
+  },
+  spawner: {
+    // Floor of 0.1s, not 0 — a zero interval spawns every frame forever.
+    intervalSecs: { min: 0.1, max: 3600 },
+  },
+  follower: {
+    speed: { min: 0, max: 1000 },
+    stopDistance: { min: 0, max: 1000 },
+  },
+  projectile: {
+    speed: { min: 0, max: 10_000 },
+    damage: { min: 0, max: 100_000 },
+    lifetimeSecs: { min: 0, max: 300 },
+  },
+  dialogue_trigger: {
+    // The store spells this one `triggerRadius`; `propertiesOf` renames it.
+    interactionRadius: { min: 0, max: 100 },
+  },
+} as const satisfies Record<string, Record<string, EngineRange>>;
+
 /**
  * The engine's ceiling for each `u32` field, from the `prop_u32` call sites in
- * `engine/src/core/game_components.rs`. Named rather than inlined because the
- * value has to be read against the Rust source to be checked at all.
+ * `game_components.rs`. Same contract as the table above and pinned by the same
+ * test; separate because `prop_u32` rounds and floors at zero rather than taking
+ * a minimum, so the two coercions are not interchangeable.
  */
-const U32_MAX = 4294967295;
-const COLLECTIBLE_VALUE_MAX = 1_000_000;
-const SPAWNER_MAX_COUNT_MAX = 1000;
-const TARGET_SCORE_MAX = U32_MAX;
+export const ENGINE_PROP_MAXIMA = {
+  collectible: { value: 1_000_000 },
+  spawner: { maxCount: 1000 },
+  win_condition: { targetScore: U32_MAX },
+} as const satisfies Record<string, Record<string, number>>;
+
+/**
+ * Coerce a float field the same way `prop_f32` does: drop what the engine cannot
+ * hold, clamp what it can.
+ *
+ * The range is a required argument rather than an optional one. Every numeric
+ * field the engine reads is bounded, so a call site with no range is a field the
+ * engine is clamping and the store is not — the divergence this whole module
+ * exists to close, and making it a type error is cheaper than a test that has to
+ * notice the omission.
+ */
+const num = (v: unknown, fallback: number, range: EngineRange): number =>
+  isEngineFinite(v) ? Math.min(Math.max(v, range.min), range.max) : fallback;
 
 /**
  * The engine's `MAX_WAYPOINTS`, mirrored so the store truncates identically.
@@ -317,9 +406,13 @@ export function buildStoreComponent(
       return {
         type: 'characterController',
         characterController: {
-          speed: num(props.speed, 5),
-          jumpHeight: num(props.jumpHeight, 8),
-          gravityScale: num(props.gravityScale, 1),
+          speed: num(props.speed, 5, ENGINE_PROP_RANGES.character_controller.speed),
+          jumpHeight: num(props.jumpHeight, 8, ENGINE_PROP_RANGES.character_controller.jumpHeight),
+          gravityScale: num(
+            props.gravityScale,
+            1,
+            ENGINE_PROP_RANGES.character_controller.gravityScale,
+          ),
           canDoubleJump: bool(props.canDoubleJump, false),
         },
       };
@@ -327,13 +420,24 @@ export function buildStoreComponent(
       // The chat tool has always accepted `maxHealth`/`currentHealth` aliases;
       // keep them working, and default current to max so a bare `maxHp` bump
       // doesn't leave the entity on the old (lower) current value.
-      const maxHp = num(props.maxHealth ?? props.maxHp, 100);
+      const maxHp = num(props.maxHealth ?? props.maxHp, 100, ENGINE_PROP_RANGES.health.maxHp);
       return {
         type: 'health',
         health: {
           maxHp,
-          currentHp: num(props.currentHealth ?? props.currentHp, maxHp),
-          invincibilitySecs: num(props.invincibilitySecs, 0.5),
+          // Clamped, then used as the fallback — `maxHp` is already inside
+          // `currentHp`'s own range, so the engine's "current defaults to max"
+          // rule lands on the same number on both sides.
+          currentHp: num(
+            props.currentHealth ?? props.currentHp,
+            maxHp,
+            ENGINE_PROP_RANGES.health.currentHp,
+          ),
+          invincibilitySecs: num(
+            props.invincibilitySecs,
+            0.5,
+            ENGINE_PROP_RANGES.health.invincibilitySecs,
+          ),
           respawnOnDeath: bool(props.respawnOnDeath, true),
           respawnPoint: vec3(props.respawnPoint, [0, 1, 0]),
           despawnOnDeath: bool(props.despawnOnDeath, true),
@@ -344,17 +448,21 @@ export function buildStoreComponent(
       return {
         type: 'collectible',
         collectible: {
-          value: int(props.value, 1, COLLECTIBLE_VALUE_MAX),
+          value: int(props.value, 1, ENGINE_PROP_MAXIMA.collectible.value),
           destroyOnCollect: bool(props.destroyOnCollect, true),
           pickupSoundAsset: nullableStr(props.pickupSoundAsset, null),
-          rotateSpeed: num(props.rotateSpeed, 90),
+          rotateSpeed: num(props.rotateSpeed, 90, ENGINE_PROP_RANGES.collectible.rotateSpeed),
         },
       };
     case 'damageZone':
       return {
         type: 'damageZone',
         damageZone: {
-          damagePerSecond: num(props.damagePerSecond, 25),
+          damagePerSecond: num(
+            props.damagePerSecond,
+            25,
+            ENGINE_PROP_RANGES.damage_zone.damagePerSecond,
+          ),
           oneShot: bool(props.oneShot, false),
         },
       };
@@ -365,19 +473,23 @@ export function buildStoreComponent(
         type: 'teleporter',
         teleporter: {
           targetPosition: vec3(props.targetPosition, [0, 1, 0]),
-          cooldownSecs: num(props.cooldownSecs, 1),
+          cooldownSecs: num(props.cooldownSecs, 1, ENGINE_PROP_RANGES.teleporter.cooldownSecs),
         },
       };
     case 'movingPlatform':
       return {
         type: 'movingPlatform',
         movingPlatform: {
-          speed: num(props.speed, 2),
+          speed: num(props.speed, 2, ENGINE_PROP_RANGES.moving_platform.speed),
           waypoints: waypointList(props.waypoints, [
             [0, 0, 0],
             [0, 3, 0],
           ]),
-          pauseDuration: num(props.pauseDuration, 0.5),
+          pauseDuration: num(
+            props.pauseDuration,
+            0.5,
+            ENGINE_PROP_RANGES.moving_platform.pauseDuration,
+          ),
           loopMode: (props.loopMode as PlatformLoopMode) ?? 'pingPong',
         },
       };
@@ -394,8 +506,8 @@ export function buildStoreComponent(
         type: 'spawner',
         spawner: {
           entityType: str(props.entityType, 'cube'),
-          intervalSecs: num(props.intervalSecs, 3),
-          maxCount: int(props.maxCount, 5, SPAWNER_MAX_COUNT_MAX),
+          intervalSecs: num(props.intervalSecs, 3, ENGINE_PROP_RANGES.spawner.intervalSecs),
+          maxCount: int(props.maxCount, 5, ENGINE_PROP_MAXIMA.spawner.maxCount),
           spawnOffset: vec3(props.spawnOffset, [0, 1, 0]),
           onTrigger: nullableStr(props.onTrigger, null),
         },
@@ -405,8 +517,8 @@ export function buildStoreComponent(
         type: 'follower',
         follower: {
           targetEntityId: nullableStr(props.targetEntityId, null),
-          speed: num(props.speed, 3),
-          stopDistance: num(props.stopDistance, 1.5),
+          speed: num(props.speed, 3, ENGINE_PROP_RANGES.follower.speed),
+          stopDistance: num(props.stopDistance, 1.5, ENGINE_PROP_RANGES.follower.stopDistance),
           lookAtTarget: bool(props.lookAtTarget, true),
         },
       };
@@ -414,9 +526,9 @@ export function buildStoreComponent(
       return {
         type: 'projectile',
         projectile: {
-          speed: num(props.speed, 15),
-          damage: num(props.damage, 10),
-          lifetimeSecs: num(props.lifetimeSecs, 5),
+          speed: num(props.speed, 15, ENGINE_PROP_RANGES.projectile.speed),
+          damage: num(props.damage, 10, ENGINE_PROP_RANGES.projectile.damage),
+          lifetimeSecs: num(props.lifetimeSecs, 5, ENGINE_PROP_RANGES.projectile.lifetimeSecs),
           gravity: bool(props.gravity, false),
           destroyOnHit: bool(props.destroyOnHit, true),
         },
@@ -426,7 +538,7 @@ export function buildStoreComponent(
         type: 'winCondition',
         winCondition: {
           conditionType: (props.conditionType as WinConditionType) ?? 'score',
-          targetScore: nullableInt(props.targetScore, 10, TARGET_SCORE_MAX),
+          targetScore: nullableInt(props.targetScore, 10, ENGINE_PROP_MAXIMA.win_condition.targetScore),
           targetEntityId: nullableStr(props.targetEntityId, null),
         },
       };
@@ -437,7 +549,11 @@ export function buildStoreComponent(
         type: 'dialogueTrigger',
         dialogueTrigger: {
           treeId: str(props.treeId, ''),
-          triggerRadius: num(props.triggerRadius, 3),
+          triggerRadius: num(
+            props.triggerRadius,
+            3,
+            ENGINE_PROP_RANGES.dialogue_trigger.interactionRadius,
+          ),
           requireInteract: bool(props.requireInteract, true),
           interactKey: str(props.interactKey, 'interact'),
           oneShot: bool(props.oneShot, false),

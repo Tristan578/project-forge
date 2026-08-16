@@ -550,6 +550,62 @@ describe('characterSetupExecutor', () => {
         canDoubleJump: false,
       });
     });
+
+    // `systemConfig` is an LLM-authored bag with no upper bound, and `moveSpeed`
+    // and `jumpForce` are the two knobs it is allowed to move. The engine clamps
+    // both; `dispatchCommand` returns void, so an unclamped payload would leave
+    // this step reporting success on a player moving at a speed nothing asked
+    // for. The values here are the engine's own ceilings.
+    it('clamps a systemConfig override to the range the engine enforces', async () => {
+      const ctx = makeCtx();
+      await characterSetupExecutor.execute({
+        entity: { name: 'Hero', role: 'player' },
+        projectType: '3d',
+        entityId: 'ent_huge',
+        systemConfig: { moveSpeed: 1e9, jumpForce: 5000 },
+        feelDirective: {
+          mood: 'dreamy',
+          pacing: 'medium',
+          weight: 'floaty',
+          referenceGames: [],
+          oneLiner: 'drifting',
+        },
+      }, ctx);
+
+      expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', {
+        entityId: 'ent_huge',
+        componentType: 'character_controller',
+        properties: { speed: 1000, jumpHeight: 100, gravityScale: 0.5, canDoubleJump: false },
+      });
+    });
+
+    // A double too large to survive `as f32` is DROPPED by the engine, not
+    // clamped, so its Rust default stands. Clamping it to the ceiling here would
+    // put the two sides on different numbers for the one input the range table
+    // exists to reconcile.
+    it('falls back to the default speed for a value the engine cannot hold', async () => {
+      const ctx = makeCtx();
+      await characterSetupExecutor.execute({
+        entity: { name: 'Hero', role: 'player' },
+        projectType: '3d',
+        entityId: 'ent_inf',
+        systemConfig: { moveSpeed: 1e300 },
+        feelDirective: {
+          mood: 'dreamy',
+          pacing: 'medium',
+          weight: 'floaty',
+          referenceGames: [],
+          oneLiner: 'drifting',
+        },
+      }, ctx);
+
+      expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', {
+        entityId: 'ent_inf',
+        componentType: 'character_controller',
+        // 5 is `CharacterControllerData::default().speed`, not the preset's 6.
+        properties: { speed: 5, jumpHeight: 8, gravityScale: 0.5, canDoubleJump: false },
+      });
+    });
   });
 
   it('does not dispatch duplicate commands when entityId is provided', async () => {

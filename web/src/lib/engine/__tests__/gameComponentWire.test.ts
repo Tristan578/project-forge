@@ -6,8 +6,11 @@ import {
   toEngineComponentType,
   toStoreComponentType,
   buildStoreComponent,
+  normalizeGameComponent,
   ENGINE_COMPONENT_TYPES,
   ENGINE_COMPONENT_CATALOG,
+  ENGINE_PROP_RANGES,
+  ENGINE_PROP_MAXIMA,
 } from '../gameComponentWire';
 import type { GameComponentData } from '@/stores/slices/types';
 
@@ -517,6 +520,207 @@ describe('gameComponentWire', () => {
         [1, 2, 3],
         [4, 5, 6],
       ]);
+    });
+  });
+
+  /**
+   * The engine CLAMPS every numeric field; the store used to check finiteness and
+   * nothing else. A `speed` of `1e9` was kept verbatim here and became `1000`
+   * there, and since `dispatchCommand` returns `void` nothing reported it — the
+   * inspector, the export and the running game each held a different number.
+   *
+   * The ranges are read out of the Rust rather than re-typed, for the reason the
+   * waypoint cap above is: a hand-copied bound is a second copy that drifts, and
+   * this particular drift is silent by construction. Adding a clamped field to
+   * `build_game_component` without adding it to the TypeScript table fails here.
+   */
+  describe('numeric ranges, pinned against the engine', () => {
+    const rustSource = readFileSync(
+      resolve(__dirname, '../../../../../engine/src/core/game_components.rs'),
+      'utf8',
+    );
+
+    // Scope the scan to `build_game_component`'s body. Its arms are the only
+    // place `prop_f32`/`prop_u32` are called, but the helpers' own definitions
+    // and the unit tests further down the file mention them too, and a match in
+    // either would attribute a range to whichever arm happened to precede it.
+    const fnStart = rustSource.indexOf('pub fn build_game_component');
+    const fnEnd = rustSource.indexOf('\n}\n', fnStart);
+    const body = fnStart >= 0 && fnEnd > fnStart ? rustSource.slice(fnStart, fnEnd) : '';
+
+    /** A Rust numeric literal as a JS number: `1_000_000.0`, `0.1`, `u32::MAX`. */
+    const literal = (token: string): number => {
+      const text = token.trim();
+      return text === 'u32::MAX' ? 4294967295 : Number(text.replace(/_/g, ''));
+    };
+
+    const scannedRanges: Record<string, Record<string, { min: number; max: number }>> = {};
+    const scannedMaxima: Record<string, Record<string, number>> = {};
+
+    // Each component is one `"name" => { ... }` arm at a fixed indent, so the arm
+    // headers delimit the slices. Keys repeat across components with DIFFERENT
+    // bounds — `speed` is `0..1000` on a follower and `0..10_000` on a projectile
+    // — so a file-wide scan keyed by field name alone would be wrong.
+    const armHeader = /^ {8}"([a-z_]+)" => \{$/gm;
+    const armStarts: { name: string; start: number }[] = [];
+    for (let match = armHeader.exec(body); match !== null; match = armHeader.exec(body)) {
+      armStarts.push({ name: match[1], start: match.index });
+    }
+    armStarts.forEach((arm, i) => {
+      const text = body.slice(arm.start, armStarts[i + 1]?.start ?? body.length);
+      for (const [, key, min, max] of text.matchAll(
+        /prop_f32\(&props,\s*"(\w+)",\s*([^,]+),\s*([^)]+)\)/g,
+      )) {
+        (scannedRanges[arm.name] ??= {})[key] = { min: literal(min), max: literal(max) };
+      }
+      for (const [, key, max] of text.matchAll(/prop_u32\(&props,\s*"(\w+)",\s*([^)]+)\)/g)) {
+        (scannedMaxima[arm.name] ??= {})[key] = literal(max);
+      }
+    });
+
+    /**
+     * Round-trip one field through the store and back out to the wire.
+     *
+     * Reading the result off `toWireComponent` rather than off the store object
+     * means the assertion is in the engine's own vocabulary, so the one component
+     * whose field names diverge needs no reverse mapping here.
+     */
+    const STORE_PROP_KEY: Record<string, string> = { interactionRadius: 'triggerRadius' };
+    const wireValue = (engineType: string, key: string, value: number): unknown => {
+      const built = buildStoreComponent(engineType, { [STORE_PROP_KEY[key] ?? key]: value });
+      if (built === null) throw new Error(`buildStoreComponent rejected ${engineType}`);
+      return toWireComponent(built).properties[key];
+    };
+
+    it('finds the clamp sites in the engine source', () => {
+      // Self-check. A renamed function or a reindented match arm would leave both
+      // scanned tables empty, and an empty scan makes the drift comparisons below
+      // pass on nothing in one direction.
+      expect(fnStart, 'build_game_component not found').toBeGreaterThanOrEqual(0);
+      expect(fnEnd, 'end of build_game_component not found').toBeGreaterThan(fnStart);
+      expect(armStarts.map(arm => arm.name).sort()).toEqual([...ENGINE_NAMES].sort());
+      expect(Object.keys(scannedRanges).length).toBeGreaterThan(0);
+      expect(Object.keys(scannedMaxima).length).toBeGreaterThan(0);
+      for (const fields of [...Object.values(scannedRanges), ...Object.values(scannedMaxima)]) {
+        for (const bound of Object.values(fields)) {
+          for (const n of typeof bound === 'number' ? [bound] : [bound.min, bound.max]) {
+            expect(Number.isFinite(n), 'unparseable Rust literal').toBe(true);
+          }
+        }
+      }
+    });
+
+    it('holds exactly the float ranges the engine applies', () => {
+      // One bidirectional comparison: a changed bound, a field the engine gained,
+      // and a field the engine dropped all fail here.
+      expect(scannedRanges).toEqual(ENGINE_PROP_RANGES);
+    });
+
+    it('holds exactly the u32 ceilings the engine applies', () => {
+      expect(scannedMaxima).toEqual(ENGINE_PROP_MAXIMA);
+    });
+
+    for (const [engineType, fields] of Object.entries(ENGINE_PROP_RANGES)) {
+      for (const [key, range] of Object.entries(fields)) {
+        it(`clamps ${engineType}.${key} onto the number the engine keeps`, () => {
+          expect(wireValue(engineType, key, range.max * 10 + 1)).toBe(range.max);
+          expect(wireValue(engineType, key, range.min - 1)).toBe(range.min);
+          // In range is left alone — a clamp that also rounds or rescales would
+          // pass the two bounds above.
+          const inside = (range.min + range.max) / 2;
+          expect(wireValue(engineType, key, inside)).toBe(inside);
+        });
+      }
+    }
+
+    for (const [engineType, fields] of Object.entries(ENGINE_PROP_MAXIMA)) {
+      for (const [key, max] of Object.entries(fields)) {
+        it(`rounds and clamps ${engineType}.${key} the way prop_u32 does`, () => {
+          expect(wireValue(engineType, key, max + 10)).toBe(max);
+          // `prop_u32` clamps at 0 rather than taking a minimum, so a negative is
+          // zero on both sides rather than an error on either.
+          expect(wireValue(engineType, key, -5)).toBe(0);
+          expect(wireValue(engineType, key, 2.6)).toBe(3);
+          // The u32 path takes the OPPOSITE branch to the float path on the same
+          // input, and that asymmetry is deliberate rather than an oversight:
+          // `prop_f32` narrows through `as f32` and drops what overflows, while
+          // `prop_u32` clamps the `as_f64()` directly and never narrows. So the
+          // finite check here has to stay `Number.isFinite` where the float path
+          // needs `isEngineFinite` — tightening this one to match its neighbour
+          // would put the store on `0` where the engine sits on `max`.
+          expect(wireValue(engineType, key, 1e300)).toBe(max);
+        });
+      }
+    }
+
+    it('drops a double the engine cannot hold rather than clamping it to the ceiling', () => {
+      // `as_f64() as f32` overflows to infinity, `is_finite()` is false, and the
+      // Rust `Default` stands. Clamping a `1e300` to `max` would look like the
+      // careful thing to do and would put the two sides on different numbers.
+      expect(wireValue('projectile', 'speed', 1e300)).toBe(15);
+      expect(wireValue('character_controller', 'speed', 1e300)).toBe(5);
+    });
+
+    it('defaults currentHp to a maxHp that has already been clamped', () => {
+      // `num` returns its fallback verbatim — it does not clamp it — so the fact
+      // that `currentHp`'s fallback is the ALREADY-clamped `maxHp` is what keeps
+      // the two in range together. Falling back to the raw `props.maxHp` would
+      // read as the same line and would hand the engine a `currentHp` it caps at
+      // a million while the store held five.
+      expect(buildStoreComponent('health', { maxHp: 5_000_000 })).toEqual({
+        type: 'health',
+        health: {
+          maxHp: 1_000_000,
+          currentHp: 1_000_000,
+          invincibilitySecs: 0.5,
+          respawnOnDeath: true,
+          respawnPoint: [0, 1, 0],
+          despawnOnDeath: true,
+        },
+      });
+    });
+
+    it('clamps a whole component handed back by the inspector', () => {
+      // The inspector never calls `buildStoreComponent` — it edits one field and
+      // hands the whole object to the store, which normalizes it. Same coercions
+      // or the panel becomes a way around the table.
+      const wild: GameComponentData = {
+        type: 'follower',
+        follower: { targetEntityId: null, speed: 9999, stopDistance: -3, lookAtTarget: true },
+      };
+      expect(normalizeGameComponent(wild)).toEqual({
+        type: 'follower',
+        follower: { targetEntityId: null, speed: 1000, stopDistance: 0, lookAtTarget: true },
+      });
+    });
+
+    it('normalizes the one component whose store names are not the engine names', () => {
+      // `normalizeGameComponent` reads the component back through `propsOf`
+      // (store names), not the `propertiesOf` used on the way out to the wire.
+      // They agree everywhere except `dialogueTrigger`, so this is the only
+      // component that can tell the two apart — read through the wire spelling,
+      // every field here misses and the inspector's edit silently reverts to the
+      // defaults instead of being clamped.
+      const edited: GameComponentData = {
+        type: 'dialogueTrigger',
+        dialogueTrigger: {
+          treeId: 'tree_intro',
+          triggerRadius: 9999,
+          requireInteract: false,
+          interactKey: 'use',
+          oneShot: true,
+        },
+      };
+      expect(normalizeGameComponent(edited)).toEqual({
+        type: 'dialogueTrigger',
+        dialogueTrigger: {
+          treeId: 'tree_intro',
+          triggerRadius: 100,
+          requireInteract: false,
+          interactKey: 'use',
+          oneShot: true,
+        },
+      });
     });
   });
 

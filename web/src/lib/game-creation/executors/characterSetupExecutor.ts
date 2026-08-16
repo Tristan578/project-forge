@@ -126,6 +126,14 @@ export const characterSetupExecutor: ExecutorDefinition = {
     // so the speed and jump the GDD asked for could not be seen or tuned, and a
     // later store-driven `update_game_component` (`applyPhysicsProfile`) would
     // reason from a store that disagreed with the engine.
+    //
+    // Normalizing is also what BOUNDS this. `systemConfig` is an LLM-authored
+    // bag, so a `moveSpeed: 1e9` reaches here intact; the engine would clamp it
+    // to 1000 and this step would report success on a player moving at a speed
+    // nothing asked for. `addGameComponent` runs `normalizeGameComponent`, which
+    // applies the same per-property ranges the engine does, so the store and the
+    // engine agree on the clamped value rather than on the number the model
+    // wrote (PF-1147).
     ctx.getStore().addGameComponent(entityId, {
       type: 'characterController',
       characterController: { ...controller, canDoubleJump: false },
