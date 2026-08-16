@@ -228,9 +228,22 @@ pub(super) fn process_game_camera_queries(
     for request in requests {
         if let QueryRequest::GameCameraState { entity_id } = request {
             if let Some((_, cam_data, active)) = camera_query.iter().find(|(eid, _, _)| eid.0 == entity_id) {
+                // Answer in the same flat wire form `set_game_camera` accepts. Serializing
+                // `GameCameraData` directly emits the externally-tagged `{"ThirdPersonFollow": {...}}`
+                // mode object plus snake_case `target_entity`, neither of which any JS consumer reads.
+                let mut game_camera_data = serde_json::json!({});
+                if let Some(cam) = cam_data {
+                    game_camera_data = cam.mode.to_flat();
+                    if let Some(obj) = game_camera_data.as_object_mut() {
+                        obj.insert(
+                            "targetEntity".to_string(),
+                            serde_json::to_value(&cam.target_entity).unwrap_or(serde_json::Value::Null),
+                        );
+                    }
+                }
                 let data = serde_json::json!({
                     "entityId": entity_id,
-                    "gameCameraData": cam_data,
+                    "gameCameraData": if cam_data.is_some() { game_camera_data } else { serde_json::Value::Null },
                     "isActive": active.is_some(),
                 });
                 events::emit_event("QUERY_GAME_CAMERA", &data);

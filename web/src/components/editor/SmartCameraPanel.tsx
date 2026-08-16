@@ -3,12 +3,11 @@
 import { useState, useCallback, useMemo } from 'react';
 import { Camera, Sparkles, SlidersHorizontal } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
-import type { GameCameraData } from '@/stores/slices/types';
 import {
   CAMERA_PRESETS,
   PRESET_KEYS,
   detectOptimalCamera,
-  smartModeToEngine,
+  presetToGameCameraData,
   interpolatePresets,
   type CameraPreset,
   type SmartCameraSceneContext,
@@ -150,41 +149,6 @@ function SliderRow({
 // ---------------------------------------------------------------------------
 // Main panel
 // ---------------------------------------------------------------------------
-
-/** Convert a CameraPreset to a GameCameraData object. */
-function presetToGameCameraData(preset: CameraPreset): GameCameraData {
-  const engineMode = smartModeToEngine(preset.mode);
-  const data: GameCameraData = { mode: engineMode, targetEntity: null };
-
-  switch (engineMode) {
-    case 'thirdPersonFollow':
-      data.followDistance = preset.followDistance;
-      data.followHeight = preset.followHeight;
-      data.followLookAhead = preset.lookAhead;
-      data.followSmoothing = preset.followSmoothing;
-      break;
-    case 'firstPerson':
-      data.firstPersonHeight = preset.followHeight;
-      data.firstPersonMouseSensitivity = 2;
-      break;
-    case 'sideScroller':
-      data.sideScrollerDistance = preset.followDistance;
-      data.sideScrollerHeight = preset.followHeight;
-      break;
-    case 'topDown':
-      data.topDownHeight = preset.followHeight;
-      data.topDownAngle = 60;
-      break;
-    case 'orbital':
-      data.orbitalDistance = preset.followDistance;
-      data.orbitalAutoRotateSpeed = 0;
-      break;
-    case 'fixed':
-      break;
-  }
-
-  return data;
-}
 
 export function SmartCameraPanel() {
   const primaryId = useEditorStore((s) => s.primaryId);

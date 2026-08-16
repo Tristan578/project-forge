@@ -60,10 +60,100 @@ function makeKF(payload: Record<string, unknown> = {}): CutsceneKeyframe {
 }
 
 describe('buildCommand', () => {
-  it('camera track returns set_game_camera', () => {
-    const cmd = buildCommand('camera', null, makeKF({ mode: 'Orbital' }), 0.5);
+  it('camera track translates authoring params into the engine wire form', () => {
+    const cmd = buildCommand(
+      'camera',
+      'cam1',
+      makeKF({ mode: 'orbital', targetEntity: 'hero', orbitalDistance: 12, orbitalAutoRotateSpeed: 20 }),
+      0.5,
+    );
     expect(cmd?.command).toBe('set_game_camera');
-    expect((cmd?.payload as Record<string, unknown>).mode).toBe('Orbital');
+    // Full shape, not objectContaining: an invented key sitting alongside the
+    // asserted ones is exactly what this ticket exists to stop shipping.
+    expect(cmd?.payload).toEqual({
+      entityId: 'cam1',
+      mode: 'orbital',
+      targetEntity: 'hero',
+      radius: 12,
+      autoRotateSpeed: 20,
+      // Derived from the speed, not authored: emitting it makes the authoring
+      // vocabulary the owner of `autoRotate`, so a stale flag from an earlier
+      // engine report cannot survive a round trip and mute this rotation.
+      autoRotate: true,
+    });
+  });
+
+  it('camera track collapses third-person distance and height into one offset', () => {
+    const cmd = buildCommand(
+      'camera',
+      'cam1',
+      makeKF({ mode: 'thirdPersonFollow', followDistance: 8, followHeight: 3, followSmoothing: 4 }),
+      1,
+    );
+    expect(cmd?.payload).toEqual({
+      entityId: 'cam1',
+      mode: 'thirdPersonFollow',
+      targetEntity: null,
+      offset: [0, 3, -8],
+      damping: 4,
+    });
+  });
+
+  it('camera track drops keys the engine cannot receive', () => {
+    const cmd = buildCommand(
+      'camera',
+      'cam1',
+      makeKF({
+        mode: 'topDown',
+        topDownHeight: 20,
+        // Phantom parameters an earlier vocabulary advertised, plus arbitrary
+        // model output. None reach the wire.
+        topDownAngle: 45,
+        followLookAhead: 2,
+        sideScrollerHeight: 6,
+        _easedProgress: 0.5,
+      }),
+      0.5,
+    );
+    expect(cmd?.payload).toEqual({
+      entityId: 'cam1',
+      mode: 'topDown',
+      targetEntity: null,
+      height: 20,
+    });
+  });
+
+  it('camera track ignores non-finite numeric params rather than resetting them', () => {
+    const cmd = buildCommand('camera', 'cam1', makeKF({ mode: 'topDown', topDownHeight: NaN }), 1);
+    expect(cmd?.payload).toEqual({ entityId: 'cam1', mode: 'topDown', targetEntity: null });
+  });
+
+  it('camera track does not read params off the prototype chain', () => {
+    // Keyframe payloads are model-authored, so a `__proto__` entry in that JSON
+    // produces exactly this object. The inherited value must not reach the wire:
+    // once picked it would be written as an OWN property on the camera data, so
+    // the `Object.hasOwn` check further down the payload builder cannot catch it.
+    const payload = Object.create({ topDownHeight: 999 }) as Record<string, unknown>;
+    payload.mode = 'topDown';
+
+    const cmd = buildCommand('camera', 'cam1', makeKF(payload), 0.5);
+    expect(cmd?.payload).toEqual({ entityId: 'cam1', mode: 'topDown', targetEntity: null });
+  });
+
+  it('camera track returns null when entityId is null', () => {
+    const cmd = buildCommand('camera', null, makeKF({ mode: 'orbital' }), 0.5);
+    expect(cmd).toBeNull();
+  });
+
+  it('camera track returns null for an unrecognized mode', () => {
+    // The old PascalCase vocabulary — the engine has never had a mode by this name.
+    const cmd = buildCommand('camera', 'cam1', makeKF({ mode: 'Orbital' }), 0.5);
+    expect(cmd).toBeNull();
+  });
+
+  it('camera track returns null when the payload names no mode', () => {
+    const cmd = buildCommand('camera', 'cam1', makeKF(), 0.5);
+    expect(cmd).toBeNull();
   });
 
   it('animation track returns play_animation', () => {
@@ -97,11 +187,6 @@ describe('buildCommand', () => {
   it('wait track returns null', () => {
     const cmd = buildCommand('wait', null, makeKF(), 0.5);
     expect(cmd).toBeNull();
-  });
-
-  it('includes _easedProgress on camera commands', () => {
-    const cmd = buildCommand('camera', null, makeKF(), 0.5);
-    expect(typeof (cmd?.payload as Record<string, unknown>)._easedProgress).toBe('number');
   });
 });
 
@@ -191,9 +276,11 @@ describe('CutscenePlayer', () => {
   });
 
   it('muted tracks are not scheduled', () => {
+    // A track that WOULD dispatch if it were not muted — a camera track with no
+    // entityId or no mode builds no command at all, so muting it proves nothing.
     const track: CutsceneTrack = {
-      id: 't1', type: 'camera', entityId: null, muted: true,
-      keyframes: [{ timestamp: 0, duration: 1, easing: 'linear', payload: {} }],
+      id: 't1', type: 'camera', entityId: 'cam1', muted: true,
+      keyframes: [{ timestamp: 0, duration: 1, easing: 'linear', payload: { mode: 'orbital' } }],
     };
     const cs = {
       id: 'cs1', name: 'Test', duration: 5,

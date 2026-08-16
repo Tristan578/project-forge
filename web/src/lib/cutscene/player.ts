@@ -9,6 +9,13 @@
 
 import type { Cutscene, CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
 import { useCutsceneStore } from '@/stores/cutsceneStore';
+import {
+  buildSetGameCameraPayload,
+  isCameraMode,
+  NUMERIC_CAMERA_FIELDS,
+} from '@/lib/game/gameCameraPayload';
+import type { SetGameCameraPayload } from '@/lib/game/gameCameraPayload';
+import type { GameCameraData } from '@/stores/slices/types';
 
 // ============================================================================
 // Types
@@ -58,6 +65,51 @@ export function applyEasing(t: number, easing: CutsceneKeyframe['easing']): numb
 // ============================================================================
 
 /**
+ * Read a camera keyframe's payload into a `set_game_camera` command payload.
+ *
+ * Keyframe payloads are `Record<string, unknown>` written by the cutscene
+ * generator — i.e. model output. They are read field by field against an
+ * allowlist, never spread onto the command: a spread would hand the engine
+ * whatever keys the model invented, and every key the engine does not
+ * recognize is dropped with no error, no log and no failing test.
+ *
+ * Returns null when the track names no camera entity, or when the payload's
+ * mode is absent or unrecognized. `set_game_camera` configures a specific
+ * camera entity, so there is nothing to address without one — the same reason
+ * the animation and audio tracks return null without an `entityId`.
+ */
+function buildCameraCommandPayload(
+  entityId: string | null,
+  payload: Record<string, unknown>,
+): SetGameCameraPayload | null {
+  if (!entityId) return null;
+
+  const rawMode = payload.mode;
+  if (!isCameraMode(rawMode)) return null;
+
+  const rawTarget = payload.targetEntity;
+  const data: GameCameraData = {
+    mode: rawMode,
+    targetEntity: typeof rawTarget === 'string' && rawTarget !== '' ? rawTarget : null,
+  };
+
+  // `NUMERIC_CAMERA_FIELDS` rather than a locally filtered list: the translator
+  // owns which of its fields hold a number, so a non-numeric one added there
+  // cannot end up assigned a number here.
+  for (const key of NUMERIC_CAMERA_FIELDS) {
+    // Own keys only. Keyframe payloads are model-authored, and a bare read walks
+    // the prototype chain — the value picked up there is then written as an OWN
+    // property on `data`, so `buildSetGameCameraPayload`'s own `Object.hasOwn`
+    // check downstream cannot tell it apart from one the author really set.
+    if (!Object.hasOwn(payload, key)) continue;
+    const value = payload[key];
+    if (typeof value === 'number' && Number.isFinite(value)) data[key] = value;
+  }
+
+  return buildSetGameCameraPayload(entityId, data);
+}
+
+/**
  * Translate a keyframe payload into an engine command for the given track type.
  * Returns null if the track type is 'wait' (no command to dispatch).
  */
@@ -65,17 +117,22 @@ export function buildCommand(
   trackType: CutsceneTrack['type'],
   entityId: string | null,
   keyframe: CutsceneKeyframe,
-  progress: number,
+  // Nothing consumes playback progress today. The camera command used to carry
+  // it as `_easedProgress`, a field no engine command has ever read and nothing
+  // on the JS side consumed either — so easing a camera keyframe has always been
+  // a no-op. Interpolating would mean lerping the camera between its current and
+  // target state JS-side and dispatching each step; `set_game_camera` is an
+  // absolute set with no interpolation of its own. The parameter stays so the
+  // scheduler's call sites keep their shape when that lands.
+  _progress: number,
 ): { command: string; payload: unknown } | null {
   const { payload } = keyframe;
-  const easedProgress = applyEasing(progress, keyframe.easing);
 
   switch (trackType) {
     case 'camera': {
-      return {
-        command: 'set_game_camera',
-        payload: { ...payload, entityId: entityId ?? undefined, _easedProgress: easedProgress },
-      };
+      const cameraPayload = buildCameraCommandPayload(entityId, payload);
+      if (!cameraPayload) return null;
+      return { command: 'set_game_camera', payload: cameraPayload };
     }
     case 'animation': {
       if (!entityId) return null;

@@ -201,48 +201,101 @@ describe('cameraToCommands', () => {
     }
   });
 
+  // These commands go straight to `handle_command`, so the payload IS the
+  // behaviour — asserted in full rather than with `objectContaining`, which is
+  // blind to the invented keys sitting alongside the ones being checked, and is
+  // why every command this function emitted was silently rejected for so long.
+
   it('sets thirdPersonFollow params for follow mode', () => {
-    const preset = CAMERA_PRESETS['platformer_3d'];
-    const commands = cameraToCommands(preset, 'e1');
-    const payload = commands[0].payload;
-    expect(payload['mode']).toBe('thirdPersonFollow');
-    expect(payload['followDistance']).toBe(preset.followDistance);
-    expect(payload['followHeight']).toBe(preset.followHeight);
-    expect(payload['followSmoothing']).toBe(preset.followSmoothing);
+    const commands = cameraToCommands(CAMERA_PRESETS['platformer_3d'], 'e1');
+    // followHeight 4 / followDistance 8 collapse into the engine's single offset
+    // vector; followSmoothing is its `damping`.
+    expect(commands[0].payload).toEqual({
+      entityId: 'e1',
+      mode: 'thirdPersonFollow',
+      targetEntity: null,
+      offset: [0, 4, -8],
+      damping: 5,
+    });
   });
 
   it('sets firstPerson params for fps_shooter', () => {
     const commands = cameraToCommands(CAMERA_PRESETS['fps_shooter'], 'e1');
-    const payload = commands[0].payload;
-    expect(payload['mode']).toBe('firstPerson');
-    expect(payload['firstPersonHeight']).toBe(1.7);
+    expect(commands[0].payload).toEqual({
+      entityId: 'e1',
+      mode: 'firstPerson',
+      targetEntity: null,
+      eyeHeight: 1.7,
+      // No `mouseSensitivity`: `CameraPreset` has no such field, so any value
+      // here would be invented, and an omitted parameter is what makes
+      // `from_flat` apply the engine's own 0.1. This assertion is `toEqual`,
+      // so the absence is part of what it pins — a reintroduced literal fails
+      // here rather than shipping as a 20× sensitivity.
+    });
   });
 
   it('sets sideScroller params for platformer_2d', () => {
     const commands = cameraToCommands(CAMERA_PRESETS['platformer_2d'], 'e1');
-    const payload = commands[0].payload;
-    expect(payload['mode']).toBe('sideScroller');
-    expect(payload['sideScrollerDistance']).toBe(10);
+    expect(commands[0].payload).toEqual({
+      entityId: 'e1',
+      mode: 'sideScroller',
+      targetEntity: null,
+      zOffset: 10,
+    });
   });
 
   it('sets topDown params for top_down_strategy', () => {
     const commands = cameraToCommands(CAMERA_PRESETS['top_down_strategy'], 'e1');
-    const payload = commands[0].payload;
-    expect(payload['mode']).toBe('topDown');
-    expect(payload['topDownHeight']).toBe(20);
+    expect(commands[0].payload).toEqual({
+      entityId: 'e1',
+      mode: 'topDown',
+      targetEntity: null,
+      height: 20,
+    });
   });
 
   it('sets orbital params for rpg_exploration', () => {
     const commands = cameraToCommands(CAMERA_PRESETS['rpg_exploration'], 'e1');
-    const payload = commands[0].payload;
-    expect(payload['mode']).toBe('orbital');
-    expect(payload['orbitalDistance']).toBe(12);
+    expect(commands[0].payload).toEqual({
+      entityId: 'e1',
+      mode: 'orbital',
+      targetEntity: null,
+      radius: 12,
+      // No `autoRotateSpeed` either — and `0` in particular is not a neutral
+      // stand-in for "unset": it is an explicit "never rotate" that overrides
+      // the engine's 15.
+    });
   });
 
   it('handles fixed mode with no extra params', () => {
     const commands = cameraToCommands(CAMERA_PRESETS['puzzle'], 'e1');
-    const payload = commands[0].payload;
-    expect(payload['mode']).toBe('fixed');
+    // A fixed camera is positioned by its own transform, so the engine takes no
+    // parameters for it at all.
+    expect(commands[0].payload).toEqual({
+      entityId: 'e1',
+      mode: 'fixed',
+      targetEntity: null,
+    });
+  });
+
+  it('emits no authoring-vocabulary or phantom keys on any preset', () => {
+    // The engine reads `offset`/`damping`/`eyeHeight`/`mouseSensitivity`/
+    // `zOffset`/`height`/`radius`/`autoRotateSpeed`. Every key below either
+    // belongs to the store's authoring vocabulary (dropped by `serde` with no
+    // error) or names a parameter no engine variant has ever had.
+    const forbidden = [
+      'followDistance', 'followHeight', 'followSmoothing',
+      'firstPersonHeight', 'firstPersonMouseSensitivity',
+      'sideScrollerDistance', 'topDownHeight',
+      'orbitalDistance', 'orbitalAutoRotateSpeed',
+      'followLookAhead', 'sideScrollerHeight', 'topDownAngle',
+    ];
+    for (const key of PRESET_KEYS) {
+      const payload = cameraToCommands(CAMERA_PRESETS[key], 'e1')[0].payload;
+      for (const bad of forbidden) {
+        expect(Object.hasOwn(payload, bad)).toBe(false);
+      }
+    }
   });
 });
 

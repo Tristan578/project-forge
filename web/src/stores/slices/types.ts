@@ -893,26 +893,52 @@ export interface MobileTouchConfig {
   autoReduceQuality: boolean;
 }
 
-// Game camera modes matching Rust's GameCameraMode enum
+// Game camera modes. These strings ARE the engine's wire vocabulary —
+// `GameCameraMode::FLAT_MODES` in engine/src/core/game_camera.rs.
 export type GameCameraMode = 'thirdPersonFollow' | 'firstPerson' | 'sideScroller' | 'topDown' | 'fixed' | 'orbital';
 
-// Game camera data matching Rust's GameCameraData struct
+/**
+ * Authoring shape for a game camera — the vocabulary the inspector labels read
+ * ("Distance", "Height", "Smoothing"), NOT the engine's.
+ *
+ * The engine speaks `offset` / `damping` / `eyeHeight` / `zOffset` / `radius`.
+ * Translation between the two lives in `@/lib/game/gameCameraPayload`, which
+ * pins this interface for completeness — adding a field here fails the build
+ * until its engine mapping is decided there. Never spread one of these straight
+ * into `dispatchCommand('set_game_camera', …)`; the engine drops every key it
+ * does not recognize, silently and without an error.
+ */
 export interface GameCameraData {
   mode: GameCameraMode;
   targetEntity: string | null;
   // Mode-specific params
   followDistance?: number;
   followHeight?: number;
-  followLookAhead?: number;
   followSmoothing?: number;
   firstPersonHeight?: number;
   firstPersonMouseSensitivity?: number;
   sideScrollerDistance?: number;
-  sideScrollerHeight?: number;
   topDownHeight?: number;
-  topDownAngle?: number;
   orbitalDistance?: number;
   orbitalAutoRotateSpeed?: number;
+  /**
+   * Engine wire parameters this authoring vocabulary has no field for, kept
+   * verbatim so they survive a round trip.
+   *
+   * The engine reads 21 camera parameters; the nine above are the ones the
+   * inspector exposes. Without this bag the other twelve are lost the first time
+   * anything re-dispatches: an MCP client sets `fov: 100`, the engine reports it,
+   * the store drops it, the user nudges Eye Height, and the rebuilt payload omits
+   * `fov` — so `from_flat` hands back 75 and the insert replaces the component.
+   * That is the destructive-full-replace shape of PF-1123, on the surface the
+   * published manifest now advertises.
+   *
+   * Deliberately opaque here: `lib/game/gameCameraPayload` is the only module
+   * that knows the engine vocabulary, and it is the only thing that reads or
+   * writes this. Values are validated against that module's own key and shape
+   * tables on the way in, never spread blind.
+   */
+  engineParams?: Readonly<Record<string, unknown>>;
 }
 
 // Discriminated union for all game component types

@@ -105,10 +105,18 @@ describe('autoPolishExecutor', () => {
 
     expect(result.success).toBe(true);
     expect(result.output?.fixesApplied).toContain('Configured camera as thirdPersonFollow');
+    // The engine's vocabulary, not the store's: `followSmoothing` is authoring
+    // for `damping`, and the engine drops every name it does not recognize
+    // without an error (PF-1126).
     expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', {
       entityId: 'cam_id',
       mode: 'thirdPersonFollow',
-      followSmoothing: 0.8,
+      targetEntity: null,
+      // No `damping`. This used to assert 0.8, sent as a 0..1 smoothing factor —
+      // but the engine's damping is a rate per second (`t = (damping * delta)
+      // .min(1.0)`), so 0.8 ran the follow roughly six times slower than the 5.0
+      // default. Omitting the field is how the payload asks for that default, and
+      // it keeps no second copy of the number here to drift from the engine's.
     });
   });
 
@@ -131,6 +139,15 @@ describe('autoPolishExecutor', () => {
 
     expect(result.success).toBe(true);
     expect(result.output?.fixesApplied).toContain('Configured camera as sideScroller');
+    // `GameCameraData` has no side-scroller damping field, so the 0.8 smoothing
+    // the 3D branch gets is simply not expressible here — the camera takes the
+    // engine's default of 5. Asserted in full so that gap stays visible rather
+    // than reappearing as a silently-dropped key.
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'cam2d',
+      mode: 'sideScroller',
+      targetEntity: null,
+    });
   });
 
   it('warns when no camera entity exists for no_camera_on_player', async () => {
@@ -258,8 +275,11 @@ describe('autoPolishExecutor', () => {
     }, ctx);
 
     expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', expect.objectContaining({
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', {
       entityId: 'follow_cam_id',
-    }));
+      mode: 'thirdPersonFollow',
+      targetEntity: null,
+      // No `damping` — see the 3D case above.
+    });
   });
 });

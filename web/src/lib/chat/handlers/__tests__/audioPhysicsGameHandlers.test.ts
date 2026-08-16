@@ -1381,12 +1381,15 @@ describe('gameplayHandlers', () => {
         followHeight: 3,
       });
       expect(result.success).toBe(true);
-      expect(store.setGameCamera).toHaveBeenCalledWith('cam1', expect.objectContaining({
+      // Full object, not `objectContaining` — the latter is blind to any extra
+      // key the handler forwards, which is precisely how this command shipped
+      // broken for its whole life.
+      expect(store.setGameCamera).toHaveBeenCalledWith('cam1', {
         mode: 'thirdPersonFollow',
         targetEntity: 'player',
         followDistance: 8,
         followHeight: 3,
-      }));
+      });
       expect((result.result as { message: string }).message).toContain('thirdPersonFollow');
     });
 
@@ -1396,10 +1399,10 @@ describe('gameplayHandlers', () => {
         mode: 'fixed',
       });
       expect(result.success).toBe(true);
-      expect(store.setGameCamera).toHaveBeenCalledWith('cam2', expect.objectContaining({
+      expect(store.setGameCamera).toHaveBeenCalledWith('cam2', {
         mode: 'fixed',
         targetEntity: null,
-      }));
+      });
     });
   });
 
