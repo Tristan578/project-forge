@@ -4,7 +4,6 @@ import {
   buildMaterialFromPartial,
   buildLightFromPartial,
   buildPhysicsFromPartial,
-  buildGameComponentFromInput,
   inferEntityType,
   identifyRole,
   mulberry32,
@@ -124,82 +123,6 @@ describe('buildPhysicsFromPartial', () => {
     expect(phys.bodyType).toBe('fixed');
     expect(phys.restitution).toBe(0.9);
     expect(phys.isSensor).toBe(true);
-  });
-});
-
-describe('buildGameComponentFromInput', () => {
-  it('should build character_controller with defaults', () => {
-    const comp = buildGameComponentFromInput('character_controller', {}) as Record<string, unknown>;
-    expect(comp).not.toBeNull();
-    expect(comp.type).toBe('characterController');
-    const cc = comp.characterController as Record<string, unknown>;
-    expect(cc.speed).toBe(5);
-    expect(cc.jumpHeight).toBe(8);
-  });
-
-  it('should build health with overrides', () => {
-    const comp = buildGameComponentFromInput('health', { maxHp: 200, respawnOnDeath: false }) as Record<string, unknown>;
-    expect(comp.type).toBe('health');
-    const h = comp.health as Record<string, unknown>;
-    expect(h.maxHp).toBe(200);
-    expect(h.currentHp).toBe(200);
-    expect(h.respawnOnDeath).toBe(false);
-    // Matches the engine's `default_true` — omitting the knob must not change
-    // what an entity does at zero health.
-    expect(h.despawnOnDeath).toBe(true);
-  });
-
-  it('should build health with despawnOnDeath disabled', () => {
-    const comp = buildGameComponentFromInput('health', { despawnOnDeath: false }) as Record<string, unknown>;
-    const h = comp.health as Record<string, unknown>;
-    expect(h.despawnOnDeath).toBe(false);
-  });
-
-  it('should build collectible', () => {
-    const comp = buildGameComponentFromInput('collectible', { value: 5 }) as Record<string, unknown>;
-    expect(comp.type).toBe('collectible');
-    expect((comp.collectible as Record<string, unknown>).value).toBe(5);
-  });
-
-  it('should build damage_zone', () => {
-    const comp = buildGameComponentFromInput('damage_zone', { damagePerSecond: 50 }) as Record<string, unknown>;
-    expect(comp.type).toBe('damageZone');
-    expect((comp.damageZone as Record<string, unknown>).damagePerSecond).toBe(50);
-  });
-
-  it('should build moving_platform with defaults', () => {
-    const comp = buildGameComponentFromInput('moving_platform', {}) as Record<string, unknown>;
-    expect(comp.type).toBe('movingPlatform');
-    const mp = comp.movingPlatform as Record<string, unknown>;
-    expect(mp.speed).toBe(2);
-    expect(mp.loopMode).toBe('pingPong');
-  });
-
-  it('should build spawner', () => {
-    const comp = buildGameComponentFromInput('spawner', { entityType: 'sphere', maxCount: 10 }) as Record<string, unknown>;
-    expect(comp.type).toBe('spawner');
-    const s = comp.spawner as Record<string, unknown>;
-    expect(s.entityType).toBe('sphere');
-    expect(s.maxCount).toBe(10);
-  });
-
-  it('should build win_condition', () => {
-    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'collectAll' }) as Record<string, unknown>;
-    expect(comp.type).toBe('winCondition');
-    expect((comp.winCondition as Record<string, unknown>).conditionType).toBe('collectAll');
-  });
-
-  it('falls back to the engine default for a conditionType the engine cannot parse', () => {
-    // `'collect_all'` is not a member — the engine's `match` has no arm for it and
-    // falls through to `WinConditionType::Score`. Storing the string verbatim (what
-    // the old unvalidated cast did) left the inspector and the running game
-    // describing different win conditions with nothing to report the split.
-    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'collect_all' }) as Record<string, unknown>;
-    expect((comp.winCondition as Record<string, unknown>).conditionType).toBe('score');
-  });
-
-  it('should return null for unknown types', () => {
-    expect(buildGameComponentFromInput('unknown_type', {})).toBeNull();
   });
 });
 

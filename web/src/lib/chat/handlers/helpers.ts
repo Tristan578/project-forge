@@ -5,8 +5,6 @@
 import { z } from 'zod';
 import type { MaterialData, LightData, PhysicsData, SceneNode } from './types';
 import { zVec2, zVec3, zVec4 } from './types';
-import { buildStoreComponent } from '@/lib/engine/gameComponentWire';
-import type { GameComponentData } from '@/stores/slices/types';
 
 // ===== Compound Action Types =====
 
@@ -186,26 +184,6 @@ export function buildPhysicsFromPartial(partialPhysics: Record<string, unknown>)
     lockRotationZ: phys.lockRotationZ ?? false,
     isSensor: phys.isSensor ?? false,
   };
-}
-
-/**
- * Build GameComponentData from input type and properties.
- *
- * A thin alias for `buildStoreComponent`, which is the single place every
- * game-component field is coerced the way the engine coerces it. This function
- * used to carry its own switch, and the two copies had already diverged: the
- * `win_condition` case cast `conditionType` straight through, so an LLM answering
- * `'collect_all'` (or `'survive'`, or anything at all) was stored verbatim while
- * the engine's `match` fell through to `WinConditionType::Score`. Nothing reported
- * the disagreement — `dispatchCommand` returns `void` — so the inspector showed one
- * win condition and the running game used another. The same divergence was open on
- * every numeric field, which the old copy passed through unranged.
- */
-export function buildGameComponentFromInput(
-  type: string,
-  props: Record<string, unknown>
-): GameComponentData | null {
-  return buildStoreComponent(type, props);
 }
 
 // ===== Analysis Functions =====
