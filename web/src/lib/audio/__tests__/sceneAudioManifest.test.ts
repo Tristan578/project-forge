@@ -98,6 +98,19 @@ describe('parseSceneAudio', () => {
     expect(Object.getPrototypeOf(audio)).toBe(Object.prototype);
   });
 
+  it('drops an entity id no engine would ever mint', () => {
+    // Ids are uuids. An oversized one is a scene file trying to write into the
+    // AI scene context, which renders an unnamed entity by its raw id.
+    const audio = parseSceneAudio(
+      scene([
+        { entityId: 'x'.repeat(129), audioData: FULL_AUDIO },
+        { entityId: 'x'.repeat(128), audioData: { volume: 0.25 } },
+      ])
+    );
+
+    expect(Object.keys(audio)).toEqual(['x'.repeat(128)]);
+  });
+
   it('keeps a zero volume, which a truthiness check would have thrown away', () => {
     const audio = parseSceneAudio(scene([{ entityId: 'e1', audioData: { volume: 0 } }]));
     expect(audio.e1.volume).toBe(0);

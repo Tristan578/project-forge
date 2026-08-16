@@ -55,6 +55,15 @@ const ENGINE_AUDIO_DEFAULTS = {
 
 const RESERVED_ENTITY_IDS = new Set(['__proto__', 'constructor', 'prototype']);
 
+/**
+ * Engine entity ids are uuids (36 chars). The cap is generous enough that no
+ * real id is ever near it, and exists because these keys are not only map keys:
+ * an entity with no scene-graph node is rendered by its id in the AI's scene
+ * context, so an unbounded string from a `.forge` file is a place that file can
+ * write into the model's prompt.
+ */
+const MAX_ENTITY_ID_LENGTH = 128;
+
 let staged: Record<string, AudioData> = {};
 
 function readNumber(raw: unknown, fallback: number): number {
@@ -106,6 +115,7 @@ export function parseSceneAudio(json: string): Record<string, AudioData> {
     if (typeof entity !== 'object' || entity === null) continue;
     const { entityId, audioData } = entity as { entityId?: unknown; audioData?: unknown };
     if (typeof entityId !== 'string' || entityId.length === 0) continue;
+    if (entityId.length > MAX_ENTITY_ID_LENGTH) continue;
     // `audio['__proto__'] = x` on an object literal REPLACES the prototype
     // instead of adding a key, so a scene file naming an entity `__proto__`
     // would make every absent entity report that entity's sound through the
