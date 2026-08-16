@@ -8,7 +8,7 @@
 
 import { fetchAI } from './client';
 import { getDeepGenerationModel } from './deepTier';
-import { sanitizeKeyframePayload } from '@/lib/cutscene/keyframePayload';
+import { CUTSCENE_TRACK_TYPES, sanitizeKeyframePayload } from '@/lib/cutscene/keyframePayload';
 import type { Cutscene, CutsceneTrack, CutsceneKeyframe, CutsceneTrackType, EasingMode } from '@/stores/cutsceneStore';
 
 // ============================================================================
@@ -103,7 +103,10 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-const VALID_TRACK_TYPES = new Set<string>(['camera', 'animation', 'dialogue', 'audio', 'wait']);
+// Derived from the payload schema rather than re-listed. A type accepted here
+// but absent there would sanitize every one of that track's keyframes to `{}` —
+// indistinguishable, downstream, from a model that wrote empty payloads.
+const VALID_TRACK_TYPES = new Set<string>(CUTSCENE_TRACK_TYPES);
 const VALID_EASING = new Set<string>(['linear', 'ease_in', 'ease_out', 'ease_in_out']);
 
 function validateKeyframe(

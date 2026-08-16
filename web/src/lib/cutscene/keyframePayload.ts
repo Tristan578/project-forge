@@ -106,6 +106,29 @@ const TRACK_PAYLOAD_FIELDS: Record<CutsceneTrackType, Record<string, FieldReader
   wait: {},
 };
 
+/**
+ * Every track type, derived from the schema table rather than re-listed.
+ *
+ * The generator validates a track's `type` against this. Keeping it derived
+ * means the check and the payload vocabulary cannot disagree: a type the
+ * validator accepted but the table did not know would sanitize every one of its
+ * keyframes to `{}`, which looks exactly like a model that wrote empty payloads.
+ */
+export const CUTSCENE_TRACK_TYPES = Object.keys(TRACK_PAYLOAD_FIELDS) as CutsceneTrackType[];
+
+/**
+ * The field names a track type accepts. Exported for the test that holds the
+ * generator's prompt and this table to each other — the prompt tells the model
+ * which fields to write, and a name that appears in one and not the other is
+ * either a field asked for and discarded, or a field accepted and never asked
+ * for. Neither shows up as a type error.
+ */
+export function getKeyframePayloadFields(trackType: CutsceneTrackType): string[] {
+  return Object.hasOwn(TRACK_PAYLOAD_FIELDS, trackType)
+    ? Object.keys(TRACK_PAYLOAD_FIELDS[trackType])
+    : [];
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

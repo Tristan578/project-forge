@@ -188,15 +188,22 @@ describe('buildCommand', () => {
     expect(buildCommand('animation', 'entity1', makeKF(payload), 1)).toBeNull();
   });
 
-  it('animation track forwards no crossfade the model did not give it', () => {
-    const cmd = buildCommand(
-      'animation',
-      'entity1',
-      makeKF({ clipName: 'run', crossfadeSecs: 'quickly' }),
-      1,
-    );
-    // Not the string, and not `NaN` from coercing it: the `??` fallback is
-    // reading an absent field rather than papering over a bad one.
+  it.each([
+    ['the model gave a non-numeric one', { clipName: 'run', crossfadeSecs: 'quickly' }],
+    ['the model gave a negative one', { clipName: 'run', crossfadeSecs: -1 }],
+    ['the payload has none at all', { clipName: 'run' }],
+  ])('animation track omits crossfadeSecs when %s', (_case, payload) => {
+    const cmd = buildCommand('animation', 'entity1', makeKF(payload), 1);
+    // OMITTED, not defaulted to 0. `handle_play_animation` reads this field as
+    // `unwrap_or(0.3)`, so a 0 written here is not "no opinion" — it is an
+    // instant cut that overrides the engine's own crossfade. Absence is the
+    // only way to ask for the engine default.
+    expect(cmd?.payload).toEqual({ entityId: 'entity1', clipName: 'run' });
+    expect(Object.hasOwn(cmd?.payload as object, 'crossfadeSecs')).toBe(false);
+  });
+
+  it('animation track keeps an explicit zero crossfade, which asks for a cut', () => {
+    const cmd = buildCommand('animation', 'entity1', makeKF({ clipName: 'run', crossfadeSecs: 0 }), 1);
     expect(cmd?.payload).toEqual({ entityId: 'entity1', clipName: 'run', crossfadeSecs: 0 });
   });
 

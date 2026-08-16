@@ -2,9 +2,13 @@
  * CutscenePlayer — rAF-based command scheduler for cutscene playback.
  *
  * Dispatches engine commands at scheduled timestamps by walking each track's
- * keyframes and firing commands when the playback clock reaches them. All
- * actual work (camera, animation, dialogue, audio) routes through the existing
- * engine command pipeline — no new Rust systems required.
+ * keyframes and firing commands when the playback clock reaches them. Camera and
+ * animation route through the existing engine command pipeline — no new Rust
+ * systems required.
+ *
+ * Dialogue and audio do NOT, despite dispatching as though they did: see the
+ * KNOWN DEAD PATH notes in `buildCommand` and PF-1154. This header used to claim
+ * all four tracks worked, which is the only reason the gap survived this long.
  */
 
 import type { Cutscene, CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
@@ -153,23 +157,34 @@ export function buildCommand(
       // engine can only ignore, indistinguishable in a log from one that worked.
       const { clipName } = payload;
       if (typeof clipName !== 'string') return null;
-      return {
-        command: 'play_animation',
-        // `crossfadeSecs` is a non-negative finite number or absent by the time
-        // it gets here, so `??` is reading an absent field rather than papering
-        // over a bad one — it used to forward whatever the model wrote, string
-        // or object included.
-        payload: { entityId, clipName, crossfadeSecs: payload.crossfadeSecs ?? 0 },
-      };
+      // `crossfadeSecs` is a non-negative finite number or absent by the time it
+      // gets here — it used to be forwarded unread, string or object included.
+      // When it is absent the key is OMITTED rather than filled in with a local
+      // default: `handle_play_animation` reads it as `unwrap_or(0.3)`, so writing
+      // a `0` here would not be "no opinion", it would be an instant cut
+      // overriding the engine's own crossfade. Omission is how you ask for the
+      // engine default (PF-1126).
+      const animationPayload: Record<string, unknown> = { entityId, clipName };
+      if (payload.crossfadeSecs !== undefined) {
+        animationPayload.crossfadeSecs = payload.crossfadeSecs;
+      }
+      return { command: 'play_animation', payload: animationPayload };
     }
     case 'dialogue': {
-      // Dialogue keyframes mutate the dialogue store directly via the dispatcher.
       // Unlike the other tracks this one does not need an entity — a cutscene can
       // narrate without anyone speaking — but it does need a tree to start, and
       // `treeId` used to be forwarded unread, so a missing one started a dialogue
       // named `undefined`.
       const { treeId } = payload;
       if (typeof treeId !== 'string') return null;
+      // KNOWN DEAD PATH (PF-1154): `start_dialogue` is not a command the engine
+      // has an arm for, and nothing on the JS side intercepts it either — the
+      // dispatcher handed to this player is the raw engine dispatcher. Starting a
+      // dialogue is a store action (`useDialogueStore.getState().startDialogue`),
+      // which is how the script runtime does it. So this dispatch has never done
+      // anything, and `handle_command` answers it with an `Err` nobody reads.
+      // Routing it correctly changes cutscene playback behaviour, so it is its
+      // own change rather than a rider on payload validation.
       return {
         command: 'start_dialogue',
         payload: { treeId, entityId: entityId ?? undefined },
@@ -183,6 +198,11 @@ export function buildCommand(
         // from the audio vocabulary rather than being the model's own object.
         // The same line over the raw payload was the "never spread LLM objects
         // into engine commands" gotcha, with a model on the other end of it.
+        //
+        // KNOWN DEAD FIELDS (PF-1154): `handle_play_audio` reads `entityId` and
+        // nothing else, so the `volume` and `pitch` a generated cutscene asks for
+        // reach nothing. They belong on `set_audio`, which means dispatching two
+        // commands for one keyframe — a scheduler change, not a payload one.
         payload: { entityId, ...payload },
       };
     }
