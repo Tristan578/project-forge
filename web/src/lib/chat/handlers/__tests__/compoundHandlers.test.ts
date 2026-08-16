@@ -452,27 +452,69 @@ describe('compoundHandlers', () => {
       });
     });
 
-    it('clamps a game component value the model invented out of range', async () => {
+    it.each([
+      // [supplied value, what the engine's u32 coercion leaves]
+      [9_999_999, 1_000_000], // above U32_MAXES.collectible.value → clamped down
+      [-5, 0],                // below zero → clamped up; u32 has no negatives
+      [2.7, 3],               // fractional → rounded, as `prop_u32` rounds
+      ['not-a-number', 1],    // not a number at all → the field's default
+    ])('coerces an out-of-range collectible value %o to %o', async (supplied, expected) => {
       // The private builder cast every field straight through (`props.x as number`),
-      // so an LLM-supplied NaN/absurd value reached the engine verbatim. The
-      // shared builder clamps, which is the whole point of collapsing onto it.
+      // so an LLM-supplied absurd value reached the engine verbatim. Assert the
+      // EXACT resulting number: a `typeof === 'number'` check would still pass if
+      // the clamp were deleted, which is the failure this test exists to catch.
       const { store } = await invoke('create_scene_from_description', {
         entities: [
           {
             type: 'cube',
             name: 'Coin',
             gameComponent: 'collectible',
-            gameComponentProps: { value: 'not-a-number' },
+            gameComponentProps: { value: supplied },
           },
         ],
       }, {
         spawnEntity: vi.fn(() => 'e1'),
       });
 
-      const call = (store.addGameComponent as ReturnType<typeof vi.fn>).mock.calls[0];
-      const collectible = (call[1] as { collectible: { value: unknown } }).collectible;
-      expect(typeof collectible.value).toBe('number');
-      expect(Number.isFinite(collectible.value)).toBe(true);
+      expect(store.addGameComponent).toHaveBeenCalledWith('e1', {
+        type: 'collectible',
+        collectible: {
+          value: expected,
+          destroyOnCollect: true,
+          pickupSoundAsset: null,
+          rotateSpeed: 90,
+        },
+      });
+    });
+
+    it('collapses a win conditionType the engine cannot parse to its default', async () => {
+      // The handler's own builder used to cast `conditionType` straight through,
+      // so an LLM answering `'collect_all'` was STORED verbatim while the engine's
+      // `match` fell through to `WinConditionType::Score`. `dispatchCommand`
+      // returns void, so nothing reported that the inspector and the running game
+      // were describing different win conditions. Pinned here at the handler level
+      // — `gameComponentWire.test.ts` pins the same collapse at the builder.
+      const { store } = await invoke('create_scene_from_description', {
+        entities: [
+          {
+            type: 'cube',
+            name: 'Flag',
+            gameComponent: 'win_condition',
+            gameComponentProps: { conditionType: 'collect_all', targetScore: 25 },
+          },
+        ],
+      }, {
+        spawnEntity: vi.fn(() => 'e1'),
+      });
+
+      expect(store.addGameComponent).toHaveBeenCalledWith('e1', {
+        type: 'winCondition',
+        winCondition: {
+          conditionType: 'score',
+          targetScore: 25,
+          targetEntityId: null,
+        },
+      });
     });
 
     it('reparents entities using the distinct ids returned by spawnEntity', async () => {
