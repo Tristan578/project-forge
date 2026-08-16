@@ -19,7 +19,7 @@
  *
  *   - the PARSE boundary (`cutsceneGenerator`) decides what gets persisted into
  *     the store, exported with the project, and drawn in the timeline UI;
- *   - the DISPATCH boundary (`player.buildCommand`) decides what reaches the
+ *   - the DISPATCH boundary (`player.buildActions`) decides what reaches the
  *     engine, and it cannot assume the generator produced its input — the store
  *     also accepts `addKeyframe` from the timeline editor and cutscenes loaded
  *     from a saved project.
@@ -45,6 +45,23 @@ const readFiniteNumber: FieldReader = (value) =>
 
 const readNonNegativeNumber: FieldReader = (value) =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+
+/**
+ * Bound a value to a closed range, dropping anything outside it.
+ *
+ * Out of range is DROPPED rather than clamped. These payloads are model output,
+ * and a `volume` of `1e308` is not an author asking for maximum loudness — it is
+ * a field the generator got wrong. Dropping it leaves the engine on its own
+ * default, which is the documented way to say "no opinion" (PF-1126); silently
+ * clamping to `1` would invent an opinion the keyframe never expressed and hide
+ * the generator bug from anyone reading the saved cutscene.
+ */
+const readNumberInRange =
+  (min: number, max: number): FieldReader =>
+  (value) =>
+    typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
+      ? value
+      : undefined;
 
 /** Empty is dropped: a clip or tree named `""` addresses nothing. */
 const readNonEmptyString: FieldReader = (value) =>
@@ -99,9 +116,17 @@ const TRACK_PAYLOAD_FIELDS: Record<CutsceneTrackType, Record<string, FieldReader
     treeId: readNonEmptyString,
     text: readString,
   },
+  // Ranges are the audio graph's own, read off `audioManager`: it clamps volume
+  // to 0–1 (`audioManager.ts:387`) and pitch — a `playbackRate` — to 0.25–4
+  // (`:397`). Neither the engine's `AudioData` nor `handle_set_audio` bounds
+  // either field, so this is the only place they are checked. Nothing dispatches
+  // these two yet (see the audio arm of `buildActions` for why); they are
+  // authored onto the keyframe and consumed when PF-1155 wires entity audio
+  // through to the graph, and bounding them here is what keeps that wiring from
+  // inheriting an unbounded field.
   audio: {
-    volume: readNonNegativeNumber,
-    pitch: readFiniteNumber,
+    volume: readNumberInRange(0, 1),
+    pitch: readNumberInRange(0.25, 4),
   },
   wait: {},
 };
@@ -144,9 +169,9 @@ function isObject(value: unknown): value is Record<string, unknown> {
  * An unusable payload yields `{}` rather than a throw. A keyframe whose payload
  * the model got wrong is one dud beat in a timeline; failing the parse would
  * discard a whole generated cutscene over it, and every consumer already treats
- * a payload that names nothing actionable as a no-op — `buildCommand` returns
- * null for a camera keyframe with no mode, and now for an animation with no clip
- * and a dialogue with no tree.
+ * a payload that names nothing actionable as a no-op — `buildActions` returns an
+ * empty list for a camera keyframe with no mode, and now for an animation with
+ * no clip and a dialogue with no tree.
  */
 export function sanitizeKeyframePayload(
   trackType: CutsceneTrackType,

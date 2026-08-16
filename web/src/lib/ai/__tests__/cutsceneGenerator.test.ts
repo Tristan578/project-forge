@@ -83,7 +83,7 @@ const VALID_RESPONSE = JSON.stringify({
       // A camera track names the camera entity it configures, and its payload
       // speaks the one real camera vocabulary (`GameCameraMode` + the authoring
       // params `buildSetGameCameraPayload` translates). `entityId: null` or a
-      // PascalCase mode both make `buildCommand` return null at playback.
+      // PascalCase mode both make `buildActions` return an empty action list.
       entityId: 'cam1',
       muted: false,
       keyframes: [
@@ -319,7 +319,7 @@ describe('parseCutsceneResponse', () => {
   it('keeps a keyframe whose payload survives as empty', () => {
     // The beat's timing is real even when its content is not. Rejecting here
     // would throw away a whole generated cutscene over one bad payload, and
-    // `buildCommand` already treats a contentless payload as a no-op.
+    // `buildActions` already treats a contentless payload as a no-op.
     const raw = JSON.stringify({
       name: 'X',
       duration: 5,

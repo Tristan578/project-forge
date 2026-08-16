@@ -1,18 +1,18 @@
 /**
  * CutscenePlayer — rAF-based command scheduler for cutscene playback.
  *
- * Dispatches engine commands at scheduled timestamps by walking each track's
- * keyframes and firing commands when the playback clock reaches them. Camera and
- * animation route through the existing engine command pipeline — no new Rust
- * systems required.
+ * Walks each track's keyframes and performs what they ask for when the playback
+ * clock reaches them. Camera, animation and audio route through the existing
+ * engine command pipeline — no new Rust systems required. Dialogue does not:
+ * there is no engine command that starts one, so it goes to the dialogue store,
+ * which is where the script runtime starts dialogues from too.
  *
- * Dialogue and audio do NOT, despite dispatching as though they did: see the
- * KNOWN DEAD PATH notes in `buildCommand` and PF-1154. This header used to claim
- * all four tracks worked, which is the only reason the gap survived this long.
+ * A keyframe is not necessarily one command — see `CutsceneAction`.
  */
 
 import type { Cutscene, CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
 import { useCutsceneStore } from '@/stores/cutsceneStore';
+import { useDialogueStore } from '@/stores/dialogueStore';
 import {
   buildSetGameCameraPayload,
   isCameraMode,
@@ -27,6 +27,48 @@ import { sanitizeKeyframePayload } from './keyframePayload';
 // ============================================================================
 
 export type CommandDispatcher = (command: string, payload: unknown) => void;
+
+/**
+ * One thing a keyframe asks for when it fires.
+ *
+ * A keyframe is not one engine command. An audio beat is two (`set_audio` to
+ * carry the volume and pitch, then `play_audio` to start it), and a dialogue
+ * beat is not an engine command at all — starting a dialogue is a store action.
+ * Modelling that as data rather than as calls keeps `buildActions` pure, so the
+ * tests assert on what a keyframe asks for without standing up a store or a
+ * dispatcher.
+ */
+export type CutsceneAction =
+  | { kind: 'command'; command: string; payload: unknown }
+  | { kind: 'dialogue'; treeId: string };
+
+/*
+ * Every keyframe fires ONCE, when the playhead reaches its timestamp. A
+ * keyframe's `duration` describes how long its beat occupies the timeline, not
+ * how long to keep dispatching.
+ *
+ * `fireKeyframesAt` used to re-fire any duration-bearing keyframe every frame,
+ * which is wrong for every track this player has:
+ *
+ *   - `play_animation`, `play_audio` and `startDialogue` are TRIGGERS. Re-firing
+ *     restarts the thing they name, so a two-second keyframe on any of them
+ *     never advanced past its first instant.
+ *   - `set_game_camera` looks like a state — an absolute set that ought to be
+ *     idempotent — and an earlier revision of this file kept it continuous on
+ *     exactly that reasoning. The engine says otherwise.
+ *     `engine/src/bridge/game.rs:159-163` rebuilds the component as
+ *     `GameCameraData { mode, target_entity, ..Default::default() }`, zeroing
+ *     `shake_intensity`/`shake_duration`/`shake_timer`, and `:168-176`
+ *     re-inserts `OrbitalState::default()` / `FirstPersonState::default()`.
+ *     `cutsceneHandlers.ts` dispatches `play` before building this player, so
+ *     `PlaySystemSet` is live during playback: re-firing zeroed the orbital
+ *     angle accumulated at `core/game_camera.rs:594` and the first-person
+ *     yaw/pitch on every tick, and cancelled any in-flight camera shake.
+ *
+ * So the one track that was kept continuous was the one where re-firing was
+ * destructive, and it bought nothing: `set_game_camera` carries no progress
+ * (see `buildActions`), so every re-fire dispatched a byte-identical payload.
+ */
 
 export interface PlayerOptions {
   dispatchCommand: CommandDispatcher;
@@ -84,8 +126,8 @@ export function applyEasing(t: number, easing: CutsceneKeyframe['easing']): numb
  * the animation and audio tracks return null without an `entityId`.
  *
  * Exported for its tests, which are the only caller that reaches it with an
- * unsanitized payload. `buildCommand` sanitizes first, so every own-key guard
- * below is unreachable through it — testing them through `buildCommand` yields
+ * unsanitized payload. `buildActions` sanitizes first, so every own-key guard
+ * below is unreachable through it — testing them through `buildActions` yields
  * assertions that pass whether or not the guards are there. See the note beside
  * the numeric loop for why the guards stay regardless.
  */
@@ -132,22 +174,28 @@ export function buildCameraCommandPayload(
 }
 
 /**
- * Translate a keyframe payload into an engine command for the given track type.
- * Returns null if the track type is 'wait' (no command to dispatch).
+ * Translate a keyframe into the list of actions it asks for.
+ *
+ * Returns an empty list when the keyframe asks for nothing actionable — a
+ * `wait`, or a track whose payload names no clip, tree or entity. Callers fire
+ * every action in order.
+ *
+ * Takes no playback progress. The camera command used to carry an
+ * `_easedProgress` field, which no engine command has ever read and nothing on
+ * the JS side consumed either — so easing a camera keyframe has always been a
+ * no-op. Real interpolation would mean lerping JS-side between the camera's
+ * current and target state and dispatching each step, since `set_game_camera`
+ * has no interpolation of its own; that is a different function with a
+ * different shape, and `applyEasing` is the seam it will use. Threading a
+ * parameter that is structurally always `1` in the meantime would be an
+ * argument the receiver never reads — the same shape as the bugs this module
+ * exists to remove.
  */
-export function buildCommand(
+export function buildActions(
   trackType: CutsceneTrack['type'],
   entityId: string | null,
   keyframe: CutsceneKeyframe,
-  // Nothing consumes playback progress today. The camera command used to carry
-  // it as `_easedProgress`, a field no engine command has ever read and nothing
-  // on the JS side consumed either — so easing a camera keyframe has always been
-  // a no-op. Interpolating would mean lerping the camera between its current and
-  // target state JS-side and dispatching each step; `set_game_camera` is an
-  // absolute set with no interpolation of its own. The parameter stays so the
-  // scheduler's call sites keep their shape when that lands.
-  _progress: number,
-): { command: string; payload: unknown } | null {
+): CutsceneAction[] {
   // Read against the track type's vocabulary before anything below touches it.
   // This is the dispatch boundary, and it does not get to assume its input came
   // from the generator: the store also takes keyframes from the timeline editor
@@ -158,16 +206,16 @@ export function buildCommand(
   switch (trackType) {
     case 'camera': {
       const cameraPayload = buildCameraCommandPayload(entityId, payload);
-      if (!cameraPayload) return null;
-      return { command: 'set_game_camera', payload: cameraPayload };
+      if (!cameraPayload) return [];
+      return [{ kind: 'command', command: 'set_game_camera', payload: cameraPayload }];
     }
     case 'animation': {
-      if (!entityId) return null;
+      if (!entityId) return [];
       // No clip names nothing to play. This used to fall back to `''` and
       // dispatch anyway — a `play_animation` for the empty clip, which the
       // engine can only ignore, indistinguishable in a log from one that worked.
       const { clipName } = payload;
-      if (typeof clipName !== 'string') return null;
+      if (typeof clipName !== 'string') return [];
       // `crossfadeSecs` is a non-negative finite number or absent by the time it
       // gets here — it used to be forwarded unread, string or object included.
       // When it is absent the key is OMITTED rather than filled in with a local
@@ -179,7 +227,7 @@ export function buildCommand(
       if (payload.crossfadeSecs !== undefined) {
         animationPayload.crossfadeSecs = payload.crossfadeSecs;
       }
-      return { command: 'play_animation', payload: animationPayload };
+      return [{ kind: 'command', command: 'play_animation', payload: animationPayload }];
     }
     case 'dialogue': {
       // Unlike the other tracks this one does not need an entity — a cutscene can
@@ -187,40 +235,52 @@ export function buildCommand(
       // `treeId` used to be forwarded unread, so a missing one started a dialogue
       // named `undefined`.
       const { treeId } = payload;
-      if (typeof treeId !== 'string') return null;
-      // KNOWN DEAD PATH (PF-1154): `start_dialogue` is not a command the engine
-      // has an arm for, and nothing on the JS side intercepts it either — the
-      // dispatcher handed to this player is the raw engine dispatcher. Starting a
-      // dialogue is a store action (`useDialogueStore.getState().startDialogue`),
-      // which is how the script runtime does it. So this dispatch has never done
-      // anything, and `handle_command` answers it with an `Err` nobody reads.
-      // Routing it correctly changes cutscene playback behaviour, so it is its
-      // own change rather than a rider on payload validation.
-      return {
-        command: 'start_dialogue',
-        payload: { treeId, entityId: entityId ?? undefined },
-      };
+      if (typeof treeId !== 'string') return [];
+      // Not an engine command. This used to dispatch `start_dialogue`, which no
+      // arm in `engine/src/core/commands/` has ever handled and nothing JS-side
+      // intercepted either — the dispatcher handed to this player is the raw
+      // engine dispatcher, so `handle_command` answered with an `Err` that
+      // `dispatchCommand` (returning `void`) discarded. Starting a dialogue is a
+      // store action, which is how the script runtime has always done it.
+      //
+      // `entityId` is dropped rather than carried: `startDialogue` takes a tree
+      // and nothing else. Passing a speaker would need the store to hold one,
+      // which it does not — inventing a second argument here would be a field
+      // the receiver never reads, the same shape as the bug being fixed.
+      return [{ kind: 'dialogue', treeId }];
     }
     case 'audio': {
-      if (!entityId) return null;
-      return {
-        command: 'play_audio',
-        // Spreading is safe here only because `payload` is now built key by key
-        // from the audio vocabulary rather than being the model's own object.
-        // The same line over the raw payload was the "never spread LLM objects
-        // into engine commands" gotcha, with a model on the other end of it.
-        //
-        // KNOWN DEAD FIELDS (PF-1154): `handle_play_audio` reads `entityId` and
-        // nothing else, so the `volume` and `pitch` a generated cutscene asks for
-        // reach nothing. They belong on `set_audio`, which means dispatching two
-        // commands for one keyframe — a scheduler change, not a payload one.
-        payload: { entityId, ...payload },
-      };
+      if (!entityId) return [];
+      // `volume` and `pitch` are read off the keyframe (see
+      // `keyframePayload.ts`) and deliberately NOT dispatched. `handle_play_audio`
+      // reads `entityId` and nothing else, so they reach nothing here — but the
+      // obvious fix, prepending a `set_audio` with the two fields, is worse than
+      // the gap it closes, for two independent reasons:
+      //
+      //   1. It would not be audible. Nothing in the web app ever creates an
+      //      entity audio instance: `audioManager.createInstance` and
+      //      `.setVolume` — the only places a gain node is assigned — have no
+      //      production call site, so `audioManager.play(entityId)` (the one
+      //      consumer of the engine's AUDIO_PLAYBACK event) always takes its
+      //      `if (!instance)` branch and warns. Volume set engine-side reaches
+      //      ECS state and stops there.
+      //   2. It would mutate the project. `bridge/audio.rs:51-58` merges the
+      //      partial into the entity's persisted `AudioData`, inserts
+      //      `AudioEnabled`, and pushes an `UndoableAction::AudioChange` onto the
+      //      editor `HistoryStack` — during playback. Ctrl-Z after watching a
+      //      cutscene would undo the cutscene's writes instead of the user's last
+      //      edit, and the volume the cutscene asked for would outlive it in the
+      //      saved scene.
+      //
+      // So the audio track plays the sound and does not pretend to set its level.
+      // Wiring entity audio through to the Web Audio graph, and giving playback a
+      // command that is not scene-mutating, is PF-1155.
+      return [{ kind: 'command', command: 'play_audio', payload: { entityId } }];
     }
     case 'wait':
-      return null;
+      return [];
     default:
-      return null;
+      return [];
   }
 }
 
@@ -308,9 +368,17 @@ export class CutscenePlayer {
     const clamped = Math.max(0, Math.min(timeSecs, this.cutscene.duration));
     this.currentTime = clamped;
     useCutsceneStore.getState().setPlaybackTime(clamped);
-    // Re-mark keyframes before the seek point as fired so they don't replay
+    // Re-mark keyframes before the seek point as fired so they don't replay.
+    //
+    // Strictly before: `fireKeyframesAt` fires a keyframe once the playhead
+    // REACHES its timestamp (`timestamp > time` is what it skips), so a keyframe
+    // sitting exactly on the seek point is due, not done. Marking it fired here
+    // — which is what `<=` did — meant scrubbing precisely onto a beat was the
+    // one way to make it never play. It went unnoticed while duration-bearing
+    // keyframes re-fired every frame and the flag was re-cleared a frame later;
+    // now that every track fires once, `fired` is the only gate there is.
     for (const item of this.scheduled) {
-      item.fired = item.keyframe.timestamp <= clamped;
+      item.fired = item.keyframe.timestamp < clamped;
     }
     if (this.startTime !== null) {
       this.startTime = performance.now() - clamped * 1000;
@@ -356,7 +424,7 @@ export class CutscenePlayer {
     if (this.currentTime >= this.cutscene.duration) {
       this.currentTime = this.cutscene.duration;
       useCutsceneStore.getState().setPlaybackTime(this.currentTime);
-      this.fireKeyframesAt(this.currentTime);
+      this.fireKeyframesSafely(this.currentTime);
       this.rafHandle = null;
       useCutsceneStore.getState().setPlaybackState('idle');
       this.options.onComplete?.();
@@ -364,37 +432,51 @@ export class CutscenePlayer {
     }
 
     useCutsceneStore.getState().setPlaybackTime(this.currentTime);
-    this.fireKeyframesAt(this.currentTime);
+    this.fireKeyframesSafely(this.currentTime);
     this.scheduleFrame();
+  }
+
+  /**
+   * Fire a tick's keyframes without letting one bad keyframe end the playback.
+   *
+   * `scheduleFrame()` runs AFTER the fire call, so anything thrown out of a sink
+   * used to take the rAF loop with it: the cutscene froze mid-play with
+   * `isPlaying` still true, `onComplete` never ran, and the handler that returns
+   * the engine to Edit mode never dispatched — leaving the editor stuck in Play.
+   * One keyframe naming a tree that does not exist should cost that keyframe,
+   * not the rest of the cutscene, so the error is reported and the playhead
+   * moves on. `fireKeyframesAt` marks each keyframe fired BEFORE firing it, so a
+   * throwing keyframe is not retried on the next tick.
+   */
+  private fireKeyframesSafely(time: number): void {
+    try {
+      this.fireKeyframesAt(time);
+    } catch (err) {
+      console.error('[CutscenePlayer] Keyframe failed; continuing playback', err);
+    }
   }
 
   private fireKeyframesAt(time: number): void {
     for (const item of this.scheduled) {
       if (item.keyframe.timestamp > time) continue;
+      // Every track fires once; `duration` bounds the beat, not the dispatching.
+      // See the note above `buildActions` for why re-firing is wrong on all four.
+      if (item.fired) continue;
+      item.fired = true;
+      this.fire(item);
+    }
+  }
 
-      const elapsed = time - item.keyframe.timestamp;
-
-      if (item.keyframe.duration > 0) {
-        // Duration-based keyframe: re-fire every frame while within the window
-        // so that easing interpolation is applied continuously.
-        // Once elapsed exceeds duration AND we've already dispatched progress=1.0,
-        // skip further processing. The `fired` flag ensures the final frame is
-        // always dispatched even when rAF skips past the exact end boundary.
-        if (elapsed > item.keyframe.duration && item.fired) continue;
-        const progress = Math.min(elapsed / item.keyframe.duration, 1);
-        const cmd = buildCommand(item.trackType, item.entityId, item.keyframe, progress);
-        if (cmd) {
-          this.options.dispatchCommand(cmd.command, cmd.payload);
-        }
-        if (progress >= 1) item.fired = true;
+  /** Perform everything one keyframe asks for, in the order it asked. */
+  private fire(item: ScheduledKeyframe): void {
+    for (const action of buildActions(item.trackType, item.entityId, item.keyframe)) {
+      if (action.kind === 'command') {
+        this.options.dispatchCommand(action.command, action.payload);
       } else {
-        // Instantaneous keyframe: fire once only to avoid duplicate commands.
-        if (item.fired) continue;
-        const cmd = buildCommand(item.trackType, item.entityId, item.keyframe, 1);
-        if (cmd) {
-          this.options.dispatchCommand(cmd.command, cmd.payload);
-        }
-        item.fired = true;
+        // Read at call time, not captured at construction. The player is built
+        // once per playback and the store is a live singleton — holding onto
+        // `getState()` would pin the actions as they were when playback started.
+        useDialogueStore.getState().startDialogue(action.treeId);
       }
     }
   }

@@ -223,6 +223,28 @@ function executeActions(actions: DialogueAction[], variables: Record<string, unk
   }
 }
 
+/**
+ * Read a tree by id without walking the prototype chain.
+ *
+ * `dialogueTrees` is a plain object literal, so a bare `trees[treeId]` answers
+ * inherited keys as readily as own ones: `trees['__proto__']` returns
+ * `Object.prototype` — truthy — so the `if (!tree) return` guard every caller
+ * relies on passes, and the next line reads `tree.nodes` off it as `undefined`
+ * and throws. `constructor`, `toString`, `valueOf` and `hasOwnProperty` behave
+ * the same way.
+ *
+ * Tree ids are not trusted input. They arrive from generated cutscene keyframes
+ * (model output) and from `forge.dialogue.start()` in user scripts, neither of
+ * which is constrained to ids that exist.
+ */
+function getTree(
+  trees: Record<string, DialogueTree>,
+  treeId: string | null,
+): DialogueTree | undefined {
+  if (treeId === null) return undefined;
+  return Object.hasOwn(trees, treeId) ? trees[treeId] : undefined;
+}
+
 // ============================================================================
 // Store
 // ============================================================================
@@ -285,7 +307,7 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
 
   updateTree: (treeId: string, updates: Partial<Pick<DialogueTree, 'name' | 'variables'>>) => {
     set(state => {
-      const tree = state.dialogueTrees[treeId];
+      const tree = getTree(state.dialogueTrees, treeId);
       if (!tree) return state;
 
       return {
@@ -299,7 +321,7 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
   },
 
   duplicateTree: (treeId: string) => {
-    const tree = get().dialogueTrees[treeId];
+    const tree = getTree(get().dialogueTrees, treeId);
     if (!tree) return null;
 
     const newTreeId = generateId('tree');
@@ -360,7 +382,7 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
   // Node CRUD
   addNode: (treeId: string, node: DialogueNode) => {
     set(state => {
-      const tree = state.dialogueTrees[treeId];
+      const tree = getTree(state.dialogueTrees, treeId);
       if (!tree) return state;
 
       return {
@@ -378,7 +400,7 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
 
   updateNode: (treeId: string, nodeId: string, updates: Partial<DialogueNode>) => {
     set(state => {
-      const tree = state.dialogueTrees[treeId];
+      const tree = getTree(state.dialogueTrees, treeId);
       if (!tree) return state;
 
       const nodeIndex = tree.nodes.findIndex(n => n.id === nodeId);
@@ -399,7 +421,7 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
 
   removeNode: (treeId: string, nodeId: string) => {
     set(state => {
-      const tree = state.dialogueTrees[treeId];
+      const tree = getTree(state.dialogueTrees, treeId);
       if (!tree) return state;
       if (nodeId === tree.startNodeId) return state; // Can't delete start node
 
@@ -444,7 +466,7 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
 
   // Runtime actions
   startDialogue: (treeId: string) => {
-    const tree = get().dialogueTrees[treeId];
+    const tree = getTree(get().dialogueTrees, treeId);
     if (!tree) return;
 
     const startNode = tree.nodes.find(n => n.id === tree.startNodeId);
@@ -470,7 +492,7 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
     const { runtime, dialogueTrees } = get();
     if (!runtime.activeTreeId || !runtime.currentNodeId) return;
 
-    const tree = dialogueTrees[runtime.activeTreeId];
+    const tree = getTree(dialogueTrees, runtime.activeTreeId);
     if (!tree) return;
 
     const currentNode = tree.nodes.find(n => n.id === runtime.currentNodeId);
@@ -499,7 +521,7 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
     const { runtime, dialogueTrees } = get();
     if (!runtime.activeTreeId || !runtime.currentNodeId) return;
 
-    const tree = dialogueTrees[runtime.activeTreeId];
+    const tree = getTree(dialogueTrees, runtime.activeTreeId);
     if (!tree) return;
 
     const currentNode = tree.nodes.find(n => n.id === runtime.currentNodeId);
@@ -525,7 +547,7 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
     const { runtime, dialogueTrees } = get();
     if (!runtime.activeTreeId || !runtime.currentNodeId) return;
 
-    const tree = dialogueTrees[runtime.activeTreeId];
+    const tree = getTree(dialogueTrees, runtime.activeTreeId);
     if (!tree) return;
 
     const currentNode = tree.nodes.find(n => n.id === runtime.currentNodeId);
@@ -587,7 +609,7 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
 
   // Import/Export
   exportTree: (treeId: string) => {
-    const tree = get().dialogueTrees[treeId];
+    const tree = getTree(get().dialogueTrees, treeId);
     if (!tree) return null;
 
     try {
@@ -626,7 +648,7 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
     const { runtime, dialogueTrees } = get();
     if (!runtime.activeTreeId || !runtime.currentNodeId) return;
 
-    const tree = dialogueTrees[runtime.activeTreeId];
+    const tree = getTree(dialogueTrees, runtime.activeTreeId);
     if (!tree) return;
 
     const currentNode = tree.nodes.find(n => n.id === runtime.currentNodeId);

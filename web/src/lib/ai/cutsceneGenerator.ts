@@ -136,7 +136,7 @@ function validateKeyframe(
   // A payload that survives as `{}` is kept rather than rejected: the keyframe's
   // timing is real even when its content is not, and dropping a beat mid-timeline
   // shifts nothing but silently loses the author's intent to have something
-  // happen there. `buildCommand` already treats a contentless payload as a no-op.
+  // happen there. `buildActions` already treats a contentless payload as a no-op.
   const payload = sanitizeKeyframePayload(trackType, data.payload);
 
   return {
