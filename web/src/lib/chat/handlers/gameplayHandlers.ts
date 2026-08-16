@@ -95,7 +95,11 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({
       entityId: zEntityId,
       mode: zGameCameraMode,
-      targetEntity: z.string().optional(),
+      // `zEntityId` (min 1), not a bare string: `parseGameCameraWire` normalizes
+      // `''` back to `null` on the way in precisely because an empty id is
+      // truthy-but-unresolvable to every consumer, so it must not be storable
+      // on the way out either.
+      targetEntity: zEntityId.optional(),
       followDistance: z.number().optional(),
       followHeight: z.number().optional(),
       followSmoothing: z.number().optional(),
@@ -130,6 +134,17 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     if (Object.hasOwn(ctx.store.allGameCameras, d.entityId)) {
       const existing = ctx.store.allGameCameras[d.entityId];
       if (existing) {
+        // The follow target is the field that decides whether the camera moves
+        // AT ALL — `cameraModeNeedsTarget` lists five of the six modes as inert
+        // without one, and the engine skips the whole update arm when
+        // `target_entity` is `None`. So it is the most consequential field to
+        // carry forward, not the least: without this, "raise the camera" detaches
+        // it from the player and the game shows a motionless camera. The
+        // inspector already does this deliberately (`handleModeChange` in
+        // GameCameraInspector.tsx keeps `primaryGameCamera?.targetEntity`).
+        if (d.targetEntity === undefined && existing.targetEntity) {
+          cameraData.targetEntity = existing.targetEntity;
+        }
         for (const key of NUMERIC_CAMERA_FIELDS) {
           const value = existing[key];
           if (typeof value === 'number' && Number.isFinite(value)) cameraData[key] = value;
