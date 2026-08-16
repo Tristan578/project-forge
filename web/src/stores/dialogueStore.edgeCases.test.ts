@@ -4,7 +4,7 @@
  * Covers gaps not addressed by dialogueStore.test.ts:
  * - Broken startNodeId (orphan start reference)
  * - Deeply nested AND/OR conditions (3+ levels)
- * - Potential cycle / deep recursion in condition/action chains
+ * - Cyclic condition/action chains and the hop cap that bounds them (PF-1146)
  * - Empty-text typewriter state
  * - duplicate tree with choice and action nodes
  * - Corrupted localStorage data
@@ -18,9 +18,11 @@
  * - importTree produces a new name suffix
  * - updateTree merges variables without clobbering unrelated keys
  */
-import { describe, it, expect, beforeEach } from 'vitest';
-import { useDialogueStore } from './dialogueStore';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
+import { useDialogueStore, MAX_DIALOGUE_HOPS } from './dialogueStore';
 import type {
+  DialogueNode,
   TextNode,
   ChoiceNode,
   ConditionNode,
@@ -1325,6 +1327,139 @@ describe('dialogueStore — edge cases (PF-360)', () => {
       const tree = useDialogueStore.getState().dialogueTrees[treeId as string];
       expect(tree.nodes).toEqual([treeWithNulls.nodes[1]]);
       expect(tree.name).toBe('Imported (Imported)');
+    });
+  });
+
+  // =========================================================================
+  // Cyclic condition/action chains (PF-1146)
+  // =========================================================================
+
+  describe('cyclic condition/action chains', () => {
+    let errorSpy: MockInstance<typeof console.error>;
+
+    beforeEach(() => {
+      // The guard reports on the way out; silence it so a deliberate cycle
+      // does not print a wall of red in an otherwise passing run.
+      errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      errorSpy.mockRestore();
+    });
+
+    /** Install `nodes` as a tree whose start node is `nodes[0]`. */
+    function seedTree(nodes: DialogueNode[], variables: Record<string, unknown> = {}) {
+      useDialogueStore.setState({
+        dialogueTrees: {
+          tree_cycle: {
+            id: 'tree_cycle',
+            name: 'Cycle',
+            nodes,
+            startNodeId: nodes[0].id,
+            variables,
+          },
+        },
+      });
+      return 'tree_cycle';
+    }
+
+    it('does not blow the stack on a condition ⇄ action cycle', () => {
+      // `cond` routes to `act`, `act` routes back to `cond`, and neither
+      // waits for the player. Recursion turned this into a RangeError that
+      // took down the play session; the tree shape is exactly what an AI
+      // authoring a branch that "loops back" produces.
+      const cond: ConditionNode = {
+        id: 'cond',
+        type: 'condition',
+        condition: { type: 'equals', variable: 'flag', value: true },
+        onTrue: 'act',
+        onFalse: 'act',
+      };
+      const act: ActionNode = {
+        id: 'act',
+        type: 'action',
+        actions: [{ type: 'set_state', key: 'flag', value: true }],
+        next: 'cond',
+      };
+
+      const treeId = seedTree([cond, act]);
+
+      expect(() => useDialogueStore.getState().startDialogue(treeId)).not.toThrow();
+      expect(useDialogueStore.getState().runtime.isActive).toBe(false);
+      expect(errorSpy).toHaveBeenCalled();
+    });
+
+    it('stops a self-looping action node after exactly MAX_DIALOGUE_HOPS passes', () => {
+      // Pins the cap itself. Each pass runs the increment once, so the counter
+      // is the number of hops taken — if the loop ever runs one iteration long
+      // or short, this reads a different number rather than merely "finished".
+      const act: ActionNode = {
+        id: 'act',
+        type: 'action',
+        actions: [{ type: 'increment', key: 'n', amount: 1 }],
+        next: 'act',
+      };
+
+      const treeId = seedTree([act], { n: 0 });
+      useDialogueStore.getState().startDialogue(treeId);
+
+      expect(
+        useDialogueStore.getState().dialogueTrees[treeId].variables.n
+      ).toBe(MAX_DIALOGUE_HOPS);
+      expect(useDialogueStore.getState().runtime.isActive).toBe(false);
+    });
+
+    it('still runs a counter-driven loop that resolves on its own', () => {
+      // The reason the guard is a hop cap and not a visited-node set: this
+      // tree revisits both `cond` and `act`, but `act` mutates the variable
+      // `cond` reads, so it terminates by design after three passes. A
+      // visited-set would have refused it on the second pass and ended a
+      // perfectly good conversation early.
+      const cond: ConditionNode = {
+        id: 'cond',
+        type: 'condition',
+        condition: { type: 'less', variable: 'n', value: 3 },
+        onTrue: 'act',
+        onFalse: 'done',
+      };
+      const act: ActionNode = {
+        id: 'act',
+        type: 'action',
+        actions: [{ type: 'increment', key: 'n', amount: 1 }],
+        next: 'cond',
+      };
+      const done: TextNode = {
+        id: 'done',
+        type: 'text',
+        speaker: 'Guide',
+        text: 'Three times is enough.',
+        next: null,
+      };
+
+      const treeId = seedTree([cond, act, done], { n: 0 });
+      useDialogueStore.getState().startDialogue(treeId);
+
+      expect(useDialogueStore.getState().runtime.isActive).toBe(true);
+      expect(useDialogueStore.getState().runtime.currentNodeId).toBe('done');
+      expect(useDialogueStore.getState().runtime.displayedText).toBe('Three times is enough.');
+      expect(useDialogueStore.getState().dialogueTrees[treeId].variables.n).toBe(3);
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it('ends the dialogue on a node whose type it does not recognize', () => {
+      // `importTree` JSON.parses without validating, so a node type outside
+      // the union reaches the runtime. Such a node changes no state, so
+      // without its own arm it would spin the loop all the way to the cap.
+      const bogus = { id: 'weird', type: 'monologue' } as unknown as DialogueNode;
+
+      const treeId = seedTree([bogus]);
+      useDialogueStore.getState().startDialogue(treeId);
+
+      expect(useDialogueStore.getState().runtime.isActive).toBe(false);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('unrecognized type'),
+        'monologue'
+      );
     });
   });
 });

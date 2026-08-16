@@ -152,6 +152,19 @@ function generateId(prefix: string): string {
 }
 
 /**
+ * How many `condition`/`action` nodes one `processCurrentNode` walk may cross
+ * before it gives up and ends the dialogue.
+ *
+ * Only nodes that route onward without waiting for the player count against
+ * it — every `text`, `choice` and `end` node returns immediately — so a
+ * conversation of any length never approaches this. It exists solely to stop a
+ * cyclic tree from looping forever (PF-1146).
+ *
+ * Exported so tests assert against this value rather than a second copy of it.
+ */
+export const MAX_DIALOGUE_HOPS = 1000;
+
+/**
  * `and` / `or` over a nested condition list, written as indexed loops.
  *
  * `.every` and `.some` SKIP holes, so `[c1, , c2]` reported the whole AND-group
@@ -723,90 +736,126 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
 
   // Internal helper to process current node
   processCurrentNode: () => {
-    const { runtime, dialogueTrees } = get();
-    if (!runtime.activeTreeId || !runtime.currentNodeId) return;
+    // `condition` and `action` nodes route straight on to another node without
+    // waiting for the player, so a tree that cycles through only those two
+    // types never yields. This used to recurse, which meant such a cycle blew
+    // the JS stack with a RangeError and took the whole play session with it —
+    // and dialogue trees are authored by the AI (`dialogueHandlers.ts`) or
+    // imported from arbitrary JSON (`importTree`), so nothing upstream
+    // guarantees they are acyclic. Walk iteratively under a hop cap instead.
+    //
+    // A hop cap rather than a visited-node set: `executeActions` mutates
+    // `tree.variables` in place and `evaluateCondition` reads that same
+    // object, so "increment a counter, loop back, stop once it reaches three"
+    // is a legitimate authored pattern that terminates on its own. A
+    // visited-set would refuse it the second time through.
+    for (let hops = 0; hops < MAX_DIALOGUE_HOPS; hops++) {
+      const { runtime, dialogueTrees } = get();
+      if (!runtime.activeTreeId || !runtime.currentNodeId) return;
 
-    const tree = dialogueTrees[runtime.activeTreeId];
-    if (!tree) return;
+      const tree = dialogueTrees[runtime.activeTreeId];
+      if (!tree) return;
 
-    const currentNode = tree.nodes.find(n => n.id === runtime.currentNodeId);
-    if (!currentNode) return;
+      const currentNode = tree.nodes.find(n => n.id === runtime.currentNodeId);
+      if (!currentNode) return;
 
-    switch (currentNode.type) {
-      case 'text': {
-        // Add to history and set displayed text
-        set(state => ({
-          runtime: {
-            ...state.runtime,
-            displayedText: currentNode.text,
-            typewriterComplete: true,
-            history: [
-              ...state.runtime.history,
-              { speaker: currentNode.speaker, text: currentNode.text },
-            ],
-          },
-        }));
-        break;
-      }
+      switch (currentNode.type) {
+        case 'text': {
+          // Add to history and set displayed text
+          set(state => ({
+            runtime: {
+              ...state.runtime,
+              displayedText: currentNode.text,
+              typewriterComplete: true,
+              history: [
+                ...state.runtime.history,
+                { speaker: currentNode.speaker, text: currentNode.text },
+              ],
+            },
+          }));
+          return;
+        }
 
-      case 'choice': {
-        // Filter choices by condition
-        const availableChoices = currentNode.choices.filter(c => {
-          if (!c.condition) return true;
-          return evaluateCondition(c.condition, tree.variables);
-        });
+        case 'choice': {
+          // Filter choices by condition
+          const availableChoices = currentNode.choices.filter(c => {
+            if (!c.condition) return true;
+            return evaluateCondition(c.condition, tree.variables);
+          });
 
-        set(state => ({
-          runtime: {
-            ...state.runtime,
-            currentChoices: availableChoices,
-          },
-        }));
-        break;
-      }
+          set(state => ({
+            runtime: {
+              ...state.runtime,
+              currentChoices: availableChoices,
+            },
+          }));
+          return;
+        }
 
-      case 'condition': {
-        // Evaluate and route
-        const result = evaluateCondition(currentNode.condition, tree.variables);
-        const nextNodeId = result ? currentNode.onTrue : currentNode.onFalse;
+        case 'condition': {
+          // Evaluate and route
+          const result = evaluateCondition(currentNode.condition, tree.variables);
+          const nextNodeId = result ? currentNode.onTrue : currentNode.onFalse;
 
-        if (nextNodeId) {
+          if (!nextNodeId) {
+            get().endDialogue();
+            return;
+          }
           set(state => ({
             runtime: {
               ...state.runtime,
               currentNodeId: nextNodeId,
             },
           }));
-          get().processCurrentNode(); // Recurse
-        } else {
-          get().endDialogue();
+          continue;
         }
-        break;
-      }
 
-      case 'action': {
-        // Execute actions and route
-        executeActions(currentNode.actions, tree.variables);
+        case 'action': {
+          // Execute actions and route
+          executeActions(currentNode.actions, tree.variables);
 
-        if (currentNode.next) {
+          if (!currentNode.next) {
+            get().endDialogue();
+            return;
+          }
           set(state => ({
             runtime: {
               ...state.runtime,
               currentNodeId: currentNode.next,
             },
           }));
-          get().processCurrentNode(); // Recurse
-        } else {
-          get().endDialogue();
+          continue;
         }
-        break;
-      }
 
-      case 'end': {
-        get().endDialogue();
-        break;
+        case 'end': {
+          get().endDialogue();
+          return;
+        }
+
+        default: {
+          // Unreachable for a well-formed tree, but `importTree` JSON.parses
+          // without validating, so a node can carry any `type` at runtime.
+          // Falling through would leave `currentNodeId` unchanged and spin the
+          // loop to the cap; end the dialogue instead of stalling on it.
+          console.error(
+            'Dialogue node has an unrecognized type; ending dialogue:',
+            (currentNode as DialogueNode).type
+          );
+          get().endDialogue();
+          return;
+        }
       }
     }
+
+    // The cap is a backstop for a cycle that never resolves, not a limit any
+    // real conversation should approach. End the dialogue rather than leave
+    // the player stuck on a node that will never render.
+    console.error(
+      `Dialogue exceeded ${MAX_DIALOGUE_HOPS} node transitions without reaching ` +
+        'text, a choice, or an end — the tree most likely contains a cycle of ' +
+        'condition/action nodes. Ending dialogue.'
+    );
+    get().endDialogue();
   },
 }));
 
