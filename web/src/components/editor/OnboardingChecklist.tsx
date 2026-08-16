@@ -101,7 +101,10 @@ const CHECKLIST_TASKS: ChecklistTask[] = [
     category: 'advanced',
     // Any entity carrying audio completes this, not just the most recently
     // changed one — the store holds a map now rather than a single component.
-    checkCompletion: (state) => Object.keys(state.entityAudio).length > 0,
+    // `?? {}` because these predicates run against whatever state snapshot they
+    // are handed; `Object.keys(undefined)` throws, and a checklist item must
+    // never be able to take down the panel that renders it.
+    checkCompletion: (state) => Object.keys(state.entityAudio ?? {}).length > 0,
   },
   {
     id: 'build-ui',

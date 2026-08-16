@@ -87,8 +87,15 @@ const appliedSignatures = new Map<string, string>();
  * dispatch that must still happen, since the engine's copy of the asset
  * metadata is what the scene and the asset panel are built from. A clip whose
  * bytes we cannot decode should be a silent clip, not a failed import.
+ *
+ * The parameter is `unknown` because the callers upstream are generation
+ * handlers reading a field off an HTTP response body. A provider can answer 200
+ * with no artifact at all (see the documented provider-success-with-no-artifact
+ * class), and `undefined.startsWith` is a `TypeError` thrown out of a store
+ * action — not the silent clip this function promises.
  */
-export function decodeBase64ToArrayBuffer(base64: string): ArrayBuffer | null {
+export function decodeBase64ToArrayBuffer(base64: unknown): ArrayBuffer | null {
+  if (typeof base64 !== 'string') return null;
   const payload = base64.startsWith('data:') ? (base64.split(',')[1] ?? '') : base64;
   if (!payload) return null;
   try {

@@ -327,8 +327,14 @@ export const generationHandlers: Record<string, ToolHandler> = {
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
 
+    // A provider can answer 200 with no artifact — the documented
+    // provider-success-with-no-artifact class — and `as string` made that a
+    // `TypeError` thrown out of a store action instead of a reported failure.
+    if (typeof data.audioBase64 !== 'string' || data.audioBase64.length === 0) {
+      return { success: false, error: 'Sound effect generation produced no audio' };
+    }
     const assetName = `sfx-${p.data.prompt.slice(0, 20)}`;
-    ctx.store.importAudio(data.audioBase64 as string, assetName);
+    ctx.store.importAudio(data.audioBase64, assetName);
     if (p.data.entityId) {
       const spatial = getSpatialDefaults(inferSfxCategory(p.data.prompt));
       ctx.store.setAudio(p.data.entityId, {
@@ -368,8 +374,12 @@ export const generationHandlers: Record<string, ToolHandler> = {
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
 
+    // Same provider-success-with-no-artifact guard as the SFX path above.
+    if (typeof data.audioBase64 !== 'string' || data.audioBase64.length === 0) {
+      return { success: false, error: 'Voice generation produced no audio' };
+    }
     const assetName = `voice-${p.data.text.slice(0, 20)}`;
-    ctx.store.importAudio(data.audioBase64 as string, assetName);
+    ctx.store.importAudio(data.audioBase64, assetName);
     if (p.data.entityId) {
       const spatial = getSpatialDefaults('voice');
       ctx.store.setAudio(p.data.entityId, {
@@ -447,9 +457,12 @@ export const generationHandlers: Record<string, ToolHandler> = {
     // Music API may return audioBase64 (sync) or jobId (async)
     const musicEntityId = p.data.targetEntityId ?? p.data.entityId;
     const musicAutoPlace = p.data.autoPlace ?? !!musicEntityId;
-    if (data.audioBase64) {
+    // `typeof`, not truthiness: this branch decides between the sync and async
+    // paths, and a truthy non-string would take the sync path and then be cast
+    // to `string` on the way into a store action.
+    if (typeof data.audioBase64 === 'string' && data.audioBase64.length > 0) {
       const assetName = `music-${p.data.prompt.slice(0, 20)}`;
-      ctx.store.importAudio(data.audioBase64 as string, assetName);
+      ctx.store.importAudio(data.audioBase64, assetName);
       if (musicEntityId && musicAutoPlace) {
         ctx.store.setAudio(musicEntityId, {
           assetId: assetName,
