@@ -50,7 +50,12 @@ const MUSIC_DEFAULTS = {
   refDistance: 1,
   rolloffFactor: 1,
   autoplay: true,
-} as const;
+  // `satisfies` and not a bare `as const`: these keys are spread straight into
+  // `setAudio`, and a key the engine's `AudioData` does not carry deserializes
+  // to nothing — a silent no-op with no exception, no log and no failing test
+  // (the `dispatchCommand` defect class in `rules/gotchas.md`). This makes a
+  // misspelling a compile error instead.
+} as const satisfies Partial<AudioData>;
 
 /**
  * The asset name is also what lands in the entity's `assetId`, which is not an

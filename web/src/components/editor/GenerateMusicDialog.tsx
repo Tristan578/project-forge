@@ -97,9 +97,15 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
         providerJobId: data.jobId,
         type: 'music',
         prompt: prompt.trim(),
-        provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.music,
+        // `typeof` and not a cast: `data` is a parsed API response, so a cast
+        // asserts a shape rather than checking one. `usageId` is the key the
+        // async refund is keyed on — a non-string surviving as one is a job
+        // that can never be refunded.
+        provider: typeof data.provider === 'string' && data.provider.length > 0
+          ? data.provider
+          : DIRECT_CAPABILITY_PROVIDER.music,
         entityId: target,
-        usageId: data.usageId as string | undefined,
+        usageId: typeof data.usageId === 'string' ? data.usageId : undefined,
         autoPlace: !!target,
         targetEntityId: target,
       });

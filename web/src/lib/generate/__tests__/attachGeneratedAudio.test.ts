@@ -1,16 +1,23 @@
 /**
  * @vitest-environment node
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';
 import {
   attachGeneratedAudio,
   generatedAudioAssetName,
   type GeneratedAudioSink,
 } from '../attachGeneratedAudio';
 
-function sink(): GeneratedAudioSink & {
-  importAudio: ReturnType<typeof vi.fn>;
-  setAudio: ReturnType<typeof vi.fn>;
+/**
+ * `Mock<T>` and not `ReturnType<typeof vi.fn>`: the bare return type is
+ * `Mock<Procedure | Constructable>`, which does not satisfy the sink's own
+ * signatures, so intersecting the two produces a type nothing can inhabit.
+ * Parameterising each mock keeps the spy assertions typed against the real
+ * signature instead.
+ */
+function sink(): {
+  importAudio: Mock<GeneratedAudioSink['importAudio']>;
+  setAudio: Mock<GeneratedAudioSink['setAudio']>;
 } {
   return { importAudio: vi.fn(), setAudio: vi.fn() };
 }
