@@ -422,6 +422,59 @@ describe('compoundHandlers', () => {
       expect(store.updatePhysics).toHaveBeenCalled();
     });
 
+    it('attaches a dialogue_trigger game component', async () => {
+      // REGRESSION (PF-1142): this handler used to own a private component
+      // builder that covered 12 of the 13 types — dialogue_trigger fell to its
+      // `default:` arm and returned null, so a compound scene could never
+      // attach one and nothing anywhere reported the drop.
+      const { store } = await invoke('create_scene_from_description', {
+        entities: [
+          {
+            type: 'cube',
+            name: 'Elder',
+            gameComponent: 'dialogue_trigger',
+            gameComponentProps: { treeId: 'intro', triggerRadius: 5 },
+          },
+        ],
+      }, {
+        spawnEntity: vi.fn(() => 'e1'),
+      });
+
+      expect(store.addGameComponent).toHaveBeenCalledWith('e1', {
+        type: 'dialogueTrigger',
+        dialogueTrigger: {
+          treeId: 'intro',
+          triggerRadius: 5,
+          requireInteract: true,
+          interactKey: 'interact',
+          oneShot: false,
+        },
+      });
+    });
+
+    it('clamps a game component value the model invented out of range', async () => {
+      // The private builder cast every field straight through (`props.x as number`),
+      // so an LLM-supplied NaN/absurd value reached the engine verbatim. The
+      // shared builder clamps, which is the whole point of collapsing onto it.
+      const { store } = await invoke('create_scene_from_description', {
+        entities: [
+          {
+            type: 'cube',
+            name: 'Coin',
+            gameComponent: 'collectible',
+            gameComponentProps: { value: 'not-a-number' },
+          },
+        ],
+      }, {
+        spawnEntity: vi.fn(() => 'e1'),
+      });
+
+      const call = (store.addGameComponent as ReturnType<typeof vi.fn>).mock.calls[0];
+      const collectible = (call[1] as { collectible: { value: unknown } }).collectible;
+      expect(typeof collectible.value).toBe('number');
+      expect(Number.isFinite(collectible.value)).toBe(true);
+    });
+
     it('reparents entities using the distinct ids returned by spawnEntity', async () => {
       // Each spawn returns a distinct id derived from the name, proving the
       // name→id map is built from spawnEntity's return value (not stale primaryId).
@@ -926,7 +979,10 @@ describe('compoundHandlers', () => {
       expect(store.togglePhysics).toHaveBeenCalledWith('id-Player', true);
       expect(store.addGameComponent).toHaveBeenCalledWith(
         'id-Player',
-        expect.objectContaining({ type: 'characterController' }),
+        {
+          type: 'characterController',
+          characterController: { speed: 5, jumpHeight: 8, gravityScale: 1, canDoubleJump: false },
+        },
       );
       // The Player must be a DYNAMIC body — that is what generates the collision
       // PAIRS with the static sensor coins/goal. A non-dynamic player produces
@@ -940,7 +996,10 @@ describe('compoundHandlers', () => {
       // Coins are collectibles with a trigger zone.
       expect(store.addGameComponent).toHaveBeenCalledWith(
         'id-Coin_0',
-        expect.objectContaining({ type: 'collectible' }),
+        {
+          type: 'collectible',
+          collectible: { value: 1, destroyOnCollect: true, pickupSoundAsset: null, rotateSpeed: 90 },
+        },
       );
 
       // WINNABILITY / INTERACTIVITY GUARD (#8541, #8764) — the regression this
@@ -975,7 +1034,10 @@ describe('compoundHandlers', () => {
       // Goal carries exactly one win_condition.
       expect(store.addGameComponent).toHaveBeenCalledWith(
         'id-Goal',
-        expect.objectContaining({ type: 'winCondition' }),
+        {
+          type: 'winCondition',
+          winCondition: { conditionType: 'reachGoal', targetScore: 10, targetEntityId: 'id-Goal' },
+        },
       );
       const winCalls = (store.addGameComponent as ReturnType<typeof vi.fn>).mock.calls.filter(
         (c) => (c[1] as { type?: string })?.type === 'winCondition',
@@ -1091,7 +1153,10 @@ describe('compoundHandlers', () => {
       // The single enemy is a follower targeting the player id.
       expect(store.addGameComponent).toHaveBeenCalledWith(
         'id-Enemy_0',
-        expect.objectContaining({ type: 'follower' }),
+        {
+          type: 'follower',
+          follower: { targetEntityId: 'id-Player', speed: 3, stopDistance: 1.5, lookAtTarget: true },
+        },
       );
     });
 
@@ -1116,7 +1181,15 @@ describe('compoundHandlers', () => {
       // key 'moving_platform' builds a component with the camelCase discriminant.
       expect(store.addGameComponent).toHaveBeenCalledWith(
         'id-Enemy_0',
-        expect.objectContaining({ type: 'movingPlatform' }),
+        {
+          type: 'movingPlatform',
+          movingPlatform: {
+            speed: 2,
+            waypoints: [[0, 1, 8], [0, 1, 4]],
+            pauseDuration: 0.5,
+            loopMode: 'pingPong',
+          },
+        },
       );
     });
   });
