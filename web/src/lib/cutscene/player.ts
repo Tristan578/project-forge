@@ -22,6 +22,7 @@ import {
   isCameraMode,
   normalizeTargetEntity,
   NUMERIC_CAMERA_FIELDS,
+  readCameraFieldValue,
 } from '@/lib/game/gameCameraPayload';
 import type { SetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 import type { GameCameraData } from '@/stores/slices/types';
@@ -150,8 +151,14 @@ export function readCameraData(payload: Record<string, unknown>): GameCameraData
     // call site that reads a payload from somewhere else would inherit the hole
     // rather than a type error.
     if (!Object.hasOwn(payload, key)) continue;
-    const value = payload[key];
-    if (typeof value === 'number' && Number.isFinite(value)) data[key] = value;
+    // Finite AND in range for that field, for the same reason the own-key guard
+    // stays: `sanitizeKeyframePayload` applies the identical policy ahead of
+    // this, but the guarantee belongs to the caller, and the parameter promises
+    // only `Record<string, unknown>`. Seven of the nine fields cannot hold a
+    // negative — a negative `followSmoothing` makes the follow diverge instead
+    // of converge — while `followHeight` and `orbitalAutoRotateSpeed` can.
+    const value = readCameraFieldValue(key, payload[key]);
+    if (value !== undefined) data[key] = value;
   }
 
   return data;

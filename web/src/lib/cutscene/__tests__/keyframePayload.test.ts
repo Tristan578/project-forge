@@ -74,6 +74,31 @@ describe('sanitizeKeyframePayload', () => {
       raw.mode = 'topDown';
       expect(sanitizeKeyframePayload('camera', raw)).toEqual({ mode: 'topDown' });
     });
+
+    /**
+     * The readers come from `gameCameraPayload`, so the sign policy is asserted
+     * in full there. What these two pin is that this table actually USES them:
+     * mapping every numeric field to a shared `readFiniteNumber` was the shape
+     * this file shipped with, and it type-checks identically.
+     */
+    it('drops a negative value for a param whose engine meaning has no negative', () => {
+      // A negative `damping` makes the follow lerp extrapolate away from the
+      // target rather than converge on it.
+      expect(
+        sanitizeKeyframePayload('camera', { mode: 'thirdPersonFollow', followSmoothing: -0.5 }),
+      ).toEqual({ mode: 'thirdPersonFollow' });
+    });
+
+    it('keeps a negative value for the two params where the sign is the meaning', () => {
+      // `followHeight` is `offset.y` — below the target is the low-angle shot.
+      expect(
+        sanitizeKeyframePayload('camera', { mode: 'thirdPersonFollow', followHeight: -2 }),
+      ).toEqual({ mode: 'thirdPersonFollow', followHeight: -2 });
+      // `orbitalAutoRotateSpeed` is deg/sec with no direction flag beside it.
+      expect(
+        sanitizeKeyframePayload('camera', { mode: 'orbital', orbitalAutoRotateSpeed: -15 }),
+      ).toEqual({ mode: 'orbital', orbitalAutoRotateSpeed: -15 });
+    });
   });
 
   describe('animation', () => {

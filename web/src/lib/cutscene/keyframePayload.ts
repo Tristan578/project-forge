@@ -28,7 +28,11 @@
  * that can drift.
  */
 
-import { isCameraMode, NUMERIC_CAMERA_FIELDS } from '@/lib/game/gameCameraPayload';
+import {
+  isCameraMode,
+  NUMERIC_CAMERA_FIELDS,
+  readCameraFieldValue,
+} from '@/lib/game/gameCameraPayload';
 import type { CutsceneTrackType } from '@/stores/cutsceneStore';
 
 /**
@@ -69,11 +73,23 @@ const readTargetEntity: FieldReader = (value) => {
  * re-typed: `gameCameraPayload` owns which of its authoring fields hold a
  * number, and a list copied here would go stale the next time one is added —
  * silently, since a missing entry is a dropped parameter, not a type error.
+ *
+ * Their READER comes from the same module for the same reason. Mapping every
+ * field to `readFiniteNumber` was uniform and wrong: seven of the nine cannot
+ * hold a negative (a negative `followSmoothing` makes the follow diverge rather
+ * than converge), and two legitimately can (`followHeight` frames from below,
+ * `orbitalAutoRotateSpeed` orbits the other way). Only `gameCameraPayload`,
+ * which owns the engine mapping, can say which is which.
  */
 const CAMERA_FIELDS: Record<string, FieldReader> = {
   mode: readCameraMode,
   targetEntity: readTargetEntity,
-  ...Object.fromEntries(NUMERIC_CAMERA_FIELDS.map((field) => [field, readFiniteNumber])),
+  ...Object.fromEntries(
+    NUMERIC_CAMERA_FIELDS.map((field) => [
+      field,
+      ((value: unknown) => readCameraFieldValue(field, value)) satisfies FieldReader,
+    ]),
+  ),
 };
 
 /**
