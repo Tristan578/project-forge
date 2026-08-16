@@ -160,18 +160,19 @@ function generateId(prefix: string): string {
  * form that sees every slot. Holes reach a condition list through `addNode` /
  * `updateNode`, which take a caller-built `ConditionNode`; `JSON.parse` cannot
  * produce a hole, but it readily produces a `null`, and `evaluateCondition`
- * dereferences its argument.
+ * dereferences its argument — which `evaluateCondition` now answers for itself,
+ * so these loops no longer repeat the per-element check.
  *
- * The list itself is checked too: an imported tree can carry `"conditions": null`
- * or omit the key, and reading `.length` off that throws mid-playback — the same
- * symptom, one level up. An absent or unusable condition is unsatisfied in both
- * groups: it cannot open an `and`, and it cannot satisfy an `or`.
+ * The list itself is still checked here: an imported tree can carry
+ * `"conditions": null` or omit the key, and reading `.length` off that throws
+ * mid-playback — the same symptom, one level up, and one the head guard cannot
+ * see. An unusable list is unsatisfied in both groups: it cannot open an `and`,
+ * and it cannot satisfy an `or`.
  */
 function allOf(conditions: Condition[], variables: Record<string, unknown>): boolean {
   if (!Array.isArray(conditions)) return false;
   for (let i = 0; i < conditions.length; i += 1) {
-    const condition = conditions[i];
-    if (!condition || !evaluateCondition(condition, variables)) return false;
+    if (!evaluateCondition(conditions[i], variables)) return false;
   }
   return true;
 }
@@ -179,8 +180,7 @@ function allOf(conditions: Condition[], variables: Record<string, unknown>): boo
 function anyOf(conditions: Condition[], variables: Record<string, unknown>): boolean {
   if (!Array.isArray(conditions)) return false;
   for (let i = 0; i < conditions.length; i += 1) {
-    const condition = conditions[i];
-    if (condition && evaluateCondition(condition, variables)) return true;
+    if (evaluateCondition(conditions[i], variables)) return true;
   }
   return false;
 }
@@ -223,7 +223,28 @@ function sanitizeNode(raw: Record<string, unknown>): DialogueNode {
   return node as unknown as DialogueNode;
 }
 
-function evaluateCondition(condition: Condition, variables: Record<string, unknown>): boolean {
+/**
+ * An absent or unusable condition is unsatisfied.
+ *
+ * Every condition in the tree flows through here — a `condition` node's own
+ * condition, a nested member of an `and`/`or` group, and a choice's `condition`
+ * — so the guard belongs at this head rather than at each caller. It was at
+ * three of the four call sites and not at the fourth (`case 'condition'`), which
+ * is a shape that reads as covered in review: the guard is visible nearby, just
+ * not on the path that throws.
+ *
+ * The declared `Condition` type is a promise the runtime does not keep.
+ * `importTree` and `loadFromLocalStorage` both hand a raw `JSON.parse` result to
+ * `set()`, and `sanitizeTree` drops null NODES without descending into a node's
+ * condition — so `null`, a missing key, and a hand-edited `"gold > 5"` all
+ * arrive here. `null.type` throws mid-playback; the string does not, but it is
+ * no more satisfiable, and both answer the same way.
+ */
+function evaluateCondition(
+  condition: Condition | null | undefined,
+  variables: Record<string, unknown>
+): boolean {
+  if (!isObject(condition)) return false;
   switch (condition.type) {
     case 'equals':
       return variables[condition.variable] === condition.value;
