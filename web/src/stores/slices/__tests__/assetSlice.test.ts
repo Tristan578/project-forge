@@ -1,8 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
 import { createAssetSlice, setAssetDispatcher, type AssetSlice } from '../assetSlice';
 
 import type { AssetMetadata } from '../types';
+
+// Only the queue is stubbed. `decodeBase64ToArrayBuffer` stays real, because
+// whether the bytes decode is exactly what decides if anything is queued at all.
+vi.mock('@/lib/audio/entityAudioGraph', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/audio/entityAudioGraph')>()),
+  queueAudioImport: vi.fn(),
+}));
+
+import { queueAudioImport } from '@/lib/audio/entityAudioGraph';
 
 const defaultSource: AssetMetadata['source'] = { type: 'upload', filename: 'test.glb' };
 
@@ -10,6 +19,7 @@ let store: ReturnType<typeof createSliceStore<AssetSlice>>;
 let mockDispatch: ReturnType<typeof createMockDispatch>;
 
 beforeEach(() => {
+  vi.clearAllMocks();
   store = createSliceStore(createAssetSlice);
   mockDispatch = createMockDispatch();
   setAssetDispatcher(mockDispatch);
@@ -62,6 +72,11 @@ describe('assetSlice', () => {
   });
 
   describe('importAudio', () => {
+    // A real one-byte WAV-ish payload: `atob` has to succeed for anything to be
+    // queued, and the fixture used elsewhere in this file ('data:base64...')
+    // deliberately has no comma, so it decodes to null.
+    const REAL_BASE64 = 'data:audio/wav;base64,AAAA';
+
     it('should dispatch only', () => {
       store.getState().importAudio('data:base64...', 'sound.mp3');
 
@@ -69,6 +84,40 @@ describe('assetSlice', () => {
         dataBase64: 'data:base64...',
         name: 'sound.mp3',
       });
+    });
+
+    it('holds the decoded bytes under the import name', () => {
+      // The engine drops `dataBase64` and mints its own asset id, so these bytes
+      // are the only copy the Web Audio graph will ever see and `name` is the
+      // only thing correlating them with the ASSET_IMPORTED that follows.
+      store.getState().importAudio(REAL_BASE64, 'jump.wav');
+
+      expect(vi.mocked(queueAudioImport)).toHaveBeenCalledTimes(1);
+      const [name, bytes] = vi.mocked(queueAudioImport).mock.calls[0]!;
+      expect(name).toBe('jump.wav');
+      expect(bytes.byteLength).toBe(3);
+    });
+
+    it('still dispatches when the payload cannot be decoded', () => {
+      // A clip whose bytes we cannot decode is a silent clip, not a failed
+      // import — the engine's copy of the metadata is what the asset panel and
+      // the scene are built from.
+      store.getState().importAudio('data:base64...', 'sound.mp3');
+
+      expect(vi.mocked(queueAudioImport)).not.toHaveBeenCalled();
+      expect(mockDispatch).toHaveBeenCalledWith('import_audio', expect.anything());
+    });
+
+    it('queues nothing when there is no dispatcher', () => {
+      // The queue is drained by ASSET_IMPORTED, which only ever arrives in
+      // answer to this command. Queueing without dispatching leaves an entry
+      // nothing can claim, occupying a FIFO slot until real imports evict it.
+      setAssetDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      store.getState().importAudio(REAL_BASE64, 'jump.wav');
+
+      expect(vi.mocked(queueAudioImport)).not.toHaveBeenCalled();
+      expect(mockDispatch).not.toHaveBeenCalled();
     });
   });
 

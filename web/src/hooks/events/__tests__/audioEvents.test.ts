@@ -27,10 +27,15 @@ vi.mock('@/lib/audio/audioManager', () => ({
 vi.mock('@/lib/audio/entityAudioGraph', () => ({
   syncEntityAudioInstance: vi.fn(),
   ingestImportedAudioAsset: vi.fn(),
+  forgetImportedAudioAsset: vi.fn(),
 }));
 
 import { useEditorStore } from '@/stores/editorStore';
-import { syncEntityAudioInstance } from '@/lib/audio/entityAudioGraph';
+import {
+  syncEntityAudioInstance,
+  ingestImportedAudioAsset,
+  forgetImportedAudioAsset,
+} from '@/lib/audio/entityAudioGraph';
 import { handleAudioEvent } from '../audioEvents';
 
 describe('handleAudioEvent', () => {
@@ -54,18 +59,23 @@ describe('handleAudioEvent', () => {
     expect(result).toBe(false);
   });
 
+  // Every payload below is the shape `engine/src/bridge/events.rs` actually
+  // emits: `ScriptPayload { entity_id, script }` and `AudioPayload { entity_id,
+  // audio }`, neither of which carries `#[serde(flatten)]`, so the component
+  // arrives NESTED under its own key. These tests used to send the fields flat
+  // and passed against a handler that read them flat — two halves of the same
+  // wrong assumption, agreeing with each other while production wrote an empty
+  // component for every field. Assertions are `toEqual` on the full object
+  // rather than `objectContaining`, because the payload IS the behaviour here:
+  // `objectContaining` is blind to an invented field sitting alongside.
   describe('SCRIPT_CHANGED', () => {
-    it('calls setEntityScript with entityId and script data', () => {
-      const payload = {
-        entityId: 'entity-1',
-        source: 'forge.log("hello");',
-        enabled: true,
-        template: 'basic',
-      };
-
+    it('records the nested script under the entity the engine named', () => {
       const result = handleAudioEvent(
         'SCRIPT_CHANGED',
-        payload,
+        {
+          entityId: 'entity-1',
+          script: { source: 'forge.log("hello");', enabled: true, template: 'basic' },
+        },
         mockSetGet.set,
         mockSetGet.get
       );
@@ -79,16 +89,12 @@ describe('handleAudioEvent', () => {
     });
 
     it('handles null template', () => {
-      const payload = {
-        entityId: 'entity-2',
-        source: '// custom script',
-        enabled: false,
-        template: null,
-      };
-
       const result = handleAudioEvent(
         'SCRIPT_CHANGED',
-        payload,
+        {
+          entityId: 'entity-2',
+          script: { source: '// custom script', enabled: false, template: null },
+        },
         mockSetGet.set,
         mockSetGet.get
       );
@@ -100,32 +106,64 @@ describe('handleAudioEvent', () => {
         template: null,
       });
     });
-  });
 
-  describe('AUDIO_CHANGED', () => {
-    it('constructs audio data with defaults and stores it under the entity', () => {
-      const payload = {
-        entityId: 'entity-audio-1',
-        assetId: 'sound-asset-1',
-        volume: 0.8,
-        pitch: 1.2,
-        loopAudio: true,
-        spatial: true,
-        maxDistance: 100,
-        refDistance: 2,
-        rolloffFactor: 1.5,
-        autoplay: true,
-        bus: 'music',
-      };
-
-      const result = handleAudioEvent(
-        'AUDIO_CHANGED',
-        payload,
+    it('fills defaults for a partially-populated script', () => {
+      handleAudioEvent(
+        'SCRIPT_CHANGED',
+        { entityId: 'entity-3', script: { source: 'x' } },
         mockSetGet.set,
         mockSetGet.get
       );
 
-      expect(result).toBe(true);
+      expect(actions.setEntityScript).toHaveBeenCalledWith('entity-3', {
+        source: 'x',
+        enabled: false,
+        template: null,
+      });
+    });
+
+    it('clears the script when the engine omits the component', () => {
+      // The engine omits the key entirely rather than sending an empty object,
+      // which is how a removed script reaches JS.
+      handleAudioEvent('SCRIPT_CHANGED', { entityId: 'entity-4' }, mockSetGet.set, mockSetGet.get);
+
+      expect(actions.setEntityScript).toHaveBeenCalledWith('entity-4', null);
+    });
+
+    it('keeps each entity under its own key', () => {
+      handleAudioEvent(
+        'SCRIPT_CHANGED',
+        { entityId: 'ent-a', script: { source: 'a' } },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+      handleAudioEvent(
+        'SCRIPT_CHANGED',
+        { entityId: 'ent-b', script: { source: 'b' } },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(actions.setEntityScript).toHaveBeenNthCalledWith(1, 'ent-a', { source: 'a', enabled: false, template: null });
+      expect(actions.setEntityScript).toHaveBeenNthCalledWith(2, 'ent-b', { source: 'b', enabled: false, template: null });
+    });
+  });
+
+  describe('AUDIO_CHANGED', () => {
+    /** Every field the handler defaults, for entities that supply none of them. */
+    const DEFAULTS = {
+      volume: 1.0,
+      pitch: 1.0,
+      loopAudio: false,
+      spatial: false,
+      maxDistance: 50,
+      refDistance: 1,
+      rolloffFactor: 1,
+      autoplay: false,
+      bus: 'sfx',
+    };
+
+    it('records the nested component and rebuilds the graph for that entity', () => {
       const audio = {
         assetId: 'sound-asset-1',
         volume: 0.8,
@@ -138,6 +176,15 @@ describe('handleAudioEvent', () => {
         autoplay: true,
         bus: 'music',
       };
+
+      const result = handleAudioEvent(
+        'AUDIO_CHANGED',
+        { entityId: 'entity-audio-1', audio },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
       expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-1', audio);
       // The engine emits this for whichever entity changed, so the Web Audio
       // node is rebuilt for that entity rather than for the selected one.
@@ -145,14 +192,9 @@ describe('handleAudioEvent', () => {
     });
 
     it('fills in defaults for missing optional fields', () => {
-      const payload = {
-        entityId: 'entity-audio-2',
-        assetId: 'sound-asset-2',
-      };
-
       const result = handleAudioEvent(
         'AUDIO_CHANGED',
-        payload,
+        { entityId: 'entity-audio-2', audio: { assetId: 'sound-asset-2' } },
         mockSetGet.set,
         mockSetGet.get
       );
@@ -160,27 +202,14 @@ describe('handleAudioEvent', () => {
       expect(result).toBe(true);
       expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-2', {
         assetId: 'sound-asset-2',
-        volume: 1.0,
-        pitch: 1.0,
-        loopAudio: false,
-        spatial: false,
-        maxDistance: 50,
-        refDistance: 1,
-        rolloffFactor: 1,
-        autoplay: false,
-        bus: 'sfx',
+        ...DEFAULTS,
       });
     });
 
-    it('handles null assetId (audio exists but no asset assigned)', () => {
-      const payload = {
-        entityId: 'entity-audio-3',
-        assetId: null,
-      };
-
+    it('handles a component with no asset assigned yet', () => {
       const result = handleAudioEvent(
         'AUDIO_CHANGED',
-        payload,
+        { entityId: 'entity-audio-3', audio: { assetId: null } },
         mockSetGet.set,
         mockSetGet.get
       );
@@ -188,27 +217,14 @@ describe('handleAudioEvent', () => {
       expect(result).toBe(true);
       expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-3', {
         assetId: null,
-        volume: 1.0,
-        pitch: 1.0,
-        loopAudio: false,
-        spatial: false,
-        maxDistance: 50,
-        refDistance: 1,
-        rolloffFactor: 1,
-        autoplay: false,
-        bus: 'sfx',
+        ...DEFAULTS,
       });
     });
 
-    it('clears audio when assetId is undefined (no audio data)', () => {
-      const payload = {
-        entityId: 'entity-audio-4',
-        // assetId intentionally omitted
-      };
-
+    it('clears audio when the engine omits the component', () => {
       const result = handleAudioEvent(
         'AUDIO_CHANGED',
-        payload,
+        { entityId: 'entity-audio-4' },
         mockSetGet.set,
         mockSetGet.get
       );
@@ -218,14 +234,29 @@ describe('handleAudioEvent', () => {
       expect(vi.mocked(syncEntityAudioInstance)).toHaveBeenCalledWith('entity-audio-4', null);
     });
 
+    it('does not read the fields flat off the payload', () => {
+      // The regression this whole describe exists for. A flat payload carries no
+      // `audio` key, so the only correct reading of it is "no component" — if
+      // the handler ever goes back to reading flat, this stores a populated
+      // component instead of `null` and the test fails.
+      handleAudioEvent(
+        'AUDIO_CHANGED',
+        { entityId: 'entity-audio-5', assetId: 'flat-asset', volume: 0.25 },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-5', null);
+    });
+
     it('keeps each entity under its own key', () => {
       // A single stored component meant the second event overwrote the first,
       // so a scene with two sound sources kept only the latest.
-      handleAudioEvent('AUDIO_CHANGED', { entityId: 'ent-a', assetId: 'a' }, mockSetGet.set, mockSetGet.get);
-      handleAudioEvent('AUDIO_CHANGED', { entityId: 'ent-b', assetId: 'b' }, mockSetGet.set, mockSetGet.get);
+      handleAudioEvent('AUDIO_CHANGED', { entityId: 'ent-a', audio: { assetId: 'a' } }, mockSetGet.set, mockSetGet.get);
+      handleAudioEvent('AUDIO_CHANGED', { entityId: 'ent-b', audio: { assetId: 'b' } }, mockSetGet.set, mockSetGet.get);
 
-      expect(actions.setEntityAudio).toHaveBeenNthCalledWith(1, 'ent-a', expect.objectContaining({ assetId: 'a' }));
-      expect(actions.setEntityAudio).toHaveBeenNthCalledWith(2, 'ent-b', expect.objectContaining({ assetId: 'b' }));
+      expect(actions.setEntityAudio).toHaveBeenNthCalledWith(1, 'ent-a', { assetId: 'a', ...DEFAULTS });
+      expect(actions.setEntityAudio).toHaveBeenNthCalledWith(2, 'ent-b', { assetId: 'b', ...DEFAULTS });
     });
   });
 
@@ -592,6 +623,40 @@ describe('handleAudioEvent', () => {
         source: { type: 'upload', filename: 'brick_diffuse.png' },
       });
     });
+
+    it('hands an audio import to the graph with the id the engine minted', () => {
+      // This event is the ONLY moment JS learns that id — the engine drops the
+      // bytes and mints its own uuid — so the ingest call is the whole seam
+      // between an imported clip and a clip that can be played.
+      handleAudioEvent(
+        'ASSET_IMPORTED',
+        { assetId: 'audio-1', name: 'jump.wav', kind: 'audio', fileSize: 0 },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(vi.mocked(ingestImportedAudioAsset)).toHaveBeenCalledWith(
+        'audio-1',
+        'jump.wav',
+        expect.any(Function)
+      );
+      // A getter, not a store import: a value-import of `@/stores/` from `lib/`
+      // is the module edge that broke `next build` in PF-1118.
+      const getter = vi.mocked(ingestImportedAudioAsset).mock.calls[0]![2];
+      actions.entityAudio = { 'ent-1': { assetId: 'audio-1' } };
+      expect(getter()).toEqual({ 'ent-1': { assetId: 'audio-1' } });
+    });
+
+    it('does not touch the audio graph for a non-audio import', () => {
+      handleAudioEvent(
+        'ASSET_IMPORTED',
+        { assetId: 'tex-1', name: 'brick.png', kind: 'texture', fileSize: 1 },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(vi.mocked(ingestImportedAudioAsset)).not.toHaveBeenCalled();
+    });
   });
 
   describe('ASSET_DELETED', () => {
@@ -607,6 +672,12 @@ describe('handleAudioEvent', () => {
 
       expect(result).toBe(true);
       expect(actions.removeAssetFromRegistry).toHaveBeenCalledWith('asset-789');
+    });
+
+    it('drops the name alias so a reused name cannot resolve to a dead asset', () => {
+      handleAudioEvent('ASSET_DELETED', { assetId: 'asset-789' }, mockSetGet.set, mockSetGet.get);
+
+      expect(vi.mocked(forgetImportedAudioAsset)).toHaveBeenCalledWith('asset-789');
     });
   });
 
