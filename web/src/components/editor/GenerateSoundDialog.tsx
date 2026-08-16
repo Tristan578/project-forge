@@ -7,6 +7,8 @@ import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useAIGeneration } from '@/hooks/useAIGeneration';
+import { attachGeneratedAudio } from '@/lib/generate/attachGeneratedAudio';
+import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 
 interface GenerateSoundDialogProps {
   isOpen: boolean;
@@ -24,7 +26,9 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
   const [voiceText, setVoiceText] = useState('');
   const [voiceStyle, setVoiceStyle] = useState<VoiceStyle>('neutral');
   const [attachToEntity, setAttachToEntity] = useState(!!entityId);
-  const { execute, cancel, isLoading: isSubmitting } = useAIGeneration({
+  // Typed: `execute` resolves to the imported asset's name, which the success
+  // toast reports so the user can find it in the asset panel.
+  const { execute, cancel, isLoading: isSubmitting } = useAIGeneration<string>({
     onError: (msg) => toast.error(msg),
   });
 
@@ -76,10 +80,32 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
         throw new Error(err.error ?? 'Generation failed');
       }
 
-      return true;
+      // The clip only exists in this response body. Discarding it — which is
+      // what this did — spends the user's tokens and leaves no asset, no
+      // component and no sound, with a success toast on top.
+      const data = (await response.json()) as { audioBase64?: unknown };
+      if (typeof data.audioBase64 !== 'string' || data.audioBase64.length === 0) {
+        // A provider can answer 200 with no artifact. Same sentence the chat
+        // tool and the `*／status` routes use for the same condition.
+        throw new EmptyArtifactError(soundType === 'sfx' ? 'Sound effect' : 'Voice', 'audio');
+      }
+
+      const store = useEditorStore.getState();
+      return attachGeneratedAudio({
+        kind: soundType,
+        prompt: soundType === 'sfx' ? sfxPrompt.trim() : voiceText.trim(),
+        audioBase64: data.audioBase64,
+        entityId: attachToEntity && entityId ? entityId : undefined,
+        sink: store,
+      });
     });
 
     if (result) {
+      toast.success(
+        attachToEntity && entityId
+          ? `Sound generated and attached as "${result}".`
+          : `Sound generated and imported as "${result}".`
+      );
       onClose();
       setSfxPrompt('');
       setVoiceText('');

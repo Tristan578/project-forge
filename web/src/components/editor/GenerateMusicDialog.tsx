@@ -7,6 +7,10 @@ import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useAIGeneration } from '@/hooks/useAIGeneration';
+import { attachGeneratedAudio } from '@/lib/generate/attachGeneratedAudio';
+import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
+import { trackJob, makeJobId } from '@/lib/chat/handlers/generationHandlers';
+import { DIRECT_CAPABILITY_PROVIDER } from '@/lib/config/providers';
 
 interface GenerateMusicDialogProps {
   isOpen: boolean;
@@ -19,7 +23,8 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
   const [duration, setDuration] = useState(30);
   const [instrumental, setInstrumental] = useState(true);
   const [attachToEntity, setAttachToEntity] = useState(!!entityId);
-  const { execute, cancel, isLoading: isSubmitting } = useAIGeneration({
+  // Typed: `execute` resolves to the sentence the success toast reports.
+  const { execute, cancel, isLoading: isSubmitting } = useAIGeneration<string>({
     onError: (msg) => toast.error(msg),
   });
 
@@ -61,10 +66,48 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
         throw new Error(err.error ?? 'Generation failed');
       }
 
-      return true;
+      // Discarding this body — which is what this did — spends the user's
+      // tokens and produces nothing: on the sync path the only copy of the
+      // track is thrown away, and on the async path the job is never tracked,
+      // so nothing ever polls for it and the finished track never arrives.
+      const data = (await response.json()) as Record<string, unknown>;
+      const target = attachToEntity && entityId ? entityId : undefined;
+
+      // `typeof`, not truthiness — the same guard the chat tool uses to pick
+      // between the sync and async shapes.
+      if (typeof data.audioBase64 === 'string' && data.audioBase64.length > 0) {
+        const assetName = attachGeneratedAudio({
+          kind: 'music',
+          prompt: prompt.trim(),
+          audioBase64: data.audioBase64,
+          entityId: target,
+          sink: useEditorStore.getState(),
+        });
+        return target
+          ? `Music generated and attached as "${assetName}".`
+          : `Music generated and imported as "${assetName}".`;
+      }
+
+      if (typeof data.jobId !== 'string' || data.jobId.length === 0) {
+        throw new EmptyArtifactError('Music', 'audio');
+      }
+
+      trackJob({
+        jobId: makeJobId(),
+        providerJobId: data.jobId,
+        type: 'music',
+        prompt: prompt.trim(),
+        provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.music,
+        entityId: target,
+        usageId: data.usageId as string | undefined,
+        autoPlace: !!target,
+        targetEntityId: target,
+      });
+      return 'Music generation started. It will be imported when it finishes.';
     });
 
     if (result) {
+      toast.success(result);
       onClose();
       setPrompt('');
     }

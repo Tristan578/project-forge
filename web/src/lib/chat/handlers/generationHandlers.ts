@@ -9,7 +9,8 @@ import { parseArgs } from './types';
 import { useGenerationStore } from '@/stores/generationStore';
 import type { GenerationType } from '@/stores/generationStore';
 import { enrichPrompt, enrichSfxPrompt, enrichMusicPrompt, enrichVoiceStyle } from '@/lib/generate/promptEnricher';
-import { inferSfxCategory, getSpatialDefaults } from '@/lib/generate/postProcess';
+import { attachGeneratedAudio } from '@/lib/generate/attachGeneratedAudio';
+import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 import { DIRECT_CAPABILITY_PROVIDER } from '@/lib/config/providers';
 import { STATUS_ENDPOINTS, resolveStatusEndpoint } from '@/lib/generation/statusEndpoints';
 
@@ -330,26 +331,19 @@ export const generationHandlers: Record<string, ToolHandler> = {
     // A provider can answer 200 with no artifact — the documented
     // provider-success-with-no-artifact class — and `as string` made that a
     // `TypeError` thrown out of a store action instead of a reported failure.
+    // The sentence comes from the shared catalogue rather than being written
+    // here, so this reads identically to the `*／status` route that reports the
+    // same condition when it surfaces at poll time instead of submit time.
     if (typeof data.audioBase64 !== 'string' || data.audioBase64.length === 0) {
-      return { success: false, error: 'Sound effect generation produced no audio' };
+      return { success: false, error: new EmptyArtifactError('Sound effect', 'audio').message };
     }
-    const assetName = `sfx-${p.data.prompt.slice(0, 20)}`;
-    ctx.store.importAudio(data.audioBase64, assetName);
-    if (p.data.entityId) {
-      const spatial = getSpatialDefaults(inferSfxCategory(p.data.prompt));
-      ctx.store.setAudio(p.data.entityId, {
-        assetId: assetName,
-        volume: spatial.volume,
-        pitch: 1.0,
-        loopAudio: spatial.loopAudio,
-        spatial: spatial.spatial,
-        maxDistance: spatial.maxDistance,
-        refDistance: spatial.refDistance,
-        rolloffFactor: spatial.rolloffFactor,
-        autoplay: false,
-        bus: 'sfx',
-      });
-    }
+    const assetName = attachGeneratedAudio({
+      kind: 'sfx',
+      prompt: p.data.prompt,
+      audioBase64: data.audioBase64,
+      entityId: p.data.entityId,
+      sink: ctx.store,
+    });
 
     return {
       success: true,
@@ -376,25 +370,15 @@ export const generationHandlers: Record<string, ToolHandler> = {
 
     // Same provider-success-with-no-artifact guard as the SFX path above.
     if (typeof data.audioBase64 !== 'string' || data.audioBase64.length === 0) {
-      return { success: false, error: 'Voice generation produced no audio' };
+      return { success: false, error: new EmptyArtifactError('Voice', 'audio').message };
     }
-    const assetName = `voice-${p.data.text.slice(0, 20)}`;
-    ctx.store.importAudio(data.audioBase64, assetName);
-    if (p.data.entityId) {
-      const spatial = getSpatialDefaults('voice');
-      ctx.store.setAudio(p.data.entityId, {
-        assetId: assetName,
-        volume: spatial.volume,
-        pitch: 1.0,
-        loopAudio: spatial.loopAudio,
-        spatial: spatial.spatial,
-        maxDistance: spatial.maxDistance,
-        refDistance: spatial.refDistance,
-        rolloffFactor: spatial.rolloffFactor,
-        autoplay: false,
-        bus: 'voice',
-      });
-    }
+    const assetName = attachGeneratedAudio({
+      kind: 'voice',
+      prompt: p.data.text,
+      audioBase64: data.audioBase64,
+      entityId: p.data.entityId,
+      sink: ctx.store,
+    });
 
     return {
       success: true,
@@ -461,22 +445,13 @@ export const generationHandlers: Record<string, ToolHandler> = {
     // paths, and a truthy non-string would take the sync path and then be cast
     // to `string` on the way into a store action.
     if (typeof data.audioBase64 === 'string' && data.audioBase64.length > 0) {
-      const assetName = `music-${p.data.prompt.slice(0, 20)}`;
-      ctx.store.importAudio(data.audioBase64, assetName);
-      if (musicEntityId && musicAutoPlace) {
-        ctx.store.setAudio(musicEntityId, {
-          assetId: assetName,
-          volume: 0.7,
-          pitch: 1.0,
-          loopAudio: true,
-          spatial: false,
-          maxDistance: 100,
-          refDistance: 1,
-          rolloffFactor: 1,
-          autoplay: true,
-          bus: 'music',
-        });
-      }
+      const assetName = attachGeneratedAudio({
+        kind: 'music',
+        prompt: p.data.prompt,
+        audioBase64: data.audioBase64,
+        entityId: musicEntityId && musicAutoPlace ? musicEntityId : undefined,
+        sink: ctx.store,
+      });
       return {
         success: true,
         result: { message: `Music generated and imported as "${assetName}".` },

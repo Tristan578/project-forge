@@ -9,6 +9,7 @@ import { GenerateMusicDialog } from './GenerateMusicDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { useUserStore } from '@/stores/userStore';
 import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
+import { resolveAudioAssetId } from '@/lib/audio/entityAudioGraph';
 
 interface SliderRowProps {
   label: string;
@@ -123,6 +124,19 @@ export function AudioInspector() {
 
   const audioAssets = Object.values(assetRegistry).filter((a) => a.kind === 'audio');
 
+  // An entity's `assetId` is not always an asset id: a generated clip carries
+  // the import NAME, because the engine mints the id itself and never lets JS
+  // supply one (see the header of `lib/audio/entityAudioGraph.ts`). The options
+  // below are keyed by id, so without resolving the alias every AI-attached
+  // sound displayed as "None" — and picking any option to see what was there
+  // overwrote it.
+  const selectedAssetId = primaryAudio?.assetId ? resolveAudioAssetId(primaryAudio.assetId) : '';
+  // Still unknown means the asset is genuinely gone (deleted, or a scene saved
+  // against assets this session never imported). Name it rather than silently
+  // showing "None", which reads as "no sound attached".
+  const selectedAssetMissing =
+    selectedAssetId !== '' && !audioAssets.some((a) => a.id === selectedAssetId);
+
   const handleUpdate = useCallback(
     (partial: Partial<AudioData>) => {
       if (primaryId) {
@@ -219,17 +233,24 @@ export function AudioInspector() {
         <div className="space-y-3">
           {/* Asset Dropdown */}
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+            <label
+              htmlFor="audio-asset-select"
+              className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1"
+            >
               Asset
               <InfoTooltip term="audioAsset" />
             </label>
             <select
-              value={primaryAudio.assetId ?? ''}
+              id="audio-asset-select"
+              value={selectedAssetId}
               onChange={(e) => handleUpdate({ assetId: e.target.value || null })}
               className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                 focus:ring-1 focus:ring-blue-500"
             >
               <option value="">None</option>
+              {selectedAssetMissing && (
+                <option value={selectedAssetId}>{selectedAssetId} (missing)</option>
+              )}
               {audioAssets.map((asset) => (
                 <option key={asset.id} value={asset.id}>
                   {asset.name}
@@ -240,11 +261,15 @@ export function AudioInspector() {
 
           {/* Bus Assignment */}
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+            <label
+              htmlFor="audio-bus-select"
+              className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1"
+            >
               Bus
               <InfoTooltip term="audioBus" />
             </label>
             <select
+              id="audio-bus-select"
               value={primaryAudio.bus ?? 'sfx'}
               onChange={(e) => handleUpdate({ bus: e.target.value })}
               className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
