@@ -30,7 +30,7 @@ function makeAudioStore(overrides: Record<string, unknown> = {}) {
     playAudio: vi.fn(),
     stopAudio: vi.fn(),
     pauseAudio: vi.fn(),
-    primaryAudio: null,
+    entityAudio: {} as Record<string, unknown>,
     audioBuses: [] as unknown[],
     updateAudioBus: vi.fn(),
     createAudioBus: vi.fn(),
@@ -184,12 +184,29 @@ describe('audioEntityHandlers', () => {
 
     it('returns audio data when present', async () => {
       const audio = { volume: 0.5, spatial: true };
-      const { result } = await invoke('get_audio', { entityId: 'ent-1' }, { primaryAudio: audio });
+      const { result } = await invoke(
+        'get_audio',
+        { entityId: 'ent-1' },
+        { entityAudio: { 'ent-1': audio } },
+      );
       expect(result.success).toBe(true);
       const r = result.result as Record<string, unknown>;
       expect(r.hasAudio).toBe(true);
       expect(r.volume).toBe(0.5);
       expect(r.spatial).toBe(true);
+    });
+
+    it('answers for the entity asked about, not another one', async () => {
+      // The store held a single component, so this returned whichever entity's
+      // audio arrived last no matter which entity the caller named.
+      const audio = { volume: 0.5, spatial: true };
+      const { result } = await invoke(
+        'get_audio',
+        { entityId: 'ent-1' },
+        { entityAudio: { 'ent-2': audio } },
+      );
+      expect(result.success).toBe(true);
+      expect((result.result as Record<string, unknown>).hasAudio).toBe(false);
     });
 
     it('fails without entityId', async () => {

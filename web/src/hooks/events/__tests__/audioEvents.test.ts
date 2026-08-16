@@ -22,7 +22,15 @@ vi.mock('@/lib/audio/audioManager', () => ({
   },
 }));
 
+// Mock the Web Audio graph — these tests cover what the event writes to the
+// store, and the graph has its own suite.
+vi.mock('@/lib/audio/entityAudioGraph', () => ({
+  syncEntityAudioInstance: vi.fn(),
+  ingestImportedAudioAsset: vi.fn(),
+}));
+
 import { useEditorStore } from '@/stores/editorStore';
+import { syncEntityAudioInstance } from '@/lib/audio/entityAudioGraph';
 import { handleAudioEvent } from '../audioEvents';
 
 describe('handleAudioEvent', () => {
@@ -95,7 +103,7 @@ describe('handleAudioEvent', () => {
   });
 
   describe('AUDIO_CHANGED', () => {
-    it('constructs audio data with defaults and calls setPrimaryAudio', () => {
+    it('constructs audio data with defaults and stores it under the entity', () => {
       const payload = {
         entityId: 'entity-audio-1',
         assetId: 'sound-asset-1',
@@ -118,7 +126,7 @@ describe('handleAudioEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(actions.setPrimaryAudio).toHaveBeenCalledWith({
+      const audio = {
         assetId: 'sound-asset-1',
         volume: 0.8,
         pitch: 1.2,
@@ -129,7 +137,11 @@ describe('handleAudioEvent', () => {
         rolloffFactor: 1.5,
         autoplay: true,
         bus: 'music',
-      });
+      };
+      expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-1', audio);
+      // The engine emits this for whichever entity changed, so the Web Audio
+      // node is rebuilt for that entity rather than for the selected one.
+      expect(vi.mocked(syncEntityAudioInstance)).toHaveBeenCalledWith('entity-audio-1', audio);
     });
 
     it('fills in defaults for missing optional fields', () => {
@@ -146,7 +158,7 @@ describe('handleAudioEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(actions.setPrimaryAudio).toHaveBeenCalledWith({
+      expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-2', {
         assetId: 'sound-asset-2',
         volume: 1.0,
         pitch: 1.0,
@@ -174,7 +186,7 @@ describe('handleAudioEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(actions.setPrimaryAudio).toHaveBeenCalledWith({
+      expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-3', {
         assetId: null,
         volume: 1.0,
         pitch: 1.0,
@@ -202,7 +214,18 @@ describe('handleAudioEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(actions.setPrimaryAudio).toHaveBeenCalledWith(null);
+      expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-4', null);
+      expect(vi.mocked(syncEntityAudioInstance)).toHaveBeenCalledWith('entity-audio-4', null);
+    });
+
+    it('keeps each entity under its own key', () => {
+      // A single stored component meant the second event overwrote the first,
+      // so a scene with two sound sources kept only the latest.
+      handleAudioEvent('AUDIO_CHANGED', { entityId: 'ent-a', assetId: 'a' }, mockSetGet.set, mockSetGet.get);
+      handleAudioEvent('AUDIO_CHANGED', { entityId: 'ent-b', assetId: 'b' }, mockSetGet.set, mockSetGet.get);
+
+      expect(actions.setEntityAudio).toHaveBeenNthCalledWith(1, 'ent-a', expect.objectContaining({ assetId: 'a' }));
+      expect(actions.setEntityAudio).toHaveBeenNthCalledWith(2, 'ent-b', expect.objectContaining({ assetId: 'b' }));
     });
   });
 

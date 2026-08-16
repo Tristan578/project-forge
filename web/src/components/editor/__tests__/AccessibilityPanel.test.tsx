@@ -17,6 +17,7 @@ vi.mock('@/stores/editorStore', () => {
     allScripts: {},
     inputBindings: [],
     allGameComponents: {},
+    entityAudio: {},
     setAccessibilityProfile: mockSetAccessibilityProfile,
   }));
   // useEditorStore is both a React hook (called with selector) and has getState
@@ -91,6 +92,7 @@ function mockStore(overrides: Record<string, unknown> = {}) {
     allScripts: {},
     inputBindings: [],
     allGameComponents: {},
+    entityAudio: {},
     setAccessibilityProfile: mockSetAccessibilityProfile,
     ...overrides,
   } as unknown as ReturnType<typeof mockedStore.getState>);
@@ -137,6 +139,25 @@ describe('AccessibilityPanel', () => {
     render(<AccessibilityPanel />);
     fireEvent.click(screen.getByLabelText('Run accessibility audit'));
     expect(vi.mocked(analyzeAccessibility)).toHaveBeenCalledOnce();
+  });
+
+  it('audits an entity the engine reported audio for but the scene graph has not', () => {
+    // The scene graph and `entityAudio` each know about sources the other does
+    // not — a freshly authored source reaches the store before the next scene
+    // graph emit — so the audit reads their union.
+    mockStore({
+      sceneGraph: {
+        nodes: {
+          'ent-1': { entityId: 'ent-1', components: ['AudioEnabled'], name: 'Speaker' },
+        },
+      },
+      entityAudio: { 'ent-2': { assetId: 'audio-2', volume: 1 } },
+    });
+    render(<AccessibilityPanel />);
+    fireEvent.click(screen.getByLabelText('Run accessibility audit'));
+
+    const ctx = vi.mocked(analyzeAccessibility).mock.calls[0][0];
+    expect(ctx.audioEntities).toEqual(new Set(['ent-1', 'ent-2']));
   });
 
   it('displays audit score after running audit', () => {

@@ -99,7 +99,9 @@ const CHECKLIST_TASKS: ChecklistTask[] = [
     title: 'Add Audio',
     description: 'Add an audio component to an entity',
     category: 'advanced',
-    checkCompletion: (state) => state.primaryAudio !== null,
+    // Any entity carrying audio completes this, not just the most recently
+    // changed one — the store holds a map now rather than a single component.
+    checkCompletion: (state) => Object.keys(state.entityAudio).length > 0,
   },
   {
     id: 'build-ui',

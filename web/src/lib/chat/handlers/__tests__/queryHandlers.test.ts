@@ -490,12 +490,12 @@ describe('get_audio', () => {
     expect(result.error).toContain('entityId');
   });
 
-  it('returns hasAudio false when no primary audio', async () => {
+  it('returns hasAudio false when the entity has no audio', async () => {
     const { result } = await invokeHandler(
       queryHandlers,
       'get_audio',
       { entityId: 'ent1' },
-      { primaryAudio: null }
+      { entityAudio: {} }
     );
     expect(result.success).toBe(true);
     const data = result.result as { hasAudio: boolean };
@@ -519,7 +519,7 @@ describe('get_audio', () => {
       queryHandlers,
       'get_audio',
       { entityId: 'ent1' },
-      { primaryAudio: audioData }
+      { entityAudio: { ent1: audioData } }
     );
     expect(result.success).toBe(true);
     const data = result.result as { hasAudio: boolean; assetId: string; volume: number; bus: string };
@@ -527,6 +527,18 @@ describe('get_audio', () => {
     expect(data.assetId).toBe('asset-123');
     expect(data.volume).toBe(0.8);
     expect(data.bus).toBe('sfx');
+  });
+
+  it('does not answer with another entity\'s audio', async () => {
+    // A single stored component meant every entity reported the same sound.
+    const { result } = await invokeHandler(
+      queryHandlers,
+      'get_audio',
+      { entityId: 'ent1' },
+      { entityAudio: { ent2: { assetId: 'asset-123', volume: 0.8 } } }
+    );
+    expect(result.success).toBe(true);
+    expect((result.result as { hasAudio: boolean }).hasAudio).toBe(false);
   });
 });
 

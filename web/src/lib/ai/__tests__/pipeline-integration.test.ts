@@ -364,7 +364,7 @@ describe('gameReviewer — generateReview contract', () => {
       projectType: '3d',
       physicsEnabled: false,
       particleEnabled: false,
-      primaryAudio: null,
+      entityAudio: {},
       primaryAnimation: null,
       allScripts: {},
       allGameComponents: {},

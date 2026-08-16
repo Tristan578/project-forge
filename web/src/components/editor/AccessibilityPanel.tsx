@@ -55,9 +55,12 @@ function buildSceneContextFromStore(): SceneContext {
     keys: b.sources ?? [],
   }));
 
-  // Audio: no full audio map in store, only primaryAudio.
-  // We can detect audio entities from the scene graph (those with AudioEnabled component)
-  const audioEntities = new Set<string>();
+  // Audio: the scene graph names every entity carrying an AudioEnabled
+  // component, and `entityAudio` holds the component data the engine has
+  // actually reported. Neither alone is complete — a freshly authored source
+  // reaches the store before the next scene-graph emit, and a muted source
+  // still counts as an audio entity here — so the audit reads their union.
+  const audioEntities = new Set<string>(Object.keys(state.entityAudio ?? {}));
   for (const node of Object.values(sceneGraph.nodes)) {
     if (node.components.includes('AudioEnabled')) {
       audioEntities.add(node.entityId);
