@@ -27,6 +27,7 @@ vi.mock('@/components/ui/InfoTooltip', () => ({
 }));
 
 import { useEditorStore } from '@/stores/editorStore';
+import { useUserStore } from '@/stores/userStore';
 
 function mockEditorStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
@@ -123,5 +124,29 @@ describe('AudioInspector', () => {
     expect(screen.getByText('Max Distance')).toBeInTheDocument();
     expect(screen.getByText('Ref Distance')).toBeInTheDocument();
     expect(screen.getByText('Rolloff')).toBeInTheDocument();
+  });
+
+  it('names the tier a locked generate button needs, not just in the tooltip', () => {
+    // The buttons stay focusable when locked (aria-disabled, not disabled) so
+    // they can still make their pitch — but `title` is unreachable by keyboard,
+    // so the requirement has to be in the accessible name.
+    mockEditorStore();
+    useUserStore.setState({ tier: 'starter' });
+    render(<AudioInspector />);
+    expect(
+      screen.getByRole('button', { name: 'Generate sound with AI — requires Starter tier' })
+    ).toHaveAttribute('aria-disabled', 'true');
+    expect(
+      screen.getByRole('button', { name: 'Generate music with AI — requires Starter tier' })
+    ).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('drops the tier clause once the tier actually allows it', () => {
+    mockEditorStore();
+    useUserStore.setState({ tier: 'creator' });
+    render(<AudioInspector />);
+    expect(
+      screen.getByRole('button', { name: 'Generate sound with AI' })
+    ).not.toHaveAttribute('aria-disabled');
   });
 });

@@ -108,6 +108,17 @@ export function AudioInspector() {
   const tier = useUserStore((s) => s.tier);
   const canGenerateSound = canAccessPanel('generate-sound', tier);
   const canGenerateMusic = canAccessPanel('generate-music', tier);
+  // These stay focusable when locked (aria-disabled, not disabled): they are
+  // upgrade prompts, and a control removed from the tab order can never tell
+  // anyone what it wants. But `title` alone is not that telling — it is
+  // unreachable by keyboard and inconsistently announced — so the requirement
+  // goes in the accessible name too.
+  const soundButtonLabel = canGenerateSound
+    ? 'Generate sound with AI'
+    : `Generate sound with AI — requires ${TIER_LABELS[getRequiredTier('generate-sound') ?? 'hobbyist']} tier`;
+  const musicButtonLabel = canGenerateMusic
+    ? 'Generate music with AI'
+    : `Generate music with AI — requires ${TIER_LABELS[getRequiredTier('generate-music') ?? 'hobbyist']} tier`;
 
   const primaryId = useEditorStore((s) => s.primaryId);
   // Read the selected entity's audio out of the per-entity map. This used to be
@@ -196,12 +207,13 @@ export function AudioInspector() {
           <button
             onClick={() => canGenerateSound && setGenerateSoundOpen(true)}
             aria-disabled={!canGenerateSound || undefined}
+            aria-label={soundButtonLabel}
             className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] ${
               canGenerateSound
                 ? 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50'
                 : 'cursor-not-allowed bg-zinc-800 text-zinc-500'
             }`}
-            title={canGenerateSound ? 'Generate sound with AI' : `Requires ${TIER_LABELS[getRequiredTier('generate-sound') ?? 'hobbyist']} tier`}
+            title={soundButtonLabel}
           >
             {canGenerateSound ? <Sparkles size={10} /> : <Lock size={10} />}
             Sound
@@ -209,12 +221,13 @@ export function AudioInspector() {
           <button
             onClick={() => canGenerateMusic && setGenerateMusicOpen(true)}
             aria-disabled={!canGenerateMusic || undefined}
+            aria-label={musicButtonLabel}
             className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] ${
               canGenerateMusic
                 ? 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50'
                 : 'cursor-not-allowed bg-zinc-800 text-zinc-500'
             }`}
-            title={canGenerateMusic ? 'Generate music with AI' : `Requires ${TIER_LABELS[getRequiredTier('generate-music') ?? 'hobbyist']} tier`}
+            title={musicButtonLabel}
           >
             {canGenerateMusic ? <Sparkles size={10} /> : <Lock size={10} />}
             Music
