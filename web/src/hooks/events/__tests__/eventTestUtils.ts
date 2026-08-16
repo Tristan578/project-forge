@@ -100,5 +100,7 @@ export function createMockActions() {
     // State properties used by animation tests
     primaryId: null as string | null,
     skeletons2d: {} as Record<string, unknown>,
+    // Read back through the getter the audio import handler passes to the graph
+    entityAudio: {} as Record<string, unknown>,
   };
 }
