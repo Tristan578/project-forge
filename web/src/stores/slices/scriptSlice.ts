@@ -31,7 +31,17 @@ export function setScriptDispatcher(dispatcher: (command: string, payload: unkno
   dispatchCommand = dispatcher;
 }
 
-export const createScriptSlice: StateCreator<ScriptSlice, [], [], ScriptSlice> = (set, get) => ({
+/**
+ * `primaryId` is owned by the selection slice, not this one. Widening the
+ * generic the way `createSceneGraphSlice` does is how a slice reads a
+ * neighbour's state without taking a dependency on its whole interface.
+ */
+export const createScriptSlice: StateCreator<
+  ScriptSlice & { primaryId: string | null },
+  [],
+  [],
+  ScriptSlice
+> = (set, get) => ({
   primaryScript: null,
   allScripts: {},
   scriptLogs: [],
@@ -62,15 +72,22 @@ export const createScriptSlice: StateCreator<ScriptSlice, [], [], ScriptSlice> =
    * and write `primaryScript` alone, so a SCRIPT_CHANGED for any entity
    * overwrote the inspector's view and `allScripts` never saw an engine-side
    * script at all — the same single-primary defect as the audio slice.
+   *
+   * `primaryScript` therefore moves ONLY when the report is about the entity
+   * actually selected. `apply_script_updates` emits SCRIPT_CHANGED for whatever
+   * entity it just wrote (`engine/src/bridge/scripts.rs`), not only the selected
+   * one, so an unconditional write would still let an unrelated entity's script
+   * appear in the inspector — the very bug the paragraph above says was fixed.
    */
   setEntityScript: (entityId, script) => set(state => {
+    const isSelected = state.primaryId === entityId;
     if (script === null) {
       const { [entityId]: _removed, ...rest } = state.allScripts;
-      return { allScripts: rest, primaryScript: null };
+      return isSelected ? { allScripts: rest, primaryScript: null } : { allScripts: rest };
     }
     return {
       allScripts: { ...state.allScripts, [entityId]: script },
-      primaryScript: script,
+      ...(isSelected ? { primaryScript: script } : {}),
     };
   }),
   addScriptLog: (entry) => {

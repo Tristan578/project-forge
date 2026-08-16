@@ -1,15 +1,30 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
+import { create } from 'zustand';
+import { createMockDispatch } from './sliceTestTemplate';
 import { createScriptSlice, setScriptDispatcher, type ScriptSlice } from '../scriptSlice';
 
+/**
+ * `primaryId` belongs to the selection slice. `setEntityScript` reads it to
+ * decide whether the incoming script is the SELECTED entity's, so an isolated
+ * store has to supply it the way `createSceneGraphSlice`'s suite does.
+ */
+type TestState = ScriptSlice & { primaryId: string | null };
+
 describe('scriptSlice', () => {
-  let store: ReturnType<typeof createSliceStore<ScriptSlice>>;
+  let store: ReturnType<typeof createTestStore>;
   let mockDispatch: ReturnType<typeof createMockDispatch>;
+
+  function createTestStore() {
+    return create<TestState>()((set, get, api) => ({
+      ...createScriptSlice(set, get, api),
+      primaryId: null,
+    }));
+  }
 
   beforeEach(() => {
     mockDispatch = createMockDispatch();
     setScriptDispatcher(mockDispatch);
-    store = createSliceStore(createScriptSlice);
+    store = createTestStore();
   });
 
   afterEach(() => {
@@ -121,9 +136,37 @@ describe('scriptSlice', () => {
       // engine-side script never reached `allScripts` — the map every consumer
       // reads, and the one `get_script` answers from.
       const script = { source: 'entity-code', enabled: false };
+      store.setState({ primaryId: 'ent-1' });
       store.getState().setEntityScript('ent-1', script);
       expect(store.getState().allScripts).toEqual({ 'ent-1': script });
       expect(store.getState().primaryScript).toEqual(script);
+    });
+
+    it('setEntityScript should not overwrite primaryScript for another entity', () => {
+      // `primaryScript` is what the script editor panel shows. Writing it on
+      // every entity's update meant a background entity's script — one arriving
+      // from a generation pass, say — silently replaced the source the user was
+      // editing, with the panel giving no sign the file had changed underneath.
+      const selected = { source: 'the-open-file', enabled: true };
+      store.setState({ primaryId: 'ent-1' });
+      store.getState().setEntityScript('ent-1', selected);
+
+      store.getState().setEntityScript('ent-2', { source: 'background', enabled: true });
+
+      expect(store.getState().primaryScript).toEqual(selected);
+      expect(store.getState().allScripts['ent-2']).toEqual({
+        source: 'background',
+        enabled: true,
+      });
+    });
+
+    it('setEntityScript clears primaryScript only for the selected entity', () => {
+      store.setState({ primaryId: 'ent-1' });
+      store.getState().setEntityScript('ent-1', { source: 'x', enabled: true });
+      store.getState().setEntityScript('ent-1', null);
+
+      expect(store.getState().primaryScript).toBeNull();
+      expect(store.getState().allScripts).toEqual({});
     });
 
     it('setEntityScript should keep other entities\' scripts', () => {
