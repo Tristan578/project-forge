@@ -5,6 +5,7 @@ const loadBuffer = vi.fn<(assetId: string, data: ArrayBuffer) => Promise<void>>(
 const createInstance = vi.fn();
 const destroyInstance = vi.fn();
 const destroyAll = vi.fn();
+const releaseBuffer = vi.fn();
 
 vi.mock('../audioManager', () => ({
   audioManager: {
@@ -12,6 +13,7 @@ vi.mock('../audioManager', () => ({
     createInstance: (...args: unknown[]) => createInstance(...args),
     destroyInstance: (...args: unknown[]) => destroyInstance(...args),
     destroyAll: (...args: unknown[]) => destroyAll(...args),
+    releaseBuffer: (...args: unknown[]) => releaseBuffer(...args),
   },
 }));
 
@@ -52,6 +54,7 @@ beforeEach(() => {
   createInstance.mockReset();
   destroyInstance.mockReset();
   destroyAll.mockReset();
+  releaseBuffer.mockReset();
 });
 
 describe('decodeBase64ToArrayBuffer', () => {
@@ -249,6 +252,28 @@ describe('resetEntityAudioGraphForScene', () => {
     // And the applied-signature record is gone, so the same component rebuilds.
     syncEntityAudioInstance('e1', audio());
     expect(createInstance).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the decoded buffer when the asset itself is deleted', () => {
+    // Nothing else ever deleted from the buffer map, so an imported-then-deleted
+    // clip stayed decoded for the life of the tab. Asset deletion is the one
+    // moment the buffer is provably unreachable.
+    registerImportedAudioAsset('uuid-1', 'sfx-laser');
+
+    forgetImportedAudioAsset('uuid-1');
+
+    expect(releaseBuffer).toHaveBeenCalledWith('uuid-1');
+    expect(resolveAudioAssetId('sfx-laser')).toBe('sfx-laser');
+  });
+
+  it('does not release buffers on a scene change', () => {
+    // The mirror of the alias rule below: buffers are asset-lifetime state, and
+    // dropping them here would silence every clip with no path to re-decode.
+    registerImportedAudioAsset('uuid-1', 'sfx-laser');
+
+    resetEntityAudioGraphForScene();
+
+    expect(releaseBuffer).not.toHaveBeenCalled();
   });
 
   it('keeps the name aliases, which outlive the scene that used them', () => {

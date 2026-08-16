@@ -520,10 +520,52 @@ class AudioManager {
 
     this.instances.delete(key);
 
+    // The occlusion filter is keyed by ENTITY, not by instance key, so it
+    // belongs to the entity as a whole and only the slot-less destroy owns it.
+    // Nothing else dropped it: `setOcclusion(id, false)` was the single delete
+    // path, so an entity deleted while occluded left a live BiquadFilterNode
+    // and a `Set` entry behind for the lifetime of the tab.
+    if (!slot) {
+      this.releaseOcclusion(entityId);
+    }
+
     // If called without slot, also destroy all layers
     if (!slot) {
       this.removeAllLayers(entityId);
     }
+  }
+
+  /**
+   * Drop an entity's occlusion filter and its enabled flag.
+   *
+   * Disconnecting matters as much as deleting: an undisconnected BiquadFilterNode
+   * that is still wired into a bus keeps its whole upstream chain reachable, so
+   * the "leak" is the graph, not just the map entry.
+   */
+  private releaseOcclusion(entityId: string): void {
+    const filter = this.occlusionFilters.get(entityId);
+    if (filter) {
+      filter.disconnect();
+      this.occlusionFilters.delete(entityId);
+    }
+    this.occlusionEnabled.delete(entityId);
+  }
+
+  /**
+   * Forget a decoded buffer.
+   *
+   * Call this when the ASSET goes away, not when a scene or a play session
+   * ends: `buffers` was written by `loadBuffer` and never deleted anywhere, so
+   * every asset a user imported and then deleted stayed decoded in memory —
+   * and decoded PCM is far larger than the compressed file it came from.
+   *
+   * Deliberately NOT called from `destroyAll`. Buffers outlive the scene by
+   * design (see `resetEntityAudioGraphForScene`): the name→id aliases survive a
+   * scene change precisely because the buffers they resolve to do, and dropping
+   * them on Stop would leave every clip silent with no path to re-decode.
+   */
+  releaseBuffer(assetId: string): void {
+    this.buffers.delete(assetId);
   }
 
   /**
@@ -533,6 +575,13 @@ class AudioManager {
     for (const entityId of Array.from(this.instances.keys())) {
       this.destroyInstance(entityId);
     }
+    // Instance keys carry a `:slot` suffix, so the loop above never reaches the
+    // slot-less branch that releases occlusion for a layered entity. Sweep what
+    // is left rather than relying on the key shape.
+    for (const entityId of Array.from(this.occlusionFilters.keys())) {
+      this.releaseOcclusion(entityId);
+    }
+    this.occlusionEnabled.clear();
     this.cancelAllOneShots();
   }
 

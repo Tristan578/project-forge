@@ -145,16 +145,25 @@ export function registerImportedAudioAsset(assetId: string, name: string): void 
 }
 
 /**
- * Drop every alias pointing at a deleted asset.
+ * Drop every alias pointing at a deleted asset, and the buffer it was decoded
+ * into.
  *
- * Without this the map only ever grows, and a name reused after its asset was
- * deleted would resolve to the dead id — handing `createInstance` an id with no
- * decoded buffer, i.e. a permanently silent entity.
+ * Without the alias sweep the map only ever grows, and a name reused after its
+ * asset was deleted would resolve to the dead id — handing `createInstance` an
+ * id with no decoded buffer, i.e. a permanently silent entity.
+ *
+ * The buffer belongs here for the same reason and nowhere else: nothing ever
+ * deleted from `audioManager`'s buffer map, so every clip a user imported and
+ * then deleted stayed decoded for the life of the tab, and decoded PCM is much
+ * larger than the file it came from. Asset deletion is the one moment the
+ * buffer is provably unreachable — scene changes and Stop deliberately keep it
+ * (see `resetEntityAudioGraphForScene`).
  */
 export function forgetImportedAudioAsset(assetId: string): void {
   for (const [name, id] of assetIdByImportName) {
     if (id === assetId) assetIdByImportName.delete(name);
   }
+  audioManager.releaseBuffer(assetId);
 }
 
 /**
