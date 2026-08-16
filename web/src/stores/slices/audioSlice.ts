@@ -8,7 +8,15 @@ import { audioManager } from '@/lib/audio/audioManager';
 import type { AudioSnapshot } from '@/lib/audio/audioManager';
 
 export interface AudioSlice {
-  primaryAudio: AudioData | null;
+  /**
+   * Every entity's audio component, keyed by entity id.
+   *
+   * This replaced a single `primaryAudio`, which held whichever entity's
+   * `AUDIO_CHANGED` arrived last. A scene with two sound sources kept one of
+   * them, and the Web Audio graph — which needs an entry per entity — had
+   * nothing to build from.
+   */
+  entityAudio: Record<string, AudioData>;
   audioBuses: AudioBusDef[];
   mixerPanelOpen: boolean;
   reverbZones: Record<string, ReverbZoneData>;
@@ -22,7 +30,9 @@ export interface AudioSlice {
   playAudio: (entityId: string) => void;
   stopAudio: (entityId: string) => void;
   pauseAudio: (entityId: string) => void;
-  setPrimaryAudio: (audio: AudioData | null) => void;
+  setEntityAudio: (entityId: string, audio: AudioData | null) => void;
+  setPlaybackVolume: (entityId: string, volume: number) => void;
+  setPlaybackPitch: (entityId: string, pitch: number) => void;
   setAudioBuses: (buses: AudioBusDef[]) => void;
   updateAudioBus: (busName: string, update: { volume?: number; muted?: boolean; soloed?: boolean }) => void;
   createAudioBus: (name: string, volume?: number) => void;
@@ -54,7 +64,7 @@ export function setAudioDispatcher(dispatcher: (command: string, payload: unknow
 }
 
 export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (set, get) => ({
-  primaryAudio: null,
+  entityAudio: {},
   audioBuses: [
     { name: 'master', volume: 1.0, muted: false, soloed: false, effects: [] },
     { name: 'sfx', volume: 1.0, muted: false, soloed: false, effects: [] },
@@ -84,7 +94,26 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
   pauseAudio: (entityId) => {
     if (dispatchCommand) dispatchCommand('pause_audio', { entityId });
   },
-  setPrimaryAudio: (audio) => set({ primaryAudio: audio }),
+  setEntityAudio: (entityId, audio) => {
+    set(state => {
+      if (audio === null) {
+        const { [entityId]: _removed, ...rest } = state.entityAudio;
+        return { entityAudio: rest };
+      }
+      return { entityAudio: { ...state.entityAudio, [entityId]: audio } };
+    });
+  },
+  // Playback-only, deliberately not `setAudio`. `set_audio` merges the partial
+  // into the entity's persisted AudioData, inserts `AudioEnabled`, and pushes an
+  // `UndoableAction::AudioChange` onto the editor history — so using it to duck a
+  // sound mid-cutscene would mutate the project and fill the undo stack. These
+  // touch the Web Audio graph and nothing else.
+  setPlaybackVolume: (entityId, volume) => {
+    audioManager.setVolume(entityId, volume);
+  },
+  setPlaybackPitch: (entityId, pitch) => {
+    audioManager.setPitch(entityId, pitch);
+  },
   setAudioBuses: (buses) => set({ audioBuses: buses }),
   updateAudioBus: (busName, update) => {
     const state = get();

@@ -112,7 +112,7 @@ export function buildReviewContext(getState: () => EditorState): ReviewContext {
   // Also check store-level flags for primary entity
   if (state.physicsEnabled) hasPhysics = true;
   if (state.particleEnabled) hasParticles = true;
-  if (state.primaryAudio) hasAudio = true;
+  if (state.entityAudio && Object.keys(state.entityAudio).length > 0) hasAudio = true;
   if (state.primaryAnimation?.availableClips?.length) hasAnimations = true;
 
   // Check scripts

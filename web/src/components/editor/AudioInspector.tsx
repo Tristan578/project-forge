@@ -109,7 +109,10 @@ export function AudioInspector() {
   const canGenerateMusic = canAccessPanel('generate-music', tier);
 
   const primaryId = useEditorStore((s) => s.primaryId);
-  const primaryAudio = useEditorStore((s) => s.primaryAudio);
+  // Read the selected entity's audio out of the per-entity map. This used to be
+  // a single `primaryAudio` holding whichever entity's AUDIO_CHANGED arrived
+  // last, so a scene with two sound sources showed the wrong one.
+  const primaryAudio = useEditorStore((s) => (primaryId ? s.entityAudio[primaryId] ?? null : null));
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
   const audioBuses = useEditorStore((s) => s.audioBuses);
   const setAudio = useEditorStore((s) => s.setAudio);

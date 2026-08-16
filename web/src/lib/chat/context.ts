@@ -34,7 +34,7 @@ interface EditorSnapshot {
   sceneName?: string;
   assetRegistry?: Record<string, AssetMetadata>;
   allScripts?: Record<string, ScriptData>;
-  primaryAudio?: AudioData | null;
+  entityAudio?: Record<string, AudioData>;
   primaryParticle?: ParticleData | null;
   particleEnabled?: boolean;
   primaryAnimation?: AnimationPlaybackState | null;

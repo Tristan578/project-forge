@@ -25,6 +25,14 @@ interface AudioInstance {
   pauseOffset: number;
   loop: boolean;
   bus: string;
+  /**
+   * Playback rate, held on the instance rather than only on `source`.
+   *
+   * `source` exists only while a sound is playing, and `play()` builds a fresh
+   * one each time — so a pitch set before playback, or set and then re-played,
+   * was silently discarded.
+   */
+  pitch: number;
 }
 
 interface BusState {
@@ -239,6 +247,7 @@ class AudioManager {
       pauseOffset: 0,
       loop: audioData.loopAudio,
       bus: audioData.bus ?? 'sfx',
+      pitch: audioData.pitch,
     };
 
     this.instances.set(key, instance);
@@ -274,6 +283,7 @@ class AudioManager {
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.loop = instance.loop;
+    source.playbackRate.value = instance.pitch;
 
     // Route through bus
     const busName = instance.bus ?? 'sfx';
@@ -389,12 +399,18 @@ class AudioManager {
 
   /**
    * Set pitch (playback rate) for an entity's audio.
+   *
+   * Records the rate on the instance as well as the live source, so it survives
+   * the source being rebuilt by the next `play()` — and so it can be set on an
+   * instance that is not playing yet.
    */
   setPitch(entityId: string, rate: number, slot?: string): void {
     const key = this.instanceKey(entityId, slot);
     const instance = this.instances.get(key);
-    if (!instance?.source) return;
-    instance.source.playbackRate.value = Math.max(0.25, Math.min(4, rate));
+    if (!instance) return;
+    const clamped = Math.max(0.25, Math.min(4, rate));
+    instance.pitch = clamped;
+    if (instance.source) instance.source.playbackRate.value = clamped;
   }
 
   /**
@@ -546,6 +562,9 @@ class AudioManager {
       pauseOffset: 0,
       loop: options?.loop ?? false,
       bus: options?.bus ?? 'sfx',
+      // `options.pitch` was accepted by this signature and read by nothing — a
+      // layer's pitch was dropped on the floor at every call site.
+      pitch: options?.pitch ?? 1.0,
     };
     this.instances.set(key, instance);
     // Auto-play the layer

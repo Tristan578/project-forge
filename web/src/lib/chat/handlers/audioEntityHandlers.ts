@@ -56,7 +56,7 @@ export const audioEntityHandlers: Record<string, ToolHandler> = {
   get_audio: async (args, { store }) => {
     const p = parseArgs(z.object({ entityId: zEntityId }), args);
     if (p.error) return p.error;
-    const audio = store.primaryAudio;
+    const audio = store.entityAudio[p.data.entityId];
     if (!audio) return { success: true, result: { hasAudio: false } };
     return { success: true, result: { hasAudio: true, ...audio } };
   },

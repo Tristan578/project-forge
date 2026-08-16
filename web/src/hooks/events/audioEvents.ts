@@ -2,7 +2,8 @@
  * Event handlers for scripts, audio, audio buses, reverb zones.
  */
 
-import { useEditorStore, type ScriptData, type AudioBusDef, type ReverbZoneData, type ReverbShape, type InputBinding, type InputPreset, type AssetMetadata } from '@/stores/editorStore';
+import { useEditorStore, type ScriptData, type AudioData, type AudioBusDef, type ReverbZoneData, type ReverbShape, type InputBinding, type InputPreset, type AssetMetadata } from '@/stores/editorStore';
+import { ingestImportedAudioAsset, syncEntityAudioInstance } from '@/lib/audio/entityAudioGraph';
 import { castPayload, type SetFn, type GetFn } from './types';
 
 export function handleAudioEvent(
@@ -33,10 +34,10 @@ export function handleAudioEvent(
         autoplay?: boolean;
         bus?: string;
       }>(data);
-      const { entityId: _entityId, ...audioData } = payload;
+      const { entityId, ...audioData } = payload;
       // If assetId is defined (even if null), it means audio exists
-      if (audioData.assetId !== undefined) {
-        const audio = {
+      const audio: AudioData | null = audioData.assetId !== undefined
+        ? {
           assetId: audioData.assetId ?? null,
           volume: audioData.volume ?? 1.0,
           pitch: audioData.pitch ?? 1.0,
@@ -47,11 +48,12 @@ export function handleAudioEvent(
           rolloffFactor: audioData.rolloffFactor ?? 1,
           autoplay: audioData.autoplay ?? false,
           bus: audioData.bus ?? 'sfx',
-        };
-        useEditorStore.getState().setPrimaryAudio(audio);
-      } else {
-        useEditorStore.getState().setPrimaryAudio(null);
-      }
+        }
+        : null;
+      useEditorStore.getState().setEntityAudio(entityId, audio);
+      // The engine emits this for whichever entity changed, so the graph is
+      // rebuilt for that entity — not for whatever happens to be selected.
+      syncEntityAudioInstance(entityId, audio);
       return true;
     }
 
@@ -148,10 +150,19 @@ export function handleAudioEvent(
       useEditorStore.getState().addAssetToRegistry({
         id: payload.assetId,
         name: payload.name,
-        kind: payload.kind as 'gltf_model' | 'texture',
+        kind: payload.kind as AssetMetadata['kind'],
         fileSize: payload.fileSize,
         source: { type: 'upload', filename: payload.name },
       });
+      if (payload.kind === 'audio') {
+        // This is the first moment JS learns the asset id the engine minted, and
+        // the only correlation back to the bytes it dropped is `name`.
+        void ingestImportedAudioAsset(
+          payload.assetId,
+          payload.name,
+          () => useEditorStore.getState().entityAudio
+        );
+      }
       return true;
     }
 

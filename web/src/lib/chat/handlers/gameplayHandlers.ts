@@ -227,7 +227,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       light: ctx.store.primaryLight || undefined,
       physics: ctx.store.primaryPhysics || undefined,
       script: ctx.store.primaryScript || undefined,
-      audio: ctx.store.primaryAudio || undefined,
+      audio: ctx.store.entityAudio[entityId] || undefined,
       particle: ctx.store.primaryParticle || undefined,
     };
 
