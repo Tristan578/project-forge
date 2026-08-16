@@ -18,6 +18,7 @@ import {
 } from '@/lib/game/gameCameraPayload';
 import type { SetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 import type { GameCameraData } from '@/stores/slices/types';
+import { sanitizeKeyframePayload } from './keyframePayload';
 
 // ============================================================================
 // Types
@@ -123,6 +124,12 @@ function readCameraData(payload: Record<string, unknown>): GameCameraData | null
     // the prototype chain — the value picked up there is then written as an OWN
     // property on `data`, so `buildSetGameCameraPayload`'s own `Object.hasOwn`
     // check downstream cannot tell it apart from one the author really set.
+    //
+    // `sanitizeKeyframePayload` now runs ahead of this and would have dropped
+    // such a key already. This stays because the guarantee is the caller's, not
+    // this function's: the parameter says `Record<string, unknown>`, and a second
+    // call site that reads a payload from somewhere else would inherit the hole
+    // rather than a type error.
     if (!Object.hasOwn(payload, key)) continue;
     const value = payload[key];
     if (typeof value === 'number' && Number.isFinite(value)) data[key] = value;
@@ -196,7 +203,12 @@ export function buildCommand(
    */
   prevKeyframe: CutsceneKeyframe | null = null,
 ): { command: string; payload: unknown } | null {
-  const { payload } = keyframe;
+  // Read against the track type's vocabulary before anything below touches it.
+  // This is the dispatch boundary, and it does not get to assume its input came
+  // from the generator: the store also takes keyframes from the timeline editor
+  // and from a saved project, neither of which passes through the parse-time
+  // check. What arrives here is `Record<string, unknown>` and nothing more.
+  const payload = sanitizeKeyframePayload(trackType, keyframe.payload);
 
   switch (trackType) {
     case 'camera': {
@@ -206,9 +218,17 @@ export function buildCommand(
     }
     case 'animation': {
       if (!entityId) return null;
-      const clipName = typeof payload.clipName === 'string' ? payload.clipName : '';
+      // No clip names nothing to play. This used to fall back to `''` and
+      // dispatch anyway — a `play_animation` for the empty clip, which the
+      // engine can only ignore, indistinguishable in a log from one that worked.
+      const { clipName } = payload;
+      if (typeof clipName !== 'string') return null;
       return {
         command: 'play_animation',
+        // `crossfadeSecs` is a non-negative finite number or absent by the time
+        // it gets here, so `??` is reading an absent field rather than papering
+        // over a bad one — it used to forward whatever the model wrote, string
+        // or object included.
         payload: { entityId, clipName, crossfadeSecs: payload.crossfadeSecs ?? 0 },
       };
     }

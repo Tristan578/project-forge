@@ -168,6 +168,38 @@ describe('buildCommand', () => {
     expect(cmd).toBeNull();
   });
 
+  it('animation track drops keys the engine cannot receive', () => {
+    const cmd = buildCommand(
+      'animation',
+      'entity1',
+      makeKF({ clipName: 'run', crossfadeSecs: 0.25, loop: true, speed: 2 }),
+      1,
+    );
+    expect(cmd?.payload).toEqual({ entityId: 'entity1', clipName: 'run', crossfadeSecs: 0.25 });
+  });
+
+  it.each([
+    ['names no clip', {}],
+    ['names the empty clip', { clipName: '' }],
+    ['gives a non-string clip name', { clipName: 42 }],
+  ])('animation track returns null when the payload %s', (_case, payload) => {
+    // This used to dispatch `play_animation` for the empty clip, which the
+    // engine can only ignore — a no-op indistinguishable in a log from a hit.
+    expect(buildCommand('animation', 'entity1', makeKF(payload), 1)).toBeNull();
+  });
+
+  it('animation track forwards no crossfade the model did not give it', () => {
+    const cmd = buildCommand(
+      'animation',
+      'entity1',
+      makeKF({ clipName: 'run', crossfadeSecs: 'quickly' }),
+      1,
+    );
+    // Not the string, and not `NaN` from coercing it: the `??` fallback is
+    // reading an absent field rather than papering over a bad one.
+    expect(cmd?.payload).toEqual({ entityId: 'entity1', clipName: 'run', crossfadeSecs: 0 });
+  });
+
   it('dialogue track returns start_dialogue, stamped with the beat it came from', () => {
     // `beat` is the keyframe's own timestamp. A dialogue keyframe with a
     // duration is re-dispatched on every frame of its window, so the handler
@@ -178,11 +210,22 @@ describe('buildCommand', () => {
     expect(cmd?.payload).toEqual({ treeId: 'tree_1', entityId: 'npc1', beat: 0 });
   });
 
-  it('dialogue track returns null when the payload names no tree', () => {
-    // A command carrying `treeId: undefined` names nothing to start. Building it
-    // anyway produced a dispatch that could only ever be a no-op.
-    expect(buildCommand('dialogue', 'npc1', makeKF(), 0)).toBeNull();
-    expect(buildCommand('dialogue', 'npc1', makeKF({ treeId: 42 }), 0)).toBeNull();
+  it('dialogue track still fires without an entity, since narration has no speaker', () => {
+    const cmd = buildCommand('dialogue', null, makeKF({ treeId: 'tree_1' }), 0);
+    expect(cmd?.payload).toEqual({ treeId: 'tree_1', entityId: undefined, beat: 0 });
+  });
+
+  it.each([
+    ['names no tree', {}],
+    ['names the empty tree', { treeId: '' }],
+    ['gives a numeric tree id', { treeId: 42 }],
+    ['gives a non-string tree id', { treeId: { id: 'tree_1' } }],
+  ])('dialogue track returns null when the payload %s', (_case, payload) => {
+    // `treeId` used to be forwarded unread, so a missing one started a dialogue
+    // named `undefined` rather than declining to start one. The handler looks the
+    // tree up by this value, so anything that is not a string finds nothing and
+    // the beat passes as if it had played.
+    expect(buildCommand('dialogue', 'npc1', makeKF(payload), 0)).toBeNull();
   });
 
   it('audio track sends only the field play_audio reads', () => {
@@ -191,6 +234,26 @@ describe('buildCommand', () => {
     // no error — a payload that looked like it configured playback.
     const cmd = buildCommand('audio', 'sfx1', makeKF({ volume: 0.8, fadeIn: 2 }), 0);
     expect(cmd?.command).toBe('play_audio');
+    expect(cmd?.payload).toEqual({ entityId: 'sfx1' });
+  });
+
+  it('audio track cannot be made to address a different entity', () => {
+    // The whole payload used to be spread into the command, so a payload key
+    // named `entityId` renamed the entity the track addresses — the track's own
+    // field, and not the payload's to set. Sending only the track's `entityId`
+    // closes that regardless of what the keyframe carries.
+    const cmd = buildCommand(
+      'audio',
+      'sfx1',
+      makeKF({
+        volume: 0.8,
+        pitch: 1.2,
+        clipUrl: 'https://example.invalid/a.mp3',
+        loop: true,
+        entityId: 'someone-elses-entity',
+      }),
+      0,
+    );
     expect(cmd?.payload).toEqual({ entityId: 'sfx1' });
   });
 
