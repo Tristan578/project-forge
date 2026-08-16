@@ -54,7 +54,25 @@ export const createScriptSlice: StateCreator<ScriptSlice, [], [], ScriptSlice> =
     if (dispatchCommand) dispatchCommand('set_script', { entityId, source, enabled: true, template: templateId });
   },
   setPrimaryScript: (script) => set({ primaryScript: script }),
-  setEntityScript: (_entityId, script) => set({ primaryScript: script }),
+  /**
+   * Record the script the engine reported for one entity.
+   *
+   * `allScripts` is the per-entity map every consumer reads; `primaryScript` is
+   * the inspector's view of the selected entity. This used to ignore `entityId`
+   * and write `primaryScript` alone, so a SCRIPT_CHANGED for any entity
+   * overwrote the inspector's view and `allScripts` never saw an engine-side
+   * script at all — the same single-primary defect as the audio slice.
+   */
+  setEntityScript: (entityId, script) => set(state => {
+    if (script === null) {
+      const { [entityId]: _removed, ...rest } = state.allScripts;
+      return { allScripts: rest, primaryScript: null };
+    }
+    return {
+      allScripts: { ...state.allScripts, [entityId]: script },
+      primaryScript: script,
+    };
+  }),
   addScriptLog: (entry) => {
     const state = get();
     // Keep max 200 log entries

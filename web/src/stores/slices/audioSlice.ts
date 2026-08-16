@@ -31,8 +31,6 @@ export interface AudioSlice {
   stopAudio: (entityId: string) => void;
   pauseAudio: (entityId: string) => void;
   setEntityAudio: (entityId: string, audio: AudioData | null) => void;
-  setPlaybackVolume: (entityId: string, volume: number) => void;
-  setPlaybackPitch: (entityId: string, pitch: number) => void;
   setAudioBuses: (buses: AudioBusDef[]) => void;
   updateAudioBus: (busName: string, update: { volume?: number; muted?: boolean; soloed?: boolean }) => void;
   createAudioBus: (name: string, volume?: number) => void;
@@ -102,17 +100,6 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
       }
       return { entityAudio: { ...state.entityAudio, [entityId]: audio } };
     });
-  },
-  // Playback-only, deliberately not `setAudio`. `set_audio` merges the partial
-  // into the entity's persisted AudioData, inserts `AudioEnabled`, and pushes an
-  // `UndoableAction::AudioChange` onto the editor history — so using it to duck a
-  // sound mid-cutscene would mutate the project and fill the undo stack. These
-  // touch the Web Audio graph and nothing else.
-  setPlaybackVolume: (entityId, volume) => {
-    audioManager.setVolume(entityId, volume);
-  },
-  setPlaybackPitch: (entityId, pitch) => {
-    audioManager.setPitch(entityId, pitch);
   },
   setAudioBuses: (buses) => set({ audioBuses: buses }),
   updateAudioBus: (busName, update) => {

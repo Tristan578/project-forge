@@ -116,10 +116,31 @@ describe('scriptSlice', () => {
       expect(store.getState().primaryScript).toBeNull();
     });
 
-    it('setEntityScript should set primaryScript', () => {
+    it('setEntityScript should record the script under its entity id', () => {
+      // This used to ignore `entityId` and write `primaryScript` alone, so an
+      // engine-side script never reached `allScripts` — the map every consumer
+      // reads, and the one `get_script` answers from.
       const script = { source: 'entity-code', enabled: false };
-      store.getState().setEntityScript('any-id', script);
+      store.getState().setEntityScript('ent-1', script);
+      expect(store.getState().allScripts).toEqual({ 'ent-1': script });
       expect(store.getState().primaryScript).toEqual(script);
+    });
+
+    it('setEntityScript should keep other entities\' scripts', () => {
+      const first = { source: 'first', enabled: true };
+      const second = { source: 'second', enabled: false };
+      store.getState().setEntityScript('ent-1', first);
+      store.getState().setEntityScript('ent-2', second);
+      expect(store.getState().allScripts).toEqual({ 'ent-1': first, 'ent-2': second });
+    });
+
+    it('setEntityScript with null should drop only that entity', () => {
+      const kept = { source: 'kept', enabled: true };
+      store.getState().setEntityScript('ent-1', kept);
+      store.getState().setEntityScript('ent-2', { source: 'gone', enabled: true });
+      store.getState().setEntityScript('ent-2', null);
+      expect(store.getState().allScripts).toEqual({ 'ent-1': kept });
+      expect(store.getState().primaryScript).toBeNull();
     });
   });
 

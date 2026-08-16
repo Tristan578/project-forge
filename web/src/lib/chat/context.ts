@@ -404,6 +404,26 @@ export function buildSceneContext(state: EditorSnapshot): string {
     }
   }
 
+  // Sound sources. Distinct from the asset list above: an imported file the
+  // model can reference is not the same as an entity already wired to play it,
+  // and without this the model re-attaches audio to entities that already have
+  // it. Names come from the scene graph so the model can address them the same
+  // way the user does.
+  if (state.entityAudio) {
+    const sources = Object.entries(state.entityAudio);
+    if (sources.length > 0) {
+      const described = sources.map(([entityId, audio]) => {
+        const name = state.sceneGraph.nodes[entityId]?.name ?? entityId;
+        const traits = [audio.bus];
+        if (audio.loopAudio) traits.push('looping');
+        if (audio.spatial) traits.push('spatial');
+        if (audio.autoplay) traits.push('autoplay');
+        return `${name} (${traits.join(', ')})`;
+      }).join(', ');
+      sections.push(`\n## Sound Sources\n${sources.length} entit${sources.length === 1 ? 'y' : 'ies'} with audio: ${described}`);
+    }
+  }
+
   // Audio Buses
   if (state.audioBuses && state.audioBuses.length > 0) {
     const busesInfo = state.audioBuses.map((bus) => {

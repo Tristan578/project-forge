@@ -172,48 +172,9 @@ describe('audioEntityHandlers', () => {
     });
   });
 
-  // =========================================================================
-  // get_audio
-  // =========================================================================
-  describe('get_audio', () => {
-    it('returns hasAudio false when no audio', async () => {
-      const { result } = await invoke('get_audio', { entityId: 'ent-1' });
-      expect(result.success).toBe(true);
-      expect((result.result as Record<string, unknown>).hasAudio).toBe(false);
-    });
-
-    it('returns audio data when present', async () => {
-      const audio = { volume: 0.5, spatial: true };
-      const { result } = await invoke(
-        'get_audio',
-        { entityId: 'ent-1' },
-        { entityAudio: { 'ent-1': audio } },
-      );
-      expect(result.success).toBe(true);
-      const r = result.result as Record<string, unknown>;
-      expect(r.hasAudio).toBe(true);
-      expect(r.volume).toBe(0.5);
-      expect(r.spatial).toBe(true);
-    });
-
-    it('answers for the entity asked about, not another one', async () => {
-      // The store held a single component, so this returned whichever entity's
-      // audio arrived last no matter which entity the caller named.
-      const audio = { volume: 0.5, spatial: true };
-      const { result } = await invoke(
-        'get_audio',
-        { entityId: 'ent-1' },
-        { entityAudio: { 'ent-2': audio } },
-      );
-      expect(result.success).toBe(true);
-      expect((result.result as Record<string, unknown>).hasAudio).toBe(false);
-    });
-
-    it('fails without entityId', async () => {
-      const { result } = await invoke('get_audio', {});
-      expect(result.success).toBe(false);
-    });
-  });
+  // `get_audio` is not registered here — it lives in `queryHandlers` with the
+  // other read-only getters, and is tested in `queryHandlers.test.ts`. A
+  // byte-identical copy used to sit in this module and shadow that one.
 
   // =========================================================================
   // Bus management

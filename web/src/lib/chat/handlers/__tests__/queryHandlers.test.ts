@@ -477,6 +477,25 @@ describe('get_script', () => {
     expect(data.hasScript).toBe(true);
     expect(data.enabled).toBe(false);
   });
+
+  it.each(['constructor', 'toString', 'valueOf', '__proto__', 'hasOwnProperty'])(
+    'reports no script for the inherited name %s',
+    async (entityId) => {
+      // A bare `allScripts[entityId]` walks the prototype chain, so these names
+      // resolved to a truthy `Object.prototype` member and the handler claimed
+      // a script existed — then reported every field as undefined. The model
+      // plans around a script it believes is there, which is worse than being
+      // told there is none.
+      const { result } = await invokeHandler(
+        queryHandlers,
+        'get_script',
+        { entityId },
+        { allScripts: {} }
+      );
+      expect(result.success).toBe(true);
+      expect(result.result).toEqual({ hasScript: false });
+    }
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -540,6 +559,21 @@ describe('get_audio', () => {
     expect(result.success).toBe(true);
     expect((result.result as { hasAudio: boolean }).hasAudio).toBe(false);
   });
+
+  it.each(['constructor', 'toString', 'valueOf', '__proto__', 'hasOwnProperty'])(
+    'reports no audio for the inherited name %s',
+    async (entityId) => {
+      // Same prototype-chain read as `get_script` above.
+      const { result } = await invokeHandler(
+        queryHandlers,
+        'get_audio',
+        { entityId },
+        { entityAudio: {} }
+      );
+      expect(result.success).toBe(true);
+      expect(result.result).toEqual({ hasAudio: false });
+    }
+  );
 });
 
 // ---------------------------------------------------------------------------
