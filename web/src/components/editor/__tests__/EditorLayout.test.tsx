@@ -15,6 +15,16 @@ import { useGenerationStore } from '@/stores/generationStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { useGenerationPolling } from '@/hooks/useGenerationPolling';
 
+// TokenDepletedModal renders inside this layout and calls `useRouter`, which
+// throws "invariant expected app router to be mounted" outside a real App
+// Router tree. Only that one export is stubbed — everything else in the module
+// stays real, so a component reaching for `usePathname` still gets the genuine
+// article rather than silently undefined.
+vi.mock('next/navigation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/navigation')>()),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn() }),
+}));
+
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: Object.assign(vi.fn(() => ({})), {
     setState: vi.fn(),

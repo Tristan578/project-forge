@@ -24,6 +24,14 @@ export class EditorErrorBoundary extends Component<Props, State> {
   }
 
   private handleReload = () => { window.location.reload(); };
+
+  // A hard navigation is the point here, not an oversight the rule would fix.
+  // This runs with `hasError: true` latched on a boundary that React will not
+  // reset on its own; a soft `router.push` keeps the same JS context — and the
+  // same wedged WASM engine and store slices that produced the crash — alive on
+  // the next screen. Tearing the document down is the recovery. There is also no
+  // hook to reach for: error boundaries must be class components.
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
   private handleBackToDashboard = () => { window.location.href = '/dashboard'; };
 
   render() {

@@ -14,13 +14,14 @@ vi.mock('lucide-react', () => ({
   Key: (props: Record<string, unknown>) => <span data-testid="key-icon" {...props} />,
 }));
 
-// Track navigation
-const assignMock = vi.fn();
-Object.defineProperty(window, 'location', {
-  value: { href: '', assign: assignMock },
-  writable: true,
-  configurable: true,
-});
+// Track navigation. The modal soft-navigates with the App Router, so the seam
+// is `useRouter().push` — not `window.location`. A stubbed `location.href` is
+// also a weaker assertion than it looks: writing a string to a plain object
+// records the write whether or not anything navigated.
+const pushMock = vi.fn();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: pushMock }),
+}));
 
 const mockChatState = {
   showTokenDepletedModal: false,
@@ -45,7 +46,6 @@ describe('TokenDepletedModal', () => {
     mockChatState.showTokenDepletedModal = false;
     mockChatState.setShowTokenDepletedModal = vi.fn();
     mockUserState.tier = 'hobbyist';
-    window.location.href = '';
   });
 
   afterEach(() => {
@@ -93,7 +93,7 @@ describe('TokenDepletedModal', () => {
     render(<TokenDepletedModal />);
     fireEvent.click(screen.getByTestId('upgrade-plan-button'));
     expect(mockChatState.setShowTokenDepletedModal).toHaveBeenCalledWith(false);
-    expect(window.location.href).toBe('/pricing');
+    expect(pushMock).toHaveBeenCalledExactlyOnceWith('/pricing');
   });
 
   it('navigates to /settings/billing when Buy Token Pack is clicked', () => {
@@ -101,7 +101,7 @@ describe('TokenDepletedModal', () => {
     render(<TokenDepletedModal />);
     fireEvent.click(screen.getByTestId('buy-token-pack-button'));
     expect(mockChatState.setShowTokenDepletedModal).toHaveBeenCalledWith(false);
-    expect(window.location.href).toBe('/settings/billing');
+    expect(pushMock).toHaveBeenCalledExactlyOnceWith('/settings/billing');
   });
 
   it('navigates to /settings/api-keys when BYOK is clicked', () => {
@@ -109,7 +109,7 @@ describe('TokenDepletedModal', () => {
     render(<TokenDepletedModal />);
     fireEvent.click(screen.getByTestId('byok-link'));
     expect(mockChatState.setShowTokenDepletedModal).toHaveBeenCalledWith(false);
-    expect(window.location.href).toBe('/settings/api-keys');
+    expect(pushMock).toHaveBeenCalledExactlyOnceWith('/settings/api-keys');
   });
 
   it('has correct aria-labelledby pointing to the heading', () => {
