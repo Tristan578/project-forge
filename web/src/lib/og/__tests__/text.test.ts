@@ -153,4 +153,23 @@ describe('truncateChars', () => {
   it('honours a custom ellipsis', () => {
     expect(truncateChars('x'.repeat(10), 5, '…')).toBe(`${'x'.repeat(4)}…`);
   });
+
+  it.each([0, 1, 2, 3])('never exceeds a limit of %i, where the ellipsis does not fit', (max) => {
+    // `max - ellipsis.length` goes negative here, and a negative `slice` start
+    // counts from the END: this returned a TWELVE character string for max=2
+    // before the guard. No caller passes a limit this small, which is the only
+    // reason it was invisible — the helper is exported with a length contract,
+    // so the contract is what gets tested, not the current call sites.
+    const out = truncateChars('abcdefghij', max);
+    expect([...out].length).toBeLessThanOrEqual(max);
+  });
+
+  it('degrades to the ellipsis itself rather than to text, when only it fits', () => {
+    // Not just "short enough" — the output must carry no source text at all.
+    // Returning `'ab'` for max=2 would also satisfy the length bound while
+    // silently dropping the "this was truncated" signal the ellipsis carries.
+    expect(truncateChars('abcdefghij', 3)).toBe('...');
+    expect(truncateChars('abcdefghij', 2)).toBe('..');
+    expect(truncateChars('abcdefghij', 0)).toBe('');
+  });
 });

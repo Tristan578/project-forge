@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readdirSync, readFileSync } from 'fs';
 import { join, relative } from 'path';
+import { EMOJI_PATTERN } from '@/lib/og/text';
 
 describe('Root OG Image', () => {
   beforeEach(() => {
@@ -82,16 +83,26 @@ async function renderOffline(makeResponse: () => Response | Promise<Response>) {
  * `bytes` is the positive control. Without it a render that died for an
  * unrelated reason would report zero remote fetches and pass.
  */
+/**
+ * Every prerendered OG route, keyed by the source file it comes from.
+ *
+ * The key is what ties this list to the source scan below: a new prerendered
+ * route that is added to the scan and not to this list is the original PF-1152
+ * incident again, and there the failure is not one broken share card, it is
+ * `next build` exiting.
+ */
+const STATIC_OG_ROUTES: Array<[string, () => Promise<{ default: () => Response }>]> = [
+  ['app/opengraph-image.tsx', () => import('../opengraph-image')],
+  ['app/community/opengraph-image.tsx', () => import('../community/opengraph-image')],
+  ['app/pricing/opengraph-image.tsx', () => import('../pricing/opengraph-image')],
+];
+
 describe('OG routes render offline', () => {
   beforeEach(() => {
     vi.resetModules();
   });
 
-  it.each([
-    ['root', () => import('../opengraph-image')],
-    ['community', () => import('../community/opengraph-image')],
-    ['pricing', () => import('../pricing/opengraph-image')],
-  ])('%s reaches no remote host and still produces an image', async (_name, load) => {
+  it.each(STATIC_OG_ROUTES)('%s reaches no remote host and still produces an image', async (_name, load) => {
     const mod = await load();
     const { remote, bytes } = await renderOffline(() => mod.default());
     expect(remote).toEqual([]);
@@ -181,6 +192,56 @@ describe('play OG route renders offline with emoji-laden user text', () => {
     expect(remote).toEqual([]);
     expect(bytes).toBeGreaterThan(0);
   });
+
+  // Both cases above mock their way into the success path, so `card` is always
+  // non-null and `renderFallback()` — the whole of `loadCard`'s catch, plus
+  // missing user and missing game — was rendered by no test at all. It is a
+  // request-time production path with its own JSX, and the source scan is the
+  // only other thing watching it; a flag pasted into it passed the entire suite
+  // while fetching `1f1fa-1f1f8.svg` and producing zero bytes.
+  it.each([
+    ['no such user', [[], []]],
+    ['no such published game', [[{ id: 'u1', displayName: 'Ada' }], []]],
+  ])('renders the %s fallback card offline', async (_case, rows) => {
+    let call = 0;
+    vi.doMock('@/lib/db/client', () => ({
+      getDb: () => {
+        throw new Error('getDb should not run: queryWithResilience is mocked');
+      },
+      queryWithResilience: async () => rows[call++],
+    }));
+
+    const mod = await import('../play/[userId]/[slug]/opengraph-image');
+    const { remote, bytes } = await renderOffline(() =>
+      mod.default({
+        params: Promise.resolve({ userId: 'clerk_1', slug: 'space-game' }),
+      })
+    );
+
+    expect(remote).toEqual([]);
+    expect(bytes).toBeGreaterThan(0);
+  });
+
+  it('renders the fallback card offline when the query rejects', async () => {
+    vi.doMock('@/lib/db/client', () => ({
+      getDb: () => {
+        throw new Error('getDb should not run: queryWithResilience is mocked');
+      },
+      queryWithResilience: async () => {
+        throw new Error('circuit breaker open');
+      },
+    }));
+
+    const mod = await import('../play/[userId]/[slug]/opengraph-image');
+    const { remote, bytes } = await renderOffline(() =>
+      mod.default({
+        params: Promise.resolve({ userId: 'clerk_1', slug: 'space-game' }),
+      })
+    );
+
+    expect(remote).toEqual([]);
+    expect(bytes).toBeGreaterThan(0);
+  });
 });
 
 /*
@@ -224,22 +285,30 @@ function collectOgSources(dir: string, match: (name: string) => boolean): string
  * covers what it cannot reach: `play/[userId]/[slug]` needs a database, and a
  * shared module is only exercised through whoever imports it.
  *
- * It scans for `Extended_Pictographic`, which is deliberately NOT the property
- * satori keys on — satori keys on `Emoji`, and the two differ by 43 codepoints
- * (see `stripEmoji`). This is a source-hygiene net, not a model of the
- * classifier: it catches the glyph a developer would actually paste into a
- * source file, and it stays quiet on ordinary typography (`—` is not
- * pictographic) and on the digits and `#`/`*` that `Emoji` also covers, which
- * appear in this codebase constantly and are harmless. The runtime guarantee is
- * the offline render above; this only keeps the source clean.
+ * It scans with `EMOJI_PATTERN` — the same set `stripEmoji` removes — rather
+ * than a set spelled here. It spelled its own for one round, `Extended_
+ * Pictographic` alone, and that is 43 codepoints narrower than the property
+ * satori actually keys on: a regional-indicator flag, a bare skin-tone
+ * modifier or a keycap pasted into any file below passed the scan and killed
+ * the render (measured: `1f1fa-1f1f8.svg`, `20-1f3fb.svg`, `31-20e3.svg`, each
+ * zero bytes and throwing). Two spellings of "emoji" in one feature is how that
+ * happened, so there is now one.
+ *
+ * Sharing the pattern also drops `#`, `*` and the digits, which `Emoji` covers
+ * and which appear in this codebase constantly: the classifier's leading
+ * lookahead only admits them ahead of a keycap, and U+20E3 is in the set, so
+ * one can never form.
  *
  * The scan reads raw source, comments included. That is deliberately one notch
  * stricter than the real rule: stripping comments first would need a
  * quote-aware parser, and a comment is a cheap place to spell the codepoint out
- * instead.
+ * instead — which is why `text.ts` writes `<FE0F>` where it quotes the
+ * classifier.
  */
 describe('OG sources carry no emoji codepoints', () => {
-  const pictographic = /\p{Extended_Pictographic}/u;
+  // Non-global on purpose: `.test()` on a `/g` regex advances `lastIndex`
+  // between calls, so every second offender would go unreported.
+  const emoji = new RegExp(EMOJI_PATTERN, 'u');
 
   const sources = [
     ...collectOgSources(APP_DIR, (n) => /^(opengraph|twitter)-image\.(tsx|ts|jsx|js)$/.test(n)),
@@ -261,9 +330,25 @@ describe('OG sources carry no emoji codepoints', () => {
     ]);
   });
 
+  it('renders every route in that list offline, or names the one it skips', () => {
+    // The scan list above is enforced; the offline list was a bare literal, so
+    // a new prerendered route could join the scan — whose regex is a hygiene
+    // net over source we wrote — while never being rendered by anything. This
+    // makes the two lists move together, and makes the ONE exemption explicit:
+    // the play card needs a database, is `ƒ` rather than `○`, and so cannot
+    // break the build. It is covered by the mocked cases above instead.
+    const exempt = ['app/play/[userId]/[slug]/opengraph-image.tsx'];
+    const routes = sources
+      .map((f) => relative(join(__dirname, '..', '..'), f))
+      .filter((f) => f.startsWith('app/'));
+    expect(routes.filter((f) => !exempt.includes(f)).sort()).toEqual(
+      STATIC_OG_ROUTES.map(([file]) => file).sort()
+    );
+  });
+
   it.each(sources)('%s', (file) => {
     const text = readFileSync(file, 'utf8');
-    const offenders = [...text].filter((c) => pictographic.test(c));
+    const offenders = [...text].filter((c) => emoji.test(c));
     expect(offenders).toEqual([]);
   });
 });
