@@ -457,3 +457,73 @@ describe('import_dialogue_tree', () => {
     expect(mockImportTree).toHaveBeenCalledWith('{"id":"old"}');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Prototype-named tree ids
+// ---------------------------------------------------------------------------
+
+/**
+ * `treeId` is validated as `z.string().min(1)`, which accepts every
+ * `Object.prototype` member name. A bare `dialogueTrees[treeId]` answers those
+ * with something truthy, so `if (!tree)` passes and the next line reads
+ * `tree.nodes` off the prototype — or, in `get_dialogue_tree`, does not throw at
+ * all and hands the model `Object.prototype` dressed up as a dialogue tree.
+ */
+const PROTOTYPE_TREE_IDS = ['__proto__', 'constructor', 'toString', 'valueOf', 'hasOwnProperty'];
+
+describe('prototype-named tree ids', () => {
+  it.each(PROTOTYPE_TREE_IDS)('get_dialogue_tree reports %s as not found', async (treeId) => {
+    const { result } = await invokeHandler(dialogueHandlers, 'get_dialogue_tree', { treeId });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Tree not found');
+  });
+
+  it.each(PROTOTYPE_TREE_IDS)('set_dialogue_choice reports %s as not found', async (treeId) => {
+    const { result } = await invokeHandler(dialogueHandlers, 'set_dialogue_choice', {
+      treeId,
+      nodeId: 'n1',
+      choiceText: 'Yes',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Tree not found');
+    expect(mockUpdateNode).not.toHaveBeenCalled();
+  });
+
+  it.each(PROTOTYPE_TREE_IDS)('add_dialogue_node does not connect through %s', async (treeId) => {
+    const { result } = await invokeHandler(dialogueHandlers, 'add_dialogue_node', {
+      treeId,
+      nodeType: 'text',
+      connectFromNodeId: 'n1',
+    });
+
+    // The node still gets added — `addNode` owns its own lookup. What must not
+    // happen is the connect step reading `.nodes` off the prototype.
+    expect(result.success).toBe(true);
+    expect(mockUpdateNode).not.toHaveBeenCalled();
+  });
+
+  it('still returns a tree genuinely named __proto__', async () => {
+    const tree = {
+      id: '__proto__',
+      name: 'Oddly named',
+      nodes: [],
+      startNodeId: 'n1',
+      variables: {},
+    };
+    Object.defineProperty(mockDialogueTrees, '__proto__', {
+      value: tree,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+
+    const { result } = await invokeHandler(dialogueHandlers, 'get_dialogue_tree', {
+      treeId: '__proto__',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.result).toBe(tree);
+  });
+});

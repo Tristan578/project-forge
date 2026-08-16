@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { ToolHandler } from './types';
 import { parseArgs } from './types';
 import type { CutscenePlayer } from '@/lib/cutscene/player';
+import { lookupOwn, hasOwnKey } from '@/lib/utils/ownLookup';
 
 // Module-level reference to the active player so stop_cutscene can reach it.
 let activePlayer: CutscenePlayer | null = null;
@@ -75,7 +76,13 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
     const { useCutsceneStore } = await import('@/stores/cutsceneStore');
     const { CutscenePlayer } = await import('@/lib/cutscene/player');
 
-    const cutscene = useCutsceneStore.getState().cutscenes[p.data.cutsceneId];
+    // `lookupOwn`, not a bare index: `z.string().min(1)` accepts `__proto__`, and
+    // a bare read would hand back the truthy `Object.prototype`. That walks past
+    // this guard, dispatches `play` below, and only then throws inside
+    // `player.load` on `cutscene.tracks` — leaving the engine in Play mode with
+    // no player to stop it, after this handler has already stopped whatever was
+    // legitimately running.
+    const cutscene = lookupOwn(useCutsceneStore.getState().cutscenes, p.data.cutsceneId);
     if (!cutscene) {
       return { success: false, error: `Cutscene "${p.data.cutsceneId}" not found` };
     }
@@ -188,7 +195,10 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
     const { useCutsceneStore } = await import('@/stores/cutsceneStore');
     const state = useCutsceneStore.getState();
 
-    if (!state.cutscenes[p.data.cutsceneId]) {
+    // Membership, not the value — see the note in `play_cutscene`. A bare
+    // `state.cutscenes['__proto__']` is truthy, so this guard would pass and
+    // `deleteCutscene` would go on to delete a key that was never there.
+    if (!hasOwnKey(state.cutscenes, p.data.cutsceneId)) {
       return { success: false, error: `Cutscene "${p.data.cutsceneId}" not found` };
     }
 

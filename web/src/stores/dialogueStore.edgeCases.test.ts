@@ -188,6 +188,12 @@ describe('dialogueStore — edge cases (PF-360)', () => {
       expect(() => useDialogueStore.getState().addNode(treeId, node)).not.toThrow();
       expect(() => useDialogueStore.getState().updateNode(treeId, 'node_x', {})).not.toThrow();
       expect(() => useDialogueStore.getState().removeNode(treeId, 'node_x')).not.toThrow();
+      // `removeTree` reads no tree, so it takes the membership half of the guard
+      // rather than `getTree`. Unguarded it was content-safe — deleting a non-own
+      // key touches nothing — but it still swapped in a fresh `dialogueTrees` and
+      // wrote localStorage for an id that named nothing, which the identity
+      // assertion below is exactly what catches.
+      expect(() => useDialogueStore.getState().removeTree(treeId)).not.toThrow();
 
       // Not merely "did not crash": an id naming nothing must write nothing. A
       // guard that let the mutation through against `Object.prototype` would be

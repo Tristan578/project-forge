@@ -10,6 +10,11 @@ import type { CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
 import { useCutsceneStore } from '@/stores/cutsceneStore';
 import { useDialogueStore } from '@/stores/dialogueStore';
 
+// The keyframe error boundary reports to Sentry as well as the console. Mocked so
+// the suite asserts on the report without pulling the SDK into the module graph.
+const { captureException } = vi.hoisted(() => ({ captureException: vi.fn() }));
+vi.mock('@/lib/monitoring/sentry-client', () => ({ captureException }));
+
 // ============================================================================
 // applyEasing
 // ============================================================================
@@ -365,6 +370,8 @@ describe('CutscenePlayer', () => {
   let player: CutscenePlayer;
 
   beforeEach(() => {
+    // Hoisted, so it is shared across the whole file and outlives each test.
+    captureException.mockClear();
     dispatch = vi.fn<CommandDispatcher>();
     onComplete = vi.fn() as unknown as () => void;
     onStop = vi.fn() as unknown as () => void;
@@ -451,11 +458,42 @@ describe('CutscenePlayer', () => {
       tracks: [track], createdAt: 0, updatedAt: 0,
     };
     player.load(cs);
-    // play + immediately pause so no rAF ticks happen
-    player.play();
-    player.pause();
-    // dispatch should NOT have been called for the muted track at t=0
-    expect(dispatch).not.toHaveBeenCalled();
+
+    // Drive a real frame. This used to `play()` then `pause()` immediately, which
+    // cancelled the rAF before jsdom ever ran it — so `tick()` never executed and
+    // the assertion below held for a muted track, an unmuted one, and a player
+    // with nothing loaded alike. Deleting the mute guard entirely left the suite
+    // green. The clock is what gives the assertion something to disprove.
+    const clock = fakeClock();
+    try {
+      player.play();
+      clock.advanceTo(1);
+      expect(dispatch).not.toHaveBeenCalled();
+    } finally {
+      clock.restore();
+    }
+  });
+
+  it('an unmuted copy of the same track does dispatch', () => {
+    // The control for the test above: same fixture, `muted: false`. Without it,
+    // "did not dispatch" cannot distinguish muting from a fixture that was never
+    // going to dispatch in the first place.
+    const track: CutsceneTrack = {
+      id: 't1', type: 'camera', entityId: 'cam1', muted: false,
+      keyframes: [{ timestamp: 0, duration: 1, easing: 'linear', payload: { mode: 'orbital' } }],
+    };
+    player.load({
+      id: 'cs1', name: 'Test', duration: 5, tracks: [track], createdAt: 0, updatedAt: 0,
+    });
+
+    const clock = fakeClock();
+    try {
+      player.play();
+      clock.advanceTo(1);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      clock.restore();
+    }
   });
 
   // --------------------------------------------------------------------------
@@ -485,6 +523,15 @@ describe('CutscenePlayer', () => {
         pending = cb;
         return 1;
       });
+    // Cancellation has to be honoured too, or a paused player keeps ticking:
+    // `pause()` calls the real `cancelAnimationFrame`, which knows nothing about
+    // the callback parked in `pending`, so the next `advanceTo` would run a frame
+    // the player had already called off.
+    const cancelSpy = vi
+      .spyOn(globalThis, 'cancelAnimationFrame')
+      .mockImplementation(() => {
+        pending = null;
+      });
     return {
       advanceTo(seconds) {
         nowMs = seconds * 1000;
@@ -495,6 +542,7 @@ describe('CutscenePlayer', () => {
       restore() {
         nowSpy.mockRestore();
         rafSpy.mockRestore();
+        cancelSpy.mockRestore();
       },
     };
   }
@@ -690,7 +738,7 @@ describe('CutscenePlayer', () => {
       expect(dispatch).toHaveBeenCalledTimes(1);
       dispatch.mockClear();
 
-      // The keyframe AT the seek point has not happened yet: `fireKeyframesAt`
+      // The keyframe AT the seek point has not happened yet: `fireKeyframesSafely`
       // fires on `timestamp <= time`, so 2 is due at t=2, not done. Marking it
       // fired here would make scrubbing precisely onto a beat the one way to
       // skip it.
@@ -800,6 +848,299 @@ describe('CutscenePlayer', () => {
       expect(dispatch).toHaveBeenCalledTimes(1);
     } finally {
       consoleError.mockRestore();
+      clock.restore();
+    }
+  });
+
+  it('fires the beats after a throwing one on the final tick', () => {
+    const clock = fakeClock();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      dispatch.mockImplementationOnce(() => {
+        throw new Error('engine bridge is not loaded');
+      });
+      player.load({
+        id: 'cs1',
+        name: 'Test',
+        duration: 3,
+        tracks: [{
+          id: 't1',
+          type: 'animation',
+          entityId: 'e1',
+          muted: false,
+          keyframes: [
+            { timestamp: 2.5, duration: 0, easing: 'linear', payload: { clipName: 'throws' } },
+            { timestamp: 3, duration: 0, easing: 'linear', payload: { clipName: 'last' } },
+          ],
+        }],
+        createdAt: 0,
+        updatedAt: 0,
+      });
+      player.play();
+
+      // Straight to the end: both keyframes come due on the terminal tick.
+      clock.advanceTo(3);
+
+      // A per-TICK boundary reads as equivalent to a per-keyframe one, because
+      // mid-playback the skipped keyframes are still unfired and the next tick
+      // picks them up. Here there is no next tick — `tick()` ends the rAF loop
+      // at `duration` — so anything the throw skipped is lost for good.
+      expect(consoleError).toHaveBeenCalled();
+      expect(dispatch).toHaveBeenLastCalledWith('play_animation', {
+        entityId: 'e1',
+        clipName: 'last',
+      });
+      expect(onComplete).toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+      clock.restore();
+    }
+  });
+
+  it('reports a failed keyframe to Sentry, not only to the console', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const clock = fakeClock();
+    try {
+      dispatch.mockImplementationOnce(() => {
+        throw new Error('engine bridge is not loaded');
+      });
+      loadSingleTrack('animation', { clipName: 'walk' });
+      player.play();
+      clock.advanceTo(1);
+
+      // The boundary's job is to swallow the error, and a swallowed beat looks
+      // like "the thing didn't happen" — nobody has a console open for that.
+      expect(captureException).toHaveBeenCalledTimes(1);
+      const [err, context] = captureException.mock.calls[0] as [Error, Record<string, unknown>];
+      expect(err.message).toBe('engine bridge is not loaded');
+      expect(context).toMatchObject({ trackId: 't1', trackType: 'animation', timestamp: 0 });
+    } finally {
+      consoleError.mockRestore();
+      clock.restore();
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // End of the timeline
+  //
+  // `tick()`'s completion branch is the only path that fires a keyframe sitting
+  // exactly at `duration` — the normal path returns before the playhead reaches
+  // it — and `duration` is where a generated cutscene puts its closing beat. The
+  // whole branch was previously unexercised: every fixture ran to `duration: 10`
+  // and no test advanced the clock past 3.5, so gutting the branch outright left
+  // the suite green.
+  // --------------------------------------------------------------------------
+
+  it('fires a keyframe sitting exactly at duration and completes once', () => {
+    const clock = fakeClock();
+    try {
+      player.load({
+        id: 'cs1',
+        name: 'Test',
+        duration: 2,
+        tracks: [{
+          id: 't1',
+          type: 'animation',
+          entityId: 'e1',
+          muted: false,
+          keyframes: [{ timestamp: 2, duration: 0, easing: 'linear', payload: { clipName: 'closing' } }],
+        }],
+        createdAt: 0,
+        updatedAt: 0,
+      });
+      player.play();
+
+      clock.advanceTo(1);
+      expect(dispatch).not.toHaveBeenCalled();
+
+      clock.advanceTo(2);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch).toHaveBeenCalledWith('play_animation', { entityId: 'e1', clipName: 'closing' });
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(player.isPlaying).toBe(false);
+      expect(useCutsceneStore.getState().playbackState).toBe('idle');
+      expect(useCutsceneStore.getState().playbackTime).toBe(2);
+    } finally {
+      clock.restore();
+    }
+  });
+
+  it('a zero-duration cutscene completes on its first tick', () => {
+    // The degenerate case of the same branch: the first frame is already terminal.
+    const clock = fakeClock();
+    try {
+      player.load({
+        id: 'cs1',
+        name: 'Test',
+        duration: 0,
+        tracks: [{
+          id: 't1',
+          type: 'animation',
+          entityId: 'e1',
+          muted: false,
+          keyframes: [{ timestamp: 0, duration: 0, easing: 'linear', payload: { clipName: 'only' } }],
+        }],
+        createdAt: 0,
+        updatedAt: 0,
+      });
+      player.play();
+      clock.advanceTo(0);
+
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(player.isPlaying).toBe(false);
+      expect(useCutsceneStore.getState().playbackState).toBe('idle');
+    } finally {
+      clock.restore();
+    }
+  });
+
+  it('fires both keyframes sharing a timestamp, in track order', () => {
+    const clock = fakeClock();
+    try {
+      player.load({
+        id: 'cs1',
+        name: 'Test',
+        duration: 5,
+        tracks: [{
+          id: 't1',
+          type: 'animation',
+          entityId: 'e1',
+          muted: false,
+          keyframes: [
+            { timestamp: 1, duration: 0, easing: 'linear', payload: { clipName: 'a' } },
+            { timestamp: 1, duration: 0, easing: 'linear', payload: { clipName: 'b' } },
+          ],
+        }],
+        createdAt: 0,
+        updatedAt: 0,
+      });
+      player.play();
+      clock.advanceTo(1);
+
+      // Both are due and both unfired, so one tick fires both. Array.prototype.sort
+      // is stable, so the schedule keeps the authored order.
+      expect(dispatch.mock.calls.map(c => (c[1] as { clipName: string }).clipName)).toEqual(['a', 'b']);
+    } finally {
+      clock.restore();
+    }
+  });
+
+  it('fires keyframes in timestamp order across tracks, not authored order', () => {
+    const clock = fakeClock();
+    try {
+      // Authored so that track order and timestamp order DISAGREE: the earlier
+      // beat lives on the second track. `buildSchedule` flattens the tracks in
+      // order and then sorts, so only the sort can put these the right way round.
+      //
+      // A single tick that catches up on several beats replays them in schedule
+      // order, and these two are the same track type — so an unsorted schedule
+      // dispatches the 1.0 beat before the 0.5 one. Deleting the sort left the
+      // whole suite green before this test existed: every other multi-keyframe
+      // case authors its beats already ascending, where the sort is a no-op.
+      player.load({
+        id: 'cs1',
+        name: 'Test',
+        duration: 5,
+        tracks: [
+          {
+            id: 't1',
+            type: 'animation',
+            entityId: 'e1',
+            muted: false,
+            keyframes: [{ timestamp: 1, duration: 0, easing: 'linear', payload: { clipName: 'later' } }],
+          },
+          {
+            id: 't2',
+            type: 'animation',
+            entityId: 'e2',
+            muted: false,
+            keyframes: [{ timestamp: 0.5, duration: 0, easing: 'linear', payload: { clipName: 'earlier' } }],
+          },
+        ],
+        createdAt: 0,
+        updatedAt: 0,
+      });
+      player.play();
+      clock.advanceTo(1);
+
+      expect(dispatch.mock.calls.map(c => (c[1] as { clipName: string }).clipName)).toEqual([
+        'earlier',
+        'later',
+      ]);
+    } finally {
+      clock.restore();
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // Transitions between seek, pause and play
+  //
+  // Each flag transition was pinned individually; the COMBINATIONS, where one
+  // transition undoes another, were not — and all three below were broken.
+  // --------------------------------------------------------------------------
+
+  it('play after seeking a stopped player starts at the seek point', () => {
+    const clock = fakeClock();
+    try {
+      loadMultiKeyframeTrack();
+      player.seek(2.5);
+      player.play();
+      clock.advanceTo(0);
+
+      // `seek` on a stopped player marks everything before 2.5 as done. `play`
+      // used to clear every flag unconditionally, so the first tick burst-fired
+      // 'first' and 'second' together with nothing at the playhead having asked
+      // for them. The beat at 3 is still ahead and must not have fired either.
+      expect(dispatch).not.toHaveBeenCalled();
+
+      clock.advanceTo(0.6);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch).toHaveBeenCalledWith('play_animation', { entityId: 'e1', clipName: 'third' });
+    } finally {
+      clock.restore();
+    }
+  });
+
+  it('seeking while paused does not charge the seek for the pause', () => {
+    const clock = fakeClock();
+    try {
+      loadMultiKeyframeTrack();
+      player.play();
+      clock.advanceTo(0.1);
+      player.pause();
+
+      // Sit paused for a long time, then scrub and resume.
+      clock.advanceTo(10);
+      player.seek(2);
+      player.play();
+      clock.advanceTo(10.05);
+
+      // Resume used to add the whole pause duration on top of the rebased start
+      // time, landing the playhead at roughly -8: eight seconds of blank playback
+      // before the beat at 2 would have fired.
+      expect(useCutsceneStore.getState().playbackTime).toBeCloseTo(2.05, 5);
+      expect(dispatch).toHaveBeenCalledWith('play_animation', { entityId: 'e1', clipName: 'second' });
+    } finally {
+      clock.restore();
+    }
+  });
+
+  it('pausing a player that never played leaves it playable', () => {
+    const clock = fakeClock();
+    try {
+      loadSingleTrack('animation', { clipName: 'walk' });
+      player.pause();
+      player.play();
+      clock.advanceTo(1);
+
+      // `pause` used to stamp the pause instant with no clock running, so the
+      // next `play` took the resume branch and never started one. `tick` bailed
+      // on the null start time without rescheduling: `isPlaying` true, state
+      // 'playing', nothing ever fired, `onComplete` never called.
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(useCutsceneStore.getState().playbackState).toBe('playing');
+    } finally {
       clock.restore();
     }
   });

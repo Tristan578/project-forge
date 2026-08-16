@@ -14,6 +14,7 @@ import {
   type ConditionNode,
   type ActionNode,
 } from '@/stores/dialogueStore';
+import { lookupOwn } from '@/lib/utils/ownLookup';
 
 // ---- Tree Selector ----
 
@@ -415,7 +416,9 @@ export function DialogueTreeEditor() {
   // Load on mount
   useState(() => { loadFromLocalStorage(); });
 
-  const tree = selectedTreeId ? dialogueTrees[selectedTreeId] : null;
+  // `selectTree()` accepts any string, including one that came from an imported
+  // project, so this read is not developer-controlled either.
+  const tree = lookupOwn(dialogueTrees, selectedTreeId) ?? null;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">

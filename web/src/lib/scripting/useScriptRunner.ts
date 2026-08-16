@@ -13,6 +13,7 @@ import {
 } from '@/lib/scripting/channels';
 import type { AsyncRequest } from '@/lib/scripting/asyncTypes';
 import { showError } from '@/lib/toast';
+import { lookupOwn } from '@/lib/utils/ownLookup';
 import { DeltaSerializer, type SceneSnapshot } from '@/lib/engine/deltaSerializer';
 
 // Commands allowed from user scripts (maps to forge.* API surface)
@@ -360,7 +361,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           }
           case 'dialogue_set_variable': {
             const dStore = useDialogueStore.getState();
-            const tree = dStore.dialogueTrees[msg.treeId];
+            // `msg.treeId` comes off a worker `postMessage`, i.e. from a user
+            // script — so `__proto__` reaches here. A bare index would return the
+            // truthy `Object.prototype` and spread its (absent) `variables` into
+            // an `updateTree` call for a tree that does not exist.
+            const tree = lookupOwn(dStore.dialogueTrees, msg.treeId);
             if (tree) {
               dStore.updateTree(msg.treeId, { variables: { ...tree.variables, [msg.key]: msg.value } });
             }

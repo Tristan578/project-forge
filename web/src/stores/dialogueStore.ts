@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+import { lookupOwn, hasOwnKey } from '@/lib/utils/ownLookup';
+
 const DIALOGUE_STORAGE_KEY = 'forge_dialogue_trees';
 
 // ============================================================================
@@ -226,23 +228,17 @@ function executeActions(actions: DialogueAction[], variables: Record<string, unk
 /**
  * Read a tree by id without walking the prototype chain.
  *
- * `dialogueTrees` is a plain object literal, so a bare `trees[treeId]` answers
- * inherited keys as readily as own ones: `trees['__proto__']` returns
- * `Object.prototype` — truthy — so the `if (!tree) return` guard every caller
- * relies on passes, and the next line reads `tree.nodes` off it as `undefined`
- * and throws. `constructor`, `toString`, `valueOf` and `hasOwnProperty` behave
- * the same way.
- *
- * Tree ids are not trusted input. They arrive from generated cutscene keyframes
- * (model output) and from `forge.dialogue.start()` in user scripts, neither of
- * which is constrained to ids that exist.
+ * A domain-named alias for `lookupOwn` so the eleven call sites below read as
+ * dialogue code rather than as a utility call. `lookupOwn`'s doc comment carries
+ * the full account of why a bare `trees[treeId]` is unsafe here; the short
+ * version is that tree ids arrive from generated cutscene keyframes and from
+ * `forge.dialogue.start()` in user scripts, and `trees['__proto__']` is truthy.
  */
 function getTree(
   trees: Record<string, DialogueTree>,
   treeId: string | null,
 ): DialogueTree | undefined {
-  if (treeId === null) return undefined;
-  return Object.hasOwn(trees, treeId) ? trees[treeId] : undefined;
+  return lookupOwn(trees, treeId);
 }
 
 // ============================================================================
@@ -294,6 +290,14 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
   },
 
   removeTree: (treeId: string) => {
+    // The one mutator that reads no tree, so it takes the membership half of the
+    // guard rather than `getTree`. `delete` of a non-own key is content-safe — it
+    // does not touch `Object.prototype` — but without this the store still swapped
+    // in a fresh `dialogueTrees` object and wrote localStorage for an id that named
+    // nothing, re-rendering every subscriber over a no-op. Guarding out here, not
+    // inside `set`, is what also skips the write.
+    if (!hasOwnKey(get().dialogueTrees, treeId)) return;
+
     set(state => {
       const newTrees = { ...state.dialogueTrees };
       delete newTrees[treeId];

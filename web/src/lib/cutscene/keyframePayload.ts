@@ -163,8 +163,16 @@ function isObject(value: unknown): value is Record<string, unknown> {
  * holding a value of the kind that field is for.
  *
  * Picking rather than filtering-in-place is the point: the returned object's own
- * keys are exactly the ones written here, so a caller may spread it into an
- * engine command without re-deriving what is safe to include.
+ * keys are exactly the ones written here, so nothing the model invented can ride
+ * along into a caller.
+ *
+ * That is a guarantee about INVENTED keys, and only that. It is NOT a licence to
+ * spread the result into an engine command: every surviving key is one this track
+ * type accepts, not necessarily one the receiving command reads. The audio
+ * vocabulary is the live example — `volume` and `pitch` are legitimate authored
+ * fields that `handle_play_audio` does not read, so spreading a sanitized audio
+ * payload into `play_audio` reintroduces exactly the PF-1123 "fields the receiver
+ * never reads" defect. Callers pick per command; see `buildActions`.
  *
  * An unusable payload yields `{}` rather than a throw. A keyframe whose payload
  * the model got wrong is one dud beat in a timeline; failing the parse would

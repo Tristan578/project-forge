@@ -6,6 +6,7 @@
 import { z } from 'zod';
 import type { ToolHandler } from './types';
 import { parseArgs } from './types';
+import { lookupOwn } from '@/lib/utils/ownLookup';
 
 export const dialogueHandlers: Record<string, ToolHandler> = {
   create_dialogue_tree: async (args, _ctx) => {
@@ -63,7 +64,9 @@ export const dialogueHandlers: Record<string, ToolHandler> = {
     useDialogueStore.getState().addNode(treeId, node);
     // Connect from another node if specified
     if (connectFromNodeId) {
-      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      // `lookupOwn`: `z.string().min(1)` accepts `__proto__`, and a bare read
+      // would hand back the truthy `Object.prototype`, which has no `.nodes`.
+      const tree = lookupOwn(useDialogueStore.getState().dialogueTrees, treeId);
       if (tree) {
         const fromNode = tree.nodes.find(n => n.id === connectFromNodeId);
         if (fromNode && 'next' in fromNode) {
@@ -87,7 +90,7 @@ export const dialogueHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
     const { useDialogueStore } = await import('@/stores/dialogueStore');
     const { treeId, nodeId, choiceText, nextNodeId } = p.data;
-    const tree = useDialogueStore.getState().dialogueTrees[treeId];
+    const tree = lookupOwn(useDialogueStore.getState().dialogueTrees, treeId);
     if (!tree) return { success: false, error: 'Tree not found' };
     const choiceNode = tree.nodes.find(n => n.id === nodeId);
     if (!choiceNode || choiceNode.type !== 'choice') return { success: false, error: 'Choice node not found' };
@@ -109,7 +112,10 @@ export const dialogueHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ treeId: z.string().min(1) }), args);
     if (p.error) return p.error;
     const { useDialogueStore } = await import('@/stores/dialogueStore');
-    const tree = useDialogueStore.getState().dialogueTrees[p.data.treeId];
+    // The worst shape of the bare read: this one does not throw. A `treeId` of
+    // `constructor` would return `success: true` and hand the model the `Object`
+    // constructor dressed up as a dialogue tree.
+    const tree = lookupOwn(useDialogueStore.getState().dialogueTrees, p.data.treeId);
     if (!tree) return { success: false, error: 'Tree not found' };
     return { success: true, result: tree };
   },

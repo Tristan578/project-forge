@@ -13,6 +13,7 @@
 import type { Cutscene, CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
 import { useCutsceneStore } from '@/stores/cutsceneStore';
 import { useDialogueStore } from '@/stores/dialogueStore';
+import { captureException } from '@/lib/monitoring/sentry-client';
 import {
   buildSetGameCameraPayload,
   isCameraMode,
@@ -47,7 +48,7 @@ export type CutsceneAction =
  * keyframe's `duration` describes how long its beat occupies the timeline, not
  * how long to keep dispatching.
  *
- * `fireKeyframesAt` used to re-fire any duration-bearing keyframe every frame,
+ * `fireKeyframesSafely` used to re-fire any duration-bearing keyframe every frame,
  * which is wrong for every track this player has:
  *
  *   - `play_animation`, `play_audio` and `startDialogue` are TRIGGERS. Re-firing
@@ -321,9 +322,16 @@ export class CutscenePlayer {
       this.pausedAt = null;
     } else {
       this.startTime = performance.now() - this.currentTime * 1000;
-      // Reset all fired flags when starting fresh
+      // Re-derive the flags from the playhead rather than clearing them all.
+      //
+      // `currentTime` is not always 0 here: `seek()` on a stopped player moves the
+      // playhead and correctly marks everything strictly before it as done. A
+      // blanket reset then threw that away, and the first tick burst-fired every
+      // beat from 0 up to the seek point at once. Same rule as `seek()`, so the
+      // two agree; when the playhead is at 0 nothing is `< 0` and this is exactly
+      // the reset it replaces.
       for (const item of this.scheduled) {
-        item.fired = false;
+        item.fired = item.keyframe.timestamp < this.currentTime;
       }
     }
 
@@ -333,10 +341,21 @@ export class CutscenePlayer {
 
   /** Pause playback at the current position. */
   pause(): void {
-    if (this.rafHandle !== null) {
-      cancelAnimationFrame(this.rafHandle);
-      this.rafHandle = null;
-    }
+    // Only a player that is actually running has a clock to freeze. Pausing one
+    // that never played used to stamp `pausedAt` while `startTime` was still
+    // null; the next `play()` took the resume branch, which cannot start a clock
+    // that was never started, so `tick()` returned immediately on the null
+    // `startTime` and never rescheduled. The player then sat at
+    // `playbackState: 'playing'` with `isPlaying` true, firing nothing and never
+    // calling `onComplete` — the same "stuck in Play" shape the keyframe error
+    // boundary exists to prevent. This also makes a second `pause()` a no-op
+    // instead of re-stamping the pause instant and swallowing the elapsed time.
+    // `rafHandle !== null` is what `isPlaying` reads; spelled out here so the
+    // handle narrows to a number for the cancel below.
+    if (this.rafHandle === null) return;
+
+    cancelAnimationFrame(this.rafHandle);
+    this.rafHandle = null;
     this.pausedAt = performance.now();
     useCutsceneStore.getState().setPlaybackState('paused');
   }
@@ -370,7 +389,7 @@ export class CutscenePlayer {
     useCutsceneStore.getState().setPlaybackTime(clamped);
     // Re-mark keyframes before the seek point as fired so they don't replay.
     //
-    // Strictly before: `fireKeyframesAt` fires a keyframe once the playhead
+    // Strictly before: `fireKeyframesSafely` fires a keyframe once the playhead
     // REACHES its timestamp (`timestamp > time` is what it skips), so a keyframe
     // sitting exactly on the seek point is due, not done. Marking it fired here
     // — which is what `<=` did — meant scrubbing precisely onto a beat was the
@@ -382,6 +401,14 @@ export class CutscenePlayer {
     }
     if (this.startTime !== null) {
       this.startTime = performance.now() - clamped * 1000;
+    }
+    if (this.pausedAt !== null) {
+      // Rebase the pause instant too. `startTime` above is stamped against NOW,
+      // but `play()`'s resume branch adds `now - pausedAt` on top of it — so a
+      // stale `pausedAt` charges the seek for however long the player sat paused
+      // before it. Pause for ten seconds, seek to 3, resume, and the playhead
+      // resumed at roughly -7: ten seconds of blank playback before the beat at 3.
+      this.pausedAt = performance.now();
     }
   }
 
@@ -445,25 +472,37 @@ export class CutscenePlayer {
    * the engine to Edit mode never dispatched — leaving the editor stuck in Play.
    * One keyframe naming a tree that does not exist should cost that keyframe,
    * not the rest of the cutscene, so the error is reported and the playhead
-   * moves on. `fireKeyframesAt` marks each keyframe fired BEFORE firing it, so a
-   * throwing keyframe is not retried on the next tick.
+   * moves on. Each keyframe is marked fired BEFORE firing, so a throwing
+   * keyframe is not retried on the next tick.
+   *
+   * The boundary is per KEYFRAME, not per tick. Wrapping the whole loop reads as
+   * equivalent — mid-playback it is, because the keyframes the throw skipped are
+   * still unfired and the next tick picks them up. It stops being equivalent on
+   * the terminal tick (`tick()` calls this once at `duration` and then ends the
+   * rAF loop): there is no next tick, so every due keyframe ordered after a
+   * throwing one at the end of the timeline would be silently dropped.
    */
   private fireKeyframesSafely(time: number): void {
-    try {
-      this.fireKeyframesAt(time);
-    } catch (err) {
-      console.error('[CutscenePlayer] Keyframe failed; continuing playback', err);
-    }
-  }
-
-  private fireKeyframesAt(time: number): void {
     for (const item of this.scheduled) {
       if (item.keyframe.timestamp > time) continue;
       // Every track fires once; `duration` bounds the beat, not the dispatching.
       // See the note above `buildActions` for why re-firing is wrong on all four.
       if (item.fired) continue;
       item.fired = true;
-      this.fire(item);
+      try {
+        this.fire(item);
+      } catch (err) {
+        // Reported twice on purpose. The boundary's job is to SWALLOW the error,
+        // and the user-visible symptom of a swallowed beat is "the thing didn't
+        // happen" — nobody is going to have a console open when it does.
+        console.error('[CutscenePlayer] Keyframe failed; continuing playback', err);
+        captureException(err, {
+          cutsceneId: this.cutscene?.id,
+          trackId: item.trackId,
+          trackType: item.trackType,
+          timestamp: item.keyframe.timestamp,
+        });
+      }
     }
   }
 
