@@ -13,6 +13,7 @@ vi.mock('@/stores/editorStore', () => ({
 
 import { useEditorStore } from '@/stores/editorStore';
 import { handleTransformEvent } from '../transformEvents';
+import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 
 describe('handleTransformEvent', () => {
   let actions: ReturnType<typeof createMockActions>;
@@ -678,6 +679,10 @@ describe('handleTransformEvent', () => {
   });
 
   describe('SCENE_LOADED', () => {
+    beforeEach(() => {
+      clearStagedSceneAudio();
+    });
+
     it('resets scene state via setState', () => {
       const payload = { name: 'LoadedScene' };
 
@@ -697,8 +702,38 @@ describe('handleTransformEvent', () => {
         primaryPhysics: null,
         physicsEnabled: false,
         primaryAnimation: null,
-        // Every entity id in the outgoing scene is about to become meaningless,
-        // so the per-entity audio map goes with it.
+        // Nothing staged — a new_scene, or a load whose JSON declared no audio.
+        // The outgoing scene's ids are meaningless either way.
+        entityAudio: {},
+      });
+    });
+
+    it('adopts the audio the loading scene declared', () => {
+      // The engine emits AUDIO_CHANGED only for the selected entity, so without
+      // this the loaded scene reads as silent to the inspector, the
+      // accessibility audit and the AI's scene context.
+      stageSceneAudio(
+        JSON.stringify({
+          entities: [{ entityId: 'speaker', audioData: { assetId: 'a1', bus: 'music' } }],
+        })
+      );
+
+      handleTransformEvent('SCENE_LOADED', { name: 'LoadedScene' }, mockSetGet.set, mockSetGet.get);
+
+      expect(vi.mocked(useEditorStore.setState).mock.calls[0][0]).toMatchObject({
+        entityAudio: { speaker: expect.objectContaining({ assetId: 'a1', bus: 'music' }) },
+      });
+    });
+
+    it('does not hand the same scene audio to a second load', () => {
+      stageSceneAudio(
+        JSON.stringify({ entities: [{ entityId: 'speaker', audioData: { assetId: 'a1' } }] })
+      );
+
+      handleTransformEvent('SCENE_LOADED', { name: 'First' }, mockSetGet.set, mockSetGet.get);
+      handleTransformEvent('SCENE_LOADED', { name: 'Second' }, mockSetGet.set, mockSetGet.get);
+
+      expect(vi.mocked(useEditorStore.setState).mock.calls[1][0]).toMatchObject({
         entityAudio: {},
       });
     });

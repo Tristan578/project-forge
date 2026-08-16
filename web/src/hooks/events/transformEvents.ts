@@ -7,6 +7,7 @@ import { saveAutoSave } from '@/lib/sceneFile';
 import { setLastExportedScene } from '@/lib/storage/autoSave';
 import { invalidateSceneCache } from '@/lib/ai/cachedContext';
 import { releaseEntityAudio, resetEntityAudioGraphForScene } from '@/lib/audio/entityAudioGraph';
+import { takeStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 import type { SceneNode } from '@/stores/slices/types';
 import { castPayload, type SetFn, type GetFn } from './types';
 import { SCENE_EXPORTED_EVENT, type SceneExportedDetail } from '@/lib/engine/sceneExportWire';
@@ -200,10 +201,16 @@ export function handleTransformEvent(
         primaryPhysics: null,
         physicsEnabled: false,
         primaryAnimation: null,
-        // Every entity id in the outgoing scene is about to become meaningless.
+        // Every entity id in the OUTGOING scene is about to become meaningless.
         // Left behind, they keep counting toward the accessibility audit and
         // keep their Web Audio nodes attached to the bus graph.
-        entityAudio: {},
+        //
+        // The incoming scene's audio comes from the JSON `loadScene` staged on
+        // its way past: the engine only ever emits AUDIO_CHANGED for the
+        // selected entity, so without this the scene reads as silent until the
+        // user clicks each entity in turn. Empty for `new_scene`, which is
+        // correct — an empty scene has no audio.
+        entityAudio: takeStagedSceneAudio(),
       });
       resetEntityAudioGraphForScene();
       invalidateSceneCache(); // PF-319: new scene = completely new context

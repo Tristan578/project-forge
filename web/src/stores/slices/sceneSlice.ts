@@ -16,6 +16,7 @@ import {
   type ProjectScenes,
 } from '@/lib/scenes/sceneManager';
 import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
+import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 
 /** Project scenes reduced to the shape the store mirrors for the Scene Browser. */
 function toSceneList(project: ProjectScenes) {
@@ -152,9 +153,17 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
     if (dispatchCommand) dispatchCommand('export_scene', requestId ? { requestId } : {});
   },
   loadScene: (json) => {
+    // The engine reveals a loaded scene's audio one selection at a time
+    // (`emit_audio_on_selection`), and SCENE_LOADED carries only a name — so
+    // this JSON is the only chance to know what the scene sounds like. Staged
+    // here, claimed by the SCENE_LOADED handler.
+    stageSceneAudio(json);
     if (dispatchCommand) dispatchCommand('load_scene', { json });
   },
   newScene: () => {
+    // new_scene emits SCENE_LOADED too. Anything staged by a load the engine
+    // rejected would otherwise be adopted by this empty scene.
+    clearStagedSceneAudio();
     if (dispatchCommand) dispatchCommand('new_scene', {});
   },
   setSceneName: (name) => set({ sceneName: name }),
