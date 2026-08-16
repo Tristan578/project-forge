@@ -11,7 +11,10 @@ import { loadProjectScenes } from '@/lib/scenes/sceneManager';
 type CtxOverrides = Partial<ExecutorContext> & { store?: unknown };
 
 function makeCtx(overrides: CtxOverrides = {}): ExecutorContext {
-  const { store = { setScenes: vi.fn(), sceneGraph: { nodes: {} } } as never, ...rest } = overrides;
+  const {
+    store = { setScenes: vi.fn(), newScene: vi.fn(), sceneGraph: { nodes: {} } } as never,
+    ...rest
+  } = overrides;
   return {
     dispatchCommand: vi.fn(),
     getStore: () => store as ReturnType<ExecutorContext['getStore']>,
@@ -59,11 +62,15 @@ describe('sceneCreateExecutor', () => {
     );
   });
 
-  it('clears the starter scene via new_scene', async () => {
+  // Through the store, not a raw dispatch: `newScene` also drops scene audio
+  // staged by an unconfirmed load, which the SCENE_LOADED this emits would
+  // otherwise adopt onto the generated game's entity ids.
+  it('clears the starter scene via the store\'s newScene', async () => {
     const ctx = makeCtx();
     await sceneCreateExecutor.execute({ name: 'Cave Level' }, ctx);
 
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('new_scene', {});
+    expect(ctx.getStore().newScene).toHaveBeenCalled();
+    expect(ctx.dispatchCommand).not.toHaveBeenCalledWith('new_scene', {});
   });
 
   it('does not create a scene or clear the viewport for a config-overlay step', async () => {
@@ -74,7 +81,7 @@ describe('sceneCreateExecutor', () => {
 
     expect(result.success).toBe(true);
     expect(loadProjectScenes().scenes.length).toBe(before);
-    expect(ctx.dispatchCommand).not.toHaveBeenCalledWith('new_scene', {});
+    expect(ctx.getStore().newScene).not.toHaveBeenCalled();
     expect(ctx.getStore().setScenes).not.toHaveBeenCalled();
   });
 

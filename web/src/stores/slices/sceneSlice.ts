@@ -157,8 +157,15 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
     // (`emit_audio_on_selection`), and SCENE_LOADED carries only a name — so
     // this JSON is the only chance to know what the scene sounds like. Staged
     // here, claimed by the SCENE_LOADED handler.
-    stageSceneAudio(json);
-    if (dispatchCommand) dispatchCommand('load_scene', { json });
+    //
+    // Inside the guard: with no dispatcher the engine never loads and never
+    // emits SCENE_LOADED, so a stash written here would sit until whatever
+    // scene loads next claimed another scene's sounds. Staging only alongside
+    // the dispatch keeps the stash and the pending load a single fact.
+    if (dispatchCommand) {
+      stageSceneAudio(json);
+      dispatchCommand('load_scene', { json });
+    }
   },
   newScene: () => {
     // new_scene emits SCENE_LOADED too. Anything staged by a load the engine

@@ -81,6 +81,21 @@ describe('sceneSlice', () => {
 
       expect(takeStagedSceneAudio()).toEqual({});
     });
+
+    it('stages nothing when there is no dispatcher to load the scene', () => {
+      // No dispatcher means the engine never loads and never emits
+      // SCENE_LOADED, so a stash written here would wait until some LATER
+      // scene's SCENE_LOADED claimed it — attaching this scene's sounds to a
+      // different scene's entity ids.
+      clearStagedSceneAudio();
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      store.getState().loadScene(
+        JSON.stringify({ entities: [{ entityId: 'e1', audioData: { assetId: 'a1' } }] })
+      );
+
+      expect(takeStagedSceneAudio()).toEqual({});
+    });
   });
 
   describe('scene metadata setters', () => {
