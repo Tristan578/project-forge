@@ -4,7 +4,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup, act } from '@/test/utils/componentTestUtils';
 import { OnboardingChecklist } from '../OnboardingChecklist';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useEditorStore as _useEditorStore } from '@/stores/editorStore';
@@ -131,5 +131,92 @@ describe('OnboardingChecklist', () => {
     setupStore();
     render(<OnboardingChecklist />);
     expect(screen.getByText('0 / 12')).toBeInTheDocument();
+  });
+
+  // Every test above renders against a store whose `subscribe` captures the
+  // listener and never calls it, so no `checkCompletion` predicate had ever
+  // run. That is the half of this component that reads editor state — the half
+  // where a rename of a store field turns a checklist item into a thrown
+  // TypeError that unmounts the panel.
+  describe('task completion', () => {
+    /** Push a state snapshot through the subscription the component registers. */
+    function emitState(over: Record<string, unknown> = {}) {
+      const subscribe = vi.mocked(_useEditorStore.subscribe);
+      const listener = subscribe.mock.calls.at(-1)?.[0] as (s: unknown) => void;
+      expect(listener).toBeDefined();
+
+      act(() => {
+        listener({
+          nodeCount: 1,
+          primaryMaterial: null,
+          physicsEnabled: false,
+          allScripts: {},
+          cloudSaveStatus: 'idle',
+          particleEnabled: false,
+          entityAudio: {},
+          hudElements: [],
+          primaryAnimationClip: null,
+          projectId: null,
+          ...over,
+        });
+      });
+    }
+
+    it('completes the audio task when any entity carries audio', () => {
+      // The store holds a map of entity → AudioData now, not one component, so
+      // the predicate has to count the map rather than read a single field.
+      setupStore();
+      render(<OnboardingChecklist />);
+
+      emitState({ entityAudio: { 'ent-1': { assetId: 'asset-1' } } });
+
+      expect(screen.getByText('1 / 12')).toBeInTheDocument();
+    });
+
+    it('leaves the audio task incomplete when no entity carries audio', () => {
+      setupStore();
+      render(<OnboardingChecklist />);
+
+      emitState({ entityAudio: {} });
+
+      expect(screen.getByText('0 / 12')).toBeInTheDocument();
+    });
+
+    it('survives a snapshot with no entityAudio at all', () => {
+      // A checklist item must never be able to take down the panel that renders
+      // it: `Object.keys(undefined)` throws, and this predicate runs against
+      // whatever snapshot the subscription hands it.
+      setupStore();
+      render(<OnboardingChecklist />);
+
+      expect(() => emitState({ entityAudio: undefined })).not.toThrow();
+      expect(screen.getByText('0 / 12')).toBeInTheDocument();
+    });
+
+    it('counts several completed tasks together', () => {
+      setupStore();
+      render(<OnboardingChecklist />);
+
+      emitState({
+        nodeCount: 3,
+        physicsEnabled: true,
+        entityAudio: { 'ent-1': { assetId: 'asset-1' } },
+      });
+
+      expect(screen.getByText('3 / 12')).toBeInTheDocument();
+    });
+
+    it('drops a task back to incomplete when the state that satisfied it goes away', () => {
+      // The listener rebuilds the whole set rather than adding to it, so an
+      // undo has to be able to un-complete a task.
+      setupStore();
+      render(<OnboardingChecklist />);
+
+      emitState({ entityAudio: { 'ent-1': { assetId: 'asset-1' } } });
+      expect(screen.getByText('1 / 12')).toBeInTheDocument();
+
+      emitState({ entityAudio: {} });
+      expect(screen.getByText('0 / 12')).toBeInTheDocument();
+    });
   });
 });
