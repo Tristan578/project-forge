@@ -261,8 +261,8 @@ export async function ingestImportedAudioAsset(
 /**
  * Drop every queued import, name alias, and applied-graph record.
  *
- * Called on scene load, where every entity id in the outgoing scene is about to
- * become meaningless, and by tests between cases.
+ * The whole module's state, for tests between cases. Scene load wants the
+ * narrower `resetEntityAudioGraphForScene` — see the note there.
  */
 export function resetEntityAudioGraph(): void {
   pendingImports.length = 0;
@@ -271,12 +271,22 @@ export function resetEntityAudioGraph(): void {
 }
 
 /**
- * Scene load: the above, plus every instance the outgoing scene built.
+ * Scene load: drop everything keyed by an entity, keep everything keyed by an
+ * asset.
  *
- * Separate from `resetEntityAudioGraph` so tests can clear module state without
- * reaching into the Web Audio graph.
+ * The alias map is deliberately NOT cleared here. It is asset-lifetime state,
+ * not scene-lifetime state, and it is already torn down at the right moment —
+ * `forgetImportedAudioAsset` on `ASSET_DELETED`. Clearing it on scene load
+ * silently un-plays every AI-attached clip: `audioManager.destroyAll` destroys
+ * instances and one-shots but never touches its decoded buffers, so the buffer
+ * survives under its uuid and the asset survives in the registry, while the
+ * name→uuid alias that is the only bridge between them is gone. Every entity
+ * whose `assetId` is an import name (which is every clip the generation
+ * handlers attach — see problem 2 at the top of this file) then resolves to a
+ * name `createInstance` has no buffer for, and is permanently silent.
  */
 export function resetEntityAudioGraphForScene(): void {
   audioManager.destroyAll();
-  resetEntityAudioGraph();
+  pendingImports.length = 0;
+  appliedSignatures.clear();
 }

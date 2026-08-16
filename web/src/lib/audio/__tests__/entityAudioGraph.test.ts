@@ -245,11 +245,23 @@ describe('resetEntityAudioGraphForScene', () => {
 
     expect(destroyAll).toHaveBeenCalled();
     expect(takeAudioImport('shot.wav')).toBeNull();
-    expect(resolveAudioAssetId('sfx-laser')).toBe('sfx-laser');
 
     // And the applied-signature record is gone, so the same component rebuilds.
     syncEntityAudioInstance('e1', audio());
     expect(createInstance).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the name aliases, which outlive the scene that used them', () => {
+    // `destroyAll` destroys instances, never the decoded buffers, so the buffer
+    // is still loaded under `uuid-1` after this. Dropping the alias would leave
+    // every AI-attached clip — which points at the import NAME — resolving to a
+    // name no buffer is keyed by, i.e. permanently silent. The alias is torn
+    // down when the ASSET goes away, which is `forgetImportedAudioAsset`.
+    registerImportedAudioAsset('uuid-1', 'sfx-laser');
+
+    resetEntityAudioGraphForScene();
+
+    expect(resolveAudioAssetId('sfx-laser')).toBe('uuid-1');
   });
 });
 

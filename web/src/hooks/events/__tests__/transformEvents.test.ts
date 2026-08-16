@@ -697,6 +697,9 @@ describe('handleTransformEvent', () => {
         primaryPhysics: null,
         physicsEnabled: false,
         primaryAnimation: null,
+        // Every entity id in the outgoing scene is about to become meaningless,
+        // so the per-entity audio map goes with it.
+        entityAudio: {},
       });
     });
   });
