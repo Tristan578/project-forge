@@ -189,7 +189,20 @@ fn route_domain(command: &str) -> u8 {
 
 /// Dispatch a command to the appropriate handler.
 /// Uses a routing table for O(1) domain selection before the domain-level match.
+///
+/// The payload is bounded before routing. Every domain handler below reaches
+/// `serde_json::from_value`, which recurses per level of nesting and has no
+/// limit of its own, so this is the one place that check can be made once
+/// instead of in each of the twelve domains — and the only place that also
+/// covers `dispatch_batch`, whose items never pass through the bridge's own
+/// entry point. See `core::json_guard`.
 pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
+    // The name is interpolated into every error this function can return, so an
+    // unbounded name is an unbounded error string travelling to JS and on into
+    // the monitoring pipeline. Bound it before it is echoed anywhere.
+    crate::core::json_guard::check_identifier("Command name", command)?;
+    let payload = crate::core::json_guard::check_command_payload(command, payload)?;
+
     match route_domain(command) {
         0 => transform::dispatch(command, &payload)
                 .unwrap_or_else(|| Err(format!("Unknown transform command: {}", command))),
@@ -265,6 +278,28 @@ fn handle_mode_change(request: ModeChangeRequest) -> CommandResult {
 /// Processing is sequential (WASM is single-threaded). If a command fails,
 /// execution continues — all responses are returned.
 pub fn dispatch_batch(batch: serde_json::Value) -> Vec<CommandResponse> {
+    // Bounded before anything reads it. The per-command check inside `dispatch`
+    // is too late for a batch: extracting an item's payload clones it, and a
+    // clone recurses per level exactly like the deserialize it is protecting.
+    // Read the item count before the check, which takes ownership of the value
+    // in order to dismantle it iteratively on rejection. `as_array().len()` is
+    // O(1) and touches no child, so it is safe on a value nothing has vetted.
+    let item_count = batch.as_array().map(|items| items.len());
+
+    let batch = match crate::core::json_guard::check_command_batch(batch) {
+        Ok(batch) => batch,
+        Err(e) => {
+            // One response per item even here, because that is this function's
+            // documented contract and callers index into the array by position
+            // — a short one reads as success for the items that fell off the
+            // end. A non-array envelope has no items to count, so it gets one.
+            let count = item_count.unwrap_or(1).max(1);
+            return (0..count)
+                .map(|_| CommandResponse::err(e.clone()))
+                .collect();
+        }
+    };
+
     let items = match batch.as_array() {
         Some(arr) => arr,
         None => return vec![CommandResponse::err("Batch payload must be a JSON array")],
@@ -275,6 +310,12 @@ pub fn dispatch_batch(batch: serde_json::Value) -> Vec<CommandResponse> {
             Some(cmd) => cmd,
             None => return CommandResponse::err("Missing \"command\" field in batch item"),
         };
+        // The bridge caps the command name on the single-command path, but a
+        // batched item never passes through it — and the name is interpolated
+        // into guard errors that travel back to JS and into monitoring.
+        if let Err(e) = crate::core::json_guard::check_identifier("Command name", command) {
+            return CommandResponse::err(e);
+        }
         let payload = item.get("payload").cloned().unwrap_or(serde_json::Value::Null);
         match dispatch(command, payload) {
             Ok(()) => CommandResponse::ok(),
@@ -815,5 +856,112 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert!(result[0].success, "first should be Ok");
         assert!(!result[1].success, "second should fail (not initialized)");
+    }
+    // === JSON guard wiring (PF-1149) ===
+    //
+    // The guard has its own unit tests; these exist because a guard that is
+    // never called still passes every one of them. Each of these fails if the
+    // call is removed from the code path it protects.
+
+    /// Build `{"a":{"a":{...}}}` nested `levels` deep, without recursing and
+    /// without `json!` — a `json!` whose value position is a variable expands to
+    /// `serde_json::to_value`, which re-serializes recursively and would
+    /// overflow while building the input.
+    fn nested(levels: usize) -> serde_json::Value {
+        let mut value = serde_json::Value::from(1);
+        for _ in 0..levels {
+            let mut map = serde_json::Map::new();
+            map.insert("a".to_string(), value);
+            value = serde_json::Value::Object(map);
+        }
+        value
+    }
+
+    #[test]
+    fn dispatch_refuses_a_payload_nested_too_deeply() {
+        let err = dispatch("spawn_entity", nested(100_000)).unwrap_err();
+        assert!(err.contains("nested too deeply"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn dispatch_accepts_a_wide_scalar_payload() {
+        // A million tiles under two containers is an ordinary tilemap edit. It
+        // must not be refused for its size — only its shape is bounded. It gets
+        // as far as "not initialized", which is this context's success.
+        let tiles: Vec<serde_json::Value> =
+            (0..1_000_000).map(|i| serde_json::Value::from(i % 8)).collect();
+        let mut payload = serde_json::Map::new();
+        payload.insert("entityId".to_string(), serde_json::Value::from("e1"));
+        payload.insert("tiles".to_string(), serde_json::Value::Array(tiles));
+        let err = dispatch("set_tilemap_data", serde_json::Value::Object(payload))
+            .expect_err("no PendingCommands in a unit-test context");
+
+        // Asserting the error is merely *not* a guard error passes for the
+        // wrong reasons — any other failure satisfies it. Compare against the
+        // same command with a one-tile payload instead: identical errors mean
+        // the wide one got exactly as far as the narrow one, i.e. past the
+        // guard and into the handler.
+        let mut control = serde_json::Map::new();
+        control.insert("entityId".to_string(), serde_json::Value::from("e1"));
+        control.insert(
+            "tiles".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::from(0)]),
+        );
+        let control_err = dispatch("set_tilemap_data", serde_json::Value::Object(control))
+            .expect_err("no PendingCommands in a unit-test context");
+        assert_eq!(
+            err, control_err,
+            "a wide scalar payload did not reach the same place a narrow one does"
+        );
+    }
+
+    #[test]
+    fn dispatch_batch_answers_once_when_the_envelope_is_not_an_array() {
+        // A refused envelope with no items to count still owes the caller one
+        // response. Nothing else exercises the `None` arm of that count.
+        let result = dispatch_batch(nested(100_000));
+        assert_eq!(result.len(), 1);
+        assert!(!result[0].success);
+        let err = result[0].error.as_deref().unwrap_or("");
+        assert!(err.contains("nested too deeply"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn dispatch_batch_answers_one_result_per_item_when_the_envelope_is_refused() {
+        // Callers index into this array by position, so a short one reads as
+        // success for the items that fell off the end.
+        let mut items = Vec::new();
+        for _ in 0..3 {
+            let mut item = serde_json::Map::new();
+            item.insert("command".to_string(), serde_json::Value::from("play"));
+            items.push(serde_json::Value::Object(item));
+        }
+        let mut deep = serde_json::Map::new();
+        deep.insert("command".to_string(), serde_json::Value::from("play"));
+        deep.insert("payload".to_string(), nested(100_000));
+        items.push(serde_json::Value::Object(deep));
+
+        let result = dispatch_batch(serde_json::Value::Array(items));
+        assert_eq!(result.len(), 4);
+        for resp in &result {
+            assert!(!resp.success);
+            let err = resp.error.as_deref().unwrap_or("");
+            assert!(err.contains("nested too deeply"), "unexpected error: {}", err);
+        }
+    }
+
+    #[test]
+    fn dispatch_batch_refuses_an_oversized_command_name() {
+        // The bridge caps the name on the single-command path; a batched item
+        // never passes through it, and the name is interpolated into errors
+        // that travel back to JS.
+        let name = "x".repeat(crate::core::json_guard::MAX_IDENTIFIER_BYTES + 1);
+        let mut item = serde_json::Map::new();
+        item.insert("command".to_string(), serde_json::Value::from(name.clone()));
+        let result = dispatch_batch(serde_json::Value::Array(vec![serde_json::Value::Object(item)]));
+        assert_eq!(result.len(), 1);
+        let err = result[0].error.as_deref().unwrap_or("");
+        assert!(err.contains("too long"), "unexpected error: {}", err);
+        assert!(!err.contains(&name), "error echoes the oversized name: {}", err);
     }
 }

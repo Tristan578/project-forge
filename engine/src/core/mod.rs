@@ -24,6 +24,7 @@ pub mod game_components;
 pub mod gizmo;
 pub mod history;
 pub mod input;
+pub mod json_guard;
 pub mod lighting;
 pub mod lod;
 pub mod material;

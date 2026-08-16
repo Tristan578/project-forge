@@ -229,11 +229,12 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
 /// and dispatches to the appropriate handler in core.
 #[wasm_bindgen]
 pub fn handle_command(command: &str, payload: JsValue) -> Result<JsValue, JsValue> {
-    // Reject oversized command strings before any allocation
-    if command.len() > 128 {
-        let response = CommandResponse::err(format!(
-            "Command name too long ({} bytes, limit 128)", command.len()
-        ));
+    // Reject an oversized command name before the payload is converted. The
+    // bound belongs to `core::json_guard`, not to this file — a second copy of
+    // the number here could drift silently, because `bridge/` is wasm32-only
+    // and no `cargo test` can reach it.
+    if let Err(e) = core::json_guard::check_identifier("Command name", command) {
+        let response = CommandResponse::err(e);
         return response.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
             .map_err(|e| JsValue::from_str(&e.to_string()));
     }
@@ -292,6 +293,12 @@ pub fn handle_command_batch(batch: JsValue) -> Result<JsValue, JsValue> {
 }
 
 /// Update engine state from JSON scene graph (legacy API).
+///
+/// No text-length bound here on purpose. A scene legitimately carries embedded
+/// asset data and can run to tens of megabytes, and the two costs a bound would
+/// buy are already covered: `from_str` caps its own recursion at 128 levels
+/// (unlike `from_value`, which is what `json_guard` exists for), and the parsed
+/// value then goes through `dispatch`, which bounds its depth and structure.
 #[wasm_bindgen]
 pub fn update_scene(scene_json: &str) -> Result<(), JsValue> {
     let payload: serde_json::Value = serde_json::from_str(scene_json)
