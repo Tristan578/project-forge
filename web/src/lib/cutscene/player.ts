@@ -82,17 +82,28 @@ export function applyEasing(t: number, easing: CutsceneKeyframe['easing']): numb
  * mode is absent or unrecognized. `set_game_camera` configures a specific
  * camera entity, so there is nothing to address without one — the same reason
  * the animation and audio tracks return null without an `entityId`.
+ *
+ * Exported for its tests, which are the only caller that reaches it with an
+ * unsanitized payload. `buildCommand` sanitizes first, so every own-key guard
+ * below is unreachable through it — testing them through `buildCommand` yields
+ * assertions that pass whether or not the guards are there. See the note beside
+ * the numeric loop for why the guards stay regardless.
  */
-function buildCameraCommandPayload(
+export function buildCameraCommandPayload(
   entityId: string | null,
   payload: Record<string, unknown>,
 ): SetGameCameraPayload | null {
   if (!entityId) return null;
 
-  const rawMode = payload.mode;
+  // `Object.hasOwn` on these two for exactly the reason the loop below states.
+  // They used to be bare reads while the loop was guarded, which made the
+  // justification written there true of one field in three — and `mode` is the
+  // one that decides whether this dispatches at all, so it is the worst of the
+  // three to leave open.
+  const rawMode = Object.hasOwn(payload, 'mode') ? payload.mode : undefined;
   if (!isCameraMode(rawMode)) return null;
 
-  const rawTarget = payload.targetEntity;
+  const rawTarget = Object.hasOwn(payload, 'targetEntity') ? payload.targetEntity : undefined;
   const data: GameCameraData = {
     mode: rawMode,
     targetEntity: typeof rawTarget === 'string' && rawTarget !== '' ? rawTarget : null,
