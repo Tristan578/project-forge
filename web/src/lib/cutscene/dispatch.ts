@@ -28,6 +28,39 @@ function asRecord(payload: unknown): Record<string, unknown> | null {
 }
 
 /**
+ * Per-playback memory of which cutscene beats a local handler has already run.
+ *
+ * A duration-based keyframe is re-dispatched on every animation frame so easing can
+ * be stepped, which for a trigger command means ~60 identical dispatches a second.
+ * Inferring "already handled" from live store state is not enough: the dialogue
+ * runtime stops looking active the moment the viewer closes the conversation, so the
+ * next frame reopened the tree at its first line and the dialogue could not be
+ * dismissed for the rest of the beat's window.
+ *
+ * The memory is created per dispatcher, and `play_cutscene` builds a dispatcher per
+ * playback, so it resets whenever a cutscene is loaded or replayed without needing a
+ * teardown hook — a stopped-and-restarted cutscene plays its dialogue again.
+ */
+export interface CutsceneDispatchSession {
+  readonly handledBeats: Set<string>;
+}
+
+/**
+ * Identity of the keyframe a dispatch came from, or `null` if it carries none.
+ *
+ * `beat` is the keyframe's timestamp, stamped by `buildCommand` in `./player.ts`.
+ * A dispatch without one is left to the live-state guard below rather than being
+ * given a synthetic identity that could suppress an unrelated dispatch.
+ */
+function beatKey(record: Record<string, unknown>): string | null {
+  const beat = record.beat;
+  if (typeof beat !== 'number' || !Number.isFinite(beat)) return null;
+  const treeId = typeof record.treeId === 'string' ? record.treeId : '';
+  const entityId = typeof record.entityId === 'string' ? record.entityId : '';
+  return `${beat}|${entityId}|${treeId}`;
+}
+
+/**
  * Open a dialogue tree named by a cutscene keyframe.
  *
  * Every rejection warns. The store's own `startDialogue` returns silently for an
@@ -35,11 +68,21 @@ function asRecord(payload: unknown): Record<string, unknown> | null {
  * pointing at a deleted tree would otherwise play through the beat with no dialogue
  * and no explanation.
  */
-function startDialogueFromKeyframe(payload: unknown): void {
+function startDialogueFromKeyframe(payload: unknown, session: CutsceneDispatchSession): void {
   const record = asRecord(payload);
   if (!record) {
     console.warn('[cutscene] start_dialogue keyframe has no payload — skipping');
     return;
+  }
+
+  // One decision per beat, whatever that decision turns out to be. Recorded before
+  // the checks rather than after the store call so the rejection paths below warn
+  // once too: a keyframe naming a deleted tree used to log on every frame of its
+  // window, ~60 lines a second for a single authoring mistake.
+  const key = beatKey(record);
+  if (key !== null) {
+    if (session.handledBeats.has(key)) return;
+    session.handledBeats.add(key);
   }
 
   const treeId = record.treeId;
@@ -60,12 +103,11 @@ function startDialogueFromKeyframe(payload: unknown): void {
     return;
   }
 
-  // Re-opening the tree the viewer is already in would reset it to its start node
-  // and discard their history. That is not hypothetical: a duration-based keyframe
-  // is re-dispatched on every animation frame so easing can be stepped, which for a
-  // trigger command means ~60 resets a second (PF-1127 / #9224 makes non-camera
-  // tracks one-shot at the scheduler; this keeps the command itself idempotent
-  // regardless of how often it is sent).
+  // Backstop for a dispatch that carries no beat identity (anything not built by
+  // `./player.ts`). It only holds while the tree is still open — the moment the
+  // viewer closes the conversation this stops applying — so it is the weaker of the
+  // two guards and must not be the only one. Re-opening the tree the viewer is
+  // already in would reset it to its start node and discard their history.
   if (runtime.isActive && runtime.activeTreeId === treeId) return;
 
   startDialogue(treeId);
@@ -95,6 +137,8 @@ export const LOCAL_CUTSCENE_COMMANDS = {
  * function and be "handled" by it.
  */
 export function createCutsceneDispatcher(engineDispatch: CommandDispatcher): CommandDispatcher {
+  const session: CutsceneDispatchSession = { handledBeats: new Set<string>() };
+
   return (command, payload) => {
     if (Object.hasOwn(LOCAL_CUTSCENE_COMMANDS, command)) {
       // A local route runs real store code inside the player's rAF callback, and
@@ -103,7 +147,7 @@ export function createCutsceneDispatcher(engineDispatch: CommandDispatcher): Com
       // loop with the cutscene mid-playback, leaving the editor in play mode with
       // no completion callback and no way out but a reload.
       try {
-        LOCAL_CUTSCENE_COMMANDS[command as keyof typeof LOCAL_CUTSCENE_COMMANDS](payload);
+        LOCAL_CUTSCENE_COMMANDS[command as keyof typeof LOCAL_CUTSCENE_COMMANDS](payload, session);
       } catch (err) {
         console.warn(`[cutscene] local handler for "${command}" failed — skipping`, err);
       }

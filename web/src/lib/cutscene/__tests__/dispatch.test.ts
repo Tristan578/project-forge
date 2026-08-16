@@ -131,6 +131,67 @@ describe('createCutsceneDispatcher', () => {
     expect(startDialogue).toHaveBeenCalledExactlyOnceWith('tree_2');
   });
 
+  it('does not reopen a beat the viewer has closed', () => {
+    // The live-runtime guard above stops holding the instant the viewer closes the
+    // conversation, and a keyframe with a duration is re-dispatched every frame of
+    // its window — so without a per-beat memory the tree reopened at its first line
+    // ~60 times a second and could not be dismissed until the window ended.
+    const startDialogue = vi.fn();
+    useDialogueStore.setState({ startDialogue });
+
+    const dispatch = createCutsceneDispatcher(engine);
+    dispatch('start_dialogue', { treeId: 'tree_1', entityId: 'npc1', beat: 1 });
+    expect(startDialogue).toHaveBeenCalledExactlyOnceWith('tree_1');
+
+    // The viewer closes it: `endDialogue` clears `isActive`/`activeTreeId`, which
+    // is exactly the state the weaker guard reads.
+    useDialogueStore.setState({ runtime: idleRuntime() });
+    dispatch('start_dialogue', { treeId: 'tree_1', entityId: 'npc1', beat: 1 });
+    dispatch('start_dialogue', { treeId: 'tree_1', entityId: 'npc1', beat: 1 });
+    expect(startDialogue).toHaveBeenCalledOnce();
+  });
+
+  it('opens a later beat that names the same tree', () => {
+    // The memory is per beat, not per tree: a cutscene that returns to the same
+    // conversation later must still play it, or the fix above would trade a
+    // dialogue that cannot be dismissed for one that never appears.
+    const startDialogue = vi.fn();
+    useDialogueStore.setState({ startDialogue });
+
+    const dispatch = createCutsceneDispatcher(engine);
+    dispatch('start_dialogue', { treeId: 'tree_1', entityId: 'npc1', beat: 1 });
+    useDialogueStore.setState({ runtime: idleRuntime() });
+    dispatch('start_dialogue', { treeId: 'tree_1', entityId: 'npc1', beat: 8 });
+
+    expect(startDialogue).toHaveBeenCalledTimes(2);
+  });
+
+  it('starts a fresh memory per playback', () => {
+    // The memory lives on the dispatcher, and `play_cutscene` builds one per
+    // playback — so replaying a cutscene plays its dialogue again rather than
+    // silently skipping every beat it has ever serviced.
+    const startDialogue = vi.fn();
+    useDialogueStore.setState({ startDialogue });
+
+    createCutsceneDispatcher(engine)('start_dialogue', { treeId: 'tree_1', beat: 1 });
+    useDialogueStore.setState({ runtime: idleRuntime() });
+    createCutsceneDispatcher(engine)('start_dialogue', { treeId: 'tree_1', beat: 1 });
+
+    expect(startDialogue).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports a beat naming a missing tree once, not once per frame', () => {
+    const dispatch = createCutsceneDispatcher(engine);
+    dispatch('start_dialogue', { treeId: 'gone', entityId: 'npc1', beat: 1 });
+    dispatch('start_dialogue', { treeId: 'gone', entityId: 'npc1', beat: 1 });
+    dispatch('start_dialogue', { treeId: 'gone', entityId: 'npc1', beat: 1 });
+
+    // One authoring mistake used to produce ~60 console lines a second for the
+    // whole of the keyframe's window.
+    expect(warn).toHaveBeenCalledOnce();
+    expect(useDialogueStore.getState().runtime.isActive).toBe(false);
+  });
+
   it('does not resolve a command name to an inherited function', () => {
     // `LOCAL_CUTSCENE_COMMANDS.toString` exists via the prototype chain. Looking a
     // command up with a bare read would "handle" it by calling Object.prototype's
@@ -213,6 +274,33 @@ describe('a dialogue keyframe reached during playback', () => {
     expect(useDialogueStore.getState().runtime.currentNodeId).toBe('n1');
     // The engine never sees it: `start_dialogue` is not one of its commands.
     expect(engine).not.toHaveBeenCalled();
+  });
+
+  it('leaves a closed dialogue closed for the rest of the beat', () => {
+    // End to end, through the real scheduler: a dialogue keyframe with a duration
+    // is re-dispatched on every frame of its window, so this is the shape the bug
+    // actually took — the viewer dismissed the box and the next frame put it back.
+    const startDialogue = vi.fn();
+    useDialogueStore.setState({ startDialogue });
+    player.load({
+      ...DIALOGUE_CUTSCENE,
+      tracks: [{
+        ...DIALOGUE_CUTSCENE.tracks[0],
+        keyframes: [{ timestamp: 1, duration: 4, easing: 'linear', payload: { treeId: 'tree_1' } }],
+      }],
+    });
+
+    player.play();
+    advanceTo(1200);
+    expect(startDialogue).toHaveBeenCalledExactlyOnceWith('tree_1');
+
+    // Still well inside the keyframe's window when the viewer closes it.
+    useDialogueStore.setState({ runtime: idleRuntime() });
+    advanceTo(1800);
+    advanceTo(2400);
+    advanceTo(3000);
+
+    expect(startDialogue).toHaveBeenCalledOnce();
   });
 
   it('keeps playing when the dialogue store throws', () => {
@@ -399,7 +487,7 @@ describe('cutscene command routing is exhaustive', () => {
     // see a renamed or missing key.
     expect(buildCommand('dialogue', 'npc1', KEYFRAME, 1)).toEqual({
       command: 'start_dialogue',
-      payload: { treeId: 'tree_1', entityId: 'npc1' },
+      payload: { treeId: 'tree_1', entityId: 'npc1', beat: KEYFRAME.timestamp },
     });
   });
 });
