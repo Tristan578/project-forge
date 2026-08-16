@@ -331,11 +331,21 @@ describe('cutscene command routing is exhaustive', () => {
    */
   const EMITS_NO_COMMAND = new Set<CutsceneTrackType>(['wait']);
 
+  /**
+   * One payload carrying every field any track's arm reads, so a single fixture
+   * exercises all of them.
+   *
+   * `mode` is load-bearing rather than decorative: the camera arm reads the
+   * keyframe through `isCameraMode` and returns null on a mode it does not
+   * recognize (PF-1126), so a payload without one makes the camera track look
+   * indistinguishable from a track whose arm nobody wrote — which is the exact
+   * failure this test exists to catch.
+   */
   const KEYFRAME: CutsceneKeyframe = {
     timestamp: 0,
     duration: 1,
     easing: 'linear',
-    payload: { treeId: 'tree_1', clipName: 'run' },
+    payload: { treeId: 'tree_1', clipName: 'run', mode: 'thirdPersonFollow' },
   };
 
   it('extracts real engine command names and not payload values', () => {

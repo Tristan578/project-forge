@@ -73,7 +73,13 @@ Return a JSON object matching this EXACT schema:
 }
 
 Track type payload schemas:
-- camera: { "mode": "ThirdPerson|FirstPerson|SideScroller|TopDown|Fixed|Orbital", "targetEntityId": "string|null", "offset": [x,y,z] }
+- camera: { "mode": "thirdPersonFollow|firstPerson|sideScroller|topDown|fixed|orbital", "targetEntity": "string|null", plus the params for that mode:
+    thirdPersonFollow: "followDistance", "followHeight", "followSmoothing"
+    firstPerson: "firstPersonHeight", "firstPersonMouseSensitivity"
+    sideScroller: "sideScrollerDistance"
+    topDown: "topDownHeight"
+    orbital: "orbitalDistance", "orbitalAutoRotateSpeed"
+    fixed: no params — the camera entity's own transform positions it }
 - animation: { "clipName": "string", "crossfadeSecs": number }
 - dialogue: { "treeId": "string", "text": "string" }
 - audio: { "volume": number, "pitch": number }
@@ -83,7 +89,7 @@ Rules:
 - Track IDs must be unique (use track_1, track_2, etc.)
 - Keyframe timestamps must be within [0, duration]
 - At least one track must be present
-- Camera tracks should have entityId: null
+- Camera tracks must have entityId set to the id of the camera entity being configured — "set_game_camera" configures one specific camera entity, so a camera track with entityId: null does nothing
 - Timestamps should be in chronological order within each track
 - Duration of each keyframe should not cause it to exceed the cutscene total duration
 - Return ONLY the JSON, no markdown fences or explanation`;

@@ -76,11 +76,15 @@ const VALID_RESPONSE = JSON.stringify({
     {
       id: 'track_1',
       type: 'camera',
-      entityId: null,
+      // A camera track names the camera entity it configures, and its payload
+      // speaks the one real camera vocabulary (`GameCameraMode` + the authoring
+      // params `buildSetGameCameraPayload` translates). `entityId: null` or a
+      // PascalCase mode both make `buildCommand` return null at playback.
+      entityId: 'cam1',
       muted: false,
       keyframes: [
-        { timestamp: 0, duration: 3, easing: 'ease_out', payload: { mode: 'Orbital' } },
-        { timestamp: 4, duration: 2, easing: 'linear', payload: { mode: 'ThirdPerson' } },
+        { timestamp: 0, duration: 3, easing: 'ease_out', payload: { mode: 'orbital', orbitalDistance: 12 } },
+        { timestamp: 4, duration: 2, easing: 'linear', payload: { mode: 'thirdPersonFollow', followDistance: 6 } },
       ],
     },
     {

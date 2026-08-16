@@ -113,7 +113,16 @@ fn handle_list_game_component_types(_payload: serde_json::Value) -> super::Comma
 // --- Game Camera Commands ---
 
 /// Handle set_game_camera command.
-/// Payload: { entity_id, mode, target_entity? }
+///
+/// Payload: { entity_id, mode, target_entity?, ...mode-specific params }
+///
+/// `entity_id` is the CAMERA entity being configured; `target_entity` is what it follows.
+///
+/// `mode` is a flat discriminator string (`"thirdPersonFollow"`, …) with its parameters as
+/// siblings, which is what the MCP manifest documents and what every caller sends.
+/// `GameCameraMode` itself is an externally-tagged enum of struct variants — deserializing the
+/// wire `mode` straight into it rejected every payload ever sent, and since `dispatchCommand`
+/// returns void that made the command a silent no-op from all six call sites.
 fn handle_set_game_camera(payload: serde_json::Value) -> super::CommandResult {
     let entity_id = payload.get("entity_id")
         .or_else(|| payload.get("entityId"))
@@ -121,9 +130,12 @@ fn handle_set_game_camera(payload: serde_json::Value) -> super::CommandResult {
         .ok_or("Missing entity_id")?
         .to_string();
 
-    let mode: super::super::game_camera::GameCameraMode = serde_json::from_value(
-        payload.get("mode").cloned().ok_or("Missing mode")?
-    ).map_err(|e| format!("Invalid mode: {}", e))?;
+    let mode_name = payload.get("mode")
+        .ok_or("Missing mode")?
+        .as_str()
+        .ok_or("Invalid mode: expected a mode name string")?;
+    let mode = super::super::game_camera::GameCameraMode::from_flat(mode_name, &payload)
+        .map_err(|e| format!("Invalid mode: {}", e))?;
 
     let target_entity = payload.get("target_entity")
         .or_else(|| payload.get("targetEntity"))
@@ -380,6 +392,55 @@ mod tests {
         let result = run("mouse_delta", json!({"dx": 5.0, "dy": -3.0}));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === set_game_camera ===
+    //
+    // The wire contract is the FLAT camelCase form the MCP manifest documents and every
+    // JS caller sends: a `mode` string plus sibling params. `GameCameraMode` itself is an
+    // externally-tagged serde enum of struct variants (that representation is load-bearing
+    // for `.forge` scene files), so the command boundary must translate. Before that
+    // translation existed the handler deserialized `mode` straight into the enum, which
+    // rejected every payload ever sent — and because `dispatchCommand` returns void, the
+    // command was a silent no-op from every call site.
+
+    #[test]
+    fn set_game_camera_accepts_flat_third_person_payload() {
+        let result = run("set_game_camera", json!({
+            "entityId": "camera-1",
+            "mode": "thirdPersonFollow",
+            "targetEntity": "player-1",
+            "offset": [0.0, 3.0, -6.0],
+            "damping": 4.0,
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("not initialized"), "mode was rejected before queueing: {}", err);
+    }
+
+    #[test]
+    fn set_game_camera_accepts_bare_mode_string_for_every_variant() {
+        for mode in ["thirdPersonFollow", "firstPerson", "sideScroller", "topDown", "fixed", "orbital"] {
+            let result = run("set_game_camera", json!({"entityId": "camera-1", "mode": mode}));
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(err.contains("not initialized"), "mode {} was rejected before queueing: {}", mode, err);
+        }
+    }
+
+    #[test]
+    fn set_game_camera_rejects_unknown_mode() {
+        let result = run("set_game_camera", json!({"entityId": "camera-1", "mode": "cinematic"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Invalid mode"), "expected an invalid-mode error, got: {}", err);
+    }
+
+    #[test]
+    fn set_game_camera_rejects_missing_mode() {
+        let result = run("set_game_camera", json!({"entityId": "camera-1"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing mode"));
     }
 
     // === set_active_game_camera ===

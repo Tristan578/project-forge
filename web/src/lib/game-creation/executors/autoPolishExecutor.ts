@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
+import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 
 // [B4] diagnoseIssues() requires GameMetrics (avgPlayTime, completionRate, etc.)
 // which do not exist on a freshly-built game. auto_polish uses STRUCTURAL
@@ -67,7 +68,23 @@ export const autoPolishExecutor: ExecutorDefinition = {
 
       if (cameraNode) {
         const mode = parsed.data.projectType === '2d' ? 'sideScroller' : 'thirdPersonFollow';
-        commands.push({ command: 'set_game_camera', payload: { entityId: cameraNode.entityId, mode, followSmoothing: 0.8 } });
+        // Translated, never flat: the store's authoring names share no key with
+        // the engine's wire form, and the engine drops every key it does not
+        // recognize without an error (PF-1126).
+        //
+        // No `followSmoothing` here. It used to send 0.8, read as a 0..1 blend
+        // factor — but the engine's `damping` is a RATE PER SECOND
+        // (`let t = (damping * delta).min(1.0)`), so 0.8 is roughly six times
+        // slower than the default 5.0, and every auto-polished 3D game shipped a
+        // sluggish follow camera. Omitting the field is how you ask for the
+        // engine default, and it carries no second copy of that number to drift.
+        commands.push({
+          command: 'set_game_camera',
+          payload: buildSetGameCameraPayload(cameraNode.entityId, {
+            mode,
+            targetEntity: null,
+          }),
+        });
         fixes.push(`Configured camera as ${mode}`);
       } else {
         fixes.push('Warning: no camera entity found to configure');

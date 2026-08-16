@@ -15,13 +15,13 @@ import {
   toStoreComponentType,
   normalizeGameComponent,
 } from '@/lib/engine/gameComponentWire';
+import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 
 export interface GameSlice {
   allGameComponents: Record<string, GameComponentData[]>;
   primaryGameComponents: GameComponentData[] | null;
   allGameCameras: Record<string, GameCameraData>;
   activeGameCameraId: string | null;
-  primaryGameCamera: GameCameraData | null;
   mobileTouchConfig: MobileTouchConfig;
   hudElements: HudElement[];
   engineMode: EngineMode;
@@ -119,7 +119,6 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   primaryGameComponents: null,
   allGameCameras: {},
   activeGameCameraId: null,
-  primaryGameCamera: null,
   mobileTouchConfig: {
     enabled: true,
     autoDetect: true,
@@ -186,7 +185,11 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   },
   setGameCamera: (entityId, data) => {
     set(state => ({ allGameCameras: { ...state.allGameCameras, [entityId]: data } }));
-    if (dispatchCommand) dispatchCommand('set_game_camera', { entityId, ...data });
+    // Spreading `data` here sent the engine nothing it could read — the store's
+    // authoring vocabulary (`followDistance`, `topDownHeight`, …) shares no key
+    // with the engine's wire form beyond `mode`, and the mode itself was the
+    // camelCase variant, which `serde` rejected outright. See gameCameraPayload.ts.
+    if (dispatchCommand) dispatchCommand('set_game_camera', buildSetGameCameraPayload(entityId, data));
   },
   removeGameCamera: (entityId) => {
     set(state => {
@@ -202,7 +205,29 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   cameraShake: (entityId, intensity, duration) => {
     if (dispatchCommand) dispatchCommand('camera_shake', { entityId, intensity, duration });
   },
-  setEntityGameCamera: (_entityId, data) => set({ primaryGameCamera: data }),
+  // Inbound engine event. The entityId was previously ignored entirely, so a
+  // camera change on ANY entity overwrote the inspector's primary camera and
+  // `allGameCameras` was never populated from the engine at all. The inspector
+  // now derives its view from this record keyed by the selected entity, so there
+  // is no parallel `primaryGameCamera` field to keep in sync (and no reason for
+  // this slice to reach across into the selection slice to do it).
+  setEntityGameCamera: (entityId, data) => set(state => {
+    // The set branch defines the key in an object literal rather than assigning
+    // `record[entityId] = data`. A plain assignment is `Set`, which walks the
+    // prototype chain, so an entityId of `"__proto__"` would hit the inherited
+    // setter instead: the camera would silently fail to store AND the record
+    // would be reparented to it, after which every miss-lookup resolves through
+    // the prototype and returns that camera for entities that have none. A
+    // computed key in a literal is `DefineOwnProperty` and does neither.
+    //
+    // `"__proto__"` is a reachable entity id, not a hypothetical: `zEntityId` is
+    // `z.string().min(1)`, and the engine's `is_valid_override_id` rejects only
+    // empty, over-64-byte and control-character ids — so a model can name an
+    // entity that and the engine will emit `GAME_CAMERA_CHANGED` for it.
+    if (data) return { allGameCameras: { ...state.allGameCameras, [entityId]: data } };
+    const { [entityId]: _removed, ...rest } = state.allGameCameras;
+    return { allGameCameras: rest };
+  }),
   setActiveGameCameraId: (entityId) => set({ activeGameCameraId: entityId }),
   setMobileTouchConfig: (config) => set({ mobileTouchConfig: config }),
   updateMobileTouchConfig: (partial) => {
