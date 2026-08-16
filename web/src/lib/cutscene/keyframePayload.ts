@@ -150,10 +150,17 @@ export function sanitizeKeyframePayload(
   trackType: CutsceneTrackType,
   raw: unknown,
 ): Record<string, unknown> {
-  // `Object.hasOwn`, not a bare index. On the generator side `trackType` comes
-  // from `JSON.parse`, and `TRACK_PAYLOAD_FIELDS['constructor']` is a function
-  // rather than `undefined` — a prototype-chain hit would hand the loop below
-  // the keys of `Object`, not an empty schema.
+  // `Object.hasOwn`, not a bare index. `trackType` is typed, but the value
+  // arrives from `JSON.parse` on the generator side and from a saved project on
+  // the player side, so at runtime it is whatever a string can be.
+  //
+  // What this guard actually buys is the unknown-track-type case: a bare index
+  // gives `undefined`, and `Object.keys(undefined)` throws, so one corrupted
+  // track would take down playback rather than yielding an empty payload. The
+  // prototype-named cases (`constructor`, `toString`) are handled too, but they
+  // are not the reason — `Object.keys(Object)` is `[]`, since every own property
+  // of a built-in constructor is non-enumerable, so the loop below would come
+  // back empty with or without this line.
   if (!Object.hasOwn(TRACK_PAYLOAD_FIELDS, trackType)) return {};
   const fields = TRACK_PAYLOAD_FIELDS[trackType];
   if (!isObject(raw)) return {};

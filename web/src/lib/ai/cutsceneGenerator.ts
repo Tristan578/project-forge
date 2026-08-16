@@ -75,7 +75,7 @@ Return a JSON object matching this EXACT schema:
 
 Track type payload schemas:
 - camera: { "mode": "thirdPersonFollow|firstPerson|sideScroller|topDown|fixed|orbital", "targetEntity": "string|null", plus the params for that mode:
-    thirdPersonFollow: "followDistance", "followHeight", "followSmoothing"
+    thirdPersonFollow: "followDistance", "followHeight", "followOffsetX", "followSmoothing"
     firstPerson: "firstPersonHeight", "firstPersonMouseSensitivity"
     sideScroller: "sideScrollerDistance"
     topDown: "topDownHeight"

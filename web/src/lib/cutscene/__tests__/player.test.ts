@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { applyEasing, buildCommand, CutscenePlayer, type CommandDispatcher } from '../player';
+import {
+  applyEasing,
+  buildCommand,
+  CutscenePlayer,
+  readCameraData,
+  type CommandDispatcher,
+} from '../player';
 import type { CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
 import { useCutsceneStore } from '@/stores/cutsceneStore';
 
@@ -128,16 +134,48 @@ describe('buildCommand', () => {
     expect(cmd?.payload).toEqual({ entityId: 'cam1', mode: 'topDown', targetEntity: null });
   });
 
-  it('camera track does not read params off the prototype chain', () => {
-    // Keyframe payloads are model-authored, so a `__proto__` entry in that JSON
-    // produces exactly this object. The inherited value must not reach the wire:
-    // once picked it would be written as an OWN property on the camera data, so
-    // the `Object.hasOwn` check further down the payload builder cannot catch it.
+  it('camera track drops an inherited param rather than sending it', () => {
+    // Called directly, NOT through `buildCommand`. `buildCommand` sanitizes the
+    // payload first, and the sanitizer already drops inherited keys — so the
+    // same assertion routed through it passes with every `Object.hasOwn` in the
+    // payload builder deleted. Verified by mutation: both guards survive when
+    // this is written against `buildCommand`.
+    //
+    // What is being pinned is the payload reader's own contract. Its parameter
+    // says `Record<string, unknown>`, so it cannot assume a sanitized input, and
+    // a `__proto__` entry in model-authored JSON produces exactly this object.
+    // An inherited value that got picked would be written as an OWN property on
+    // the camera data, past the point where anything downstream could tell.
     const payload = Object.create({ topDownHeight: 999 }) as Record<string, unknown>;
     payload.mode = 'topDown';
 
-    const cmd = buildCommand('camera', 'cam1', makeKF(payload), 0.5);
-    expect(cmd?.payload).toEqual({ entityId: 'cam1', mode: 'topDown', targetEntity: null });
+    expect(readCameraData(payload)).toEqual({
+      mode: 'topDown',
+      targetEntity: null,
+    });
+  });
+
+  it('camera track does not read the mode or target off the prototype chain either', () => {
+    // `mode` decides whether this dispatches at all, so an inherited one is the
+    // difference between a no-op and a camera reconfigured by a key the author
+    // never set — the highest-value of the three fields to guard.
+    const inherited = Object.create({
+      mode: 'topDown',
+      targetEntity: 'someone-elses-entity',
+    }) as Record<string, unknown>;
+
+    expect(readCameraData(inherited)).toBeNull();
+
+    const ownModeOnly = Object.create({ targetEntity: 'someone-elses-entity' }) as Record<
+      string,
+      unknown
+    >;
+    ownModeOnly.mode = 'topDown';
+
+    expect(readCameraData(ownModeOnly)).toEqual({
+      mode: 'topDown',
+      targetEntity: null,
+    });
   });
 
   it('camera track returns null when entityId is null', () => {
