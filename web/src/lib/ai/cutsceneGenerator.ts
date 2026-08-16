@@ -107,6 +107,13 @@ function isObject(v: unknown): v is Record<string, unknown> {
 // Derived from the store's own list, never re-typed: a second copy drifts, and a
 // track type the validator accepts but `buildCommand` has no arm for dispatches
 // nothing at playback time — silently, since the player drops a null command.
+//
+// The payload schema cannot disagree with it either, for the same reason and
+// without a second derivation: `CutsceneTrackType` IS this array's element type,
+// and `TRACK_PAYLOAD_FIELDS` is a `Record` over it, so a type here with no
+// vocabulary there is a compile error rather than a track whose every keyframe
+// sanitizes to `{}`.
+
 const VALID_TRACK_TYPES = new Set<string>(CUTSCENE_TRACK_TYPES);
 const VALID_EASING = new Set<string>(['linear', 'ease_in', 'ease_out', 'ease_in_out']);
 

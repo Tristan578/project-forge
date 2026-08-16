@@ -9,6 +9,8 @@ import {
   generateCutscene,
   type CutsceneGenerationOptions,
 } from '../cutsceneGenerator';
+import { getKeyframePayloadFields } from '@/lib/cutscene/keyframePayload';
+import { CUTSCENE_TRACK_TYPES } from '@/stores/cutsceneStore';
 
 // ============================================================================
 // buildCutscenePrompt
@@ -97,6 +99,71 @@ const VALID_RESPONSE = JSON.stringify({
       ],
     },
   ],
+});
+
+// ============================================================================
+// Prompt <-> payload schema parity
+// ============================================================================
+
+/**
+ * Read the field names the prompt asks the model to write, per track type.
+ *
+ * The prompt names a field two ways: `"name":` in a payload schema, and — for
+ * camera, whose parameters depend on the mode — bare quoted names on the
+ * indented per-mode lines. Quoted VALUE descriptions (`"string|null"`) are
+ * neither, so they are excluded by construction rather than by a stop-list.
+ */
+function promptFieldsByTrack(prompt: string): Record<string, Set<string>> {
+  const section = prompt.split('Track type payload schemas:')[1]?.split('\nRules:')[0];
+  if (!section) throw new Error('prompt no longer documents payload schemas');
+
+  const byTrack: Record<string, Set<string>> = {};
+  let current: Set<string> | null = null;
+
+  for (const line of section.split('\n')) {
+    const trackStart = /^- (\w+):/.exec(line);
+    if (trackStart) {
+      current = new Set<string>();
+      byTrack[trackStart[1]] = current;
+    }
+    if (!current) continue;
+
+    for (const [, name] of line.matchAll(/"(\w+)":/g)) current.add(name);
+    // Indented `mode: "param", "param"` lines — a camera parameter is quoted but
+    // carries no colon of its own, so the key regex above cannot see it.
+    if (/^\s+\w+:/.test(line)) {
+      for (const [, name] of line.matchAll(/"(\w+)"(?!:)/g)) current.add(name);
+    }
+  }
+  return byTrack;
+}
+
+describe('prompt and payload schema parity', () => {
+  // Both sides are TypeScript in the same package and nothing makes them agree.
+  // A field the prompt asks for but the schema omits is discarded silently on
+  // arrival; a field the schema accepts but the prompt never mentions is one the
+  // model has no reason to ever send. Neither is a type error, and neither shows
+  // up in a passing generation — the cutscene just quietly does less.
+  const prompt = buildCutscenePrompt({ prompt: 'Pan from sky', sceneEntities: [] });
+  const byTrack = promptFieldsByTrack(prompt);
+
+  it('documents every track type', () => {
+    expect(Object.keys(byTrack).sort()).toEqual([...CUTSCENE_TRACK_TYPES].sort());
+  });
+
+  it.each(CUTSCENE_TRACK_TYPES)('%s: prompt and schema name the same fields', (trackType) => {
+    expect([...(byTrack[trackType] ?? [])].sort()).toEqual(
+      getKeyframePayloadFields(trackType).sort(),
+    );
+  });
+
+  it('extracts field names rather than value descriptions', () => {
+    // Self-check on the parser above: `"string|null"` is a value, not a field,
+    // and a parser that swept up every quoted token would make the assertions
+    // above pass against a prompt that had drifted.
+    expect(byTrack.dialogue).toEqual(new Set(['treeId', 'text']));
+    expect([...(byTrack.camera ?? [])]).not.toContain('string');
+  });
 });
 
 describe('parseCutsceneResponse', () => {

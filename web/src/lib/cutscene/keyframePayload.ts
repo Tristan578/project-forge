@@ -106,6 +106,27 @@ const TRACK_PAYLOAD_FIELDS: Record<CutsceneTrackType, Record<string, FieldReader
   wait: {},
 };
 
+/*
+ * There is deliberately no `CUTSCENE_TRACK_TYPES` here. The store owns that
+ * array and derives `CutsceneTrackType` from it, and `TRACK_PAYLOAD_FIELDS` is a
+ * `Record` over that union — so a track type with no payload vocabulary is
+ * already a compile error, and a second exported copy of the list under the same
+ * name would be the drift it was meant to prevent.
+ */
+
+/**
+ * The field names a track type accepts. Exported for the test that holds the
+ * generator's prompt and this table to each other — the prompt tells the model
+ * which fields to write, and a name that appears in one and not the other is
+ * either a field asked for and discarded, or a field accepted and never asked
+ * for. Neither shows up as a type error.
+ */
+export function getKeyframePayloadFields(trackType: CutsceneTrackType): string[] {
+  return Object.hasOwn(TRACK_PAYLOAD_FIELDS, trackType)
+    ? Object.keys(TRACK_PAYLOAD_FIELDS[trackType])
+    : [];
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

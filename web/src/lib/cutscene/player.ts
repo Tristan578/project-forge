@@ -2,9 +2,16 @@
  * CutscenePlayer — rAF-based command scheduler for cutscene playback.
  *
  * Dispatches engine commands at scheduled timestamps by walking each track's
- * keyframes and firing commands when the playback clock reaches them. All
- * actual work (camera, animation, dialogue, audio) routes through the existing
- * engine command pipeline — no new Rust systems required.
+ * keyframes and firing commands when the playback clock reaches them. Camera and
+ * animation route through the existing engine command pipeline — no new Rust
+ * systems required.
+ *
+ * Dialogue does not: `start_dialogue` has no engine arm, so `./dispatch.ts`
+ * intercepts it and drives the dialogue store instead. Audio reaches the engine
+ * but only as far as `entityId` — `handle_play_audio` reads nothing else, so the
+ * `volume`/`pitch` a keyframe carries are deliberately not sent rather than sent
+ * and dropped. This header used to claim all four tracks worked end to end,
+ * which is the only reason those gaps survived as long as they did.
  */
 
 import type { Cutscene, CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
@@ -223,14 +230,18 @@ export function buildCommand(
       // engine can only ignore, indistinguishable in a log from one that worked.
       const { clipName } = payload;
       if (typeof clipName !== 'string') return null;
-      return {
-        command: 'play_animation',
-        // `crossfadeSecs` is a non-negative finite number or absent by the time
-        // it gets here, so `??` is reading an absent field rather than papering
-        // over a bad one — it used to forward whatever the model wrote, string
-        // or object included.
-        payload: { entityId, clipName, crossfadeSecs: payload.crossfadeSecs ?? 0 },
-      };
+      // `crossfadeSecs` is a non-negative finite number or absent by the time it
+      // gets here — it used to be forwarded unread, string or object included.
+      // When it is absent the key is OMITTED rather than filled in with a local
+      // default: `handle_play_animation` reads it as `unwrap_or(0.3)`, so writing
+      // a `0` here would not be "no opinion", it would be an instant cut
+      // overriding the engine's own crossfade. Omission is how you ask for the
+      // engine default (PF-1126).
+      const animationPayload: Record<string, unknown> = { entityId, clipName };
+      if (payload.crossfadeSecs !== undefined) {
+        animationPayload.crossfadeSecs = payload.crossfadeSecs;
+      }
+      return { command: 'play_animation', payload: animationPayload };
     }
     case 'dialogue': {
       // Dialogue keyframes mutate the dialogue store directly via the dispatcher.
@@ -243,6 +254,8 @@ export function buildCommand(
       // handler looks the tree up by that value, so a number or an object finds
       // nothing and the beat passes as if it had played; the command names a
       // real tree or it is not built.
+      // Unlike the other tracks this one does not need an entity — a cutscene can
+      // narrate without anyone speaking — but it does need a tree to start.
       const treeId = typeof payload.treeId === 'string' ? payload.treeId : '';
       if (!treeId) return null;
       return {
@@ -252,11 +265,13 @@ export function buildCommand(
     }
     case 'audio': {
       if (!entityId) return null;
-      // `handle_play_audio` reads `entityId` and nothing else — volume, fade and
+      // `handle_play_audio` reads `entityId` and nothing else — volume, pitch and
       // every other key a generated keyframe carries were spread onto the command
       // and dropped by the engine without an error. Sending only the field the
       // handler reads makes that a visible gap instead of a payload that looks
-      // like it configures playback.
+      // like it configures playback. The `volume`/`pitch` a cutscene asks for
+      // belong on `set_audio`, which is two commands for one keyframe — a
+      // scheduler change, not a payload one.
       return { command: 'play_audio', payload: { entityId } };
     }
     case 'wait':
