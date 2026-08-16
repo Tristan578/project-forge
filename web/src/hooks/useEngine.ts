@@ -6,6 +6,7 @@ import { showError } from '@/lib/toast';
 import { fetchWasmWithMetrics } from '@/lib/monitoring/cdnAnalytics';
 import { GPU_INIT_TIMEOUT_MS, WASM_FETCH_TIMEOUT_MS } from '@/lib/config/timeouts';
 import { withTimeout } from '@/lib/async/withTimeout';
+import { checkCommandBatch, checkCommandPayload } from '@/lib/engine/commandPayloadGuard';
 
 /** Loading progress state exported for UI components to display progress feedback. */
 export type LoadingPhase = 'idle' | 'detecting' | 'downloading' | 'initializing' | 'ready' | 'error';
@@ -607,6 +608,78 @@ export interface UseEngineOptions {
   onError?: (error: Error) => void;
 }
 
+/**
+ * Send one command, refusing a payload the engine could not survive receiving.
+ *
+ * Split out of the hook and given the module explicitly because the guard is
+ * the interesting part and the hook is not reachable from a test with an engine
+ * loaded — `wasmModule` is module-private and only a real WASM load assigns it,
+ * so a test of the hook can only ever exercise the not-initialized branch above
+ * this. That would have left the refusal itself asserted nowhere but by a grep.
+ */
+export function dispatchGuarded<T = unknown>(
+  module: WasmModule,
+  command: string,
+  payload: unknown,
+): T | undefined {
+  // Bounded before the call, not inside the engine: `handle_command`
+  // receives this through `serde_wasm_bindgen`, which walks the value
+  // recursively to build what the Rust guard then checks — so a payload
+  // deep enough to overflow the stack traps during that walk, before any
+  // engine code runs. On wasm32 that trap is unrecoverable.
+  const tooBig = checkCommandPayload(command, payload);
+  if (tooBig) {
+    console.error(`Refused command '${command}': ${tooBig}`);
+    // The shape the engine itself would have answered with, had the payload
+    // reached it. Callers here read `handle_command`'s `CommandResponse`.
+    return { success: false, error: tooBig } as T;
+  }
+  try {
+    return module.handle_command(command, payload) as T;
+  } catch (err) {
+    const cmdError = err instanceof Error ? err : new Error(String(err));
+    captureException(cmdError, {
+      phase: 'handle_command',
+      command,
+      payload: typeof payload === 'object' ? (() => { try { return JSON.stringify(payload).slice(0, 500); } catch { return '[unserializable]'; } })() : String(payload),
+    });
+    throw err;
+  }
+}
+
+/** The batch counterpart of {@link dispatchGuarded}, split out for the same reason. */
+export function dispatchGuardedBatch(
+  module: WasmModule,
+  commands: Array<{ command: string; payload?: unknown }>,
+): BatchResult {
+  // The whole envelope, not each payload in turn: a batch crosses into WASM
+  // as one value, so it is the envelope that gets walked recursively.
+  const tooBig = checkCommandBatch(commands);
+  if (tooBig) {
+    console.error(`Refused command batch: ${tooBig}`);
+    return {
+      success: false,
+      // One result per command, in order — callers index into this array,
+      // so a short one reads as success for whatever fell off the end.
+      results: commands.map(() => ({ success: false, error: tooBig })),
+    };
+  }
+  try {
+    const results = module.handle_command_batch(commands) as CommandResponse[];
+    return {
+      success: results.every((r) => r.success),
+      results,
+    };
+  } catch (err) {
+    const batchError = err instanceof Error ? err : new Error(String(err));
+    captureException(batchError, {
+      phase: 'handle_command_batch',
+      batchSize: commands.length,
+    });
+    return { success: false, results: [] };
+  }
+}
+
 export function useEngine(canvasId: string, options?: UseEngineOptions) {
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -720,17 +793,7 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         console.warn('Engine not initialized');
         return undefined;
       }
-      try {
-        return wasmModule.handle_command(command, payload) as T;
-      } catch (err) {
-        const cmdError = err instanceof Error ? err : new Error(String(err));
-        captureException(cmdError, {
-          phase: 'handle_command',
-          command,
-          payload: typeof payload === 'object' ? (() => { try { return JSON.stringify(payload).slice(0, 500); } catch { return '[unserializable]'; } })() : String(payload),
-        });
-        throw err;
-      }
+      return dispatchGuarded<T>(wasmModule, command, payload);
     },
     []
   );
@@ -741,20 +804,7 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         console.warn('Engine not initialized');
         return { success: false, results: [] };
       }
-      try {
-        const results = wasmModule.handle_command_batch(commands) as CommandResponse[];
-        return {
-          success: results.every((r) => r.success),
-          results,
-        };
-      } catch (err) {
-        const batchError = err instanceof Error ? err : new Error(String(err));
-        captureException(batchError, {
-          phase: 'handle_command_batch',
-          batchSize: commands.length,
-        });
-        return { success: false, results: [] };
-      }
+      return dispatchGuardedBatch(wasmModule, commands);
     },
     [],
   );

@@ -14,6 +14,7 @@ import {
 import type { AsyncRequest } from '@/lib/scripting/asyncTypes';
 import { showError } from '@/lib/toast';
 import { DeltaSerializer, type SceneSnapshot } from '@/lib/engine/deltaSerializer';
+import { checkCommandPayload } from '@/lib/engine/commandPayloadGuard';
 
 // Commands allowed from user scripts (maps to forge.* API surface)
 const SCRIPT_ALLOWED_COMMANDS = new Set([
@@ -176,6 +177,17 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
 
   const dispatchCommand = useCallback(
     (command: string, payload: unknown): unknown => {
+      // The one dispatch path that carries genuinely untrusted structure: a
+      // user script running in the worker builds this payload, and
+      // `structuredClone` happily posts a value far deeper than
+      // `serde_wasm_bindgen` can walk to build what the Rust guard checks. That
+      // walk happens before any engine code runs, and on wasm32 overflowing it
+      // is an unrecoverable trap — the engine instance dies mid-game.
+      const tooBig = checkCommandPayload(command, payload);
+      if (tooBig) {
+        console.error(`[ScriptRunner] Refused command '${command}': ${tooBig}`);
+        return { success: false, error: tooBig };
+      }
       if (wasmModule?.handle_command) {
         try {
           return wasmModule.handle_command(command, payload);

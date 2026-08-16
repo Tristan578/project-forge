@@ -281,6 +281,55 @@ describe('useScriptRunner', () => {
     consoleSpy.mockRestore();
   });
 
+  it('refuses a payload deep enough to trap the engine, without calling into WASM', () => {
+    // A user script builds this structure and `structuredClone` posts it
+    // verbatim. The Rust guard cannot help here: `serde_wasm_bindgen` walks the
+    // value recursively to build what that guard checks, and on wasm32
+    // overflowing that walk is an unrecoverable trap, not an error. So the
+    // refusal has to happen on this side of the boundary — asserting that
+    // `handle_command` is never reached is the whole point of the test.
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const worker = latestWorker!;
+
+    // Built iteratively — a recursive helper would overflow building the input.
+    let deep: unknown = 1;
+    for (let i = 0; i < 10_000; i += 1) deep = { a: deep };
+
+    act(() => {
+      worker.simulateMessage({
+        type: 'commands',
+        commands: [{ cmd: 'update_transform', entityId: 'e1', position: deep }],
+      });
+    });
+
+    expect(mockWasmModule.handle_command).not.toHaveBeenCalled();
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Refused command 'update_transform'"),
+    );
+    consoleSpy.mockRestore();
+  });
+
+  it('still dispatches an ordinary payload', () => {
+    // Pins the guard from the accepting side: a refusal that also refused
+    // normal traffic would leave the test above green while breaking scripting
+    // outright.
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    const worker = latestWorker!;
+    act(() => {
+      worker.simulateMessage({
+        type: 'commands',
+        commands: [{ cmd: 'update_transform', entityId: 'e1', position: [1, 2, 3] }],
+      });
+    });
+
+    expect(mockWasmModule.handle_command).toHaveBeenCalledTimes(1);
+  });
+
   // ---------------------------------------------------------------------------
   // Audio command routing
   // ---------------------------------------------------------------------------
