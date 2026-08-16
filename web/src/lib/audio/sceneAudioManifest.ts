@@ -53,6 +53,8 @@ const ENGINE_AUDIO_DEFAULTS = {
   bus: 'sfx',
 } as const;
 
+const RESERVED_ENTITY_IDS = new Set(['__proto__', 'constructor', 'prototype']);
+
 let staged: Record<string, AudioData> = {};
 
 function readNumber(raw: unknown, fallback: number): number {
@@ -104,6 +106,12 @@ export function parseSceneAudio(json: string): Record<string, AudioData> {
     if (typeof entity !== 'object' || entity === null) continue;
     const { entityId, audioData } = entity as { entityId?: unknown; audioData?: unknown };
     if (typeof entityId !== 'string' || entityId.length === 0) continue;
+    // `audio['__proto__'] = x` on an object literal REPLACES the prototype
+    // instead of adding a key, so a scene file naming an entity `__proto__`
+    // would make every absent entity report that entity's sound through the
+    // prototype chain. Engine entity ids are uuids, so none of these is ever a
+    // real id — dropping them costs nothing.
+    if (RESERVED_ENTITY_IDS.has(entityId)) continue;
     // `audioData` is `skip_serializing_if = "Option::is_none"`, so an entity
     // with no sound simply has no key — the common case, not an error.
     if (typeof audioData !== 'object' || audioData === null) continue;

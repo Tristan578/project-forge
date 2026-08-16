@@ -81,6 +81,23 @@ describe('parseSceneAudio', () => {
     });
   });
 
+  it('does not let a scene file name an entity after a prototype key', () => {
+    // `audio['__proto__'] = x` swaps the prototype instead of adding a key, so
+    // an unguarded parse would make every entity in the scene report this
+    // sound through the prototype chain.
+    const audio = parseSceneAudio(
+      scene([
+        { entityId: '__proto__', audioData: FULL_AUDIO },
+        { entityId: 'constructor', audioData: FULL_AUDIO },
+        { entityId: 'real-entity', audioData: { volume: 0.25 } },
+      ])
+    );
+
+    expect(Object.keys(audio)).toEqual(['real-entity']);
+    expect(audio['some-entity-with-no-sound']).toBeUndefined();
+    expect(Object.getPrototypeOf(audio)).toBe(Object.prototype);
+  });
+
   it('keeps a zero volume, which a truthiness check would have thrown away', () => {
     const audio = parseSceneAudio(scene([{ entityId: 'e1', audioData: { volume: 0 } }]));
     expect(audio.e1.volume).toBe(0);
