@@ -26,140 +26,243 @@ export interface GameplayAnalysis {
 
 // ===== Zod Schemas for Builder Functions =====
 
+/**
+ * Largest magnitude a model-supplied scalar may carry into the engine.
+ *
+ * Every one of these numbers is cast to `f32` on the Rust side while JSON
+ * carries f64, so a *finite* value past `f32::MAX` (~3.4e38) arrives as `inf`
+ * and poisons whatever it touches — an infinite density or roughness
+ * propagates NaN through the physics and render graphs rather than merely
+ * looking wrong. Zod rejects `Infinity` and `NaN` outright; this covers the
+ * finite-but-unusable band beneath them, for fields with no tighter bound of
+ * their own.
+ */
+const F32_SAFE_MAX = 1e30;
+
+/**
+ * A model-supplied number, clamped into the range the field can actually mean.
+ *
+ * Out of range clamps rather than rejects. `metallic: 5` means "as metallic as
+ * it goes", and answering that with the 0 default reads it worse than
+ * answering with 1. Input that is not a finite number at all — a string,
+ * `null`, `NaN`, `Infinity` — carries no such reading, so `.catch(undefined)`
+ * drops it and the caller's own default applies.
+ *
+ * That `.catch` is load-bearing well beyond the one field: these schemas are
+ * parsed inside chat tool handlers, and a ZodError thrown out of one aborts
+ * the entire compound action. Without it a single nonsense number would cost
+ * the user every entity in the batch.
+ */
+function zNum(min: number, max: number = F32_SAFE_MAX) {
+  return z
+    .number()
+    .transform((v) => Math.min(max, Math.max(min, v)))
+    .optional()
+    .catch(undefined);
+}
+
+/**
+ * The same, for a field the engine deserializes into an integer type.
+ *
+ * serde performs no float-to-int coercion, so `value: 1.5` against a `u32`
+ * fails the whole payload — and `dispatchCommand` returns void, so nothing
+ * anywhere reports the rejection. Rounding here is what stops a plausible
+ * model answer from silently dropping the command.
+ */
+function zInt(min: number, max: number = 1e9) {
+  return z
+    .number()
+    .transform((v) => Math.round(Math.min(max, Math.max(min, v))))
+    .optional()
+    .catch(undefined);
+}
+
+/**
+ * Any non-numeric field: keep its type check, but fall back to the caller's
+ * default instead of throwing, for the same reason `zNum` catches.
+ */
+function zOpt<S extends z.ZodType>(schema: S) {
+  return schema.optional().catch(undefined);
+}
+
+/**
+ * Parse a partial spec without ever throwing.
+ *
+ * Each field catches on its own, so a failure at this level means the input
+ * was not an object at all — `light: "bright"`, say, which the compound
+ * handlers pass through with a bare cast. No field can be read out of that,
+ * which is the same state as supplying none, so it takes the same answer: an
+ * empty spec, and every default applies.
+ */
+function parsePartial<S extends z.ZodType>(schema: S, input: unknown): z.output<S> {
+  const parsed = schema.safeParse(input);
+  if (parsed.success) return parsed.data;
+  const empty = schema.safeParse({});
+  return empty.success ? empty.data : ({} as z.output<S>);
+}
+
 const zPartialMaterial = z.object({
-  baseColor: zVec4.optional(),
-  metallic: z.number().optional(),
-  perceptualRoughness: z.number().optional(),
-  reflectance: z.number().optional(),
-  emissive: zVec4.optional(),
-  emissiveExposureWeight: z.number().optional(),
-  alphaMode: z.enum(['opaque', 'blend', 'mask']).optional(),
-  alphaCutoff: z.number().optional(),
-  doubleSided: z.boolean().optional(),
-  unlit: z.boolean().optional(),
-  uvOffset: zVec2.optional(),
-  uvScale: zVec2.optional(),
-  uvRotation: z.number().optional(),
-  parallaxDepthScale: z.number().optional(),
-  parallaxMappingMethod: z.enum(['occlusion', 'relief']).optional(),
-  maxParallaxLayerCount: z.number().optional(),
-  parallaxReliefMaxSteps: z.number().optional(),
-  clearcoat: z.number().optional(),
-  clearcoatPerceptualRoughness: z.number().optional(),
-  specularTransmission: z.number().optional(),
-  diffuseTransmission: z.number().optional(),
-  ior: z.number().optional(),
-  thickness: z.number().optional(),
-  attenuationDistance: z.number().nullable().optional(),
-  attenuationColor: zVec3.optional(),
+  baseColor: zOpt(zVec4),
+  metallic: zNum(0, 1),
+  perceptualRoughness: zNum(0, 1),
+  reflectance: zNum(0, 1),
+  emissive: zOpt(zVec4),
+  emissiveExposureWeight: zNum(0, 1),
+  alphaMode: zOpt(z.enum(['opaque', 'blend', 'mask'])),
+  alphaCutoff: zNum(0, 1),
+  doubleSided: zOpt(z.boolean()),
+  unlit: zOpt(z.boolean()),
+  uvOffset: zOpt(zVec2),
+  uvScale: zOpt(zVec2),
+  // An angle wraps, so any finite rotation is meaningful.
+  uvRotation: zNum(-F32_SAFE_MAX),
+  parallaxDepthScale: zNum(0, 1),
+  parallaxMappingMethod: zOpt(z.enum(['occlusion', 'relief'])),
+  maxParallaxLayerCount: zNum(1, 64),
+  // `parallax_relief_max_steps` is a u32 in the engine.
+  parallaxReliefMaxSteps: zInt(0, 64),
+  clearcoat: zNum(0, 1),
+  clearcoatPerceptualRoughness: zNum(0, 1),
+  specularTransmission: zNum(0, 1),
+  diffuseTransmission: zNum(0, 1),
+  // Index of refraction: 1 is vacuum, and nothing the engine renders is above
+  // diamond's 2.42.
+  ior: zNum(1, 3),
+  thickness: zNum(0),
+  attenuationDistance: zNum(0),
+  attenuationColor: zOpt(zVec3),
 }).passthrough();
 
 const zPartialLight = z.object({
-  lightType: z.enum(['point', 'directional', 'spot']).optional(),
-  color: zVec3.optional(),
-  intensity: z.number().optional(),
-  shadowsEnabled: z.boolean().optional(),
-  shadowDepthBias: z.number().optional(),
-  shadowNormalBias: z.number().optional(),
-  range: z.number().optional(),
-  radius: z.number().optional(),
-  innerAngle: z.number().optional(),
-  outerAngle: z.number().optional(),
+  lightType: zOpt(z.enum(['point', 'directional', 'spot'])),
+  color: zOpt(zVec3),
+  intensity: zNum(0),
+  shadowsEnabled: zOpt(z.boolean()),
+  shadowDepthBias: zNum(0, 100),
+  shadowNormalBias: zNum(0, 100),
+  range: zNum(0),
+  radius: zNum(0),
+  // Bevy clamps a spot cone at a half-angle of pi/2; past that the light is
+  // no longer a cone at all.
+  innerAngle: zNum(0, Math.PI / 2),
+  outerAngle: zNum(0, Math.PI / 2),
 }).passthrough();
 
 const zPartialPhysics = z.object({
-  bodyType: z.enum(['dynamic', 'fixed', 'kinematic_position', 'kinematic_velocity']).optional(),
-  colliderShape: z.enum(['cuboid', 'ball', 'cylinder', 'capsule', 'auto']).optional(),
-  restitution: z.number().optional(),
-  friction: z.number().optional(),
-  density: z.number().optional(),
-  gravityScale: z.number().optional(),
-  lockTranslationX: z.boolean().optional(),
-  lockTranslationY: z.boolean().optional(),
-  lockTranslationZ: z.boolean().optional(),
-  lockRotationX: z.boolean().optional(),
-  lockRotationY: z.boolean().optional(),
-  lockRotationZ: z.boolean().optional(),
-  isSensor: z.boolean().optional(),
+  bodyType: zOpt(z.enum(['dynamic', 'fixed', 'kinematic_position', 'kinematic_velocity'])),
+  colliderShape: zOpt(z.enum(['cuboid', 'ball', 'cylinder', 'capsule', 'auto'])),
+  // Restitution above 1 returns more energy than the impact carried, so a
+  // bouncing body accelerates until the solver gives up.
+  restitution: zNum(0, 1),
+  friction: zNum(0, 100),
+  // Zero density is a zero-mass dynamic body, which Rapier cannot integrate.
+  density: zNum(0.0001),
+  gravityScale: zNum(-1000, 1000),
+  lockTranslationX: zOpt(z.boolean()),
+  lockTranslationY: zOpt(z.boolean()),
+  lockTranslationZ: zOpt(z.boolean()),
+  lockRotationX: zOpt(z.boolean()),
+  lockRotationY: zOpt(z.boolean()),
+  lockRotationZ: zOpt(z.boolean()),
+  isSensor: zOpt(z.boolean()),
 }).passthrough();
 
 // Per-case game component prop schemas
+/**
+ * An identifier or asset key. Dropped rather than truncated when it runs long:
+ * half an entity id names the wrong entity, where no id at all falls back to
+ * the field's default.
+ */
+const zName = zOpt(z.string().max(256));
+const zNullableName = zOpt(z.string().max(256).nullable());
+
+/** Seconds. One hour is well past any interval a game loop can use. */
+const MAX_SECS = 3600;
+/** Metres per second, and the ceiling for anything else measured in units/sec. */
+const MAX_SPEED = 10000;
+
 const zCharacterControllerProps = z.object({
-  speed: z.number().optional(),
-  jumpHeight: z.number().optional(),
-  gravityScale: z.number().optional(),
-  canDoubleJump: z.boolean().optional(),
+  speed: zNum(0, MAX_SPEED),
+  jumpHeight: zNum(0, MAX_SPEED),
+  gravityScale: zNum(-1000, 1000),
+  canDoubleJump: zOpt(z.boolean()),
 }).passthrough();
 
 const zHealthProps = z.object({
-  maxHp: z.number().optional(),
-  currentHp: z.number().optional(),
-  invincibilitySecs: z.number().optional(),
-  respawnOnDeath: z.boolean().optional(),
-  respawnPoint: zVec3.optional(),
-  despawnOnDeath: z.boolean().optional(),
+  maxHp: zNum(0),
+  currentHp: zNum(0),
+  invincibilitySecs: zNum(0, MAX_SECS),
+  respawnOnDeath: zOpt(z.boolean()),
+  respawnPoint: zOpt(zVec3),
+  despawnOnDeath: zOpt(z.boolean()),
 }).passthrough();
 
 const zCollectibleProps = z.object({
-  value: z.number().optional(),
-  destroyOnCollect: z.boolean().optional(),
-  pickupSoundAsset: z.string().nullable().optional(),
-  rotateSpeed: z.number().optional(),
+  // `CollectibleData::value` is a u32, so a negative or fractional score is a
+  // hard serde reject that drops the whole command.
+  value: zInt(0),
+  destroyOnCollect: zOpt(z.boolean()),
+  pickupSoundAsset: zNullableName,
+  // Degrees per second; the sign picks the direction.
+  rotateSpeed: zNum(-36000, 36000),
 }).passthrough();
 
 const zDamageZoneProps = z.object({
-  damagePerSecond: z.number().optional(),
-  oneShot: z.boolean().optional(),
+  damagePerSecond: zNum(0),
+  oneShot: zOpt(z.boolean()),
 }).passthrough();
 
 const zCheckpointProps = z.object({
-  autoSave: z.boolean().optional(),
+  autoSave: zOpt(z.boolean()),
 }).passthrough();
 
 const zTeleporterProps = z.object({
-  targetPosition: zVec3.optional(),
-  cooldownSecs: z.number().optional(),
+  targetPosition: zOpt(zVec3),
+  cooldownSecs: zNum(0, MAX_SECS),
 }).passthrough();
 
 const zMovingPlatformProps = z.object({
-  speed: z.number().optional(),
-  waypoints: z.array(zVec3).optional(),
-  pauseDuration: z.number().optional(),
-  loopMode: z.enum(['pingPong', 'loop', 'once']).optional(),
+  speed: zNum(0, MAX_SPEED),
+  waypoints: zOpt(z.array(zVec3)),
+  pauseDuration: zNum(0, MAX_SECS),
+  loopMode: zOpt(z.enum(['pingPong', 'loop', 'once'])),
 }).passthrough();
 
 const zTriggerZoneProps = z.object({
-  eventName: z.string().optional(),
-  oneShot: z.boolean().optional(),
+  eventName: zName,
+  oneShot: zOpt(z.boolean()),
 }).passthrough();
 
 const zSpawnerProps = z.object({
-  entityType: z.string().optional(),
-  intervalSecs: z.number().optional(),
-  maxCount: z.number().optional(),
-  spawnOffset: zVec3.optional(),
-  onTrigger: z.string().nullable().optional(),
+  entityType: zName,
+  // A zero interval spawns every frame until max_count, which reads as a hang.
+  intervalSecs: zNum(0.01, MAX_SECS),
+  // `SpawnerData::max_count` is a u32.
+  maxCount: zInt(0, 10000),
+  spawnOffset: zOpt(zVec3),
+  onTrigger: zNullableName,
 }).passthrough();
 
 const zFollowerProps = z.object({
-  targetEntityId: z.string().nullable().optional(),
-  speed: z.number().optional(),
-  stopDistance: z.number().optional(),
-  lookAtTarget: z.boolean().optional(),
+  targetEntityId: zNullableName,
+  speed: zNum(0, MAX_SPEED),
+  stopDistance: zNum(0),
+  lookAtTarget: zOpt(z.boolean()),
 }).passthrough();
 
 const zProjectileProps = z.object({
-  speed: z.number().optional(),
-  damage: z.number().optional(),
-  lifetimeSecs: z.number().optional(),
-  gravity: z.boolean().optional(),
-  destroyOnHit: z.boolean().optional(),
+  speed: zNum(0, MAX_SPEED),
+  damage: zNum(0),
+  lifetimeSecs: zNum(0, MAX_SECS),
+  gravity: zOpt(z.boolean()),
+  destroyOnHit: zOpt(z.boolean()),
 }).passthrough();
 
 const zWinConditionProps = z.object({
-  conditionType: z.string().optional(),
-  targetScore: z.number().nullable().optional(),
-  targetEntityId: z.string().nullable().optional(),
+  conditionType: zName,
+  // `WinConditionData::target_score` is an Option<u32>.
+  targetScore: zInt(0),
+  targetEntityId: zNullableName,
 }).passthrough();
 
 // ===== Builder Functions =====
@@ -194,7 +297,7 @@ export function buildCompoundResult(
  * Build full MaterialData from partial input with defaults.
  */
 export function buildMaterialFromPartial(partialMat: Record<string, unknown>): MaterialData {
-  const mat = zPartialMaterial.parse(partialMat);
+  const mat = parsePartial(zPartialMaterial, partialMat);
   return {
     baseColor: mat.baseColor ?? [1, 1, 1, 1],
     metallic: mat.metallic ?? 0,
@@ -228,7 +331,7 @@ export function buildMaterialFromPartial(partialMat: Record<string, unknown>): M
  * Build full LightData from partial input with defaults.
  */
 export function buildLightFromPartial(partialLight: Record<string, unknown>): LightData {
-  const light = zPartialLight.parse(partialLight);
+  const light = parsePartial(zPartialLight, partialLight);
   return {
     lightType: light.lightType ?? 'point',
     color: light.color ?? [1, 1, 1],
@@ -247,7 +350,7 @@ export function buildLightFromPartial(partialLight: Record<string, unknown>): Li
  * Build full PhysicsData from partial input with defaults.
  */
 export function buildPhysicsFromPartial(partialPhysics: Record<string, unknown>): PhysicsData {
-  const phys = zPartialPhysics.parse(partialPhysics);
+  const phys = parsePartial(zPartialPhysics, partialPhysics);
   return {
     bodyType: phys.bodyType ?? 'dynamic',
     colliderShape: phys.colliderShape ?? 'auto',
@@ -274,7 +377,7 @@ export function buildGameComponentFromInput(
 ): import('@/stores/editorStore').GameComponentData | null {
   switch (type) {
     case 'character_controller': {
-      const p = zCharacterControllerProps.parse(props);
+      const p = parsePartial(zCharacterControllerProps, props);
       return {
         type: 'characterController',
         characterController: {
@@ -286,7 +389,7 @@ export function buildGameComponentFromInput(
       };
     }
     case 'health': {
-      const p = zHealthProps.parse(props);
+      const p = parsePartial(zHealthProps, props);
       return {
         type: 'health',
         health: {
@@ -300,7 +403,7 @@ export function buildGameComponentFromInput(
       };
     }
     case 'collectible': {
-      const p = zCollectibleProps.parse(props);
+      const p = parsePartial(zCollectibleProps, props);
       return {
         type: 'collectible',
         collectible: {
@@ -312,7 +415,7 @@ export function buildGameComponentFromInput(
       };
     }
     case 'damage_zone': {
-      const p = zDamageZoneProps.parse(props);
+      const p = parsePartial(zDamageZoneProps, props);
       return {
         type: 'damageZone',
         damageZone: {
@@ -322,7 +425,7 @@ export function buildGameComponentFromInput(
       };
     }
     case 'checkpoint': {
-      const p = zCheckpointProps.parse(props);
+      const p = parsePartial(zCheckpointProps, props);
       return {
         type: 'checkpoint',
         checkpoint: {
@@ -331,7 +434,7 @@ export function buildGameComponentFromInput(
       };
     }
     case 'teleporter': {
-      const p = zTeleporterProps.parse(props);
+      const p = parsePartial(zTeleporterProps, props);
       return {
         type: 'teleporter',
         teleporter: {
@@ -341,7 +444,7 @@ export function buildGameComponentFromInput(
       };
     }
     case 'moving_platform': {
-      const p = zMovingPlatformProps.parse(props);
+      const p = parsePartial(zMovingPlatformProps, props);
       return {
         type: 'movingPlatform',
         movingPlatform: {
@@ -353,7 +456,7 @@ export function buildGameComponentFromInput(
       };
     }
     case 'trigger_zone': {
-      const p = zTriggerZoneProps.parse(props);
+      const p = parsePartial(zTriggerZoneProps, props);
       return {
         type: 'triggerZone',
         triggerZone: {
@@ -363,7 +466,7 @@ export function buildGameComponentFromInput(
       };
     }
     case 'spawner': {
-      const p = zSpawnerProps.parse(props);
+      const p = parsePartial(zSpawnerProps, props);
       return {
         type: 'spawner',
         spawner: {
@@ -376,7 +479,7 @@ export function buildGameComponentFromInput(
       };
     }
     case 'follower': {
-      const p = zFollowerProps.parse(props);
+      const p = parsePartial(zFollowerProps, props);
       return {
         type: 'follower',
         follower: {
@@ -388,7 +491,7 @@ export function buildGameComponentFromInput(
       };
     }
     case 'projectile': {
-      const p = zProjectileProps.parse(props);
+      const p = parsePartial(zProjectileProps, props);
       return {
         type: 'projectile',
         projectile: {
@@ -401,7 +504,7 @@ export function buildGameComponentFromInput(
       };
     }
     case 'win_condition': {
-      const p = zWinConditionProps.parse(props);
+      const p = parsePartial(zWinConditionProps, props);
       return {
         type: 'winCondition',
         winCondition: {
