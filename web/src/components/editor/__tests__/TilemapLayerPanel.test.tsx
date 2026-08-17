@@ -170,7 +170,13 @@ describe('TilemapLayerPanel', () => {
   it('shows collision toggle with "Collision enabled" title for collision layer', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapLayerPanel />);
-    expect(screen.getByTitle('Collision enabled')).toBeInTheDocument();
+    const toggle = screen.getByTitle('Collision enabled');
+    expect(toggle).toBeInTheDocument();
+    // A bare <button> inside a form defaults to type="submit". This panel has no
+    // form today, so the default is harmless RIGHT NOW and would become a page
+    // reload the moment one wraps it — the kind of regression that reproduces
+    // only in the browser and never in this suite.
+    expect(toggle).toHaveAttribute('type', 'button');
   });
 
   it('shows collision toggle with "Collision disabled" title for non-collision layer', () => {

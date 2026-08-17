@@ -321,6 +321,31 @@ describe('SkeletonInspector', () => {
     expect(screen.getByText(/Bend: positive/)).toBeInTheDocument();
   });
 
+  it('reads a NaN bend direction as positive, the way the builder sends it', () => {
+    // `undefined` alone does not pin this: `undefined < 0` is false, so the
+    // `Number.isFinite` guard can be deleted outright and the missing-field test
+    // above stays green. NaN is the input that needs it — `NaN < 0` is false too,
+    // but `typeof NaN === 'number'`, so without the guard the intent is untested
+    // either way. `wireIkConstraint` replaces a non-finite bend with +1, and the
+    // panel has to say the same thing the payload does.
+    setupStore({
+      skeleton: {
+        ...baseSkeleton,
+        ikConstraints: [
+          {
+            name: 'arm_ik',
+            boneChain: ['upper_arm', 'forearm'],
+            targetEntityId: 'entity-target',
+            bendDirection: Number.NaN,
+            mix: 1,
+          } as unknown as (typeof baseSkeleton)['ikConstraints'][number],
+        ],
+      },
+    });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText(/Bend: positive/)).toBeInTheDocument();
+  });
+
   it('treats entity id 0 as a target rather than as no target', () => {
     // A truthiness test would call this inactive. The engine field is a `String`
     // and the builder stringifies a numeric id, so 0 is a real entity.
@@ -340,7 +365,128 @@ describe('SkeletonInspector', () => {
     });
     render(<SkeletonInspector entityId="entity-1" />);
     expect(screen.queryByText('(inactive)')).not.toBeInTheDocument();
-    expect(screen.getByText(/Target: 0/)).toBeInTheDocument();
+    // Anchored: `/Target: 0/` also matches `Target: 0abc`, and a stringify bug
+    // that appended anything would sail past it.
+    expect(screen.getByText(/^Target: 0$/)).toBeInTheDocument();
+  });
+
+  it('renders a constraint whose bone chain is absent instead of throwing', () => {
+    // `import_skeleton_json` checks an `ikConstraints` entry only as far as "is a
+    // non-array object" and writes it straight in, so `boneChain` can be missing.
+    // `.join` on it threw a TypeError out of render and blanked the whole panel:
+    // the user imports a rig and the inspector disappears until a reload.
+    setupStore({
+      skeleton: {
+        ...baseSkeleton,
+        ikConstraints: [
+          { name: 'arm_ik' } as unknown as (typeof baseSkeleton)['ikConstraints'][number],
+        ],
+      },
+    });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('arm_ik')).toBeInTheDocument();
+    expect(screen.getByText(/Bones: none/)).toBeInTheDocument();
+  });
+
+  it('drops a chain entry the builder drops, rather than rendering a gap', () => {
+    // A `null` is what an array hole becomes on the way through JSON. The builder
+    // drops it; printing it rendered "upper_arm →  → forearm", an empty segment
+    // that reads as a bone whose name failed to load rather than as a dropped one.
+    setupStore({
+      skeleton: {
+        ...baseSkeleton,
+        ikConstraints: [
+          {
+            name: 'arm_ik',
+            boneChain: ['upper_arm', null, 'forearm'],
+            targetEntityId: 'entity-target',
+            bendDirection: 1,
+            mix: 1,
+          } as unknown as (typeof baseSkeleton)['ikConstraints'][number],
+        ],
+      },
+    });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('Bones: upper_arm → forearm')).toBeInTheDocument();
+  });
+
+  it('clamps the displayed mix the way the builder clamps the sent one', () => {
+    // The panel printed 150% for a value the engine receives as 100%.
+    setupStore({
+      skeleton: {
+        ...baseSkeleton,
+        ikConstraints: [
+          {
+            name: 'arm_ik',
+            boneChain: ['upper_arm', 'forearm'],
+            targetEntityId: 'entity-target',
+            bendDirection: 1,
+            mix: 1.5,
+          } as unknown as (typeof baseSkeleton)['ikConstraints'][number],
+        ],
+      },
+    });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('Mix: 100%')).toBeInTheDocument();
+  });
+
+  it('does not render Mix: NaN% for a mix the store never carried', () => {
+    // `undefined * 100` is `NaN`, and `.toFixed(0)` renders it verbatim — a raw
+    // JS artifact in product copy, describing a value the engine never saw.
+    setupStore({
+      skeleton: {
+        ...baseSkeleton,
+        ikConstraints: [
+          {
+            name: 'arm_ik',
+            boneChain: ['upper_arm', 'forearm'],
+            targetEntityId: 'entity-target',
+            bendDirection: 1,
+          } as unknown as (typeof baseSkeleton)['ikConstraints'][number],
+        ],
+      },
+    });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+    // The builder's default for an unusable mix is full IK, not zero.
+    expect(screen.getByText('Mix: 100%')).toBeInTheDocument();
+  });
+
+  it('reserves the flag gutter on every row so the text column stays flush', () => {
+    // `box-sizing: border-box` means a border on only the flagged row insets its
+    // text by 2px against every sibling — a ragged edge on the one row that
+    // reports a problem. Both branches carry the width; only the colour differs.
+    setupStore({
+      skeleton: {
+        ...baseSkeleton,
+        ikConstraints: [
+          {
+            name: 'live_ik',
+            boneChain: ['upper_arm', 'forearm'],
+            targetEntityId: 'entity-target',
+            bendDirection: 1,
+            mix: 1,
+          },
+          {
+            name: 'dead_ik',
+            boneChain: ['upper_arm', 'forearm'],
+            targetEntityId: '',
+            bendDirection: 1,
+            mix: 1,
+          },
+        ],
+      },
+    });
+    render(<SkeletonInspector entityId="entity-1" />);
+    const rowOf = (name: string) => screen.getByText(name).parentElement as HTMLElement;
+    for (const [name, colour] of [
+      ['live_ik', 'border-transparent'],
+      ['dead_ik', 'border-amber-400'],
+    ] as const) {
+      const row = rowOf(name);
+      expect(row.className, name).toContain('border-l-2');
+      expect(row.className, name).toContain(colour);
+    }
   });
 
   it('shows selected bone properties when a bone is selected', () => {

@@ -326,7 +326,11 @@ describe('ik constraints', () => {
       expect(built.ikConstraints[0].boneChain, label).toEqual([]);
       // The rest of the rig still arrives, which is the whole point of bounding.
       expect(built.bones, label).toHaveLength(1);
-      expect(warnings.some((w) => w.includes('not an array')), label).toBe(true);
+      // Exactly one: the short-chain warning is suppressed on this path, because a
+      // second sentence counting the bones of a list that was never read describes
+      // a consequence rather than a second cause.
+      expect(warnings, label).toHaveLength(1);
+      expect(warnings[0], label).toContain('not an array');
     }
   });
 
@@ -340,7 +344,8 @@ describe('ik constraints', () => {
     // A spread accepts a string happily and yields ['a', 'b', 'c'] — three bones
     // that name nothing, with no warning, which the solver then chains together.
     expect(ikConstraints[0].boneChain).toEqual([]);
-    expect(warnings.some((w) => w.includes('not an array'))).toBe(true);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('not an array');
   });
 
   it('leaves a chain that is exactly at the engine bound alone', () => {
@@ -357,7 +362,11 @@ describe('ik constraints', () => {
 
     // The boundary itself, not a value comfortably past it: an off-by-one in the
     // comparison drops a legal bone and is invisible at MAX + 5.
+    // Length alone would pass for a window that dropped the first bone and kept a
+    // phantom at the end, so both ends are pinned by identity.
     expect(ikConstraints[0].boneChain).toHaveLength(MAX_IK_BONE_CHAIN_2D);
+    expect(ikConstraints[0].boneChain.at(0)).toBe('b0');
+    expect(ikConstraints[0].boneChain.at(-1)).toBe(`b${MAX_IK_BONE_CHAIN_2D - 1}`);
     expect(warnings).toEqual([]);
   });
 
@@ -374,8 +383,13 @@ describe('ik constraints', () => {
     );
 
     expect(ikConstraints[0].boneChain).toHaveLength(MAX_IK_BONE_CHAIN_2D);
+    expect(ikConstraints[0].boneChain.at(0)).toBe('b0');
     expect(ikConstraints[0].boneChain.at(-1)).toBe(`b${MAX_IK_BONE_CHAIN_2D - 1}`);
     expect(warnings).toHaveLength(1);
+    // The dropped count is the number the author has to act on, and it is the one
+    // an off-by-one gets wrong while the length assertions above stay green.
+    expect(warnings[0]).toContain('arm');
+    expect(warnings[0]).toContain('the last 1 were dropped');
   });
 });
 
@@ -386,7 +400,7 @@ describe('mesh vertex weights', () => {
     // passes a bare `JSON.parse` result and the declared types do not constrain it.
     const source = {
       skins: {
-        default: {
+        cape_variant: {
           attachments: {
             cloak: { type: 'mesh', textureId: 'tex', vertices: [[0, 0]], weights },
           },
@@ -395,7 +409,7 @@ describe('mesh vertex weights', () => {
     } as unknown as SkeletonSource2d;
 
     const { skins } = buildWireSkeletonData2d(source, warnings);
-    const cloak = skins.default.attachments.cloak;
+    const cloak = skins.cape_variant.attachments.cloak;
     return cloak.type === 'mesh' ? cloak.weights : [];
   }
 
@@ -413,7 +427,8 @@ describe('mesh vertex weights', () => {
     // length would slide 0.3 onto `hip`'s predecessor and deform the mesh wrongly —
     // a quieter failure than the reject this is avoiding.
     expect(weights).toEqual([{ bones: ['spine', 'hip'], weights: [0.5, 0.3] }]);
-    expect(warnings.some((w) => w.includes('bones[1]'))).toBe(true);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('bones[1]');
   });
 
   it('drops a weights hole, which JSON.stringify would otherwise send as null', () => {
@@ -424,7 +439,8 @@ describe('mesh vertex weights', () => {
     expect(meshWith([{ bones: holed, weights: [0.4, 0.6] }], warnings)).toEqual([
       { bones: ['hip'], weights: [0.6] },
     ]);
-    expect(warnings.some((w) => w.includes('bones[0]'))).toBe(true);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('bones[0]');
   });
 
   it('leaves a vertex unweighted when its bone list is not an array', () => {
@@ -432,7 +448,81 @@ describe('mesh vertex weights', () => {
     expect(meshWith([{ bones: 7, weights: [1] }], warnings)).toEqual([
       { bones: [], weights: [] },
     ]);
-    expect(warnings.some((w) => w.includes('not an array'))).toBe(true);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('the bone list for vertex 0');
+  });
+
+  it('reports a hole in the weights array instead of skipping it in silence', () => {
+    // The hole is the input under test: `.map` would skip its callback here and
+    // leave the gap in place, and the vertex arrives at the engine unweighted
+    // either way. `total_weight <= 1e-6` then drops it to its bind position — the
+    // rig LOADS and one vertex quietly stops deforming, which is exactly the kind
+    // of failure that needs a sentence.
+    const holed = [{ bones: ['spine'], weights: [1] }] as unknown[];
+    holed[2] = { bones: ['hip'], weights: [1] };
+
+    const warnings: string[] = [];
+    expect(meshWith(holed, warnings)).toEqual([
+      { bones: ['spine'], weights: [1] },
+      { bones: [], weights: [] },
+      { bones: ['hip'], weights: [1] },
+    ]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('vertex 1');
+    expect(warnings[0]).toContain('bind position');
+  });
+
+  it('reports a weight entry that is not an object at all', () => {
+    const warnings: string[] = [];
+    expect(meshWith([7], warnings)).toEqual([{ bones: [], weights: [] }]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('not an object');
+    expect(warnings[0]).toContain('bind position');
+  });
+
+  it('treats an array as "not an object", since indexed reads would find no bones', () => {
+    // `typeof [] === 'object'`, so the guard has to exclude arrays explicitly or
+    // this falls through to `record.bones === undefined` and reports nothing.
+    const warnings: string[] = [];
+    expect(meshWith([['spine']], warnings)).toEqual([{ bones: [], weights: [] }]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('not an object');
+  });
+
+  it('reports a weights field that is not an array, which zeroes every influence', () => {
+    // Not a dropped field: `weights` is read index-for-index against `bones`, so a
+    // non-array makes every lookup `undefined` and every influence 0 — the same
+    // "stays at bind position" outcome by a different route. The bones still go,
+    // because the engine reads them and their absence would be a second defect.
+    const warnings: string[] = [];
+    expect(meshWith([{ bones: ['spine', 'hip'], weights: 7 }], warnings)).toEqual([
+      { bones: ['spine', 'hip'], weights: [0, 0] },
+    ]);
+    expect(warnings.some((w) => w.includes('the weight list for vertex 0'))).toBe(true);
+    expect(warnings.some((w) => w.includes('sent as 0'))).toBe(true);
+  });
+
+  it('reports each influence a short weights array leaves without a number', () => {
+    const warnings: string[] = [];
+    expect(meshWith([{ bones: ['spine', 'hip'], weights: [0.6] }], warnings)).toEqual([
+      { bones: ['spine', 'hip'], weights: [0.6, 0] },
+    ]);
+
+    expect(warnings).toHaveLength(1);
+    // Naming the BONE, not just the index: an author reading this has a bone list
+    // in front of them, not an offset.
+    expect(warnings[0]).toContain('"hip"');
+    expect(warnings[0]).toContain('undefined');
+  });
+
+  it('quotes a weight that is a string, so the sentence is not self-refuting', () => {
+    const warnings: string[] = [];
+    expect(meshWith([{ bones: ['spine'], weights: ['0.5'] }], warnings)).toEqual([
+      { bones: ['spine'], weights: [0] },
+    ]);
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('"0.5"');
   });
 
   it('names the skin and the slot it warned about', () => {
@@ -441,7 +531,10 @@ describe('mesh vertex weights', () => {
     const warnings: string[] = [];
     meshWith([{ bones: [null], weights: [1] }], warnings);
 
-    expect(warnings[0]).toContain('default');
+    // A distinctive skin name, not `default`: `default` is also the fallback this
+    // builder substitutes for a missing `activeSkin`, so a message that named the
+    // wrong skin entirely would still contain the word.
+    expect(warnings[0]).toContain('cape_variant');
     expect(warnings[0]).toContain('cloak');
   });
 });
@@ -463,6 +556,87 @@ describe('parseSkeletonWire2d', () => {
     });
 
     expect(parsed?.ikConstraints[0].boneChain).toEqual(['a', 'b']);
+  });
+
+  it('returns null for anything that is not a skeleton object', () => {
+    // `AutoRiggingPanel` shows a failure message on null, so this is the branch
+    // that decides whether a bad generation reports or throws.
+    for (const given of [null, undefined, 7, 'skeleton', true, [], [{ bones: [] }]]) {
+      expect(parseSkeletonWire2d(given), String(given)).toBeNull();
+    }
+  });
+
+  it('substitutes a name the store type says is a string but the wire made a number', () => {
+    // The parser writes straight into the store, whose declared types every
+    // downstream reader trusts. A number surviving here is a lie to all of them —
+    // and `??` does not catch it, because a number is neither null nor undefined.
+    const parsed = parseSkeletonWire2d({
+      bones: [{ name: 42, parentBone: 7 }],
+      slots: [{ name: 42, boneName: 7, spritePart: false, attachment: 9 }],
+      skins: { hero: { name: 42, attachments: {} } },
+      ikConstraints: [{ name: 42, boneChain: ['a', 'b'], targetEntityId: 7 }],
+    });
+
+    expect(parsed?.bones[0].name).toBe('bone_0');
+    expect(parsed?.bones[0].parentBone).toBeNull();
+    expect(parsed?.slots[0]).toMatchObject({
+      name: 'slot_0',
+      boneName: '',
+      spritePart: '',
+      attachment: null,
+    });
+    expect(parsed?.skins.hero.name).toBe('hero');
+    expect(parsed?.ikConstraints[0].name).toBe('ik_0');
+    // A number is the one non-string the engine field can be built from, so it
+    // converts rather than falling back.
+    expect(parsed?.ikConstraints[0].targetEntityId).toBe('7');
+  });
+});
+
+describe('String fields survive a source the declared types do not constrain', () => {
+  it('does not send a number into a field the engine reads as a String', () => {
+    // `import_skeleton_json` hands the builder a bare `JSON.parse` result, and the
+    // engine reads the whole rig through one `from_value::<SkeletonData2d>` — so a
+    // single number in any of these is the same whole-rig `Invalid skeletonData`
+    // reject the bone chain used to be. `?? fallback` never fires for a number.
+    const built = buildWireSkeletonData2d({
+      bones: [{ name: 42, parentBone: 7 }],
+      slots: [{ name: 42, boneName: 7, spritePart: false, attachment: 9 }],
+      skins: { hero: { name: 42, attachments: { body: { type: 'sprite', textureId: 3 } } } },
+      activeSkin: 5,
+      ikConstraints: [{ name: 42, boneChain: ['a', 'b'] }],
+    } as unknown as SkeletonSource2d);
+
+    expect(built.bones[0].name).toBe('bone_0');
+    expect(built.bones[0].parentBone).toBeNull();
+    expect(built.slots[0].name).toBe('slot_0');
+    expect(built.slots[0].boneName).toBe('');
+    expect(built.slots[0].spritePart).toBe('');
+    // `attachment` is the one `Option<String>` here, so `null` is legal where the
+    // empty string is used above — but a number is not, and `?? null` let it past.
+    expect(built.slots[0].attachment).toBeNull();
+    expect(built.skins.hero.name).toBe('hero');
+    expect(built.ikConstraints[0].name).toBe('ik_0');
+    expect(built.activeSkin).toBe('default');
+
+    const body = built.skins.hero.attachments.body;
+    expect(body.type === 'sprite' && body.textureId).toBe('');
+
+    // Nothing anywhere in the payload may still be a number where the engine
+    // declares a String — a per-field assertion above misses a field nobody
+    // thought to list.
+    for (const value of [
+      built.activeSkin,
+      built.bones[0].name,
+      built.slots[0].name,
+      built.slots[0].boneName,
+      built.slots[0].spritePart,
+      built.skins.hero.name,
+      built.ikConstraints[0].name,
+      built.ikConstraints[0].targetEntityId,
+    ]) {
+      expect(typeof value).toBe('string');
+    }
   });
 });
 
@@ -546,9 +720,34 @@ describe('warnings report every bound the engine would have rejected', () => {
     expect(ikConstraints[0].bendDirection).toBe(1);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('not a finite number');
+    // Naming the field is the whole point of splitting these branches: without
+    // this, the bend and mix sentences are interchangeable and swapping the two
+    // string literals leaves every assertion here green.
+    expect(warnings[0]).toContain('bend direction');
+    expect(warnings[0]).not.toContain('blend weight');
+    // The quotes ARE the signal. `String("-1")` renders `-1`, so a message built
+    // that way reads "bend direction -1 is not a finite number" — self-evidently
+    // false, and it sends the reader hunting for a bug in the validator.
+    expect(warnings[0]).toContain('"-1"');
+    expect(warnings[0]).toContain('bends the opposite way');
     // The magnitude sentence would send the reader to look at a value whose
     // magnitude was never the problem.
     expect(warnings[0]).not.toContain('ignores the magnitude');
+  });
+
+  it('does not blame quoting for a bend direction that was never quoted', () => {
+    // The note above is about a string that LOOKS like the number it is not.
+    // Appending it to a NaN failure describes a quoting problem the file does
+    // not have.
+    const warnings: string[] = [];
+    buildWireSkeletonData2d(
+      { ikConstraints: [{ name: 'arm', boneChain: ['x', 'y'], bendDirection: NaN }] },
+      warnings,
+    );
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('not a finite number');
+    expect(warnings[0]).not.toContain('bends the opposite way');
   });
 
   it('blames the type, not the range, for a mix that is not a number', () => {
@@ -564,6 +763,11 @@ describe('warnings report every bound the engine would have rejected', () => {
     expect(ikConstraints[0].mix).toBe(1);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('not a finite number');
+    expect(warnings[0]).toContain('blend weight');
+    expect(warnings[0]).not.toContain('bend direction');
+    // Same reason as the bend case: unquoted, "mix 0.5 is not a finite number"
+    // is a sentence that reads as its own refutation.
+    expect(warnings[0]).toContain('"0.5"');
     expect(warnings[0]).not.toContain('outside');
   });
 
@@ -589,6 +793,16 @@ describe('warnings report every bound the engine would have rejected', () => {
       expect(ikConstraints[0].mix, label).toBe(1);
       expect(warnings, label).toHaveLength(2);
       expect(warnings.every((w) => w.includes('not a finite number')), label).toBe(true);
+      // Two reports about two fields have to be two DIFFERENT sentences. A single
+      // shared message satisfies every assertion above while telling the author
+      // one of the two problems twice.
+      expect(warnings[0], label).not.toBe(warnings[1]);
+      expect(warnings[0], label).toContain('bend direction');
+      expect(warnings[1], label).toContain('blend weight');
+      expect(warnings[1], label).not.toContain('bend direction');
+      // `JSON.stringify` alone would render NaN and Infinity as `null` here,
+      // naming a value the file does not contain.
+      expect(warnings[0], label).toContain(label);
     }
   });
 

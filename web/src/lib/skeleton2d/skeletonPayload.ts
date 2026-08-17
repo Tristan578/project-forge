@@ -193,6 +193,36 @@ function finite(value: unknown, fallback: number): number {
 }
 
 /**
+ * Every plain `String` field on the wire needs this, not a bare `??`.
+ *
+ * `??` only substitutes for `null`/`undefined`, so a slot named `42` passes
+ * straight through into a `String` field and takes the WHOLE rig down with the
+ * same `Invalid skeletonData` reject the bone chain used to. `activeSkin` has
+ * always been written this way; the rest of the module had not caught up.
+ */
+function text(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+/**
+ * `String("0.5")` renders `0.5`, so "blend weight 0.5 is not a finite number"
+ * reads as self-evidently false and sends the reader looking for a bug in the
+ * validator rather than a quoted number in their file. Quotes are the whole
+ * signal in these messages, so they have to survive into the sentence.
+ *
+ * Not `JSON.stringify` alone: it renders `NaN` and `Infinity` as `null` — which
+ * would name a value the file does not contain — and `undefined` as no
+ * characters at all, leaving a sentence with a hole in it.
+ */
+function describeValue(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+  if (typeof value === 'boolean' || value === null || value === undefined) return String(value);
+  if (Array.isArray(value)) return 'an array';
+  return typeof value === 'object' ? 'an object' : typeof value;
+}
+
+/**
  * Read an indexed slot rather than a callback form. A sparse array skips the
  * callback for a hole entirely, so `.map` would preserve the gap positionally and
  * `JSON.stringify` would then write it as `null` — which is not a number and
@@ -210,8 +240,13 @@ function vec(source: readonly number[] | undefined, length: number, fallback: nu
  * Bone names, with the non-array and non-string cases both refused. The store's
  * `boneChain` is a `string[]` and the engine's is a `Vec<String>`; a `null` from a
  * `JSON.parse` result satisfies neither, and it is what an array hole becomes.
+ *
+ * Takes `unknown` rather than the declared type, because every caller reads a
+ * value the declared type says is impossible: `import_skeleton_json` writes a bare
+ * `JSON.parse` result into the store, so the inspector rendering that store is
+ * under the same threat model as the builder. Exported for exactly that reader.
  */
-function boneNameList(source: readonly string[] | undefined): string[] {
+export function boneNameList(source: unknown): string[] {
   if (!Array.isArray(source)) return [];
   const out: string[] = [];
   for (let i = 0; i < source.length; i += 1) {
@@ -239,8 +274,8 @@ function color4(source: readonly number[] | undefined): [number, number, number,
 
 function wireBone(bone: SourceBone2d, index: number): WireBone2d {
   return {
-    name: bone.name ?? `bone_${index}`,
-    parentBone: bone.parentBone ?? null,
+    name: text(bone.name, `bone_${index}`),
+    parentBone: typeof bone.parentBone === 'string' ? bone.parentBone : null,
     localPosition: position3(bone.localPosition),
     localRotation: finite(bone.localRotation, 0),
     localScale: vec2(bone.localScale, 1),
@@ -255,11 +290,13 @@ function wireBlendMode(mode: string | undefined): WireBlendMode2d {
 
 function wireSlot(slot: SourceSlot2d, index: number): WireSlot2d {
   return {
-    name: slot.name ?? `slot_${index}`,
-    boneName: slot.boneName ?? '',
-    spritePart: slot.spritePart ?? '',
+    name: text(slot.name, `slot_${index}`),
+    boneName: text(slot.boneName, ''),
+    spritePart: text(slot.spritePart, ''),
     blendMode: wireBlendMode(slot.blendMode),
-    attachment: slot.attachment ?? null,
+    // `Option<String>`, so `null` is legal here where it is not on the fields
+    // above — but a number is not, and `?? null` let one through.
+    attachment: typeof slot.attachment === 'string' ? slot.attachment : null,
   };
 }
 
@@ -284,18 +321,54 @@ function wireVec2List(source: readonly (readonly number[])[] | undefined): [numb
  * deforms wrongly is harder to notice than one that refuses to load.
  */
 function wireVertexWeights(
-  entry: { bones?: readonly string[]; weights?: readonly number[] } | undefined,
+  // `unknown`, for the same reason `boneNameList` takes it: `import_skeleton_json`
+  // writes a bare `JSON.parse` result, so the declared element type describes what
+  // a well-formed file contains rather than what this function is handed.
+  entry: unknown,
   label: string,
   vertex: number,
   report: (message: string) => void,
 ): WireVertexWeights2d {
-  const source = entry?.bones;
-  if (source !== undefined && !Array.isArray(source)) {
+  // An unweighted vertex is not an error the engine reports: `total_weight <= 1e-6`
+  // drops it to its bind position, so the rig loads and one vertex quietly stops
+  // deforming. Every path that produces one therefore has to say so, including the
+  // two that used to return the empty pair in silence — a hole in the outer
+  // `weights` array (which arrives here as `undefined`) and an entry that is not an
+  // object at all.
+  if (entry === undefined || entry === null) {
     report(
-      `${label}: the bone list for vertex ${vertex} is not an array, so that vertex was left ` +
-        `unweighted.`,
+      `${label}: vertex ${vertex} has no weight entry, so it will stay at its bind position.`,
     );
     return { bones: [], weights: [] };
+  }
+  if (typeof entry !== 'object' || Array.isArray(entry)) {
+    report(
+      `${label}: the weight entry for vertex ${vertex} is ${describeValue(entry)}, not an object, ` +
+        `so that vertex will stay at its bind position.`,
+    );
+    return { bones: [], weights: [] };
+  }
+
+  const record = entry as { bones?: unknown; weights?: unknown };
+
+  const source = record.bones;
+  if (source !== undefined && !Array.isArray(source)) {
+    report(
+      `${label}: the bone list for vertex ${vertex} is ${describeValue(source)}, not an array, so ` +
+        `that vertex was left unweighted.`,
+    );
+    return { bones: [], weights: [] };
+  }
+
+  // `weights` is read index-for-index against `bones`, so a non-array here is not a
+  // dropped field — every influence silently becomes 0, which is the same "stays at
+  // bind position" outcome by a different route.
+  const weightSource = record.weights;
+  if (weightSource !== undefined && !Array.isArray(weightSource)) {
+    report(
+      `${label}: the weight list for vertex ${vertex} is ${describeValue(weightSource)}, not an ` +
+        `array, so every influence on that vertex was sent as 0.`,
+    );
   }
 
   const bones: string[] = [];
@@ -308,8 +381,15 @@ function wireVertexWeights(
       );
       continue;
     }
+    const weight: unknown = Array.isArray(weightSource) ? weightSource[i] : undefined;
+    if (typeof weight !== 'number' || !Number.isFinite(weight)) {
+      report(
+        `${label}: vertex ${vertex} has no usable weight for "${bone}" ` +
+          `(${describeValue(weight)}), so that influence was sent as 0.`,
+      );
+    }
     bones.push(bone);
-    weights.push(finite(entry?.weights?.[i], 0));
+    weights.push(finite(weight, 0));
   }
   return { bones, weights };
 }
@@ -324,7 +404,7 @@ function wireAttachment(
   label: string,
   report: (message: string) => void,
 ): WireAttachment2d | null {
-  const textureId = attachment.textureId ?? '';
+  const textureId = text(attachment.textureId, '');
 
   if (attachment.type === 'sprite') {
     return {
@@ -397,10 +477,10 @@ function wireSkin(
   for (const key of Object.keys(skin.attachments ?? {})) {
     const source = skin.attachments?.[key];
     if (!source) continue;
-    const wired = wireAttachment(source, `Skin "${skin.name ?? name}" attachment "${key}"`, report);
+    const wired = wireAttachment(source, `Skin "${text(skin.name, name)}" attachment "${key}"`, report);
     if (wired) attachments[key] = wired;
   }
-  return { name: skin.name ?? name, attachments };
+  return { name: text(skin.name, name), attachments };
 }
 
 /**
@@ -431,7 +511,7 @@ function wireIkConstraint(
   index: number,
   report: (message: string) => void,
 ): WireIkConstraint2d {
-  const name = constraint.name ?? `ik_${index}`;
+  const name = text(constraint.name, `ik_${index}`);
 
   // `IkConstraint2d::bone_chain` is a `Vec<String>`, so ONE entry that is not a
   // string — a number, a null, or the `undefined` an array hole materializes as —
@@ -445,10 +525,11 @@ function wireIkConstraint(
   // silently expands a string into one bone per character. An indexed read behind
   // the guard handles all three.
   const source = constraint.boneChain;
-  if (source !== undefined && !Array.isArray(source)) {
+  const chainDropped = source !== undefined && !Array.isArray(source);
+  if (chainDropped) {
     report(
-      `IK chain "${name}": the bone list is not an array, so the chain was dropped and the ` +
-        `solver will skip it.`,
+      `IK chain "${name}": the bone list is ${describeValue(source)}, not an array, so the chain ` +
+        `was dropped and the solver will skip it.`,
     );
   }
   const chain: string[] = [];
@@ -473,7 +554,10 @@ function wireIkConstraint(
     );
     chain.length = MAX_IK_BONE_CHAIN_2D;
   }
-  if (chain.length < 2) {
+  // Suppressed when the list was refused outright: that branch has already said the
+  // solver will skip this chain, and a second sentence counting the bones of a list
+  // that was never read describes a consequence rather than a second cause.
+  if (chain.length < 2 && !chainDropped) {
     report(
       `IK chain "${name}": ${chain.length} bone(s) in the chain — the solver needs at least 2 ` +
         `and will skip this chain.`,
@@ -493,14 +577,19 @@ function wireIkConstraint(
   if (bendSource !== undefined) {
     if (!bendUsable) {
       report(
-        `IK chain "${name}": bend direction ${String(bendSource)} is not a finite number, so the ` +
-          `default ${bendDirection} was sent — note that a quoted "-1" bends the opposite way ` +
-          `from the -1 it looks like.`,
+        `IK chain "${name}": bend direction ${describeValue(bendSource)} is not a finite number, ` +
+          `so the default ${bendDirection} was sent.` +
+          // Only a string can look like the number it is not. Appending this to a
+          // `null`/`NaN`/`Infinity` failure points at a quoting problem the file
+          // does not have.
+          (typeof bendSource === 'string'
+            ? ` Note that a quoted "-1" bends the opposite way from the -1 it looks like.`
+            : ''),
       );
     } else if (bendSource !== bendDirection) {
       report(
-        `IK chain "${name}": bend direction ${String(bendSource)} was sent as ${bendDirection} — ` +
-          `the engine reads the sign and ignores the magnitude.`,
+        `IK chain "${name}": bend direction ${describeValue(bendSource)} was sent as ` +
+          `${bendDirection} — the engine reads the sign and ignores the magnitude.`,
       );
     }
   }
@@ -515,12 +604,12 @@ function wireIkConstraint(
   if (mixSource !== undefined) {
     if (!mixUsable) {
       report(
-        `IK chain "${name}": blend weight ${String(mixSource)} is not a finite number, so the ` +
-          `default ${mix} (full IK) was sent.`,
+        `IK chain "${name}": blend weight ${describeValue(mixSource)} is not a finite number, so ` +
+          `the default ${mix} (full IK) was sent.`,
       );
     } else if (mixSource !== mix) {
       report(
-        `IK chain "${name}": blend weight ${String(mixSource)} is outside 0–1 and was ` +
+        `IK chain "${name}": blend weight ${describeValue(mixSource)} is outside 0–1 and was ` +
           `sent as ${mix}.`,
       );
     }
@@ -534,7 +623,7 @@ function wireIkConstraint(
     targetEntityId:
       typeof constraint.targetEntityId === 'number'
         ? String(constraint.targetEntityId)
-        : constraint.targetEntityId ?? '',
+        : text(constraint.targetEntityId, ''),
     bendDirection,
     mix,
   };
@@ -639,8 +728,8 @@ export function parseSkeletonWire2d(source: unknown): StoreSkeletonData2d | null
     // round-trip fidelity for 3D rigs and has no browser-side reader.
     const [x, y] = vec(bone.localPosition, 2, 0);
     bones.push({
-      name: bone.name ?? `bone_${i}`,
-      parentBone: bone.parentBone ?? null,
+      name: text(bone.name, `bone_${i}`),
+      parentBone: typeof bone.parentBone === 'string' ? bone.parentBone : null,
       localPosition: [x, y],
       localRotation: finite(bone.localRotation, 0),
       localScale: vec2(bone.localScale, 1),
@@ -653,11 +742,11 @@ export function parseSkeletonWire2d(source: unknown): StoreSkeletonData2d | null
   for (let i = 0; i < (wire.slots?.length ?? 0); i += 1) {
     const slot = wire.slots?.[i] ?? {};
     slots.push({
-      name: slot.name ?? `slot_${i}`,
-      boneName: slot.boneName ?? '',
-      spritePart: slot.spritePart ?? '',
+      name: text(slot.name, `slot_${i}`),
+      boneName: text(slot.boneName, ''),
+      spritePart: text(slot.spritePart, ''),
       blendMode: wireBlendMode(slot.blendMode),
-      attachment: slot.attachment ?? null,
+      attachment: typeof slot.attachment === 'string' ? slot.attachment : null,
     });
   }
 
@@ -672,14 +761,14 @@ export function parseSkeletonWire2d(source: unknown): StoreSkeletonData2d | null
       const parsed = parseAttachmentWire2d(attachment);
       if (parsed) attachments[slotName] = parsed;
     }
-    skins[key] = { name: skin.name ?? key, attachments };
+    skins[key] = { name: text(skin.name, key), attachments };
   }
 
   const ikConstraints: StoreIkConstraint2d[] = [];
   for (let i = 0; i < (wire.ikConstraints?.length ?? 0); i += 1) {
     const constraint = wire.ikConstraints?.[i] ?? {};
     ikConstraints.push({
-      name: constraint.name ?? `ik_${i}`,
+      name: text(constraint.name, `ik_${i}`),
       // Same guard as the outbound builder, for the same reason: this parses an
       // engine event, but `AutoRiggingPanel` also routes a locally-built wire
       // skeleton through it, so a non-array `boneChain` would throw here where a
@@ -689,7 +778,7 @@ export function parseSkeletonWire2d(source: unknown): StoreSkeletonData2d | null
       targetEntityId:
         typeof constraint.targetEntityId === 'number'
           ? String(constraint.targetEntityId)
-          : constraint.targetEntityId ?? '',
+          : text(constraint.targetEntityId, ''),
       bendDirection: finite(constraint.bendDirection, 1) < 0 ? -1 : 1,
       mix: Math.min(1, Math.max(0, finite(constraint.mix, 1))),
     });
@@ -711,7 +800,7 @@ export function parseSkeletonWire2d(source: unknown): StoreSkeletonData2d | null
  * outbound path rebuilds it from the mesh, and a half-kept copy would drift.
  */
 function parseAttachmentWire2d(attachment: SourceAttachment2d): StoreAttachment2d | null {
-  const textureId = attachment.textureId ?? '';
+  const textureId = text(attachment.textureId, '');
 
   if (attachment.type === 'sprite') {
     return {

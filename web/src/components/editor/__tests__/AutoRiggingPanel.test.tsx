@@ -12,6 +12,22 @@ vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
 }));
 
+// `rigToCommands` is real everywhere except the one test that needs a skeleton
+// the parser refuses — a hand-written command list is the only way to reach that
+// branch, and a blanket mock would stop the other tests from proving anything
+// about the real builder.
+const { commandOverride } = vi.hoisted(() => ({
+  commandOverride: { value: null as { command: string; payload: unknown }[] | null },
+}));
+vi.mock('@/lib/ai/autoRigging', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ai/autoRigging')>();
+  return {
+    ...actual,
+    rigToCommands: (...args: Parameters<typeof actual.rigToCommands>) =>
+      commandOverride.value ?? actual.rigToCommands(...args),
+  };
+});
+
 /** The engine-shaped bones the humanoid template produces, before narrowing. */
 function wireBones(): { name: string; localPosition: number[] }[] {
   const payload = rigToCommands(RIG_TEMPLATES.humanoid(), 'entity-1').find(
@@ -32,6 +48,7 @@ describe('AutoRiggingPanel', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    commandOverride.value = null;
     mockStore(null);
   });
 
@@ -88,6 +105,29 @@ describe('AutoRiggingPanel', () => {
       // the third element is dropped rather than just absent from the fixture.
       expect(wire.find((b) => b.name === 'toe_l')?.localPosition).toEqual([0.1, 0.05, 0.1]);
       expect(stored.bones.find((b) => b.name === 'toe_l')?.localPosition).toEqual([0.1, 0.05]);
+    });
+
+    it('reports a skeleton the parser refuses instead of writing nothing in silence', () => {
+      // `parseSkeletonWire2d` returns null for anything that is not a skeleton
+      // object, and this is the branch that decides whether a bad generation
+      // reports or vanishes. Without it the user clicks Apply Rig, the store is
+      // never written, and the panel says nothing at all.
+      mockStore('entity-1');
+      commandOverride.value = [
+        { command: 'create_skeleton2d', payload: { entityId: 'entity-1', skeletonData: 7 } },
+      ];
+      render(<AutoRiggingPanel />);
+
+      fireEvent.click(screen.getByRole('button', { name: /humanoid/i }));
+      fireEvent.click(screen.getByLabelText('Apply rig to selected entity'));
+
+      expect(setSkeleton2d).not.toHaveBeenCalled();
+      // Named distinctly from the sibling "produced no skeleton to send" message:
+      // the two failures have different causes and a shared sentence would send
+      // the reader to the wrong one.
+      expect(
+        screen.getByText(/the generated skeleton was not in a readable shape/),
+      ).toBeInTheDocument();
     });
 
     it('does nothing when no entity is selected', () => {
