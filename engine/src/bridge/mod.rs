@@ -403,9 +403,11 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, (
                 audio::apply_audio_playback,
                 audio::apply_audio_bus_updates,
-                audio::apply_reverb_zone_updates,
+                // One system for set/toggle/remove — see its doc comment: they
+                // all write the same two components, so as separate systems the
+                // deferred-Commands ordering decided who won.
+                audio::apply_reverb_zone_commands,
             ))
-            .add_systems(Update, audio::apply_reverb_zone_toggles)
             // Audio bus systems (always-active, split to stay under tuple limit)
             .add_systems(Update, (
                 audio::apply_audio_bus_creates,

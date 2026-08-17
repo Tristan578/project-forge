@@ -2192,14 +2192,21 @@ fn execute_undo(
                 }
             }
         }
-        UndoableAction::ReverbZoneChange { entity_id, old_reverb, .. } => {
+        UndoableAction::ReverbZoneChange { entity_id, old_reverb, old_enabled, .. } => {
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
+                    // Restore the marker from what was RECORDED, never
+                    // unconditionally: enabling a zone the user had disabled is
+                    // the PF-1173 bug, and this action also covers removal, so
+                    // the marker genuinely varies.
                     if let Some(ref rz) = old_reverb {
                         commands.entity(entity).insert(rz.clone());
-                        commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
                     } else {
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneData>();
+                    }
+                    if *old_enabled {
+                        commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
+                    } else {
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneEnabled>();
                     }
                     break;
@@ -2525,14 +2532,19 @@ fn execute_redo(
                 }
             }
         }
-        UndoableAction::ReverbZoneChange { entity_id, new_reverb, .. } => {
+        UndoableAction::ReverbZoneChange { entity_id, new_reverb, new_enabled, .. } => {
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
+                    // Mirror of the undo arm: the marker comes from the recorded
+                    // post-state, not from "data is present".
                     if let Some(ref rz) = new_reverb {
                         commands.entity(entity).insert(rz.clone());
-                        commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
                     } else {
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneData>();
+                    }
+                    if *new_enabled {
+                        commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
+                    } else {
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneEnabled>();
                     }
                     break;
@@ -4550,5 +4562,200 @@ mod bridge_registration_pin_tests {
             "TerrainChangeEvents is never initialised; `collect_terrain_changes` panics on \
              the first frame it runs",
         );
+    }
+}
+
+#[cfg(test)]
+mod reverb_zone_history_tests {
+    //! Undo/redo of a reverb zone must restore the RECORDED enablement, not
+    //! infer it from "data is present".
+    //!
+    //! Two distinct failures motivate these: the PF-1173 class, where the arms
+    //! inserted `ReverbZoneEnabled` unconditionally and so switched a zone on
+    //! that the user had deliberately turned off; and reverb removal, which
+    //! PF-1182 makes undoable for the first time — a data-only restore would
+    //! bring the zone back invisibly disabled, and because
+    //! `ReverbZoneInspector` gates its editing controls on the enabled flag, the
+    //! user would be looking at "Add Reverb Zone" with a configured zone sitting
+    //! underneath it.
+
+    use super::{apply_redo_requests, apply_undo_requests, HistoryStack, UndoableAction};
+    use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
+    use crate::core::history::{queue_redo_from_bridge, queue_undo_from_bridge};
+    use crate::core::reverb_zone::{ReverbZoneData, ReverbZoneEnabled};
+    use bevy::prelude::*;
+
+    /// A zone distinguishable from `ReverbZoneData::default()` in every field a
+    /// test reads, so "restored the recorded data" cannot pass by accident.
+    fn cave() -> ReverbZoneData {
+        ReverbZoneData {
+            preset: "cave".to_string(),
+            wet_mix: 0.9,
+            ..Default::default()
+        }
+    }
+
+    /// World carrying exactly the resources `apply_undo_requests` /
+    /// `apply_redo_requests` read, plus one entity with the components their
+    /// primary query requires.
+    fn world_with(data: Option<ReverbZoneData>, enabled: bool) -> (World, Entity) {
+        let mut world = World::new();
+        world.insert_resource(HistoryStack::default());
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+
+        let mut entity = world.spawn((
+            EntityId("zone-1".to_string()),
+            EntityName("Zone".to_string()),
+            EntityVisible(true),
+            Transform::default(),
+        ));
+        if let Some(d) = data {
+            entity.insert(d);
+        }
+        if enabled {
+            entity.insert(ReverbZoneEnabled);
+        }
+        let id = entity.id();
+        (world, id)
+    }
+
+    /// Run one system once through a Schedule, which also flushes the deferred
+    /// `Commands` the undo arms queue — without the flush every assertion below
+    /// would read the pre-undo state and pass vacuously.
+    fn run_once(world: &mut World, system: fn(Commands, ResMut<HistoryStack>, Query<(Entity, &EntityId, &mut Transform, &mut EntityName, &mut EntityVisible)>, Query<(&EntityId, &mut crate::core::material::MaterialData)>, Query<(&EntityId, &mut crate::core::lighting::LightData)>, Query<(&EntityId, &mut crate::core::physics::PhysicsData)>, Query<(Entity, &EntityId, Option<&crate::core::scripting::ScriptData>)>, Query<(Entity, &EntityId, Option<&crate::core::audio::AudioData>)>, Query<(Entity, &EntityId, Option<&crate::core::particles::ParticleData>)>, ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>)) {
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system);
+        schedule.run(world);
+    }
+
+    fn undo(world: &mut World) {
+        queue_undo_from_bridge();
+        run_once(world, apply_undo_requests);
+    }
+
+    fn redo(world: &mut World) {
+        queue_redo_from_bridge();
+        run_once(world, apply_redo_requests);
+    }
+
+    fn state(world: &World, entity: Entity) -> (Option<ReverbZoneData>, bool) {
+        (
+            world.get::<ReverbZoneData>(entity).cloned(),
+            world.get::<ReverbZoneEnabled>(entity).is_some(),
+        )
+    }
+
+    /// A property edit on a DISABLED zone: undoing it must not start the reverb.
+    #[test]
+    fn undoing_a_property_edit_leaves_a_disabled_zone_disabled() {
+        let edited = ReverbZoneData { wet_mix: 0.2, ..cave() };
+        let (mut world, entity) = world_with(Some(edited), false);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: Some(ReverbZoneData { wet_mix: 0.2, ..cave() }),
+            old_enabled: false,
+            new_enabled: false,
+        });
+
+        undo(&mut world);
+
+        assert_eq!(state(&world, entity), (Some(cave()), false));
+    }
+
+    /// The redo mirror — the two arms are separate code and each has to be right.
+    #[test]
+    fn redoing_a_property_edit_leaves_a_disabled_zone_disabled() {
+        let (mut world, entity) = world_with(Some(cave()), false);
+        let edited = ReverbZoneData { wet_mix: 0.2, ..cave() };
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: Some(edited.clone()),
+            old_enabled: false,
+            new_enabled: false,
+        });
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert_eq!(state(&world, entity), (Some(edited), false));
+    }
+
+    /// The opposite direction: "don't touch the marker" must not decay into
+    /// "lose the reverb" for a zone that was enabled all along.
+    #[test]
+    fn undo_and_redo_preserve_an_enabled_zone() {
+        let edited = ReverbZoneData { wet_mix: 0.2, ..cave() };
+        let (mut world, entity) = world_with(Some(edited.clone()), true);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: Some(edited.clone()),
+            old_enabled: true,
+            new_enabled: true,
+        });
+
+        undo(&mut world);
+        assert_eq!(state(&world, entity), (Some(cave()), true));
+
+        redo(&mut world);
+        assert_eq!(state(&world, entity), (Some(edited), true));
+    }
+
+    /// Removal is undoable as of PF-1182, and it has to come back ENABLED —
+    /// restoring the data alone would leave the inspector showing "Add Reverb
+    /// Zone" over a zone that is really there.
+    #[test]
+    fn undoing_a_removal_brings_the_zone_back_enabled() {
+        let (mut world, entity) = world_with(None, false);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: None,
+            old_enabled: true,
+            new_enabled: false,
+        });
+
+        undo(&mut world);
+
+        assert_eq!(state(&world, entity), (Some(cave()), true));
+    }
+
+    /// Redoing that removal clears both components again.
+    #[test]
+    fn redoing_a_removal_clears_the_data_and_the_marker() {
+        let (mut world, entity) = world_with(None, false);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: None,
+            old_enabled: true,
+            new_enabled: false,
+        });
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert_eq!(state(&world, entity), (None, false));
+    }
+
+    /// Undoing the AUTHORING of a zone removes it entirely: there was nothing
+    /// there before, so an enabled marker must not survive.
+    #[test]
+    fn undoing_the_creation_of_a_zone_removes_both_components() {
+        let (mut world, entity) = world_with(Some(cave()), true);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: None,
+            new_reverb: Some(cave()),
+            old_enabled: false,
+            new_enabled: true,
+        });
+
+        undo(&mut world);
+
+        assert_eq!(state(&world, entity), (None, false));
     }
 }
