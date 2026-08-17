@@ -14,6 +14,13 @@ collider shape used to silently reset the thirteen other fields. And the editor
 now reflects what the simulation actually holds, rather than only its own
 optimistic copy.
 
+2D joints now connect. Every joint the editor has ever created was rejected
+before it reached the simulation, so no hinge, slider, rope or spring had ever
+held two sprites together — and a joint the engine reported back was dropped
+without being read, so the inspector never showed the real one. Both directions
+now speak the same vocabulary, and a parameter that belongs to a different joint
+type is no longer sent along to be quietly ignored.
+
 Adding 2D physics to an entity now starts it at the engine's own defaults, so
 the collider shape reads Box rather than Auto.
 
