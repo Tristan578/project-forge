@@ -102,7 +102,11 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       targetEntity: zEntityId.optional(),
       followDistance: z.number().optional(),
       followHeight: z.number().optional(),
-      followSmoothing: z.number().optional(),
+      // `.nonnegative()`, so the model gets a validation error naming the field
+      // instead of a silently dropped rate: the engine HARD-REJECTS a negative
+      // follow rate, and `set_game_camera` is full-replace, so one bad value
+      // takes mode, targetEntity and offset down with it (PF-1166).
+      followSmoothing: z.number().nonnegative().optional(),
       firstPersonHeight: z.number().optional(),
       firstPersonMouseSensitivity: z.number().optional(),
       sideScrollerDistance: z.number().optional(),

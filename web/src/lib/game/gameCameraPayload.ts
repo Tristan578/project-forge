@@ -101,12 +101,37 @@ export const GAME_CAMERA_WIRE_KEYS = Object.keys(
   WIRE_PARAM_SHAPES,
 ) as (keyof GameCameraWireParams)[];
 
+/**
+ * Wire keys the engine HARD-REJECTS below zero (`flat_damping`).
+ *
+ * A negative rate is not a slower camera, it is a lerp factor pointing the wrong
+ * way — the camera extrapolates away from its target and compounds the gap every
+ * frame (PF-1166). The engine refuses it, and `set_game_camera` is a full-replace
+ * command, so one bad rate loses `mode`, `targetEntity` and `offset` along with
+ * it. Screening the key here keeps the rest of the command dispatchable, which is
+ * the whole reason the tightening needs a matching guard on this side.
+ *
+ * Pinned against the Rust readers by `__tests__/gameCameraPayload.test.ts`, so a
+ * second field adopting a sign policy cannot leave this set behind.
+ */
+export const NON_NEGATIVE_WIRE_KEYS = new Set<keyof GameCameraWireParams>([
+  'damping',
+]);
+
 /** Is `value` a well-formed value for the wire parameter `key`? */
 function isWireValue(key: keyof GameCameraWireParams, value: unknown): boolean {
   const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
   switch (WIRE_PARAM_SHAPES[key]) {
     case 'number':
-      return finite(value);
+      // A sign policy is part of being well-formed, not a separate later check:
+      // this predicate is what decides whether a preserved `engineParams` value
+      // is copied forward, and `parseGameCameraWire` round-trips a `.forge`
+      // scene through that field. Admitting a negative `damping` here would let
+      // one bad scene file hard-reject every later `set_game_camera`.
+      return (
+        finite(value) &&
+        (!NON_NEGATIVE_WIRE_KEYS.has(key) || (value as number) >= 0)
+      );
     case 'bool':
       return typeof value === 'boolean';
     case 'pair':
@@ -343,8 +368,18 @@ export function buildSetGameCameraPayload(
           -(distance ?? DEFAULT_FOLLOW_DISTANCE),
         ];
       }
+      // `num` proves finiteness; `isWireValue` adds the engine's sign policy, so
+      // the two write paths into `damping` — this mapping and the `engineParams`
+      // passthrough below — cannot disagree about what the engine will take.
+      // Omission is how this builder says "engine default" (PF-1126), so a
+      // refused rate keeps the rest of this full-replace command intact rather
+      // than losing mode/targetEntity/offset to a hard reject. The signal a human
+      // or the AI can act on lives at the input surfaces instead: `min={0}` on
+      // the inspector field, and a non-negative schema on the chat tool.
       const smoothing = num(data, 'followSmoothing');
-      if (smoothing !== undefined) payload.damping = smoothing;
+      if (smoothing !== undefined && isWireValue('damping', smoothing)) {
+        payload.damping = smoothing;
+      }
       break;
     }
     case 'firstPerson': {
@@ -417,11 +452,27 @@ export function buildSetGameCameraPayload(
   return payload;
 }
 
-/** Read one finite number out of an engine wire payload. */
-function wireNum(params: Record<string, unknown>, key: string): number | undefined {
+/**
+ * Read one well-formed number out of an engine wire payload.
+ *
+ * Screened by {@link isWireValue}, not a local finiteness check, so the mode arms
+ * below cannot admit a value the `engineParams` passthrough refuses. That matters
+ * for `damping`: a `.forge` scene file deserializes straight into the camera
+ * struct without passing through `from_flat`, so a negative rate really can
+ * arrive here, and letting it into the store would put a value on the inspector
+ * that hard-rejects the entity's every later `set_game_camera` (PF-1166).
+ * Omitting it instead means the authoring layer sees the engine's own default.
+ */
+function wireNum(
+  params: Record<string, unknown>,
+  key: keyof GameCameraWireParams,
+): number | undefined {
   if (!Object.hasOwn(params, key)) return undefined;
   const value = params[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  // The `typeof` is what narrows — `isWireValue` returns a plain boolean, and a
+  // cast here would keep type-checking if a caller ever passed a `pair`/`vec3`
+  // key, handing an array back as a `number`.
+  return typeof value === 'number' && isWireValue(key, value) ? value : undefined;
 }
 
 /**
