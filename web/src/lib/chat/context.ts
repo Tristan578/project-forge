@@ -475,9 +475,13 @@ export function buildSceneContext(state: EditorSnapshot): string {
   // Dialogue Trees
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { useDialogueStore } = require('@/stores/dialogueStore');
+    const { useDialogueStore, listTrees } = require('@/stores/dialogueStore');
     const dialogueStore = useDialogueStore.getState();
-    const trees = Object.values(dialogueStore.dialogueTrees) as Array<{ id: string; name: string; nodes: unknown[] }>;
+    // `listTrees`, not `Object.values`: `tree.nodes.length` on an unwalkable entry
+    // throws, and the throw lands in the `catch` below — which would silently
+    // delete the entire Dialogue Trees section from what the model gets to see.
+    // One corrupt tree would make the model believe the game has no dialogue at all.
+    const trees = listTrees(dialogueStore.dialogueTrees) as Array<{ id: string; name: string; nodes: unknown[] }>;
     if (trees.length > 0) {
       sections.push('');
       sections.push(`## Dialogue Trees (${trees.length})`);

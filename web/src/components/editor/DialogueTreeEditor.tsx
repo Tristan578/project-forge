@@ -3,10 +3,15 @@
 import { useState, useCallback } from 'react';
 import {
   Plus, Trash2, ChevronDown, ChevronRight, MessageSquare,
-  GitBranch, Zap, CircleStop, ArrowRight, Copy,
+  GitBranch, Zap, CircleStop, ArrowRight, Copy, AlertTriangle,
 } from 'lucide-react';
 import {
   useDialogueStore,
+  getTree,
+  listTrees,
+  choicesOf,
+  actionsOf,
+  conditionOf,
   type DialogueTree,
   type DialogueNode,
   type TextNode,
@@ -25,7 +30,10 @@ function TreeSelector() {
   const removeTree = useDialogueStore((s) => s.removeTree);
   const duplicateTree = useDialogueStore((s) => s.duplicateTree);
 
-  const trees = Object.values(dialogueTrees);
+  // `listTrees`, not `Object.values`: one stored tree that cannot be walked would
+  // otherwise throw out of this render and take the whole panel with it — including
+  // the selector the author needs to switch away from the broken tree.
+  const trees = listTrees(dialogueTrees);
 
   const handleCreate = useCallback(() => {
     const id = addTree('New Dialogue');
@@ -112,12 +120,24 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
   const removeNode = useDialogueStore((s) => s.removeNode);
   const updateTree = useDialogueStore((s) => s.updateTree);
 
+  // The store vouches that a node is an object, not that a `text` node carries a
+  // string or an `action` node carries an array — those are whatever the imported
+  // or generated JSON said. A malformed node has to render AS malformed: this label
+  // is how the author finds the node they need to fix, so throwing here would hide
+  // the one thing they are looking for behind a blank panel.
   const nodeLabel = (() => {
     switch (node.type) {
-      case 'text': return `"${(node as TextNode).text.slice(0, 40) || '(empty)'}${(node as TextNode).text.length > 40 ? '...' : ''}"`;
-      case 'choice': return `${(node as ChoiceNode).choices.length} choices`;
+      case 'text': {
+        const text = (node as TextNode).text;
+        if (typeof text !== 'string') return '(malformed text)';
+        return `"${text.slice(0, 40) || '(empty)'}${text.length > 40 ? '...' : ''}"`;
+      }
+      case 'choice': return `${choicesOf(node).length} choices`;
       case 'condition': return 'Condition';
-      case 'action': return `${(node as ActionNode).actions.length} actions`;
+      case 'action': {
+        const actions = (node as ActionNode).actions;
+        return Array.isArray(actions) ? `${actions.length} actions` : '(malformed actions)';
+      }
       case 'end': return 'End';
       default: return 'Unknown';
     }
@@ -125,6 +145,11 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
 
   // Available nodes for "next" dropdowns
   const nodeOptions = tree.nodes.filter((n) => n.id !== node.id);
+
+  // The store vouches that the node is an object, not that its `condition` is
+  // one: a `condition` node carrying a string reaches `.type` in the pane below
+  // and throws out of the panel the author would use to repair it.
+  const condition = conditionOf(node);
 
   return (
     <div className={`rounded border ${isSelected ? 'border-blue-500/50 bg-zinc-800/80' : 'border-zinc-700/50 bg-zinc-800/30'}`}>
@@ -150,7 +175,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
           {/* Set as start node */}
           {!isStartNode && (
             <button
-              onClick={() => updateTree(treeId, { startNodeId: node.id } as Partial<DialogueTree>)}
+              onClick={() => updateTree(treeId, { startNodeId: node.id })}
               className="text-[10px] text-blue-400 hover:text-blue-300"
             >
               Set as Start Node
@@ -172,7 +197,11 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
               <div>
                 <label className="block text-[10px] text-zinc-400">Text</label>
                 <textarea
-                  value={(node as TextNode).text}
+                  // The node's label already reads `(malformed text)`; handing the
+                  // same non-string to React makes the field uncontrolled (`null`)
+                  // or prints `[object Object]` as if it were the author's copy.
+                  // An empty box the next keystroke repairs is the honest state.
+                  value={typeof (node as TextNode).text === 'string' ? (node as TextNode).text : ''}
                   onChange={(e) => updateNode(treeId, node.id, { text: e.target.value })}
                   rows={3}
                   className="w-full rounded bg-zinc-900 px-2 py-1 text-xs text-zinc-300 border border-zinc-700 resize-none"
@@ -211,7 +240,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                   <label className="text-[10px] text-zinc-400">Choices</label>
                   <button
                     onClick={() => {
-                      const choices = [...(node as ChoiceNode).choices, {
+                      const choices = [...choicesOf(node), {
                         id: `ch_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
                         text: 'New choice',
                         nextNodeId: null,
@@ -223,14 +252,14 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                     + Add Choice
                   </button>
                 </div>
-                {(node as ChoiceNode).choices.map((ch, idx) => (
+                {choicesOf(node).map((ch, idx) => (
                   <div key={ch.id} className="flex items-center gap-1">
                     <span className="text-[10px] text-zinc-400 w-4">{idx + 1}.</span>
                     <input
                       type="text"
                       value={ch.text}
                       onChange={(e) => {
-                        const choices = [...(node as ChoiceNode).choices];
+                        const choices = [...choicesOf(node)];
                         choices[idx] = { ...choices[idx], text: e.target.value };
                         updateNode(treeId, node.id, { choices });
                       }}
@@ -239,7 +268,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                     <select
                       value={ch.nextNodeId ?? ''}
                       onChange={(e) => {
-                        const choices = [...(node as ChoiceNode).choices];
+                        const choices = [...choicesOf(node)];
                         choices[idx] = { ...choices[idx], nextNodeId: e.target.value || null };
                         updateNode(treeId, node.id, { choices });
                       }}
@@ -252,7 +281,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                     </select>
                     <button
                       onClick={() => {
-                        const choices = (node as ChoiceNode).choices.filter((_, i) => i !== idx);
+                        const choices = choicesOf(node).filter((_, i) => i !== idx);
                         updateNode(treeId, node.id, { choices });
                       }}
                       className="text-zinc-400 hover:text-red-400"
@@ -268,26 +297,36 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
           {/* Condition node fields */}
           {node.type === 'condition' && (
             <>
-              <div>
-                <label className="block text-[10px] text-zinc-400">Variable</label>
-                <input
-                  type="text"
-                  value={
-                    (node as ConditionNode).condition.type === 'equals' || (node as ConditionNode).condition.type === 'not_equals' ||
-                    (node as ConditionNode).condition.type === 'greater' || (node as ConditionNode).condition.type === 'less'
-                      ? ((node as ConditionNode).condition as { variable: string }).variable
-                      : ''
-                  }
-                  onChange={(e) => {
-                    const cond = { ...(node as ConditionNode).condition };
-                    if ('variable' in cond) {
-                      (cond as { variable: string }).variable = e.target.value;
+              {condition === null ? (
+                <div className="flex items-start gap-1.5 rounded border border-amber-700/40 bg-amber-950/30 px-2 py-1.5 text-[10px] text-amber-300">
+                  <AlertTriangle size={11} className="mt-px shrink-0" />
+                  <span>
+                    This node&apos;s condition is malformed, so it always evaluates as false.
+                    Re-import the tree or delete this node.
+                  </span>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-[10px] text-zinc-400">Variable</label>
+                  <input
+                    type="text"
+                    value={
+                      condition.type === 'equals' || condition.type === 'not_equals' ||
+                      condition.type === 'greater' || condition.type === 'less'
+                        ? (condition as { variable: string }).variable
+                        : ''
                     }
-                    updateNode(treeId, node.id, { condition: cond });
-                  }}
-                  className="w-full rounded bg-zinc-900 px-2 py-1 text-xs text-zinc-300 border border-zinc-700"
-                />
-              </div>
+                    onChange={(e) => {
+                      const cond = { ...condition };
+                      if ('variable' in cond) {
+                        (cond as { variable: string }).variable = e.target.value;
+                      }
+                      updateNode(treeId, node.id, { condition: cond });
+                    }}
+                    className="w-full rounded bg-zinc-900 px-2 py-1 text-xs text-zinc-300 border border-zinc-700"
+                  />
+                </div>
+              )}
               <div className="flex gap-2">
                 <div className="flex-1">
                   <label className="block text-[10px] text-zinc-400">If True → Node</label>
@@ -330,7 +369,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                 </select>
               </div>
               <div className="text-[10px] text-zinc-400">
-                {(node as ActionNode).actions.length} actions configured
+                {actionsOf(node).length} actions configured
               </div>
             </>
           )}
@@ -415,7 +454,7 @@ export function DialogueTreeEditor() {
   // Load on mount
   useState(() => { loadFromLocalStorage(); });
 
-  const tree = selectedTreeId ? dialogueTrees[selectedTreeId] : null;
+  const tree = (selectedTreeId ? getTree(dialogueTrees, selectedTreeId) : undefined) ?? null;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -450,6 +489,20 @@ export function DialogueTreeEditor() {
 
             <AddNodeMenu treeId={tree.id} />
           </>
+        ) : selectedTreeId ? (
+          // A selected tree that will not open is a different state from no
+          // selection, and showing the same placeholder for both leaves the
+          // author staring at "select a tree" having just selected one. The
+          // selector lists only walkable trees, so reaching this means the tree
+          // was refused or removed after it was picked.
+          <div className="mt-8 text-center text-xs text-zinc-400">
+            <AlertTriangle size={32} className="mx-auto mb-2 text-amber-500/70" />
+            <p className="text-zinc-300">This tree can&apos;t be opened</p>
+            <p className="mt-1">
+              Its data is missing or unreadable. Pick another tree, or delete this one and
+              recreate it.
+            </p>
+          </div>
         ) : (
           <div className="mt-8 text-center text-xs text-zinc-400">
             <MessageSquare size={32} className="mx-auto mb-2 text-zinc-700" />

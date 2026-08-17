@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useEditorStore, setPlayTickCallback } from '@/stores/editorStore';
-import { useDialogueStore } from '@/stores/dialogueStore';
+import { useDialogueStore, getTree } from '@/stores/dialogueStore';
 import { audioManager } from '@/lib/audio/audioManager';
 import { extractWaveform } from '@/lib/audio/waveformExtractor';
 import { AsyncChannelRouter } from '@/lib/scripting/asyncChannelRouter';
@@ -372,7 +372,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           }
           case 'dialogue_set_variable': {
             const dStore = useDialogueStore.getState();
-            const tree = dStore.dialogueTrees[msg.treeId];
+            const tree = getTree(dStore.dialogueTrees, msg.treeId);
             if (tree) {
               dStore.updateTree(msg.treeId, { variables: { ...tree.variables, [msg.key]: msg.value } });
             }

@@ -9,7 +9,12 @@ import { DialogueOverlay } from '../DialogueOverlay';
 import { useDialogueStore } from '@/stores/dialogueStore';
 import { useEditorStore } from '@/stores/editorStore';
 
-vi.mock('@/stores/dialogueStore', () => ({
+// The real `getTree` — it is the prototype-chain guard itself, so stubbing it
+// here would let the mock drift from the guard under test.
+vi.mock('@/stores/dialogueStore', async () => ({
+  getTree: (await vi.importActual<typeof import('@/stores/dialogueStore')>(
+    '@/stores/dialogueStore',
+  )).getTree,
   useDialogueStore: vi.fn(() => ({})),
 }));
 
@@ -36,6 +41,22 @@ const choiceNode = {
   speaker: 'Guide',
   choices: [{ id: 'choice-1', text: 'Enter', targetNodeId: null }],
 };
+
+/**
+ * A tree the runtime will actually walk. `variables` and `startNodeId` are both
+ * required by `DialogueTree`, and `getTree` refuses a tree missing either — a
+ * fixture that omits one is not a smaller tree, it is one the component correctly
+ * declines to render, which makes every assertion below fail for the wrong reason.
+ * `startNodeId` in particular is rendered as a string by the editor, so a tree
+ * without one is not walkable no matter how well-formed its nodes are.
+ */
+function fixtureTree(...nodes: (typeof textNode | typeof choiceNode)[]) {
+  return {
+    nodes,
+    variables: {},
+    startNodeId: nodes[0]?.id ?? 'node-1',
+  } as unknown as { nodes: typeof textNode[] };
+}
 
 describe('DialogueOverlay', () => {
   const mockAdvanceDialogue = vi.fn();
@@ -110,11 +131,60 @@ describe('DialogueOverlay', () => {
       isActive: true,
       currentNodeId: 'node-1',
       activeTreeId: 'tree-1',
-      dialogueTrees: { 'tree-1': { nodes: [textNode] } },
+      dialogueTrees: { 'tree-1': fixtureTree(textNode) },
       typewriterComplete: true,
     });
     render(<DialogueOverlay />);
     expect(screen.getByText('Hero')).toBeDefined();
+  });
+
+  it('renders nothing rather than throwing when activeTreeId names an inherited property', () => {
+    // `activeTreeId` traces back to a generated tree, so `dialogueTrees['__proto__']`
+    // is reachable. It is truthy, so the bare lookup handed `Object.prototype` to
+    // `tree.nodes.find(...)` and the overlay crashed the play surface. `getTree`
+    // gates on `Object.hasOwn`, so this resolves to null and the overlay bails.
+    setupDialogueStore({
+      isActive: true,
+      currentNodeId: 'node-1',
+      activeTreeId: '__proto__',
+      dialogueTrees: {},
+      typewriterComplete: true,
+    });
+    expect(() => render(<DialogueOverlay />)).not.toThrow();
+    expect(screen.queryByText('Hero')).toBeNull();
+  });
+
+  it('says the conversation cannot continue rather than painting an empty box', () => {
+    // Not throwing is only half of it. Every content block is gated on the current
+    // node while the box itself renders on `isActive` alone, so a tree that has
+    // gone unreadable underneath a running dialogue used to leave a bordered shell
+    // with nothing in it but the Esc bar — indistinguishable from a hang, and the
+    // author's only recourse was to guess that Esc would close it.
+    setupDialogueStore({
+      isActive: true,
+      currentNodeId: 'node-1',
+      activeTreeId: '__proto__',
+      dialogueTrees: {},
+      typewriterComplete: true,
+    });
+    render(<DialogueOverlay />);
+
+    expect(screen.getByText(/can't continue/i)).toBeInTheDocument();
+  });
+
+  it('does not show that message when there is a node to render', () => {
+    // Without this the message above could be rendered unconditionally and every
+    // ordinary line of dialogue would carry a failure notice under it.
+    setupDialogueStore({
+      isActive: true,
+      currentNodeId: 'node-1',
+      activeTreeId: 'tree-1',
+      dialogueTrees: { 'tree-1': fixtureTree(textNode) },
+      typewriterComplete: true,
+    });
+    render(<DialogueOverlay />);
+
+    expect(screen.queryByText(/can't continue/i)).toBeNull();
   });
 
   it('renders dialogue text content', () => {
@@ -122,7 +192,7 @@ describe('DialogueOverlay', () => {
       isActive: true,
       currentNodeId: 'node-1',
       activeTreeId: 'tree-1',
-      dialogueTrees: { 'tree-1': { nodes: [textNode] } },
+      dialogueTrees: { 'tree-1': fixtureTree(textNode) },
       typewriterComplete: true,
     });
     render(<DialogueOverlay />);
@@ -138,7 +208,7 @@ describe('DialogueOverlay', () => {
       isActive: true,
       currentNodeId: 'node-2',
       activeTreeId: 'tree-1',
-      dialogueTrees: { 'tree-1': { nodes: [textNode, choiceNode as unknown as typeof textNode] } },
+      dialogueTrees: { 'tree-1': fixtureTree(textNode, choiceNode) },
       typewriterComplete: true,
       currentChoices: [{ id: 'choice-1', text: 'Enter' }],
     });
@@ -151,7 +221,7 @@ describe('DialogueOverlay', () => {
       isActive: true,
       currentNodeId: 'node-2',
       activeTreeId: 'tree-1',
-      dialogueTrees: { 'tree-1': { nodes: [textNode, choiceNode as unknown as typeof textNode] } },
+      dialogueTrees: { 'tree-1': fixtureTree(textNode, choiceNode) },
       typewriterComplete: true,
       currentChoices: [{ id: 'choice-1', text: 'Enter' }],
     });
@@ -165,7 +235,7 @@ describe('DialogueOverlay', () => {
       isActive: true,
       currentNodeId: 'node-1',
       activeTreeId: 'tree-1',
-      dialogueTrees: { 'tree-1': { nodes: [textNode] } },
+      dialogueTrees: { 'tree-1': fixtureTree(textNode) },
       typewriterComplete: true,
     });
     render(<DialogueOverlay />);
@@ -178,7 +248,7 @@ describe('DialogueOverlay', () => {
       isActive: true,
       currentNodeId: 'node-1',
       activeTreeId: 'tree-1',
-      dialogueTrees: { 'tree-1': { nodes: [textNode] } },
+      dialogueTrees: { 'tree-1': fixtureTree(textNode) },
       typewriterComplete: true,
       history: [{ speaker: 'Hero', text: 'Hello' }],
     });
@@ -192,7 +262,7 @@ describe('DialogueOverlay', () => {
       isActive: true,
       currentNodeId: 'node-1',
       activeTreeId: 'tree-1',
-      dialogueTrees: { 'tree-1': { nodes: [textNode] } },
+      dialogueTrees: { 'tree-1': fixtureTree(textNode) },
       typewriterComplete: true,
     });
     render(<DialogueOverlay />);

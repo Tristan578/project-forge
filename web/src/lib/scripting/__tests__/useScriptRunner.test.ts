@@ -69,6 +69,11 @@ const mockSetGameWon = vi.fn();
 const mockSetGameScore = vi.fn();
 let mockPlayTickCallback: ((data: unknown) => void) | null = null;
 
+// Dialogue trees the `dialogue_set_variable` branch looks up. Held in a `let` so a
+// test can seed a tree without re-mocking the store.
+let mockDialogueTrees: Record<string, unknown> = {};
+const mockUpdateTree = vi.fn();
+
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: Object.assign(
     (selector: (s: Record<string, unknown>) => unknown) => {
@@ -116,15 +121,23 @@ vi.mock('@/stores/editorStore', () => ({
   }),
 }));
 
-vi.mock('@/stores/dialogueStore', () => ({
+// `getTree` is pulled through `importActual` rather than stubbed: it is the guard
+// under test for the `dialogue_set_variable` branch below, and a hand-written stub
+// is free to drift away from the real one. Its absence here was also latent — the
+// module imports `getTree`, so vitest's proxy would have thrown "No getTree export
+// is defined on the mock" the moment any test drove that branch.
+vi.mock('@/stores/dialogueStore', async () => ({
+  getTree: (await vi.importActual<typeof import('@/stores/dialogueStore')>(
+    '@/stores/dialogueStore',
+  )).getTree,
   useDialogueStore: {
     getState: () => ({
       startDialogue: vi.fn(),
       endDialogue: vi.fn(),
       advanceDialogue: vi.fn(),
       skipTypewriter: vi.fn(),
-      dialogueTrees: {},
-      updateTree: vi.fn(),
+      dialogueTrees: mockDialogueTrees,
+      updateTree: mockUpdateTree,
     }),
   },
 }));
@@ -164,6 +177,7 @@ describe('useScriptRunner', () => {
     workerPostMessages = [];
     workerTerminated = false;
     mockPlayTickCallback = null;
+    mockDialogueTrees = {};
   });
 
   afterEach(() => {
@@ -356,6 +370,43 @@ describe('useScriptRunner', () => {
       expect.objectContaining({ volume: 0.8 }),
     );
     expect(mockWasmModule.handle_command).not.toHaveBeenCalled();
+  });
+
+  it('writes dialogue_set_variable through for a real tree', () => {
+    mockEngineMode = 'play';
+    // `startNodeId` is required by `DialogueTree` and `getTree` refuses a tree
+    // missing it — a fixture without one is not a smaller tree, it is one the
+    // guard correctly declines, which would make this assertion fail for a
+    // reason that has nothing to do with the write it is pinning.
+    mockDialogueTrees = {
+      'tree-1': { id: 'tree-1', nodes: [], variables: { gold: 1 }, startNodeId: 'n1' },
+    };
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    act(() => {
+      latestWorker!.simulateMessage({
+        type: 'dialogue_set_variable', treeId: 'tree-1', key: 'gold', value: 2,
+      });
+    });
+
+    expect(mockUpdateTree).toHaveBeenCalledWith('tree-1', { variables: { gold: 2 } });
+  });
+
+  it('ignores a dialogue_set_variable naming an inherited tree id', () => {
+    // `treeId` comes out of a user script, so `dialogueTrees['__proto__']` is
+    // reachable. It is truthy, so the `if (tree)` gate alone let it through and the
+    // spread read `Object.prototype.variables` — undefined, so the write landed on
+    // a tree that does not exist. `getTree` gates on `Object.hasOwn` instead.
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    act(() => {
+      latestWorker!.simulateMessage({
+        type: 'dialogue_set_variable', treeId: '__proto__', key: 'gold', value: 2,
+      });
+    });
+
+    expect(mockUpdateTree).not.toHaveBeenCalled();
   });
 
   it('routes audio_crossfade to audioManager', () => {
