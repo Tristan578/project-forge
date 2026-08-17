@@ -720,6 +720,12 @@ fn insert_aux_components(entity_commands: &mut bevy::ecs::system::EntityCommands
         entity_commands.insert(ad.clone());
         entity_commands.insert(AudioEnabled);
     }
+    if let Some(ref rzd) = aux.reverb_zone_data {
+        entity_commands.insert(rzd.clone());
+    }
+    if aux.reverb_zone_enabled {
+        entity_commands.insert(super::reverb_zone::ReverbZoneEnabled);
+    }
     if let Some(ref pd) = aux.particle_data {
         entity_commands.insert(pd.clone());
     }
@@ -4866,5 +4872,208 @@ mod reverb_zone_history_tests {
                 enabled: false,
             }]
         );
+    }
+}
+
+#[cfg(test)]
+mod duplicate_aux_component_tests {
+    //! `insert_aux_components` is the DUPLICATE restore path;
+    //! `spawn_from_snapshot` is the undo/redo one. A component wired into only
+    //! one of them survives one operation and vanishes on the other, with no
+    //! error anywhere — which is exactly how reverb zones came to be dropped by
+    //! Ctrl+D while surviving an undone delete (PF-1182).
+
+    use super::{insert_aux_components, AuxComponentData};
+    use crate::core::reverb_zone::{ReverbZoneData, ReverbZoneEnabled};
+    use bevy::prelude::*;
+
+    /// Distinguishable from `ReverbZoneData::default()` (`"hall"` / `0.5`) in
+    /// both fields the assertion reads, so an `insert(default())` mutant fails.
+    fn cave() -> ReverbZoneData {
+        ReverbZoneData {
+            preset: "cave".to_string(),
+            wet_mix: 0.9,
+            ..Default::default()
+        }
+    }
+
+    fn restore(aux: &AuxComponentData) -> (World, Entity) {
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        {
+            let mut commands = world.commands();
+            let mut entity_commands = commands.entity(entity);
+            insert_aux_components(&mut entity_commands, aux);
+        }
+        world.flush();
+        (world, entity)
+    }
+
+    #[test]
+    fn duplicating_carries_an_enabled_reverb_zone() {
+        let (world, entity) = restore(&AuxComponentData {
+            reverb_zone_data: Some(cave()),
+            reverb_zone_enabled: true,
+            ..Default::default()
+        });
+
+        assert_eq!(world.get::<ReverbZoneData>(entity), Some(&cave()));
+        assert!(
+            world.get::<ReverbZoneEnabled>(entity).is_some(),
+            "the duplicate lost the enabled marker, so its zone is configured but silent"
+        );
+    }
+
+    /// The inverse: a zone the user deliberately turned off must not come back
+    /// switched on, the PF-1173 failure direction.
+    #[test]
+    fn duplicating_a_disabled_reverb_zone_leaves_it_disabled() {
+        let (world, entity) = restore(&AuxComponentData {
+            reverb_zone_data: Some(cave()),
+            reverb_zone_enabled: false,
+            ..Default::default()
+        });
+
+        assert_eq!(world.get::<ReverbZoneData>(entity), Some(&cave()));
+        assert!(world.get::<ReverbZoneEnabled>(entity).is_none());
+    }
+
+    #[test]
+    fn duplicating_an_entity_with_no_reverb_zone_adds_neither() {
+        let (world, entity) = restore(&AuxComponentData::default());
+
+        assert!(world.get::<ReverbZoneData>(entity).is_none());
+        assert!(world.get::<ReverbZoneEnabled>(entity).is_none());
+    }
+}
+
+#[cfg(test)]
+mod aux_component_parity {
+    //! The behavioural tests above prove reverb specifically is carried. They
+    //! say nothing about the NEXT field added to `AuxComponentData`, which is
+    //! the actual defect: the collector and `spawn_from_snapshot` get updated,
+    //! `insert_aux_components` is forgotten, and nothing anywhere reports it.
+    //!
+    //! So pin the divergence itself — every field of the struct must be read by
+    //! `insert_aux_components`, minus an explicitly reasoned exemption list.
+    //! Same source-parity idiom as `route_domain_parity` in `commands/mod.rs`,
+    //! and fail-closed for the same reason: a slice that silently returns empty
+    //! is what makes this class of test report green on a broken parser.
+
+    const SOURCE: &str = include_str!("entity_factory.rs");
+
+    /// Fields `insert_aux_components` must deliberately NOT restore.
+    const EXEMPT: &[(&str, &str)] = &[(
+        "active_game_camera",
+        "apply_duplicate_requests zeroes it on purpose — a duplicate must not \
+         steal the active-camera flag from the entity it was copied from",
+    )];
+
+    /// Every field of `AuxComponentData`. Both floors below exist because
+    /// `find` returning a short slice would otherwise pass vacuously.
+    const FIELD_FLOOR: usize = 22;
+    /// Fields actually read by `insert_aux_components` (= FIELD_FLOOR - EXEMPT).
+    const RESTORED_FLOOR: usize = 21;
+
+    /// Source text from `marker` up to the first line that closes its block.
+    fn block_after(marker: &str) -> &'static str {
+        let start = SOURCE.find(marker).unwrap_or_else(|| {
+            panic!("parser is stale: {marker:?} no longer appears in the source")
+        });
+        let rest = &SOURCE[start..];
+        let end = rest
+            .find("\n}")
+            .unwrap_or_else(|| panic!("parser is stale: no closing brace after {marker:?}"));
+        &rest[..end]
+    }
+
+    fn struct_fields() -> Vec<String> {
+        block_after("struct AuxComponentData {")
+            .lines()
+            .skip(1)
+            .filter_map(|line| {
+                let name = line.trim().split_once(':')?.0;
+                let looks_like_a_field = !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+                looks_like_a_field.then(|| name.to_string())
+            })
+            .collect()
+    }
+
+    fn restored_fields() -> Vec<String> {
+        let body = block_after("fn insert_aux_components");
+        let mut found: Vec<String> = Vec::new();
+        for (at, _) in body.match_indices("aux.") {
+            let name: String = body[at + "aux.".len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() && !found.contains(&name) {
+                found.push(name);
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn every_aux_field_is_restored_on_the_duplicate_path() {
+        let fields = struct_fields();
+        let restored = restored_fields();
+
+        assert!(
+            fields.len() >= FIELD_FLOOR,
+            "parsed only {} AuxComponentData fields (floor {FIELD_FLOOR}) — the parser broke, \
+             not the struct; fix it before trusting this test",
+            fields.len()
+        );
+        assert!(
+            restored.len() >= RESTORED_FLOOR,
+            "parsed only {} `aux.` reads in insert_aux_components (floor {RESTORED_FLOOR}) — \
+             the parser broke, not the function",
+            restored.len()
+        );
+
+        let missing: Vec<&String> = fields
+            .iter()
+            .filter(|f| {
+                !restored.contains(f) && !EXEMPT.iter().any(|(exempt, _)| *exempt == f.as_str())
+            })
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "insert_aux_components (the duplicate path) never restores {missing:?}, but \
+             spawn_from_snapshot (the undo/redo path) does. Duplicating an entity would \
+             silently drop them. Add them to insert_aux_components, or to EXEMPT with a reason."
+        );
+
+        let unknown: Vec<&String> = restored.iter().filter(|r| !fields.contains(r)).collect();
+        assert!(
+            unknown.is_empty(),
+            "insert_aux_components reads {unknown:?}, which are not AuxComponentData fields — \
+             the parser is matching something it should not"
+        );
+    }
+
+    /// An exemption that stops being true in either direction is worse than no
+    /// exemption at all, because it reads as reviewed.
+    #[test]
+    fn exemptions_are_still_accurate() {
+        let fields = struct_fields();
+        let restored = restored_fields();
+
+        for (name, reason) in EXEMPT {
+            assert!(
+                fields.contains(&name.to_string()),
+                "EXEMPT lists {name:?} ({reason}), but AuxComponentData no longer has that \
+                 field — drop the entry"
+            );
+            assert!(
+                !restored.contains(&name.to_string()),
+                "EXEMPT lists {name:?} as deliberately not restored, but \
+                 insert_aux_components does restore it now — drop the entry"
+            );
+        }
     }
 }
