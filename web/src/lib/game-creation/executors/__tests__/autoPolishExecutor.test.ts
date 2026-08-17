@@ -17,6 +17,18 @@ const FEEL_DIRECTIVE = {
  */
 type CtxOverrides = Partial<ExecutorContext> & { store?: unknown };
 
+/**
+ * A `resolveStepOutput` that answers PER STEP NAME.
+ *
+ * A blanket `mockReturnValue({ issues: [...] })` answers every name with the
+ * verify output, so `resolveStepOutput('character_setup')` returns an object
+ * with no `entityId` and the camera silently ends up targetless — the exact
+ * defect these tests are meant to catch, hidden by the mock.
+ */
+function stepOutputs(map: Record<string, Record<string, unknown>>) {
+  return vi.fn((name: string) => map[name]);
+}
+
 function makeCtx(overrides: CtxOverrides = {}): ExecutorContext {
   const { store = { sceneGraph: { nodes: {} } } as never, ...rest } = overrides;
   return {
@@ -88,7 +100,10 @@ describe('autoPolishExecutor', () => {
 
   it('configures camera as thirdPersonFollow in 3D when no_camera_on_player', async () => {
     const ctx = makeCtx({
-      resolveStepOutput: vi.fn().mockReturnValue({ issues: ['no_camera_on_player'] }),
+      resolveStepOutput: stepOutputs({
+        verify_all_scenes: { issues: ['no_camera_on_player'] },
+        character_setup: { entityId: 'player_id' },
+      }),
       store: {
         sceneGraph: {
           nodes: {
@@ -111,18 +126,36 @@ describe('autoPolishExecutor', () => {
     expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', {
       entityId: 'cam_id',
       mode: 'thirdPersonFollow',
-      targetEntity: null,
+      // The issue being fixed is `no_camera_on_player`, and the engine skips
+      // ThirdPersonFollow's whole update arm when `target_entity` is `None`. A
+      // `null` here would report the problem solved while shipping a camera
+      // that never moves.
+      targetEntity: 'player_id',
       // No `damping`. This used to assert 0.8, sent as a 0..1 smoothing factor —
       // but the engine's damping is a rate per second (`t = (damping * delta)
       // .min(1.0)`), so 0.8 ran the follow roughly six times slower than the 5.0
       // default. Omitting the field is how the payload asks for that default, and
       // it keeps no second copy of the number here to drift from the engine's.
     });
+    // Configuring a camera the engine does not render through is a repair the
+    // player cannot see: `game_camera_system` is `With<ActiveGameCamera>`, and
+    // only `set_active_game_camera` inserts that marker on a freshly configured
+    // camera. Asserted as an ORDERED call list rather than another
+    // `toHaveBeenCalledWith`, because the latter is blind to a missing sibling —
+    // which is how this stayed absent through the suite that was written for it.
+    expect(
+      vi.mocked(ctx.dispatchCommand).mock.calls
+        .map((c: unknown[]) => c[0])
+        .filter((name: unknown) => String(name).includes('camera')),
+    ).toEqual(['set_game_camera', 'set_active_game_camera']);
   });
 
   it('configures camera as sideScroller in 2D', async () => {
     const ctx = makeCtx({
-      resolveStepOutput: vi.fn().mockReturnValue({ issues: ['no_camera_on_player'] }),
+      resolveStepOutput: stepOutputs({
+        verify_all_scenes: { issues: ['no_camera_on_player'] },
+        character_setup: { entityId: 'player_id' },
+      }),
       store: {
         sceneGraph: {
           nodes: {
@@ -146,6 +179,37 @@ describe('autoPolishExecutor', () => {
     expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', {
       entityId: 'cam2d',
       mode: 'sideScroller',
+      targetEntity: 'player_id',
+    });
+  });
+
+  it('says the camera will not move when no player was rigged to follow', async () => {
+    const ctx = makeCtx({
+      // No `character_setup` output: the movement system drops that step when the
+      // GDD names no player, so this is reachable on a real build.
+      resolveStepOutput: stepOutputs({
+        verify_all_scenes: { issues: ['no_camera_on_player'] },
+      }),
+      store: {
+        sceneGraph: { nodes: { n1: { entityId: 'cam_id', name: 'MainCamera' } } },
+      } as never,
+    });
+
+    const result = await autoPolishExecutor.execute({
+      projectType: '3d',
+      feelDirective: FEEL_DIRECTIVE,
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    // The fix list is user-visible. Reporting a plain "Configured camera as …"
+    // here would tell the user the problem was solved while the camera stands
+    // still for the whole game.
+    expect(result.output?.fixesApplied).toContain(
+      'Configured camera as thirdPersonFollow, but found no player for it to follow — it will not move',
+    );
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'cam_id',
+      mode: 'thirdPersonFollow',
       targetEntity: null,
     });
   });

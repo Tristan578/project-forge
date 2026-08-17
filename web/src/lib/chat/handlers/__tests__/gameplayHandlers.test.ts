@@ -438,6 +438,60 @@ describe('set_game_camera', () => {
     });
   });
 
+  // The follow target is the one field whose loss stops the camera moving at
+  // all: five of the six modes are inert without it, and the engine skips its
+  // whole update arm when `target_entity` is `None`. An LLM asked to "raise the
+  // camera" restates only the height, so without carry-forward the camera
+  // detaches from the player and the running game shows a motionless camera.
+  it('keeps the existing follow target when the update does not restate it', async () => {
+    const { store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
+      entityId: 'cam-1',
+      mode: 'thirdPersonFollow',
+      followHeight: 4,
+    }, {
+      allGameCameras: {
+        'cam-1': {
+          mode: 'thirdPersonFollow',
+          targetEntity: 'player-1',
+        },
+      },
+    });
+    expect(store.setGameCamera).toHaveBeenCalledWith('cam-1', {
+      mode: 'thirdPersonFollow',
+      targetEntity: 'player-1',
+      followHeight: 4,
+    });
+  });
+
+  it('lets an explicit targetEntity override the existing one', async () => {
+    const { store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
+      entityId: 'cam-1',
+      mode: 'thirdPersonFollow',
+      targetEntity: 'boss-1',
+    }, {
+      allGameCameras: {
+        'cam-1': { mode: 'thirdPersonFollow', targetEntity: 'player-1' },
+      },
+    });
+    expect(store.setGameCamera).toHaveBeenCalledWith('cam-1', {
+      mode: 'thirdPersonFollow',
+      targetEntity: 'boss-1',
+    });
+  });
+
+  // `''` is truthy-but-unresolvable to every consumer, which is why
+  // `parseGameCameraWire` normalizes it back to `null` on the way in. Rejecting
+  // it here keeps it out of the store rather than letting it detach the camera.
+  it('rejects an empty targetEntity rather than storing it', async () => {
+    const { result, store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
+      entityId: 'cam-1',
+      mode: 'thirdPersonFollow',
+      targetEntity: '',
+    });
+    expect(result.success).toBe(false);
+    expect(store.setGameCamera).not.toHaveBeenCalled();
+  });
+
   it('omits engineParams when the entity has no existing camera', async () => {
     const { store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
       entityId: 'cam-new',
@@ -459,6 +513,60 @@ describe('set_game_camera', () => {
     expect(store.setGameCamera).toHaveBeenCalledWith('constructor', {
       mode: 'topDown',
       targetEntity: null,
+    });
+  });
+
+  // The authoring numerics need the same carry-forward as `engineParams` above,
+  // for the same reason: this verb replaces the whole `GameCameraData`, so a field
+  // the caller left out came back as the engine's default. `followOffsetX` makes
+  // it concrete — no schema key and no inspector control can restate it, so
+  // dropping it here is the only outcome and it is permanent.
+  it('carries existing authoring parameters forward, and explicit arguments win', async () => {
+    const { store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
+      entityId: 'cam-1',
+      mode: 'thirdPersonFollow',
+      followHeight: 4,
+    }, {
+      allGameCameras: {
+        'cam-1': {
+          mode: 'thirdPersonFollow',
+          targetEntity: null,
+          followDistance: 8,
+          followHeight: 3,
+          followOffsetX: 1.5,
+          followSmoothing: 6,
+        },
+      },
+    });
+    expect(store.setGameCamera).toHaveBeenCalledWith('cam-1', {
+      mode: 'thirdPersonFollow',
+      targetEntity: null,
+      followDistance: 8,
+      // The one field this call names is the one field that changes.
+      followHeight: 4,
+      followOffsetX: 1.5,
+      followSmoothing: 6,
+    });
+  });
+
+  it('ignores a non-finite stored parameter rather than carrying NaN into the engine', async () => {
+    const { store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
+      entityId: 'cam-1',
+      mode: 'thirdPersonFollow',
+    }, {
+      allGameCameras: {
+        'cam-1': {
+          mode: 'thirdPersonFollow',
+          targetEntity: null,
+          followDistance: Number.NaN,
+          followHeight: 3,
+        },
+      },
+    });
+    expect(store.setGameCamera).toHaveBeenCalledWith('cam-1', {
+      mode: 'thirdPersonFollow',
+      targetEntity: null,
+      followHeight: 3,
     });
   });
 
@@ -630,6 +738,21 @@ describe('get_game_camera', () => {
     const data = result.result as { isActive: boolean };
     expect(data.isActive).toBe(false);
   });
+
+  // `entityId` is model-chosen and `zEntityId` is `z.string().min(1)`, so any
+  // `Object.prototype` key reaches the lookup. A bare `allGameCameras[entityId]`
+  // returns the inherited FUNCTION for these, and the handler would report it as
+  // the entity's camera. The other cases in this block use ids that miss as own
+  // keys AND miss on the prototype, so they pass with or without the guard —
+  // this is the one that distinguishes them.
+  it.each(['constructor', 'toString', '__proto__', 'hasOwnProperty'])(
+    'reports no camera for the inherited key %s',
+    async (entityId) => {
+      const { result } = await invokeHandler(gameplayHandlers, 'get_game_camera', { entityId });
+      expect(result.success).toBe(true);
+      expect(result.result).toEqual({ camera: null, isActive: false });
+    },
+  );
 });
 
 // ===========================================================================

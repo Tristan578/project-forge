@@ -28,6 +28,7 @@ function makeState(overrides: Record<string, unknown> = {}) {
     pendingGate: null,
     tokenEstimate: null,
     orchestratorError: null,
+    orchestratorWarnings: [],
     resolveGate: mockResolveGate,
     cancelPipeline: mockCancelPipeline,
     runPipelineFromPlan: mockRunPipelineFromPlan,
@@ -269,5 +270,70 @@ describe('OrchestratorPanel', () => {
 
     fireEvent.click(screen.getByText('Start Over'));
     expect(mockResetOrchestrator).toHaveBeenCalled();
+  });
+
+  describe('step warnings', () => {
+    /**
+     * A step that only partly applied still gets a green tick, because it did
+     * succeed. Its note is the only thing that tells the user their camera will
+     * never move — so if this block does not render, the tick is a lie.
+     */
+    it('renders each note against its step label', () => {
+      mockStore({
+        orchestratorStatus: 'completed',
+        currentPlan: MOCK_PLAN,
+        stepStatuses: { 'step-1': 'completed', 'step-2': 'completed', 'step-3': 'completed' },
+        orchestratorWarnings: [
+          {
+            stepId: 'step-2',
+            executor: 'camera_setup',
+            message: 'Camera set to sideScroller but nothing was given for it to follow.',
+          },
+          {
+            stepId: 'step-3',
+            executor: 'auto_polish',
+            message: 'Camera settings the engine has no parameter for were ignored: smoothing.',
+          },
+        ],
+      });
+      render(<OrchestratorPanel />);
+
+      expect(screen.getByText('2 things need your attention')).toBeTruthy();
+      expect(
+        screen.getByText('Camera set to sideScroller but nothing was given for it to follow.', {
+          exact: false,
+        }),
+      ).toBeTruthy();
+      // The executor name is mapped to the same label the step list shows, not
+      // printed raw — `camera_setup` was missing from that map entirely.
+      expect(screen.getByText('Positioning camera:')).toBeTruthy();
+      expect(screen.getByText('Polishing game:')).toBeTruthy();
+    });
+
+    it('singularizes the count for one note', () => {
+      mockStore({
+        orchestratorStatus: 'completed',
+        currentPlan: MOCK_PLAN,
+        stepStatuses: {},
+        orchestratorWarnings: [
+          { stepId: 'step-2', executor: 'camera_setup', message: 'it will not move' },
+        ],
+      });
+      render(<OrchestratorPanel />);
+
+      expect(screen.getByText('1 thing needs your attention')).toBeTruthy();
+    });
+
+    it('renders nothing when no step reported a problem', () => {
+      mockStore({
+        orchestratorStatus: 'completed',
+        currentPlan: MOCK_PLAN,
+        stepStatuses: {},
+        orchestratorWarnings: [],
+      });
+      render(<OrchestratorPanel />);
+
+      expect(screen.queryByLabelText('Game creation warnings')).toBeNull();
+    });
   });
 });

@@ -412,6 +412,10 @@ describe('gameCameraPayload', () => {
           targetEntity: 'player-1',
           followDistance: 8,
           followHeight: 3,
+          // No inspector control writes this, but the round trip has to carry it:
+          // it is the X slot of the same `offset` vector as the two above, and
+          // the builder used to hardcode a `0` there (PF-1125).
+          followOffsetX: 1.5,
           followSmoothing: 0.9,
         },
         firstPerson: {
@@ -537,15 +541,18 @@ describe('gameCameraPayload', () => {
         const parsed = parseGameCameraWire({
           mode: 'thirdPersonFollow',
           targetEntity: null,
-          offset: [0, 'not-a-number', -5],
+          offset: [1, 'not-a-number', -5],
         });
 
-        // y (followHeight) is invalid and dropped; z (followDistance, negated) is
-        // still a valid number and is kept. This is the module's actual,
-        // documented per-component behaviour, not an invented expectation.
+        // y (followHeight) is invalid and dropped; x (followOffsetX) and z
+        // (followDistance, negated) are still valid numbers and are kept. This is
+        // the module's actual, documented per-component behaviour, not an invented
+        // expectation. x is deliberately non-zero: a `0` there would pass whether
+        // it was read from the wire or defaulted.
         expect(parsed).toEqual({
           mode: 'thirdPersonFollow',
           targetEntity: null,
+          followOffsetX: 1,
           followDistance: 5,
         });
       });
@@ -554,12 +561,13 @@ describe('gameCameraPayload', () => {
         const parsed = parseGameCameraWire({
           mode: 'thirdPersonFollow',
           targetEntity: null,
-          offset: [0, NaN, -5],
+          offset: [1, NaN, -5],
         });
 
         expect(parsed).toEqual({
           mode: 'thirdPersonFollow',
           targetEntity: null,
+          followOffsetX: 1,
           followDistance: 5,
         });
       });
@@ -578,6 +586,7 @@ describe('gameCameraPayload', () => {
         'targetEntity',
         'followDistance',
         'followHeight',
+        'followOffsetX',
         'followSmoothing',
         'firstPersonHeight',
         'firstPersonMouseSensitivity',
@@ -600,6 +609,7 @@ describe('gameCameraPayload', () => {
     const FIELD_MODE: Record<NumericCameraField, GameCameraMode> = {
       followDistance: 'thirdPersonFollow',
       followHeight: 'thirdPersonFollow',
+      followOffsetX: 'thirdPersonFollow',
       followSmoothing: 'thirdPersonFollow',
       firstPersonHeight: 'firstPerson',
       firstPersonMouseSensitivity: 'firstPerson',
@@ -685,18 +695,43 @@ describe('gameCameraPayload', () => {
       const parsed = parseGameCameraWire({
         mode: 'thirdPersonFollow',
         targetEntity: null,
-        offset: [0, 3, -8],
+        offset: [1.5, 3, -8],
         damping: 0.9,
       });
 
-      // `offset` and `damping` map onto followHeight/followDistance/
-      // followSmoothing, so they must NOT also appear in the bag.
+      // `offset` and `damping` map onto followOffsetX/followHeight/
+      // followDistance/followSmoothing, so they must NOT also appear in the bag.
+      // `offset` is the reason `followOffsetX` exists: the bag cannot preserve one
+      // component of a vector the authoring path already owns, so X had to become
+      // an authoring field or be lost (PF-1125).
       expect(parsed).toEqual({
         mode: 'thirdPersonFollow',
         targetEntity: null,
         followDistance: 8,
         followHeight: 3,
+        followOffsetX: 1.5,
         followSmoothing: 0.9,
+      });
+    });
+
+    it('a shoulder offset survives a nudge of an unrelated follow control', () => {
+      // The user-visible shape of PF-1125: an MCP client or a scene file sets a
+      // sideways offset, the user then drags the height slider, and the camera
+      // snaps to dead-centre behind the player. `offset` is one vector, so the
+      // builder must re-emit X from the parsed data rather than a literal 0.
+      const parsed = parseGameCameraWire({
+        mode: 'thirdPersonFollow',
+        targetEntity: 'player-1',
+        offset: [1.5, 3, -8],
+      })!;
+
+      const payload = buildSetGameCameraPayload('cam-1', { ...parsed, followHeight: 4 });
+
+      expect(payload).toEqual({
+        entityId: 'cam-1',
+        mode: 'thirdPersonFollow',
+        targetEntity: 'player-1',
+        offset: [1.5, 4, -8],
       });
     });
 
@@ -900,9 +935,10 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
     },
   );
 
-  // `followDistance`/`followHeight` are not scalars engine-side: they are the Z
-  // and Y components of one `offset` vector, so they need the Vec3 literal.
-  it('followHeight and followDistance equal the thirdPersonFollow offset default', () => {
+  // `followOffsetX`/`followHeight`/`followDistance` are not scalars engine-side:
+  // they are the three components of one `offset` vector, so they need the Vec3
+  // literal.
+  it('the follow offset fields equal the thirdPersonFollow offset default', () => {
     const arm = arms['thirdPersonFollow'];
     expect(arm, 'no "thirdPersonFollow" arm in from_flat').toBeDefined();
 
@@ -911,8 +947,9 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
     ).exec(arm!);
     expect(m, 'no Vec3 default for `offset`').not.toBeNull();
 
+    expect(ENGINE_CAMERA_DEFAULTS.followOffsetX).toBe(parseRustF32(m![1]!, 'offset.x'));
     expect(ENGINE_CAMERA_DEFAULTS.followHeight).toBe(parseRustF32(m![2]!, 'offset.y'));
-    // The payload builder emits `offset: [0, height, -distance]`, so the
+    // The payload builder emits `offset: [offsetX, height, -distance]`, so the
     // engine's Z is the negated authoring distance.
     expect(ENGINE_CAMERA_DEFAULTS.followDistance).toBe(-parseRustF32(m![3]!, 'offset.z'));
   });
@@ -921,7 +958,12 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
   // added field could sit here permanently unpinned.
   it('pins every field in ENGINE_CAMERA_DEFAULTS', () => {
     expect(Object.keys(ENGINE_CAMERA_DEFAULTS).sort()).toEqual(
-      [...Object.keys(SCALAR_SOURCES), 'followHeight', 'followDistance'].sort(),
+      [
+        ...Object.keys(SCALAR_SOURCES),
+        'followOffsetX',
+        'followHeight',
+        'followDistance',
+      ].sort(),
     );
   });
 });

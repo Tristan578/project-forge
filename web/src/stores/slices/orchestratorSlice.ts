@@ -22,11 +22,27 @@ import { buildPlan } from '@/lib/game-creation/planBuilder';
 import { runPipeline } from '@/lib/game-creation/pipelineRunner';
 import type { PipelineCallbacks } from '@/lib/game-creation/pipelineRunner';
 import { EXECUTOR_REGISTRY } from '@/lib/game-creation/executors';
+import { collectStepWarnings } from '@/lib/game-creation/stepWarnings';
 import { captureException } from '@/lib/monitoring/sentry-client';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/**
+ * A step that succeeded but could not do everything it was asked.
+ *
+ * Kept separate from `orchestratorError`: that field means the pipeline stopped,
+ * and folding a "your camera will not move" note into it would either read as a
+ * failure or, worse, be overwritten by the next step's note. Warnings accumulate
+ * across the run and are never fatal.
+ */
+export interface OrchestratorWarning {
+  stepId: string;
+  /** Executor name — the UI already maps this to a human step label. */
+  executor: string;
+  message: string;
+}
 
 export type OrchestratorStatus =
   | 'idle'
@@ -54,6 +70,9 @@ export interface OrchestratorSlice {
 
   // Error state
   orchestratorError: string | null;
+
+  /** Non-fatal notes from steps that succeeded partially. Accumulates per run. */
+  orchestratorWarnings: OrchestratorWarning[];
 
   // Actions
   startDecomposition: (prompt: string, projectType: ProjectType) => Promise<void>;
@@ -105,6 +124,7 @@ export const createOrchestratorSlice: StateCreator<
   tokenEstimate: null,
   reservationId: null,
   orchestratorError: null,
+  orchestratorWarnings: [],
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -117,6 +137,7 @@ export const createOrchestratorSlice: StateCreator<
     set({
       orchestratorStatus: 'decomposing',
       orchestratorError: null,
+      orchestratorWarnings: [],
       currentPlan: null,
       stepStatuses: {},
       pendingGate: null,
@@ -293,6 +314,7 @@ export const createOrchestratorSlice: StateCreator<
       tokenEstimate: null,
       reservationId: null,
       orchestratorError: null,
+      orchestratorWarnings: [],
     });
   },
 
@@ -313,7 +335,9 @@ export const createOrchestratorSlice: StateCreator<
     }
 
     _abortController = new AbortController();
-    set({ orchestratorStatus: 'executing' });
+    // Cleared per RUN, not per plan: re-running the same plan after a fix must
+    // not show the notes the previous attempt produced.
+    set({ orchestratorStatus: 'executing', orchestratorWarnings: [] });
 
     // Read user tier from userStore
     const { useUserStore } = await import('@/stores/userStore');
@@ -343,11 +367,23 @@ export const createOrchestratorSlice: StateCreator<
 
         // Update currentStepIndex
         const plan = get().currentPlan;
-        if (plan) {
-          const idx = plan.steps.findIndex(s => s.id === stepId);
-          if (idx >= 0) {
-            set({ currentStepIndex: idx });
-          }
+        const idx = plan ? plan.steps.findIndex(s => s.id === stepId) : -1;
+        if (idx >= 0) {
+          set({ currentStepIndex: idx });
+        }
+
+        // A partially-applied step reports itself on its output rather than
+        // failing, so this is the only place those notes can reach the user —
+        // and until now the whole `output` was discarded here.
+        const messages = collectStepWarnings(result.output);
+        if (messages.length > 0) {
+          const executor = plan?.steps[idx]?.executor ?? stepId;
+          set(s => ({
+            orchestratorWarnings: [
+              ...s.orchestratorWarnings,
+              ...messages.map(message => ({ stepId, executor, message })),
+            ],
+          }));
         }
 
         if (result.success) {

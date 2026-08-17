@@ -9,21 +9,23 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import type { ExecutorName, GameSystem, OrchestratorGDD } from '@/lib/game-creation/types';
 import type { SystemStepContext } from '@/lib/game-creation/systems';
+import { EXECUTOR_REGISTRY } from '@/lib/game-creation/executors';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const VALID_EXECUTOR_NAMES: ReadonlySet<ExecutorName> = new Set<ExecutorName>([
-  'scene_create',
-  'physics_profile',
-  'character_setup',
-  'entity_setup',
-  'asset_generate',
-  'custom_script_generate',
-  'verify_all_scenes',
-  'auto_polish',
-]);
+/**
+ * Derived from the registry, not hand-listed. A hardcoded copy of the
+ * `ExecutorName` union drifts silently in the safe-looking direction: it went
+ * stale on `plan_present` and again on `camera_setup`, and a missing entry only
+ * ever makes this check REJECT a name that is in fact valid. The registry is
+ * also the stronger authority — a step naming an executor that type-checks but
+ * was never registered dies at run time, and only this form catches that.
+ */
+const VALID_EXECUTOR_NAMES: ReadonlySet<ExecutorName> = new Set<ExecutorName>(
+  EXECUTOR_REGISTRY.keys(),
+);
 
 /** No planned entities — these cases assert step SHAPE, not entity binding. */
 function makeCtx(overrides?: Partial<SystemStepContext>): SystemStepContext {
@@ -205,15 +207,20 @@ describe('SYSTEM_REGISTRY', () => {
       expect(steps).toHaveLength(1);
     });
 
-    it('uses scene_create executor with cameraMode + cameraConfig', () => {
+    // `scene_create` until PF-1125, where it could never apply: scene creation
+    // precedes every spawn, so no camera entity existed to configure.
+    it('uses camera_setup executor with cameraMode + cameraConfig', () => {
       const def = SYSTEM_REGISTRY.get('camera')!;
       const system = makeSystem('camera', 'orbit');
       system.config = { fov: 60 };
-      const steps = def.setupSteps(system, makeGdd(), makeCtx());
-      expect(steps[0].executor).toBe('scene_create');
-      expect(steps[0].input).toMatchObject({
+      const steps = def.setupSteps(system, makeGdd(), makePlayerCtx());
+      expect(steps[0].executor).toBe('camera_setup');
+      // Full shape, not `toMatchObject`: the follow target is what stops this
+      // step being inert, and a partial matcher cannot see it go missing.
+      expect(steps[0].input).toEqual({
         cameraMode: system.type,
         cameraConfig: system.config,
+        targetEntityId: 'id-hero',
       });
     });
   });

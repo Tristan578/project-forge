@@ -114,6 +114,8 @@ import { TOKEN_COSTS as PRICING } from '@/lib/tokens/pricing';
 const PLAN_COST_ESTIMATES: Record<string, { base: number; variance: number }> = {
   scene_create: { base: 0, variance: 0 },
   physics_profile: { base: 0, variance: 0 },
+  // Pure engine dispatch, no model call — same as the two above.
+  camera_setup: { base: 0, variance: 0 },
   character_setup: { base: 0, variance: 0 },
   entity_setup: { base: PRICING.plan_entity_setup, variance: 0.1 },
   asset_generate: { base: PRICING.plan_asset_generate, variance: 0.4 },

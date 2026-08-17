@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
+import { resolveCameraEntityId } from '../cameraResolution';
 
 // [B4] diagnoseIssues() requires GameMetrics (avgPlayTime, completionRate, etc.)
 // which do not exist on a freshly-built game. auto_polish uses STRUCTURAL
@@ -60,13 +61,23 @@ export const autoPolishExecutor: ExecutorDefinition = {
       // is dispatched straight to the engine. A snapshot taken before the
       // pipeline started names entities that no longer exist, and
       // `set_game_camera` against a despawned id is a silent no-op (PF-1118).
-      const nodes = Object.values(ctx.getStore().sceneGraph.nodes);
-      const cameraNode = nodes.find(n => {
-        const lower = n.name.toLowerCase();
-        return lower === 'camera' || lower.endsWith('camera') || lower.endsWith('_cam');
-      });
+      // Same heuristic as `camera_setup`, shared rather than copied — two
+      // executors resolving "the scene's camera" by different rules is how one
+      // of them silently configures nothing.
+      const cameraEntityId = resolveCameraEntityId(Object.values(ctx.getStore().sceneGraph.nodes));
 
-      if (cameraNode) {
+      // The issue being fixed is `no_camera_on_player`, and both modes below are
+      // follow modes: the engine skips their entire update arm when
+      // `target_entity` is `None`, so a targetless "fix" produces a motionless
+      // camera while reporting `Configured camera as …` in the user-visible fix
+      // list. `character_setup` is the step that rigged the player, and its
+      // output carries the id the plan minted for it.
+      const playerEntityId = ctx.resolveStepOutput('character_setup')?.['entityId'];
+      const targetEntity = typeof playerEntityId === 'string' && playerEntityId.length > 0
+        ? playerEntityId
+        : null;
+
+      if (cameraEntityId) {
         const mode = parsed.data.projectType === '2d' ? 'sideScroller' : 'thirdPersonFollow';
         // Translated, never flat: the store's authoring names share no key with
         // the engine's wire form, and the engine drops every key it does not
@@ -80,12 +91,28 @@ export const autoPolishExecutor: ExecutorDefinition = {
         // engine default, and it carries no second copy of that number to drift.
         commands.push({
           command: 'set_game_camera',
-          payload: buildSetGameCameraPayload(cameraNode.entityId, {
+          payload: buildSetGameCameraPayload(cameraEntityId, {
             mode,
-            targetEntity: null,
+            targetEntity,
           }),
         });
-        fixes.push(`Configured camera as ${mode}`);
+        // Configuring a camera the engine is not rendering through changes
+        // nothing a player can see. `game_camera_system`, `first_person_look_system`
+        // and `orbital_system` are each `With<ActiveGameCamera>`, and the ONLY
+        // things that insert that marker are `set_active_game_camera` and a
+        // snapshot restore of a camera that was already active — so
+        // `set_game_camera` alone leaves this repair inert in exactly the way it
+        // was written to prevent. `camera_setup` pairs the two commands for the
+        // same reason.
+        commands.push({
+          command: 'set_active_game_camera',
+          payload: { entityId: cameraEntityId },
+        });
+        fixes.push(
+          targetEntity
+            ? `Configured camera as ${mode}`
+            : `Configured camera as ${mode}, but found no player for it to follow — it will not move`,
+        );
       } else {
         fixes.push('Warning: no camera entity found to configure');
       }

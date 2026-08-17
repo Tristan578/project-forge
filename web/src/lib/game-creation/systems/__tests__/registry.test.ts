@@ -165,16 +165,56 @@ describe('movement system', () => {
 });
 
 describe('camera system', () => {
-  it('produces scene_create step with camera config', () => {
+  // Repointed from `scene_create` in PF-1125: scene creation runs before any
+  // entity is spawned, so it had no camera entity to configure and the directive
+  // was dropped for every generated game.
+  it('produces camera_setup step with camera config', () => {
     const def = SYSTEM_REGISTRY.get('camera')!;
     const system = makeSystem({ category: 'camera', type: 'follow', config: { smoothing: 0.8 } });
     const gdd = makeGDD();
 
-    const steps = def.setupSteps(system, gdd, makeCtx());
+    const steps = def.setupSteps(system, gdd, makePlayerCtx());
 
     expect(steps).toHaveLength(1);
-    expect(steps[0].executor).toBe('scene_create');
-    expect(steps[0].input).toEqual({ cameraMode: 'follow', cameraConfig: { smoothing: 0.8 } });
+    expect(steps[0].executor).toBe('camera_setup');
+    // Full-shape `toEqual`: the follow target is the whole reason this step is
+    // not a no-op, and a partial matcher is blind to its absence.
+    expect(steps[0].input).toEqual({
+      cameraMode: 'follow',
+      cameraConfig: { smoothing: 0.8 },
+      targetEntityId: 'id-hero',
+    });
+  });
+
+  // Every mode but `fixed` is inert without a target — the engine skips the
+  // whole update arm — so a player-less follow camera has to say so at plan
+  // time rather than ship as a motionless camera that reported success.
+  it('warns and omits the target when the GDD names no player', () => {
+    const def = SYSTEM_REGISTRY.get('camera')!;
+    const warn = vi.fn();
+
+    const steps = def.setupSteps(
+      makeSystem({ category: 'camera', type: 'third-person', config: {} }),
+      makeGDD(),
+      makeCtx({ warn }),
+    );
+
+    expect(steps[0].input).toEqual({ cameraMode: 'third-person', cameraConfig: {} });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/player/i);
+  });
+
+  it('does not warn for a fixed camera, the one mode that needs no target', () => {
+    const def = SYSTEM_REGISTRY.get('camera')!;
+    const warn = vi.fn();
+
+    def.setupSteps(
+      makeSystem({ category: 'camera', type: 'fixed', config: {} }),
+      makeGDD(),
+      makeCtx({ warn }),
+    );
+
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

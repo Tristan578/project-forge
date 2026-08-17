@@ -26,16 +26,23 @@ import {
 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import type { OrchestratorStatus } from '@/stores/slices/orchestratorSlice';
-import type { PlanStep, ApprovalGate, TokenEstimate } from '@/lib/game-creation/types';
+import type { PlanStep, ApprovalGate, TokenEstimate, ExecutorName } from '@/lib/game-creation/types';
 
 // ---------------------------------------------------------------------------
 // Executor name -> user-friendly label
 // ---------------------------------------------------------------------------
 
-const STEP_LABELS: Record<string, string> = {
+/**
+ * `Record<ExecutorName, …>`, not `Record<string, …>`: the map was missing
+ * `camera_setup` and that step rendered its raw executor name to the user, which
+ * a permissive index signature can never catch. Keyed by the union, an added
+ * executor fails `tsc` here until it has a label.
+ */
+const STEP_LABELS: Record<ExecutorName, string> = {
   plan_present: 'Presenting plan',
   scene_create: 'Creating scene',
   physics_profile: 'Setting up physics',
+  camera_setup: 'Positioning camera',
   character_setup: 'Building characters',
   entity_setup: 'Setting up entities',
   asset_generate: 'Generating assets',
@@ -45,7 +52,9 @@ const STEP_LABELS: Record<string, string> = {
 };
 
 function getStepLabel(executor: string): string {
-  return STEP_LABELS[executor] ?? executor;
+  return Object.hasOwn(STEP_LABELS, executor)
+    ? STEP_LABELS[executor as ExecutorName]
+    : executor;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +262,7 @@ export function OrchestratorPanel() {
   const pendingGate = useEditorStore((s) => s.pendingGate);
   const tokenEstimate = useEditorStore((s) => s.tokenEstimate);
   const error = useEditorStore((s) => s.orchestratorError);
+  const warnings = useEditorStore((s) => s.orchestratorWarnings);
   const resolveGate = useEditorStore((s) => s.resolveGate);
   const cancelPipeline = useEditorStore((s) => s.cancelPipeline);
   const runPipelineFromPlan = useEditorStore((s) => s.runPipelineFromPlan);
@@ -310,6 +320,35 @@ export function OrchestratorPanel() {
         {error && (
           <div className="rounded-md border border-red-800 bg-red-950/50 px-3 py-2 text-sm text-red-300">
             {error}
+          </div>
+        )}
+
+        {/* Partially-applied steps. Amber, not red, and never replaces a step's
+            success tick — the pipeline did keep going. But a camera that will
+            never move has to be readable somewhere, or the tick is a lie. */}
+        {warnings.length > 0 && (
+          <div
+            role="status"
+            aria-live="polite"
+            aria-label="Game creation warnings"
+            className="rounded-md border border-amber-800 bg-amber-950/40 px-3 py-2 text-sm text-amber-200"
+          >
+            <div className="mb-1 flex items-center gap-1.5 font-medium">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                {warnings.length === 1
+                  ? '1 thing needs your attention'
+                  : `${warnings.length} things need your attention`}
+              </span>
+            </div>
+            <ul className="space-y-1">
+              {warnings.map((warning, i) => (
+                <li key={`${warning.stepId}-${i}`} className="text-xs leading-snug">
+                  <span className="text-amber-400">{getStepLabel(warning.executor)}:</span>{' '}
+                  {warning.message}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
