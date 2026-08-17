@@ -143,10 +143,14 @@ export function buildCommand(
       };
     }
     case 'dialogue': {
-      // Dialogue keyframes mutate the dialogue store directly via the dispatcher
+      // Dialogue keyframes mutate the dialogue store directly via the dispatcher.
+      // `beat` names which keyframe this dispatch came from: opening a dialogue is a
+      // trigger, but a keyframe with a duration is re-dispatched every frame of its
+      // window, so the handler needs to tell "the same beat again" from "a later
+      // beat that happens to name the same tree". See `./dispatch.ts`.
       return {
         command: 'start_dialogue',
-        payload: { treeId: payload.treeId, entityId: entityId ?? undefined },
+        payload: { treeId: payload.treeId, entityId: entityId ?? undefined, beat: keyframe.timestamp },
       };
     }
     case 'audio': {

@@ -12,7 +12,17 @@ import { create } from 'zustand';
 // Types
 // ============================================================================
 
-export type CutsceneTrackType = 'camera' | 'animation' | 'dialogue' | 'audio' | 'wait';
+/**
+ * Every track type a cutscene can carry.
+ *
+ * A runtime array rather than a bare union so tests can enumerate the whole set —
+ * `web/src/lib/cutscene/__tests__/dispatch.test.ts` walks it to prove every command
+ * a track can emit is routed by something. A union alone is erased at runtime, and
+ * a hand-written list beside it is a second copy that drifts.
+ */
+export const CUTSCENE_TRACK_TYPES = ['camera', 'animation', 'dialogue', 'audio', 'wait'] as const;
+
+export type CutsceneTrackType = (typeof CUTSCENE_TRACK_TYPES)[number];
 
 export type EasingMode = 'linear' | 'ease_in' | 'ease_out' | 'ease_in_out';
 

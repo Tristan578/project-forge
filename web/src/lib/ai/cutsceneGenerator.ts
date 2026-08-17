@@ -8,6 +8,7 @@
 
 import { fetchAI } from './client';
 import { getDeepGenerationModel } from './deepTier';
+import { CUTSCENE_TRACK_TYPES } from '@/stores/cutsceneStore';
 import type { Cutscene, CutsceneTrack, CutsceneKeyframe, CutsceneTrackType, EasingMode } from '@/stores/cutsceneStore';
 
 // ============================================================================
@@ -56,7 +57,7 @@ Return a JSON object matching this EXACT schema:
   "tracks": [
     {
       "id": "track_1",
-      "type": "camera|animation|dialogue|audio|wait",
+      "type": "${CUTSCENE_TRACK_TYPES.join('|')}",
       "entityId": "string or null",
       "muted": false,
       "keyframes": [
@@ -102,7 +103,10 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-const VALID_TRACK_TYPES = new Set<string>(['camera', 'animation', 'dialogue', 'audio', 'wait']);
+// Derived from the store's own list, never re-typed: a second copy drifts, and a
+// track type the validator accepts but `buildCommand` has no arm for dispatches
+// nothing at playback time — silently, since the player drops a null command.
+const VALID_TRACK_TYPES = new Set<string>(CUTSCENE_TRACK_TYPES);
 const VALID_EASING = new Set<string>(['linear', 'ease_in', 'ease_out', 'ease_in_out']);
 
 function validateKeyframe(data: unknown, trackIndex: number, kfIndex: number): CutsceneKeyframe {

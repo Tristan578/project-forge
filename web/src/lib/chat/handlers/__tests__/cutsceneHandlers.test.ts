@@ -18,11 +18,24 @@ const mockLoad = vi.fn();
 const mockPlay = vi.fn();
 const mockStop = vi.fn();
 
+/**
+ * Options the handler constructed the player with.
+ *
+ * Recorded rather than discarded: the dispatcher the handler hands the player is
+ * NOT `ctx.dispatchCommand` — it is a wrapper that routes browser-side commands
+ * (see `lib/cutscene/dispatch.ts`). Discarding the options left that wiring
+ * unasserted, which is exactly how a dialogue keyframe reached an engine that
+ * silently drops what it does not know.
+ */
+const playerOptions: { dispatchCommand: (command: string, payload: unknown) => void }[] = [];
+
 class MockCutscenePlayer {
   load = mockLoad;
   play = mockPlay;
   stop = mockStop;
-  constructor(_options: unknown) {}
+  constructor(options: unknown) {
+    playerOptions.push(options as (typeof playerOptions)[number]);
+  }
 }
 
 vi.mock('@/lib/cutscene/player', () => ({
@@ -42,6 +55,7 @@ function makeCutscene(id = 'cs1'): Cutscene {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  playerOptions.length = 0;
   useCutsceneStore.setState({
     cutscenes: {},
     activeCutsceneId: null,
@@ -155,6 +169,44 @@ describe('play_cutscene', () => {
     );
 
     expect(useCutsceneStore.getState().activeCutsceneId).toBe('cs1');
+  });
+
+  it('gives the player a dispatcher that routes dialogue locally and everything else to the engine', async () => {
+    useCutsceneStore.getState().addCutscene(makeCutscene('cs1'));
+
+    const { useDialogueStore } = await import('@/stores/dialogueStore');
+    useDialogueStore.setState({
+      dialogueTrees: {
+        tree_1: {
+          id: 'tree_1',
+          name: 'Opening',
+          startNodeId: 'n1',
+          variables: {},
+          nodes: [{ id: 'n1', type: 'text', speaker: 'Guide', text: 'Welcome.', next: null }],
+        },
+      },
+    });
+
+    const dispatchCommand = vi.fn();
+    const store = { sceneGraph: {} } as unknown as import('../types').ToolCallContext['store'];
+
+    await cutsceneHandlers['play_cutscene']({ cutsceneId: 'cs1' }, { store, dispatchCommand });
+
+    const options = playerOptions.at(-1);
+    expect(options, 'handler did not construct a player').toBeDefined();
+
+    // The handler already dispatched 'play' to enter play mode; ignore that call.
+    dispatchCommand.mockClear();
+
+    options!.dispatchCommand('start_dialogue', { treeId: 'tree_1' });
+    expect(useDialogueStore.getState().runtime.activeTreeId).toBe('tree_1');
+    expect(dispatchCommand).not.toHaveBeenCalled();
+
+    options!.dispatchCommand('play_animation', { entityId: 'e1', clipName: 'run' });
+    expect(dispatchCommand.mock.calls[0]).toEqual([
+      'play_animation',
+      { entityId: 'e1', clipName: 'run' },
+    ]);
   });
 
   it('returns failure for unknown cutscene', async () => {
