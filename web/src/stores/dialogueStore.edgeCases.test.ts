@@ -1106,4 +1106,225 @@ describe('dialogueStore — edge cases (PF-360)', () => {
       expect(useDialogueStore.getState().runtime.typewriterComplete).toBe(false);
     });
   });
+
+  /**
+   * Run a condition node and report which branch it took.
+   *
+   * `Condition` cannot describe a hole, a `null` member, or a bare string, which
+   * is the whole point: the casts below are what let the test express the shape
+   * the runtime actually has to survive. See `evaluateCondition` / `allOf` /
+   * `anyOf` in `dialogueStore.ts` for where each shape comes from and why the
+   * callback methods miss it.
+   *
+   * Shared by the two describes below on purpose. They cover the same helper
+   * from opposite sides — a bad member INSIDE a group, and a bad condition ON
+   * the node itself — and the second was the one nothing exercised.
+   */
+  const branchTaken = (condition: unknown): string | null => {
+    const treeId = useDialogueStore.getState().addTree('Gap', 'Start');
+    useDialogueStore.getState().updateTree(treeId, { variables: { a: 1 } });
+    const startNodeId = useDialogueStore.getState().dialogueTrees[treeId].startNodeId;
+
+    useDialogueStore.getState().addNode(treeId, {
+      id: 'cond',
+      type: 'condition',
+      condition: condition as ConditionNode['condition'],
+      onTrue: 'yes',
+      onFalse: 'no',
+    } as ConditionNode);
+    for (const id of ['yes', 'no']) {
+      useDialogueStore.getState().addNode(treeId, {
+        id,
+        type: 'text',
+        speaker: 'System',
+        text: id,
+        next: null,
+      } as TextNode);
+    }
+    useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'cond' });
+
+    useDialogueStore.getState().startDialogue(treeId);
+    useDialogueStore.getState().advanceDialogue();
+    return useDialogueStore.getState().runtime.currentNodeId;
+  };
+
+  describe('condition groups with an absent member', () => {
+    it('does not let a hole satisfy an AND group', () => {
+      // `Array.prototype.every` skips holes, so this group reported itself
+      // satisfied without the missing slot ever being evaluated — a gate opening
+      // because one of its terms was absent.
+      // The hole below is deliberate — it IS the input under test.
+      const withHole = [{ type: 'equals', variable: 'a', value: 1 }, , ];
+      expect(withHole).toHaveLength(2);
+      expect(branchTaken({ type: 'and', conditions: withHole })).toBe('no');
+    });
+
+    it('does not let a null member satisfy an AND group', () => {
+      // Unlike a hole, this one survives `JSON.parse`, so it arrives from any
+      // imported tree — and `evaluateCondition` reads `.type` off its argument,
+      // so before this it threw mid-playback rather than resolving either way.
+      expect(
+        branchTaken({
+          type: 'and',
+          conditions: [{ type: 'equals', variable: 'a', value: 1 }, null],
+        })
+      ).toBe('no');
+    });
+
+    it('still takes the true branch when every AND member is present', () => {
+      // Without this, an `allOf` that returned `false` unconditionally would pass
+      // both tests above.
+      expect(
+        branchTaken({
+          type: 'and',
+          conditions: [{ type: 'equals', variable: 'a', value: 1 }],
+        })
+      ).toBe('yes');
+    });
+
+    it('does not let a hole or a null satisfy an OR group', () => {
+      // Every member is a gap, so the false branch can only mean that neither a
+      // hole nor a `null` stood in for a satisfied term — no real condition is
+      // present that could have produced it instead.
+      // The hole below is deliberate — it IS the input under test.
+      const gaps = [, null];
+      expect(branchTaken({ type: 'or', conditions: gaps })).toBe('no');
+    });
+
+    it('treats a missing or non-array conditions list as unsatisfied', () => {
+      // Reachable from an imported tree, and one level up from the element
+      // guards: reading `.length` off `undefined` threw mid-playback.
+      expect(branchTaken({ type: 'and' })).toBe('no');
+      expect(branchTaken({ type: 'or', conditions: null })).toBe('no');
+      expect(branchTaken({ type: 'and', conditions: 'nope' })).toBe('no');
+    });
+
+    it('still takes the true branch when an OR member is satisfied', () => {
+      expect(
+        branchTaken({
+          type: 'or',
+          conditions: [null, { type: 'equals', variable: 'a', value: 1 }],
+        })
+      ).toBe('yes');
+    });
+  });
+
+  /**
+   * The same absent-condition problem on the node itself rather than inside a
+   * group — `case 'condition'` passes `currentNode.condition` straight to
+   * `evaluateCondition`.
+   *
+   * The guard existed at three of the four call sites and not at this one, which
+   * is why it read as covered: `allOf`, `anyOf` and the choice filter each
+   * carried their own check, so the shape was visibly handled everywhere except
+   * the path that threw. Every case here is reachable from `importTree` or
+   * `loadFromLocalStorage` — `sanitizeTree` drops null NODES, and does not
+   * descend into a node's condition.
+   */
+  describe('a condition node whose own condition is absent or unusable', () => {
+    // These two are the guard. Both threw before it: `evaluateCondition` read
+    // `.type` off its argument, and `case 'condition'` had nothing in front of
+    // it. Measured against the pre-fix source, these are the only two of this
+    // block that go red.
+    it.each([
+      ['null', null],
+      ['undefined', undefined],
+    ])('routes to the false branch when the condition is %s', (_case, condition) => {
+      expect(branchTaken(condition)).toBe('no');
+    });
+
+    // These do NOT exercise the guard, and saying so is the point: each falls
+    // through to `evaluateCondition`'s `default` arm, so each answers `false`
+    // with or without it, and each stayed green against the pre-fix source. They
+    // are here for the `default` arm itself — a hand-edited or third-party tree
+    // produces exactly these, and a future `default: throw` or a `.type`
+    // narrowing would reintroduce the same crash by another route.
+    it.each([
+      ['an object with no type key', {}],
+      ['a bare expression string', 'gold > 5'],
+      ['a number', 0],
+    ])('routes to the false branch when the condition is %s', (_case, condition) => {
+      expect(branchTaken(condition)).toBe('no');
+    });
+
+    it('still takes the true branch when the condition is a real one', () => {
+      // Without this, an `evaluateCondition` that returned `false` unconditionally
+      // would pass every case above.
+      expect(branchTaken({ type: 'equals', variable: 'a', value: 1 })).toBe('yes');
+    });
+  });
+
+  describe('null members in imported and persisted trees', () => {
+    // `JSON.parse` produces `null` freely, and both entry points used to cast
+    // the result to `DialogueTree` without checking anything. Every reader
+    // downstream — `nodes.find`, `choices.filter`, `for (const action of ...)` —
+    // dereferences the element on the strength of that cast.
+    const treeWithNulls = {
+      id: 't1',
+      name: 'Imported',
+      startNodeId: 'start',
+      variables: {},
+      nodes: [
+        null,
+        { id: 'start', type: 'text', speaker: 'A', text: 'hi', next: 'pick' },
+        { id: 'pick', type: 'choice', choices: [null, { id: 'c1', text: 'go', nextNodeId: null }] },
+        { id: 'act', type: 'action', actions: null, next: null },
+        { id: 'noChoices', type: 'choice' },
+      ],
+    };
+
+    it('drops null nodes on import and still plays the tree', () => {
+      const treeId = useDialogueStore.getState().importTree(JSON.stringify(treeWithNulls));
+      expect(treeId).not.toBeNull();
+
+      const tree = useDialogueStore.getState().dialogueTrees[treeId as string];
+      expect(tree.nodes.map(n => n.id)).toEqual(['start', 'pick', 'act', 'noChoices']);
+
+      // The whole point: starting playback used to throw on `nodes.find`.
+      useDialogueStore.getState().startDialogue(treeId as string);
+      expect(useDialogueStore.getState().runtime.currentNodeId).toBe('start');
+      useDialogueStore.getState().advanceDialogue();
+      expect(useDialogueStore.getState().runtime.currentChoices.map(c => c.id)).toEqual(['c1']);
+    });
+
+    it('gives a choice node with no choices key an empty list', () => {
+      const treeId = useDialogueStore.getState().importTree(JSON.stringify(treeWithNulls));
+      const tree = useDialogueStore.getState().dialogueTrees[treeId as string];
+      const noChoices = tree.nodes.find(n => n.id === 'noChoices');
+      expect(noChoices && 'choices' in noChoices ? noChoices.choices : null).toEqual([]);
+      const act = tree.nodes.find(n => n.id === 'act');
+      expect(act && 'actions' in act ? act.actions : null).toEqual([]);
+    });
+
+    it('drops null nodes when loading from localStorage', () => {
+      localStorage.setItem('forge_dialogue_trees', JSON.stringify({ t1: treeWithNulls }));
+      useDialogueStore.getState().loadFromLocalStorage();
+      expect(useDialogueStore.getState().dialogueTrees.t1.nodes.map(n => n.id)).toEqual([
+        'start',
+        'pick',
+        'act',
+        'noChoices',
+      ]);
+    });
+
+    it('ignores a stored payload that is not an object', () => {
+      localStorage.setItem('forge_dialogue_trees', '"just a string"');
+      useDialogueStore.getState().loadFromLocalStorage();
+      expect(useDialogueStore.getState().dialogueTrees).toEqual({});
+    });
+
+    it('refuses to import a payload that is not an object', () => {
+      expect(useDialogueStore.getState().importTree('42')).toBeNull();
+      expect(useDialogueStore.getState().importTree('null')).toBeNull();
+    });
+
+    it('keeps a well-formed tree untouched', () => {
+      // Positive control: a sanitizer that dropped everything passes the above.
+      const good = { ...treeWithNulls, nodes: [treeWithNulls.nodes[1]] };
+      const treeId = useDialogueStore.getState().importTree(JSON.stringify(good));
+      const tree = useDialogueStore.getState().dialogueTrees[treeId as string];
+      expect(tree.nodes).toEqual([treeWithNulls.nodes[1]]);
+      expect(tree.name).toBe('Imported (Imported)');
+    });
+  });
 });

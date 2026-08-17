@@ -177,10 +177,42 @@ const num = (v: unknown, fallback: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
 const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v : fallback);
-const vec3 = (v: unknown, fallback: [number, number, number]): [number, number, number] =>
-  Array.isArray(v) && v.length === 3 && v.every(n => typeof n === 'number' && Number.isFinite(n))
-    ? (v as [number, number, number])
-    : fallback;
+/**
+ * Finite as the engine sees it, not as JS sees it.
+ *
+ * Every numeric field crosses the wire as JSON, which the engine reads with
+ * `as_f64() as f32` and then tests with `is_finite()`. A double the size of
+ * `1e300` survives `Number.isFinite` here and becomes `f32::INFINITY` there, so
+ * a plain finite check accepted values the engine drops on the floor — the store
+ * showing a waypoint the running platform never visits.
+ *
+ * `Math.fround` is the same narrowing, so this is the engine's own test.
+ */
+const isEngineFinite = (v: unknown): v is number =>
+  typeof v === 'number' && Number.isFinite(Math.fround(v));
+
+/**
+ * Read each slot ONCE, and read it before deciding.
+ *
+ * `Array.prototype.every` **skips holes**, so `[1, , 3]` has `length === 3` and
+ * passes `.every(isEngineFinite)` without the callback ever seeing index 1. The
+ * tuple was then built by re-reading the same indices, where a hole reads as
+ * `undefined` and `JSON.stringify` writes `null` — which the engine's `as_f64()`
+ * returns `None` for, so the point is dropped there and kept here. That is the
+ * exact store/engine divergence this module exists to close, arriving through the
+ * guard meant to prevent it. `some`, `filter` and `forEach` skip holes too, so no
+ * callback form fixes this; destructuring is an indexed read and yields
+ * `undefined` for a hole, which `isEngineFinite` rejects.
+ *
+ * Capturing first also closes the validate-then-re-read TOCTOU seam: a getter or
+ * Proxy is free to answer differently on the second read, so a value that passed
+ * the check need not be the value that crosses the wire.
+ */
+const vec3 = (v: unknown, fallback: [number, number, number]): [number, number, number] => {
+  if (!Array.isArray(v) || v.length !== 3) return fallback;
+  const [x, y, z] = v as unknown[];
+  return isEngineFinite(x) && isEngineFinite(y) && isEngineFinite(z) ? [x, y, z] : fallback;
+};
 const nullableStr = (v: unknown, fallback: string | null): string | null =>
   v === null ? null : typeof v === 'string' ? v : fallback;
 
@@ -193,6 +225,53 @@ const U32_MAX = 4294967295;
 const COLLECTIBLE_VALUE_MAX = 1_000_000;
 const SPAWNER_MAX_COUNT_MAX = 1000;
 const TARGET_SCORE_MAX = U32_MAX;
+
+/**
+ * The engine's `MAX_WAYPOINTS`, mirrored so the store truncates identically.
+ *
+ * Must equal `pub const MAX_WAYPOINTS` in `engine/src/core/game_components.rs`;
+ * `__tests__/gameComponentWire.test.ts` reads that line and fails if the two
+ * drift. Truncating on one side only would leave the store and the engine
+ * holding different routes, and `dispatchCommand` returns `void`, so nothing
+ * anywhere would report the disagreement.
+ */
+const MAX_WAYPOINTS = 64;
+
+/**
+ * Mirror the engine's waypoint parse: keep the first `MAX_WAYPOINTS` entries
+ * that are 3-element arrays of engine-finite numbers, and fall back to the
+ * default route if that leaves nothing.
+ *
+ * The store used to cast `props.waypoints` through untouched. The engine
+ * `filter_map`s each entry, so an array carrying a 2-element point or a string
+ * left the store showing a route the platform does not follow — and an
+ * arbitrarily long one left it holding a `Vec` walked every frame and written
+ * into every scene save.
+ */
+const waypointList = (
+  v: unknown,
+  fallback: [number, number, number][],
+): [number, number, number][] => {
+  if (!Array.isArray(v)) return fallback;
+  const out: [number, number, number][] = [];
+  for (const point of v) {
+    // Cap first: `take` after `filter_map` on the Rust side stops the iterator
+    // once the cap is reached, so neither side visits the rest of the array.
+    if (out.length >= MAX_WAYPOINTS) break;
+    if (!Array.isArray(point) || point.length !== 3) continue;
+    // Destructure rather than `.every` + re-read, for the reason `vec3` above
+    // documents: `every` skips holes, so `[0, , 0]` cleared the check and was
+    // pushed as `[0, undefined, 0]` — `[0, null, 0]` on the wire, dropped by the
+    // engine and kept by the store.
+    const [x, y, z] = point as unknown[];
+    if (!isEngineFinite(x) || !isEngineFinite(y) || !isEngineFinite(z)) continue;
+    out.push([x, y, z]);
+  }
+  // `if !waypoints.is_empty()` in the engine: an all-malformed list leaves the
+  // Rust `Default` route standing rather than an empty one, which
+  // `system_moving_platform` would refuse to move at all.
+  return out.length > 0 ? out : fallback;
+};
 
 /**
  * Coerce a whole-number field the same way the engine's `prop_u32` does.
@@ -294,9 +373,10 @@ export function buildStoreComponent(
         type: 'movingPlatform',
         movingPlatform: {
           speed: num(props.speed, 2),
-          waypoints: Array.isArray(props.waypoints)
-            ? (props.waypoints as [number, number, number][])
-            : [[0, 0, 0], [0, 3, 0]],
+          waypoints: waypointList(props.waypoints, [
+            [0, 0, 0],
+            [0, 3, 0],
+          ]),
           pauseDuration: num(props.pauseDuration, 0.5),
           loopMode: (props.loopMode as PlatformLoopMode) ?? 'pingPong',
         },

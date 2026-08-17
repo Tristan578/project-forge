@@ -148,11 +148,33 @@ impl Default for TeleporterData {
     }
 }
 
+/// Ceiling on how many waypoints one moving platform keeps.
+///
+/// Every other field on this wire is bounded — `prop_f32` clamps, `prop_u32`
+/// clamps — but `waypoints` was a `Vec` grown from whatever the properties bag
+/// carried, and the values are LLM-authored: a generated GDD asking for a long
+/// patrol route, or a model emitting a degenerate array, lands the whole thing
+/// in an ECS component that `system_moving_platform` walks every frame and that
+/// gets serialized into every `.forge` scene save.
+///
+/// Over-length lists TRUNCATE rather than being rejected, matching how every
+/// other field here degrades: an out-of-range `speed` clamps and the platform
+/// still moves. Rejecting would drop the caller back to the two-point default,
+/// which is a *different* route rather than a shortened one — a platform
+/// somewhere the author never asked for, and (since `dispatchCommand` returns
+/// `void`) with nothing to say why.
+///
+/// The JS side of the wire applies the same cap, and the value is read back out
+/// of this line by `web/src/lib/engine/__tests__/gameComponentWire.test.ts` —
+/// truncating on one side only would leave the store and the engine holding
+/// different routes with nothing reporting the disagreement.
+pub const MAX_WAYPOINTS: usize = 64;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MovingPlatformData {
     pub speed: f32,             // units/sec, default 2.0
-    pub waypoints: Vec<[f32; 3]>, // at least 2 points
+    pub waypoints: Vec<[f32; 3]>, // at least 2 points, at most MAX_WAYPOINTS
     pub pause_duration: f32,    // seconds at each waypoint, default 0.5
     pub loop_mode: PlatformLoopMode, // default PingPong
 }
@@ -516,6 +538,12 @@ pub fn build_game_component(component_type: &str, properties_json: &str) -> Resu
                         }
                         Some(out)
                     })
+                    // After the filter, not before: the cap counts waypoints the
+                    // platform can actually visit, so a leading run of malformed
+                    // entries cannot silently eat the budget. `take` also
+                    // short-circuits the iterator, so a huge trailing array is
+                    // never walked once the cap is reached.
+                    .take(MAX_WAYPOINTS)
                     .collect();
                 if !waypoints.is_empty() {
                     data.waypoints = waypoints;

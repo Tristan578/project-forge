@@ -76,11 +76,27 @@ export function isValidBinding(binding: unknown): binding is EffectBinding {
   const validCategories: EventCategory[] = ['combat', 'collection', 'movement', 'ui', 'environment'];
   if (!validCategories.includes(evt.category as EventCategory)) return false;
   if (!Array.isArray(b.effects)) return false;
-  return (b.effects as unknown[]).every((e) => {
+  // Indexed rather than `.every`, which SKIPS holes: `[valid, , valid]` cleared
+  // the check without the missing slot being seen. That matters because this is
+  // a type guard — it narrows to `EffectBinding`, whose `effects: Effect[]`
+  // promises every element is an `Effect`, and consumers are written against
+  // that promise. `applyBinding` iterates with `for...of`, which unlike `.every`
+  // does NOT skip holes: it yields `undefined`, and `applyEffect` then reads
+  // `.type` off it and throws at gameplay time.
+  const effects = b.effects as unknown[];
+  for (let i = 0; i < effects.length; i += 1) {
+    const e = effects[i];
     if (!e || typeof e !== 'object') return false;
     const eff = e as Record<string, unknown>;
-    return typeof eff.type === 'string' && typeof eff.intensity === 'number' && typeof eff.duration === 'number';
-  });
+    if (
+      typeof eff.type !== 'string' ||
+      typeof eff.intensity !== 'number' ||
+      typeof eff.duration !== 'number'
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------

@@ -151,7 +151,100 @@ function generateId(prefix: string): string {
   return `${prefix}_${timestamp}_${random}`;
 }
 
-function evaluateCondition(condition: Condition, variables: Record<string, unknown>): boolean {
+/**
+ * `and` / `or` over a nested condition list, written as indexed loops.
+ *
+ * `.every` and `.some` SKIP holes, so `[c1, , c2]` reported the whole AND-group
+ * satisfied without the missing slot ever being evaluated — the fail-OPEN
+ * direction for something whose only job is to gate. An indexed read is the only
+ * form that sees every slot. Holes reach a condition list through `addNode` /
+ * `updateNode`, which take a caller-built `ConditionNode`; `JSON.parse` cannot
+ * produce a hole, but it readily produces a `null`, and `evaluateCondition`
+ * dereferences its argument — which `evaluateCondition` now answers for itself,
+ * so these loops no longer repeat the per-element check.
+ *
+ * The list itself is still checked here: an imported tree can carry
+ * `"conditions": null` or omit the key, and reading `.length` off that throws
+ * mid-playback — the same symptom, one level up, and one the head guard cannot
+ * see. An unusable list is unsatisfied in both groups: it cannot open an `and`,
+ * and it cannot satisfy an `or`.
+ */
+function allOf(conditions: Condition[], variables: Record<string, unknown>): boolean {
+  if (!Array.isArray(conditions)) return false;
+  for (let i = 0; i < conditions.length; i += 1) {
+    if (!evaluateCondition(conditions[i], variables)) return false;
+  }
+  return true;
+}
+
+function anyOf(conditions: Condition[], variables: Record<string, unknown>): boolean {
+  if (!Array.isArray(conditions)) return false;
+  for (let i = 0; i < conditions.length; i += 1) {
+    if (evaluateCondition(conditions[i], variables)) return true;
+  }
+  return false;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
+ * Drop members that the declared types promise cannot exist.
+ *
+ * `importTree` and `loadFromLocalStorage` both hand a raw `JSON.parse` result
+ * straight to `set()` behind an `as DialogueTree` that checks nothing. JSON has
+ * no way to express an array hole, but `null` is one token — and every reader
+ * downstream trusts the element type it was given: `tree.nodes.find(n => n.id
+ * === ...)` (five call sites), `currentNode.choices.filter(c => c.condition)`,
+ * and `for (const action of actions)` all dereference the element with no guard,
+ * so a single `null` in a persisted tree throws mid-playback instead of being
+ * skipped. Sanitizing once at the two entry points keeps every one of those
+ * readers honest without a guard bolted onto each.
+ */
+function sanitizeTree(raw: unknown): DialogueTree | null {
+  if (!isObject(raw)) return null;
+  // `filter` drops holes as well as nulls — it is the one array method whose
+  // hole-skipping is the behaviour we want.
+  const nodes = Array.isArray(raw.nodes) ? raw.nodes.filter(isObject).map(sanitizeNode) : [];
+  return { ...raw, nodes } as unknown as DialogueTree;
+}
+
+function sanitizeNode(raw: Record<string, unknown>): DialogueNode {
+  const node = { ...raw };
+  // A `choice` node with no `choices` key is as fatal as one with a null member:
+  // `currentNode.choices.filter(...)` throws either way.
+  if (node.type === 'choice') {
+    node.choices = Array.isArray(node.choices) ? node.choices.filter(isObject) : [];
+  }
+  if (node.type === 'action') {
+    node.actions = Array.isArray(node.actions) ? node.actions.filter(isObject) : [];
+  }
+  return node as unknown as DialogueNode;
+}
+
+/**
+ * An absent or unusable condition is unsatisfied.
+ *
+ * Every condition in the tree flows through here — a `condition` node's own
+ * condition, a nested member of an `and`/`or` group, and a choice's `condition`
+ * — so the guard belongs at this head rather than at each caller. It was at
+ * three of the four call sites and not at the fourth (`case 'condition'`), which
+ * is a shape that reads as covered in review: the guard is visible nearby, just
+ * not on the path that throws.
+ *
+ * The declared `Condition` type is a promise the runtime does not keep.
+ * `importTree` and `loadFromLocalStorage` both hand a raw `JSON.parse` result to
+ * `set()`, and `sanitizeTree` drops null NODES without descending into a node's
+ * condition — so `null`, a missing key, and a hand-edited `"gold > 5"` all
+ * arrive here. `null.type` throws mid-playback; the string does not, but it is
+ * no more satisfiable, and both answer the same way.
+ */
+function evaluateCondition(
+  condition: Condition | null | undefined,
+  variables: Record<string, unknown>
+): boolean {
+  if (!isObject(condition)) return false;
   switch (condition.type) {
     case 'equals':
       return variables[condition.variable] === condition.value;
@@ -168,9 +261,9 @@ function evaluateCondition(condition: Condition, variables: Record<string, unkno
       return Array.isArray(items) && items.includes(condition.itemId);
     }
     case 'and':
-      return condition.conditions.every(c => evaluateCondition(c, variables));
+      return allOf(condition.conditions, variables);
     case 'or':
-      return condition.conditions.some(c => evaluateCondition(c, variables));
+      return anyOf(condition.conditions, variables);
     default:
       return false;
   }
@@ -568,7 +661,13 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
     try {
       const data = localStorage.getItem(DIALOGUE_STORAGE_KEY);
       if (data) {
-        const trees = JSON.parse(data) as Record<string, DialogueTree>;
+        const parsed: unknown = JSON.parse(data);
+        if (!isObject(parsed)) return;
+        const trees: Record<string, DialogueTree> = {};
+        for (const [id, raw] of Object.entries(parsed)) {
+          const tree = sanitizeTree(raw);
+          if (tree) trees[id] = tree;
+        }
         set({ dialogueTrees: trees });
       }
     } catch (error) {
@@ -600,13 +699,14 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
 
   importTree: (jsonData: string) => {
     try {
-      const tree = JSON.parse(jsonData) as DialogueTree;
+      const tree = sanitizeTree(JSON.parse(jsonData));
+      if (!tree) return null;
       const newTreeId = generateId('tree');
 
       const newTree: DialogueTree = {
         ...tree,
         id: newTreeId,
-        name: `${tree.name} (Imported)`,
+        name: `${tree.name ?? 'Untitled'} (Imported)`,
       };
 
       set(state => ({
