@@ -5,8 +5,8 @@ use crate::core::{
     entity_id::EntityId,
     audio::{AudioData, AudioEnabled, AudioBusConfig},
     reverb_zone::{
-        plan_reverb_zone_write, resolve_reverb_zone_commands, ReverbZoneData, ReverbZoneEnabled,
-        ReverbZoneEvent,
+        plan_reverb_zone_write, resolve_reverb_zone_commands, ReverbZoneCommand, ReverbZoneData,
+        ReverbZoneEnabled, ReverbZoneEvent, ReverbZoneResync,
     },
     selection::{Selection, SelectionChangedEvent},
     pending_commands::PendingCommands,
@@ -216,42 +216,44 @@ pub(super) fn emit_audio_on_selection(
 /// enabling a zone in the same frame you authored it could overwrite it with
 /// `ReverbZoneData::default()`.
 ///
-/// Folding the frame's three queues into one intent per entity
+/// Folding the frame's commands into one intent per entity
 /// (`resolve_reverb_zone_commands`) and then deciding the writes against the
 /// entity's *current* state (`plan_reverb_zone_write`) makes that
 /// unrepresentable, and delivers exactly one event per entity per frame by
 /// construction. Both of those functions live in `core/` and are unit-tested
 /// natively — this system is a thin applicator, which is the only shape testable
 /// at all given the bridge is `wasm32`-only.
+///
+/// It also drains `reverb_zone_resyncs`, the queue the undo and redo arms push to.
+/// Those arms live in `core/entity_factory.rs` and cannot emit, and the only other
+/// emitter (`emit_reverb_zone_on_selection`) needs `selection.primary` AND
+/// `Changed<ReverbZoneData>` — so it reaches neither a non-selected entity nor a
+/// component *removal*, and the browser's mirror silently kept a zone the engine
+/// had dropped. A resync applies nothing and records no history: the ECS write
+/// already happened in the arm, this only re-reports it.
 pub(super) fn apply_reverb_zone_commands(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
     query: Query<(Entity, &EntityId, Option<&ReverbZoneData>, Option<&ReverbZoneEnabled>)>,
     mut history: ResMut<HistoryStack>,
 ) {
-    // Collected rather than passed as lazy iterators: all three queues live on
-    // the same `PendingCommands`, so they cannot be borrowed mutably at once.
-    let updates: Vec<(String, ReverbZoneData)> = pending
-        .reverb_zone_updates
-        .drain(..)
-        .map(|u| (u.entity_id, u.reverb_zone_data))
-        .collect();
-    let toggles: Vec<(String, bool)> = pending
-        .reverb_zone_toggles
-        .drain(..)
-        .map(|t| (t.entity_id, t.enabled))
-        .collect();
-    let removals: Vec<String> = pending
-        .reverb_zone_removals
-        .drain(..)
-        .map(|r| r.entity_id)
-        .collect();
+    // Collected rather than passed as lazy iterators: both queues live on the
+    // same `PendingCommands`, so they cannot be borrowed mutably at once.
+    let queued: Vec<ReverbZoneCommand> = pending.reverb_zone_commands.drain(..).collect();
+    let resyncs: Vec<ReverbZoneResync> = pending.reverb_zone_resyncs.drain(..).collect();
 
-    if updates.is_empty() && toggles.is_empty() && removals.is_empty() {
+    if queued.is_empty() && resyncs.is_empty() {
         return;
     }
 
-    for (entity_id, intent) in resolve_reverb_zone_commands(updates, toggles, removals) {
+    let resolved = resolve_reverb_zone_commands(queued);
+    // A command and a resync for the same entity in one frame is not producible
+    // from the UI (it needs an undo and an authoring action in the same frame),
+    // but if it ever happens the command wins: it involves an actual ECS write,
+    // while the resync only re-reports one that already landed.
+    let commanded: Vec<String> = resolved.iter().map(|(id, _)| id.clone()).collect();
+
+    for (entity_id, intent) in resolved {
         for (entity, eid, current_data, current_enabled) in query.iter() {
             if eid.0 != entity_id {
                 continue;
@@ -296,6 +298,24 @@ pub(super) fn apply_reverb_zone_commands(
             }
 
             break;
+        }
+    }
+
+    for resync in resyncs {
+        if commanded.iter().any(|id| *id == resync.entity_id) {
+            continue;
+        }
+        // The state comes off the resync, never re-read from the ECS: the undo
+        // arm and this system are separate systems in the same unordered tuple
+        // and both write through a deferred `Commands`, so a re-query here can
+        // still observe pre-undo values.
+        match resync.event() {
+            ReverbZoneEvent::Changed { data, enabled } => {
+                events::emit_reverb_zone_changed(&resync.entity_id, &data, enabled);
+            }
+            ReverbZoneEvent::Removed => {
+                events::emit_reverb_zone_removed(&resync.entity_id);
+            }
         }
     }
 }

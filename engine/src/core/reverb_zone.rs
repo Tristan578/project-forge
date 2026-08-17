@@ -120,68 +120,136 @@ pub struct ReverbZoneHistory {
     pub new_enabled: bool,
 }
 
-/// Fold a frame's three reverb-zone queues into one intent per entity.
+/// One queued reverb-zone command, in the order the browser dispatched it.
 ///
-/// Ordering policy, because the three queues carry no interleaved sequence and
-/// are drained one after another:
+/// The three commands share ONE queue, and that is load-bearing rather than
+/// tidiness: with a queue per command kind, "the later command wins" is not
+/// derivable at all. A `remove_reverb_zone` followed by a `set_reverb_zone` for
+/// the same entity comes back in whatever order the queues happen to be drained,
+/// so the removal beat a *later* set and the zone the user just authored was
+/// deleted — silently, since the removal event then wiped the store's optimistic
+/// copy.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReverbZoneCommand {
+    Set {
+        entity_id: String,
+        data: ReverbZoneData,
+    },
+    Toggle {
+        entity_id: String,
+        enabled: bool,
+    },
+    Remove {
+        entity_id: String,
+    },
+}
+
+impl ReverbZoneCommand {
+    pub fn entity_id(&self) -> &str {
+        match self {
+            ReverbZoneCommand::Set { entity_id, .. }
+            | ReverbZoneCommand::Toggle { entity_id, .. }
+            | ReverbZoneCommand::Remove { entity_id } => entity_id,
+        }
+    }
+}
+
+/// A state re-report for one entity whose reverb state changed *without* a
+/// command — undo and redo, whose arms live in `core/` and so cannot emit.
 ///
-/// - Within a queue, the later command for an entity wins.
-/// - A `set` and a `toggle` for the same entity merge into a single `Set`, which
-///   is what authoring a zone actually dispatches (data, then enablement) — and
-///   is why a user action produces exactly one event.
-/// - A removal anywhere in the frame wins over any set or toggle. It is the
-///   destructive, explicitly-requested act, and no UI path produces
-///   set-then-remove in one frame; resolving it the other way would leave a zone
-///   the user asked to delete.
+/// It carries the state the arm WROTE rather than an entity id to be re-read.
+/// `apply_undo_requests` and the reverb applicator are separate systems in the
+/// same unordered tuple, and both write through a deferred `Commands`, so a
+/// re-query in the same frame may still observe pre-undo state — exactly the
+/// coin flip this module exists to eliminate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReverbZoneResync {
+    pub entity_id: String,
+    pub data: Option<ReverbZoneData>,
+    pub enabled: bool,
+}
+
+impl ReverbZoneResync {
+    /// The event the browser must receive to match what was written.
+    pub fn event(&self) -> ReverbZoneEvent {
+        match &self.data {
+            Some(data) => ReverbZoneEvent::Changed {
+                data: data.clone(),
+                enabled: self.enabled,
+            },
+            None => ReverbZoneEvent::Removed,
+        }
+    }
+}
+
+/// Fold a frame's reverb-zone commands into one intent per entity.
+///
+/// Ordering policy — one ordered queue, so the policy is simply *last writer
+/// wins*, per command kind and across kinds alike:
+///
+/// - A later `Set` replaces an earlier one; a later `Toggle` replaces an earlier
+///   one.
+/// - A `Set` and a `Toggle` merge into a single `Set`, which is what authoring a
+///   zone actually dispatches (data, then enablement) — and is why a user action
+///   produces exactly one event.
+/// - A `Remove` discards whatever preceded it for that entity, and a `Set` or
+///   `Toggle` *after* a remove starts a fresh intent. Both directions follow from
+///   position alone, so what the caller asked for last is what happens.
 ///
 /// Entities come back in first-seen order, so the result is deterministic
 /// regardless of how the ECS iterates.
 pub fn resolve_reverb_zone_commands(
-    updates: impl IntoIterator<Item = (String, ReverbZoneData)>,
-    toggles: impl IntoIterator<Item = (String, bool)>,
-    removals: impl IntoIterator<Item = String>,
+    commands: impl IntoIterator<Item = ReverbZoneCommand>,
 ) -> Vec<(String, ReverbZoneIntent)> {
     let mut resolved: Vec<(String, ReverbZoneIntent)> = Vec::new();
 
-    // Linear search is deliberate: a frame carries a handful of entities at
-    // most, and it keeps first-seen ordering without a second index.
-    fn slot<'a>(
-        resolved: &'a mut Vec<(String, ReverbZoneIntent)>,
-        entity_id: &str,
-    ) -> &'a mut ReverbZoneIntent {
-        if let Some(i) = resolved.iter().position(|(id, _)| id == entity_id) {
-            return &mut resolved[i].1;
-        }
-        resolved.push((
-            entity_id.to_string(),
-            ReverbZoneIntent::Set {
-                data: None,
-                enabled: None,
+    for command in commands {
+        // Linear search is deliberate: a frame carries a handful of entities at
+        // most, and it keeps first-seen ordering without a second index.
+        let index = match resolved
+            .iter()
+            .position(|(id, _)| id == command.entity_id())
+        {
+            Some(i) => i,
+            None => {
+                resolved.push((
+                    command.entity_id().to_string(),
+                    ReverbZoneIntent::Set {
+                        data: None,
+                        enabled: None,
+                    },
+                ));
+                resolved.len() - 1
+            }
+        };
+        let slot = &mut resolved[index].1;
+
+        match command {
+            ReverbZoneCommand::Set { data, .. } => match slot {
+                ReverbZoneIntent::Set { data: slot_data, .. } => *slot_data = Some(data),
+                // Re-authoring after a remove in the same frame is a
+                // re-creation, not a no-op.
+                ReverbZoneIntent::Remove => {
+                    *slot = ReverbZoneIntent::Set {
+                        data: Some(data),
+                        enabled: None,
+                    }
+                }
             },
-        ));
-        let last = resolved.len() - 1;
-        &mut resolved[last].1
-    }
-
-    for (entity_id, data) in updates {
-        match slot(&mut resolved, &entity_id) {
-            ReverbZoneIntent::Set { data: slot_data, .. } => *slot_data = Some(data),
-            ReverbZoneIntent::Remove => {}
+            ReverbZoneCommand::Toggle { enabled, .. } => match slot {
+                ReverbZoneIntent::Set {
+                    enabled: slot_enabled,
+                    ..
+                } => *slot_enabled = Some(enabled),
+                ReverbZoneIntent::Remove => {
+                    *slot = ReverbZoneIntent::Set {
+                        data: None,
+                        enabled: Some(enabled),
+                    }
+                }
+            },
+            ReverbZoneCommand::Remove { .. } => *slot = ReverbZoneIntent::Remove,
         }
-    }
-
-    for (entity_id, enabled) in toggles {
-        match slot(&mut resolved, &entity_id) {
-            ReverbZoneIntent::Set {
-                enabled: slot_enabled,
-                ..
-            } => *slot_enabled = Some(enabled),
-            ReverbZoneIntent::Remove => {}
-        }
-    }
-
-    for entity_id in removals {
-        *slot(&mut resolved, &entity_id) = ReverbZoneIntent::Remove;
     }
 
     resolved
@@ -257,7 +325,12 @@ pub fn plan_reverb_zone_write(
                 insert_data,
                 remove_data: false,
                 set_enabled,
-                event: Some(ReverbZoneEvent::Changed {
+                // Gated on `changed` alongside the history entry, so a write that
+                // does nothing reports nothing. Re-reporting an unchanged zone
+                // rebuilt `reverbZones[id]` in the store with fresh object
+                // identity and re-rendered every subscriber; a browser that wants
+                // to *ask* has `get_reverb_zone`.
+                event: changed.then(|| ReverbZoneEvent::Changed {
                     data: effective.clone(),
                     enabled: target_enabled,
                 }),
@@ -291,15 +364,31 @@ mod reverb_zone_resolution_tests {
 
     // -- resolve -----------------------------------------------------------
 
+    fn set(id: &str, preset: &str) -> ReverbZoneCommand {
+        ReverbZoneCommand::Set {
+            entity_id: id.to_string(),
+            data: data(preset),
+        }
+    }
+
+    fn toggle(id: &str, enabled: bool) -> ReverbZoneCommand {
+        ReverbZoneCommand::Toggle {
+            entity_id: id.to_string(),
+            enabled,
+        }
+    }
+
+    fn remove(id: &str) -> ReverbZoneCommand {
+        ReverbZoneCommand::Remove {
+            entity_id: id.to_string(),
+        }
+    }
+
     #[test]
     fn a_set_and_a_toggle_for_one_entity_merge_into_a_single_intent() {
         // This is what authoring a zone dispatches: data, then enablement.
         // Two intents would mean two events and two undo entries per click.
-        let resolved = resolve_reverb_zone_commands(
-            vec![("e1".to_string(), data("cave"))],
-            vec![("e1".to_string(), true)],
-            Vec::<String>::new(),
-        );
+        let resolved = resolve_reverb_zone_commands(vec![set("e1", "cave"), toggle("e1", true)]);
 
         assert_eq!(
             resolved,
@@ -315,11 +404,12 @@ mod reverb_zone_resolution_tests {
 
     #[test]
     fn the_later_command_of_a_kind_wins() {
-        let resolved = resolve_reverb_zone_commands(
-            vec![("e1".to_string(), data("room")), ("e1".to_string(), data("hall"))],
-            vec![("e1".to_string(), true), ("e1".to_string(), false)],
-            Vec::<String>::new(),
-        );
+        let resolved = resolve_reverb_zone_commands(vec![
+            set("e1", "room"),
+            set("e1", "hall"),
+            toggle("e1", true),
+            toggle("e1", false),
+        ]);
 
         assert_eq!(
             resolved,
@@ -334,34 +424,67 @@ mod reverb_zone_resolution_tests {
     }
 
     #[test]
-    fn a_removal_wins_over_a_set_or_toggle_in_the_same_frame() {
-        let resolved = resolve_reverb_zone_commands(
-            vec![("e1".to_string(), data("cave"))],
-            vec![("e1".to_string(), true)],
-            vec!["e1".to_string()],
-        );
+    fn a_removal_after_a_set_and_a_toggle_wins() {
+        let resolved = resolve_reverb_zone_commands(vec![
+            set("e1", "cave"),
+            toggle("e1", true),
+            remove("e1"),
+        ]);
 
         assert_eq!(resolved, vec![("e1".to_string(), ReverbZoneIntent::Remove)]);
     }
 
     #[test]
-    fn a_removal_alone_resolves_to_remove() {
-        let resolved = resolve_reverb_zone_commands(
-            Vec::new(),
-            Vec::new(),
-            vec!["e1".to_string()],
+    fn a_set_after_a_removal_re_creates_the_zone() {
+        // The old two-queue fold made removal win regardless of position, so a
+        // remove-then-set in one frame deleted the zone the user had just
+        // authored — the store wrote it optimistically and the removal event
+        // wiped it, with no error anywhere.
+        let resolved = resolve_reverb_zone_commands(vec![remove("e1"), set("e1", "cave")]);
+
+        assert_eq!(
+            resolved,
+            vec![(
+                "e1".to_string(),
+                ReverbZoneIntent::Set {
+                    data: Some(data("cave")),
+                    enabled: None,
+                }
+            )]
         );
+    }
+
+    #[test]
+    fn a_toggle_after_a_removal_starts_a_fresh_intent() {
+        let resolved = resolve_reverb_zone_commands(vec![remove("e1"), toggle("e1", true)]);
+
+        assert_eq!(
+            resolved,
+            vec![(
+                "e1".to_string(),
+                ReverbZoneIntent::Set {
+                    data: None,
+                    enabled: Some(true),
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn a_removal_alone_resolves_to_remove() {
+        let resolved = resolve_reverb_zone_commands(vec![remove("e1")]);
 
         assert_eq!(resolved, vec![("e1".to_string(), ReverbZoneIntent::Remove)]);
     }
 
     #[test]
     fn entities_come_back_in_first_seen_order_and_never_collapse() {
-        let resolved = resolve_reverb_zone_commands(
-            vec![("e2".to_string(), data("cave"))],
-            vec![("e1".to_string(), true), ("e2".to_string(), false)],
-            vec!["e3".to_string()],
-        );
+        let resolved = resolve_reverb_zone_commands(vec![
+            set("e2", "cave"),
+            toggle("e1", true),
+            toggle("e2", false),
+            remove("e3"),
+        ]);
 
         let ids: Vec<&str> = resolved.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(ids, vec!["e2", "e1", "e3"]);
@@ -372,12 +495,46 @@ mod reverb_zone_resolution_tests {
                 enabled: Some(true)
             }
         );
+        assert_eq!(resolved[2].1, ReverbZoneIntent::Remove);
     }
 
     #[test]
     fn an_empty_frame_resolves_to_nothing() {
-        let resolved = resolve_reverb_zone_commands(Vec::new(), Vec::new(), Vec::<String>::new());
+        let resolved = resolve_reverb_zone_commands(Vec::new());
         assert!(resolved.is_empty());
+    }
+
+    // -- resync: the state undo/redo wrote, re-reported ----------------------
+
+    #[test]
+    fn a_resync_carrying_data_reports_a_change_with_its_enablement() {
+        let resync = ReverbZoneResync {
+            entity_id: "e1".to_string(),
+            data: Some(data("cave")),
+            enabled: false,
+        };
+
+        assert_eq!(
+            resync.event(),
+            ReverbZoneEvent::Changed {
+                data: data("cave"),
+                enabled: false,
+            }
+        );
+    }
+
+    #[test]
+    fn a_resync_with_no_data_reports_a_removal() {
+        // Undo of a zone's creation. `Changed<ReverbZoneData>` cannot fire for a
+        // component that no longer exists, which is the whole reason this queue
+        // exists.
+        let resync = ReverbZoneResync {
+            entity_id: "e1".to_string(),
+            data: None,
+            enabled: false,
+        };
+
+        assert_eq!(resync.event(), ReverbZoneEvent::Removed);
     }
 
     // -- plan: enablement is only ever written when it changes --------------
@@ -542,7 +699,7 @@ mod reverb_zone_resolution_tests {
     }
 
     #[test]
-    fn toggling_to_the_state_the_entity_is_already_in_records_no_history() {
+    fn toggling_to_the_state_the_entity_is_already_in_reports_nothing() {
         let write = plan_reverb_zone_write(
             &ReverbZoneIntent::Set {
                 data: None,
@@ -552,11 +709,12 @@ mod reverb_zone_resolution_tests {
             true,
         );
 
-        assert_eq!(write.insert_data, None);
-        assert_eq!(write.set_enabled, None);
-        assert_eq!(write.history, None);
-        // Still re-reports, so a browser that asked is answered.
-        assert!(write.event.is_some());
+        // A write that does nothing reports nothing — the whole `ReverbZoneWrite`
+        // is empty, which is what this type's doc claims. Emitting here rebuilt
+        // `reverbZones[id]` in the store with fresh object identity and
+        // re-rendered every subscriber; a browser that wants to *ask* has
+        // `get_reverb_zone`.
+        assert_eq!(write, ReverbZoneWrite::default());
     }
 
     #[test]

@@ -2209,6 +2209,21 @@ fn execute_undo(
                     } else {
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneEnabled>();
                     }
+                    // This arm is pure `core/` and cannot emit, and the bridge's
+                    // only reverb emitter is gated on both `selection.primary`
+                    // and `Changed<ReverbZoneData>` — so it reaches neither a
+                    // non-selected entity nor this arm's removal branch, and the
+                    // browser's mirror kept a zone the engine had just dropped.
+                    // Carry the state written, don't ask for it to be re-read:
+                    // the drain runs in a different system and `Commands` are
+                    // deferred.
+                    super::pending_commands::queue_reverb_zone_resync_pending(
+                        super::reverb_zone::ReverbZoneResync {
+                            entity_id: entity_id.clone(),
+                            data: old_reverb.clone(),
+                            enabled: *old_enabled,
+                        },
+                    );
                     break;
                 }
             }
@@ -2547,6 +2562,14 @@ fn execute_redo(
                     } else {
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneEnabled>();
                     }
+                    // Same re-report as the undo arm, with the post-state.
+                    super::pending_commands::queue_reverb_zone_resync_pending(
+                        super::reverb_zone::ReverbZoneResync {
+                            entity_id: entity_id.clone(),
+                            data: new_reverb.clone(),
+                            enabled: *new_enabled,
+                        },
+                    );
                     break;
                 }
             }
@@ -4582,7 +4605,7 @@ mod reverb_zone_history_tests {
     use super::{apply_redo_requests, apply_undo_requests, HistoryStack, UndoableAction};
     use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
     use crate::core::history::{queue_redo_from_bridge, queue_undo_from_bridge};
-    use crate::core::reverb_zone::{ReverbZoneData, ReverbZoneEnabled};
+    use crate::core::reverb_zone::{ReverbZoneData, ReverbZoneEnabled, ReverbZoneResync};
     use bevy::prelude::*;
 
     /// A zone distinguishable from `ReverbZoneData::default()` in every field a
@@ -4757,5 +4780,91 @@ mod reverb_zone_history_tests {
         undo(&mut world);
 
         assert_eq!(state(&world, entity), (None, false));
+    }
+
+    // -- the browser has to be told, and only these arms can tell it ---------
+
+    /// Run `body` with a live pending queue registered, and hand back the reverb
+    /// resyncs it collected.
+    ///
+    /// The registration is not ceremony. `with_pending` reaches a thread-local
+    /// raw pointer that only the bridge's `Startup` system sets in production, so
+    /// an unregistered push is a SILENT no-op — a test that skipped this would
+    /// assert an empty queue and pass no matter what the arms did.
+    fn resyncs_from(body: impl FnOnce()) -> Vec<ReverbZoneResync> {
+        struct PendingGuard;
+        impl Drop for PendingGuard {
+            fn drop(&mut self) {
+                crate::core::pending::unregister_pending_commands();
+            }
+        }
+
+        let mut pending = crate::core::pending::PendingCommands::default();
+        crate::core::pending::register_pending_commands(&mut pending as *mut _);
+        let guard = PendingGuard;
+        body();
+        // Clear the pointer before `pending` is moved out of this frame, and even
+        // if `body` unwound.
+        drop(guard);
+        pending.reverb_zone_resyncs
+    }
+
+    /// Undoing a creation is the case no `Changed<ReverbZoneData>` watcher can
+    /// ever see: the component is GONE, so the only way the browser learns to
+    /// drop its copy is this arm queueing the re-report itself.
+    #[test]
+    fn undoing_a_creation_queues_a_removal_resync() {
+        let (mut world, _) = world_with(Some(cave()), true);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: None,
+            new_reverb: Some(cave()),
+            old_enabled: false,
+            new_enabled: true,
+        });
+
+        let queued = resyncs_from(|| undo(&mut world));
+
+        assert_eq!(
+            queued,
+            vec![ReverbZoneResync {
+                entity_id: "zone-1".to_string(),
+                data: None,
+                enabled: false,
+            }]
+        );
+    }
+
+    /// Undo carries the pre-state and redo the post-state, and each resync
+    /// carries the data the arm WROTE — never an entity id to be re-read, since
+    /// the drain runs in a different system and `Commands` are deferred.
+    #[test]
+    fn undo_and_redo_of_a_removal_queue_the_state_each_one_wrote() {
+        let (mut world, _) = world_with(None, false);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: None,
+            old_enabled: true,
+            new_enabled: false,
+        });
+
+        assert_eq!(
+            resyncs_from(|| undo(&mut world)),
+            vec![ReverbZoneResync {
+                entity_id: "zone-1".to_string(),
+                data: Some(cave()),
+                enabled: true,
+            }]
+        );
+
+        assert_eq!(
+            resyncs_from(|| redo(&mut world)),
+            vec![ReverbZoneResync {
+                entity_id: "zone-1".to_string(),
+                data: None,
+                enabled: false,
+            }]
+        );
     }
 }

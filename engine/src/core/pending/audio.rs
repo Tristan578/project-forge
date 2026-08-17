@@ -2,6 +2,7 @@
 
 use super::PendingCommands;
 use crate::core::audio::AudioEffectDef;
+use crate::core::reverb_zone::{ReverbZoneCommand, ReverbZoneResync};
 
 // === Request Structs ===
 
@@ -71,22 +72,9 @@ pub struct AudioBusEffectsUpdate {
     pub effects: Vec<AudioEffectDef>,
 }
 
-#[derive(Debug, Clone)]
-pub struct ReverbZoneUpdate {
-    pub entity_id: String,
-    pub reverb_zone_data: crate::core::reverb_zone::ReverbZoneData,
-}
-
-#[derive(Debug, Clone)]
-pub struct ReverbZoneToggle {
-    pub entity_id: String,
-    pub enabled: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct ReverbZoneRemoval {
-    pub entity_id: String,
-}
+// Reverb zone commands share ONE ordered queue — see `ReverbZoneCommand` in
+// `core/reverb_zone.rs` for why a queue per command kind cannot express "the
+// later command wins".
 
 // === Queue Methods ===
 
@@ -127,16 +115,12 @@ impl PendingCommands {
         self.audio_bus_effects_updates.push(update);
     }
 
-    pub fn queue_reverb_zone_update(&mut self, update: ReverbZoneUpdate) {
-        self.reverb_zone_updates.push(update);
+    pub fn queue_reverb_zone_command(&mut self, command: ReverbZoneCommand) {
+        self.reverb_zone_commands.push(command);
     }
 
-    pub fn queue_reverb_zone_toggle(&mut self, toggle: ReverbZoneToggle) {
-        self.reverb_zone_toggles.push(toggle);
-    }
-
-    pub fn queue_reverb_zone_removal(&mut self, removal: ReverbZoneRemoval) {
-        self.reverb_zone_removals.push(removal);
+    pub fn queue_reverb_zone_resync(&mut self, resync: ReverbZoneResync) {
+        self.reverb_zone_resyncs.push(resync);
     }
 }
 
@@ -178,14 +162,16 @@ pub fn queue_audio_bus_effects_update_from_bridge(update: AudioBusEffectsUpdate)
     super::with_pending(|pc| pc.queue_audio_bus_effects_update(update)).is_some()
 }
 
-pub fn queue_reverb_zone_update_from_bridge(update: ReverbZoneUpdate) -> bool {
-    super::with_pending(|pc| pc.queue_reverb_zone_update(update)).is_some()
+pub fn queue_reverb_zone_command_from_bridge(command: ReverbZoneCommand) -> bool {
+    super::with_pending(|pc| pc.queue_reverb_zone_command(command)).is_some()
 }
 
-pub fn queue_reverb_zone_toggle_from_bridge(toggle: ReverbZoneToggle) -> bool {
-    super::with_pending(|pc| pc.queue_reverb_zone_toggle(toggle)).is_some()
-}
-
-pub fn queue_reverb_zone_removal_from_bridge(removal: ReverbZoneRemoval) -> bool {
-    super::with_pending(|pc| pc.queue_reverb_zone_removal(removal)).is_some()
+/// Queue a re-report of reverb state that changed without a command.
+///
+/// Named for the thread-local it reaches, not for a bridge caller: the only
+/// callers are the undo and redo arms in `core/entity_factory.rs`, which are pure
+/// Rust and cannot emit an event themselves. `with_pending` is a thread-local, so
+/// this is reachable from `core/` and natively testable.
+pub fn queue_reverb_zone_resync_pending(resync: ReverbZoneResync) -> bool {
+    super::with_pending(|pc| pc.queue_reverb_zone_resync(resync)).is_some()
 }
