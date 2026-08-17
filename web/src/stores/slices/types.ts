@@ -215,7 +215,12 @@ export interface AttachmentData2d {
 export interface IkConstraint2d {
   name: string;
   boneChain: string[];
-  targetEntityId: number;
+  /**
+   * `IkConstraint2d.target_entity_id` in the engine is a `String` holding an
+   * `EntityId` UUID. A number can never match one, so the solver silently skips
+   * the constraint. Empty means "no target yet".
+   */
+  targetEntityId: string;
   bendDirection: number;
   mix: number;
 }

@@ -1125,6 +1125,59 @@ function defaultSkeleton2d(): SkeletonData2d {
   };
 }
 
+/**
+ * `skeletons2d` is a plain object, so a bare `skeletons2d[entityId]` walks the
+ * prototype chain: an entity id of `__proto__` or `constructor` resolves to a
+ * truthy inherited value that passes every `if (!existing)` guard, and the next
+ * `existing.bones.find(...)` throws far from the cause. Read own keys only, so
+ * an inherited name reads as absent.
+ */
+function skeletonOf(
+  skeletons: Record<string, SkeletonData2d>,
+  entityId: string,
+): SkeletonData2d | undefined {
+  return Object.hasOwn(skeletons, entityId) ? skeletons[entityId] : undefined;
+}
+
+/** An array's own entries, with holes and non-objects dropped. */
+function objectEntries(value: unknown): unknown[] {
+  return Array.isArray(value)
+    ? value.filter(entry => typeof entry === 'object' && entry !== null)
+    : [];
+}
+
+/**
+ * `import_skeleton_json` hands `JSON.parse` a caller-supplied string and casts the
+ * result. That result is whatever the file says: `null`, a string, an array, or an
+ * object whose `bones` is a number — and every reader downstream (`bones.find`,
+ * `[...ikConstraints]`, the inspector's `.map`) assumes the stored copy is
+ * well-shaped, so one malformed import throws somewhere far from the import.
+ * Normalize once at the boundary rather than guarding each reader.
+ *
+ * Containers only. Element fields are defaulted at the wire boundary by
+ * `buildWireSkeletonData2d`; what cannot be recovered there is a `bones` that is
+ * not an array at all, or an element that is `null` — which is what a hole or a
+ * JSON `null` degrades into.
+ */
+function normalizeImportedSkeleton(parsed: unknown): SkeletonData2d {
+  const base = defaultSkeleton2d();
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return base;
+
+  const src = parsed as Record<string, unknown>;
+  const skins = src.skins;
+  return {
+    ...base,
+    bones: objectEntries(src.bones) as SkeletonData2d['bones'],
+    slots: objectEntries(src.slots) as SkeletonData2d['slots'],
+    skins:
+      typeof skins === 'object' && skins !== null && !Array.isArray(skins)
+        ? (skins as SkeletonData2d['skins'])
+        : base.skins,
+    activeSkin: typeof src.activeSkin === 'string' ? src.activeSkin : base.activeSkin,
+    ikConstraints: objectEntries(src.ikConstraints) as SkeletonData2d['ikConstraints'],
+  };
+}
+
 const skeleton2dHandlers: Record<string, ToolHandler> = {
   create_skeleton2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
@@ -1162,7 +1215,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
       const { entityId, boneName, parentBone, position, rotation = 0, length = 1 } = p.data;
 
-      const existing = ctx.store.skeletons2d[entityId] ?? defaultSkeleton2d();
+      const existing = skeletonOf(ctx.store.skeletons2d, entityId) ?? defaultSkeleton2d();
       const bone: Bone2dDef = {
         name: boneName,
         parentBone: parentBone ?? null,
@@ -1185,7 +1238,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(z.object({ entityId: zEntityId, boneName: z.string() }), args);
       if (p.error) return p.error;
       const { entityId, boneName } = p.data;
-      const existing = ctx.store.skeletons2d[entityId];
+      const existing = skeletonOf(ctx.store.skeletons2d, entityId);
       if (!existing) {
         return { success: false, error: `No skeleton for entity ${entityId}` };
       }
@@ -1216,7 +1269,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
       const { entityId, boneName, position, rotation, length } = p.data;
 
-      const existing = ctx.store.skeletons2d[entityId];
+      const existing = skeletonOf(ctx.store.skeletons2d, entityId);
       if (!existing) {
         return { success: false, error: `No skeleton for entity ${entityId}` };
       }
@@ -1337,7 +1390,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
       if (p.error) return p.error;
       const { entityId, skinName, attachments } = p.data;
 
-      const existing = ctx.store.skeletons2d[entityId] ?? defaultSkeleton2d();
+      const existing = skeletonOf(ctx.store.skeletons2d, entityId) ?? defaultSkeleton2d();
       const skin = { name: skinName, attachments: (attachments ?? {}) as SkeletonData2d['skins'][string]['attachments'] };
 
       ctx.store.setSkeleton2d(entityId, {
@@ -1366,7 +1419,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
           bones: z.array(z.string().min(1)).min(2).max(MAX_IK_BONE_CHAIN_2D).optional(),
           startBone: z.string().min(1).optional(),
           endBone: z.string().min(1).optional(),
-          targetEntityId: z.number().int().min(0).optional(),
+          targetEntityId: zEntityId.optional(),
           bendDirection: z.number().optional(),
           mix: z.number().min(0).max(1).optional(),
         }),
@@ -1380,7 +1433,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
         return { success: false, error: 'Missing name (or chainName) for the IK chain' };
       }
 
-      const existing = ctx.store.skeletons2d[entityId] ?? defaultSkeleton2d();
+      const existing = skeletonOf(ctx.store.skeletons2d, entityId) ?? defaultSkeleton2d();
 
       let boneChain: string[];
       if (explicitChain) {
@@ -1424,9 +1477,14 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
         boneChain,
         // Was hardcoded to 0 with no way to override, so every constraint the AI
         // created was inert: the engine's solver skips any whose target entity it
-        // cannot find, and 0 matches nothing.
-        targetEntityId: targetEntityId ?? 0,
-        bendDirection: bendDirection !== undefined && bendDirection < 0 ? -1 : 1,
+        // cannot find, and 0 — a number, where the engine field is an `EntityId`
+        // UUID string — matches nothing. Absent means "no target yet", which the
+        // solver also skips, but the user can pick one in the panel; a bogus id
+        // looks configured and never will be.
+        targetEntityId: targetEntityId ?? '',
+        // Normalized to ±1 — the engine treats the sign, not the magnitude.
+        // Omitted and `0` both mean "bend positive"; only a negative flips it.
+        bendDirection: (bendDirection ?? 1) < 0 ? -1 : 1,
         mix: mix ?? 1,
       };
 
@@ -1445,7 +1503,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(z.object({ entityId: zEntityId }), args);
       if (p.error) return p.error;
       const { entityId } = p.data;
-      const data = ctx.store.skeletons2d[entityId];
+      const data = skeletonOf(ctx.store.skeletons2d, entityId);
       if (!data) {
         return { success: false, error: `No skeleton data for entity ${entityId}` };
       }
@@ -1460,8 +1518,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(z.object({ entityId: zEntityId, json: z.string() }), args);
       if (p.error) return p.error;
       const { entityId, json } = p.data;
-      const parsed = JSON.parse(json) as SkeletonData2d;
-      ctx.store.setSkeleton2d(entityId, parsed);
+      ctx.store.setSkeleton2d(entityId, normalizeImportedSkeleton(JSON.parse(json)));
       return { success: true, result: { message: `Imported skeleton from JSON for entity ${entityId}` } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to import skeleton JSON' };
@@ -1483,7 +1540,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
       );
       if (p.error) return p.error;
       const { entityId, method, iterations } = p.data;
-      const existing = ctx.store.skeletons2d[entityId];
+      const existing = skeletonOf(ctx.store.skeletons2d, entityId);
       if (!existing) {
         return { success: false, error: `No skeleton for entity ${entityId}` };
       }

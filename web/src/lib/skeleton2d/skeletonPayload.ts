@@ -329,18 +329,36 @@ function wireSkin(name: string, skin: SourceSkin2d): WireSkin2d {
   return { name: skin.name ?? name, attachments };
 }
 
+/**
+ * The browser-reachable half of `parse_ik_chain2d`'s validation.
+ *
+ * That Rust function bounds `bones`, normalizes `bendDirection` to a sign and
+ * clamps `mix` — but it only runs for a `create_ik_chain2d` command. Everything
+ * the editor and `import_skeleton_json` send arrives as a whole `SkeletonData2d`
+ * through here instead, where none of those bounds used to apply. The invariants
+ * have to hold on both paths or they hold on neither.
+ */
 function wireIkConstraint(constraint: SourceIkConstraint2d, index: number): WireIkConstraint2d {
+  // `import_skeleton_json` feeds this a bare `JSON.parse` result, so the chain is
+  // whatever length the file claims. Truncating keeps the constraint usable and
+  // the payload bounded; the alternative — passing it through — is a rig the
+  // engine's own limit says is malformed.
+  const chain = [...(constraint.boneChain ?? [])].slice(0, MAX_IK_BONE_CHAIN_2D);
   return {
     name: constraint.name ?? `ik_${index}`,
-    boneChain: [...(constraint.boneChain ?? [])],
+    boneChain: chain,
     // A numeric id must become its decimal string, not `undefined` — the engine
     // field is a `String` and there is no coercion on the serde side.
     targetEntityId:
       typeof constraint.targetEntityId === 'number'
         ? String(constraint.targetEntityId)
         : constraint.targetEntityId ?? '',
-    bendDirection: finite(constraint.bendDirection, 1),
-    mix: finite(constraint.mix, 1),
+    // Sign is the whole meaning of this field — magnitude is not a strength dial,
+    // and the engine reads only the sign. Match it rather than forwarding 2.5.
+    bendDirection: finite(constraint.bendDirection, 1) < 0 ? -1 : 1,
+    // Outside 0..1 the solver blends past full IK or past full FK; clamp rather
+    // than let an imported file drive it.
+    mix: Math.min(1, Math.max(0, finite(constraint.mix, 1))),
   };
 }
 

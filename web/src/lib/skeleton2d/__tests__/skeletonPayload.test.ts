@@ -215,6 +215,79 @@ describe('ik constraints', () => {
       mix: 1,
     });
   });
+
+  // `parse_ik_chain2d` bounds all three of these, but it only runs for a
+  // `create_ik_chain2d` command. Everything the editor and `import_skeleton_json`
+  // send arrives as a whole skeleton through this builder instead, so the same
+  // invariants have to hold here or a rig can carry values the engine's own
+  // command path would have refused.
+
+  it('truncates a bone chain past the engine bound rather than sending it', () => {
+    const { ikConstraints } = buildWireSkeletonData2d({
+      ikConstraints: [{
+        name: 'arm',
+        boneChain: Array.from({ length: MAX_IK_BONE_CHAIN_2D + 5 }, (_, i) => `b${i}`),
+      }],
+    });
+
+    expect(ikConstraints[0].boneChain).toHaveLength(MAX_IK_BONE_CHAIN_2D);
+    // Truncated from the tail, so the chain still starts at the root it was
+    // authored against — dropping the head would re-parent the whole constraint.
+    expect(ikConstraints[0].boneChain[0]).toBe('b0');
+  });
+
+  it('normalizes bendDirection to a sign, matching the engine', () => {
+    const cases: Array<[number | undefined, number]> = [
+      [-1, -1], [-2.5, -1], [0, 1], [1, 1], [4.5, 1], [undefined, 1],
+    ];
+    for (const [given, expected] of cases) {
+      const { ikConstraints } = buildWireSkeletonData2d({
+        ikConstraints: [{ name: 'arm', bendDirection: given }],
+      });
+      // Magnitude is not a strength dial — the solver reads only the sign, so a
+      // forwarded 4.5 is indistinguishable from 1 in the engine and misleading
+      // everywhere else.
+      expect(ikConstraints[0].bendDirection, `bendDirection ${given}`).toBe(expected);
+    }
+  });
+
+  it('clamps mix into the range the solver blends over', () => {
+    const cases: Array<[number | undefined, number]> = [
+      [-0.5, 0], [0, 0], [0.25, 0.25], [1, 1], [1.5, 1], [undefined, 1],
+    ];
+    for (const [given, expected] of cases) {
+      const { ikConstraints } = buildWireSkeletonData2d({
+        ikConstraints: [{ name: 'arm', mix: given }],
+      });
+      // 0 survives — full FK is a legal authored value, and `mix ?? 1` would
+      // silently promote it to full IK.
+      expect(ikConstraints[0].mix, `mix ${given}`).toBe(expected);
+    }
+  });
+});
+
+describe('the MCP manifest publishes the vocabulary this builder speaks', () => {
+  const MANIFEST = join(
+    __dirname, '..', '..', '..', '..', '..',
+    'mcp-server', 'manifest', 'commands.json',
+  );
+
+  it('declares create_ik_chain2d.targetEntityId as a string', () => {
+    // The manifest is what an LLM reads before composing a call. It declared this
+    // field a number for as long as the command existed, documenting a value the
+    // engine's `EntityId` String can never hold — so a model following the docs
+    // produced a constraint the solver silently skipped.
+    const raw = readFileSync(MANIFEST, 'utf8');
+    const manifest = JSON.parse(raw) as {
+      commands: Array<{
+        name: string;
+        parameters?: { properties?: Record<string, { type?: string }> };
+      }>;
+    };
+    const command = manifest.commands.find(c => c.name === 'create_ik_chain2d');
+    expect(command, `no create_ik_chain2d in ${MANIFEST}`).toBeDefined();
+    expect(command!.parameters?.properties?.targetEntityId?.type).toBe('string');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -244,11 +317,17 @@ describe('the wire shape matches engine/src/core/skeleton2d.rs', () => {
       __dirname, '..', '..', '..', '..', '..',
       'engine', 'src', 'core', 'commands', 'sprites.rs',
     );
-    const text = readFileSync(SPRITES, 'utf8');
-    expect(text.length, `empty ${SPRITES}`).toBeGreaterThan(0);
-    const match = text.match(/pub const MAX_IK_BONE_CHAIN_2D: usize = (\d+);/);
-    expect(match, `no MAX_IK_BONE_CHAIN_2D in ${SPRITES}`).not.toBeNull();
-    expect(Number(match![1])).toBe(MAX_IK_BONE_CHAIN_2D);
+    const raw = readFileSync(SPRITES, 'utf8');
+    expect(raw.length, `empty ${SPRITES}`).toBeGreaterThan(0);
+    // A commented-out declaration would satisfy a raw scan while the real const is
+    // gone — the pin would then report agreement with a value the engine no longer
+    // has. `//` is stripped per line, and the count is pinned so a second (live)
+    // declaration cannot hide behind the first.
+    const text = raw.split('\n').map(line => line.replace(/\/\/.*$/, '')).join('\n');
+    const pattern = /pub const MAX_IK_BONE_CHAIN_2D: usize = (\d+);/g;
+    const matches = [...text.matchAll(pattern)];
+    expect(matches, `expected exactly one MAX_IK_BONE_CHAIN_2D in ${SPRITES}`).toHaveLength(1);
+    expect(Number(matches[0][1])).toBe(MAX_IK_BONE_CHAIN_2D);
   });
 
   /**

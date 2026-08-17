@@ -575,10 +575,11 @@ pub(crate) fn parse_ik_chain2d(
         bone_chain.push(name.to_string());
     }
 
-    // `IkConstraint2d::target_entity_id` is matched against `EntityId(String)`, but
-    // the manifest declares this a number and the browser store holds one. Accept
-    // either spelling rather than dropping the target and leaving a constraint the
-    // solver can never resolve.
+    // `IkConstraint2d::target_entity_id` is matched against `EntityId(String)`.
+    // The manifest and the browser store now both say string, but older callers
+    // and saved rigs still carry the number this field used to be declared as, so
+    // accept either spelling rather than dropping the target and leaving a
+    // constraint the solver can never resolve.
     let target = payload.get("targetEntityId").ok_or("Missing targetEntityId")?;
     let target_entity_id = match target {
         serde_json::Value::String(s) => s.clone(),
@@ -598,6 +599,10 @@ pub(crate) fn parse_ik_chain2d(
 
     let mix = payload.get("mix")
         .and_then(|v| v.as_f64())
+        // `serde_json` cannot represent NaN or an infinity, so this cannot fire
+        // from a JSON payload today. It is kept because `clamp` returns NaN for a
+        // NaN input rather than a bound, so any future non-JSON caller would
+        // otherwise poison every bone rotation `mix` multiplies.
         .filter(|v| v.is_finite())
         .map(|v| v.clamp(0.0, 1.0) as f32)
         .unwrap_or(1.0);
@@ -1212,7 +1217,10 @@ mod ik_chain2d_tests {
     }
 
     #[test]
-    fn reads_the_manifest_vocabulary() {
+    // Named for what it does: parse the documented `name` + `bones` shape. That the
+    // manifest still PUBLISHES that shape is checked where the manifest can actually
+    // be read — `web/src/lib/skeleton2d/__tests__/skeletonPayload.test.ts`.
+    fn parses_the_documented_shape() {
         let (entity_id, ik) = parse_ik_chain2d(&valid()).expect("valid payload");
         assert_eq!(entity_id, "ent-1");
         assert_eq!(ik.name, "left_arm");
@@ -1310,7 +1318,11 @@ mod ik_chain2d_tests {
     }
 
     #[test]
-    fn clamps_mix_and_rejects_non_finite() {
+    // Clamping only. The `is_finite` filter this exercises the JSON side of cannot
+    // fire from a JSON payload — `serde_json` has no NaN — so claiming a rejection
+    // in the name would describe coverage that does not exist; see the comment on
+    // that filter for why it is kept anyway.
+    fn clamps_mix_to_the_solver_range() {
         for (given, expected) in [
             (json!(0), 0.0_f32),
             (json!(0.5), 0.5),

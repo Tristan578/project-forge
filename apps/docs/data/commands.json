@@ -10564,8 +10564,8 @@
             "description": "Bone chain (2 bones)"
           },
           "targetEntityId": {
-            "type": "number",
-            "description": "Target entity ID"
+            "type": "string",
+            "description": "Target entity ID (UUID string; empty means no target yet)"
           },
           "bendDirection": {
             "type": "number",

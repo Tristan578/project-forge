@@ -225,7 +225,15 @@ describe('SkeletonInspector', () => {
       skeleton: {
         ...baseSkeleton,
         ikConstraints: [
-          { name: 'arm_ik', boneChain: ['upper_arm', 'forearm'], targetEntityId: 0, bendDirection: 1, mix: 0.8 },
+          {
+            name: 'arm_ik',
+            boneChain: ['upper_arm', 'forearm'],
+            // The engine's `EntityId` is a UUID string; `''` is how a constraint
+            // with no target yet is spelled.
+            targetEntityId: '',
+            bendDirection: 1,
+            mix: 0.8,
+          },
         ],
       },
     });

@@ -61,3 +61,20 @@ allocation size, which made an oversized number enough to take the engine down
 for the session. Asking for a chain between two bones with no path between them
 used to invent one; it now says so. A cycle in the bone hierarchy used to hang
 the tab.
+
+The target-entity field was published as a number everywhere it was documented —
+in the command reference an assistant reads before composing a call — while the
+engine has only ever held a text id. A model following the documentation
+therefore produced a constraint the solver was always going to skip. It is a
+string on both sides now, and the reference is checked against the code rather
+than kept in step by hand.
+
+The same limits are applied wherever a constraint is built, not only on the AI
+path. Editing a rig in the inspector and importing one from a file both went
+through a builder that had none of them, so a chain long enough to crash the
+engine, a blend weight outside the range the solver understands, or a bend
+direction that is neither left nor right could all still reach it from the
+editor. Importing a rig now also survives a file that is not a rig: a malformed
+import used to be stored as-is and then threw somewhere else entirely — in the
+inspector, or the next time a constraint was added — rather than at the import
+that caused it.
