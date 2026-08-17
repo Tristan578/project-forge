@@ -34,8 +34,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import {
+  collectSourceFiles,
+  isTypeOnlyOccurrence,
+  stripComments,
+} from '@/test/utils/importScanner';
 
 /** `web/src/lib` — the base every reported path is relative to. */
 const LIB = join(__dirname, '..', '..');
@@ -45,119 +50,14 @@ const GUARDED_ROOTS = [join(LIB, 'game-creation'), join(LIB, 'game')];
 /** Modules that pull client-only React state into whatever imports them. */
 const CLIENT_ONLY_SPECIFIERS = ['@/stores/', '@/hooks/useEngine'];
 
-function collectSourceFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === '__tests__') continue;
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      out.push(...collectSourceFiles(full));
-    } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
-      out.push(full);
-    }
-  }
-  return out;
-}
-
-/**
- * Blanks out comment text, preserving one output line per input line so a
- * violation still reports its true line number.
- *
- * A "does this line start with `//`" test is not good enough, and the gap is
- * exploitable in the false-PASS direction: `/* … *\/ const { useEditorStore } =
- * await import('@/stores/editorStore');` starts with `/*`, so a prefix test
- * skips the whole line — comment AND the real code after the terminator.
- *
- * Quote tracking is what keeps the strip itself from becoming the hole. A naive
- * "cut at the first `//`" blanks the tail of any line containing a URL in a
- * string literal, and blanked code is code this gate cannot see. Template-literal
- * state is deliberately reset per line: an unterminated quote means the rest of
- * the line survives into the scan, which over-reports rather than under-reports.
+/*
+ * `collectSourceFiles`, `stripComments` and `isTypeOnlyOccurrence` live in
+ * `@/test/utils/importScanner`. They started here, and moved when a second
+ * RSC-boundary test (`lib/chat/__tests__/apiHandlerReachability.test.ts`)
+ * needed the same three primitives: two hand-rolled comment strippers is
+ * precisely how one of them quietly stops catching things. The helper tests at
+ * the bottom of this file still exercise them through this import.
  */
-function stripComments(source: string): string[] {
-  const out: string[] = [];
-  let inBlock = false;
-
-  for (const line of source.split('\n')) {
-    let kept = '';
-    let quote: string | null = null;
-    let i = 0;
-
-    while (i < line.length) {
-      const ch = line[i];
-      const next = line[i + 1];
-
-      if (inBlock) {
-        if (ch === '*' && next === '/') {
-          inBlock = false;
-          i += 2;
-        } else {
-          i += 1;
-        }
-        continue;
-      }
-
-      if (quote !== null) {
-        if (ch === '\\') {
-          kept += ch + (next ?? '');
-          i += 2;
-          continue;
-        }
-        if (ch === quote) quote = null;
-        kept += ch;
-        i += 1;
-        continue;
-      }
-
-      if (ch === '"' || ch === "'" || ch === '`') {
-        quote = ch;
-        kept += ch;
-        i += 1;
-        continue;
-      }
-      if (ch === '/' && next === '/') break; // rest of the line is prose
-      if (ch === '/' && next === '*') {
-        inBlock = true;
-        i += 2;
-        continue;
-      }
-
-      kept += ch;
-      i += 1;
-    }
-
-    out.push(kept);
-  }
-
-  return out;
-}
-
-/**
- * True when the occurrence is erased at compile time and therefore contributes
- * no module edge: an `import type { … } from '…'` statement, or a deferred
- * `import('…')` sitting in type position (`: import('…').Foo`).
- *
- * Deliberately conservative — anything this cannot positively prove is
- * type-only is reported. `await import('…')` and a bare
- * `import x from '…'` both fall through to the failure path, which is the
- * point.
- *
- * The type-position test requires member ACCESS, not a call. `import('…').Foo`
- * names a type; `import('…').then(m => m.useEditorStore)` is a runtime load
- * wearing the same first few characters, and an earlier version of this
- * function waved it through. The `\b` before the lookahead is load-bearing: it
- * stops the identifier match backtracking off `then` onto `the` and satisfying
- * the "not followed by `(`" test one character early.
- */
-function isTypeOnlyOccurrence(line: string): boolean {
-  if (/^\s*import\s+type\s/.test(line)) return true;
-  if (/^\s*export\s+type\s/.test(line)) return true;
-  // Anything that evaluates the module is a real edge, whatever shape it wears.
-  if (/\bawait\s/.test(line) || /\.then\s*\(/.test(line)) return false;
-  // `=> import('@/hooks/useEngine').BatchResult` / `: import('…').Foo`
-  if (/[:=]>?\s*import\((['"])[^'"]+\1\)\s*\.[A-Za-z_$][\w$]*\b\s*(?!\()/.test(line)) return true;
-  return false;
-}
 
 describe('game-creation server-safe imports', () => {
   const files = GUARDED_ROOTS.flatMap(collectSourceFiles);
