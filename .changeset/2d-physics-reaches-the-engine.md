@@ -10,6 +10,9 @@ static platform, sensor trigger, one-way platform or conveyor had ever behaved
 as authored, while the inspector displayed the value that was asked for.
 
 Setting one property no longer resets the others: changing a body type or
-collider shape used to silently reset nine unrelated fields. And the editor now
-reflects what the simulation actually holds, rather than only its own optimistic
-copy.
+collider shape used to silently reset the thirteen other fields. And the editor
+now reflects what the simulation actually holds, rather than only its own
+optimistic copy.
+
+Adding 2D physics to an entity now starts it at the engine's own defaults, so
+the collider shape reads Box rather than Auto.

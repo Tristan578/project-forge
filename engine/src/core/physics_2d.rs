@@ -125,12 +125,15 @@ pub enum ColliderShape2d {
 ///
 /// Trade-off, identical to the 3D patch: because nothing is required, a
 /// misspelled key silently no-ops and the engine cannot detect it. The web client
-/// closes that gap by building every payload through `buildPhysics2dPatch`
-/// (`web/src/lib/physics/physics2dPayload.ts`), which copies only allowlisted
-/// keys. `deny_unknown_fields` would be the engine-side answer, but it cannot see
-/// the alias spellings as distinct and — more importantly — the drift test needs
-/// `Serialize` to enumerate the emitted names, so do NOT add
-/// `skip_serializing_if` here.
+/// closes that gap by building every payload through `buildUpdatePhysics2dPayload`
+/// / `buildSetPhysics2dPayload` (`web/src/lib/physics/physics2dPayload.ts`), which
+/// copy only allowlisted keys. `deny_unknown_fields` would be the engine-side
+/// answer, but serde documents it as incompatible with `#[serde(flatten)]`, and
+/// `UpdatePhysics2dPayload` (`core/commands/physics.rs`) flattens this struct
+/// beside `entity_id` — that flatten is what makes the wire partial at all, so it
+/// is not negotiable. The aliases are NOT the obstacle: the generated field
+/// visitor knows them as field names. See `.claude/rules/gotchas.md` → the
+/// "undetectable typo" bullet.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Physics2dPatch {
