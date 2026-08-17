@@ -539,12 +539,18 @@ fn handle_set_physics2d(payload: serde_json::Value) -> super::CommandResult {
     data.physics_data.apply_to(&mut resolved);
 
     if let Some(enabled) = data.enabled {
-        // Queued before the update so a failure to queue is reported by the update
-        // arm below; both go into the same frame's pending lists.
-        queue_physics2d_toggle_from_bridge(Physics2dToggle {
+        // Queued before the update, and CHECKED rather than discarded. Both queues
+        // read the same thread-local today, so in practice they fail together and
+        // the update arm below would report it — but that is a property of the
+        // current implementation, not of this function, and the failure mode it
+        // buys is the bad kind: a dropped enable reported as `Ok`, i.e. a body the
+        // caller believes is simulating and never is.
+        if !queue_physics2d_toggle_from_bridge(Physics2dToggle {
             entity_id: data.entity_id.clone(),
             enabled,
-        });
+        }) {
+            return Err("PendingCommands resource not initialized".to_string());
+        }
     }
 
     let update = Physics2dUpdate {
