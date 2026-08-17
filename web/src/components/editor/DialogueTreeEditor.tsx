@@ -175,7 +175,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
           {/* Set as start node */}
           {!isStartNode && (
             <button
-              onClick={() => updateTree(treeId, { startNodeId: node.id } as Partial<DialogueTree>)}
+              onClick={() => updateTree(treeId, { startNodeId: node.id })}
               className="text-[10px] text-blue-400 hover:text-blue-300"
             >
               Set as Start Node

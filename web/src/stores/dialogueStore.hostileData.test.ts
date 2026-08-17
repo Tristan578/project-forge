@@ -1434,7 +1434,7 @@ describe('a refused import names what it was missing', () => {
   // There is deliberately no row for an ELEMENT that is not an object. The
   // clause covers it (`!everyNodeIsRecord`), but no caller can reach that branch
   // of the MESSAGE: `importTree` repairs a non-record element away before the
-  // guard runs, and `updateTree` accepts only `name` and `variables`, so a
+  // guard runs, and `updateTree` accepts no `nodes` key at all, so a
   // caller-built `nodes` array never passes through a complaint. The check
   // itself is still very much live — `getTree` and `listTrees` call
   // `isWalkableTree` on whatever is already in the map — and that path is pinned
@@ -1461,5 +1461,103 @@ describe('a refused import names what it was missing', () => {
 
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('`variables` object'));
     expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining('startNodeId'));
+  });
+});
+
+// ===========================================================================
+// PF-1144 — a node id that is not a string
+// ===========================================================================
+
+describe('a node whose id is not a string is dropped at the door', () => {
+  /**
+   * Ingest checked that a node was an OBJECT and stopped there, so `{ id: 5 }`
+   * survived into the map — and then never worked, in two ways that both look
+   * like nothing happening:
+   *
+   * - every reader matches ids with `===` against a string, so
+   *   `nodes.find(n => n.id === currentNodeId)` can never reach it. The node is
+   *   in the tree, visible in the editor, and permanently unreachable.
+   * - "Set as Start Node" hands that id straight to `updateTree`, where
+   *   `isWalkableTree` refuses the whole update over `typeof startNodeId`. The
+   *   button does nothing and says nothing, every time it is clicked.
+   *
+   * Dropping the node during repair collapses both into the one outcome an
+   * author can act on: a counted drop, reported with the rest.
+   */
+  const badIds: Array<[string, unknown]> = [
+    ['a number', 5],
+    ['null', null],
+    ['an object', { toString: 'nope' }],
+    ['absent', undefined],
+  ];
+
+  it.each(badIds)('%s', (_label, id) => {
+    const treeId = useDialogueStore.getState().importTree(JSON.stringify({
+      name: 'Mixed',
+      startNodeId: 'good',
+      variables: {},
+      nodes: [{ id: 'good', type: 'end' }, { id, type: 'end' }],
+    }));
+
+    expect(treeId).not.toBeNull();
+    expect(rawTree(treeId!).nodes.map(n => n.id)).toEqual(['good']);
+  });
+
+  it('counts the drop in the same report as a non-object node', () => {
+    // The count is the whole remedy — a node that disappears in silence is the
+    // harm this replaces, not a smaller version of it.
+    useDialogueStore.getState().importTree(JSON.stringify({
+      name: 'Mixed',
+      startNodeId: 'good',
+      variables: {},
+      nodes: [{ id: 'good', type: 'end' }, { id: 5, type: 'end' }, 'not a node'],
+    }));
+
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('dropped 2'));
+  });
+
+  it('does not drop a node that has one', () => {
+    // Without this, dropping every node satisfies the cases above.
+    const treeId = useDialogueStore.getState().importTree(JSON.stringify({
+      name: 'Fine',
+      startNodeId: 'a',
+      variables: {},
+      nodes: [{ id: 'a', type: 'end' }, { id: 'b', type: 'end' }],
+    }));
+
+    expect(rawTree(treeId!).nodes.map(n => n.id)).toEqual(['a', 'b']);
+    expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining('dropped'));
+  });
+});
+
+describe('the start node can be moved, and the type says so', () => {
+  /**
+   * `updateTree`'s parameter listed only `name` and `variables`, so the editor's
+   * "Set as Start Node" button reached it through `as Partial<DialogueTree>`.
+   * The write worked — the guard below has always read `startNodeId` — but the
+   * cast is the shape that hides a dropped field: it silences the compiler on
+   * exactly the question of whether the store accepts what is being sent, which
+   * is the question worth asking. The type now names the field, and these pin
+   * both halves of what it claims.
+   */
+  it('accepts a startNodeId naming a node that exists', () => {
+    const treeId = useDialogueStore.getState().addTree('Tree', 'Start');
+    useDialogueStore.getState().addNode(treeId, { id: 'second', type: 'end' } as EndNode);
+
+    useDialogueStore.getState().updateTree(treeId, { startNodeId: 'second' });
+
+    expect(rawTree(treeId).startNodeId).toBe('second');
+  });
+
+  it('refuses a startNodeId that is not a string, and says why', () => {
+    const treeId = useDialogueStore.getState().addTree('Tree', 'Start');
+    const before = rawTree(treeId).startNodeId;
+
+    useDialogueStore.getState().updateTree(treeId, {
+      startNodeId: 5 as unknown as string,
+    });
+
+    expect(rawTree(treeId).startNodeId).toBe(before);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('startNodeId'));
   });
 });

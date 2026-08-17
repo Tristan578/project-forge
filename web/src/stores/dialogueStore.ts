@@ -111,7 +111,10 @@ interface DialogueStore {
   // Tree CRUD
   addTree: (name: string, startNodeText?: string) => string;
   removeTree: (treeId: string) => void;
-  updateTree: (treeId: string, updates: Partial<Pick<DialogueTree, 'name' | 'variables'>>) => void;
+  updateTree: (
+    treeId: string,
+    updates: Partial<Pick<DialogueTree, 'name' | 'variables' | 'startNodeId'>>,
+  ) => void;
   duplicateTree: (treeId: string) => string | null;
 
   // Node CRUD
@@ -492,8 +495,29 @@ function repairIngestedTree(raw: unknown): unknown {
   if (!isPlainRecord(tree) || !Array.isArray(tree.nodes)) return tree;
   // `filter` drops holes as well as non-records — it is the one array method
   // whose hole-skipping is the behaviour wanted here.
-  const nodes = tree.nodes.filter(isPlainRecord).map(repairNode);
+  //
+  // A node whose `id` is not a string is dropped alongside them, because every
+  // reader matches ids with `===` against a string: `nodes.find(n => n.id ===
+  // currentNodeId)` can never reach a node numbered `5`, so it is content that
+  // imports successfully and is then unreachable forever. Worse, the editor's
+  // "Set as Start Node" button hands that same id to `updateTree`, where
+  // `isWalkableTree` rejects the whole update over `typeof startNodeId` — the
+  // button does nothing, says nothing, and keeps doing nothing. Dropping the
+  // node at the door turns both of those into the one thing the author can act
+  // on: a counted drop reported by `droppedNodeCount`.
+  const nodes = tree.nodes.filter(hasStringId).map(repairNode);
   return { ...tree, nodes };
+}
+
+/**
+ * A record with a usable `id`, in one predicate so `filter` narrows to it.
+ *
+ * Written as a type guard rather than two chained filters because the `map` that
+ * follows takes `Record<string, unknown>`, and a plain boolean callback would
+ * leave the array typed `unknown[]`.
+ */
+function hasStringId(value: unknown): value is Record<string, unknown> {
+  return isPlainRecord(value) && typeof value.id === 'string';
 }
 
 function repairNode(raw: Record<string, unknown>): Record<string, unknown> {
@@ -700,7 +724,16 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
     get().saveToLocalStorage();
   },
 
-  updateTree: (treeId: string, updates: Partial<Pick<DialogueTree, 'name' | 'variables'>>) => {
+  // `startNodeId` is in the accepted set because the editor's "Set as Start
+  // Node" button has always written it — it just had to lie about the type to
+  // get past the compiler (`as Partial<DialogueTree>`), which is precisely the
+  // shape that hides a silently-dropped field. The guard below is what decides
+  // whether the write lands, and it already reads `startNodeId`; the type now
+  // agrees with it.
+  updateTree: (
+    treeId: string,
+    updates: Partial<Pick<DialogueTree, 'name' | 'variables' | 'startNodeId'>>,
+  ) => {
     set(state => {
       const tree = getTree(state.dialogueTrees, treeId);
       if (!tree) return state;
@@ -1051,7 +1084,7 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
           // note for whoever is looking at the console over a corrupt file, not an
           // interruption for an author who has lost nothing they can see.
           console.warn(
-            `[dialogue] dropped ${droppedNodes} stored node(s) that were not objects`,
+            `[dialogue] dropped ${droppedNodes} stored node(s) that were not objects with a string id`,
           );
         }
         set({ dialogueTrees: kept });
@@ -1117,7 +1150,7 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
       const droppedNodes = droppedNodeCount(raw, parsed);
       if (droppedNodes > 0) {
         console.warn(
-          `[dialogue] dropped ${droppedNodes} imported node(s) that were not objects`,
+          `[dialogue] dropped ${droppedNodes} imported node(s) that were not objects with a string id`,
         );
       }
       const tree = parsed;
