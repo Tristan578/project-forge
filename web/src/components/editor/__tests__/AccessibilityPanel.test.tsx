@@ -294,12 +294,17 @@ describe('AccessibilityPanel', () => {
       expect(mockGenerate).toHaveBeenCalledTimes(1);
     });
 
-    // Profile A should have dispatched set_input_binding for Jump
-    const setJumpCalls = mockDispatcher.mock.calls.filter(
-      ([cmd]) => cmd === 'set_input_binding',
-    );
-    expect(setJumpCalls.length).toBeGreaterThanOrEqual(1);
-    expect(setJumpCalls.some(([_cmd, args]) => args.actionName === 'Jump')).toBe(true);
+    // Profile A should have dispatched set_input_binding for Jump. The
+    // generate-count wait above is NOT enough to assert on: `generate` is
+    // called inside the setTimeout, before `setProfile`, so it resolves a
+    // re-render and an effect ahead of the dispatch this asserts on. Poll for
+    // the dispatch itself — same reason as the unmount test below.
+    await vi.waitFor(() => {
+      const setJumpCalls = mockDispatcher.mock.calls.filter(
+        ([cmd]) => cmd === 'set_input_binding',
+      );
+      expect(setJumpCalls.some(([_cmd, args]) => args.actionName === 'Jump')).toBe(true);
+    });
 
     mockDispatcher.mockClear();
 
@@ -309,17 +314,21 @@ describe('AccessibilityPanel', () => {
       expect(mockGenerate).toHaveBeenCalledTimes(2);
     });
 
-    // The old Jump binding should have been removed
-    const removeJumpCalls = mockDispatcher.mock.calls.filter(
-      ([cmd, args]) => cmd === 'remove_input_binding' && args.actionName === 'Jump',
-    );
-    expect(removeJumpCalls.length).toBeGreaterThanOrEqual(1);
+    // The old Jump binding should have been removed and the new Dash binding
+    // applied. Both come from the SAME effect teardown-and-rerun, so one wait
+    // covers them; asserting them together also proves they land in the same
+    // pass rather than the removal trailing a frame behind.
+    await vi.waitFor(() => {
+      const removeJumpCalls = mockDispatcher.mock.calls.filter(
+        ([cmd, args]) => cmd === 'remove_input_binding' && args.actionName === 'Jump',
+      );
+      expect(removeJumpCalls.length).toBeGreaterThanOrEqual(1);
 
-    // And the new Dash binding should have been applied
-    const setDashCalls = mockDispatcher.mock.calls.filter(
-      ([cmd, args]) => cmd === 'set_input_binding' && args.actionName === 'Dash',
-    );
-    expect(setDashCalls.length).toBeGreaterThanOrEqual(1);
+      const setDashCalls = mockDispatcher.mock.calls.filter(
+        ([cmd, args]) => cmd === 'set_input_binding' && args.actionName === 'Dash',
+      );
+      expect(setDashCalls.length).toBeGreaterThanOrEqual(1);
+    });
   });
 
   it('cleans up all applied keybindings on unmount (#8307)', async () => {

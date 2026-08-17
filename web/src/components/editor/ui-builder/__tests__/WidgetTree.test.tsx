@@ -4,7 +4,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup, act } from '@/test/utils/componentTestUtils';
 import { WidgetTree } from '../WidgetTree';
 import { useUIBuilderStore } from '@/stores/uiBuilderStore';
 
@@ -147,6 +147,15 @@ describe('WidgetTree', () => {
     fireEvent.click(deleteButtons[0]);
     await vi.waitFor(() => {
       expect(mockConfirm).toHaveBeenCalled();
+    });
+    // `confirm` having been CALLED is not the same as the handler's
+    // continuation having RUN: `removeWidget` sits after `await confirm(...)`,
+    // so the wait above is satisfied a microtask before the branch is even
+    // taken, and this negative assertion would pass vacuously. Await the same
+    // promise the handler awaits — our continuation is queued behind its —
+    // so a regression that deletes on cancel has definitively had its chance.
+    await act(async () => {
+      await mockConfirm.mock.results[0].value;
     });
     expect(mockRemoveWidget).not.toHaveBeenCalled();
   });
