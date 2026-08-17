@@ -24,7 +24,7 @@
 #### `core/commands/` — Command dispatch (split into domain modules)
 | File | Purpose |
 |------|---------|
-| `mod.rs` | `dispatch()` chain, `CommandResponse`, `CommandResult`, shared helpers |
+| `mod.rs` | `dispatch()` chain, `CommandResponse`, `CommandResult`, shared helpers, and `fn route_domain` — the routing table consulted BEFORE any domain module, so a name it omits is unreachable however correct its arm (`_ => 255` → `Err("Unknown command")`). Its `#[cfg(test)] mod route_domain_parity` compares the router's index against each domain's own `pub fn dispatch` arms, which is the only way to catch a name routed to the WRONG domain (PF-1178 — see `rules/gotchas.md` → Engine & Game Loop) |
 | `transform.rs` | Spawn, delete, duplicate, rename, reparent, camera, gizmo, snap, input |
 | `material.rs` | Material, light, ambient, environment, post-processing, skybox, shaders |
 | `physics.rs` | Physics 3D, joints, physics 2D, forces, raycasts |
