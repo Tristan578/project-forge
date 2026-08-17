@@ -277,10 +277,57 @@ describe('animationSlice', () => {
       store.getState().setSkeleton2d('entity1', data);
 
       expect(store.getState().skeletons2d.entity1).toEqual(data);
-      // Full payload, not objectContaining: the nesting under `skeletonData` IS
-      // the behaviour. A flat spread deserializes to an empty default skeleton.
+      // Full payload, not objectContaining: the nesting under `skeletonData` and the
+      // 3-element `localPosition` ARE the behaviour. The store type is 2D, but
+      // `Bone2dDef::local_position` is `[f32; 3]`, so sending the store's own
+      // 2-tuple is "invalid length 2, expected an array of length 3" — a hard
+      // reject that loses the whole rig with no error anywhere in the browser.
       expect(mockDispatch.mock.calls).toEqual([
-        ['create_skeleton2d', { entityId: 'entity1', skeletonData: data }],
+        [
+          'create_skeleton2d',
+          {
+            entityId: 'entity1',
+            skeletonData: {
+              bones: [
+                {
+                  name: 'root',
+                  parentBone: null,
+                  localPosition: [0, 0, 0],
+                  localRotation: 0,
+                  localScale: [1, 1],
+                  length: 50,
+                  color: [1, 1, 1, 1],
+                },
+              ],
+              slots: [],
+              skins: {},
+              activeSkin: 'default',
+              ikConstraints: [],
+            },
+          },
+        ],
+      ]);
+    });
+
+    it('setSkeleton2d should send an IK target the engine can read', () => {
+      // `IkConstraint2d.target_entity_id` is a Rust `String`. The store type declares
+      // `number`, which serde cannot deserialize into a String at all — so any
+      // skeleton carrying an IK constraint used to refuse in full.
+      const data = {
+        bones: [],
+        slots: [],
+        skins: {},
+        activeSkin: 'default',
+        ikConstraints: [
+          { name: 'left-arm', boneChain: ['shoulder', 'hand'], targetEntityId: 42, bendDirection: -1, mix: 0.5 },
+        ],
+      } as unknown as SkeletonData2d;
+
+      store.getState().setSkeleton2d('entity1', data);
+
+      const payload = mockDispatch.mock.calls[0][1] as { skeletonData: { ikConstraints: unknown[] } };
+      expect(payload.skeletonData.ikConstraints).toEqual([
+        { name: 'left-arm', boneChain: ['shoulder', 'hand'], targetEntityId: '42', bendDirection: -1, mix: 0.5 },
       ]);
     });
 

@@ -3,6 +3,7 @@
  */
 
 import { StateCreator } from 'zustand';
+import { buildCreateSkeleton2dPayload } from '@/lib/skeleton2d/skeletonPayload';
 import type { AnimationPlaybackState, AnimationClipData, SkeletonData2d, SkeletalAnimation2d } from './types';
 
 export interface AnimationSlice {
@@ -101,10 +102,15 @@ export const createAnimationSlice: StateCreator<AnimationSlice, [], [], Animatio
   },
   setSkeleton2d: (entityId, data) => {
     set(state => ({ skeletons2d: { ...state.skeletons2d, [entityId]: data } }));
-    // The engine spells this `create_skeleton2d` (no underscore before the 2d) and
-    // reads the data NESTED under `skeletonData` — a flat spread deserializes to
-    // `.unwrap_or_default()`, i.e. an empty skeleton. See engine/src/core/commands/sprites.rs.
-    if (dispatchCommand) dispatchCommand('create_skeleton2d', { entityId, skeletonData: data });
+    // The engine spells this `create_skeleton2d` (no underscore before the 2d), reads
+    // the data NESTED under `skeletonData`, and does NOT accept the store's shape:
+    // `local_position` is `[f32; 3]`, `target_entity_id` is a `String`, and
+    // `AttachmentData` is a tagged enum with no optional fields. Any one of those is a
+    // hard `Invalid skeletonData` reject that loses the whole rig, so the payload is
+    // built by `buildCreateSkeleton2dPayload` rather than passed through.
+    if (dispatchCommand) {
+      dispatchCommand('create_skeleton2d', buildCreateSkeleton2dPayload(entityId, data));
+    }
   },
   removeSkeleton2d: (entityId) => {
     set(state => {
