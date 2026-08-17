@@ -354,6 +354,33 @@ mod physics2d_patch_tests {
         assert_eq!(data, configured_platform());
     }
 
+    /// Two patches for one entity in a single frame must COMPOSE, not compete.
+    ///
+    /// `apply_physics2d_updates` accumulates successive updates for an entity that
+    /// has no `Physics2dData` yet, because `Commands` is deferred and its insert is
+    /// invisible to the query on the next iteration of the same drain. That is only
+    /// correct if applying the second patch onto the first's result keeps the first
+    /// patch's fields — i.e. if the bridge can accumulate instead of restarting
+    /// from `default()`. Restarting is what the pre-fix code did, and it silently
+    /// dropped the earlier patch. The bridge is wasm-only, so pin the property here.
+    #[test]
+    fn successive_patches_accumulate_onto_one_value() {
+        let mut data = Physics2dData::default();
+
+        Physics2dPatch { friction: Some(0.1), ..Default::default() }.apply_to(&mut data);
+        Physics2dPatch { restitution: Some(0.9), ..Default::default() }.apply_to(&mut data);
+
+        assert_eq!(data.friction, 0.1, "the second patch must not reset the first's field");
+        assert_eq!(data.restitution, 0.9);
+
+        // And the accumulated result is identical to applying both fields at once,
+        // which is what makes collapsing them into a single insert sound.
+        let mut at_once = Physics2dData::default();
+        Physics2dPatch { friction: Some(0.1), restitution: Some(0.9), ..Default::default() }
+            .apply_to(&mut at_once);
+        assert_eq!(data, at_once);
+    }
+
     /// The defect PF-1167 was filed for: `set_2d_collider_shape` used to queue
     /// `Physics2dData { collider_shape, ..Default::default() }`, so changing a
     /// platform's shape also reset its friction, mass, sensor flag and conveyor

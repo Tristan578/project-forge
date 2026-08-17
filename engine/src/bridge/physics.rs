@@ -310,6 +310,16 @@ pub(super) fn apply_remove_joint_requests(
 /// it, configuring 2D physics on a fresh entity was a total no-op: the loop found
 /// no match and dropped the command. `Without<Physics2dData>` makes the two
 /// queries disjoint, so there is no B0001 access conflict.
+///
+/// Two updates for the SAME fresh entity in one drain are accumulated rather than
+/// applied one at a time. `Commands` is deferred, so the insert issued for the
+/// first update is invisible to both queries on the second iteration: `query`
+/// still misses and `missing_query` still matches, so the second update would
+/// rebuild from `Physics2dData::default()` and DISCARD the first patch, then push
+/// a second history entry and emit a second event for one logical change. A
+/// batch carrying `set_physics_2d` plus an `update_physics_2d` for one entity
+/// reaches that directly. Accumulating makes a fresh entity behave exactly like
+/// an existing one: one insert, one history entry, one event.
 pub(super) fn apply_physics2d_updates(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -318,6 +328,11 @@ pub(super) fn apply_physics2d_updates(
     phys2d_enabled_query: Query<&EntityId, With<Physics2dEnabled>>,
     mut history: ResMut<HistoryStack>,
 ) {
+    // Fresh entities awaiting their first insert, in first-seen order. A `Vec` and
+    // not a map: the count is one drain's worth of commands, and the order has to
+    // be deterministic because history entries and events are emitted from it.
+    let mut fresh: Vec<(Entity, String, Physics2dData)> = Vec::new();
+
     for update in pending.physics2d_updates.drain(..) {
         let enabled = phys2d_enabled_query.iter().any(|eid| eid.0 == update.entity_id);
         let mut matched = false;
@@ -349,21 +364,21 @@ pub(super) fn apply_physics2d_updates(
             continue;
         }
 
-        // No `Physics2dData` yet — build it from defaults plus the patch and
-        // insert it, so this command is how 2D physics gets configured on an
-        // entity for the first time rather than being silently dropped.
+        // Already staged by an earlier update in this same drain — merge onto the
+        // accumulated value instead of starting over from the defaults.
+        if let Some((_, _, staged)) = fresh.iter_mut().find(|(_, id, _)| *id == update.entity_id) {
+            update.patch.apply_to(staged);
+            continue;
+        }
+
+        // No `Physics2dData` yet — build it from defaults plus the patch and stage
+        // it, so this command is how 2D physics gets configured on an entity for
+        // the first time rather than being silently dropped.
         for (entity, entity_id) in missing_query.iter() {
             if entity_id.0 == update.entity_id {
                 let mut new_physics = Physics2dData::default();
                 update.patch.apply_to(&mut new_physics);
-
-                commands.entity(entity).insert(new_physics.clone());
-                history.push(crate::core::history::UndoableAction::Physics2dChange {
-                    entity_id: update.entity_id.clone(),
-                    old_physics: None,
-                    new_physics: Some(new_physics.clone()),
-                });
-                events::emit_physics2d_changed(&update.entity_id, &new_physics, enabled);
+                fresh.push((entity, update.entity_id.clone(), new_physics));
                 matched = true;
                 break;
             }
@@ -375,6 +390,19 @@ pub(super) fn apply_physics2d_updates(
                 update.entity_id
             );
         }
+    }
+
+    // One insert, one history entry and one event per fresh entity, whatever the
+    // number of updates that contributed to it.
+    for (entity, entity_id, new_physics) in fresh {
+        let enabled = phys2d_enabled_query.iter().any(|eid| eid.0 == entity_id);
+        commands.entity(entity).insert(new_physics.clone());
+        history.push(crate::core::history::UndoableAction::Physics2dChange {
+            entity_id: entity_id.clone(),
+            old_physics: None,
+            new_physics: Some(new_physics.clone()),
+        });
+        events::emit_physics2d_changed(&entity_id, &new_physics, enabled);
     }
 }
 

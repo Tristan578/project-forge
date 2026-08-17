@@ -1357,4 +1357,61 @@ mod tests {
         let result = dispatch("definitely_not_physics", &json!({}));
         assert!(result.is_none(), "Unknown command should return None");
     }
+
+    // === the REAL entry point (PF-1167 round 2) ===
+    //
+    // Every test above calls this module's own `dispatch`, which is NOT how a
+    // command arrives. `commands::dispatch` matches `route_domain` FIRST, and
+    // `route_domain` ends in `_ => 255` whose arm returns `Unknown command`. So a
+    // perfect arm in this file is dead code unless the router also names it, and
+    // a domain-level test passes either way.
+    //
+    // That is not hypothetical: `update_physics2d` and `toggle_physics2d` (both
+    // spellings each) had complete handlers, four green tests above, and no
+    // router entry — so every call from the browser hit `Unknown command` and
+    // `dispatchCommand` swallowed it. These tests go through the real front door.
+
+    /// Reaching the pending queue is the only outcome that proves BOTH gates were
+    /// passed. A name-only assertion (`!err.contains("Unknown command")`) would be
+    /// satisfied by a deserialization reject, which is the other half of this
+    /// defect class.
+    fn assert_routed_and_reaches_handler(command: &str, payload: serde_json::Value) {
+        let err = super::super::dispatch(command, payload)
+            .expect_err("no pending queue under native test");
+        assert!(
+            err.contains("PendingCommands resource not initialized"),
+            "{command} must be routed by route_domain AND deserialize, got: {err}"
+        );
+    }
+
+    #[test]
+    fn every_2d_physics_command_is_routed_by_the_real_dispatch() {
+        for command in ["update_physics2d", "update_physics_2d"] {
+            assert_routed_and_reaches_handler(command, json!({"entityId": "e", "friction": 0.9}));
+        }
+        for command in ["toggle_physics2d", "toggle_physics_2d", "set_physics_2d_enabled"] {
+            assert_routed_and_reaches_handler(command, json!({"entityId": "e", "enabled": true}));
+        }
+        for command in ["set_physics2d", "set_physics_2d"] {
+            assert_routed_and_reaches_handler(
+                command,
+                json!({"entityId": "e", "physicsData": {"bodyType": "static"}}),
+            );
+        }
+        for command in ["set_2d_collider_shape", "set_2d_body_type"] {
+            assert_routed_and_reaches_handler(
+                command,
+                json!({"entityId": "e", "colliderShape": "circle", "bodyType": "static"}),
+            );
+        }
+    }
+
+    /// The router's fallthrough, so the assertion above is not vacuously true for
+    /// any string at all.
+    #[test]
+    fn an_unrouted_name_is_rejected_by_the_real_dispatch() {
+        let err = super::super::dispatch("update_physics3d", json!({"entityId": "e"}))
+            .expect_err("an unrouted name must not dispatch");
+        assert!(err.contains("Unknown command"), "got: {err}");
+    }
 }
