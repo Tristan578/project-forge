@@ -4,10 +4,10 @@ import { makeStepError, successResult, failResult } from './shared';
 import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 import {
   cameraModeNeedsTarget,
+  classifyCameraConfigKeys,
   filterCameraNumerics,
   normalizeCameraMode,
   resolveCameraEntityId,
-  unmappedCameraConfigKeys,
 } from '../cameraResolution';
 // Type-only: erased at compile time, so this adds no module edge into `@/stores`
 // (see `../__tests__/serverSafeImports.test.ts` — this file is reachable from an
@@ -137,11 +137,27 @@ export const cameraSetupExecutor: ExecutorDefinition = {
     // the engine as nothing. Dropping them is the honest outcome — a guessed unit
     // conversion would aim the camera wrongly rather than not at all — but
     // dropping them SILENTLY is the PF-1125 defect itself, one field down.
-    const ignored = unmappedCameraConfigKeys(parsed.data.cameraConfig);
-    if (ignored.length > 0) {
+    //
+    // One sentence per reason, because the reason is what the author acts on: an
+    // unrecognized key needs a different key, a bad value needs a different
+    // value, and a duplicate spelling needs neither. They shared a sentence that
+    // named only the first case, so the other two were reported as something
+    // they are not.
+    const report = classifyCameraConfigKeys(parsed.data.cameraConfig);
+    if (report.unknown.length > 0) {
       warnings.push(
-        `Camera settings the engine has no parameter for were ignored: ${ignored.join(', ')}.`,
+        `Camera settings the engine has no parameter for were ignored: ${report.unknown.join(', ')}.`,
       );
+    }
+    if (report.unusable.length > 0) {
+      const detail = report.unusable.map(({ key, reason }) => `${key} (${reason})`).join(', ');
+      warnings.push(`Camera settings the engine cannot accept were ignored: ${detail}.`);
+    }
+    if (report.overridden.length > 0) {
+      const detail = report.overridden
+        .map(({ key, field }) => `${key} (superseded by ${field})`)
+        .join(', ');
+      warnings.push(`Camera settings given twice kept the engine spelling: ${detail}.`);
     }
 
     return successResult({
