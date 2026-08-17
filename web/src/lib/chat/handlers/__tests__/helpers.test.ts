@@ -1,18 +1,26 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { toWireComponent } from '@/lib/engine/gameComponentWire';
+import { parseGameComponentWire, toWireComponent } from '@/lib/engine/gameComponentWire';
 import {
   buildCompoundResult,
   buildMaterialFromPartial,
   buildLightFromPartial,
   buildPhysicsFromPartial,
-  buildGameComponentFromInput,
   inferEntityType,
   identifyRole,
   mulberry32,
   wallFromStartEnd,
 } from '../helpers';
+
+// The alias every game-component case below used to call through —
+// `buildGameComponentFromInput` in `../helpers` — was retired by PF-1142 once it
+// had become a one-line forward. Its body is what runs here.
+// `parseGameComponentWire`, not `buildStoreComponent`: these bags are the
+// ENGINE's vocabulary, which is what a model answers, and `dialogueTrigger` is
+// the one component whose store field names diverge from the Rust struct's.
+const built = (componentType: string, properties: Record<string, unknown> = {}) =>
+  parseGameComponentWire({ componentType, properties });
 
 describe('buildCompoundResult', () => {
   it('should report full success', () => {
@@ -127,85 +135,6 @@ describe('buildPhysicsFromPartial', () => {
     expect(phys.bodyType).toBe('fixed');
     expect(phys.restitution).toBe(0.9);
     expect(phys.isSensor).toBe(true);
-  });
-});
-
-describe('buildGameComponentFromInput', () => {
-  it('should build character_controller with defaults', () => {
-    const comp = buildGameComponentFromInput('character_controller', {}) as Record<string, unknown>;
-    expect(comp).not.toBeNull();
-    expect(comp.type).toBe('characterController');
-    const cc = comp.characterController as Record<string, unknown>;
-    expect(cc.speed).toBe(5);
-    expect(cc.jumpHeight).toBe(8);
-  });
-
-  it('should build health with overrides', () => {
-    const comp = buildGameComponentFromInput('health', { maxHp: 200, respawnOnDeath: false }) as Record<string, unknown>;
-    expect(comp.type).toBe('health');
-    const h = comp.health as Record<string, unknown>;
-    expect(h.maxHp).toBe(200);
-    expect(h.currentHp).toBe(200);
-    expect(h.respawnOnDeath).toBe(false);
-    // Matches the engine's `default_true` — omitting the knob must not change
-    // what an entity does at zero health.
-    expect(h.despawnOnDeath).toBe(true);
-  });
-
-  it('should build health with despawnOnDeath disabled', () => {
-    const comp = buildGameComponentFromInput('health', { despawnOnDeath: false }) as Record<string, unknown>;
-    const h = comp.health as Record<string, unknown>;
-    expect(h.despawnOnDeath).toBe(false);
-  });
-
-  it('should build collectible', () => {
-    const comp = buildGameComponentFromInput('collectible', { value: 5 }) as Record<string, unknown>;
-    expect(comp.type).toBe('collectible');
-    expect((comp.collectible as Record<string, unknown>).value).toBe(5);
-  });
-
-  it('should build damage_zone', () => {
-    const comp = buildGameComponentFromInput('damage_zone', { damagePerSecond: 50 }) as Record<string, unknown>;
-    expect(comp.type).toBe('damageZone');
-    expect((comp.damageZone as Record<string, unknown>).damagePerSecond).toBe(50);
-  });
-
-  it('should build moving_platform with defaults', () => {
-    const comp = buildGameComponentFromInput('moving_platform', {}) as Record<string, unknown>;
-    expect(comp.type).toBe('movingPlatform');
-    const mp = comp.movingPlatform as Record<string, unknown>;
-    expect(mp.speed).toBe(2);
-    expect(mp.loopMode).toBe('pingPong');
-  });
-
-  it('should build spawner', () => {
-    const comp = buildGameComponentFromInput('spawner', { entityType: 'sphere', maxCount: 10 }) as Record<string, unknown>;
-    expect(comp.type).toBe('spawner');
-    const s = comp.spawner as Record<string, unknown>;
-    expect(s.entityType).toBe('sphere');
-    expect(s.maxCount).toBe(10);
-  });
-
-  it('should build win_condition', () => {
-    // `collectAll` is the one spelling the engine's match arm recognises; this
-    // asserted `collect_all` survived, which pinned the passthrough that turned
-    // a collect-all game into a score game (see the win-condition test below).
-    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'collectAll' }) as Record<string, unknown>;
-    expect(comp.type).toBe('winCondition');
-    expect((comp.winCondition as Record<string, unknown>).conditionType).toBe('collectAll');
-  });
-
-  it('falls back to the engine default for a conditionType the engine cannot parse', () => {
-    // `'collect_all'` is not a member — the engine's `match` has no arm for it and
-    // falls through to `WinConditionType::Score`. Storing the string verbatim (what
-    // the old unvalidated cast did) left the inspector and the running game
-    // describing different win conditions with nothing to report the split.
-    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'collect_all' }) as Record<string, unknown>;
-    expect((comp.winCondition as Record<string, unknown>).conditionType).toBe('score');
-  });
-
-  it('should return null for unknown types', () => {
-    expect(buildGameComponentFromInput('unknown_type', {})).toBeNull();
   });
 });
 
@@ -340,6 +269,7 @@ describe('wallFromStartEnd', () => {
 // ===========================================================================
 
 describe('bounds on model-supplied values', () => {
+
   it('never throws, whatever it is handed', () => {
     const junk: unknown[] = [null, undefined, 'text', 42, [], () => {}, { metallic: {} }];
 
@@ -347,7 +277,7 @@ describe('bounds on model-supplied values', () => {
       expect(() => buildMaterialFromPartial(input as Record<string, unknown>)).not.toThrow();
       expect(() => buildLightFromPartial(input as Record<string, unknown>)).not.toThrow();
       expect(() => buildPhysicsFromPartial(input as Record<string, unknown>)).not.toThrow();
-      expect(() => buildGameComponentFromInput('health', input as Record<string, unknown>)).not.toThrow();
+      expect(() => built('health', input as Record<string, unknown>)).not.toThrow();
     }
   });
 
@@ -362,19 +292,19 @@ describe('bounds on model-supplied values', () => {
 
   it('drops an over-long identifier rather than truncating it', () => {
     // Half an entity id names the wrong entity; no id at all takes the default.
-    const comp = buildGameComponentFromInput('follower', { targetEntityId: 'e'.repeat(300) });
+    const comp = built('follower', { targetEntityId: 'e'.repeat(300) });
 
     expect((comp as { follower: { targetEntityId: string | null } }).follower.targetEntityId).toBeNull();
   });
 
   it('rounds target_score, which the engine reads as Option<u32>', () => {
-    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'score', targetScore: 9.7 });
+    const comp = built('win_condition', { conditionType: 'score', targetScore: 9.7 });
 
     expect((comp as { winCondition: { targetScore: number | null } }).winCondition.targetScore).toBe(10);
   });
 
   it('refuses a spawner interval of zero, which spawns every frame', () => {
-    const comp = buildGameComponentFromInput('spawner', { intervalSecs: 0 });
+    const comp = built('spawner', { intervalSecs: 0 });
 
     // The exact floor the engine clamps to, not merely "positive": a typo'd
     // 1e-30 is also positive, and would leave the store recording a value the
@@ -383,7 +313,7 @@ describe('bounds on model-supplied values', () => {
   });
 
   it('caps an absurd spawner count at the engine\'s own ceiling', () => {
-    const comp = buildGameComponentFromInput('spawner', { maxCount: 1e6 });
+    const comp = built('spawner', { maxCount: 1e6 });
 
     expect((comp as { spawner: { maxCount: number } }).spawner.maxCount).toBe(1000);
   });
@@ -391,20 +321,20 @@ describe('bounds on model-supplied values', () => {
   it('drops an over-long name on a non-nullable field back to its own default', () => {
     // The nullable variant answers null; this one has no null to fall back to,
     // so it takes the builder's default instead of a truncated string.
-    const comp = buildGameComponentFromInput('trigger_zone', { eventName: 'x'.repeat(300) });
+    const comp = built('trigger_zone', { eventName: 'x'.repeat(300) });
 
     expect((comp as { triggerZone: { eventName: string } }).triggerZone.eventName).toBe('trigger');
   });
 
   it('still returns null for a component type it does not know', () => {
-    expect(buildGameComponentFromInput('teleprompter', {})).toBeNull();
+    expect(built('teleprompter', {})).toBeNull();
   });
 });
 
 describe('compoundHandlers does not shadow this module', () => {
   // PF-1160 was a private copy of every export below sitting in
   // compoundHandlers.ts and winning over the import, so the validated module
-  // never ran. The four validating builders are protected by value assertions
+  // never ran. The three validating builders are protected by value assertions
   // elsewhere in the suite; the other five clamp nothing, so a re-added copy
   // of those would behave identically and no behavioural test could see it.
   // This one reads the source and can.
@@ -413,7 +343,6 @@ describe('compoundHandlers does not shadow this module', () => {
     'buildMaterialFromPartial',
     'buildLightFromPartial',
     'buildPhysicsFromPartial',
-    'buildGameComponentFromInput',
     'inferEntityType',
     'identifyRole',
     'mulberry32',
@@ -433,7 +362,7 @@ describe('compoundHandlers does not shadow this module', () => {
     expect(source).not.toMatch(new RegExp(`^\\s*(?:export\\s+)?(?:const|let|var)\\s+${name}\\b`, 'm'));
   });
 
-  // Naming the nine and finding *a* `from './helpers'` somewhere are two
+  // Naming the eight and finding *a* `from './helpers'` somewhere are two
   // different claims: the type-only `import type { GameplayAnalysis }` at the
   // top of the file already satisfies the second on its own. Bind them to the
   // same value-import block, so deleting that block fails here rather than
@@ -533,7 +462,7 @@ describe('game-component bounds match the engine, field by field', () => {
 
   // Components the engine knows and these builders do not (`interactable`)
   // answer null; they are a gap in PF-1142's other builder, not a drift here.
-  const covered = bounds.filter((b) => buildGameComponentFromInput(b.component, {}) !== null);
+  const covered = bounds.filter((b) => built(b.component) !== null);
 
   it('covers every component both sides know', () => {
     expect(new Set(covered.map((b) => b.component)).size).toBeGreaterThanOrEqual(10);
@@ -547,8 +476,8 @@ describe('game-component bounds match the engine, field by field', () => {
   // Going back out through `toWireComponent` also asserts the number the engine
   // actually receives rather than the one the store happens to hold.
   const read = (component: string, key: string, value: number): unknown => {
-    const built = buildGameComponentFromInput(component, { [key]: value });
-    return built === null ? null : toWireComponent(built).properties[key];
+    const comp = built(component, { [key]: value });
+    return comp === null ? null : toWireComponent(comp).properties[key];
   };
 
   it.each(covered.map((b) => [`${b.component}.${b.key}`, b] as const))(
@@ -565,21 +494,21 @@ describe('fields the engine reads as something other than a number', () => {
     // snake_case is the plausible model answer — every component type in the
     // same call is spelled that way — and the engine's match falls through to
     // Score, turning "collect all the coins" into "reach 10 points".
-    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'collect_all' });
+    const comp = built('win_condition', { conditionType: 'collect_all' });
 
     expect((comp as { winCondition: { conditionType: string } }).winCondition.conditionType).toBe('score');
     expect(
-      (buildGameComponentFromInput('win_condition', { conditionType: 'collectAll' }) as
+      (built('win_condition', { conditionType: 'collectAll' }) as
         { winCondition: { conditionType: string } }).winCondition.conditionType,
     ).toBe('collectAll');
   });
 
   it('drops a one-point waypoint list, which is a platform that never moves', () => {
-    const comp = buildGameComponentFromInput('moving_platform', { waypoints: [[0, 0, 0]] });
+    const comp = built('moving_platform', { waypoints: [[0, 0, 0]] });
 
     // The engine's mover early-returns below two points and reports nothing,
     // so the field falls back to the builder's own two-point default.
-    const fallback = (buildGameComponentFromInput('moving_platform', {}) as
+    const fallback = (built('moving_platform', {}) as
       { movingPlatform: { waypoints: number[][] } }).movingPlatform.waypoints;
     expect(fallback).toHaveLength(2);
     expect((comp as { movingPlatform: { waypoints: number[][] } }).movingPlatform.waypoints).toEqual(fallback);

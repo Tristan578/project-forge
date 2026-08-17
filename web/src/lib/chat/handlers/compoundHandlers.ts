@@ -18,13 +18,13 @@ import type { EntityType, InputBinding } from './types';
 import { parseArgs, zSetupGameFromDescription } from './types';
 import { getPresetById } from '@/lib/materialPresets';
 import { buildEntityIndex, findEntityByName } from '@/lib/engine/entityIndex';
+import { buildStoreComponent, parseGameComponentWire } from '@/lib/engine/gameComponentWire';
 import type { GameplayAnalysis } from './helpers';
 import {
   buildCompoundResult,
   buildMaterialFromPartial,
   buildLightFromPartial,
   buildPhysicsFromPartial,
-  buildGameComponentFromInput,
   inferEntityType,
   identifyRole,
   mulberry32,
@@ -470,7 +470,18 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         if (ent.gameComponent) {
           const componentType = ent.gameComponent as string;
           const componentProps = (ent.gameComponentProps as Record<string, unknown>) ?? {};
-          const component = buildGameComponentFromInput(componentType, componentProps);
+          // `parseGameComponentWire`, not `buildStoreComponent`: every other call
+          // in this file names a component and writes its fields as literals right
+          // there, so the store's vocabulary is the one being spoken. This one takes
+          // both the name and the bag from the model, which answers in the engine's
+          // vocabulary — and `dialogueTrigger` is the one component whose store field
+          // names diverge from the Rust struct's. `buildStoreComponent` reads store
+          // names, so it would answer a fully-defaulted dialogue trigger for a bag
+          // that specified every field, and nothing downstream reports the difference.
+          const component = parseGameComponentWire({
+            componentType,
+            properties: componentProps,
+          });
           if (component) ctx.store.addGameComponent(entityId, component);
         }
 
@@ -617,7 +628,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
             ctx.store.updatePhysics(obstId, buildPhysicsFromPartial(obstacle.physics as Record<string, unknown>));
           }
           if (obstacle.gameComponent) {
-            const comp = buildGameComponentFromInput(
+            const comp = buildStoreComponent(
               obstacle.gameComponent as string,
               (obstacle.gameComponentProps as Record<string, unknown>) ?? {}
             );
@@ -675,13 +686,13 @@ export const compoundHandlers: Record<string, ToolHandler> = {
           ctx.store.updateMaterial(goalId, buildMaterialFromPartial({ baseColor: [1, 1, 0, 1], unlit: true }));
 
           if (goal.gameComponent) {
-            const comp = buildGameComponentFromInput(
+            const comp = buildStoreComponent(
               goal.gameComponent as string,
               (goal.gameComponentProps as Record<string, unknown>) ?? {}
             );
             if (comp) ctx.store.addGameComponent(goalId, comp);
           } else if (goalType === 'reach') {
-            const triggerComp = buildGameComponentFromInput('trigger_zone', {
+            const triggerComp = buildStoreComponent('trigger_zone', {
               eventName: 'goal_reached',
               oneShot: true,
             });
@@ -739,11 +750,11 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       });
       ctx.store.updatePhysics(charId, physData);
 
-      const controllerComp = buildGameComponentFromInput('character_controller', controller);
+      const controllerComp = buildStoreComponent('character_controller', controller);
       if (controllerComp) ctx.store.addGameComponent(charId, controllerComp);
 
       if (health !== null) {
-        const healthComp = buildGameComponentFromInput('health', health ?? {});
+        const healthComp = buildStoreComponent('health', health ?? {});
         if (healthComp) ctx.store.addGameComponent(charId, healthComp);
       }
 
@@ -820,7 +831,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         if (config.gameComponents) {
           const components = config.gameComponents as Array<Record<string, unknown>>;
           for (const comp of components) {
-            const builtComp = buildGameComponentFromInput(
+            const builtComp = buildStoreComponent(
               comp.type as string,
               (comp.props as Record<string, unknown>) ?? {}
             );
@@ -1050,9 +1061,9 @@ export const compoundHandlers: Record<string, ToolHandler> = {
           lockRotationZ: true,
         }),
       );
-      const controller = buildGameComponentFromInput('character_controller', {});
+      const controller = buildStoreComponent('character_controller', {});
       if (controller) ctx.store.addGameComponent(id, controller);
-      const health = buildGameComponentFromInput('health', {});
+      const health = buildStoreComponent('health', {});
       if (health) ctx.store.addGameComponent(id, health);
     });
 
@@ -1068,8 +1079,8 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         ctx.store.updateMaterial(id, buildMaterialFromPartial({ baseColor: [1, 0.2, 0.2, 1] }));
         const behavior =
           plan.enemyBehavior === 'follower' && playerId
-            ? buildGameComponentFromInput('follower', { targetEntityId: playerId })
-            : buildGameComponentFromInput('moving_platform', {
+            ? buildStoreComponent('follower', { targetEntityId: playerId })
+            : buildStoreComponent('moving_platform', {
                 waypoints: [
                   [offset, 1, 8],
                   [offset, 1, 4],
@@ -1098,9 +1109,9 @@ export const compoundHandlers: Record<string, ToolHandler> = {
           id,
           buildPhysicsFromPartial({ bodyType: 'fixed', isSensor: true }),
         );
-        const collectible = buildGameComponentFromInput('collectible', { value: 1 });
+        const collectible = buildStoreComponent('collectible', { value: 1 });
         if (collectible) ctx.store.addGameComponent(id, collectible);
-        const trigger = buildGameComponentFromInput('trigger_zone', { eventName: 'coin_collected' });
+        const trigger = buildStoreComponent('trigger_zone', { eventName: 'coin_collected' });
         if (trigger) ctx.store.addGameComponent(id, trigger);
       });
     }
@@ -1125,7 +1136,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         id,
         buildPhysicsFromPartial({ bodyType: 'fixed', isSensor: true }),
       );
-      const trigger = buildGameComponentFromInput('trigger_zone', {
+      const trigger = buildStoreComponent('trigger_zone', {
         eventName: 'goal_reached',
         oneShot: true,
       });
@@ -1143,7 +1154,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     // (5) Win condition — a reachGoal win_condition attached to the goal entity,
     // pointing at the goal as its targetEntityId. Reaching the goal wins the game.
     if (goalId) {
-      const winCondition = buildGameComponentFromInput('win_condition', {
+      const winCondition = buildStoreComponent('win_condition', {
         conditionType: 'reachGoal',
         targetEntityId: goalId,
       });

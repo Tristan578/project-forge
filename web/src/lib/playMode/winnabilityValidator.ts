@@ -46,7 +46,8 @@ export type WinnabilityIssueCode =
   | 'GOAL_TARGET_MISSING'
   | 'NO_PLAYER'
   | 'NO_COLLECTIBLES'
-  | 'INVALID_TARGET_SCORE';
+  | 'INVALID_TARGET_SCORE'
+  | 'UNKNOWN_WIN_CONDITION';
 
 export interface WinnabilityIssue {
   code: WinnabilityIssueCode;
@@ -136,8 +137,23 @@ function evaluateCondition(
       }
       return [];
     }
-    default:
-      return [];
+    default: {
+      // Fail CLOSED. `conditionType` is typed as a union, but the value is
+      // LLM-authored and also arrives from `.forge` scenes saved by older
+      // builds, so the runtime value is not guaranteed to be a member. The
+      // engine collapses anything it cannot parse to `Score` with a target it
+      // never accrues (`game_components.rs` `_ => WinConditionType::Score`),
+      // which is unwinnable — so returning no issues here would hand the
+      // player exactly the scene this gate exists to stop (PF-1123 / #8542).
+      const shown = typeof data.conditionType === 'string' && data.conditionType
+        ? safeLabel(data.conditionType)
+        : 'unset';
+      return [{
+        code: 'UNKNOWN_WIN_CONDITION',
+        entityId,
+        message: `The win condition type ("${shown}") is not one the engine can run, so the game can never be won. Set it to "reach goal", "collect all", or "reach score".`,
+      }];
+    }
   }
 }
 
