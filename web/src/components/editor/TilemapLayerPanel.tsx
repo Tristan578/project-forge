@@ -60,11 +60,13 @@ export function TilemapLayerPanel() {
             Layers
           </h3>
           <button
+            type="button"
             onClick={handleAddLayer}
             className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300"
             title="Add Layer"
+            aria-label="Add layer"
           >
-            <Plus size={14} />
+            <Plus size={14} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -85,7 +87,7 @@ export function TilemapLayerPanel() {
                 }`}
               >
                 {/* Drag handle */}
-                <div className="cursor-move text-zinc-400" title="Drag to reorder">
+                <div className="cursor-move text-zinc-400" title="Drag to reorder" aria-hidden="true">
                   <GripVertical size={14} />
                 </div>
 
@@ -99,18 +101,25 @@ export function TilemapLayerPanel() {
                   }}
                   onClick={(e) => e.stopPropagation()}
                   className="min-w-0 flex-1 rounded border-0 bg-transparent px-1 py-0.5 text-xs text-zinc-300 focus:bg-zinc-900 focus:outline-none"
+                  aria-label={`Name of layer ${index + 1}`}
                 />
 
-                {/* Visibility toggle */}
+                {/* Visibility toggle. `title` gives every row's control the same
+                    name, so the layer being acted on has to be in the label. */}
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     handleUpdateLayer(index, { visible: !layer.visible });
                   }}
                   className="rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
                   title={layer.visible ? 'Hide layer' : 'Show layer'}
+                  aria-label={`${layer.visible ? 'Hide' : 'Show'} layer ${layer.name || index + 1}`}
+                  aria-pressed={layer.visible}
                 >
-                  {layer.visible ? <Eye size={12} /> : <EyeOff size={12} />}
+                  {layer.visible
+                    ? <Eye size={12} aria-hidden="true" />
+                    : <EyeOff size={12} aria-hidden="true" />}
                 </button>
 
                 {/* Collision toggle */}
@@ -123,8 +132,10 @@ export function TilemapLayerPanel() {
                     layer.isCollision ? 'text-yellow-500' : 'text-zinc-400'
                   } hover:bg-zinc-700`}
                   title={layer.isCollision ? 'Collision enabled' : 'Collision disabled'}
+                  aria-label={`Collision on layer ${layer.name || index + 1}`}
+                  aria-pressed={layer.isCollision}
                 >
-                  <Shield size={12} />
+                  <Shield size={12} aria-hidden="true" />
                 </button>
 
                 {/* Opacity display */}
@@ -138,14 +149,16 @@ export function TilemapLayerPanel() {
                 {/* Delete button */}
                 {tilemapData.layers.length > 1 && (
                   <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       handleRemoveLayer(index);
                     }}
                     className="rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-red-500"
                     title="Delete layer"
+                    aria-label={`Delete layer ${layer.name || index + 1}`}
                   >
-                    <Trash2 size={12} />
+                    <Trash2 size={12} aria-hidden="true" />
                   </button>
                 )}
               </div>

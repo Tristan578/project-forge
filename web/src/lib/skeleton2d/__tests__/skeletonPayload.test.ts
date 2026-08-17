@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   buildCreateSkeleton2dPayload,
   buildWireSkeletonData2d,
+  collectSkeleton2dWarnings,
   MAX_IK_BONE_CHAIN_2D,
   type SkeletonSource2d,
 } from '../skeletonPayload';
@@ -218,9 +219,11 @@ describe('ik constraints', () => {
 
   // `parse_ik_chain2d` bounds all three of these, but it only runs for a
   // `create_ik_chain2d` command. Everything the editor and `import_skeleton_json`
-  // send arrives as a whole skeleton through this builder instead, so the same
-  // invariants have to hold here or a rig can carry values the engine's own
-  // command path would have refused.
+  // send arrives as a whole skeleton through this builder instead, where serde
+  // applies no validation at all — so a rig would otherwise carry values the
+  // engine's own command path refuses outright. The engine REJECTS where this
+  // BOUNDS, deliberately: a reject on the whole-skeleton path costs every other
+  // bone in the rig. Each bound is reported instead (see the warnings block below).
 
   it('truncates a bone chain past the engine bound rather than sending it', () => {
     const { ikConstraints } = buildWireSkeletonData2d({
@@ -263,6 +266,149 @@ describe('ik constraints', () => {
       // silently promote it to full IK.
       expect(ikConstraints[0].mix, `mix ${given}`).toBe(expected);
     }
+  });
+
+  it('drops a chain entry that is not a bone name rather than losing the rig', () => {
+    // `IkConstraint2d::bone_chain` is a `Vec<String>`, so ONE non-string entry is a
+    // hard `Invalid skeletonData` reject — which costs every other bone in the
+    // skeleton, not just this chain.
+    const warnings: string[] = [];
+    const built = buildWireSkeletonData2d(
+      {
+        bones: [{ name: 'root' }],
+        ikConstraints: [{
+          name: 'arm',
+          boneChain: ['a', 7 as unknown as string, '', null as unknown as string, 'b'],
+        }],
+      },
+      warnings,
+    );
+
+    expect(built.ikConstraints[0].boneChain).toEqual(['a', 'b']);
+    // The rest of the rig survives, which is the whole point of bounding here.
+    expect(built.bones).toHaveLength(1);
+    expect(warnings.filter((w) => w.includes('not a bone name'))).toHaveLength(3);
+  });
+
+  it('drops a chain hole, which JSON.stringify would otherwise send as null', () => {
+    // The hole is the input under test: a callback form skips it entirely, so the
+    // gap survives positionally and serializes to a `null` the engine refuses.
+    const holed = ['a', 'b', 'c'];
+    delete holed[1];
+
+    const warnings: string[] = [];
+    const { ikConstraints } = buildWireSkeletonData2d(
+      { ikConstraints: [{ name: 'arm', boneChain: holed }] },
+      warnings,
+    );
+
+    expect(ikConstraints[0].boneChain).toEqual(['a', 'c']);
+    expect(warnings.some((w) => w.includes('bones[1]'))).toBe(true);
+  });
+});
+
+describe('warnings report every bound the engine would have rejected', () => {
+  it('reports a truncated chain, naming the constraint and the limit', () => {
+    const warnings: string[] = [];
+    buildWireSkeletonData2d(
+      {
+        ikConstraints: [{
+          name: 'arm',
+          boneChain: Array.from({ length: MAX_IK_BONE_CHAIN_2D + 3 }, (_, i) => `b${i}`),
+        }],
+      },
+      warnings,
+    );
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('arm');
+    expect(warnings[0]).toContain(String(MAX_IK_BONE_CHAIN_2D));
+    expect(warnings[0]).toContain('3');
+  });
+
+  it('reports a chain the solver will skip', () => {
+    const warnings: string[] = [];
+    buildWireSkeletonData2d({ ikConstraints: [{ name: 'arm', boneChain: ['a'] }] }, warnings);
+
+    // `parse_ik_chain2d` refuses `bones.len() < 2` outright, and the solver's own
+    // `bone_chain.len() < 2` guard skips it silently. Neither tells the author.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('at least 2');
+  });
+
+  it('reports a collapsed bend direction, including a 0 that becomes +1', () => {
+    const warnings: string[] = [];
+    buildWireSkeletonData2d(
+      {
+        ikConstraints: [
+          { name: 'a', boneChain: ['x', 'y'], bendDirection: 4.5 },
+          // 0 is not a neutral value here: the engine's `Some(v) if v < 0.0` arm
+          // does not match it, so it is sent as a positive bend.
+          { name: 'b', boneChain: ['x', 'y'], bendDirection: 0 },
+        ],
+      },
+      warnings,
+    );
+
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain('4.5');
+    expect(warnings[1]).toContain('bend direction 0');
+  });
+
+  it('reports a clamped mix but stays silent on a value already in range', () => {
+    const warnings: string[] = [];
+    buildWireSkeletonData2d(
+      {
+        ikConstraints: [
+          { name: 'a', boneChain: ['x', 'y'], mix: 1.5 },
+          { name: 'b', boneChain: ['x', 'y'], mix: 0 },
+          { name: 'c', boneChain: ['x', 'y'], mix: 0.25 },
+        ],
+      },
+      warnings,
+    );
+
+    // 0 is a legal authored value (full FK) and must not be reported as clamped.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('1.5');
+  });
+
+  it('stays silent for a skeleton with nothing to report', () => {
+    const warnings: string[] = [];
+    buildWireSkeletonData2d(
+      {
+        bones: [{ name: 'root' }],
+        // An empty target is the one difference from `parse_ik_chain2d` that is
+        // deliberate — the store type documents it as "no target yet" and the
+        // inspector labels the chain inactive — so it is not a warning.
+        ikConstraints: [{ name: 'arm', boneChain: ['a', 'b'], targetEntityId: '' }],
+      },
+      warnings,
+    );
+
+    expect(warnings).toEqual([]);
+  });
+
+  it('is optional: omitting the collector changes nothing about the payload', () => {
+    const source = {
+      ikConstraints: [{ name: 'arm', boneChain: ['a'], mix: 2 }],
+    };
+    const warnings: string[] = [];
+
+    expect(buildWireSkeletonData2d(source)).toEqual(
+      buildWireSkeletonData2d(source, warnings),
+    );
+    expect(warnings.length).toBeGreaterThan(0);
+  });
+
+  it('collectSkeleton2dWarnings returns the same list the builder reports', () => {
+    const source = {
+      ikConstraints: [{ name: 'arm', boneChain: ['a'], bendDirection: -3, mix: 9 }],
+    };
+    const warnings: string[] = [];
+    buildWireSkeletonData2d(source, warnings);
+
+    expect(collectSkeleton2dWarnings(source)).toEqual(warnings);
   });
 });
 

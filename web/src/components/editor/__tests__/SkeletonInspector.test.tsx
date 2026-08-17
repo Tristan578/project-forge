@@ -239,7 +239,41 @@ describe('SkeletonInspector', () => {
     });
     render(<SkeletonInspector entityId="entity-1" />);
     expect(screen.getByText('IK Constraints').textContent).toBe('IK Constraints');
-    expect(screen.getByText('arm_ik').textContent).toBe('arm_ik');
+    // The name row also carries the inactive badge, so assert the two parts
+    // separately rather than an equality on the row's whole text content.
+    expect(screen.getByText('arm_ik')).toBeInTheDocument();
+    // This fixture's `targetEntityId` is empty, which the engine's solver can never
+    // resolve — so the row MUST say so. Asserting the badge away to keep an older
+    // equality passing would put back the bug where a chain that can never move a
+    // bone rendered identically to a working one.
+    expect(screen.getByText('(inactive)')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Target: not set — this chain will not solve/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Bones: upper_arm → forearm/)).toBeInTheDocument();
+    expect(screen.getByText(/Bend: positive/)).toBeInTheDocument();
+    expect(screen.getByText(/Mix: 80%/)).toBeInTheDocument();
+  });
+
+  it('does not mark an IK constraint inactive when it has a target', () => {
+    setupStore({
+      skeleton: {
+        ...baseSkeleton,
+        ikConstraints: [
+          {
+            name: 'arm_ik',
+            boneChain: ['upper_arm', 'forearm'],
+            targetEntityId: 'entity-target',
+            bendDirection: -1,
+            mix: 1,
+          },
+        ],
+      },
+    });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.queryByText('(inactive)')).not.toBeInTheDocument();
+    expect(screen.getByText(/Target: entity-target/)).toBeInTheDocument();
+    expect(screen.getByText(/Bend: negative/)).toBeInTheDocument();
   });
 
   it('shows selected bone properties when a bone is selected', () => {

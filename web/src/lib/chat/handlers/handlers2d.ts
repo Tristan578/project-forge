@@ -29,7 +29,10 @@ import type {
   SliceMode,
   Grid2dSettings,
 } from '@/stores/slices/types';
-import { MAX_IK_BONE_CHAIN_2D } from '@/lib/skeleton2d/skeletonPayload';
+import {
+  MAX_IK_BONE_CHAIN_2D,
+  collectSkeleton2dWarnings,
+} from '@/lib/skeleton2d/skeletonPayload';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1639,11 +1642,18 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
         // untouched: a rejected import must not cost the caller the rig they had.
         return { success: false, error: `Skeleton JSON rejected — ${imported.reason}` };
       }
+      // `normalizeImportedSkeleton` does not bound IK chains — the payload builder
+      // does, because the engine's own limit lives there. A file whose chain was
+      // truncated or whose bend direction was collapsed still imports, but the caller
+      // is told what changed rather than discovering it from a bone that will not move.
+      const warnings = collectSkeleton2dWarnings(imported.data);
       ctx.store.setSkeleton2d(entityId, imported.data);
       return {
         success: true,
         result: {
           message: `Imported skeleton with ${imported.data.bones.length} bone(s) for entity ${entityId}`,
+          // `ExecutionResult` has no warning field, so these ride inside `result`.
+          ...(warnings.length > 0 ? { warnings } : {}),
         },
       };
     } catch (err) {

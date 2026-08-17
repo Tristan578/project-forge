@@ -429,8 +429,15 @@ export function validateRig(rig: RigTemplate): RigValidationResult {
  * Convert a rig template into engine commands that attach a skeleton
  * to the specified entity. Uses the skeleton2d command interface which
  * supports both 2D and 3D bone hierarchies.
+ *
+ * A rig can arrive from an LLM, so `warnings` is worth passing: an IK chain the
+ * builder had to bound is a chain that will not move the bones the caller named.
  */
-export function rigToCommands(rig: RigTemplate, entityId: string): EngineCommand[] {
+export function rigToCommands(
+  rig: RigTemplate,
+  entityId: string,
+  warnings?: string[],
+): EngineCommand[] {
   const commands: EngineCommand[] = [];
 
   // `create_skeleton2d` is the command the engine actually implements, and it takes
@@ -463,7 +470,7 @@ export function rigToCommands(rig: RigTemplate, entityId: string): EngineCommand
         bendDirection: 1,
         mix: 1.0,
       })),
-    }),
+    }, warnings),
   });
 
   return commands;

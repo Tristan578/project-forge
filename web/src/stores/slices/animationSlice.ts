@@ -116,7 +116,16 @@ export const createAnimationSlice: StateCreator<AnimationSlice, [], [], Animatio
     // hard `Invalid skeletonData` reject that loses the whole rig, so the payload is
     // built by `buildCreateSkeleton2dPayload` rather than passed through.
     if (dispatchCommand) {
-      dispatchCommand('create_skeleton2d', buildCreateSkeleton2dPayload(entityId, data));
+      // A store action has no result channel, so a bounded IK chain would otherwise
+      // reach the engine at a length the inspector never showed. The console is the
+      // only channel available here; the callers that have a better one pass their
+      // own collector to `buildCreateSkeleton2dPayload`.
+      const warnings: string[] = [];
+      const payload = buildCreateSkeleton2dPayload(entityId, data, warnings);
+      for (const warning of warnings) {
+        console.warn(`[skeleton2d] ${warning}`);
+      }
+      dispatchCommand('create_skeleton2d', payload);
     }
   },
   applySkeleton2dFromEngine: (entityId, data) => {

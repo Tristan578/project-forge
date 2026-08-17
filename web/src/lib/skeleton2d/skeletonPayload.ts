@@ -342,22 +342,91 @@ function wireSkin(name: string, skin: SourceSkin2d): WireSkin2d {
 }
 
 /**
- * The browser-reachable half of `parse_ik_chain2d`'s validation.
+ * The browser-reachable half of `parse_ik_chain2d`'s validation — with one
+ * deliberate difference, and it is the reason this reports.
  *
  * That Rust function bounds `bones`, normalizes `bendDirection` to a sign and
- * clamps `mix` — but it only runs for a `create_ik_chain2d` command. Everything
- * the editor and `import_skeleton_json` send arrives as a whole `SkeletonData2d`
- * through here instead, where none of those bounds used to apply. The invariants
- * have to hold on both paths or they hold on neither.
+ * clamps `mix`, but it only runs for a `create_ik_chain2d` command. Everything the
+ * editor and `import_skeleton_json` send arrives as a whole `SkeletonData2d`
+ * instead, which serde deserializes with no validation at all, so this is the only
+ * place those bounds exist on that path.
+ *
+ * Where the engine REFUSES a payload, this BOUNDS it: a reject on the whole-rig
+ * path costs the caller every other bone in the skeleton, not just the offending
+ * chain. That difference is a choice, not a claim of parity — so each bound is
+ * reported through `report` rather than applied silently, which is what let an
+ * over-long chain reach the engine at a different length than the one the
+ * inspector was showing. Two differences remain unbounded on purpose:
+ *
+ * - An empty `targetEntityId` is a hard reject in `parse_ik_chain2d` and is legal
+ *   here, because the store type documents empty as "no target yet" and the
+ *   inspector labels such a chain inactive. The solver skips it either way.
+ * - A chain the solver will skip (`< 2` bones) is passed through and reported
+ *   rather than padded — there is nothing to pad it with.
  */
-function wireIkConstraint(constraint: SourceIkConstraint2d, index: number): WireIkConstraint2d {
+function wireIkConstraint(
+  constraint: SourceIkConstraint2d,
+  index: number,
+  report: (message: string) => void,
+): WireIkConstraint2d {
+  const name = constraint.name ?? `ik_${index}`;
+
+  // `IkConstraint2d::bone_chain` is a `Vec<String>`, so ONE entry that is not a
+  // string — a number, a null, or the `undefined` an array hole materializes as —
+  // is a hard `Invalid skeletonData` reject that loses the whole rig rather than
+  // this chain. Read by index: a callback form skips a hole entirely, so the gap
+  // would survive into the payload as the `null` that causes the reject.
+  const source = [...(constraint.boneChain ?? [])];
+  const chain: string[] = [];
+  for (let i = 0; i < source.length; i += 1) {
+    const bone: unknown = source[i];
+    if (typeof bone !== 'string' || bone.length === 0) {
+      report(
+        `IK chain "${name}": bones[${i}] is not a bone name, so it was dropped from the chain.`,
+      );
+      continue;
+    }
+    chain.push(bone);
+  }
+
   // `import_skeleton_json` feeds this a bare `JSON.parse` result, so the chain is
-  // whatever length the file claims. Truncating keeps the constraint usable and
-  // the payload bounded; the alternative — passing it through — is a rig the
-  // engine's own limit says is malformed.
-  const chain = [...(constraint.boneChain ?? [])].slice(0, MAX_IK_BONE_CHAIN_2D);
+  // whatever length the file claims, and the engine refuses a longer one outright.
+  if (chain.length > MAX_IK_BONE_CHAIN_2D) {
+    report(
+      `IK chain "${name}": the chain is ${chain.length} bones and the engine's limit is ` +
+        `${MAX_IK_BONE_CHAIN_2D}, so the last ${chain.length - MAX_IK_BONE_CHAIN_2D} were dropped.`,
+    );
+    chain.length = MAX_IK_BONE_CHAIN_2D;
+  }
+  if (chain.length < 2) {
+    report(
+      `IK chain "${name}": ${chain.length} bone(s) in the chain — the solver needs at least 2 ` +
+        `and will skip this chain.`,
+    );
+  }
+
+  // Sign is the whole meaning of this field — magnitude is not a strength dial,
+  // and the engine reads only the sign. Match it rather than forwarding 2.5.
+  const bendDirection = finite(constraint.bendDirection, 1) < 0 ? -1 : 1;
+  if (constraint.bendDirection !== undefined && constraint.bendDirection !== bendDirection) {
+    report(
+      `IK chain "${name}": bend direction ${String(constraint.bendDirection)} was sent as ` +
+        `${bendDirection} — the engine reads the sign and ignores the magnitude.`,
+    );
+  }
+
+  // Outside 0..1 the solver blends past full IK or past full FK; clamp rather
+  // than let an imported file drive it.
+  const mix = Math.min(1, Math.max(0, finite(constraint.mix, 1)));
+  if (constraint.mix !== undefined && constraint.mix !== mix) {
+    report(
+      `IK chain "${name}": blend weight ${String(constraint.mix)} is outside 0–1 and was ` +
+        `sent as ${mix}.`,
+    );
+  }
+
   return {
-    name: constraint.name ?? `ik_${index}`,
+    name,
     boneChain: chain,
     // A numeric id must become its decimal string, not `undefined` — the engine
     // field is a `String` and there is no coercion on the serde side.
@@ -365,17 +434,23 @@ function wireIkConstraint(constraint: SourceIkConstraint2d, index: number): Wire
       typeof constraint.targetEntityId === 'number'
         ? String(constraint.targetEntityId)
         : constraint.targetEntityId ?? '',
-    // Sign is the whole meaning of this field — magnitude is not a strength dial,
-    // and the engine reads only the sign. Match it rather than forwarding 2.5.
-    bendDirection: finite(constraint.bendDirection, 1) < 0 ? -1 : 1,
-    // Outside 0..1 the solver blends past full IK or past full FK; clamp rather
-    // than let an imported file drive it.
-    mix: Math.min(1, Math.max(0, finite(constraint.mix, 1))),
+    bendDirection,
+    mix,
   };
 }
 
-/** Convert a browser-side skeleton into the shape `SkeletonData2d` deserializes. */
-export function buildWireSkeletonData2d(source: SkeletonSource2d): WireSkeletonData2d {
+/**
+ * Convert a browser-side skeleton into the shape `SkeletonData2d` deserializes.
+ *
+ * Pass `warnings` to learn what was bounded on the way through. Every caller has a
+ * different channel for that — a tool handler has a `result`, a panel has a status
+ * line, a store action has only `console.warn` — so the collector is an out-param
+ * rather than a return shape, and omitting it keeps the old signature working.
+ */
+export function buildWireSkeletonData2d(
+  source: SkeletonSource2d,
+  warnings?: string[],
+): WireSkeletonData2d {
   // `import_skeleton_json` reaches here with a bare `JSON.parse` result cast to the
   // store type, so this can be null, an array, or a string however the signature
   // reads. A throw inside a store action loses more than a degraded rig does.
@@ -398,9 +473,12 @@ export function buildWireSkeletonData2d(source: SkeletonSource2d): WireSkeletonD
     if (source) skins[key] = wireSkin(key, source);
   }
 
+  const report = (message: string) => {
+    warnings?.push(message);
+  };
   const ikConstraints: WireIkConstraint2d[] = [];
   for (let i = 0; i < (data.ikConstraints?.length ?? 0); i += 1) {
-    ikConstraints.push(wireIkConstraint(data.ikConstraints?.[i] ?? {}, i));
+    ikConstraints.push(wireIkConstraint(data.ikConstraints?.[i] ?? {}, i, report));
   }
 
   return {
@@ -417,8 +495,22 @@ export function buildWireSkeletonData2d(source: SkeletonSource2d): WireSkeletonD
 export function buildCreateSkeleton2dPayload(
   entityId: string,
   data: SkeletonSource2d,
+  warnings?: string[],
 ): CreateSkeleton2dPayload {
-  return { entityId, skeletonData: buildWireSkeletonData2d(data) };
+  return { entityId, skeletonData: buildWireSkeletonData2d(data, warnings) };
+}
+
+/**
+ * What `buildWireSkeletonData2d` would report for this skeleton, without building it.
+ *
+ * For callers that dispatch through `setSkeleton2d` rather than the builder — the
+ * store owns the payload there, so this is the only way to get the same list into a
+ * user-facing channel.
+ */
+export function collectSkeleton2dWarnings(data: SkeletonSource2d): string[] {
+  const warnings: string[] = [];
+  buildWireSkeletonData2d(data, warnings);
+  return warnings;
 }
 
 /**

@@ -108,10 +108,12 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
             {bone.name}
           </button>
           <button
+            type="button"
             onClick={() => handleDeleteBone(bone.name)}
             className="p-1 hover:bg-red-600 rounded"
+            aria-label={`Delete bone ${bone.name}`}
           >
-            <Trash2 className="w-3 h-3" />
+            <Trash2 className="w-3 h-3" aria-hidden="true" />
           </button>
         </div>
       </div>,
@@ -151,10 +153,12 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
             onKeyDown={(e) => e.key === 'Enter' && handleAddBone()}
           />
           <button
+            type="button"
             onClick={handleAddBone}
             className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm"
+            aria-label={selectedBone ? `Add bone as a child of ${selectedBone}` : 'Add root bone'}
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
         <div className="text-xs text-zinc-400 mt-1">
@@ -267,17 +271,38 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
         <div>
           <label className="text-sm font-medium block mb-1">IK Constraints</label>
           <div className="space-y-1">
-            {skeleton.ikConstraints.map((ik, idx) => (
-              <div key={idx} className="text-xs bg-zinc-800 rounded px-2 py-1">
-                <div className="font-medium">{ik.name}</div>
-                <div className="text-zinc-400">
-                  Bones: {ik.boneChain.join(' → ')}
+            {skeleton.ikConstraints.map((ik, idx) => {
+              // The engine's solver skips any constraint whose `target_entity_id`
+              // it cannot resolve, and an empty one never resolves. The panel used
+              // to render such a constraint identically to a working one — name,
+              // chain, mix — so a chain that could never move a bone looked live.
+              const hasTarget = ik.targetEntityId !== '';
+              return (
+                <div
+                  key={idx}
+                  className={`text-xs bg-zinc-800 rounded px-2 py-1 ${hasTarget ? '' : 'opacity-60'}`}
+                >
+                  <div className="font-medium">
+                    {ik.name}
+                    {!hasTarget && (
+                      <span className="ml-1.5 font-normal text-amber-400">(inactive)</span>
+                    )}
+                  </div>
+                  <div className="text-zinc-400">
+                    Bones: {ik.boneChain.join(' → ')}
+                  </div>
+                  <div className={hasTarget ? 'text-zinc-400' : 'text-amber-400'}>
+                    Target: {hasTarget ? ik.targetEntityId : 'not set — this chain will not solve'}
+                  </div>
+                  <div className="text-zinc-400">
+                    Bend: {ik.bendDirection >= 0 ? 'positive' : 'negative'}
+                  </div>
+                  <div className="text-zinc-400">
+                    Mix: {(ik.mix * 100).toFixed(0)}%
+                  </div>
                 </div>
-                <div className="text-zinc-400">
-                  Mix: {(ik.mix * 100).toFixed(0)}%
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
