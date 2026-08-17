@@ -8,6 +8,7 @@
 import { create } from 'zustand';
 import { trackCommandDispatched } from '@/lib/analytics/events';
 import { addBreadcrumb, captureException } from '@/lib/monitoring/sentry-client';
+import { checkCommandBatch, checkCommandPayload } from '@/lib/engine/commandPayloadGuard';
 // Namespace import so partial test mocks of `@/hooks/useEngine` (which omit
 // the snapshot setter) don't throw at module load. We feature-detect the
 // export at runtime instead of relying on the named binding being present.
@@ -235,6 +236,16 @@ export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
   const tracked: CommandDispatcher = (command, payload) => {
     trackCommandDispatched(command);
     recordCommand(command);
+    // Bounded here rather than only in the engine. The Rust guard cannot see a
+    // payload until `serde_wasm_bindgen` has already walked it recursively to
+    // build the value it checks, and on wasm32 overflowing that walk is an
+    // unrecoverable trap that kills the engine instance. This is the last point
+    // at which the structure is still a JS object.
+    const tooBig = checkCommandPayload(command, payload);
+    if (tooBig) {
+      reportCommandRejected(command, tooBig);
+      return { success: false, error: tooBig };
+    }
     const response = dispatcher(command, payload);
     // Only an explicit `success: false` is a rejection. A dispatcher that
     // returns nothing (every test double, and any pre-PF-1098 caller) is not
@@ -289,6 +300,21 @@ export function setCommandBatchDispatcher(dispatcher: BatchCommandDispatcher | u
     for (const { command } of commands) {
       trackCommandDispatched(command);
       recordCommand(command);
+    }
+    // The whole envelope, not each payload in turn: the batch crosses into WASM
+    // as one value, so it is the envelope that gets walked recursively.
+    const tooBig = checkCommandBatch(commands);
+    if (tooBig) {
+      // One report for one refusal. Reporting per command would emit up to a
+      // few hundred console lines for a single event, and — worse — would enter
+      // every command in the batch into the session-scoped dedup set, so a
+      // later genuine rejection of any of them would never reach Sentry.
+      reportCommandRejected('batch', tooBig);
+      return {
+        success: false,
+        // One result per command, in order — callers index into this array.
+        results: commands.map(() => ({ success: false, error: tooBig })),
+      };
     }
     return dispatcher(commands);
   };

@@ -412,12 +412,24 @@ fn prop_vec3(props: &serde_json::Value, key: &str) -> Option<[f32; 3]> {
 /// object at all. Both mean the caller sent something structurally wrong that no
 /// amount of field defaulting can repair.
 pub fn build_game_component(component_type: &str, properties_json: &str) -> Result<GameComponentData, String> {
+    // Bounded before it is interpolated into any error below: the type name
+    // comes out of the payload like everything else.
+    crate::core::json_guard::check_identifier("Component type", component_type)?;
+    // Built once. Both guards below name the same thing, and it used to be
+    // formatted twice per call including on the success path.
+    let what = format!("{} properties", component_type);
     let props = if properties_json.trim().is_empty() {
         serde_json::Value::Object(serde_json::Map::new())
     } else {
+        // Bounded before the parse, not after: the cost of an oversized body is
+        // paid in `from_str` itself. This is a second entry point rather than a
+        // duplicate of the `dispatch` check — the bag arrives here as text, and
+        // the same text is also what a `.forge` scene replays on load.
+        crate::core::json_guard::check_json_text(&what, properties_json)?;
         serde_json::from_str::<serde_json::Value>(properties_json)
             .map_err(|e| format!("Invalid {} properties: {}", component_type, e))?
     };
+    let props = crate::core::json_guard::check_command_payload(&what, props)?;
     if !props.is_object() {
         return Err(format!(
             "Invalid {} properties: expected a JSON object",
@@ -2258,6 +2270,45 @@ mod win_condition_tests {
         // Draining an already-empty queue is a safe no-op (matches the bridge's
         // every-frame call when nothing happened).
         assert!(runtime.take_pending_events().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod guard_wiring_tests {
+    use super::build_game_component;
+
+    // The guard has its own unit tests; these exist because a guard that is
+    // never called still passes every one of them (PF-1149).
+
+    #[test]
+    fn refuses_an_oversized_properties_body_before_parsing_it() {
+        let oversized = format!(
+            "{{\"speed\":{}}}",
+            "9".repeat(crate::core::json_guard::MAX_JSON_TEXT_BYTES)
+        );
+        let err = build_game_component("character_controller", &oversized).unwrap_err();
+        assert!(err.contains("too large"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn refuses_a_properties_body_nested_too_deeply() {
+        let depth = crate::core::json_guard::MAX_COMMAND_PAYLOAD_DEPTH + 5;
+        let body = format!("{}1{}", "{\"a\":".repeat(depth), "}".repeat(depth));
+        let err = build_game_component("character_controller", &body).unwrap_err();
+        assert!(err.contains("nested too deeply"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn refuses_an_oversized_component_type_without_echoing_it() {
+        let name = "x".repeat(crate::core::json_guard::MAX_IDENTIFIER_BYTES + 1);
+        let err = build_game_component(&name, "{}").unwrap_err();
+        assert!(err.contains("too long"), "unexpected error: {}", err);
+        assert!(!err.contains(&name), "error echoes the oversized type: {}", err);
+    }
+
+    #[test]
+    fn accepts_a_normal_properties_body() {
+        assert!(build_game_component("character_controller", "{\"speed\":9.0}").is_ok());
     }
 }
 

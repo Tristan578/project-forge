@@ -54,7 +54,9 @@ describe('engine command rejection reporting', () => {
     expect(sentry.captureException).toHaveBeenCalledTimes(1);
     const [err, context] = vi.mocked(sentry.captureException).mock.calls[0];
     expect((err as Error).message).toContain('switch_scene');
-    expect(context).toMatchObject({
+    // Whole-object, not a subset: what this context carries is the thing under
+    // test, and a subset assertion is blind to a field invented alongside it.
+    expect(context).toEqual({
       command: 'switch_scene',
       engineError: 'Not yet implemented: switch_scene',
     });
@@ -146,5 +148,121 @@ describe('engine command rejection reporting', () => {
     store.getCommandDispatcher()?.('save_scene', {});
 
     expect(store.getRecentCommands()).toContain('save_scene');
+  });
+});
+
+/**
+ * The same wrapper is where an oversized payload has to be stopped. The engine
+ * bounds depth and node count too, but on the wasm path its guard runs after
+ * `serde_wasm_bindgen` has already walked the value recursively to build it —
+ * and overflowing that walk is an unrecoverable trap, not an error (PF-1149).
+ */
+describe('oversized command payloads are refused before reaching the engine', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Built iteratively — a recursive helper would overflow building the input. */
+  function nested(levels: number): unknown {
+    let value: unknown = 1;
+    for (let i = 0; i < levels; i += 1) value = { a: value };
+    return value;
+  }
+
+  it('never calls the dispatcher with a payload deep enough to trap the engine', async () => {
+    const { store } = await loadStore();
+    const dispatcher = vi.fn(() => ({ success: true }));
+    store.setCommandDispatcher(dispatcher);
+
+    const response = store.getCommandDispatcher()?.('update_physics', nested(10_000));
+
+    expect(dispatcher).not.toHaveBeenCalled();
+    // The whole response, not a subset: `toMatchObject` would pass just as
+    // happily on a shape carrying fields the callers never expect.
+    expect(response).toEqual({
+      success: false,
+      error: expect.stringContaining('nested too deeply'),
+    });
+  });
+
+  it('reports the refusal so it is not a silent no-op', async () => {
+    const { store, sentry } = await loadStore();
+    store.setCommandDispatcher(() => ({ success: true }));
+
+    store.getCommandDispatcher()?.('update_physics', nested(10_000));
+
+    expect(sentry.captureException).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('update_physics'));
+  });
+
+  it('still dispatches a normal payload', async () => {
+    const { store } = await loadStore();
+    const dispatcher = vi.fn(() => ({ success: true }));
+    store.setCommandDispatcher(dispatcher);
+
+    store.getCommandDispatcher()?.('update_physics', { entityId: 'e1', mass: 2 });
+
+    expect(dispatcher).toHaveBeenCalledWith('update_physics', { entityId: 'e1', mass: 2 });
+  });
+
+  it('refuses an oversized batch and answers one result per command', async () => {
+    const { store } = await loadStore();
+    const dispatcher = vi.fn(() => ({ success: true, results: [] }));
+    store.setCommandBatchDispatcher(dispatcher);
+
+    const result = store.getCommandBatchDispatcher()?.([
+      { command: 'update_transform', payload: nested(10_000) },
+      { command: 'play' },
+    ]);
+
+    expect(dispatcher).not.toHaveBeenCalled();
+    expect(result?.success).toBe(false);
+    // Callers index into this array by command position, so a short one would
+    // read as a success for the commands that fell off the end. Asserted whole:
+    // `.every(r => !r.success)` collapses every entry to one boolean and never
+    // looks at `error`, so it passes on a result carrying no reason at all.
+    expect(result?.results).toEqual([
+      { success: false, error: expect.stringContaining('nested too deeply') },
+      { success: false, error: expect.stringContaining('nested too deeply') },
+    ]);
+  });
+
+  it('reports a refused batch once, not once per command', async () => {
+    // Reporting per command would print a line per entry for a single event —
+    // and, worse, would enter every command in the batch into the
+    // session-scoped Sentry dedup set, so a later genuine rejection of any of
+    // them would never be reported at all.
+    const { store, sentry } = await loadStore();
+    store.setCommandBatchDispatcher(() => ({ success: true, results: [] }));
+
+    store.getCommandBatchDispatcher()?.([
+      { command: 'update_transform', payload: nested(10_000) },
+      { command: 'update_material' },
+      { command: 'play' },
+    ]);
+
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(sentry.captureException).toHaveBeenCalledTimes(1);
+
+    // And the commands in it stay eligible for their own report later.
+    store.setCommandDispatcher(() => ({ success: false, error: 'nope' }));
+    store.getCommandDispatcher()?.('update_transform', {});
+    expect(sentry.captureException).toHaveBeenCalledTimes(2);
+  });
+
+  it('still dispatches a normal batch', async () => {
+    const { store } = await loadStore();
+    const dispatcher = vi.fn(() => ({ success: true, results: [] }));
+    store.setCommandBatchDispatcher(dispatcher);
+
+    const commands = [{ command: 'play' }];
+    store.getCommandBatchDispatcher()?.(commands);
+
+    expect(dispatcher).toHaveBeenCalledWith(commands);
   });
 });

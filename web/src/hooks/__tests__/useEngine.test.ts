@@ -1,6 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { useEngine, resetEngine, recoverEngine, fetchWasmManifest, onEngineRecovered } from '../useEngine';
+import {
+  useEngine,
+  resetEngine,
+  recoverEngine,
+  fetchWasmManifest,
+  onEngineRecovered,
+  dispatchGuarded,
+  dispatchGuardedBatch,
+  type WasmModule,
+} from '../useEngine';
 import * as initLog from '@/lib/initLog';
 
 vi.mock('@/lib/initLog', () => ({
@@ -348,5 +357,99 @@ describe('fetchWasmManifest', () => {
     });
 
     vi.unstubAllGlobals();
+  });
+});
+
+/**
+ * The guard that keeps an oversized payload from reaching WASM (PF-1149).
+ *
+ * The engine bounds this too, but on the wasm path its guard runs only after
+ * `serde_wasm_bindgen` has walked the value recursively to build it — and
+ * overflowing that walk is an unrecoverable trap, not an error, so the refusal
+ * has to happen here. These exercise the guard directly rather than through the
+ * hook: `wasmModule` is module-private and only a real WASM load assigns it, so
+ * a hook-level test can only ever reach the not-initialized branch.
+ */
+describe('guarded dispatch', () => {
+  /** Built iteratively — a recursive helper would overflow building the input. */
+  function nested(levels: number): unknown {
+    let value: unknown = 1;
+    for (let i = 0; i < levels; i += 1) value = { a: value };
+    return value;
+  }
+
+  function fakeModule() {
+    return {
+      handle_command: vi.fn(() => ({ success: true })),
+      handle_command_batch: vi.fn(() => [{ success: true }]),
+    } as unknown as WasmModule & {
+      handle_command: ReturnType<typeof vi.fn>;
+      handle_command_batch: ReturnType<typeof vi.fn>;
+    };
+  }
+
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('never calls handle_command with a payload deep enough to trap the engine', () => {
+    const engine = fakeModule();
+
+    const response = dispatchGuarded(engine, 'update_physics', nested(10_000));
+
+    expect(engine.handle_command).not.toHaveBeenCalled();
+    // The whole response, not a subset: callers read this as the engine's own
+    // CommandResponse, and a subset assertion is blind to a field alongside it.
+    expect(response).toEqual({
+      success: false,
+      error: expect.stringContaining('nested too deeply'),
+    });
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('update_physics'));
+  });
+
+  it('passes an ordinary payload straight through', () => {
+    const engine = fakeModule();
+
+    const response = dispatchGuarded(engine, 'update_physics', { entityId: 'e1', mass: 2 });
+
+    expect(engine.handle_command).toHaveBeenCalledWith('update_physics', {
+      entityId: 'e1',
+      mass: 2,
+    });
+    expect(response).toEqual({ success: true });
+  });
+
+  it('refuses an oversized batch and answers one result per command', () => {
+    const engine = fakeModule();
+
+    const result = dispatchGuardedBatch(engine, [
+      { command: 'update_transform', payload: nested(10_000) },
+      { command: 'play' },
+    ]);
+
+    expect(engine.handle_command_batch).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    // Asserted whole and in order: callers index into this array by command
+    // position, so a short one reads as success for whatever fell off the end.
+    // `.every(r => !r.success)` would collapse it to one boolean and never look
+    // at `error`, passing on a result that carries no reason at all.
+    expect(result.results).toEqual([
+      { success: false, error: expect.stringContaining('nested too deeply') },
+      { success: false, error: expect.stringContaining('nested too deeply') },
+    ]);
+  });
+
+  it('passes an ordinary batch straight through', () => {
+    const engine = fakeModule();
+    const commands = [{ command: 'play' }];
+
+    const result = dispatchGuardedBatch(engine, commands);
+
+    expect(engine.handle_command_batch).toHaveBeenCalledWith(commands);
+    expect(result).toEqual({ success: true, results: [{ success: true }] });
   });
 });
