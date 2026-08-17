@@ -16,7 +16,7 @@ paths:
 - **Use `EntitySnapshot::new(entity_id, entity_type, name, transform)`** — defaults all ~35 optional fields to None/false, visible=true
 - For ECS reads: `let mut snap = EntitySnapshot::new(...); snap.material_data = mat_data.cloned(); ...`
 - For new entities: `let mut snap = EntitySnapshot::new(...); snap.procedural_mesh_data = Some(data); snap`
-- When adding a new `Option<T>` field: add to `EntitySnapshot` struct + update `new()` constructor (1 site) + update `spawn_from_snapshot`
+- When adding a new `Option<T>` field: add to `EntitySnapshot` struct + update `new()` constructor (1 site) + update `spawn_from_snapshot` **and `insert_aux_components`** — there are TWO restore paths, and a field wired into only one survives undo/redo but vanishes on duplicate (or the reverse), with no error anywhere. `mod aux_component_parity` in `entity_factory.rs` fails the build if the second one is forgotten; see `rules/gotchas.md` → Engine & Game Loop
 - In bridge modules, `EntitySnapshot` is imported as `HistEntitySnapshot` — same type, both have `new()`
 
 ## spawn_from_snapshot
