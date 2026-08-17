@@ -276,6 +276,73 @@ describe('SkeletonInspector', () => {
     expect(screen.getByText(/Bend: negative/)).toBeInTheDocument();
   });
 
+  it('marks a constraint inactive when the target key is absent, not just empty', () => {
+    // `setSkeleton2d` writes its argument into the store verbatim — only the
+    // engine copy goes through the builder — so the key can be missing entirely.
+    // `!== ''` is `true` for `undefined`, which rendered a bare "Target: " on the
+    // very row the inactive treatment exists for.
+    setupStore({
+      skeleton: {
+        ...baseSkeleton,
+        ikConstraints: [
+          {
+            name: 'arm_ik',
+            boneChain: ['upper_arm', 'forearm'],
+            bendDirection: 1,
+            mix: 1,
+          } as unknown as (typeof baseSkeleton)['ikConstraints'][number],
+        ],
+      },
+    });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('(inactive)')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Target: not set — this chain will not solve/),
+    ).toBeInTheDocument();
+  });
+
+  it('reads a missing bend direction the way the builder sends it', () => {
+    // `>= 0` is `false` for `undefined`, so the panel said "negative" while
+    // `wireIkConstraint` sent +1 — the inspector contradicting the payload.
+    setupStore({
+      skeleton: {
+        ...baseSkeleton,
+        ikConstraints: [
+          {
+            name: 'arm_ik',
+            boneChain: ['upper_arm', 'forearm'],
+            targetEntityId: 'entity-target',
+            mix: 1,
+          } as unknown as (typeof baseSkeleton)['ikConstraints'][number],
+        ],
+      },
+    });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText(/Bend: positive/)).toBeInTheDocument();
+  });
+
+  it('treats entity id 0 as a target rather than as no target', () => {
+    // A truthiness test would call this inactive. The engine field is a `String`
+    // and the builder stringifies a numeric id, so 0 is a real entity.
+    setupStore({
+      skeleton: {
+        ...baseSkeleton,
+        ikConstraints: [
+          {
+            name: 'arm_ik',
+            boneChain: ['upper_arm', 'forearm'],
+            targetEntityId: 0,
+            bendDirection: 1,
+            mix: 1,
+          } as unknown as (typeof baseSkeleton)['ikConstraints'][number],
+        ],
+      },
+    });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.queryByText('(inactive)')).not.toBeInTheDocument();
+    expect(screen.getByText(/Target: 0/)).toBeInTheDocument();
+  });
+
   it('shows selected bone properties when a bone is selected', () => {
     setupStore({ skeleton: baseSkeleton, selectedBone: 'root' });
     render(<SkeletonInspector entityId="entity-1" />);

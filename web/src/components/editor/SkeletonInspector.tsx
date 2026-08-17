@@ -276,11 +276,29 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
               // it cannot resolve, and an empty one never resolves. The panel used
               // to render such a constraint identically to a working one — name,
               // chain, mix — so a chain that could never move a bone looked live.
-              const hasTarget = ik.targetEntityId !== '';
+              //
+              // `!== ''` is not the test. `setSkeleton2d` writes its argument into
+              // the store verbatim, so the key can be absent entirely, and
+              // `undefined !== ''` is `true` — the inactive treatment would then
+              // miss the very case it was written for and render a bare "Target: ".
+              const rawTarget: unknown = ik.targetEntityId;
+              const target =
+                typeof rawTarget === 'string' || typeof rawTarget === 'number'
+                  ? String(rawTarget)
+                  : '';
+              const hasTarget = target.length > 0;
+              const bendsNegative =
+                typeof ik.bendDirection === 'number' &&
+                Number.isFinite(ik.bendDirection) &&
+                ik.bendDirection < 0;
               return (
                 <div
                   key={idx}
-                  className={`text-xs bg-zinc-800 rounded px-2 py-1 ${hasTarget ? '' : 'opacity-60'}`}
+                  // A left rule rather than `opacity-60`: group opacity compounds
+                  // with the row's already-dim colours, and it dropped the amber
+                  // "(inactive)" flag to 4.13:1 and the zinc body text to 2.99:1 —
+                  // making the one row that reports a problem the hardest to read.
+                  className={`text-xs bg-zinc-800 rounded px-2 py-1 ${hasTarget ? '' : 'border-l-2 border-amber-500'}`}
                 >
                   <div className="font-medium">
                     {ik.name}
@@ -292,10 +310,13 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
                     Bones: {ik.boneChain.join(' → ')}
                   </div>
                   <div className={hasTarget ? 'text-zinc-400' : 'text-amber-400'}>
-                    Target: {hasTarget ? ik.targetEntityId : 'not set — this chain will not solve'}
+                    Target: {hasTarget ? target : 'not set — this chain will not solve'}
                   </div>
                   <div className="text-zinc-400">
-                    Bend: {ik.bendDirection >= 0 ? 'positive' : 'negative'}
+                    {/* Mirrors `wireIkConstraint`'s rule exactly. `>= 0` reads a
+                        missing or NaN bend direction as "negative" while the
+                        builder sends +1, so the panel contradicted the payload. */}
+                    Bend: {bendsNegative ? 'negative' : 'positive'}
                   </div>
                   <div className="text-zinc-400">
                     Mix: {(ik.mix * 100).toFixed(0)}%

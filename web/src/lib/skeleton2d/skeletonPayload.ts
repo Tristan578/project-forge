@@ -206,6 +206,21 @@ function vec(source: readonly number[] | undefined, length: number, fallback: nu
   return out;
 }
 
+/**
+ * Bone names, with the non-array and non-string cases both refused. The store's
+ * `boneChain` is a `string[]` and the engine's is a `Vec<String>`; a `null` from a
+ * `JSON.parse` result satisfies neither, and it is what an array hole becomes.
+ */
+function boneNameList(source: readonly string[] | undefined): string[] {
+  if (!Array.isArray(source)) return [];
+  const out: string[] = [];
+  for (let i = 0; i < source.length; i += 1) {
+    const bone: unknown = source[i];
+    if (typeof bone === 'string' && bone.length > 0) out.push(bone);
+  }
+  return out;
+}
+
 function vec2(source: readonly number[] | undefined, fallback: number): [number, number] {
   const [x, y] = vec(source, 2, fallback);
   return [x, y];
@@ -257,11 +272,58 @@ function wireVec2List(source: readonly (readonly number[])[] | undefined): [numb
 }
 
 /**
+ * `VertexWeights.bones` is a `Vec<String>` reached by the same
+ * `serde_json::from_value::<SkeletonData2d>` as `IkConstraint2d::bone_chain`, so ONE
+ * non-string entry is the identical whole-rig `Invalid skeletonData` reject — and
+ * `import_skeleton_json` feeds this a bare `JSON.parse` result, where a `null` (or an
+ * array hole, which serializes as one) is exactly what turns up.
+ *
+ * Dropping a bone drops the weight PAIRED with it: the two vectors are read
+ * index-for-index by the skinning solve, so keeping the weights at their source
+ * length would shift every influence after the gap onto the wrong bone — a rig that
+ * deforms wrongly is harder to notice than one that refuses to load.
+ */
+function wireVertexWeights(
+  entry: { bones?: readonly string[]; weights?: readonly number[] } | undefined,
+  label: string,
+  vertex: number,
+  report: (message: string) => void,
+): WireVertexWeights2d {
+  const source = entry?.bones;
+  if (source !== undefined && !Array.isArray(source)) {
+    report(
+      `${label}: the bone list for vertex ${vertex} is not an array, so that vertex was left ` +
+        `unweighted.`,
+    );
+    return { bones: [], weights: [] };
+  }
+
+  const bones: string[] = [];
+  const weights: number[] = [];
+  for (let i = 0; i < (source?.length ?? 0); i += 1) {
+    const bone: unknown = source?.[i];
+    if (typeof bone !== 'string' || bone.length === 0) {
+      report(
+        `${label}: vertex ${vertex} names no bone at bones[${i}], so that influence was dropped.`,
+      );
+      continue;
+    }
+    bones.push(bone);
+    weights.push(finite(entry?.weights?.[i], 0));
+  }
+  return { bones, weights };
+}
+
+/**
  * An attachment whose `type` is neither variant cannot be widened into one, and an
  * unknown tag refuses the whole skeleton — so it is dropped. Losing one attachment
  * beats losing the rig, and the return type makes the caller handle the absence.
  */
-function wireAttachment(attachment: SourceAttachment2d): WireAttachment2d | null {
+function wireAttachment(
+  attachment: SourceAttachment2d,
+  label: string,
+  report: (message: string) => void,
+): WireAttachment2d | null {
   const textureId = attachment.textureId ?? '';
 
   if (attachment.type === 'sprite') {
@@ -278,11 +340,7 @@ function wireAttachment(attachment: SourceAttachment2d): WireAttachment2d | null
     const vertices = wireVec2List(attachment.vertices);
     const weights: WireVertexWeights2d[] = [];
     for (let i = 0; i < (attachment.weights?.length ?? 0); i += 1) {
-      const entry = attachment.weights?.[i];
-      weights.push({
-        bones: [...(entry?.bones ?? [])],
-        weights: vec(entry?.weights, entry?.weights?.length ?? 0, 0),
-      });
+      weights.push(wireVertexWeights(attachment.weights?.[i], label, i, report));
     }
     return {
       type: 'mesh',
@@ -330,12 +388,16 @@ function wireTriangles(source: readonly number[] | undefined, vertexCount: numbe
   return out;
 }
 
-function wireSkin(name: string, skin: SourceSkin2d): WireSkin2d {
+function wireSkin(
+  name: string,
+  skin: SourceSkin2d,
+  report: (message: string) => void,
+): WireSkin2d {
   const attachments: Record<string, WireAttachment2d> = {};
   for (const key of Object.keys(skin.attachments ?? {})) {
     const source = skin.attachments?.[key];
     if (!source) continue;
-    const wired = wireAttachment(source);
+    const wired = wireAttachment(source, `Skin "${skin.name ?? name}" attachment "${key}"`, report);
     if (wired) attachments[key] = wired;
   }
   return { name: skin.name ?? name, attachments };
@@ -376,10 +438,23 @@ function wireIkConstraint(
   // is a hard `Invalid skeletonData` reject that loses the whole rig rather than
   // this chain. Read by index: a callback form skips a hole entirely, so the gap
   // would survive into the payload as the `null` that causes the reject.
-  const source = [...(constraint.boneChain ?? [])];
+  //
+  // `Array.isArray` and NOT a spread. `[...(x ?? [])]` iterates, which does
+  // materialize a hole as `undefined`, but it THROWS on a non-iterable (`7`, `{}`)
+  // — and `import_skeleton_json` hands this whatever the file said — and it
+  // silently expands a string into one bone per character. An indexed read behind
+  // the guard handles all three.
+  const source = constraint.boneChain;
+  if (source !== undefined && !Array.isArray(source)) {
+    report(
+      `IK chain "${name}": the bone list is not an array, so the chain was dropped and the ` +
+        `solver will skip it.`,
+    );
+  }
   const chain: string[] = [];
-  for (let i = 0; i < source.length; i += 1) {
-    const bone: unknown = source[i];
+  const chainLength = Array.isArray(source) ? source.length : 0;
+  for (let i = 0; i < chainLength; i += 1) {
+    const bone: unknown = source?.[i];
     if (typeof bone !== 'string' || bone.length === 0) {
       report(
         `IK chain "${name}": bones[${i}] is not a bone name, so it was dropped from the chain.`,
@@ -407,22 +482,48 @@ function wireIkConstraint(
 
   // Sign is the whole meaning of this field — magnitude is not a strength dial,
   // and the engine reads only the sign. Match it rather than forwarding 2.5.
-  const bendDirection = finite(constraint.bendDirection, 1) < 0 ? -1 : 1;
-  if (constraint.bendDirection !== undefined && constraint.bendDirection !== bendDirection) {
-    report(
-      `IK chain "${name}": bend direction ${String(constraint.bendDirection)} was sent as ` +
-        `${bendDirection} — the engine reads the sign and ignores the magnitude.`,
-    );
+  //
+  // A value that is not a finite number gets its OWN branch, because the two
+  // failures need different sentences: a string `"-1"` falls back to the default,
+  // which SILENTLY INVERTS the sign the file asked for, and a message that blamed
+  // magnitude for that would send the reader looking at the wrong field.
+  const bendSource = constraint.bendDirection;
+  const bendUsable = typeof bendSource === 'number' && Number.isFinite(bendSource);
+  const bendDirection = bendUsable && bendSource < 0 ? -1 : 1;
+  if (bendSource !== undefined) {
+    if (!bendUsable) {
+      report(
+        `IK chain "${name}": bend direction ${String(bendSource)} is not a finite number, so the ` +
+          `default ${bendDirection} was sent — note that a quoted "-1" bends the opposite way ` +
+          `from the -1 it looks like.`,
+      );
+    } else if (bendSource !== bendDirection) {
+      report(
+        `IK chain "${name}": bend direction ${String(bendSource)} was sent as ${bendDirection} — ` +
+          `the engine reads the sign and ignores the magnitude.`,
+      );
+    }
   }
 
   // Outside 0..1 the solver blends past full IK or past full FK; clamp rather
-  // than let an imported file drive it.
-  const mix = Math.min(1, Math.max(0, finite(constraint.mix, 1)));
-  if (constraint.mix !== undefined && constraint.mix !== mix) {
-    report(
-      `IK chain "${name}": blend weight ${String(constraint.mix)} is outside 0–1 and was ` +
-        `sent as ${mix}.`,
-    );
+  // than let an imported file drive it. Same split as `bendDirection`: `"0.5"` is
+  // a type failure, and reporting it as "outside 0–1" names a number that is
+  // plainly inside the range.
+  const mixSource = constraint.mix;
+  const mixUsable = typeof mixSource === 'number' && Number.isFinite(mixSource);
+  const mix = mixUsable ? Math.min(1, Math.max(0, mixSource)) : 1;
+  if (mixSource !== undefined) {
+    if (!mixUsable) {
+      report(
+        `IK chain "${name}": blend weight ${String(mixSource)} is not a finite number, so the ` +
+          `default ${mix} (full IK) was sent.`,
+      );
+    } else if (mixSource !== mix) {
+      report(
+        `IK chain "${name}": blend weight ${String(mixSource)} is outside 0–1 and was ` +
+          `sent as ${mix}.`,
+      );
+    }
   }
 
   return {
@@ -457,6 +558,10 @@ export function buildWireSkeletonData2d(
   const data: SkeletonSource2d =
     typeof source === 'object' && source !== null && !Array.isArray(source) ? source : {};
 
+  const report = (message: string) => {
+    warnings?.push(message);
+  };
+
   const bones: WireBone2d[] = [];
   for (let i = 0; i < (data.bones?.length ?? 0); i += 1) {
     bones.push(wireBone(data.bones?.[i] ?? {}, i));
@@ -470,12 +575,9 @@ export function buildWireSkeletonData2d(
   const skins: Record<string, WireSkin2d> = {};
   for (const key of Object.keys(data.skins ?? {})) {
     const source = data.skins?.[key];
-    if (source) skins[key] = wireSkin(key, source);
+    if (source) skins[key] = wireSkin(key, source, report);
   }
 
-  const report = (message: string) => {
-    warnings?.push(message);
-  };
   const ikConstraints: WireIkConstraint2d[] = [];
   for (let i = 0; i < (data.ikConstraints?.length ?? 0); i += 1) {
     ikConstraints.push(wireIkConstraint(data.ikConstraints?.[i] ?? {}, i, report));
@@ -578,7 +680,12 @@ export function parseSkeletonWire2d(source: unknown): StoreSkeletonData2d | null
     const constraint = wire.ikConstraints?.[i] ?? {};
     ikConstraints.push({
       name: constraint.name ?? `ik_${i}`,
-      boneChain: [...(constraint.boneChain ?? [])],
+      // Same guard as the outbound builder, for the same reason: this parses an
+      // engine event, but `AutoRiggingPanel` also routes a locally-built wire
+      // skeleton through it, so a non-array `boneChain` would throw here where a
+      // spread iterated it. There is no warning channel inbound — the store gets
+      // the chain the engine is actually solving, which is none.
+      boneChain: boneNameList(constraint.boneChain),
       targetEntityId:
         typeof constraint.targetEntityId === 'number'
           ? String(constraint.targetEntityId)

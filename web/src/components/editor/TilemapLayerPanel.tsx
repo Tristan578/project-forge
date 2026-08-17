@@ -124,6 +124,7 @@ export function TilemapLayerPanel() {
 
                 {/* Collision toggle */}
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     handleUpdateLayer(index, { isCollision: !layer.isCollision });

@@ -6,6 +6,7 @@ import {
   buildWireSkeletonData2d,
   collectSkeleton2dWarnings,
   MAX_IK_BONE_CHAIN_2D,
+  parseSkeletonWire2d,
   type SkeletonSource2d,
 } from '../skeletonPayload';
 
@@ -305,6 +306,164 @@ describe('ik constraints', () => {
     expect(ikConstraints[0].boneChain).toEqual(['a', 'c']);
     expect(warnings.some((w) => w.includes('bones[1]'))).toBe(true);
   });
+
+  it('refuses a bone chain that is not an array rather than throwing on it', () => {
+    // `import_skeleton_json` hands the builder a bare `JSON.parse` result, so
+    // `boneChain` is whatever the file said it was. A spread ITERATES, which throws
+    // on a number or a plain object — and a throw inside a store action loses more
+    // than a degraded rig does.
+    for (const given of [7, {}, null, true]) {
+      const warnings: string[] = [];
+      const built = buildWireSkeletonData2d(
+        {
+          bones: [{ name: 'root' }],
+          ikConstraints: [{ name: 'arm', boneChain: given as unknown as string[] }],
+        },
+        warnings,
+      );
+
+      const label = `boneChain ${JSON.stringify(given)}`;
+      expect(built.ikConstraints[0].boneChain, label).toEqual([]);
+      // The rest of the rig still arrives, which is the whole point of bounding.
+      expect(built.bones, label).toHaveLength(1);
+      expect(warnings.some((w) => w.includes('not an array')), label).toBe(true);
+    }
+  });
+
+  it('does not expand a string bone chain into one bone per character', () => {
+    const warnings: string[] = [];
+    const { ikConstraints } = buildWireSkeletonData2d(
+      { ikConstraints: [{ name: 'arm', boneChain: 'abc' as unknown as string[] }] },
+      warnings,
+    );
+
+    // A spread accepts a string happily and yields ['a', 'b', 'c'] — three bones
+    // that name nothing, with no warning, which the solver then chains together.
+    expect(ikConstraints[0].boneChain).toEqual([]);
+    expect(warnings.some((w) => w.includes('not an array'))).toBe(true);
+  });
+
+  it('leaves a chain that is exactly at the engine bound alone', () => {
+    const warnings: string[] = [];
+    const { ikConstraints } = buildWireSkeletonData2d(
+      {
+        ikConstraints: [{
+          name: 'arm',
+          boneChain: Array.from({ length: MAX_IK_BONE_CHAIN_2D }, (_, i) => `b${i}`),
+        }],
+      },
+      warnings,
+    );
+
+    // The boundary itself, not a value comfortably past it: an off-by-one in the
+    // comparison drops a legal bone and is invisible at MAX + 5.
+    expect(ikConstraints[0].boneChain).toHaveLength(MAX_IK_BONE_CHAIN_2D);
+    expect(warnings).toEqual([]);
+  });
+
+  it('drops exactly one bone from a chain one past the bound', () => {
+    const warnings: string[] = [];
+    const { ikConstraints } = buildWireSkeletonData2d(
+      {
+        ikConstraints: [{
+          name: 'arm',
+          boneChain: Array.from({ length: MAX_IK_BONE_CHAIN_2D + 1 }, (_, i) => `b${i}`),
+        }],
+      },
+      warnings,
+    );
+
+    expect(ikConstraints[0].boneChain).toHaveLength(MAX_IK_BONE_CHAIN_2D);
+    expect(ikConstraints[0].boneChain.at(-1)).toBe(`b${MAX_IK_BONE_CHAIN_2D - 1}`);
+    expect(warnings).toHaveLength(1);
+  });
+});
+
+describe('mesh vertex weights', () => {
+  function meshWith(weights: unknown, warnings?: string[]) {
+    // Cast at the boundary, once: every case here feeds the builder a shape the
+    // source type says is impossible, which is the whole point — `import_skeleton_json`
+    // passes a bare `JSON.parse` result and the declared types do not constrain it.
+    const source = {
+      skins: {
+        default: {
+          attachments: {
+            cloak: { type: 'mesh', textureId: 'tex', vertices: [[0, 0]], weights },
+          },
+        },
+      },
+    } as unknown as SkeletonSource2d;
+
+    const { skins } = buildWireSkeletonData2d(source, warnings);
+    const cloak = skins.default.attachments.cloak;
+    return cloak.type === 'mesh' ? cloak.weights : [];
+  }
+
+  it('drops an influence whose bone is not a name, and the weight paired with it', () => {
+    // `VertexWeights.bones` is the same `Vec<String>` as `IkConstraint2d::bone_chain`,
+    // reached by the same `from_value::<SkeletonData2d>` — so one number here is the
+    // same whole-rig `Invalid skeletonData` reject, one field over.
+    const warnings: string[] = [];
+    const weights = meshWith(
+      [{ bones: ['spine', 7, 'hip'], weights: [0.5, 0.2, 0.3] }],
+      warnings,
+    );
+
+    // 0.2 goes with the bone it belonged to. Keeping the weights at their source
+    // length would slide 0.3 onto `hip`'s predecessor and deform the mesh wrongly —
+    // a quieter failure than the reject this is avoiding.
+    expect(weights).toEqual([{ bones: ['spine', 'hip'], weights: [0.5, 0.3] }]);
+    expect(warnings.some((w) => w.includes('bones[1]'))).toBe(true);
+  });
+
+  it('drops a weights hole, which JSON.stringify would otherwise send as null', () => {
+    const holed = ['spine', 'hip'];
+    delete holed[0];
+
+    const warnings: string[] = [];
+    expect(meshWith([{ bones: holed, weights: [0.4, 0.6] }], warnings)).toEqual([
+      { bones: ['hip'], weights: [0.6] },
+    ]);
+    expect(warnings.some((w) => w.includes('bones[0]'))).toBe(true);
+  });
+
+  it('leaves a vertex unweighted when its bone list is not an array', () => {
+    const warnings: string[] = [];
+    expect(meshWith([{ bones: 7, weights: [1] }], warnings)).toEqual([
+      { bones: [], weights: [] },
+    ]);
+    expect(warnings.some((w) => w.includes('not an array'))).toBe(true);
+  });
+
+  it('names the skin and the slot it warned about', () => {
+    // One rig can carry the same slot name in several skins; a warning that named
+    // neither would leave the author with nowhere to look.
+    const warnings: string[] = [];
+    meshWith([{ bones: [null], weights: [1] }], warnings);
+
+    expect(warnings[0]).toContain('default');
+    expect(warnings[0]).toContain('cloak');
+  });
+});
+
+describe('parseSkeletonWire2d', () => {
+  it('does not throw on a bone chain that is not an array', () => {
+    // `AutoRiggingPanel` routes a locally-built wire skeleton through the parser,
+    // so this is not only fed by trusted engine events.
+    const parsed = parseSkeletonWire2d({
+      ikConstraints: [{ name: 'arm', boneChain: 7 }],
+    });
+
+    expect(parsed?.ikConstraints[0].boneChain).toEqual([]);
+  });
+
+  it('drops a chain entry the store type says cannot be there', () => {
+    const parsed = parseSkeletonWire2d({
+      ikConstraints: [{ name: 'arm', boneChain: ['a', null, 3, '', 'b'] }],
+    });
+
+    expect(parsed?.ikConstraints[0].boneChain).toEqual(['a', 'b']);
+  });
 });
 
 describe('warnings report every bound the engine would have rejected', () => {
@@ -371,6 +530,83 @@ describe('warnings report every bound the engine would have rejected', () => {
     // 0 is a legal authored value (full FK) and must not be reported as clamped.
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('1.5');
+  });
+
+  it('blames the type, not the range, for a bend direction that is not a number', () => {
+    const warnings: string[] = [];
+    const { ikConstraints } = buildWireSkeletonData2d(
+      {
+        // A quoted "-1" is the case worth naming: it falls back to the default,
+        // which bends the chain the OPPOSITE way from what the file asked for.
+        ikConstraints: [{ name: 'arm', boneChain: ['x', 'y'], bendDirection: '-1' as unknown as number }],
+      },
+      warnings,
+    );
+
+    expect(ikConstraints[0].bendDirection).toBe(1);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('not a finite number');
+    // The magnitude sentence would send the reader to look at a value whose
+    // magnitude was never the problem.
+    expect(warnings[0]).not.toContain('ignores the magnitude');
+  });
+
+  it('blames the type, not the range, for a mix that is not a number', () => {
+    const warnings: string[] = [];
+    const { ikConstraints } = buildWireSkeletonData2d(
+      {
+        // "0.5" is plainly INSIDE 0–1, so the range sentence would be false.
+        ikConstraints: [{ name: 'arm', boneChain: ['x', 'y'], mix: '0.5' as unknown as number }],
+      },
+      warnings,
+    );
+
+    expect(ikConstraints[0].mix).toBe(1);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('not a finite number');
+    expect(warnings[0]).not.toContain('outside');
+  });
+
+  it('treats NaN, Infinity and null as type failures for both fields', () => {
+    for (const given of [NaN, Infinity, -Infinity, null]) {
+      const warnings: string[] = [];
+      const { ikConstraints } = buildWireSkeletonData2d(
+        {
+          ikConstraints: [{
+            name: 'arm',
+            boneChain: ['x', 'y'],
+            bendDirection: given as unknown as number,
+            mix: given as unknown as number,
+          }],
+        },
+        warnings,
+      );
+
+      const label = String(given);
+      // The engine's `f32` cannot carry any of these, and serde refuses `null`
+      // for a non-optional field outright.
+      expect(ikConstraints[0].bendDirection, label).toBe(1);
+      expect(ikConstraints[0].mix, label).toBe(1);
+      expect(warnings, label).toHaveLength(2);
+      expect(warnings.every((w) => w.includes('not a finite number')), label).toBe(true);
+    }
+  });
+
+  it('says nothing about -0, which changes neither field', () => {
+    const warnings: string[] = [];
+    const { ikConstraints } = buildWireSkeletonData2d(
+      // `-0 < 0` is false in both JS and Rust, so the bend is +1 exactly as it is
+      // for 0; and `Math.min(1, Math.max(0, -0))` is 0, which `!==` cannot tell
+      // from -0. Nothing was altered, so nothing is reported — except the bend,
+      // which reports for the same reason a plain 0 does.
+      { ikConstraints: [{ name: 'arm', boneChain: ['x', 'y'], bendDirection: -0, mix: -0 }] },
+      warnings,
+    );
+
+    expect(ikConstraints[0].bendDirection).toBe(1);
+    expect(ikConstraints[0].mix).toBe(0);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('bend direction 0');
   });
 
   it('stays silent for a skeleton with nothing to report', () => {
