@@ -168,10 +168,14 @@ describe('buildCommand', () => {
     expect(cmd).toBeNull();
   });
 
-  it('dialogue track returns start_dialogue', () => {
+  it('dialogue track returns start_dialogue, stamped with the beat it came from', () => {
+    // `beat` is the keyframe's own timestamp. A dialogue keyframe with a
+    // duration is re-dispatched on every frame of its window, so the handler
+    // needs it to tell "the same beat again" — which must not reopen the tree —
+    // from a later beat that happens to name the same one.
     const cmd = buildCommand('dialogue', 'npc1', makeKF({ treeId: 'tree_1' }), 0);
     expect(cmd?.command).toBe('start_dialogue');
-    expect(cmd?.payload).toEqual({ treeId: 'tree_1', entityId: 'npc1' });
+    expect(cmd?.payload).toEqual({ treeId: 'tree_1', entityId: 'npc1', beat: 0 });
   });
 
   it('dialogue track returns null when the payload names no tree', () => {
