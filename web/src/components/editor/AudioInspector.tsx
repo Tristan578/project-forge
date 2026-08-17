@@ -9,6 +9,7 @@ import { GenerateMusicDialog } from './GenerateMusicDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { useUserStore } from '@/stores/userStore';
 import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
+import { resolveAudioAssetId } from '@/lib/audio/entityAudioGraph';
 
 interface SliderRowProps {
   label: string;
@@ -107,9 +108,23 @@ export function AudioInspector() {
   const tier = useUserStore((s) => s.tier);
   const canGenerateSound = canAccessPanel('generate-sound', tier);
   const canGenerateMusic = canAccessPanel('generate-music', tier);
+  // These stay focusable when locked (aria-disabled, not disabled): they are
+  // upgrade prompts, and a control removed from the tab order can never tell
+  // anyone what it wants. But `title` alone is not that telling — it is
+  // unreachable by keyboard and inconsistently announced — so the requirement
+  // goes in the accessible name too.
+  const soundButtonLabel = canGenerateSound
+    ? 'Generate sound with AI'
+    : `Generate sound with AI — requires ${TIER_LABELS[getRequiredTier('generate-sound') ?? 'hobbyist']} tier`;
+  const musicButtonLabel = canGenerateMusic
+    ? 'Generate music with AI'
+    : `Generate music with AI — requires ${TIER_LABELS[getRequiredTier('generate-music') ?? 'hobbyist']} tier`;
 
   const primaryId = useEditorStore((s) => s.primaryId);
-  const primaryAudio = useEditorStore((s) => s.primaryAudio);
+  // Read the selected entity's audio out of the per-entity map. This used to be
+  // a single `primaryAudio` holding whichever entity's AUDIO_CHANGED arrived
+  // last, so a scene with two sound sources showed the wrong one.
+  const primaryAudio = useEditorStore((s) => (primaryId ? s.entityAudio[primaryId] ?? null : null));
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
   const audioBuses = useEditorStore((s) => s.audioBuses);
   const setAudio = useEditorStore((s) => s.setAudio);
@@ -119,6 +134,19 @@ export function AudioInspector() {
   const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
 
   const audioAssets = Object.values(assetRegistry).filter((a) => a.kind === 'audio');
+
+  // An entity's `assetId` is not always an asset id: a generated clip carries
+  // the import NAME, because the engine mints the id itself and never lets JS
+  // supply one (see the header of `lib/audio/entityAudioGraph.ts`). The options
+  // below are keyed by id, so without resolving the alias every AI-attached
+  // sound displayed as "None" — and picking any option to see what was there
+  // overwrote it.
+  const selectedAssetId = primaryAudio?.assetId ? resolveAudioAssetId(primaryAudio.assetId) : '';
+  // Still unknown means the asset is genuinely gone (deleted, or a scene saved
+  // against assets this session never imported). Name it rather than silently
+  // showing "None", which reads as "no sound attached".
+  const selectedAssetMissing =
+    selectedAssetId !== '' && !audioAssets.some((a) => a.id === selectedAssetId);
 
   const handleUpdate = useCallback(
     (partial: Partial<AudioData>) => {
@@ -179,12 +207,13 @@ export function AudioInspector() {
           <button
             onClick={() => canGenerateSound && setGenerateSoundOpen(true)}
             aria-disabled={!canGenerateSound || undefined}
+            aria-label={soundButtonLabel}
             className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] ${
               canGenerateSound
                 ? 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50'
                 : 'cursor-not-allowed bg-zinc-800 text-zinc-500'
             }`}
-            title={canGenerateSound ? 'Generate sound with AI' : `Requires ${TIER_LABELS[getRequiredTier('generate-sound') ?? 'hobbyist']} tier`}
+            title={soundButtonLabel}
           >
             {canGenerateSound ? <Sparkles size={10} /> : <Lock size={10} />}
             Sound
@@ -192,12 +221,13 @@ export function AudioInspector() {
           <button
             onClick={() => canGenerateMusic && setGenerateMusicOpen(true)}
             aria-disabled={!canGenerateMusic || undefined}
+            aria-label={musicButtonLabel}
             className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] ${
               canGenerateMusic
                 ? 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50'
                 : 'cursor-not-allowed bg-zinc-800 text-zinc-500'
             }`}
-            title={canGenerateMusic ? 'Generate music with AI' : `Requires ${TIER_LABELS[getRequiredTier('generate-music') ?? 'hobbyist']} tier`}
+            title={musicButtonLabel}
           >
             {canGenerateMusic ? <Sparkles size={10} /> : <Lock size={10} />}
             Music
@@ -216,17 +246,24 @@ export function AudioInspector() {
         <div className="space-y-3">
           {/* Asset Dropdown */}
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+            <label
+              htmlFor="audio-asset-select"
+              className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1"
+            >
               Asset
               <InfoTooltip term="audioAsset" />
             </label>
             <select
-              value={primaryAudio.assetId ?? ''}
+              id="audio-asset-select"
+              value={selectedAssetId}
               onChange={(e) => handleUpdate({ assetId: e.target.value || null })}
               className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                 focus:ring-1 focus:ring-blue-500"
             >
               <option value="">None</option>
+              {selectedAssetMissing && (
+                <option value={selectedAssetId}>{selectedAssetId} (missing)</option>
+              )}
               {audioAssets.map((asset) => (
                 <option key={asset.id} value={asset.id}>
                   {asset.name}
@@ -237,11 +274,15 @@ export function AudioInspector() {
 
           {/* Bus Assignment */}
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+            <label
+              htmlFor="audio-bus-select"
+              className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1"
+            >
               Bus
               <InfoTooltip term="audioBus" />
             </label>
             <select
+              id="audio-bus-select"
               value={primaryAudio.bus ?? 'sfx'}
               onChange={(e) => handleUpdate({ bus: e.target.value })}
               className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none

@@ -638,4 +638,55 @@ describe('buildSceneContext', () => {
     const ctx = buildSceneContext(baseState());
     expect(ctx).toContain('Prefabs: Use list_prefabs');
   });
+
+  // ---------------------------------------------------------------------------
+  // Sound sources
+  // ---------------------------------------------------------------------------
+  describe('sound sources', () => {
+    const withAudio = (entityAudio: Record<string, unknown>, nodes: Record<string, unknown> = {}) =>
+      buildSceneContext(baseState({
+        entityAudio,
+        sceneGraph: { nodes, rootIds: Object.keys(nodes) },
+      } as unknown as Partial<ContextState>));
+
+    it('omits the section when no entity has audio', () => {
+      expect(withAudio({})).not.toContain('## Sound Sources');
+      expect(buildSceneContext(baseState())).not.toContain('## Sound Sources');
+    });
+
+    it('names the entity from the scene graph and lists its traits', () => {
+      // The model addresses entities by name, so the id alone would be
+      // unusable in a follow-up tool call.
+      const ctx = withAudio(
+        { 'ent-1': { assetId: 'a1', bus: 'music', loopAudio: true, spatial: false, autoplay: true } },
+        { 'ent-1': makeEntity({ entityId: 'ent-1', name: 'Background Music' }) },
+      );
+      expect(ctx).toContain('## Sound Sources');
+      expect(ctx).toContain('1 entity with audio');
+      expect(ctx).toContain('Background Music (music, looping, autoplay)');
+    });
+
+    it('falls back to the id when the entity is not in the scene graph', () => {
+      const ctx = withAudio({ 'ent-9': { assetId: 'a1', bus: 'sfx' } });
+      expect(ctx).toContain('ent-9 (sfx)');
+    });
+
+    it('lists every source, not just the first', () => {
+      // A single `primaryAudio` field is exactly what this section replaced —
+      // a scene with two sound sources reported one.
+      const ctx = withAudio(
+        {
+          'ent-1': { assetId: 'a1', bus: 'music', loopAudio: true },
+          'ent-2': { assetId: 'a2', bus: 'sfx', spatial: true },
+        },
+        {
+          'ent-1': makeEntity({ entityId: 'ent-1', name: 'Theme' }),
+          'ent-2': makeEntity({ entityId: 'ent-2', name: 'Door' }),
+        },
+      );
+      expect(ctx).toContain('2 entities with audio');
+      expect(ctx).toContain('Theme (music, looping)');
+      expect(ctx).toContain('Door (sfx, spatial)');
+    });
+  });
 });

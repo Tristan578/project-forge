@@ -487,6 +487,22 @@ describe('audioManager - Advanced', () => {
       expect(audioManager.getMusicIntensity('battle')).toBe(0);
     });
 
+    it('setMusicIntensity rejects a non-finite intensity', () => {
+      // NaN survives a min/max clamp — it fails every comparison — and then
+      // reaches `linearRampToValueAtTime` through the stem volumes, which
+      // throws. `forge.audio.setMusicIntensity` passes whatever a user script
+      // handed it, so this is reachable from game code.
+      audioManager.setAdaptiveMusic('battle', [
+        { name: 'ambient', assetId: 'ambient-asset' },
+      ]);
+
+      expect(() => audioManager.setMusicIntensity('battle', Number.NaN)).not.toThrow();
+      expect(audioManager.getMusicIntensity('battle')).toBe(0);
+
+      audioManager.setMusicIntensity('battle', Number.POSITIVE_INFINITY);
+      expect(audioManager.getMusicIntensity('battle')).toBe(0);
+    });
+
     it('setMusicIntensity updates track intensity', () => {
       audioManager.setAdaptiveMusic('battle', [
         { name: 'ambient', assetId: 'ambient-asset' },

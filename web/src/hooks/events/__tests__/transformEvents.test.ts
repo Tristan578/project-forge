@@ -11,8 +11,18 @@ vi.mock('@/stores/editorStore', () => ({
   },
 }));
 
+// The Web Audio graph is a module singleton with real `AudioContext` nodes
+// behind it. Mocking it keeps this suite about the EVENT wiring, and gives the
+// entity-delete case a spy to assert against.
+vi.mock('@/lib/audio/entityAudioGraph', () => ({
+  releaseEntityAudio: vi.fn(),
+  resetEntityAudioGraphForScene: vi.fn(),
+}));
+
 import { useEditorStore } from '@/stores/editorStore';
+import { releaseEntityAudio } from '@/lib/audio/entityAudioGraph';
 import { handleTransformEvent } from '../transformEvents';
+import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 
 describe('handleTransformEvent', () => {
   let actions: ReturnType<typeof createMockActions>;
@@ -248,6 +258,42 @@ describe('handleTransformEvent', () => {
       handleTransformEvent('SCENE_NODE_REMOVED', { entityId: 'ghost' }, mockSetGet.set, mockSetGet.get);
 
       expect(actions.onLightNodeRemoved).not.toHaveBeenCalled();
+    });
+
+    it('drops the entity from both halves of the audio state', () => {
+      // `entityAudio` in the store is what the inspector and the AI's scene
+      // context read; the Web Audio graph is what actually makes noise. A
+      // deleted entity that only left one of them would either keep a dead
+      // sound in the panel or keep a live node playing with nothing to stop it.
+      vi.mocked(useEditorStore.getState).mockReturnValue({
+        ...actions,
+        sceneGraph: { nodes: {}, rootIds: [] },
+      } as unknown as StoreState);
+
+      handleTransformEvent('SCENE_NODE_REMOVED', { entityId: 'a1' }, mockSetGet.set, mockSetGet.get);
+
+      expect(actions.setEntityAudio).toHaveBeenCalledWith('a1', null);
+      expect(releaseEntityAudio).toHaveBeenCalledWith('a1');
+    });
+
+    it('releases audio for an entity the scene graph never knew about', () => {
+      // The audio teardown sits OUTSIDE the `if (removedNode)` guard on
+      // purpose: an entity can carry audio while its graph node has already
+      // gone, and a guarded release would leak the node forever.
+      vi.mocked(useEditorStore.getState).mockReturnValue({
+        ...actions,
+        sceneGraph: { nodes: {}, rootIds: [] },
+      } as unknown as StoreState);
+
+      handleTransformEvent(
+        'SCENE_NODE_REMOVED',
+        { entityId: 'ghost' },
+        mockSetGet.set,
+        mockSetGet.get,
+      );
+
+      expect(actions.onLightNodeRemoved).not.toHaveBeenCalled();
+      expect(releaseEntityAudio).toHaveBeenCalledWith('ghost');
     });
   });
 
@@ -678,6 +724,10 @@ describe('handleTransformEvent', () => {
   });
 
   describe('SCENE_LOADED', () => {
+    beforeEach(() => {
+      clearStagedSceneAudio();
+    });
+
     it('resets scene state via setState', () => {
       const payload = { name: 'LoadedScene' };
 
@@ -697,6 +747,39 @@ describe('handleTransformEvent', () => {
         primaryPhysics: null,
         physicsEnabled: false,
         primaryAnimation: null,
+        // Nothing staged — a new_scene, or a load whose JSON declared no audio.
+        // The outgoing scene's ids are meaningless either way.
+        entityAudio: {},
+      });
+    });
+
+    it('adopts the audio the loading scene declared', () => {
+      // The engine emits AUDIO_CHANGED only for the selected entity, so without
+      // this the loaded scene reads as silent to the inspector, the
+      // accessibility audit and the AI's scene context.
+      stageSceneAudio(
+        JSON.stringify({
+          entities: [{ entityId: 'speaker', audioData: { assetId: 'a1', bus: 'music' } }],
+        })
+      );
+
+      handleTransformEvent('SCENE_LOADED', { name: 'LoadedScene' }, mockSetGet.set, mockSetGet.get);
+
+      expect(vi.mocked(useEditorStore.setState).mock.calls[0][0]).toMatchObject({
+        entityAudio: { speaker: expect.objectContaining({ assetId: 'a1', bus: 'music' }) },
+      });
+    });
+
+    it('does not hand the same scene audio to a second load', () => {
+      stageSceneAudio(
+        JSON.stringify({ entities: [{ entityId: 'speaker', audioData: { assetId: 'a1' } }] })
+      );
+
+      handleTransformEvent('SCENE_LOADED', { name: 'First' }, mockSetGet.set, mockSetGet.get);
+      handleTransformEvent('SCENE_LOADED', { name: 'Second' }, mockSetGet.set, mockSetGet.get);
+
+      expect(vi.mocked(useEditorStore.setState).mock.calls[1][0]).toMatchObject({
+        entityAudio: {},
       });
     });
   });

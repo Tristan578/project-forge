@@ -77,7 +77,7 @@ export function createMockStore(overrides: Record<string, unknown> = {}): ToolCa
     removeJoint: vi.fn(),
 
     // Audio
-    primaryAudio: null,
+    entityAudio: {},
     audioBuses: [],
     audioSnapshots: {},
     setAdaptiveMusicIntensity: vi.fn(),

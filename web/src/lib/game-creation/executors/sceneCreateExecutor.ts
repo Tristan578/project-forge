@@ -83,7 +83,15 @@ export const sceneCreateExecutor: ExecutorDefinition = {
       // `setup_scene`) so the generated game is not stacked on top of it.
       // `new_scene` despawns deletable entities and resets editor state; it does
       // not re-run `setup_scene`.
-      ctx.dispatchCommand('new_scene', {});
+      //
+      // Through the store, not `dispatchCommand`: `sceneSlice.newScene` also
+      // drops any scene audio staged by a `loadScene` the engine never confirmed
+      // (`clearStagedSceneAudio`). A raw dispatch skips that, and the stash would
+      // then be adopted by the SCENE_LOADED this very command emits — attaching
+      // the old scene's sounds to the generated game's fresh entity ids. Both
+      // paths reach the same `_dispatchCommand`, so the engine sees no
+      // difference.
+      ctx.getStore().newScene();
     }
 
     // `worldConfig` is parsed and then dropped. There is no scene-level world

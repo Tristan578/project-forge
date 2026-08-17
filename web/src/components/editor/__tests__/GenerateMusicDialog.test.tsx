@@ -4,10 +4,21 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup, waitFor } from '@/test/utils/componentTestUtils';
 import { GenerateMusicDialog } from '../GenerateMusicDialog';
 import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
+import { toast } from 'sonner';
+import { trackJob } from '@/lib/chat/handlers/generationHandlers';
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock('@/lib/chat/handlers/generationHandlers', () => ({
+  trackJob: vi.fn(),
+  makeJobId: vi.fn(() => 'job-local-1'),
+}));
 
 vi.mock('@/stores/userStore', () => ({
   useUserStore: vi.fn(() => ({})),
@@ -20,10 +31,13 @@ vi.mock('@/stores/editorStore', () => ({
 vi.mock('lucide-react', () => ({
   X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
   Sparkles: (props: Record<string, unknown>) => <span data-testid="sparkles-icon" {...props} />,
+  Loader2: (props: Record<string, unknown>) => <span data-testid="loader-icon" {...props} />,
 }));
 
 describe('GenerateMusicDialog', () => {
   const mockOnClose = vi.fn();
+  const importAudio = vi.fn();
+  const setAudio = vi.fn();
 
   function setupStore(balance = 1000, primaryName = '') {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,6 +52,8 @@ describe('GenerateMusicDialog', () => {
       const state = { primaryName };
       return typeof selector === 'function' ? selector(state) : state;
     });
+    // The submit path reaches for the store imperatively, outside React.
+    vi.mocked(useEditorStore).getState = vi.fn(() => ({ importAudio, setAudio })) as never;
   }
 
   beforeEach(() => {
@@ -125,5 +141,77 @@ describe('GenerateMusicDialog', () => {
   it('renders duration range slider', () => {
     render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} />);
     expect(screen.getByText(/Duration:/)).toBeInTheDocument();
+  });
+
+  /**
+   * Music answers in two shapes — a finished clip, or a provider job id to poll
+   * — and this dialog used to discard both. The sync path threw the only copy
+   * of the track away; the async path never registered the job, so nothing ever
+   * polled for it and the finished track never arrived.
+   */
+  describe('submit', () => {
+    function respondWith(body: unknown, ok = true) {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok, json: async () => body }));
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function generate(entityId?: string) {
+      setupStore(1000, 'AudioEntity');
+      render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} entityId={entityId} />);
+      fireEvent.change(screen.getByPlaceholderText('Upbeat chiptune adventure music'), {
+        target: { value: 'tense dungeon theme' },
+      });
+      fireEvent.click(screen.getByText('Generate'));
+    }
+
+    it('imports a clip returned inline and attaches it as a looping bed', async () => {
+      respondWith({ audioBase64: 'AAAA' });
+      generate('entity-1');
+
+      await waitFor(() => expect(importAudio).toHaveBeenCalledTimes(1));
+      expect(importAudio).toHaveBeenCalledWith('AAAA', 'music-tense dungeon theme');
+      expect(setAudio).toHaveBeenCalledWith(
+        'entity-1',
+        expect.objectContaining({ bus: 'music', loopAudio: true, autoplay: true })
+      );
+      expect(trackJob).not.toHaveBeenCalled();
+    });
+
+    it('registers the async job so something eventually polls for the track', async () => {
+      respondWith({ jobId: 'suno-42', provider: 'suno', usageId: 'usage-9' });
+      generate('entity-1');
+
+      await waitFor(() => expect(trackJob).toHaveBeenCalledTimes(1));
+      expect(trackJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerJobId: 'suno-42',
+          type: 'music',
+          provider: 'suno',
+          usageId: 'usage-9',
+          autoPlace: true,
+          targetEntityId: 'entity-1',
+        })
+      );
+      expect(importAudio).not.toHaveBeenCalled();
+      expect(toast.success).toHaveBeenCalledWith(
+        'Music generation started. It will be imported when it finishes.'
+      );
+    });
+
+    it('reports a 200 with neither a clip nor a job as a failure', async () => {
+      respondWith({});
+      generate('entity-1');
+
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          expect.stringContaining('Music generation produced no audio')
+        )
+      );
+      expect(trackJob).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
+    });
   });
 });

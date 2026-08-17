@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
 import { createSceneSlice, setSceneDispatcher, type SceneSlice } from '../sceneSlice';
 import { loadProjectScenes } from '@/lib/scenes/sceneManager';
+import { takeStagedSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 
 describe('sceneSlice', () => {
   let store: ReturnType<typeof createSliceStore<SceneSlice>>;
@@ -57,6 +58,43 @@ describe('sceneSlice', () => {
     it('should dispatch new_scene', () => {
       store.getState().newScene();
       expect(mockDispatch).toHaveBeenCalledWith('new_scene', {});
+    });
+
+    it('stages the audio the scene declares, since SCENE_LOADED carries only a name', () => {
+      clearStagedSceneAudio();
+      store.getState().loadScene(
+        JSON.stringify({ entities: [{ entityId: 'e1', audioData: { assetId: 'a1' } }] })
+      );
+
+      expect(takeStagedSceneAudio()).toMatchObject({
+        e1: expect.objectContaining({ assetId: 'a1' }),
+      });
+    });
+
+    it('drops a stash the engine never confirmed when a new scene starts', () => {
+      // new_scene emits the same SCENE_LOADED a load does, so a rejected load's
+      // stash would otherwise attach audio to an empty scene's dead ids.
+      store.getState().loadScene(
+        JSON.stringify({ entities: [{ entityId: 'e1', audioData: { assetId: 'a1' } }] })
+      );
+      store.getState().newScene();
+
+      expect(takeStagedSceneAudio()).toEqual({});
+    });
+
+    it('stages nothing when there is no dispatcher to load the scene', () => {
+      // No dispatcher means the engine never loads and never emits
+      // SCENE_LOADED, so a stash written here would wait until some LATER
+      // scene's SCENE_LOADED claimed it — attaching this scene's sounds to a
+      // different scene's entity ids.
+      clearStagedSceneAudio();
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      store.getState().loadScene(
+        JSON.stringify({ entities: [{ entityId: 'e1', audioData: { assetId: 'a1' } }] })
+      );
+
+      expect(takeStagedSceneAudio()).toEqual({});
     });
   });
 

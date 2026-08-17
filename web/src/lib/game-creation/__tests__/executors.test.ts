@@ -132,8 +132,11 @@ function makeMockStore(overrides: Partial<EditorState> = {}): EditorState {
     primaryPhysics: null,
     physicsEnabled: false,
     debugPhysics: false,
-    // scene_create mirrors the JS-side scene list into the store (PF-1097).
+    // scene_create mirrors the JS-side scene list into the store (PF-1097) and
+    // clears the starter scene through the slice, not a raw dispatch, so the
+    // staged scene audio is dropped with it (PF-1155).
     setScenes: vi.fn(),
+    newScene: vi.fn(),
     // character_setup routes the controller and the input bindings through the
     // store rather than dispatching them itself, so store and engine cannot
     // drift apart (PF-1124). Both of these actions dispatch.
@@ -194,7 +197,8 @@ describe('scene_create executor', () => {
       expect.arrayContaining([expect.objectContaining({ name: 'Level 1' })]),
       expect.any(String),
     );
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('new_scene', {});
+    expect(ctx.getStore().newScene).toHaveBeenCalled();
+    expect(ctx.dispatchCommand).not.toHaveBeenCalledWith('new_scene', {});
     expect(ctx.dispatchCommand).not.toHaveBeenCalledWith('create_scene', expect.anything());
   });
 
