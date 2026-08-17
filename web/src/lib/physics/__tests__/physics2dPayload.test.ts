@@ -66,42 +66,70 @@ function toCamel(snake: string): string {
   return snake.replace(/_([a-z0-9])/g, (_m, c: string) => c.toUpperCase());
 }
 
-describe('Physics2dData default table vs the Rust engine', () => {
-  const source = readRust();
-  const defaultBlock = blockAfter(
-    source,
-    /impl\s+Default\s+for\s+Physics2dData\s*\{[\s\S]*?fn\s+default\s*\(\s*\)\s*->\s*Self\s*\{\s*Self\s*\{/,
-    'impl Default for Physics2dData',
-  );
+/**
+ * PascalCase serde variant -> the snake_case value the store vocabulary uses.
+ *
+ * Derived rather than tabulated so the expectation cannot drift into agreement
+ * with the implementation: `ConvexPolygon` must become `convex_polygon`, and a
+ * lowercase-only mapping (`convexpolygon`) is a value no consumer can match.
+ */
+function toSnake(pascal: string): string {
+  return pascal.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+}
 
-  /**
-   * Field name -> raw Rust initializer text. Only top-level `name: value,` pairs
-   * are taken, so a nested `vec![]` or `[1.0, 1.0]` stays intact as one value.
-   */
-  const rustDefaults = new Map<string, string>();
-  {
-    let depth = 0;
-    let buffer = '';
-    for (const char of defaultBlock) {
-      if (char === '[' || char === '(' || char === '{') depth += 1;
-      if (char === ']' || char === ')' || char === '}') depth -= 1;
-      if (char === ',' && depth === 0) {
-        const pair = buffer.trim();
-        buffer = '';
-        if (pair.length === 0) continue;
-        const colon = pair.indexOf(':');
-        if (colon === -1) continue;
-        rustDefaults.set(pair.slice(0, colon).trim(), pair.slice(colon + 1).trim());
-        continue;
-      }
-      buffer += char;
+/**
+ * Field name -> raw Rust initializer text. Only top-level `name: value,` pairs
+ * are taken, so a nested `vec![]` or `[1.0, 1.0]` stays intact as one value.
+ */
+function topLevelPairs(block: string): Map<string, string> {
+  const pairs = new Map<string, string>();
+  const record = (chunk: string) => {
+    const pair = chunk.trim();
+    if (pair.length === 0) return;
+    const colon = pair.indexOf(':');
+    if (colon === -1) return;
+    pairs.set(pair.slice(0, colon).trim(), pair.slice(colon + 1).trim());
+  };
+
+  let depth = 0;
+  let buffer = '';
+  for (const char of block) {
+    if (char === '[' || char === '(' || char === '{') depth += 1;
+    if (char === ']' || char === ')' || char === '}') depth -= 1;
+    if (char === ',' && depth === 0) {
+      record(buffer);
+      buffer = '';
+      continue;
     }
-    const tail = buffer.trim();
-    if (tail.length > 0 && tail.includes(':')) {
-      const colon = tail.indexOf(':');
-      rustDefaults.set(tail.slice(0, colon).trim(), tail.slice(colon + 1).trim());
-    }
+    buffer += char;
   }
+  record(buffer);
+  return pairs;
+}
+
+/** The `impl Default for Physics2dData` initializers, keyed by Rust field name. */
+function rustDefaultFields(): Map<string, string> {
+  return topLevelPairs(
+    blockAfter(
+      readRust(),
+      /impl\s+Default\s+for\s+Physics2dData\s*\{[\s\S]*?fn\s+default\s*\(\s*\)\s*->\s*Self\s*\{\s*Self\s*\{/,
+      'impl Default for Physics2dData',
+    ),
+  );
+}
+
+/** The variant names declared by a `pub enum <name>` in physics_2d.rs. */
+function rustEnumVariants(name: string): string[] {
+  const block = blockAfter(readRust(), new RegExp(`pub\\s+enum\\s+${name}\\s*\\{`), `enum ${name}`);
+  const variants = [...block.matchAll(/^\s*([A-Z][A-Za-z0-9]*)\s*,/gm)].map((m) => m[1]);
+  if (variants.length === 0) {
+    throw new Error(`Parsed no variants out of enum ${name} — refusing to pass vacuously.`);
+  }
+  return variants;
+}
+
+describe('Physics2dData default table vs the Rust engine', () => {
+  const rustDefaults = rustDefaultFields();
 
   it('parsed a plausible default block', () => {
     // Guards the parser itself: an initializer shape it cannot read would otherwise
@@ -169,26 +197,34 @@ describe('Physics2dPatch field set vs the Rust struct', () => {
 });
 
 describe('enum variant tables vs the Rust enums', () => {
-  const source = readRust();
+  const bodyTypes = rustEnumVariants('BodyType2d');
+  const colliderShapes = rustEnumVariants('ColliderShape2d');
 
   it.each([
-    ['BodyType2d', ['Dynamic', 'Static', 'Kinematic']],
-    ['ColliderShape2d', ['Box', 'Circle', 'Capsule', 'ConvexPolygon', 'Edge', 'Auto']],
-  ])('%s declares exactly the variants the wire parser maps', (name, expected) => {
-    const block = blockAfter(source, new RegExp(`pub\\s+enum\\s+${name}\\s*\\{`), `enum ${name}`);
-    const variants = [...block.matchAll(/^\s*([A-Z][A-Za-z0-9]*)\s*,/gm)].map((m) => m[1]);
-    expect([...variants].sort()).toEqual([...expected].sort());
+    ['BodyType2d', bodyTypes, ['Dynamic', 'Static', 'Kinematic']],
+    [
+      'ColliderShape2d',
+      colliderShapes,
+      ['Box', 'Circle', 'Capsule', 'ConvexPolygon', 'Edge', 'Auto'],
+    ],
+  ])('%s declares exactly the variants the wire parser maps', (_name, parsed, expected) => {
+    expect([...parsed].sort()).toEqual([...expected].sort());
   });
 
-  it('maps every declared variant rather than dropping it as unrecognised', () => {
-    for (const variant of ['Dynamic', 'Static', 'Kinematic']) {
-      const parsed = parsePhysics2dWire({ entityId: 'e1', body_type: variant });
-      expect(parsed?.data.bodyType).toBeDefined();
-    }
-    for (const variant of ['Box', 'Circle', 'Capsule', 'ConvexPolygon', 'Edge', 'Auto']) {
-      const parsed = parsePhysics2dWire({ entityId: 'e1', collider_shape: variant });
-      expect(parsed?.data.colliderShape).toBeDefined();
-    }
+  // The variant list comes from the Rust enum, not a literal here, so a variant
+  // added to the engine and not to the TS table fails this rather than sitting
+  // unmapped. And the expectation is the EXACT mapped value, not `toBeDefined()`:
+  // presence is the weak half of the property, and it is satisfied by `Kinematic`
+  // mapping to `'static'` — a body the simulation moves being reported as one it
+  // never will. Same weakness class as `expect.objectContaining` (PF-1167).
+  it.each(bodyTypes)('maps body type %s to its store value', (variant) => {
+    const parsed = parsePhysics2dWire({ entityId: 'e1', body_type: variant });
+    expect(parsed?.data.bodyType).toBe(toSnake(variant));
+  });
+
+  it.each(colliderShapes)('maps collider shape %s to its store value', (variant) => {
+    const parsed = parsePhysics2dWire({ entityId: 'e1', collider_shape: variant });
+    expect(parsed?.data.colliderShape).toBe(toSnake(variant));
   });
 });
 
@@ -276,6 +312,67 @@ describe('parsePhysics2dWire', () => {
         surfaceVelocity: [3, 0],
       },
     });
+  });
+
+  /**
+   * One wire value per field, keyed by the store's camelCase name.
+   *
+   * Every value differs from the engine default, so a field silently dropped by a
+   * mis-spelled `WIRE_KEY_BY_FIELD` entry cannot coincidentally match what the
+   * store would have held anyway.
+   */
+  const WIRE_SAMPLES: Record<string, { wire: unknown; parsed: unknown }> = {
+    bodyType: { wire: 'Kinematic', parsed: 'kinematic' },
+    colliderShape: { wire: 'ConvexPolygon', parsed: 'convex_polygon' },
+    size: { wire: [3, 4], parsed: [3, 4] },
+    radius: { wire: 1.25, parsed: 1.25 },
+    mass: { wire: 9, parsed: 9 },
+    friction: { wire: 0.125, parsed: 0.125 },
+    restitution: { wire: 0.875, parsed: 0.875 },
+    gravityScale: { wire: 0, parsed: 0 },
+    isSensor: { wire: true, parsed: true },
+    lockRotation: { wire: true, parsed: true },
+    continuousDetection: { wire: true, parsed: true },
+    oneWayPlatform: { wire: true, parsed: true },
+    surfaceVelocity: { wire: [-2, 5], parsed: [-2, 5] },
+    vertices: {
+      wire: [
+        [0, 0],
+        [1, 0],
+        [0, 1],
+      ],
+      parsed: [
+        [0, 0],
+        [1, 0],
+        [0, 1],
+      ],
+    },
+  };
+
+  it('has a sample for every field the Rust struct declares, and no others', () => {
+    // Keeps the round-trip below honest as the struct grows: a field added in Rust
+    // has no sample, fails here, and gets one — rather than quietly staying outside
+    // the only test that proves its wire key is spelled correctly.
+    const rustCamel = [...rustDefaultFields().keys()].map(toCamel).sort();
+    expect(Object.keys(WIRE_SAMPLES).sort()).toEqual(rustCamel);
+  });
+
+  it('round-trips every field, with the wire key taken from the Rust field name', () => {
+    // The full field set, not a representative five. `WIRE_KEY_BY_FIELD`'s values
+    // are unconstrained `string`s — `satisfies Record<keyof Physics2dData, string>`
+    // constrains the KEYS only — so a stale or mistyped snake_case spelling
+    // type-checks cleanly and reads `undefined` at runtime. Deriving each wire key
+    // from the Rust field name here is the only thing that can catch that.
+    const wire: Record<string, unknown> = { entityId: 'e1', enabled: true };
+    const expected: Record<string, unknown> = {};
+    for (const rustField of rustDefaultFields().keys()) {
+      const field = toCamel(rustField);
+      const sample = WIRE_SAMPLES[field];
+      wire[rustField] = sample.wire;
+      expected[field] = sample.parsed;
+    }
+
+    expect(parsePhysics2dWire(wire)).toEqual({ entityId: 'e1', enabled: true, data: expected });
   });
 
   it('returns null without a usable entityId', () => {

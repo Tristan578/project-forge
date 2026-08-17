@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
 import { createPhysicsSlice, setPhysicsDispatcher, type PhysicsSlice } from '../physicsSlice';
 import type { PhysicsData, JointData, Physics2dData, Joint2dData } from '../types';
+import { defaultPhysics2dData } from '@/lib/physics/physics2dPayload';
 
 let store: ReturnType<typeof createSliceStore<PhysicsSlice>>;
 let mockDispatch: ReturnType<typeof createMockDispatch>;
@@ -186,7 +187,14 @@ describe('physicsSlice', () => {
       store.getState().setPhysics2d('entity1', data, false);
 
       expect(store.getState().physics2dEnabled.entity1).toBe(false);
-      expect(mockDispatch).toHaveBeenCalledWith('set_physics_2d', expect.objectContaining({ enabled: false }));
+      // `toEqual`, not `objectContaining`: the payload SHAPE is the behaviour here,
+      // and `objectContaining({ enabled: false })` passes just as happily against
+      // the old flat spread that the engine hard-rejected (PF-1167).
+      expect(mockDispatch).toHaveBeenCalledWith('set_physics_2d', {
+        entityId: 'entity1',
+        physicsData: data,
+        enabled: false,
+      });
     });
   });
 
@@ -226,6 +234,71 @@ describe('physicsSlice', () => {
       expect(mockDispatch).toHaveBeenCalledWith('toggle_physics_2d', {
         entityId: 'entity1',
         enabled: true,
+      });
+    });
+  });
+
+  describe('applyPhysics2dFromEngine', () => {
+    it('should not dispatch anything', () => {
+      // The whole reason this action exists. Routing the inbound
+      // `PHYSICS2D_CHANGED` event through `setPhysics2d` would send
+      // `set_physics_2d` straight back at the engine — a FULL REPLACE, so every
+      // field the event did not carry would be reset on the entity the engine had
+      // just finished describing, plus one echoed command per event (PF-1167).
+      store.getState().applyPhysics2dFromEngine('entity1', { friction: 0.25 }, true);
+
+      expect(store.getState().physics2d.entity1?.friction).toBe(0.25);
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+
+    it('should merge onto existing state rather than replacing it', () => {
+      const existing: Physics2dData = {
+        ...defaultPhysics2dData(),
+        bodyType: 'static',
+        mass: 7,
+        oneWayPlatform: true,
+      };
+      store.getState().setPhysics2d('entity1', existing, true);
+      mockDispatch.mockClear();
+
+      store.getState().applyPhysics2dFromEngine('entity1', { friction: 0.75 }, true);
+
+      expect(store.getState().physics2d.entity1).toEqual({
+        ...existing,
+        friction: 0.75,
+      });
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+
+    it('should merge onto engine defaults for an entity the store has never seen', () => {
+      // A partial event about an unknown entity must not leave the other thirteen
+      // fields `undefined` — the inspector reads them unconditionally
+      // (`physics2d.mass.toFixed(1)`), so a hole here throws in the panel.
+      store.getState().applyPhysics2dFromEngine('ghost', { bodyType: 'kinematic' }, true);
+
+      expect(store.getState().physics2d.ghost).toEqual({
+        ...defaultPhysics2dData(),
+        bodyType: 'kinematic',
+      });
+    });
+
+    it('should write enabled verbatim, including false', () => {
+      store.getState().setPhysics2d('entity1', defaultPhysics2dData(), true);
+
+      store.getState().applyPhysics2dFromEngine('entity1', {}, false);
+
+      expect(store.getState().physics2dEnabled.entity1).toBe(false);
+    });
+
+    it('should not read an inherited key for an entity id from the prototype chain', () => {
+      // `state.physics2d['__proto__']` is `Object.prototype` — truthy, so a bare
+      // read would spread it as the "existing" state instead of falling back to
+      // engine defaults. Hence the `Object.hasOwn` guard in the action.
+      store.getState().applyPhysics2dFromEngine('__proto__', { mass: 3 }, true);
+
+      expect(store.getState().physics2d['__proto__']).toEqual({
+        ...defaultPhysics2dData(),
+        mass: 3,
       });
     });
   });

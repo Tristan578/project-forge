@@ -382,12 +382,17 @@ impl Plugin for SelectionPlugin {
             //
             // The toggle/update pair is `.chain()`ed, and the order is load-bearing:
             // both systems insert `Physics2dData` on an entity that has none (the
-            // toggle a default, the update the patched value), and both do it through
-            // deferred `Commands`, so the LAST insert wins. Running the toggle first
-            // makes the patched value the winner. A bare tuple is UNORDERED, so
-            // leaving these unchained lets a `set_physics_2d` + enable pair on a fresh
-            // entity collapse to defaults nondeterministically. The 3D pair needs no
-            // such ordering because `apply_physics_updates` never inserts.
+            // toggle a default, the update the patched value). `.chain()` puts an
+            // `ApplyDeferred` between them (Bevy inserts one at every explicit
+            // ordering edge, and `auto_insert_apply_deferred` is left at its default
+            // here), so the toggle's insert is FLUSHED before the update runs: the
+            // update sees the marker and the default, merges its patch onto them, and
+            // its value is what survives. Reverse the order and the toggle's default
+            // is applied second, resetting the patch. A bare tuple is UNORDERED with
+            // no sync point at all, so leaving these unchained lets a
+            // `set_physics_2d` + enable pair on a fresh entity resolve either way
+            // nondeterministically. The 3D pair needs no such ordering because
+            // `apply_physics_updates` never inserts.
             .add_systems(Update, (
                 physics::apply_physics2d_toggles,
                 physics::apply_physics2d_updates,

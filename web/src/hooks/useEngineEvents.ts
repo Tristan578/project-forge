@@ -29,14 +29,24 @@ import type { CommandResponse } from './useEngine';
  *
  * Events NOT in this set (scene graph changes, selection, mode transitions,
  * collision events, script errors, history changes) are always processed immediately.
+ *
+ * Every name here must be one the engine actually emits — verify against the
+ * `emit_event` call sites, not against a handler switch. Those sites are spread
+ * across the whole `engine/src` tree, not just `bridge/events.rs`
+ * (`TRANSFORM_CHANGED` is emitted from `core/gizmo.rs` and `bridge/core_systems.rs`),
+ * so a grep scoped to one file reports a real name as a phantom. A name nothing
+ * emits is silently inert, and it fails in BOTH directions: the throttle budget
+ * is spent on a phantom while the real high-frequency event goes unthrottled.
+ * `PHYSICS2D_UPDATED` sat here doing exactly that until PF-1167; the emitted name
+ * is `PHYSICS2D_CHANGED`. Pinned by `__tests__/useEngineEvents.throttle.test.ts`.
  */
-const THROTTLED_EVENTS = new Set([
+export const THROTTLED_EVENTS = new Set([
   'TRANSFORM_CHANGED',
   'ANIMATION_STATE_CHANGED',
   'ANIMATION_LIST_CHANGED',
   'PHYSICS_CHANGED',
   'DEBUG_PHYSICS_CHANGED',
-  'PHYSICS2D_UPDATED',
+  'PHYSICS2D_CHANGED',
 ]);
 
 /**

@@ -1208,12 +1208,18 @@ mod tests {
         );
     }
 
+    /// `physicsData` stays REQUIRED here — the `serde(default)` is on the patch's
+    /// fields, not on the outer payload — so an entity id alone is a payload error,
+    /// not a full reset to defaults. The old assertion here was
+    /// `!err.contains("Unknown")`, which this deserialization failure satisfies just
+    /// as happily as a real handler would; name the actual error instead.
     #[test]
-    fn set_physics2d_accepts_entity_id() {
-        let result = run("set_physics2d", json!({"entityId": "entity-1"}));
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(!err.contains("Unknown"), "Should reach 2D physics handler, got: {}", err);
+    fn set_physics2d_requires_a_physics_data_block() {
+        let err = run("set_physics2d", json!({"entityId": "entity-1"})).unwrap_err();
+        assert!(
+            err.contains("Invalid set_physics2d payload") && err.contains("physicsData"),
+            "expected a missing-physicsData payload error, got: {err}"
+        );
     }
 
     // === 2D partial update / toggle (PF-1167) ===
@@ -1226,12 +1232,23 @@ mod tests {
     // rather than on the command name.
 
     /// `run` panics when `dispatch` returns `None`, so reaching this assertion at
-    /// all proves the arm exists.
+    /// all proves the arm exists. The assertion itself proves the PAYLOAD got
+    /// through, and it has to be a POSITIVE one.
+    ///
+    /// A negative exclusion (`!err.contains("Unknown")`) is satisfied by a hard
+    /// deserialization reject as readily as by a real handler: handlers format
+    /// those as `Invalid <cmd> payload: {e}`, and serde's own text is lowercase
+    /// (`unknown variant ...`, `missing field ...`), which a case-sensitive
+    /// `contains("Unknown")` never sees. So a renamed field or a dropped
+    /// `serde(alias)` — the exact PF-1167 regression — would have passed.
+    ///
+    /// The one error only a command that got past deserialization can produce is
+    /// the missing thread-local queue, which native tests never have.
     fn assert_reaches_handler(command: &str, payload: serde_json::Value) {
         let err = run(command, payload).expect_err("no pending queue under native test");
         assert!(
-            !err.contains("Unknown") && !err.contains("Not yet implemented"),
-            "{command} must reach a real handler, got: {err}"
+            err.contains("PendingCommands resource not initialized"),
+            "{command} must deserialize and reach the pending queue, got: {err}"
         );
     }
 

@@ -166,8 +166,14 @@ export function buildSetPhysics2dPayload(
 /**
  * The engine's snake_case wire key for each store field, for the inbound
  * `PHYSICS2D_CHANGED` event. Derived from the Rust field names, not from a
- * mechanical camel→snake transform, so a field whose Rust spelling ever diverges
- * is a compile error here rather than a silent read of `undefined`.
+ * mechanical camel→snake transform, because `convex_polygon`-style names do not
+ * round-trip through one.
+ *
+ * The `satisfies` below constrains the KEY set only — the values are unconstrained
+ * `string`, so a wrong or stale snake_case spelling type-checks cleanly and then
+ * silently reads `undefined`. The compiler cannot catch that; the guard is
+ * `__tests__/physics2dPayload.test.ts`, which parses the Rust struct's field names
+ * and asserts every one of them round-trips through `parsePhysics2dWire`.
  */
 const WIRE_KEY_BY_FIELD = {
   bodyType: 'body_type',
@@ -208,6 +214,20 @@ const COLLIDER_SHAPE_BY_VARIANT: Record<string, Physics2dData['colliderShape']> 
   Auto: 'auto',
 };
 
+/**
+ * Look a serde variant name up in one of the tables above.
+ *
+ * A bare `TABLE[raw]` walks the prototype chain, so `'constructor'`, `'toString'`
+ * and `'__proto__'` all resolve to inherited members — every one of them truthy,
+ * which means the `if (mapped)` guard passes and a `Function` or `Object.prototype`
+ * lands where a `Physics2dData` enum value is declared. `Object.hasOwn` is the
+ * same discipline the wire-key read above already uses (PF-1167).
+ */
+function variantValue<T>(table: Record<string, T>, raw: unknown): T | undefined {
+  if (typeof raw !== 'string') return undefined;
+  return Object.hasOwn(table, raw) ? table[raw] : undefined;
+}
+
 export interface ParsedPhysics2dWire {
   entityId: string;
   enabled: boolean;
@@ -238,12 +258,12 @@ export function parsePhysics2dWire(payload: unknown): ParsedPhysics2dWire | null
     if (raw === undefined || raw === null) continue;
 
     if (field === 'bodyType') {
-      const mapped = typeof raw === 'string' ? BODY_TYPE_BY_VARIANT[raw] : undefined;
+      const mapped = variantValue(BODY_TYPE_BY_VARIANT, raw);
       if (mapped) data.bodyType = mapped;
       continue;
     }
     if (field === 'colliderShape') {
-      const mapped = typeof raw === 'string' ? COLLIDER_SHAPE_BY_VARIANT[raw] : undefined;
+      const mapped = variantValue(COLLIDER_SHAPE_BY_VARIANT, raw);
       if (mapped) data.colliderShape = mapped;
       continue;
     }
