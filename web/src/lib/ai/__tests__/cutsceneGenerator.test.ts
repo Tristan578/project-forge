@@ -81,7 +81,7 @@ const VALID_RESPONSE = JSON.stringify({
       // A camera track names the camera entity it configures, and its payload
       // speaks the one real camera vocabulary (`GameCameraMode` + the authoring
       // params `buildSetGameCameraPayload` translates). `entityId: null` or a
-      // PascalCase mode both make `buildCommand` return null at playback.
+      // PascalCase mode both make `buildCommand` return null.
       entityId: 'cam1',
       muted: false,
       keyframes: [

@@ -50,6 +50,23 @@ const readFiniteNumber: FieldReader = (value) =>
 const readNonNegativeNumber: FieldReader = (value) =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 
+/**
+ * Bound a value to a closed range, dropping anything outside it.
+ *
+ * Out of range is DROPPED rather than clamped. These payloads are model output,
+ * and a `volume` of `1e308` is not an author asking for maximum loudness — it is
+ * a field the generator got wrong. Dropping it leaves the engine on its own
+ * default, which is the documented way to say "no opinion" (PF-1126); silently
+ * clamping to `1` would invent an opinion the keyframe never expressed and hide
+ * the generator bug from anyone reading the saved cutscene.
+ */
+const readNumberInRange =
+  (min: number, max: number): FieldReader =>
+  (value) =>
+    typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
+      ? value
+      : undefined;
+
 /** Empty is dropped: a clip or tree named `""` addresses nothing. */
 const readNonEmptyString: FieldReader = (value) =>
   typeof value === 'string' && value !== '' ? value : undefined;
@@ -115,9 +132,17 @@ const TRACK_PAYLOAD_FIELDS: Record<CutsceneTrackType, Record<string, FieldReader
     treeId: readNonEmptyString,
     text: readString,
   },
+  // Ranges are the audio graph's own, read off `audioManager`: it clamps volume
+  // to 0–1 (`audioManager.ts:387`) and pitch — a `playbackRate` — to 0.25–4
+  // (`:397`). Neither the engine's `AudioData` nor `handle_set_audio` bounds
+  // either field, so this is the only place they are checked. Nothing dispatches
+  // these two yet (see the audio arm of `buildCommand` for why); they are
+  // authored onto the keyframe and consumed when PF-1155 wires entity audio
+  // through to the graph, and bounding them here is what keeps that wiring from
+  // inheriting an unbounded field.
   audio: {
-    volume: readNonNegativeNumber,
-    pitch: readFiniteNumber,
+    volume: readNumberInRange(0, 1),
+    pitch: readNumberInRange(0.25, 4),
   },
   wait: {},
 };
@@ -152,8 +177,16 @@ function isObject(value: unknown): value is Record<string, unknown> {
  * holding a value of the kind that field is for.
  *
  * Picking rather than filtering-in-place is the point: the returned object's own
- * keys are exactly the ones written here, so a caller may spread it into an
- * engine command without re-deriving what is safe to include.
+ * keys are exactly the ones written here, so nothing the model invented can ride
+ * along into a caller.
+ *
+ * That is a guarantee about INVENTED keys, and only that. It is NOT a licence to
+ * spread the result into an engine command: every surviving key is one this track
+ * type accepts, not necessarily one the receiving command reads. The audio
+ * vocabulary is the live example — `volume` and `pitch` are legitimate authored
+ * fields that `handle_play_audio` does not read, so spreading a sanitized audio
+ * payload into `play_audio` reintroduces exactly the PF-1123 "fields the receiver
+ * never reads" defect. Callers pick per command; see `buildCommand`.
  *
  * An unusable payload yields `{}` rather than a throw. A keyframe whose payload
  * the model got wrong is one dud beat in a timeline; failing the parse would

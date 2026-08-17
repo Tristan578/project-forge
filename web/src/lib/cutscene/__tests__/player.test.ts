@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import {
   applyEasing,
   buildCommand,
@@ -8,6 +8,11 @@ import {
 } from '../player';
 import type { CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
 import { useCutsceneStore } from '@/stores/cutsceneStore';
+
+// The keyframe error boundary reports to Sentry as well as the console. Mocked so
+// the suite asserts on the report without pulling the SDK into the module graph.
+const { captureException } = vi.hoisted(() => ({ captureException: vi.fn() }));
+vi.mock('@/lib/monitoring/sentry-client', () => ({ captureException }));
 
 // ============================================================================
 // applyEasing
@@ -380,15 +385,42 @@ describe('buildCommand — camera easing', () => {
 // ============================================================================
 
 describe('CutscenePlayer', () => {
-  let dispatch: CommandDispatcher;
-  let onComplete: (() => void) | undefined;
-  let onStop: (() => void) | undefined;
+  let dispatch: Mock<CommandDispatcher>;
+  let onComplete: Mock<() => void>;
+  let onStop: Mock<() => void>;
   let player: CutscenePlayer;
 
+  // Shared rAF harness. `advance(ms)` moves the stubbed clock forward and runs
+  // every frame the player has queued, so a test drives playback frame by frame
+  // rather than waiting on a real clock — which is the only way to ask how many
+  // frames a given keyframe sees.
+  function installFakeClock(): (ms: number) => void {
+    let now = 0;
+    let pending: FrameRequestCallback[] = [];
+    vi.stubGlobal('performance', { now: () => now });
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      pending.push(cb);
+      return pending.length;
+    });
+    // Cancellation is honoured rather than stubbed away. `pause()` and `stop()`
+    // both call it, and a no-op cancel would run a frame the player had already
+    // called off — a paused player would go on ticking.
+    vi.stubGlobal('cancelAnimationFrame', () => {
+      pending = [];
+    });
+    return (ms: number) => {
+      now += ms;
+      const due = pending;
+      pending = [];
+      for (const cb of due) cb(now);
+    };
+  }
+
   beforeEach(() => {
-    dispatch = vi.fn() as unknown as CommandDispatcher;
-    onComplete = vi.fn() as unknown as () => void;
-    onStop = vi.fn() as unknown as () => void;
+    dispatch = vi.fn();
+    onComplete = vi.fn();
+    onStop = vi.fn();
+    captureException.mockClear();
     player = new CutscenePlayer({ dispatchCommand: dispatch, onComplete, onStop });
 
     // Reset store state
@@ -474,20 +506,7 @@ describe('CutscenePlayer', () => {
     let advance: (ms: number) => void;
 
     beforeEach(() => {
-      let now = 0;
-      let pending: FrameRequestCallback[] = [];
-      vi.stubGlobal('performance', { now: () => now });
-      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-        pending.push(cb);
-        return pending.length;
-      });
-      vi.stubGlobal('cancelAnimationFrame', () => {});
-      advance = (ms: number) => {
-        now += ms;
-        const due = pending;
-        pending = [];
-        for (const cb of due) cb(now);
-      };
+      advance = installFakeClock();
       player = new CutscenePlayer({ dispatchCommand: dispatch, onComplete, onStop });
     });
 
@@ -502,7 +521,7 @@ describe('CutscenePlayer', () => {
       player.play();
     }
 
-    const dispatched = () => (dispatch as ReturnType<typeof vi.fn>).mock.calls;
+    const dispatched = () => dispatch.mock.calls;
 
     it('re-dispatches a camera keyframe each frame, stepping toward the target', () => {
       loadTracks({
@@ -660,22 +679,488 @@ describe('CutscenePlayer', () => {
     });
   });
 
-  it('muted tracks are not scheduled', () => {
-    // A track that WOULD dispatch if it were not muted — a camera track with no
-    // entityId or no mode builds no command at all, so muting it proves nothing.
-    const track: CutsceneTrack = {
-      id: 't1', type: 'camera', entityId: 'cam1', muted: true,
-      keyframes: [{ timestamp: 0, duration: 1, easing: 'linear', payload: { mode: 'orbital' } }],
-    };
-    const cs = {
-      id: 'cs1', name: 'Test', duration: 5,
-      tracks: [track], createdAt: 0, updatedAt: 0,
-    };
-    player.load(cs);
-    // play + immediately pause so no rAF ticks happen
-    player.play();
-    player.pause();
-    // dispatch should NOT have been called for the muted track at t=0
-    expect(dispatch).not.toHaveBeenCalled();
+  // --------------------------------------------------------------------------
+  // Playback lifecycle
+  //
+  // `fired` is the only thing standing between a keyframe and a re-dispatch, so
+  // the transitions that touch it — `play` from a stop, `seek`, the per-tick
+  // latch — are pinned individually, along with the two edges no test used to
+  // reach at all: the terminal tick, and a keyframe whose sink throws.
+  // --------------------------------------------------------------------------
+  describe('playback lifecycle', () => {
+    let advance: (ms: number) => void;
+
+    beforeEach(() => {
+      advance = installFakeClock();
+      player = new CutscenePlayer({ dispatchCommand: dispatch, onComplete, onStop });
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function loadSingleTrack(type: CutsceneTrack['type'], payload: Record<string, unknown>): void {
+      player.load({
+        id: 'cs1',
+        name: 'Test',
+        duration: 10,
+        tracks: [{
+          id: 't1',
+          type,
+          entityId: 'e1',
+          muted: false,
+          // The keyframe spans several frames, so a per-frame re-fire shows up as
+          // a call count rather than needing a timing assertion.
+          keyframes: [{ timestamp: 0, duration: 4, easing: 'linear', payload }],
+        }],
+        createdAt: 0,
+        updatedAt: 0,
+      });
+    }
+
+    /**
+     * One track, three beats at distinct timestamps.
+     *
+     * `loadSingleTrack` puts its only keyframe at `timestamp: 0`, which is where
+     * the playhead already sits — so it can show that a keyframe fires once, but
+     * never that it fires at its OWN time rather than at the start. Zero
+     * durations keep this about scheduling and nothing else.
+     */
+    function loadMultiKeyframeTrack(): void {
+      player.load({
+        id: 'cs1',
+        name: 'Test',
+        duration: 10,
+        tracks: [{
+          id: 't1',
+          type: 'animation',
+          entityId: 'e1',
+          muted: false,
+          keyframes: [
+            { timestamp: 0, duration: 0, easing: 'linear', payload: { clipName: 'first' } },
+            { timestamp: 2, duration: 0, easing: 'linear', payload: { clipName: 'second' } },
+            { timestamp: 3, duration: 0, easing: 'linear', payload: { clipName: 'third' } },
+          ],
+        }],
+        createdAt: 0,
+        updatedAt: 0,
+      });
+    }
+
+    const clipNames = () =>
+      dispatch.mock.calls.map((c) => (c[1] as { clipName?: string }).clipName);
+
+    it('muted tracks are not scheduled', () => {
+      // A track that WOULD dispatch if it were not muted — a camera track with no
+      // entityId or no mode builds no command at all, so muting it proves nothing.
+      player.load({
+        id: 'cs1', name: 'Test', duration: 5, createdAt: 0, updatedAt: 0,
+        tracks: [{
+          id: 't1', type: 'camera', entityId: 'cam1', muted: true,
+          keyframes: [{ timestamp: 0, duration: 1, easing: 'linear', payload: { mode: 'orbital' } }],
+        }],
+      });
+
+      // Drive a real frame. This used to `play()` then `pause()` immediately,
+      // which cancelled the rAF before it ever ran — so `tick()` never executed
+      // and the assertion below held for a muted track, an unmuted one, and a
+      // player with nothing loaded alike. Deleting the mute guard entirely left
+      // the suite green. The clock is what gives the assertion something to
+      // disprove.
+      player.play();
+      advance(1000);
+
+      expect(dispatch).not.toHaveBeenCalled();
+    });
+
+    it('an unmuted copy of the same track does dispatch', () => {
+      // The control for the test above: same fixture, `muted: false`. Without it,
+      // "did not dispatch" cannot distinguish muting from a fixture that was
+      // never going to dispatch in the first place.
+      player.load({
+        id: 'cs1', name: 'Test', duration: 5, createdAt: 0, updatedAt: 0,
+        tracks: [{
+          id: 't1', type: 'camera', entityId: 'cam1', muted: false,
+          keyframes: [{ timestamp: 0, duration: 1, easing: 'linear', payload: { mode: 'orbital' } }],
+        }],
+      });
+
+      player.play();
+      advance(1000);
+
+      expect(dispatch).toHaveBeenCalledTimes(1);
+    });
+
+    it('an animation keyframe starts its clip once, however long it lasts', () => {
+      loadSingleTrack('animation', { clipName: 'run' });
+      player.play();
+      advance(1000);
+      advance(1000);
+      advance(1000);
+
+      // `duration` bounds the beat, not the dispatching: re-firing would restart
+      // the clip from frame one on every tick, so it would never play past its
+      // first instant.
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch).toHaveBeenCalledWith('play_animation', { entityId: 'e1', clipName: 'run' });
+    });
+
+    it('a dialogue keyframe starts its tree once, stamped with its own beat', () => {
+      loadSingleTrack('dialogue', { treeId: 'tree_1' });
+      player.play();
+      advance(1000);
+      advance(1000);
+
+      // `start_dialogue` has no engine arm; `./dispatch.ts` intercepts it and
+      // drives the dialogue store. The player still goes through the dispatcher
+      // rather than reaching for the store itself, so the interception stays the
+      // one place that decision lives. `beat` names the keyframe it came from.
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch).toHaveBeenCalledWith('start_dialogue', {
+        treeId: 'tree_1',
+        entityId: 'e1',
+        beat: 0,
+      });
+    });
+
+    it('replays every keyframe after stop() and play() again', () => {
+      loadSingleTrack('animation', { clipName: 'run' });
+      player.play();
+      advance(1000);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+
+      player.stop();
+      player.play();
+      advance(1000);
+
+      // `play()` clears every `fired` flag when it is not resuming from a pause,
+      // so a second run is a second dispatch rather than a silent no-op.
+      expect(dispatch).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not replay a keyframe when resuming from pause', () => {
+      loadSingleTrack('animation', { clipName: 'run' });
+      player.play();
+      advance(1000);
+      player.pause();
+      player.play();
+      advance(1000);
+
+      // Resuming keeps the flags: a paused cutscene picks up where it left off
+      // rather than restarting every beat already played.
+      expect(dispatch).toHaveBeenCalledTimes(1);
+    });
+
+    it('seeking exactly onto a keyframe leaves it due to fire', () => {
+      loadMultiKeyframeTrack();
+      player.play();
+      advance(500);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      dispatch.mockClear();
+
+      // The keyframe AT the seek point has not happened yet: a keyframe fires
+      // once the playhead REACHES its timestamp, so 2 is due at t=2, not done.
+      // Marking it fired here — which is what `<=` did — made scrubbing
+      // precisely onto a beat the one way to skip it.
+      player.seek(2);
+      advance(100);
+
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch).toHaveBeenCalledWith('play_animation', {
+        entityId: 'e1',
+        clipName: 'second',
+      });
+    });
+
+    it('seeking past a keyframe skips it', () => {
+      loadMultiKeyframeTrack();
+      player.play();
+      player.seek(3);
+      advance(100);
+
+      // Everything strictly before the seek point counts as already played, so
+      // scrubbing forward does not fire a burst of the beats it flew past.
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch).toHaveBeenCalledWith('play_animation', {
+        entityId: 'e1',
+        clipName: 'third',
+      });
+    });
+
+    it('fires each keyframe as the playhead reaches its own timestamp', () => {
+      loadMultiKeyframeTrack();
+      player.play();
+
+      advance(500);
+      expect(clipNames()).toEqual(['first']);
+
+      advance(2000);
+      advance(1000);
+      expect(clipNames()).toEqual(['first', 'second', 'third']);
+    });
+
+    // ------------------------------------------------------------------------
+    // Keyframe error boundary
+    //
+    // `scheduleFrame()` runs AFTER the fire call, so an escaping throw used to
+    // take the rAF loop with it: playback froze mid-cutscene with `isPlaying`
+    // still true, `onComplete` never ran, and the editor stayed in Play mode.
+    // ------------------------------------------------------------------------
+
+    it('keeps playing when a keyframe sink throws', () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        dispatch.mockImplementationOnce(() => {
+          throw new Error('engine bridge is not loaded');
+        });
+        loadMultiKeyframeTrack();
+        player.play();
+
+        advance(500);
+        advance(2000);
+
+        // The bad beat is reported and dropped; the rest of the timeline plays.
+        expect(player.isPlaying).toBe(true);
+        expect(consoleError).toHaveBeenCalled();
+        expect(dispatch).toHaveBeenLastCalledWith('play_animation', {
+          entityId: 'e1',
+          clipName: 'second',
+        });
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
+    it('does not retry a keyframe whose sink threw', () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        dispatch.mockImplementation(() => {
+          throw new Error('engine bridge is not loaded');
+        });
+        loadSingleTrack('animation', { clipName: 'run' });
+        player.play();
+        advance(1000);
+        advance(1000);
+        advance(1000);
+
+        // A trigger keyframe is marked `fired` BEFORE the sink runs. One that
+        // threw every frame would otherwise re-throw every frame, turning one
+        // bad beat into a per-frame console flood for the whole cutscene.
+        expect(dispatch).toHaveBeenCalledTimes(1);
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
+    it('fires the beats after a throwing one on the final tick', () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        dispatch.mockImplementationOnce(() => {
+          throw new Error('engine bridge is not loaded');
+        });
+        player.load({
+          id: 'cs1', name: 'Test', duration: 3, createdAt: 0, updatedAt: 0,
+          tracks: [{
+            id: 't1', type: 'animation', entityId: 'e1', muted: false,
+            keyframes: [
+              { timestamp: 2.5, duration: 0, easing: 'linear', payload: { clipName: 'throws' } },
+              { timestamp: 3, duration: 0, easing: 'linear', payload: { clipName: 'last' } },
+            ],
+          }],
+        });
+        player.play();
+
+        // Straight to the end: both keyframes come due on the terminal tick.
+        advance(3000);
+
+        // A per-TICK boundary reads as equivalent to a per-keyframe one, because
+        // mid-playback the skipped keyframes are still unfired and the next tick
+        // picks them up. Here there is no next tick — the rAF loop ends at
+        // `duration` — so anything the throw skipped is lost for good.
+        expect(consoleError).toHaveBeenCalled();
+        expect(dispatch).toHaveBeenLastCalledWith('play_animation', {
+          entityId: 'e1',
+          clipName: 'last',
+        });
+        expect(onComplete).toHaveBeenCalled();
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
+    it('reports a failed keyframe to Sentry, not only to the console', () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        dispatch.mockImplementationOnce(() => {
+          throw new Error('engine bridge is not loaded');
+        });
+        loadSingleTrack('animation', { clipName: 'walk' });
+        player.play();
+        advance(1000);
+
+        // The boundary's job is to swallow the error, and a swallowed beat looks
+        // like "the thing didn't happen" — nobody has a console open for that.
+        expect(captureException).toHaveBeenCalledTimes(1);
+        const [err, context] = captureException.mock.calls[0] as [Error, Record<string, unknown>];
+        expect(err.message).toBe('engine bridge is not loaded');
+        expect(context).toMatchObject({ trackId: 't1', trackType: 'animation', timestamp: 0 });
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
+    // ------------------------------------------------------------------------
+    // End of the timeline
+    //
+    // The completion branch is the only path that fires a keyframe sitting
+    // exactly at `duration` — the normal path returns before the playhead
+    // reaches it — and `duration` is where a generated cutscene puts its closing
+    // beat.
+    // ------------------------------------------------------------------------
+
+    it('fires a keyframe sitting exactly at duration and completes once', () => {
+      player.load({
+        id: 'cs1', name: 'Test', duration: 2, createdAt: 0, updatedAt: 0,
+        tracks: [{
+          id: 't1', type: 'animation', entityId: 'e1', muted: false,
+          keyframes: [{ timestamp: 2, duration: 0, easing: 'linear', payload: { clipName: 'closing' } }],
+        }],
+      });
+      player.play();
+
+      advance(1000);
+      expect(dispatch).not.toHaveBeenCalled();
+
+      advance(1000);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch).toHaveBeenCalledWith('play_animation', { entityId: 'e1', clipName: 'closing' });
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(player.isPlaying).toBe(false);
+      expect(useCutsceneStore.getState().playbackState).toBe('idle');
+      expect(useCutsceneStore.getState().playbackTime).toBe(2);
+    });
+
+    it('a zero-duration cutscene completes on its first tick', () => {
+      // The degenerate case of the same branch: the first frame is already terminal.
+      player.load({
+        id: 'cs1', name: 'Test', duration: 0, createdAt: 0, updatedAt: 0,
+        tracks: [{
+          id: 't1', type: 'animation', entityId: 'e1', muted: false,
+          keyframes: [{ timestamp: 0, duration: 0, easing: 'linear', payload: { clipName: 'only' } }],
+        }],
+      });
+      player.play();
+      advance(0);
+
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(player.isPlaying).toBe(false);
+      expect(useCutsceneStore.getState().playbackState).toBe('idle');
+    });
+
+    it('fires both keyframes sharing a timestamp, in track order', () => {
+      player.load({
+        id: 'cs1', name: 'Test', duration: 5, createdAt: 0, updatedAt: 0,
+        tracks: [{
+          id: 't1', type: 'animation', entityId: 'e1', muted: false,
+          keyframes: [
+            { timestamp: 1, duration: 0, easing: 'linear', payload: { clipName: 'a' } },
+            { timestamp: 1, duration: 0, easing: 'linear', payload: { clipName: 'b' } },
+          ],
+        }],
+      });
+      player.play();
+      advance(1000);
+
+      // Both are due and both unfired, so one tick fires both. Array.prototype.sort
+      // is stable, so the schedule keeps the authored order.
+      expect(clipNames()).toEqual(['a', 'b']);
+    });
+
+    it('fires keyframes in timestamp order across tracks, not authored order', () => {
+      // Authored so that track order and timestamp order DISAGREE: the earlier
+      // beat lives on the second track. The schedule flattens the tracks in order
+      // and then sorts, so only the sort can put these the right way round.
+      //
+      // A single tick that catches up on several beats replays them in schedule
+      // order, and these two are the same track type — so an unsorted schedule
+      // dispatches the 1.0 beat before the 0.5 one. Deleting the sort left the
+      // whole suite green before this test existed: every other multi-keyframe
+      // case authors its beats already ascending, where the sort is a no-op.
+      player.load({
+        id: 'cs1', name: 'Test', duration: 5, createdAt: 0, updatedAt: 0,
+        tracks: [
+          {
+            id: 't1', type: 'animation', entityId: 'e1', muted: false,
+            keyframes: [{ timestamp: 1, duration: 0, easing: 'linear', payload: { clipName: 'later' } }],
+          },
+          {
+            id: 't2', type: 'animation', entityId: 'e2', muted: false,
+            keyframes: [{ timestamp: 0.5, duration: 0, easing: 'linear', payload: { clipName: 'earlier' } }],
+          },
+        ],
+      });
+      player.play();
+      advance(1000);
+
+      expect(clipNames()).toEqual(['earlier', 'later']);
+    });
+
+    // ------------------------------------------------------------------------
+    // Transitions between seek, pause and play
+    //
+    // Each flag transition was pinned individually; the COMBINATIONS, where one
+    // transition undoes another, were not.
+    // ------------------------------------------------------------------------
+
+    it('play after seeking a stopped player starts at the seek point', () => {
+      loadMultiKeyframeTrack();
+      player.seek(2.5);
+      player.play();
+      advance(0);
+
+      // `seek` on a stopped player marks everything before 2.5 as done. `play`
+      // used to clear every flag unconditionally, so the first tick burst-fired
+      // 'first' and 'second' together with nothing at the playhead having asked
+      // for them. The beat at 3 is still ahead and must not have fired either.
+      expect(dispatch).not.toHaveBeenCalled();
+
+      advance(600);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch).toHaveBeenCalledWith('play_animation', { entityId: 'e1', clipName: 'third' });
+    });
+
+    it('seeking while paused does not charge the seek for the pause', () => {
+      loadMultiKeyframeTrack();
+      player.play();
+      advance(100);
+      player.pause();
+
+      // Sit paused for a long time, then scrub and resume.
+      advance(9900);
+      player.seek(2);
+      player.play();
+      advance(50);
+
+      // Resume used to add the whole pause duration on top of the rebased start
+      // time, landing the playhead at roughly -8: eight seconds of blank playback
+      // before the beat at 2 would have fired.
+      expect(useCutsceneStore.getState().playbackTime).toBeCloseTo(2.05, 5);
+      expect(dispatch).toHaveBeenCalledWith('play_animation', { entityId: 'e1', clipName: 'second' });
+    });
+
+    it('pausing a player that never played leaves it playable', () => {
+      loadSingleTrack('animation', { clipName: 'walk' });
+      player.pause();
+      player.play();
+      advance(1000);
+
+      // `pause` used to stamp the pause instant with no clock running, so the
+      // next `play` took the resume branch and never started one. `tick` bailed
+      // on the null start time without rescheduling: `isPlaying` true, state
+      // 'playing', nothing ever fired, `onComplete` never called.
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(useCutsceneStore.getState().playbackState).toBe('playing');
+    });
   });
 });

@@ -200,8 +200,42 @@ describe('sanitizeKeyframePayload', () => {
     it.each([
       ['negative', -1],
       ['Infinity', Infinity],
+      ['above the gain node maximum', 1.5],
+      ['absurd', 1e308],
     ])('drops a volume that is %s', (_case, volume) => {
       expect(sanitizeKeyframePayload('audio', { volume, pitch: 1 })).toEqual({ pitch: 1 });
+    });
+
+    it.each([
+      ['below the playbackRate minimum', 0.1],
+      ['above the playbackRate maximum', 8],
+      ['zero', 0],
+      ['negative', -1],
+    ])('drops a pitch that is %s', (_case, pitch) => {
+      expect(sanitizeKeyframePayload('audio', { volume: 0.5, pitch })).toEqual({ volume: 0.5 });
+    });
+
+    it.each([
+      ['volume', 'volume', 0],
+      ['volume', 'volume', 1],
+      ['pitch', 'pitch', 0.25],
+      ['pitch', 'pitch', 4],
+    ])('keeps %s at the %s bound %d', (_label, field, value) => {
+      // The bounds are inclusive: they are the audio graph's own clamp limits
+      // (`audioManager.ts:387` for volume, `:397` for pitch), so a keyframe
+      // asking for silence, unity gain, or either end of the rate range is
+      // asking for something the graph can actually produce.
+      expect(sanitizeKeyframePayload('audio', { [field]: value })).toEqual({ [field]: value });
+    });
+
+    it('drops an out-of-range value rather than clamping it', () => {
+      // Clamping would invent an opinion the keyframe never expressed and bury
+      // the generator bug in a saved cutscene that reads as deliberate. Dropping
+      // leaves the engine on its own default, which is how this codebase spells
+      // "no opinion" (PF-1126).
+      const result = sanitizeKeyframePayload('audio', { volume: 42 });
+      expect(result).not.toHaveProperty('volume');
+      expect(result).toEqual({});
     });
   });
 

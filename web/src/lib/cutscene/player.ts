@@ -12,10 +12,14 @@
  * `volume`/`pitch` a keyframe carries are deliberately not sent rather than sent
  * and dropped. This header used to claim all four tracks worked end to end,
  * which is the only reason those gaps survived as long as they did.
+ *
+ * A keyframe that throws costs that keyframe, not the playback — see
+ * `fireKeyframesSafely`.
  */
 
 import type { Cutscene, CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
 import { useCutsceneStore } from '@/stores/cutsceneStore';
+import { captureException } from '@/lib/monitoring/sentry-client';
 import {
   blendGameCameraData,
   buildSetGameCameraPayload,
@@ -33,6 +37,23 @@ import { sanitizeKeyframePayload } from './keyframePayload';
 // ============================================================================
 
 export type CommandDispatcher = (command: string, payload: unknown) => void;
+
+/*
+ * TRIGGER tracks fire once; STATE tracks re-fire across their window.
+ *
+ * `play_animation` and `play_audio` are triggers — re-firing restarts the thing
+ * they name, so a two-second keyframe on either never advanced past its first
+ * instant. `set_game_camera` is a state, and re-firing it is how a camera
+ * keyframe's easing curve is actually applied (see `STATE_TRACK_TYPES` and
+ * `cameraKeyframeBlends`).
+ *
+ * An earlier revision made camera fire once too, on the grounds that
+ * `apply_set_game_camera_requests` rebuilt the component with
+ * `..Default::default()` — zeroing in-flight shake and resetting the orbital and
+ * first-person look state on every tick. That is no longer true: the engine now
+ * carries the runtime state across and writes THROUGH the query, so a re-fire is
+ * idempotent for everything the author did not name (`bridge/game.rs`, PF-1127).
+ */
 
 export interface PlayerOptions {
   dispatchCommand: CommandDispatcher;
@@ -208,7 +229,9 @@ function cameraKeyframeBlends(item: ScheduledKeyframe): boolean {
 
 /**
  * Translate a keyframe payload into an engine command for the given track type.
- * Returns null if the track type is 'wait' (no command to dispatch).
+ *
+ * Returns null when the keyframe asks for nothing dispatchable — a `wait`, or a
+ * track whose payload names no clip, tree or entity.
  */
 export function buildCommand(
   trackType: CutsceneTrack['type'],
@@ -274,9 +297,11 @@ export function buildCommand(
       // nothing and the beat passes as if it had played; the command names a
       // real tree or it is not built.
       // Unlike the other tracks this one does not need an entity — a cutscene can
-      // narrate without anyone speaking — but it does need a tree to start.
-      const treeId = typeof payload.treeId === 'string' ? payload.treeId : '';
-      if (!treeId) return null;
+      // narrate without anyone speaking — but it does need a tree to start, and
+      // `treeId` used to be forwarded unread, so a missing one started a dialogue
+      // named `undefined`.
+      const { treeId } = payload;
+      if (typeof treeId !== 'string') return null;
       return {
         command: 'start_dialogue',
         payload: { treeId, entityId: entityId ?? undefined, beat: keyframe.timestamp },
@@ -284,13 +309,30 @@ export function buildCommand(
     }
     case 'audio': {
       if (!entityId) return null;
-      // `handle_play_audio` reads `entityId` and nothing else — volume, pitch and
-      // every other key a generated keyframe carries were spread onto the command
-      // and dropped by the engine without an error. Sending only the field the
-      // handler reads makes that a visible gap instead of a payload that looks
-      // like it configures playback. The `volume`/`pitch` a cutscene asks for
-      // belong on `set_audio`, which is two commands for one keyframe — a
-      // scheduler change, not a payload one.
+      // `volume` and `pitch` are read off the keyframe (see
+      // `keyframePayload.ts`) and deliberately NOT dispatched. `handle_play_audio`
+      // reads `entityId` and nothing else, so they reach nothing here — but the
+      // obvious fix, prepending a `set_audio` with the two fields, is worse than
+      // the gap it closes, for two independent reasons:
+      //
+      //   1. It would not be audible. Nothing in the web app ever creates an
+      //      entity audio instance: `audioManager.createInstance` and
+      //      `.setVolume` — the only places a gain node is assigned — have no
+      //      production call site, so `audioManager.play(entityId)` (the one
+      //      consumer of the engine's AUDIO_PLAYBACK event) always takes its
+      //      `if (!instance)` branch and warns. Volume set engine-side reaches
+      //      ECS state and stops there.
+      //   2. It would mutate the project. `bridge/audio.rs:51-58` merges the
+      //      partial into the entity's persisted `AudioData`, inserts
+      //      `AudioEnabled`, and pushes an `UndoableAction::AudioChange` onto the
+      //      editor `HistoryStack` — during playback. Ctrl-Z after watching a
+      //      cutscene would undo the cutscene's writes instead of the user's last
+      //      edit, and the volume the cutscene asked for would outlive it in the
+      //      saved scene.
+      //
+      // So the audio track plays the sound and does not pretend to set its level.
+      // Wiring entity audio through to the Web Audio graph, and giving playback a
+      // command that is not scene-mutating, is PF-1155.
       return { command: 'play_audio', payload: { entityId } };
     }
     case 'wait':
@@ -337,9 +379,16 @@ export class CutscenePlayer {
       this.pausedAt = null;
     } else {
       this.startTime = performance.now() - this.currentTime * 1000;
-      // Reset all fired flags when starting fresh
+      // Re-derive the flags from the playhead rather than clearing them all.
+      //
+      // `currentTime` is not always 0 here: `seek()` on a stopped player moves the
+      // playhead and correctly marks everything strictly before it as done. A
+      // blanket reset then threw that away, and the first tick burst-fired every
+      // beat from 0 up to the seek point at once. Same rule as `seek()`, so the
+      // two agree; when the playhead is at 0 nothing is `< 0` and this is exactly
+      // the reset it replaces.
       for (const item of this.scheduled) {
-        item.fired = false;
+        item.fired = item.keyframe.timestamp < this.currentTime;
       }
     }
 
@@ -349,10 +398,21 @@ export class CutscenePlayer {
 
   /** Pause playback at the current position. */
   pause(): void {
-    if (this.rafHandle !== null) {
-      cancelAnimationFrame(this.rafHandle);
-      this.rafHandle = null;
-    }
+    // Only a player that is actually running has a clock to freeze. Pausing one
+    // that never played used to stamp `pausedAt` while `startTime` was still
+    // null; the next `play()` took the resume branch, which cannot start a clock
+    // that was never started, so `tick()` returned immediately on the null
+    // `startTime` and never rescheduled. The player then sat at
+    // `playbackState: 'playing'` with `isPlaying` true, firing nothing and never
+    // calling `onComplete` — the same "stuck in Play" shape the keyframe error
+    // boundary exists to prevent. This also makes a second `pause()` a no-op
+    // instead of re-stamping the pause instant and swallowing the elapsed time.
+    // `rafHandle !== null` is what `isPlaying` reads; spelled out here so the
+    // handle narrows to a number for the cancel below.
+    if (this.rafHandle === null) return;
+
+    cancelAnimationFrame(this.rafHandle);
+    this.rafHandle = null;
     this.pausedAt = performance.now();
     useCutsceneStore.getState().setPlaybackState('paused');
   }
@@ -397,13 +457,26 @@ export class CutscenePlayer {
     const clamped = Math.max(0, Math.min(timeSecs, this.cutscene.duration));
     this.currentTime = clamped;
     useCutsceneStore.getState().setPlaybackTime(clamped);
+    // Strictly before, for the triggers: `fireKeyframesSafely` fires a keyframe
+    // once the playhead REACHES its timestamp (`timestamp > time` is what it
+    // skips), so a keyframe sitting exactly on the seek point is due, not done.
+    // Marking it fired here — which is what `<=` did — made scrubbing precisely
+    // onto a beat the one way to stop it playing.
     for (const item of this.scheduled) {
       item.fired = STATE_TRACK_TYPES.has(item.trackType)
         ? false
-        : item.keyframe.timestamp <= clamped;
+        : item.keyframe.timestamp < clamped;
     }
     if (this.startTime !== null) {
       this.startTime = performance.now() - clamped * 1000;
+    }
+    if (this.pausedAt !== null) {
+      // Rebase the pause instant too. `startTime` above is stamped against NOW,
+      // but `play()`'s resume branch adds `now - pausedAt` on top of it — so a
+      // stale `pausedAt` charges the seek for however long the player sat paused
+      // before it. Pause for ten seconds, seek to 3, resume, and the playhead
+      // resumed at roughly -7: ten seconds of blank playback before the beat at 3.
+      this.pausedAt = performance.now();
     }
   }
 
@@ -452,7 +525,7 @@ export class CutscenePlayer {
     if (this.currentTime >= this.cutscene.duration) {
       this.currentTime = this.cutscene.duration;
       useCutsceneStore.getState().setPlaybackTime(this.currentTime);
-      this.fireKeyframesAt(this.currentTime);
+      this.fireKeyframesSafely(this.currentTime);
       this.rafHandle = null;
       useCutsceneStore.getState().setPlaybackState('idle');
       this.options.onComplete?.();
@@ -460,11 +533,32 @@ export class CutscenePlayer {
     }
 
     useCutsceneStore.getState().setPlaybackTime(this.currentTime);
-    this.fireKeyframesAt(this.currentTime);
+    this.fireKeyframesSafely(this.currentTime);
     this.scheduleFrame();
   }
 
-  private fireKeyframesAt(time: number): void {
+  /**
+   * Fire a tick's keyframes without letting one bad keyframe end the playback.
+   *
+   * `scheduleFrame()` runs AFTER the fire call, so anything thrown out of a sink
+   * used to take the rAF loop with it: the cutscene froze mid-play with
+   * `isPlaying` still true, `onComplete` never ran, and the handler that returns
+   * the engine to Edit mode never dispatched — leaving the editor stuck in Play.
+   * One keyframe naming a tree that does not exist should cost that keyframe,
+   * not the rest of the cutscene, so the error is reported and the playhead
+   * moves on. A trigger keyframe is marked fired BEFORE dispatching, so a
+   * throwing one is not retried on the next tick. An interpolating keyframe is
+   * not, deliberately: it is re-dispatched every frame of its window by design,
+   * and one bad frame of a camera blend should not abandon the blend.
+   *
+   * The boundary is per KEYFRAME, not per tick. Wrapping the whole loop reads as
+   * equivalent — mid-playback it is, because the keyframes the throw skipped are
+   * still unfired and the next tick picks them up. It stops being equivalent on
+   * the terminal tick (`tick()` calls this once at `duration` and then ends the
+   * rAF loop): there is no next tick, so every due keyframe ordered after a
+   * throwing one at the end of the timeline would be silently dropped.
+   */
+  private fireKeyframesSafely(time: number): void {
     for (const item of this.scheduled) {
       if (item.keyframe.timestamp > time) continue;
 
@@ -478,14 +572,23 @@ export class CutscenePlayer {
         STATE_TRACK_TYPES.has(item.trackType) &&
         (item.trackType !== 'camera' || cameraKeyframeBlends(item));
 
+      let progress = 1;
       if (interpolates) {
         // Re-fire every frame while within the window so that easing
-        // interpolation is applied continuously.
-        // Once elapsed exceeds duration AND we've already dispatched progress=1.0,
-        // skip further processing. The `fired` flag ensures the final frame is
-        // always dispatched even when rAF skips past the exact end boundary.
+        // interpolation is applied continuously. Once elapsed exceeds duration
+        // AND progress=1.0 has already been dispatched, skip. The `fired` flag
+        // ensures the final frame is dispatched even when rAF skips past the
+        // exact end boundary.
         if (elapsed > item.keyframe.duration && item.fired) continue;
-        const progress = Math.min(elapsed / item.keyframe.duration, 1);
+        progress = Math.min(elapsed / item.keyframe.duration, 1);
+        if (progress >= 1) item.fired = true;
+      } else {
+        // One-shot keyframe: fire once only to avoid duplicate commands.
+        if (item.fired) continue;
+        item.fired = true;
+      }
+
+      try {
         const cmd = buildCommand(
           item.trackType,
           item.entityId,
@@ -496,15 +599,17 @@ export class CutscenePlayer {
         if (cmd) {
           this.options.dispatchCommand(cmd.command, cmd.payload);
         }
-        if (progress >= 1) item.fired = true;
-      } else {
-        // One-shot keyframe: fire once only to avoid duplicate commands.
-        if (item.fired) continue;
-        const cmd = buildCommand(item.trackType, item.entityId, item.keyframe, 1, item.prev);
-        if (cmd) {
-          this.options.dispatchCommand(cmd.command, cmd.payload);
-        }
-        item.fired = true;
+      } catch (err) {
+        // Reported twice on purpose. The boundary's job is to SWALLOW the error,
+        // and the user-visible symptom of a swallowed beat is "the thing didn't
+        // happen" — nobody is going to have a console open when it does.
+        console.error('[CutscenePlayer] Keyframe failed; continuing playback', err);
+        captureException(err, {
+          cutsceneId: this.cutscene?.id,
+          trackId: item.trackId,
+          trackType: item.trackType,
+          timestamp: item.keyframe.timestamp,
+        });
       }
     }
   }
