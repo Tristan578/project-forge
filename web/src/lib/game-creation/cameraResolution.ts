@@ -224,6 +224,22 @@ function cameraValueRejection(field: NumericCameraField, value: unknown): string
   return policy && !policy.accepts(value) ? policy.reason : null;
 }
 
+/**
+ * Narrowing view of {@link cameraValueRejection}, for the write path.
+ *
+ * A type predicate rather than `out[key] = val as number` after the check: the
+ * cast asserts the very thing the check just proved, so it keeps type-checking if
+ * the check is ever reordered, weakened or dropped — which is how a value the
+ * policy refuses reaches the engine anyway. Same shape as `usableOverride` in
+ * `physicsProfileResolution.ts`, the house pattern for this.
+ */
+function isSendableCameraValue(
+  field: NumericCameraField,
+  value: unknown,
+): value is number {
+  return cameraValueRejection(field, value) === null;
+}
+
 function asCameraField(key: string): NumericCameraField | undefined {
   const fields: readonly string[] = NUMERIC_CAMERA_FIELDS;
   return fields.includes(key) ? (key as NumericCameraField) : undefined;
@@ -253,7 +269,7 @@ export function filterCameraNumerics(
     // and a bare read walks the prototype chain.
     if (!Object.hasOwn(obj, key)) continue;
     const val = obj[key];
-    if (cameraValueRejection(key, val) === null) out[key] = val as number;
+    if (isSendableCameraValue(key, val)) out[key] = val;
   }
   // A GDD-spelled key only fills a field the translator's own names left unset,
   // so an explicit `topDownHeight` always beats an aliased `altitude`.
@@ -261,7 +277,7 @@ export function filterCameraNumerics(
     if (out[field] !== undefined) continue;
     if (!Object.hasOwn(obj, alias)) continue;
     const val = obj[alias];
-    if (cameraValueRejection(field, val) === null) out[field] = val as number;
+    if (isSendableCameraValue(field, val)) out[field] = val;
   }
   return out;
 }

@@ -9,6 +9,7 @@ import {
   NUMERIC_CAMERA_FIELDS,
   TRANSLATED_CAMERA_FIELDS,
   GAME_CAMERA_WIRE_KEYS,
+  NON_NEGATIVE_WIRE_KEYS,
   type SetGameCameraPayload,
   type NumericCameraField,
 } from '../gameCameraPayload';
@@ -357,6 +358,46 @@ describe('gameCameraPayload', () => {
           offset: [0, 2, -5],
         });
         expect(payload).not.toHaveProperty('damping');
+      });
+
+      // A sign policy, not a finiteness one, but the same reason and the same
+      // remedy: `flat_damping` HARD-REJECTS a negative rate, and because
+      // `set_game_camera` rebuilds the whole component, sending one would lose
+      // mode, targetEntity and offset with it rather than just the rate (PF-1166).
+      it('negative followSmoothing is dropped, and the rest of the command survives', () => {
+        const payload = buildSetGameCameraPayload('cam-1', {
+          mode: 'thirdPersonFollow',
+          targetEntity: 'player',
+          followDistance: 5,
+          followHeight: 2,
+          followSmoothing: -3,
+        });
+
+        expect(payload).toEqual({
+          entityId: 'cam-1',
+          mode: 'thirdPersonFollow',
+          targetEntity: 'player',
+          offset: [0, 2, -5],
+        });
+        expect(payload).not.toHaveProperty('damping');
+      });
+
+      it('zero followSmoothing is a legitimate authored value and is sent', () => {
+        const payload = buildSetGameCameraPayload('cam-1', {
+          mode: 'thirdPersonFollow',
+          targetEntity: null,
+          followDistance: 5,
+          followHeight: 2,
+          followSmoothing: 0,
+        });
+
+        expect(payload).toEqual({
+          entityId: 'cam-1',
+          mode: 'thirdPersonFollow',
+          targetEntity: null,
+          offset: [0, 2, -5],
+          damping: 0,
+        });
       });
 
       it('non-finite firstPersonMouseSensitivity is dropped', () => {
@@ -792,6 +833,11 @@ describe('gameCameraPayload', () => {
         ['pair of the wrong length', { pitchClamp: [1] }],
         ['vec3 with a non-numeric member', { lookAt: [0, 'x', 0] }],
         ['unknown key the engine never reads', { notAWireKey: 5 }],
+        // A `.forge` scene file deserializes straight into the camera struct
+        // without passing through `from_flat`, so a negative `damping` really can
+        // arrive here. Admitting it would let one bad scene file hard-reject every
+        // later `set_game_camera` for that entity (PF-1166).
+        ['negative value on a key the engine refuses below zero', { damping: -3 }],
       ])('drops a %s on capture', (_label, bad) => {
         const parsed = parseGameCameraWire({ mode: 'fixed', targetEntity: null, ...bad });
         expect(parsed).toEqual({ mode: 'fixed', targetEntity: null });
@@ -802,6 +848,7 @@ describe('gameCameraPayload', () => {
         ['non-finite number', { fov: Infinity }],
         ['pair of the wrong length', { pitchClamp: [1, 2, 3] }],
         ['unknown key the engine never reads', { notAWireKey: 5 }],
+        ['negative value on a key the engine refuses below zero', { damping: -3 }],
       ])('drops a %s on re-emit', (_label, bad) => {
         const payload = buildSetGameCameraPayload('cam-1', {
           mode: 'fixed',
@@ -899,13 +946,21 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
     return value;
   }
 
-  /** The literal default in `flat_f32(params, "<wireKey>", <default>)`. */
+  /**
+   * The literal default in `flat_<reader>(params, "<wireKey>", <default>, …)`.
+   *
+   * Matches ANY `flat_*` reader rather than `flat_f32` specifically. Every one of
+   * them takes the default immediately after the key, and pinning the reader
+   * name means a field that gains a range or sign policy — `flat_f32` ->
+   * `flat_damping`, as `damping` just did — drops out of this scan and takes its
+   * default pin with it, silently, at the moment its handling got stricter.
+   */
   function rustDefault(arm: string, wireKey: string): number {
     const m = new RegExp(
-      `flat_f32\\(params, "${wireKey}", (${RUST_F32})\\)`,
+      `flat_\\w+\\(params, "${wireKey}", (${RUST_F32})`,
     ).exec(arm);
-    expect(m, `no flat_f32 default for "${wireKey}"`).not.toBeNull();
-    return parseRustF32(m![1]!, `flat_f32 "${wireKey}"`);
+    expect(m, `no flat_* default for "${wireKey}"`).not.toBeNull();
+    return parseRustF32(m![1]!, `flat_* "${wireKey}"`);
   }
 
   const arms = fromFlatArms();
@@ -918,10 +973,18 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
   // and `parseGameCameraWire` silently drops it on every round trip, which under
   // a full-replace command means resetting it.
   describe('GAME_CAMERA_WIRE_KEYS matches the keys from_flat reads', () => {
-    /** Every `"<key>"` passed to a `flat_*` reader inside a from_flat arm. */
+    /**
+     * Every `"<key>"` passed to a `flat_*` reader inside a from_flat arm.
+     *
+     * Deliberately matches any reader name, not an enumerated set: an
+     * enumeration goes stale silently in the false-negative direction, because a
+     * key whose reader was renamed simply stops being seen and the scan reports
+     * that the engine no longer reads it. `damping` did exactly that when it
+     * moved to `flat_damping`.
+     */
     const rustKeys = new Set(
       [...Object.values(arms).join('\n').matchAll(
-        /flat_(?:f32|bool|range|numbers::<\d+>)\(params, "(\w+)"/g,
+        /flat_\w+(?:::<\d+>)?\(params, "(\w+)"/g,
       )].map(m => m[1]!),
     );
 
@@ -936,6 +999,27 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
 
     it('declares no key the engine does not read', () => {
       expect(GAME_CAMERA_WIRE_KEYS.filter(k => !rustKeys.has(k))).toEqual([]);
+    });
+
+    /**
+     * Keys read through `flat_damping`, the engine's non-negative reader.
+     *
+     * Pinned in BOTH directions. Missing a key means a value the engine
+     * hard-rejects is dispatched, and since `set_game_camera` is full-replace the
+     * whole command is lost, not just that key. Carrying a key the engine reads
+     * with an unrestricted reader is the mirror defect: this side would refuse a
+     * value the engine would have taken.
+     */
+    const rustNonNegativeKeys = new Set(
+      [...Object.values(arms).join('\n').matchAll(
+        /flat_damping\(params, "(\w+)"/g,
+      )].map(m => m[1]!),
+    );
+
+    it('screens exactly the keys the engine refuses below zero', () => {
+      expect(rustNonNegativeKeys.size).toBeGreaterThan(0);
+      expect([...rustNonNegativeKeys].sort())
+        .toEqual([...NON_NEGATIVE_WIRE_KEYS].sort());
     });
   });
 

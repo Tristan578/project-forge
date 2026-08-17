@@ -1342,6 +1342,72 @@ mod from_flat_tests {
         assert_eq!(follow_lerp_factor(f32::NEG_INFINITY, 1.0 / 60.0), 0.0);
         assert_eq!(follow_lerp_factor(1e38, 1.0 / 60.0), 1.0);
     }
+
+    /// Distance from `camera` to where a follow mode wants it to be.
+    fn gap(camera: &Transform, desired: Vec3) -> f32 {
+        (camera.translation - desired).length()
+    }
+
+    // The three tests below exist because testing `follow_lerp_factor` alone does
+    // not pin the fix: revert just the three call sites to
+    // `let t = (damping * delta).min(1.0);` and every other test in this file
+    // still passes. Each consume site is a separate `let t = …`, so each needs its
+    // own assertion that it is the guarded one.
+    //
+    // A negative rate is asserted as an EXACT freeze rather than "moved less":
+    // `lerp(a, b, 0.0)` is `a` bit-for-bit, and a frozen camera is the authored
+    // outcome the floor chooses deliberately (see `follow_lerp_factor`). The
+    // companion gap assertion is what states the defect — the old factor pushed
+    // the camera the wrong way and compounded it every frame.
+
+    #[test]
+    fn third_person_never_extrapolates_away_from_the_target() {
+        let target = Transform::from_translation(Vec3::new(10.0, 0.0, 0.0));
+        let offset = Vec3::new(0.0, 5.0, 10.0);
+        let desired = target.translation + offset;
+        let mut camera = Transform::from_translation(Vec3::ZERO);
+        let before = gap(&camera, desired);
+
+        update_third_person(
+            &mut camera,
+            &target,
+            offset,
+            -3.0,
+            0.0,
+            true,
+            false,
+            1.0 / 60.0,
+        );
+
+        assert_eq!(camera.translation, Vec3::ZERO);
+        assert!(gap(&camera, desired) <= before);
+    }
+
+    #[test]
+    fn side_scroller_never_extrapolates_away_from_the_target() {
+        let target = Transform::from_translation(Vec3::new(10.0, 3.0, 0.0));
+        let desired = Vec3::new(10.0, 3.0, 12.0);
+        let mut camera = Transform::from_translation(Vec3::ZERO);
+        let before = gap(&camera, desired);
+
+        update_side_scroller(&mut camera, &target, 12.0, true, None, -3.0, 1.0 / 60.0);
+
+        assert_eq!(camera.translation, Vec3::ZERO);
+        assert!(gap(&camera, desired) <= before);
+    }
+
+    #[test]
+    fn top_down_never_extrapolates_away_from_the_target() {
+        let target = Transform::from_translation(Vec3::new(10.0, 0.0, 0.0));
+        let desired = target.translation + Vec3::Y * 20.0;
+        let mut camera = Transform::from_translation(Vec3::ZERO);
+        let before = gap(&camera, desired);
+
+        update_top_down(&mut camera, &target, 20.0, -3.0, false, 1.0 / 60.0);
+
+        assert_eq!(camera.translation, Vec3::ZERO);
+        assert!(gap(&camera, desired) <= before);
+    }
 }
 
 /// `set_game_camera` rebuilds the whole component from the request, so anything on it that the
