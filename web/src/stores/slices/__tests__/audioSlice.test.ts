@@ -328,7 +328,7 @@ describe('audioSlice', () => {
       const state = store.getState();
       expect(state.reverbZones['entity-1']).toEqual(updatedData);
 
-      expect(mockDispatch).toHaveBeenCalledWith('update_reverb_zone', {
+      expect(mockDispatch).toHaveBeenCalledWith('set_reverb_zone', {
         entityId: 'entity-1',
         ...updatedData,
       });

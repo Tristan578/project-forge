@@ -173,7 +173,7 @@ describe('spriteSlice', () => {
       store.getState().removeSpriteData('entity1');
 
       expect(store.getState().sprites.entity1).toBeUndefined();
-      expect(mockDispatch).toHaveBeenCalledWith('remove_sprite_data', {
+      expect(mockDispatch).toHaveBeenCalledWith('remove_sprite', {
         entityId: 'entity1',
       });
     });
@@ -270,7 +270,7 @@ describe('spriteSlice', () => {
       store.getState().setCamera2dData(data);
 
       expect(store.getState().camera2dData).toEqual(data);
-      expect(mockDispatch).toHaveBeenCalledWith('set_camera_2d_data', data);
+      expect(mockDispatch).toHaveBeenCalledWith('update_camera_2d', data);
     });
 
     it('should overwrite previous camera data', () => {

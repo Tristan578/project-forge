@@ -132,7 +132,9 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
   },
   updateReverbZone: (entityId, data) => {
     set(state => ({ reverbZones: { ...state.reverbZones, [entityId]: data } }));
-    if (dispatchCommand) dispatchCommand('update_reverb_zone', { entityId, ...data });
+    // `set_reverb_zone` is the only arm the engine has ever had; it takes
+    // `entityId` plus a flattened ReverbZoneData, which is exactly this payload.
+    if (dispatchCommand) dispatchCommand('set_reverb_zone', { entityId, ...data });
   },
   fadeInAudio: (entityId, durationMs) => {
     audioManager.fadeIn(entityId, durationMs);

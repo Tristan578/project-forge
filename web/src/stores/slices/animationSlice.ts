@@ -101,7 +101,10 @@ export const createAnimationSlice: StateCreator<AnimationSlice, [], [], Animatio
   },
   setSkeleton2d: (entityId, data) => {
     set(state => ({ skeletons2d: { ...state.skeletons2d, [entityId]: data } }));
-    if (dispatchCommand) dispatchCommand('set_skeleton_2d', { entityId, ...data });
+    // The engine spells this `create_skeleton2d` (no underscore before the 2d) and
+    // reads the data NESTED under `skeletonData` — a flat spread deserializes to
+    // `.unwrap_or_default()`, i.e. an empty skeleton. See engine/src/core/commands/sprites.rs.
+    if (dispatchCommand) dispatchCommand('create_skeleton2d', { entityId, skeletonData: data });
   },
   removeSkeleton2d: (entityId) => {
     set(state => {

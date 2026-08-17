@@ -153,10 +153,14 @@ export function AutoRiggingPanel() {
     // Go through the store (not direct dispatch) so Zustand state stays
     // in sync with the engine — required for save, inspector, and scripts.
     const commands = rigToCommands(currentRig, primaryId);
-    const skeletonCmd = commands.find((c) => c.command === 'set_skeleton_2d');
-    if (skeletonCmd) {
-      const { entityId: _eid, ...skeletonData } = skeletonCmd.payload as Record<string, unknown>;
-      setSkeleton2d(primaryId, skeletonData as unknown as Parameters<typeof setSkeleton2d>[1]);
+    // `rigToCommands` emits the engine's real command name and nests the skeleton
+    // under `skeletonData`. This used to look for `set_skeleton_2d` and spread the
+    // payload root, so once the builder was corrected the find never matched and
+    // Apply Rig silently did nothing (PF-1170).
+    const skeletonCmd = commands.find((c) => c.command === 'create_skeleton2d');
+    const skeletonData = (skeletonCmd?.payload as { skeletonData?: unknown } | undefined)?.skeletonData;
+    if (skeletonData) {
+      setSkeleton2d(primaryId, skeletonData as Parameters<typeof setSkeleton2d>[1]);
     }
   }, [currentRig, primaryId, setSkeleton2d]);
 

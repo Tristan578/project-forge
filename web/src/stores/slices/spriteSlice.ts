@@ -84,11 +84,11 @@ export const createSpriteSlice: StateCreator<SpriteSlice, [], [], SpriteSlice> =
       const { [entityId]: _, ...rest } = state.sprites;
       return { sprites: rest };
     });
-    if (dispatchCommand) dispatchCommand('remove_sprite_data', { entityId });
+    if (dispatchCommand) dispatchCommand('remove_sprite', { entityId });
   },
   setCamera2dData: (data) => {
     set({ camera2dData: data });
-    if (dispatchCommand) dispatchCommand('set_camera_2d_data', data);
+    if (dispatchCommand) dispatchCommand('update_camera_2d', data);
   },
   setSortingLayers: (layers) => set({ sortingLayers: layers }),
   addSortingLayer: (name) => {

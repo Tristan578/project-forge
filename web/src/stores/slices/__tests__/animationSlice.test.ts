@@ -277,10 +277,11 @@ describe('animationSlice', () => {
       store.getState().setSkeleton2d('entity1', data);
 
       expect(store.getState().skeletons2d.entity1).toEqual(data);
-      expect(mockDispatch).toHaveBeenCalledWith('set_skeleton_2d', {
-        entityId: 'entity1',
-        ...data,
-      });
+      // Full payload, not objectContaining: the nesting under `skeletonData` IS
+      // the behaviour. A flat spread deserializes to an empty default skeleton.
+      expect(mockDispatch.mock.calls).toEqual([
+        ['create_skeleton2d', { entityId: 'entity1', skeletonData: data }],
+      ]);
     });
 
     it('setSkeleton2d should handle multiple entities', () => {
