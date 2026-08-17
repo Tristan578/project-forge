@@ -503,6 +503,31 @@ describe('handlers2d physics2d edge cases', () => {
       });
       expect(result.success).toBe(false);
     });
+
+    it('falls back to real defaults for an inherited-key entityId', async () => {
+      // The `?? defaultPhysics2dData()` fallback never fired for '__proto__',
+      // because the bare read returned truthy `Object.prototype`. Spreading that
+      // contributes nothing (its properties are non-enumerable), so the payload
+      // was the request's own fields with every other field ABSENT — and
+      // `set_physics_2d` is a full replace (PF-1167).
+      const { result: proto, store: protoStore } = await invoke('set_physics2d', {
+        entityId: '__proto__',
+        bodyType: 'static',
+      });
+      const { result: fresh, store: freshStore } = await invoke('set_physics2d', {
+        entityId: 'never-seen',
+        bodyType: 'static',
+      });
+      expect(proto.success).toBe(true);
+      expect(fresh.success).toBe(true);
+
+      const protoPayload = vi.mocked(protoStore.setPhysics2d).mock.calls[0][1];
+      const freshPayload = vi.mocked(freshStore.setPhysics2d).mock.calls[0][1];
+      // An unknown id is an unknown id, whatever it is named.
+      expect(protoPayload).toEqual(freshPayload);
+      // And the defaults are really there, rather than both being near-empty.
+      expect(Object.keys(protoPayload as object).length).toBeGreaterThan(1);
+    });
   });
 
   describe('remove_physics2d', () => {
@@ -534,6 +559,19 @@ describe('handlers2d physics2d edge cases', () => {
       const { result } = await invoke('get_physics2d', { entityId: 'missing' });
       expect(result.success).toBe(false);
     });
+
+    it.each(['__proto__', 'constructor', 'toString'])(
+      'reports %s as missing instead of returning an inherited value',
+      async (entityId) => {
+        // `zEntityId` is `z.string().min(1)`, so these reach the handler. A bare
+        // `ctx.store.physics2d[entityId]` read resolves to `Object.prototype` or a
+        // function — truthy — so `if (!data)` never fired and the handler returned
+        // a prototype object to the model as if it were physics data (PF-1167).
+        const { result } = await invoke('get_physics2d', { entityId });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('No 2D physics data');
+      },
+    );
   });
 
   describe('set_gravity2d', () => {
