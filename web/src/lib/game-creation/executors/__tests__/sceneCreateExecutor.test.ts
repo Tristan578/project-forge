@@ -103,8 +103,13 @@ describe('sceneCreateExecutor', () => {
     expect(result.success).toBe(true);
     expect(result.output).toEqual({ sceneName: 'Arena', worldType: null });
 
+    // The scene clear goes through `getStore().newScene()` as of PF-1155, so
+    // this executor now dispatches nothing at all — which makes the assertion
+    // stricter than the `['new_scene']` it replaced: ANY dispatch from here,
+    // camera or otherwise, fails it.
+    expect(ctx.getStore().newScene).toHaveBeenCalled();
     const commands = (ctx.dispatchCommand as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
-    expect(commands).toEqual(['new_scene']);
+    expect(commands).toEqual([]);
   });
 
   it('aborts before touching persisted scenes', async () => {
