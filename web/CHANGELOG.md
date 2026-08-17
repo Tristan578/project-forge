@@ -1,5 +1,427 @@
 # web
 
+## 0.6.0
+
+### Minor Changes
+
+- [#9142](https://github.com/Tristan578/project-forge/pull/9142) [`44a0d8d`](https://github.com/Tristan578/project-forge/commit/44a0d8de114c8e58d1e34e6bd705273631726005) Thanks [@Tristan578](https://github.com/Tristan578)! - Make the game-creation pipeline reachable from the product. The orchestrator panel is now registered with the workspace so it can actually render, and a direct request like "make me a 3D platformer" routes from chat into the creation pipeline instead of the chat tool loop.
+
+- [#9087](https://github.com/Tristan578/project-forge/pull/9087) [`98899bf`](https://github.com/Tristan578/project-forge/commit/98899bf53146f295afd8c6330a5724e33419a33d) Thanks [@Tristan578](https://github.com/Tristan578)! - Add Sentry profiling and business metrics for the generation surface.
+
+  Profiling is wired across the Node server and browser runtimes (`profileLifecycle: 'trace'`, sampled at 10% in production), with the `Document-Policy: js-profiling` header enabling the browser profiler.
+
+  `/api/generate/*` now emits three business metrics through the shared handler factory — request volume faceted by outcome, end-to-end latency, and tokens actually charged on success. All metric emission fails open so observability can never take down the generate routes.
+
+### Patch Changes
+
+- [#9218](https://github.com/Tristan578/project-forge/pull/9218) [`9164e59`](https://github.com/Tristan578/project-forge/commit/9164e59e78b80b737f1c9f73373205b10f62deea) Thanks [@Tristan578](https://github.com/Tristan578)! - Generated 2D games now ship a player that can move. The character rig step gave
+  2D players a skeleton and nothing else — a skeleton is an animation rig, not a
+  movement component — so the player stood still no matter what the input did.
+
+  The same movement component the 3D path uses is now added for 2D, tuned by the
+  same feel directive, and the engine steers it along the screen plane instead of
+  into the depth axis the player cannot see.
+
+  Generated games also bind their controls. The engine ships no input bindings by
+  default, so every generated player previously had a movement component with
+  nothing wired to drive it; the movement style in the design document now picks
+  the binding set. And in 3D, moving left works — A and D used to strafe the same
+  direction.
+
+- [#9250](https://github.com/Tristan578/project-forge/pull/9250) [`d4c41f4`](https://github.com/Tristan578/project-forge/commit/d4c41f42f47d037bc2f3d89f62dc012bb1e1fa3e) Thanks [@Tristan578](https://github.com/Tristan578)! - Guard the RSC boundary around `lib/chat/handlers/`.
+
+  Most chat handlers value-import a Zustand store. That is safe only because
+  nothing in the server graph can reach them — a property nothing checked. A new
+  test walks the real import graph outward from every shipped module under `app/`,
+  stopping where a module declares `'use client'`, and fails if any of them reaches
+  a handler at any depth. The day that stops being true it is a red test rather
+  than an opaque `next build` failure on a module that never mentions a store.
+
+  The comment stripper and type-only detector the existing `game-creation` scan
+  uses now live in `test/utils/importScanner.ts` and are shared by both, rather
+  than existing as two hand-rolled copies of the same subtle logic. The shared
+  extractor reads whole statements rather than physical lines, so a Prettier-wrapped
+  `await import(…)` — a form this repo already ships — is a module edge the scan
+  sees instead of a silent miss.
+
+- [#9255](https://github.com/Tristan578/project-forge/pull/9255) [`6a9130f`](https://github.com/Tristan578/project-forge/commit/6a9130f6f730427b6e011ef9ed5128bdcfe25c4f) Thanks [@Tristan578](https://github.com/Tristan578)! - Reject command payloads that are nested too deeply, or that carry more objects and arrays than the engine can convert, before they cross into WASM. A deeply nested payload previously overflowed the stack during the recursive JS-to-Rust conversion, which on wasm32 is an unrecoverable trap that kills the engine instance for the rest of the session. Bulk data is unaffected — a full-size tilemap is millions of values but only a handful of containers, and only containers count toward the bound.
+
+- [#9268](https://github.com/Tristan578/project-forge/pull/9268) [`3d266a6`](https://github.com/Tristan578/project-forge/commit/3d266a6fc69d79a9be882d918cec2d31c12c9bef) Thanks [@Tristan578](https://github.com/Tristan578)! - Refuse a negative camera follow damping instead of sending it to the engine.
+
+  The engine follows with `t = (damping * delta).min(1.0)` and then
+  `translation.lerp(target, t)` — `t` is capped above but never below, so a
+  negative rate is a negative lerp factor: the camera extrapolates away from its
+  target every frame and the gap compounds (~16x per second at 60fps with -3),
+  putting the camera somewhere unreachable within two seconds. It was accepted by
+  the GDD camera translator, sent, and reported as applied.
+
+  The rate is now rejected at both boundaries — `flat_damping` on the command path
+  and a floored `follow_lerp_factor` at each consume site, because `.forge` scene
+  files deserialize straight into the camera struct without passing through
+  `from_flat`.
+
+  Because `set_game_camera` is full-replace, that engine-side tightening needs a
+  matching screen on the browser side or one bad rate would take `mode`,
+  `targetEntity` and `offset` down with it. Both write paths into the wire
+  `damping` key now share one predicate, and the actionable signal moved to the
+  input surfaces: the inspector's Smoothing field carries a real floor (the `min`
+  attribute alone is advisory — a typed value still fires `change`), and the chat
+  tool rejects a negative rate with a validation error naming the field instead of
+  dropping it silently. `0` stays a legitimate authored value everywhere — it
+  means "never move", not "absent".
+
+  Camera config keys that do not reach the engine are also now reported by reason:
+  an unrecognized key, a value the engine cannot take, and a duplicate spelling
+  each get their own sentence, where all three previously shared one that named
+  only the first.
+
+- [#9215](https://github.com/Tristan578/project-forge/pull/9215) [`60eeffc`](https://github.com/Tristan578/project-forge/commit/60eeffc43f36fa94dbd4f10a3d152405a64bc846) Thanks [@Tristan578](https://github.com/Tristan578)! - Generated games now use the camera the GDD asked for. The camera directive was
+  being normalized and then dropped before it reached the engine, so every
+  generated game — including 2D side-scrollers — ran on the default third-person
+  follow camera.
+
+  The camera it creates also has something to follow, the repair path it runs on a
+  broken scene actually renders, and camera values nobody restates — a sideways
+  shoulder offset, a tuned follow smoothing — survive the next camera command
+  instead of snapping back to the engine default. A pipeline step that only
+  partially applied now says so in the UI rather than reporting plain success.
+
+- [#9169](https://github.com/Tristan578/project-forge/pull/9169) [`5838cb7`](https://github.com/Tristan578/project-forge/commit/5838cb765f6503b43334b78a4369a36f5db367c6) Thanks [@Tristan578](https://github.com/Tristan578)! - Game creation: cancelling a run now stops the current step's remaining retries instead of waiting for them to finish, and reports the plan as cancelled rather than failed.
+
+- [#9176](https://github.com/Tristan578/project-forge/pull/9176) [`64cd700`](https://github.com/Tristan578/project-forge/commit/64cd700f3dd7c567586991e9d7316029787ea8d9) Thanks [@Tristan578](https://github.com/Tristan578)! - Bind generated character setup to the engine's entity id instead of the designed
+  name. `character_setup` steps come from the system registry rather than the
+  entity loop, so they carried no entity at all — the executor then fell back to
+  the GDD name, which the engine's `EntityId` match never resolves. A generated 3D
+  player silently received no `CharacterController` and could not move. System
+  definitions now receive the planned entities, and an unresolvable target fails
+  loudly instead of dispatching a no-op.
+
+- [#9176](https://github.com/Tristan578/project-forge/pull/9176) [`64cd700`](https://github.com/Tristan578/project-forge/commit/64cd700f3dd7c567586991e9d7316029787ea8d9) Thanks [@Tristan578](https://github.com/Tristan578)! - Game creation no longer abandons an entire build when a design asks for movement without naming a player character. The character rig step is planned only when there is a character to rig, and the final review says so when it was skipped.
+
+- [#9261](https://github.com/Tristan578/project-forge/pull/9261) [`2913f64`](https://github.com/Tristan578/project-forge/commit/2913f6465555132ab3a068a8b3a23048c615e222) Thanks [@Tristan578](https://github.com/Tristan578)! - Run the compound chat tools' input validation instead of shadowing it. `compoundHandlers.ts` declared its own private copies of every `helpers.ts` export, so the validated builders never executed in production and a model-supplied material, light, physics body or game component reached the engine through a bare cast. The copies are deleted; the builders now clamp every game-component field to the engine's own range (mirrored from `build_game_component` and pinned against the Rust by test), clamp the material, light and physics fields to what each can mean, round the integer-typed fields, and fall back per field rather than throwing. A win condition described as `collect_all` no longer silently becomes a score game, and a vector component past the f32 range no longer reaches the engine as infinity.
+
+- [#9224](https://github.com/Tristan578/project-forge/pull/9224) [`57da338`](https://github.com/Tristan578/project-forge/commit/57da338123981b7a67a75342ed38eadbb12576b7) Thanks [@Tristan578](https://github.com/Tristan578)! - Cutscene camera moves now actually move. A camera keyframe with a duration and
+  an easing curve snapped to its destination on its first frame — the eased
+  progress was written onto the command as a field no engine command reads — so
+  every authored camera move was a cut.
+
+  Every other kind of keyframe was being re-sent on every animation frame for the
+  length of its duration, which restarted the sound, the animation clip and the
+  dialogue about sixty times a second. Those now fire once. An audio keyframe also
+  stops sending volume and fade settings that the engine discards, and a dialogue
+  keyframe that names no dialogue tree is no longer sent at all.
+
+  Seeking a cutscene past a camera keyframe now applies it. Jumping over a camera
+  move left the camera wherever it happened to be, so seeking into a move showed
+  it and seeking one frame past the same move showed nothing. Sounds, animations
+  and dialogue are still not replayed by a seek.
+
+  Reconfiguring a game camera mid-play no longer cancels a camera shake that is
+  still running — including one triggered in the same frame — or snaps a
+  first-person or orbital camera back to its starting angle.
+
+- [#9231](https://github.com/Tristan578/project-forge/pull/9231) [`b9c4a31`](https://github.com/Tristan578/project-forge/commit/b9c4a31f51941dc6198ed696597ca493c4e262a6) Thanks [@Tristan578](https://github.com/Tristan578)! - Fix cutscene dialogue beats doing nothing. A dialogue keyframe builds a
+  `start_dialogue` command, but that command lives entirely in the browser — the
+  engine has never known it. The player was handed the engine dispatcher, which
+  rejected the command — a console error for a developer, nothing at all for the
+  viewer: every authored dialogue beat in every cutscene played through with no
+  dialogue and no user-visible error. Cutscene playback now routes browser-side
+  commands to their real handler, and a cutscene pointing at a deleted dialogue
+  tree says so instead of playing a silent gap.
+
+- [#9221](https://github.com/Tristan578/project-forge/pull/9221) [`f54300b`](https://github.com/Tristan578/project-forge/commit/f54300b06a93195da3429751e870e86e0663ea39) Thanks [@Tristan578](https://github.com/Tristan578)! - Match GDD system keywords at word boundaries instead of anywhere in the prompt.
+
+  The local system decomposer tested each keyword with `text.includes()`, so a
+  keyword matched inside unrelated words: `car` in "scary", `star` in "start",
+  `click` in "clicker", `run` in "runner". A horror prompt was given vehicle
+  movement, "where you start the level" was read as collecting pickups, and the two
+  entries that describe idle-clicker and endless-runner games lost to entries whose
+  vocabulary the prompt never used.
+
+  Keywords now match as whole words, with an optional plural so the table can keep
+  listing `coin` while prompts say "coins". Evidence is counted as distinct regions
+  of the prompt rather than as keywords, so the table's own nesting (`platform`
+  inside `platformer`, `runner` inside `endless runner`) no longer lets one word
+  score twice and beat a rival entry — which is what classified "a top-down game
+  with jumping" as a platformer. Two separate mentions still count twice.
+
+  `priority` now records whether the prompt named the category at all, rather than
+  whether it tripped two keywords; that count was largely measuring the nesting
+  above. The systems panel also names each detected system by what was detected
+  rather than by its category, so a prompt asking for pixel art no longer reads
+  back "visual".
+
+- [#9201](https://github.com/Tristan578/project-forge/pull/9201) [`b1a838c`](https://github.com/Tristan578/project-forge/commit/b1a838cd4fc9247f954dbd972bae49f247611a8e) Thanks [@dependabot](https://github.com/apps/dependabot)! - Bump the npm minor-and-patch group (29 packages, including next 16.2.12 → 16.3.0).
+
+  next 16.3.0 adds `@next/next/no-location-assign-relative-destination`, which the
+  repo's `--max-warnings 0` policy turns into a build failure. The token-depleted
+  modal now soft-navigates with `useRouter().push` instead of assigning
+  `window.location.href` — a location assignment is a full document navigation, so
+  it was tearing down the WASM engine and every unsaved store slice on the way to
+  a billing page the user is expected to come straight back from.
+
+  The editor error boundary keeps its hard navigation, with the rule disabled on
+  that line and the reason recorded: it runs with `hasError` latched, so a soft
+  push would carry the same wedged engine and stores onto the next screen instead
+  of clearing them.
+
+- [#9100](https://github.com/Tristan578/project-forge/pull/9100) [`fcf39f3`](https://github.com/Tristan578/project-forge/commit/fcf39f3c4678e2b709978b7af2254ab571e5e991) Thanks [@Tristan578](https://github.com/Tristan578)! - chore(deps): relock `nanoid`, `js-yaml` and `dompurify` to clear three published advisories ([#9099](https://github.com/Tristan578/project-forge/issues/9099))
+
+  The `npm audit` gate was red on all three audited workspaces (`.`, `web`, `mcp-server`):
+
+  - **GHSA-2v37-7h3g-55p8** (high) — `nanoid`: a custom generator can loop indefinitely when `size` is zero. `3.3.16` → `3.3.18`.
+  - **GHSA-5p4m-2wfm-xmqj** (high) — `js-yaml`: quadratic CPU consumption resolving `!!omap`. `4.3.0` → `4.3.1` at the root, and the two nested `3.15.0` copies (under `gray-matter/` and `read-yaml-file/`) → `3.15.1`. A root-only bump would have left both nested copies vulnerable.
+  - **GHSA-55q2-fjhq-7xh7** (moderate) — `dompurify`: an `IN_PLACE` hook removal leaves a detached subtree executable (XSS). The existing root override was pinned `>=3.4.12`, one patch short of the fix, so it actively held the vulnerable version in place; tightened to `>=3.4.13` and relocked to `3.4.13`.
+
+  Every fix was already published, so no `ALLOWED_ADVISORIES` waiver was added — the allowlist stays empty, which is its correct steady state.
+
+  Relocked on the pinned Node 24 toolchain with a scoped `npm update … --package-lock-only`. The committed lockfile carries exactly five changed nodes (`version`/`resolved`/`integrity` only) with zero nodes added or removed; the `libc` metadata that `npm update` strips from 34 Linux-only optional native nodes was restored so the file round-trips through `npm install --package-lock-only` unchanged.
+
+- [#9259](https://github.com/Tristan578/project-forge/pull/9259) [`6b838a8`](https://github.com/Tristan578/project-forge/commit/6b838a89211c53682927089865008bc8b88d0708) Thanks [@Tristan578](https://github.com/Tristan578)! - Stop a malformed dialogue tree from crashing the play session. A conversation whose condition and action nodes formed a cycle recursed until the browser ran out of stack, ending the whole session rather than the one conversation. The runtime now walks such a tree without recursing and ends the conversation if it never reaches anything the player can read. Loops that resolve on their own — "ask again until the counter reaches three" — still play through as authored.
+
+  Two neighbouring crashes from the same source are closed with it: a condition nested thousands of levels deep no longer overflows the stack when it is evaluated (it is treated as unmet instead, so a gated choice stays hidden rather than opening), and a line that points at a node which is not in the tree now ends the conversation with an explanation instead of leaving the player in an empty dialogue box with no way out but Esc.
+
+- [#9240](https://github.com/Tristan578/project-forge/pull/9240) [`c75718b`](https://github.com/Tristan578/project-forge/commit/c75718ba09d8b46ed802fab1c85683f431ecadd3) Thanks [@Tristan578](https://github.com/Tristan578)! - Dialogue: a generated or imported tree can no longer break the dialogue runtime. Tree ids that name an inherited property (`__proto__`, `constructor`) are no longer mistaken for real trees — on every read path, not just the store's own — and a tree whose JSON carries no `nodes` array, no `startNodeId`, or a `nodes` entry that is not an object is now rejected rather than throwing on the first walk. A dialogue action can no longer re-point the prototype of a tree's variable bag, and a variable that was never set now reads back as unset whatever it is named — a condition on `toString` or `constructor` used to see the inherited member and turn on a name the tree never wrote.
+
+  The same check now covers what each node carries, not just the tree around it: a node that is not an object, a condition or action that is not one, an `actions` field that is not a list, and a choice node whose `choices` is not a list all end the dialogue or read as empty instead of throwing mid-walk. A tree that simply omits its (empty) variable bag is repaired on import and on load rather than being accepted and then silently refusing to run — including a tree saved that way by an earlier build.
+
+  Failures that used to be silent now say so where the author is looking. A dialogue cut short by a routing loop or an unrecognised node type raises a toast naming the node, not just a console line; a running conversation whose tree has gone unreadable says it cannot continue instead of painting an empty box that reads as a hang; and the dialogue editor now distinguishes a tree that will not open from no tree being selected, rather than telling an author who has just picked one to pick one.
+
+  Corrupt stored data no longer costs more than the tree it corrupts. A tree that cannot be walked is now refused at import and dropped on load, each by name in the console, so it can never reach the runtime that would throw on it; a stored blob that is not an object at all starts an empty set of trees rather than being assigned through. Reads of the whole set — the dialogue tree editor's picker, the entity inspector's tree dropdown, the voice-profile speaker sweep, and the scene context sent to the AI — now skip an unwalkable tree instead of throwing on it, so one bad tree costs that tree and not the panel the author needs in order to fix it. The last remaining way to put an unreadable tree into the map is closed too: an update that would leave a tree unwalkable is refused rather than half-applied, and dropping the tree a dialogue is currently running now ends that dialogue instead of leaving the runtime aimed at something no longer there.
+
+- [#9171](https://github.com/Tristan578/project-forge/pull/9171) [`645cfb4`](https://github.com/Tristan578/project-forge/commit/645cfb4c28626a1d596fe4d6619d61624ae807f6) Thanks [@Tristan578](https://github.com/Tristan578)! - Game creation: a design that asks for two mechanics in the same category (walk + swim, enemy waves + hazards) now builds steps for both instead of silently dropping all but the first.
+
+- [#9156](https://github.com/Tristan578/project-forge/pull/9156) [`462597b`](https://github.com/Tristan578/project-forge/commit/462597b6daebf064baa36fd11e4564ef1fd8315c) Thanks [@Tristan578](https://github.com/Tristan578)! - Surface engine command rejections. `dispatchCommand` now returns the engine's `CommandResponse` instead of discarding it, and the store's tracked wrapper logs and reports any rejection — making a whole class of silent no-ops diagnosable across every editor panel, chat handler, and pipeline executor.
+
+- [#9185](https://github.com/Tristan578/project-forge/pull/9185) [`27c9752`](https://github.com/Tristan578/project-forge/commit/27c9752c42d88022e49c33cda9398fd6c9c81f4d) Thanks [@Tristan578](https://github.com/Tristan578)! - Generated 3D games now spawn the shape the design asked for. `entity_setup` reads the GDD's `appearance` field when it names a primitive (`primitive:sphere`), instead of always spawning the role-default mesh — previously every enemy, NPC, decoration, trigger and interactable was a cube regardless of what the design specified. Free-text appearance still falls back to the role default rather than failing the step, and 2D entities remain textured planes.
+
+  The `behaviors` field is removed from the game design document. Nothing in the pipeline ever read it, so the model was spending tokens writing prose that was parsed, sanitized, stored and then discarded.
+
+- [#9251](https://github.com/Tristan578/project-forge/pull/9251) [`901c6f2`](https://github.com/Tristan578/project-forge/commit/901c6f299580a6df0610bfc708f970abbc3e692c) Thanks [@Tristan578](https://github.com/Tristan578)! - Play audio per entity instead of per scene. The editor kept a single audio component for the whole scene — whichever entity reported last — so a scene with two sound sources showed and edited the wrong one, the AI answered questions about the wrong entity, and nothing ever reached the Web Audio graph. Audio is now stored per entity, imported sounds are decoded and attached to the entity that owns them, and a pitch set before a sound plays (or set and then replayed) is no longer discarded. Sound generation that comes back without a clip now says so instead of attaching a sound that will never play, and deleting an audio asset no longer leaves entities pointing at it silent. Opening a scene restores every entity's audio at once rather than revealing it one selection at a time, and the AI generate buttons now state which tier they need somewhere a screen reader can reach.
+
+- [#9176](https://github.com/Tristan578/project-forge/pull/9176) [`64cd700`](https://github.com/Tristan578/project-forge/commit/64cd700f3dd7c567586991e9d7316029787ea8d9) Thanks [@Tristan578](https://github.com/Tristan578)! - Bind orchestrator-generated scripts to the engine's entity id instead of the designed entity name. The plan now mints an id per entity, forwards it to the engine via `spawn_entity`'s id override, and `custom_script_generate` binds `set_script` to that id — previously every generated script bound to a name the engine never matches, and the miss was silent.
+
+- [#9195](https://github.com/Tristan578/project-forge/pull/9195) [`bbbef60`](https://github.com/Tristan578/project-forge/commit/bbbef60133b97855fa3d95dd7e6771a2782f1ff7) Thanks [@Tristan578](https://github.com/Tristan578)! - Game-creation executors now read the editor store live through a `getStore()` accessor on `ExecutorContext` instead of a snapshot captured before the pipeline starts. `verify_all_scenes` no longer reports `empty_scene` on a populated scene, and `auto_polish` no longer dispatches `set_game_camera` against a despawned entity id. A guard test fails the build if any `lib/game-creation` module value-imports a client-only module, which is what previously broke the production build of `/api/game/decompose`.
+
+- [#9211](https://github.com/Tristan578/project-forge/pull/9211) [`c0ca08c`](https://github.com/Tristan578/project-forge/commit/c0ca08c3a237bd7c3e5e6a7c7b05313a3ab830b6) Thanks [@Tristan578](https://github.com/Tristan578)! - Fix `set_game_camera`, which never reached the engine from any call site. The
+  engine deserialized the camera mode as an externally-tagged enum while every
+  caller sent a camelCase string with flat parameters, so the command was dropped
+  before it was queued — silently, because engine dispatch returns no result. The
+  Game Camera Inspector, the AI `set_game_camera` tool, smart-camera presets and
+  cutscene camera tracks were all affected.
+
+  Also removes three camera parameters (`followLookAhead`, `sideScrollerHeight`,
+  `topDownAngle`) that no engine camera mode has ever had a field for, and
+  rewrites the published MCP `set_game_camera` schema, which advertised those
+  same authoring names rather than the parameters the engine reads.
+
+  Hardens the wire itself: a camera parameter can no longer crash the engine.
+  Values that saturate to infinity and inverted `[min, max]` ranges are rejected,
+  and the two sites that clamp between a pair order their bounds first — an
+  inverted pair reached `f32::clamp`, whose panic takes down the whole WASM
+  instance and loses the unsaved scene.
+
+  Camera parameters the editor's authoring vocabulary has no field for — twelve of
+  the engine's twenty-one, including field of view and the look-at target — now
+  survive a round trip through the store. `set_game_camera` replaces the whole
+  component, so a parameter the next payload omits comes back as the engine's
+  default: dropping these on read was not leaving them alone, it was resetting
+  them. An entity named `__proto__` can also no longer reparent the camera record,
+  which previously made every camera-less entity report the polluting camera as
+  its own.
+
+  Fixes the 3D auto-polish camera, which sent a follow smoothing of 0.8 as though
+  it were a 0..1 blend factor. The engine reads it as a rate per second, so every
+  auto-polished 3D game shipped a follow camera roughly six times slower than the
+  default.
+
+- [#9163](https://github.com/Tristan578/project-forge/pull/9163) [`e7d32b3`](https://github.com/Tristan578/project-forge/commit/e7d32b3c8757abb0fba04fc9e2b081c805306244) Thanks [@Tristan578](https://github.com/Tristan578)! - Match the engine's whole-number coercion for game component fields. `collectible.value`, `spawner.maxCount` and `winCondition.targetScore` are `u32` in the engine, which rounds and clamps them — the editor previously kept the raw value, so a collectible authored as worth 10.4 points showed 10.4 in the inspector while the running game scored something else.
+
+- [#9158](https://github.com/Tristan578/project-forge/pull/9158) [`ed296f7`](https://github.com/Tristan578/project-forge/commit/ed296f7af53c3300be0b1362098dcbab042500b9) Thanks [@Tristan578](https://github.com/Tristan578)! - Stop game-component integer fields from silently reverting to their defaults when JSON spells them as floats.
+
+  `build_game_component` read `collectible.value`, `spawner.maxCount` and `win_condition.targetScore` with `as_u64()`, which answers `None` for a float-formatted integer like `10.0`. JSON has one number type and the producers on this wire spell integers differently — JS `JSON.stringify(10)` emits `10`, but anything routed through a float (an inspector slider, an LLM writing `10.0`, a `.forge` scene round-tripped through `f64`) emits `10.0`. The field then fell back to its default, so a collectible authored as worth 50 points was worth 1 — the exact unusable-value outcome the permissive builder exists to prevent, and inconsistent with the sibling float and vector readers, which both take either spelling.
+
+  These fields now parse via `as_f64()`, round to the nearest whole (a fractional count means nothing to a system that iterates it), and clamp into range instead of dropping — the same clamp-don't-drop rule the float reader already followed. Non-numbers still leave the default standing.
+
+- [#9146](https://github.com/Tristan578/project-forge/pull/9146) [`a1e63f7`](https://github.com/Tristan578/project-forge/commit/a1e63f7088b772aaaf0f04cc936c6211afb4513b) Thanks [@Tristan578](https://github.com/Tristan578)! - Fix the JS↔engine game-component wire contract so AI-authored gameplay actually reaches the engine.
+
+  The store models a game component as a tagged union (`{ type: 'characterController', characterController: {...} }`) but `handle_add_game_component` requires a flat `{ entityId, componentType: 'character_controller', properties }`, and the engine deserializes each properties bag with strict serde. Ten dispatch sites were sending a shape the engine rejected, and because `dispatchCommand` returns `void` every rejection was silent — the AI reported success on gameplay that was never added.
+
+  - New `lib/engine/gameComponentWire.ts` owns the store↔engine name mapping, the per-type property projection, and a `buildStoreComponent` that fills a complete, deserializable default bag for all 13 component types.
+  - `gameSlice` add/update/remove now dispatch the flat snake_case shape, which also revives the Remove button in the game-component inspector.
+  - `characterSetupExecutor` sends all four `character_controller` fields (a missing `canDoubleJump` dropped the whole component) and uses `create_skeleton2d` for 2D.
+  - The four `autoIteration` fix generators no longer emit the non-existent `game_component` type.
+  - `gameplayHandlers` derives its valid-type list from the catalog, adding the previously missing `dialogue_trigger`.
+  - `autoRigging` emits `create_skeleton2d` with a correctly nested `SkeletonData2d` and a string `targetEntityId`, so applying a rig works.
+
+- [#9183](https://github.com/Tristan578/project-forge/pull/9183) [`6b21495`](https://github.com/Tristan578/project-forge/commit/6b21495a0e5c4ec4a938b9c782504d55017d79d7) Thanks [@Tristan578](https://github.com/Tristan578)! - Reject a generated game design that declares a movement system but casts no player entity. The two fields were each valid in isolation, so the nonsense design survived decomposition and only surfaced downstream as a dropped character-setup step — the user asked for movement and got a game where nothing moves. The decomposer now fails that GDD and re-prompts the model instead.
+
+- [#9116](https://github.com/Tristan578/project-forge/pull/9116) [`56e9100`](https://github.com/Tristan578/project-forge/commit/56e9100479657b75bd9ea87a11803da8cc1e03a1) Thanks [@Tristan578](https://github.com/Tristan578)! - Fix two permanent false outages on the public status page. The health check
+  probed environment variables that nothing in the tree reads and no environment
+  sets: `CLOUDFLARE_ACCOUNT_ID` / `R2_*` for asset storage (the real R2 consumer
+  reads the `ASSET_*` namespace) and `MESHY_API_KEY` / `ELEVENLABS_API_KEY` /
+  `SUNO_API_KEY` for AI providers (the real names are `PLATFORM_*`). The chat
+  reachability probe also hard-coded `api.anthropic.com` while production routes
+  chat through the Vercel AI Gateway.
+
+  Every namespace a health check reads now comes from a shared constants module,
+  so the check and its consumer can no longer drift apart.
+
+- [#9181](https://github.com/Tristan578/project-forge/pull/9181) [`60e4103`](https://github.com/Tristan578/project-forge/commit/60e41037fcdca5dcbf57551d31b5dc21e8b5325f) Thanks [@Tristan578](https://github.com/Tristan578)! - Expose the health component's `despawnOnDeath` knob across the editor, AI chat, and MCP surfaces. The engine has always honored the field (defaulting to `true`), but nothing above the bridge could author it, so a boss or destructible prop that should leave a wreck at zero health had no way to say so.
+
+- [#9113](https://github.com/Tristan578/project-forge/pull/9113) [`e261b4a`](https://github.com/Tristan578/project-forge/commit/e261b4a8422b6cf521ee99819aa343826e297a8a) Thanks [@Tristan578](https://github.com/Tristan578)! - Execute the distributed rate limiter's sliding-window Lua script in a real Lua VM under test, instead of only asserting the request we send to Upstash. The script's boundary arithmetic and `tonumber` coercions are now covered by tests that fail when the script changes.
+
+- [#9232](https://github.com/Tristan578/project-forge/pull/9232) [`89ce885`](https://github.com/Tristan578/project-forge/commit/89ce885f16c6ce04deaedc46501595a5e9aa942f) Thanks [@Tristan578](https://github.com/Tristan578)! - Bound `movingPlatform.waypoints` on both sides of the engine bridge. The list had
+  a lower bound (two points) and no upper one, and the values are LLM-authored — a
+  generated GDD asking for a long patrol route grew an unbounded `Vec` that
+  `system_moving_platform` walks every frame and that gets serialized into every
+  scene save. Both sides now cap at a single `MAX_WAYPOINTS` constant, parsed out
+  of the Rust by the TypeScript test so the two cannot drift apart silently. Points
+  the engine would discard are also discarded in the store, including doubles that
+  survive `Number.isFinite` in JavaScript but overflow to infinity as an `f32`.
+
+  Also fixed three validators that were passing arrays they exist to reject.
+  `Array.prototype.every` skips array holes, so `[1, , 3]` cleared every one of
+  them without the missing slot being checked. On the engine wire that shipped the
+  gap as a `null` the engine drops and the store keeps. In dialogue an `and` group
+  with a missing condition reported itself satisfied; separately, a `null`
+  condition, node or choice in an imported or persisted tree crashed playback, so
+  both `JSON.parse` boundaries now drop members the declared types say cannot
+  exist. In the effect system an incomplete binding was accepted by a type guard
+  whose narrowing promises the opposite, leaving `applyBinding` — which iterates
+  with `for...of`, and so does not skip the gap — to throw on it at gameplay time.
+
+- [#9243](https://github.com/Tristan578/project-forge/pull/9243) [`cb599e8`](https://github.com/Tristan578/project-forge/commit/cb599e8f35cff7a5fd7701c2086dec54faceffb5) Thanks [@Tristan578](https://github.com/Tristan578)! - Render the OG image badge as inline SVG instead of an emoji glyph. Satori resolves any codepoint its emoji classifier matches through a third-party CDN rather than the bundled font, which put that CDN on the critical path of `next build` for the three prerendered OG routes — a connect timeout failed the export outright. The play card additionally strips emoji from the game title, description and creator name it renders, so a user-supplied emoji no longer breaks that share card at request time. The classifier keys on `Emoji`, not `Extended_Pictographic`, so flags, keycaps and skin-tone modifiers are stripped too, and truncation now counts codepoints so the cut cannot split a surrogate pair.
+
+- [#9151](https://github.com/Tristan578/project-forge/pull/9151) [`0618de5`](https://github.com/Tristan578/project-forge/commit/0618de5bdbdfb29bb26cd6bad700884ce15e44a4) Thanks [@Tristan578](https://github.com/Tristan578)! - Game components now accept partial property bags. `build_game_component` merges each recognised field onto the type's default instead of deserializing the whole bag strictly, so a command that names only `speed` no longer fails with "missing field `jumpHeight`". Unusable values (wrong type, non-finite, out of range) fall back to their default rather than rejecting the component, and numeric fields are clamped to the range the engine can simulate. Only an unknown component type or a body that is not a JSON object is still an error.
+
+- [#9192](https://github.com/Tristan578/project-forge/pull/9192) [`b892594`](https://github.com/Tristan578/project-forge/commit/b89259484e32ca22e7c119de047b06e30eeb03f5) Thanks [@Tristan578](https://github.com/Tristan578)! - Fix `update_physics` silently discarding or corrupting partial physics edits.
+
+  Asking the AI to change one physics property (for example "make the ground
+  bouncier") previously rebuilt all 13 fields of the entity's physics body,
+  sourcing the unspecified ones from whichever entity happened to be selected —
+  so a single tweak could flip a static platform to dynamic and drop the player
+  through the level. The engine now accepts a partial patch and leaves untouched
+  fields at their live values, and the physics feel presets dispatch the payload
+  shape the engine actually reads instead of one it discarded.
+
+- [#9121](https://github.com/Tristan578/project-forge/pull/9121) [`1995c56`](https://github.com/Tristan578/project-forge/commit/1995c56b4253d275ff7aab859fb2e71935ce8921) Thanks [@Tristan578](https://github.com/Tristan578)! - Pixel-art generation no longer reports a job `completed` when the provider delivered no image. Completion is now derived from the artifact actually returned rather than from the absence of a prediction id, both provider clients reject an empty response, and an empty artifact surfaces as a 503 naming what is missing — with tokens refunded — instead of a 201 the client cannot poll.
+
+- [#9144](https://github.com/Tristan578/project-forge/pull/9144) [`dfb1f47`](https://github.com/Tristan578/project-forge/commit/dfb1f477778690a5f618f07e580559e494e2b8d2) Thanks [@Tristan578](https://github.com/Tristan578)! - Game creation now reports a cyclic system-dependency graph as a named failure instead of silently dropping a step from the build plan.
+
+- [#9126](https://github.com/Tristan578/project-forge/pull/9126) [`125797c`](https://github.com/Tristan578/project-forge/commit/125797c4100db40dee48e69ab3e422d3d64942fa) Thanks [@Tristan578](https://github.com/Tristan578)! - Published games no longer hang on an indefinite spinner. The `/play` metadata fetch and the WASM engine load are each bounded by a deadline, a failure of either now surfaces a message naming what timed out instead of leaving "Loading game..." or "Starting engine..." on screen forever, and both failures are reported to error tracking. A failure that happens before the engine takes the canvas offers a retry.
+
+- [#9122](https://github.com/Tristan578/project-forge/pull/9122) [`83ba78e`](https://github.com/Tristan578/project-forge/commit/83ba78e9ed41d1628f4e443748f43ad5846aa3c7) Thanks [@Tristan578](https://github.com/Tristan578)! - Correct the public pricing copy. Every plan name, price, limit, and feature bullet on the pricing page, OG image, FAQ, and landing page is now derived from the billing constants the server enforces, replacing hand-written copy that quoted a $99 top tier (charged at $79), promised the free tier AI chat it cannot use, and advertised published-game and project allowances that did not match the limits in force.
+
+- [#9106](https://github.com/Tristan578/project-forge/pull/9106) [`46d60c0`](https://github.com/Tristan578/project-forge/commit/46d60c08126a0d6def3c8850a59d8305b148bf5c) Thanks [@Tristan578](https://github.com/Tristan578)! - Make `/docs`, `/health`, `/robots.txt`, `/sitemap.xml` and the root/pricing OpenGraph images reachable without a session. Each rendered for anonymous visitors by design but was missing from the proxy's public-route matcher, so every one of them redirected to sign-in. `/health` now serves a shared TTL-cached health report with in-flight request dedup, so the public dashboard cannot amplify one inbound request into ten outbound service probes; `/api/status` uses the same cache.
+
+- [#9110](https://github.com/Tristan578/project-forge/pull/9110) [`6049cd4`](https://github.com/Tristan578/project-forge/commit/6049cd4204897e3eb4c4bf855e3050de94deaaff) Thanks [@Tristan578](https://github.com/Tristan578)! - Bound the outbound fan-out driven by the public `/health` page, fix healthy services rendering as "Unknown", and tighten the Clerk public-route patterns.
+
+  Rendering `/health` costs four outbound probes (Neon, engine CDN, Clerk, Anthropic). All three surfaces that can trigger it — the page, `GET /api/health` and `GET /api/status` — now read through a shared, in-flight-deduped report cache and charge a single shared fan-out budget, and only on a cache miss: a cached report is free to serve, so it no longer spends an allowance it never consumed. Over budget the two API routes return an honest 429 with `Retry-After`, while the page degrades to a neutral shell that polls `/api/health`.
+
+  Separately, the dashboard now translates the public `'up'` status back to the internal `'healthy'` at the client boundary. Without it, every healthy service card flipped from green "Healthy" to gray "Unknown" on the first 30s poll. Public-route patterns are now declared as an exact path plus a `/(.*)` subtree, since Clerk's vendored matcher treats a bare `(.*)` as a suffix wildcard with no path-segment boundary.
+
+- [#9160](https://github.com/Tristan578/project-forge/pull/9160) [`9d09c06`](https://github.com/Tristan578/project-forge/commit/9d09c066c92dfcc54d03ff346cc69fd24c0838d9) Thanks [@Tristan578](https://github.com/Tristan578)! - Persist a scene's contents when switching away from it. `saveCurrentSceneData` had no production caller, so every scene's stored data stayed empty — switching scenes discarded the outgoing scene's work and loaded a blank viewport back. Switching and duplicating now read the live scene out of the engine first, and refuse to proceed if a live scene exists but cannot be read.
+
+- [#9180](https://github.com/Tristan578/project-forge/pull/9180) [`305f385`](https://github.com/Tristan578/project-forge/commit/305f385cee624ce8e972285111f3df9db788f140) Thanks [@Tristan578](https://github.com/Tristan578)! - Correlate scene-export requests so a listener only consumes the export it asked for. `export_scene` now carries an optional request id that the engine echoes back on `SCENE_EXPORTED`, preventing an autosave tick or cloud save from being mistaken for a pending game export or file download.
+
+- [#9188](https://github.com/Tristan578/project-forge/pull/9188) [`43502e2`](https://github.com/Tristan578/project-forge/commit/43502e2324d1986886e72bf769eb8b661e5e8c6c) Thanks [@Tristan578](https://github.com/Tristan578)! - The scene graph now reports which components each entity carries. `detect_components` was a stub returning an empty list, so every node the engine emitted claimed to have no components at all — and ten editor surfaces classify entities by exactly that list. Light counts read zero, the chat entity picker could not tell a mesh from a light, and the LOD, pacing, camera, physics-feel and design-teacher panels all silently took their fallback branch.
+
+  Scene Statistics additionally counted component names the engine never emits, so its physics, audio, particle and game-component rows would have stayed empty even once the engine reported correctly. Those counters now key on the emitted names and count entities rather than component names, so an entity carrying both a data component and its enabled-marker counts once. The "Animation Clips" row is removed — the editor has no scene-wide source for it, and a row that can only ever read zero is worse than no row.
+
+  The engine half ships with the next WASM build.
+
+- [#9111](https://github.com/Tristan578/project-forge/pull/9111) [`29960b8`](https://github.com/Tristan578/project-forge/commit/29960b82fff8dd279b28c7975e5475642181d0a2) Thanks [@Tristan578](https://github.com/Tristan578)! - Make the crawl policy actually block what it says it blocks, and make the docs
+  site's crawler surfaces reachable.
+
+  A robots.txt `Disallow` value is a plain prefix match, not a path-segment match,
+  so `Disallow: /admin/` never matches the canonical URL `/admin` — only things
+  beneath it. Every private entry in the web app's `robots.ts` carried a trailing
+  slash, which left `/dev` (the auth-bypass route), `/settings`, `/health` and
+  `/api-docs` crawlable at exactly the URL each entry was written to block.
+  Dropping the slash matches both the bare path and its subtree. `/api/` keeps its
+  slash deliberately: there is no bare `/api` page to miss.
+
+  The docs deployment now publishes a robots.txt of its own, declaring the two
+  surfaces reachable without a session (`/` and `/mcp`) and the auth-gated ones
+  that are not. Both it and the existing sitemap read a single shared `DOCS_URL`,
+  so a robots.txt advertising a sitemap at one origin while the sitemap declares
+  its URLs at another is no longer possible.
+
+  That robots.txt was unreachable as written: the docs proxy gates every path its
+  matcher covers, and neither `/robots.txt` nor `/sitemap.xml` was listed as
+  public, so a crawler fetching either received a redirect to sign-in — the same
+  defect class already fixed on the web app. Both are public now, and the four
+  bare `X(.*)` public-route patterns are tightened to an exact path plus an
+  explicit `/(.*)` subtree, so a future sibling that merely shares a name prefix
+  (`/sign-internal`, `/mcpadmin`) cannot become public by spelling.
+
+- [#9177](https://github.com/Tristan578/project-forge/pull/9177) [`928999d`](https://github.com/Tristan578/project-forge/commit/928999d12eb8a34b8bbe731e606bbf827c2b1f4b) Thanks [@Tristan578](https://github.com/Tristan578)! - Document `spawn_entity`'s `id` override in the MCP command manifest. The engine has
+  accepted a caller-supplied entity id for a while — it is what lets a caller address a
+  new entity immediately instead of waiting for the async selection event, and the
+  orchestrator's script and character binding now depend on it — but the manifest
+  described `spawn_entity` without it, so neither an MCP client nor the chat tool schema
+  could discover it. The chat tool schema deliberately withholds it: the store mints the
+  id itself and returns it synchronously, so a model-supplied id buys nothing, while a
+  collision with an existing id would make the engine's id-matching loops address the
+  wrong entity. Also repairs three mojibake em-dashes in the `play`/`stop`/`pause`
+  descriptions, which rendered as `â€"` in every MCP client's tool list.
+
+- [#9179](https://github.com/Tristan578/project-forge/pull/9179) [`b8209c8`](https://github.com/Tristan578/project-forge/commit/b8209c8c4356da55166b5acdf9da525c81fd6f30) Thanks [@Tristan578](https://github.com/Tristan578)! - Chat `spawn_entity` now honors the documented `position` parameter. Asking the AI to spawn an entity at specific world coordinates previously reported success while placing it at the origin — the manifest documented `position` and the engine honored it, but the chat handler parsed only `entityType` and `name`. A malformed position (wrong arity, non-finite element) is now rejected with a clear error instead of being silently dropped, and the AI-facing tool schema no longer advertises the internal `id` override.
+
+- [#9130](https://github.com/Tristan578/project-forge/pull/9130) [`35e89d3`](https://github.com/Tristan578/project-forge/commit/35e89d374ee08e25da59daa3e78c07f5f0ca58a8) Thanks [@Tristan578](https://github.com/Tristan578)! - fix(engine): drain the terrain command queues, and parent the level ground to the terrain that was actually spawned
+
+  Two defects on the 3D game-creation path, one on each side of the bridge.
+
+  The engine pushed every `spawn_terrain` / `update_terrain` / `sculpt_terrain` command onto a
+  `PendingCommands` queue that no system ever drained. The commands were accepted, acknowledged, and
+  discarded — live terrain creation was a silent no-op for the entire life of the feature. Three drain
+  systems now consume those queues, apply the noise config, rebuild the mesh, and emit
+  `TERRAIN_CHANGED`.
+
+  `create_level_layout` spawned the terrain and then read `primaryId` back out of the store to parent
+  the ground to it. `primaryId` is only set later, by an asynchronous engine event, so the read
+  returned whatever was selected _before_ the spawn — the ground was parented to a stale entity, or to
+  none. `spawnTerrain` now returns the id it generated and the engine honours that id, so the handler
+  parents to the real terrain synchronously. This is the terrain variant of the mesh fix in [#8748](https://github.com/Tristan578/project-forge/issues/8748).
+
+  Also corrected while in the file:
+
+  - The `TERRAIN_CHANGED` payload flattened `TerrainData` to the top level while the web handler read a
+    nested `terrainData`, so the terrain inspector stored `undefined` and rendered nothing. Both sides
+    now assert against one shared fixture, and the event name is a single shared constant rather than a
+    literal repeated across a boundary neither side can see across.
+  - The sculpt brush's falloff was inverted, weakening the effect at the brush centre instead of at its
+    edge.
+  - Terrain resolution was unbounded and `resolution * resolution` was computed unchecked. `usize` is
+    32-bit on wasm32 and the release profile does not enable overflow checks, so a large resolution
+    wrapped silently in the shipped binary — at 65536 the product is exactly zero, which made every
+    downstream `heights.len()` guard vacuous. The mesh builders now bound the resolution and check the
+    multiplication.
+  - Both terrain commands snapped the requested resolution into `{32, 64, 128, 256}` before validating
+    it. Asking for 100000 returned success and silently produced a 256-grid — the exact substitution the
+    validator exists to refuse, defeated before it ever ran, and a cap four times lower than the mesh
+    builder actually supports. An out-of-range resolution is now rejected with a message naming the
+    supported range, and an in-range one is carried through verbatim.
+  - `spawn_terrain` from chat reported success even when the engine had not finished loading and nothing
+    was dispatched, and never returned the new entity's id. A follow-up "now sculpt it" had nothing to
+    target. It now returns the id, and reports the not-ready case as a failure.
+  - The sidebar and mobile toolbars discarded the result of adding an entity, so a click before the
+    engine finished loading closed the menu, added nothing, and said nothing. Both now surface the
+    reason.
+  - Caller-supplied entity ids were interpolated into warning logs at full length. They are now
+    truncated before logging.
+  - `spawnEntity('terrain')` dropped the caller's `name` argument entirely, so every named terrain came
+    back as the engine's auto-generated "Terrain (n)". The name is forwarded now.
+
+  The engine half ships as WASM and is not live until the next engine build reaches the CDN.
+
+- [#9148](https://github.com/Tristan578/project-forge/pull/9148) [`e5e33da`](https://github.com/Tristan578/project-forge/commit/e5e33dab518ec4d46ec89ee8741ab8cfa5e101dc) Thanks [@Tristan578](https://github.com/Tristan578)! - Sculpt a terrain with its real pose the frame it spawns. `apply_terrain_spawn_requests` relied on the required `GlobalTransform`, whose default is the identity until `PostUpdate` propagates — but the terrain drains are `.chain()`ed, so `apply_terrain_sculpts` sees the new terrain in the same frame and converted the world-space brush through the wrong affine, landing a hill on the terrain's local coordinate instead of the requested world one.
+
+- [#9199](https://github.com/Tristan578/project-forge/pull/9199) [`6a4f5a3`](https://github.com/Tristan578/project-forge/commit/6a4f5a3fc83fe16c2a27226788871d7bce041cef) Thanks [@Tristan578](https://github.com/Tristan578)! - Generated 3D players now move the way the game design document asks. The character rig step built its controller from hardcoded numbers, so a floaty space game and a weighty RPG produced identical movement; both movement steps now resolve the feel directive through one shared resolver.
+
+- [#9154](https://github.com/Tristan578/project-forge/pull/9154) [`78dd611`](https://github.com/Tristan578/project-forge/commit/78dd611fbc8c2bb78ca82649019cea36ee809abf) Thanks [@Tristan578](https://github.com/Tristan578)! - Fix scene management dispatching engine commands that reject by design. Scenes live JS-side in `lib/scenes/sceneManager`, but four call sites dispatched the engine's `switch_scene` / `create_scene` / `delete_scene` / `duplicate_scene` / `save_scene` stubs instead. This hard-failed every entity in the AI game-creation pipeline, made the Scene Browser's add/switch/duplicate/delete controls inert, turned scene creation into a silent no-op, and stopped crash-recovery autosave from ever writing a byte.
+
 ## 0.5.0
 
 ### Minor Changes
