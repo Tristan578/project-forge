@@ -16,3 +16,7 @@ optimistic copy.
 
 Adding 2D physics to an entity now starts it at the engine's own defaults, so
 the collider shape reads Box rather than Auto.
+
+Configuring an entity's 2D physics in one go — as chat and the generation
+pipeline do — no longer loses the earlier half of the change or leaves two undo
+steps behind where one edit was made.
