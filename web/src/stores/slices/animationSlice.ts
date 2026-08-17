@@ -32,6 +32,13 @@ export interface AnimationSlice {
   previewClip: (entityId: string, action: 'play' | 'stop' | 'seek', seekTime?: number) => void;
   removeAnimationClip: (entityId: string) => void;
   setSkeleton2d: (entityId: string, data: SkeletonData2d) => void;
+  /**
+   * State-only mirror of what the engine reports. `setSkeleton2d` dispatches
+   * `create_skeleton2d`, so driving it from an inbound event handler echoes a
+   * full-replace command straight back at the engine that just described the
+   * rig — and a full replace built from a misread payload destroys it.
+   */
+  applySkeleton2dFromEngine: (entityId: string, data: SkeletonData2d) => void;
   removeSkeleton2d: (entityId: string) => void;
   setSkeletalAnimations2d: (entityId: string, animations: SkeletalAnimation2d[]) => void;
   setSelectedBone: (boneName: string | null) => void;
@@ -111,6 +118,9 @@ export const createAnimationSlice: StateCreator<AnimationSlice, [], [], Animatio
     if (dispatchCommand) {
       dispatchCommand('create_skeleton2d', buildCreateSkeleton2dPayload(entityId, data));
     }
+  },
+  applySkeleton2dFromEngine: (entityId, data) => {
+    set(state => ({ skeletons2d: { ...state.skeletons2d, [entityId]: data } }));
   },
   removeSkeleton2d: (entityId) => {
     set(state => {

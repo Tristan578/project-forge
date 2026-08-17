@@ -3,6 +3,7 @@
  */
 
 import { StateCreator } from 'zustand';
+import { buildSetSpriteDataPayload } from '@/lib/sprite/sprite2dPayload';
 import type { ProjectType, SpriteData, Camera2dData, SortingLayerData, Grid2dSettings, SpriteSheetData, SpriteAnimatorData, AnimationStateMachineData, TilesetData, TilemapData } from './types';
 
 export interface SpriteSlice {
@@ -22,8 +23,18 @@ export interface SpriteSlice {
 
   setProjectType: (type: ProjectType) => void;
   setSpriteData: (entityId: string, data: SpriteData) => void;
+  /**
+   * State-only mirror of what the engine reports. `null` means the entity has no
+   * sprite (`emit_sprite_changed` passes an `Option<&SpriteData>` straight from
+   * the query), so the entry is dropped rather than written as a default sprite.
+   * `setSpriteData` would echo a full-replace `set_sprite_data` back at the
+   * engine that just described the sprite.
+   */
+  applySpriteFromEngine: (entityId: string, data: SpriteData | null) => void;
   removeSpriteData: (entityId: string) => void;
   setCamera2dData: (data: Camera2dData) => void;
+  /** State-only mirror; `setCamera2dData` echoes `update_camera_2d`. */
+  applyCamera2dFromEngine: (data: Camera2dData) => void;
   setSortingLayers: (layers: SortingLayerData[]) => void;
   addSortingLayer: (name: string) => void;
   removeSortingLayer: (name: string) => void;
@@ -38,6 +49,15 @@ export interface SpriteSlice {
   setTileset: (assetId: string, data: TilesetData) => void;
   removeTileset: (assetId: string) => void;
   setTilemapData: (entityId: string, data: TilemapData) => void;
+  /**
+   * State-only mirror of what the engine reports. `null` means the entity has
+   * no tilemap (the engine's `Option<&TilemapData>` is `None`), so the entry is
+   * dropped rather than written as an empty map. Both dispatching siblings
+   * (`setTilemapData` / `removeTilemapData`) would echo a command back at the
+   * engine, and `set_tilemap_data` is a full replace — an echo built from a
+   * stale store copy erases every tile the engine just reported.
+   */
+  applyTilemapFromEngine: (entityId: string, data: TilemapData | null) => void;
   removeTilemapData: (entityId: string) => void;
   setActiveTileset: (assetId: string | null) => void;
   spawnSprite: (opts?: { name?: string; textureAssetId?: string; position?: [number, number] | [number, number, number]; sortingLayer?: string; sortingOrder?: number }) => void;
@@ -77,7 +97,22 @@ export const createSpriteSlice: StateCreator<SpriteSlice, [], [], SpriteSlice> =
   },
   setSpriteData: (entityId, data) => {
     set(state => ({ sprites: { ...state.sprites, [entityId]: data } }));
-    if (dispatchCommand) dispatchCommand('set_sprite_data', { entityId, ...data });
+    // Spreading the store shape here sent `anchor: 'top_left'`, which the engine's
+    // anchor match does not recognize and silently coerces to `Center`
+    // (`bridge/sprite.rs`) — so all eight non-centre anchors were discarded while
+    // the optimistic write above kept the inspector looking correct.
+    if (dispatchCommand) {
+      dispatchCommand('set_sprite_data', buildSetSpriteDataPayload(entityId, data));
+    }
+  },
+  applySpriteFromEngine: (entityId, data) => {
+    set(state => {
+      if (data === null) {
+        const { [entityId]: _, ...rest } = state.sprites;
+        return { sprites: rest };
+      }
+      return { sprites: { ...state.sprites, [entityId]: data } };
+    });
   },
   removeSpriteData: (entityId) => {
     set(state => {
@@ -90,6 +125,7 @@ export const createSpriteSlice: StateCreator<SpriteSlice, [], [], SpriteSlice> =
     set({ camera2dData: data });
     if (dispatchCommand) dispatchCommand('update_camera_2d', data);
   },
+  applyCamera2dFromEngine: (data) => set({ camera2dData: data }),
   setSortingLayers: (layers) => set({ sortingLayers: layers }),
   addSortingLayer: (name) => {
     const state = get();
@@ -155,6 +191,15 @@ export const createSpriteSlice: StateCreator<SpriteSlice, [], [], SpriteSlice> =
   setTilemapData: (entityId, data) => {
     set(state => ({ tilemaps: { ...state.tilemaps, [entityId]: data } }));
     if (dispatchCommand) dispatchCommand('set_tilemap_data', { entityId, ...data });
+  },
+  applyTilemapFromEngine: (entityId, data) => {
+    set(state => {
+      if (data === null) {
+        const { [entityId]: _, ...rest } = state.tilemaps;
+        return { tilemaps: rest };
+      }
+      return { tilemaps: { ...state.tilemaps, [entityId]: data } };
+    });
   },
   removeTilemapData: (entityId) => {
     set(state => {

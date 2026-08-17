@@ -132,10 +132,35 @@ describe('spriteSlice', () => {
       store.getState().setSpriteData('entity1', data);
 
       expect(store.getState().sprites.entity1).toEqual(data);
+      // Not `{ entityId, ...data }`. Spreading the store shape sent the store's
+      // `anchor` spelling, which the engine's PascalCase match coerces to `Center`
+      // — silently discarding all eight non-centre anchors.
       expect(mockDispatch).toHaveBeenCalledWith('set_sprite_data', {
         entityId: 'entity1',
-        ...data,
+        textureAssetId: 'hero.png',
+        colorTint: [1, 1, 1, 1],
+        flipX: false,
+        flipY: false,
+        customSize: null,
+        sortingLayer: 'Default',
+        sortingOrder: 0,
+        anchor: 'Center',
       });
+    });
+
+    it('sends the engine spelling of a non-centre anchor', () => {
+      store.getState().setSpriteData('entity1', {
+        textureAssetId: null,
+        colorTint: [1, 1, 1, 1],
+        flipX: false,
+        flipY: false,
+        customSize: null,
+        sortingLayer: 'Default',
+        sortingOrder: 0,
+        anchor: 'bottom_left',
+      });
+
+      expect(mockDispatch.mock.calls[0]?.[1]).toMatchObject({ anchor: 'BottomLeft' });
     });
 
     it('should overwrite existing sprite data for the same entity', () => {

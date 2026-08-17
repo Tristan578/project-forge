@@ -28,6 +28,18 @@
  * rig that is visibly wrong in one place instead of an entity that renders nothing.
  */
 
+// Type-only, deliberately: this module is reachable from an API route, and a value
+// import of `@/stores/` drags the client-only store into a server graph and breaks
+// `next build` (see `.claude/rules/gotchas.md` → the RSC-boundary entry).
+import type {
+  SkeletonData2d as StoreSkeletonData2d,
+  Bone2dDef as StoreBone2d,
+  SlotDef as StoreSlot2d,
+  SkinData2d as StoreSkin2d,
+  AttachmentData2d as StoreAttachment2d,
+  IkConstraint2d as StoreIkConstraint2d,
+} from '@/stores/slices/types';
+
 /**
  * Mirror of `MAX_IK_BONE_CHAIN_2D` in `engine/src/core/commands/sprites.rs`, which
  * refuses a longer `bones` array outright. Pinned against the Rust source by this
@@ -407,4 +419,121 @@ export function buildCreateSkeleton2dPayload(
   data: SkeletonSource2d,
 ): CreateSkeleton2dPayload {
   return { entityId, skeletonData: buildWireSkeletonData2d(data) };
+}
+
+/**
+ * The inbound direction: `SKELETON2D_UPDATED` carries `SkeletonData2d` serialized
+ * by the engine, which is the wire shape above and NOT the store shape. Narrowing
+ * it here rather than casting keeps the store's declared types true — a 3-tuple
+ * `localPosition` written into a `[number, number]` field is a lie the inspector
+ * then renders, and `weights` has nowhere to live on the store's flat attachment.
+ *
+ * Returns `null` for anything that is not a plain object. The engine is a trusted
+ * source, so a null here means the payload key was misread — which is exactly the
+ * failure this module exists to make visible instead of silently writing an empty
+ * rig over a real one.
+ */
+export function parseSkeletonWire2d(source: unknown): StoreSkeletonData2d | null {
+  if (typeof source !== 'object' || source === null || Array.isArray(source)) return null;
+
+  const wire = source as SkeletonSource2d;
+
+  const bones: StoreBone2d[] = [];
+  for (let i = 0; i < (wire.bones?.length ?? 0); i += 1) {
+    const bone = wire.bones?.[i] ?? {};
+    // The engine's 3-tuple narrows back to the 2D pair the store declares. Z is
+    // round-trip fidelity for 3D rigs and has no browser-side reader.
+    const [x, y] = vec(bone.localPosition, 2, 0);
+    bones.push({
+      name: bone.name ?? `bone_${i}`,
+      parentBone: bone.parentBone ?? null,
+      localPosition: [x, y],
+      localRotation: finite(bone.localRotation, 0),
+      localScale: vec2(bone.localScale, 1),
+      length: finite(bone.length, DEFAULT_BONE_LENGTH),
+      color: color4(bone.color),
+    });
+  }
+
+  const slots: StoreSlot2d[] = [];
+  for (let i = 0; i < (wire.slots?.length ?? 0); i += 1) {
+    const slot = wire.slots?.[i] ?? {};
+    slots.push({
+      name: slot.name ?? `slot_${i}`,
+      boneName: slot.boneName ?? '',
+      spritePart: slot.spritePart ?? '',
+      blendMode: wireBlendMode(slot.blendMode),
+      attachment: slot.attachment ?? null,
+    });
+  }
+
+  const skins: Record<string, StoreSkin2d> = {};
+  for (const key of Object.keys(wire.skins ?? {})) {
+    const skin = wire.skins?.[key];
+    if (!skin) continue;
+    const attachments: Record<string, StoreAttachment2d> = {};
+    for (const slotName of Object.keys(skin.attachments ?? {})) {
+      const attachment = skin.attachments?.[slotName];
+      if (!attachment) continue;
+      const parsed = parseAttachmentWire2d(attachment);
+      if (parsed) attachments[slotName] = parsed;
+    }
+    skins[key] = { name: skin.name ?? key, attachments };
+  }
+
+  const ikConstraints: StoreIkConstraint2d[] = [];
+  for (let i = 0; i < (wire.ikConstraints?.length ?? 0); i += 1) {
+    const constraint = wire.ikConstraints?.[i] ?? {};
+    ikConstraints.push({
+      name: constraint.name ?? `ik_${i}`,
+      boneChain: [...(constraint.boneChain ?? [])],
+      targetEntityId:
+        typeof constraint.targetEntityId === 'number'
+          ? String(constraint.targetEntityId)
+          : constraint.targetEntityId ?? '',
+      bendDirection: finite(constraint.bendDirection, 1) < 0 ? -1 : 1,
+      mix: Math.min(1, Math.max(0, finite(constraint.mix, 1))),
+    });
+  }
+
+  return {
+    bones,
+    slots,
+    skins,
+    activeSkin: typeof wire.activeSkin === 'string' ? wire.activeSkin : 'default',
+    ikConstraints,
+  };
+}
+
+/**
+ * The store's attachment is one flat struct; the engine's is a tagged enum. An
+ * unknown tag is dropped rather than written with a `type` the store's union
+ * forbids. `weights` has no store field and is deliberately not carried — the
+ * outbound path rebuilds it from the mesh, and a half-kept copy would drift.
+ */
+function parseAttachmentWire2d(attachment: SourceAttachment2d): StoreAttachment2d | null {
+  const textureId = attachment.textureId ?? '';
+
+  if (attachment.type === 'sprite') {
+    return {
+      type: 'sprite',
+      textureId,
+      offset: vec2(attachment.offset, 0),
+      rotation: finite(attachment.rotation, 0),
+      scale: vec2(attachment.scale, 1),
+    };
+  }
+
+  if (attachment.type === 'mesh') {
+    const vertices = wireVec2List(attachment.vertices);
+    return {
+      type: 'mesh',
+      textureId,
+      vertices,
+      uvs: wireVec2List(attachment.uvs),
+      triangles: wireTriangles(attachment.triangles, vertices.length),
+    };
+  }
+
+  return null;
 }
