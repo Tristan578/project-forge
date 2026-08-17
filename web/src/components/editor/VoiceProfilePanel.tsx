@@ -7,7 +7,7 @@ import {
   VOICE_PRESETS,
   type VoiceProfile,
 } from '@/stores/voiceProfileStore';
-import { useDialogueStore } from '@/stores/dialogueStore';
+import { useDialogueStore, listTrees } from '@/stores/dialogueStore';
 
 export function VoiceProfilePanel() {
   const profiles = useVoiceProfileStore((s) => s.profiles);
@@ -20,7 +20,9 @@ export function VoiceProfilePanel() {
   const dialogueSpeakers = useMemo(() => {
     const dialogueTrees = useDialogueStore.getState().dialogueTrees;
     const speakers = new Set<string>();
-    for (const tree of Object.values(dialogueTrees)) {
+    // `listTrees`: `tree.nodes` below is a walk, so an unwalkable stored tree
+    // would throw inside this `useMemo` and unmount the panel.
+    for (const tree of listTrees(dialogueTrees)) {
       for (const node of tree.nodes) {
         if (node.type === 'text' && node.speaker) {
           speakers.add(node.speaker);

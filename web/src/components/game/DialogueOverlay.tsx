@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { MessageSquare, ChevronRight, History } from 'lucide-react';
-import { useDialogueStore, type TextNode, type ChoiceNode, type DialogueChoice } from '@/stores/dialogueStore';
+import { useDialogueStore, getTree, type TextNode, type ChoiceNode, type DialogueChoice } from '@/stores/dialogueStore';
 import { useEditorStore } from '@/stores/editorStore';
 
 const TYPEWRITER_MS = 30; // ms per character
@@ -27,7 +27,7 @@ export function DialogueOverlay() {
   const [typewriterDone, setTypewriterDone] = useState(false);
 
   // Get current node
-  const tree = activeTreeId ? dialogueTrees[activeTreeId] : null;
+  const tree = (activeTreeId ? getTree(dialogueTrees, activeTreeId) : undefined) ?? null;
   const currentNode = tree?.nodes.find((n) => n.id === currentNodeId) ?? null;
 
   // Typewriter effect
@@ -181,6 +181,19 @@ export function DialogueOverlay() {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Nothing to show. Every block above is gated on `currentNode`, so
+            without this the box renders as an empty shell that reads as a hang
+            rather than as a dialogue that ended. The store ends a dialogue whose
+            tree is dropped on load; this covers the tree being made unreadable
+            underneath a running dialogue by any other writer. */}
+        {!currentNode && (
+          <div className="px-4 py-3">
+            <p className="text-sm leading-relaxed text-zinc-300">
+              This conversation can&apos;t continue — its dialogue could not be read.
+            </p>
           </div>
         )}
 

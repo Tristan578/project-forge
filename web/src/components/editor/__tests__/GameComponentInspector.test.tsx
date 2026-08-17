@@ -21,7 +21,13 @@ vi.mock('@/stores/editorStore', () => ({
   ],
 }));
 
-vi.mock('@/stores/dialogueStore', () => ({
+// `listTrees` comes from the real module: it is the guard that keeps one unwalkable
+// stored tree from throwing on `t.id` and taking the whole inspector down, so a stub
+// here would let these tests pass against an inspector that no longer has it.
+vi.mock('@/stores/dialogueStore', async () => ({
+  listTrees: (await vi.importActual<typeof import('@/stores/dialogueStore')>(
+    '@/stores/dialogueStore',
+  )).listTrees,
   useDialogueStore: vi.fn(() => ({})),
 }));
 
@@ -44,6 +50,7 @@ const mockRemoveGameComponent = vi.fn();
 function setupStore(overrides: {
   primaryId?: string | null;
   primaryGameComponents?: GameComponentData[] | null;
+  dialogueTrees?: Record<string, unknown>;
 } = {}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(useEditorStore).mockImplementation((selector: any) => {
@@ -59,7 +66,7 @@ function setupStore(overrides: {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(useDialogueStore).mockImplementation((selector: any) => {
-    const state = { dialogueTrees: {} };
+    const state = { dialogueTrees: overrides.dialogueTrees ?? {} };
     return selector(state);
   });
 }
@@ -368,6 +375,84 @@ describe('GameComponentInspector', () => {
     render(<GameComponentInspector />);
     expect(screen.getByText('Dialogue Trigger').textContent).toBe('Dialogue Trigger');
     expect(screen.getByText('Key').textContent).toBe('Key');
+  });
+
+  it('offers the walkable stored trees and survives an unwalkable one', () => {
+    // The tree options come straight from persisted JSON. A bare
+    // `Object.values(dialogueTrees).map(t => t.id)` throws on a `null` entry, and a
+    // throw here unmounts the inspector — the author loses the panel they were
+    // editing, not just the one bad tree. `listTrees` skips it instead, so the
+    // sibling trees stay pickable.
+    setupStore({
+      primaryGameComponents: [
+        { type: 'dialogueTrigger', dialogueTrigger: { treeId: '', triggerRadius: 3, requireInteract: true, interactKey: 'e', oneShot: false } },
+      ],
+      dialogueTrees: {
+        broken: null,
+        noNodes: { id: 'noNodes', name: 'No nodes', startNodeId: 's', variables: {} },
+        fine: { id: 'fine', name: 'Village Intro', startNodeId: 's', variables: {}, nodes: [] },
+      },
+    });
+    render(<GameComponentInspector />);
+
+    expect(screen.getByText('Dialogue Trigger').textContent).toBe('Dialogue Trigger');
+    expect(screen.getByText('Village Intro').textContent).toBe('Village Intro');
+    expect(screen.queryByText('No nodes')).toBeNull();
+  });
+
+  it('says so when the trigger points at a tree that is not on offer', () => {
+    // A controlled `<select>` whose value matches no option displays the FIRST
+    // option. So a trigger still naming a deleted — or unwalkable, and so
+    // filtered out by `listTrees` — tree reads as `(none)`, which is also
+    // exactly what an unconfigured trigger reads as. The author sees a field
+    // they never set, sets it, and never learns the trigger was pointed
+    // somewhere real and is now pointed somewhere else.
+    setupStore({
+      primaryGameComponents: [
+        { type: 'dialogueTrigger', dialogueTrigger: { treeId: 'ghost-1', triggerRadius: 3, requireInteract: true, interactKey: 'e', oneShot: false } },
+      ],
+      dialogueTrees: {
+        fine: { id: 'fine', name: 'Village Intro', startNodeId: 's', variables: {}, nodes: [] },
+      },
+    });
+    render(<GameComponentInspector />);
+
+    expect(screen.getByText(/Missing tree \(ghost-1\)/)).not.toBeNull();
+    // The dead id is kept as the value rather than rewritten to '': nothing on
+    // this screen should edit the author's data to make its own display tidy,
+    // and the id is the only clue to what the trigger used to point at.
+    const select = Array.from(document.querySelectorAll('select')).find((s) => s.value === 'ghost-1');
+    expect(select).toBeDefined();
+  });
+
+  it('adds no such option when the trigger points at a listed tree', () => {
+    // Without this, an unconditional warning option passes the test above.
+    setupStore({
+      primaryGameComponents: [
+        { type: 'dialogueTrigger', dialogueTrigger: { treeId: 'fine', triggerRadius: 3, requireInteract: true, interactKey: 'e', oneShot: false } },
+      ],
+      dialogueTrees: {
+        fine: { id: 'fine', name: 'Village Intro', startNodeId: 's', variables: {}, nodes: [] },
+      },
+    });
+    render(<GameComponentInspector />);
+
+    expect(screen.queryByText(/Missing tree/)).toBeNull();
+    expect(screen.getByText('Village Intro').textContent).toBe('Village Intro');
+  });
+
+  it('adds no such option when the trigger is simply unconfigured', () => {
+    // `treeId: ''` is the unset state, and it HAS an option — `(none)`. Warning
+    // about it would put a scary label on every freshly-added trigger.
+    setupStore({
+      primaryGameComponents: [
+        { type: 'dialogueTrigger', dialogueTrigger: { treeId: '', triggerRadius: 3, requireInteract: true, interactKey: 'e', oneShot: false } },
+      ],
+      dialogueTrees: {},
+    });
+    render(<GameComponentInspector />);
+
+    expect(screen.queryByText(/Missing tree/)).toBeNull();
   });
 
   // ── Update component ──────────────────────────────────────────────────

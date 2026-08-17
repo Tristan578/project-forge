@@ -2,7 +2,7 @@
 
 import { useCallback, useId, useMemo, useState } from 'react';
 import { useEditorStore, type GameComponentData, type DialogueTriggerData, GAME_COMPONENT_TYPES } from '@/stores/editorStore';
-import { useDialogueStore } from '@/stores/dialogueStore';
+import { useDialogueStore, listTrees } from '@/stores/dialogueStore';
 import { ChevronDown, ChevronRight, Trash2, Plus } from 'lucide-react';
 import { Vec3Input } from './Vec3Input';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
@@ -508,14 +508,27 @@ interface DialogueTriggerSectionProps {
 
 function DialogueTriggerSection({ data, onChange, onRemove }: DialogueTriggerSectionProps) {
   const dialogueTrees = useDialogueStore((s) => s.dialogueTrees);
-  const treeOptions = Object.values(dialogueTrees).map((t) => ({ value: t.id, label: t.name }));
+  // `listTrees`: a stored `null` entry would throw on `t.id` and take the whole
+  // inspector down, and an unwalkable tree offered here is a tree the runtime will
+  // refuse the moment the author picks it.
+  const treeOptions = listTrees(dialogueTrees).map((t) => ({ value: t.id, label: t.name }));
+
+  // A controlled `<select>` whose value matches no option displays the FIRST
+  // option, so a trigger still pointing at a deleted — or unwalkable, and so
+  // filtered out just above — tree reads as `(none)` while the dead id stays on
+  // the component and the trigger silently does nothing at runtime. The id is
+  // kept as the value (nothing here should rewrite the author's data) and given
+  // an option that says what it is.
+  const missingTreeOption = data.treeId !== '' && !treeOptions.some((o) => o.value === data.treeId)
+    ? [{ value: data.treeId, label: `⚠ Missing tree (${data.treeId})` }]
+    : [];
 
   return (
     <ComponentSection title="Dialogue Trigger" onRemove={onRemove}>
       <SelectRow
         label="Tree"
         value={data.treeId}
-        options={[{ value: '', label: '(none)' }, ...treeOptions]}
+        options={[{ value: '', label: '(none)' }, ...missingTreeOption, ...treeOptions]}
         onChange={(v) => onChange({ ...data, treeId: v })}
         tooltipTerm="gcDialogueTree"
       />
