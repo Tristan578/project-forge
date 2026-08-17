@@ -410,4 +410,25 @@ describe('parsePhysics2dWire', () => {
     polluted.entityId = 'e1';
     expect(parsePhysics2dWire(polluted)?.data).toEqual({});
   });
+
+  // The variant tables are plain objects, so a bare `TABLE[raw]` resolves an
+  // inherited member for each of these names — and every one is TRUTHY, so the
+  // `if (mapped)` guard passes and a `Function` or `Object.prototype` lands where
+  // an enum value is declared. That is the hole `variantValue` was added to close,
+  // and it is the read direction: these strings arrive in an engine event payload,
+  // not from a caller. Reverting `variantValue` to `table[raw]` makes every case
+  // below fail with `bodyType`/`colliderShape` set to an inherited value.
+  it.each(['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__'])(
+    'drops the inherited enum-table member %s instead of mapping it',
+    (hostile) => {
+      const parsed = parsePhysics2dWire({
+        entityId: 'e1',
+        body_type: hostile,
+        collider_shape: hostile,
+        mass: 3,
+      });
+      // `mass` proves the parse ran rather than bailing out early.
+      expect(parsed?.data).toEqual({ mass: 3 });
+    },
+  );
 });
