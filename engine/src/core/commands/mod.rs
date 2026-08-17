@@ -519,6 +519,94 @@ mod route_domain_parity {
     fn an_unknown_name_is_unroutable() {
         assert_eq!(route_domain("no_such_command_xyz"), 255);
     }
+
+    /// `DOMAIN_MODULES` is hand-maintained, and every check above iterates it — so a
+    /// NEW domain module escapes all of them by simply not being listed. Nothing
+    /// fails, and the domain reports itself fully routed while none of its arms have
+    /// ever been held against `route_domain`. Read the directory instead: the file
+    /// system is the authority on which modules exist.
+    #[test]
+    fn every_domain_module_on_disk_is_listed() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/core/commands");
+        let entries = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("cannot enumerate {dir}: {e} — this check must not pass vacuously"));
+
+        let mut on_disk: Vec<String> = Vec::new();
+        for entry in entries {
+            let name = entry.expect("readable dir entry").file_name();
+            let name = name.to_str().expect("module file name is not UTF-8").to_owned();
+            // `mod.rs` is this file: it holds the router and domain 12's inline arms,
+            // and has no `pub fn dispatch` of the domain shape to scan.
+            if name.ends_with(".rs") && name != "mod.rs" {
+                on_disk.push(name);
+            }
+        }
+        assert!(
+            on_disk.len() > 5,
+            "found only {} domain modules in {dir} — the enumeration has broken and \
+             would report every list as complete",
+            on_disk.len()
+        );
+
+        let listed: Vec<&str> = DOMAIN_MODULES.iter().map(|(f, _, _)| *f).collect();
+        let mut missing: Vec<&String> = on_disk.iter().filter(|f| !listed.contains(&f.as_str())).collect();
+        missing.sort();
+        assert!(
+            missing.is_empty(),
+            "These domain modules exist but no check above looks at them — add each to \
+             DOMAIN_MODULES with its `route_domain` index: {missing:?}"
+        );
+
+        let mut stale: Vec<&&str> = listed.iter().filter(|f| !on_disk.contains(&f.to_string())).collect();
+        stale.sort();
+        assert!(
+            stale.is_empty(),
+            "DOMAIN_MODULES names files that no longer exist: {stale:?}"
+        );
+    }
+
+    /// A duplicated index would make `every_implemented_arm_is_routed_to_its_own_domain`
+    /// compare one module's arms against another module's number, and a listed module
+    /// that `dispatch` never calls is unreachable however well `route_domain` groups it.
+    #[test]
+    fn each_listed_index_dispatches_to_its_own_module() {
+        let router = include_str!("mod.rs");
+        let body = dispatch_body(router).expect("mod.rs has a `pub fn dispatch`");
+
+        let mut seen: Vec<u8> = Vec::new();
+        for (file, index, _) in DOMAIN_MODULES {
+            assert!(
+                !seen.contains(index),
+                "{file}: domain index {index} is already claimed by another module — the \
+                 arm check would grade it against the wrong number"
+            );
+            seen.push(*index);
+
+            let module = file.strip_suffix(".rs").expect("module file name ends in .rs");
+            let arm = format!("{index} => {module}::dispatch");
+            // A bare `contains` is satisfied by a LONGER number ending in these digits —
+            // renumbering the arm to `111 => edit_mode::dispatch` still contains
+            // `11 => edit_mode::dispatch`, so the check passed on an index nothing routes
+            // to. Require the digit run to start at the match.
+            let routed = body
+                .match_indices(&arm)
+                .any(|(at, _)| !body[..at].ends_with(|c: char| c.is_ascii_digit()));
+            assert!(
+                routed,
+                "{file} is listed as domain {index}, but `dispatch` has no `{arm}` arm — \
+                 every command routed there would answer Unknown command"
+            );
+        }
+
+        seen.sort_unstable();
+        let expected: Vec<u8> = (0..DOMAIN_MODULES.len() as u8).collect();
+        assert_eq!(
+            seen, expected,
+            "domain indices must be the contiguous set 0..{} — a gap means an arm number \
+             nothing implements",
+            DOMAIN_MODULES.len()
+        );
+    }
 }
 
 #[cfg(test)]
