@@ -253,8 +253,10 @@ class AudioManager {
 
     const key = this.instanceKey(entityId, slot);
 
-    // Destroy existing instance if any
-    this.destroyInstance(entityId, slot);
+    // Replace any existing instance. `teardownInstance`, not `destroyInstance`:
+    // swapping an entity's clip is not the entity going away, so it must not
+    // drop that entity's occlusion filter.
+    this.teardownInstance(entityId, slot);
 
     // Create gain node for volume control
     const gainNode = ctx.createGain();
@@ -508,6 +510,37 @@ class AudioManager {
    * Destroy an audio instance for an entity.
    */
   destroyInstance(entityId: string, slot?: string): void {
+    // The occlusion filter is keyed by ENTITY, not by instance key, so it
+    // belongs to the entity as a whole and only the slot-less destroy owns it.
+    // Nothing else dropped it: `setOcclusion(id, false)` was the single delete
+    // path, so an entity deleted while occluded left a live BiquadFilterNode
+    // and a `Set` entry behind for the lifetime of the tab.
+    //
+    // Released OUTSIDE `teardownInstance` — i.e. before its missing-instance
+    // bail — because `setOcclusion` builds the filter without needing an
+    // instance to exist. An entity occluded while its clip was still decoding
+    // (`createInstance` bails on a missing buffer) has a filter and no
+    // instance, and `syncEntityAudioInstance` calls this with a null component
+    // the moment the clip is cleared, so a release reached only via a live
+    // instance never runs for exactly the entity holding the orphan.
+    if (!slot) {
+      this.releaseOcclusion(entityId);
+    }
+
+    this.teardownInstance(entityId, slot);
+  }
+
+  /**
+   * Tear down an instance's nodes without touching the entity's occlusion.
+   *
+   * Split out from `destroyInstance` because `createInstance` calls it to
+   * REPLACE an instance, which is not the entity going away: routing that
+   * through the public destroy silently disabled occlusion on every clip swap,
+   * and — once the release moved ahead of the missing-instance bail — would
+   * have disabled it on the decode-retry path too, which is the very case the
+   * release exists to cover.
+   */
+  private teardownInstance(entityId: string, slot?: string): void {
     const key = this.instanceKey(entityId, slot);
     const instance = this.instances.get(key);
     if (!instance) return;
@@ -519,15 +552,6 @@ class AudioManager {
     instance.pannerNode?.disconnect();
 
     this.instances.delete(key);
-
-    // The occlusion filter is keyed by ENTITY, not by instance key, so it
-    // belongs to the entity as a whole and only the slot-less destroy owns it.
-    // Nothing else dropped it: `setOcclusion(id, false)` was the single delete
-    // path, so an entity deleted while occluded left a live BiquadFilterNode
-    // and a `Set` entry behind for the lifetime of the tab.
-    if (!slot) {
-      this.releaseOcclusion(entityId);
-    }
 
     // If called without slot, also destroy all layers
     if (!slot) {

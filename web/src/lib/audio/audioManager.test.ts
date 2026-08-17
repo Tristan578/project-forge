@@ -943,6 +943,103 @@ describe('audioManager', () => {
       expect(occludables).not.toContain('entity1');
     });
 
+    it('releases the filter when the entity is destroyed', () => {
+      audioManager.createInstance('entity1', 'test-asset', {
+        volume: 0.8, pitch: 1.0, loopAudio: false,
+        spatial: true, maxDistance: 50, refDistance: 1, rolloffFactor: 1, bus: 'sfx',
+      });
+      audioManager.setOcclusion('entity1', true);
+      const filter = getInternal().occlusionFilters.get('entity1')!;
+      const disconnect = vi.spyOn(filter, 'disconnect');
+
+      audioManager.destroyInstance('entity1');
+
+      // Disconnecting matters as much as deleting: a filter still wired into a
+      // bus keeps its whole upstream chain reachable, so dropping only the map
+      // entry would leak the graph rather than fix it.
+      expect(disconnect).toHaveBeenCalled();
+      expect(getInternal().occlusionFilters.has('entity1')).toBe(false);
+      expect(getInternal().occlusionEnabled.has('entity1')).toBe(false);
+    });
+
+    it('releases the filter even when the entity has no instance', () => {
+      // `setOcclusion` builds the filter without needing an instance, and
+      // `createInstance` bails on a buffer that is still decoding — so this is
+      // the reachable state, not a synthetic one. `syncEntityAudioInstance`
+      // calls `destroyInstance(id)` with no slot the moment the clip is
+      // cleared, and a release placed after the missing-instance bail would
+      // never run for precisely the entity holding an orphaned filter.
+      audioManager.setOcclusion('entity1', true);
+      const filter = getInternal().occlusionFilters.get('entity1')!;
+      const disconnect = vi.spyOn(filter, 'disconnect');
+
+      audioManager.destroyInstance('entity1');
+
+      expect(disconnect).toHaveBeenCalled();
+      expect(getInternal().occlusionFilters.has('entity1')).toBe(false);
+      expect(getInternal().occlusionEnabled.has('entity1')).toBe(false);
+    });
+
+    it('keeps the entity filter when a single layer is destroyed', () => {
+      // The filter belongs to the entity, not to one of its layers: removing a
+      // music stem must not un-occlude everything else the entity plays.
+      audioManager.createInstance('entity1', 'test-asset', {
+        volume: 0.8, pitch: 1.0, loopAudio: false,
+        spatial: true, maxDistance: 50, refDistance: 1, rolloffFactor: 1, bus: 'sfx',
+      });
+      audioManager.setOcclusion('entity1', true);
+
+      audioManager.destroyInstance('entity1', 'layer1');
+
+      expect(getInternal().occlusionFilters.has('entity1')).toBe(true);
+      expect(getInternal().occlusionEnabled.has('entity1')).toBe(true);
+    });
+
+    it('keeps the entity filter when the clip is swapped', () => {
+      // `createInstance` replaces any existing instance, and it did that by
+      // calling the public `destroyInstance` — so re-pointing an occluded entity
+      // at another clip silently un-occluded it. Once the release moved ahead of
+      // the missing-instance bail, that same call would also have wiped
+      // occlusion on the decode-retry path, i.e. the exact case the release
+      // exists to serve. Replacement now goes through `teardownInstance`.
+      audioManager.setOcclusion('entity1', true);
+      const filter = getInternal().occlusionFilters.get('entity1')!;
+
+      audioManager.createInstance('entity1', 'test-asset', {
+        volume: 0.8, pitch: 1.0, loopAudio: false,
+        spatial: true, maxDistance: 50, refDistance: 1, rolloffFactor: 1, bus: 'sfx',
+      });
+
+      expect(getInternal().occlusionEnabled.has('entity1')).toBe(true);
+      // The same node, not a rebuilt one: `setOcclusion` is the only builder, so
+      // a dropped filter stays dropped until a caller re-enables occlusion.
+      expect(getInternal().occlusionFilters.get('entity1')).toBe(filter);
+    });
+
+    it('destroyAll releases a layered entity whose keys never name it directly', () => {
+      // `destroyAll` iterates instance KEYS, and a layered entity's keys all
+      // carry a `:slot` suffix — so `destroyInstance` is only ever handed
+      // `entity1:layer1`, and the per-entity release inside it looks up a key
+      // that does not exist. The sweep in `destroyAll` is what closes that, and
+      // it is load-bearing rather than belt-and-braces: without it a layered
+      // entity's filter survives every Play -> Stop cycle.
+      audioManager.createInstance('entity1', 'test-asset', {
+        volume: 0.8, pitch: 1.0, loopAudio: false,
+        spatial: true, maxDistance: 50, refDistance: 1, rolloffFactor: 1, bus: 'sfx',
+      }, 'layer1');
+      audioManager.setOcclusion('entity1', true);
+      const filter = getInternal().occlusionFilters.get('entity1')!;
+      const disconnect = vi.spyOn(filter, 'disconnect');
+      // Precondition: the only instance key is the compound one.
+      expect(Array.from(getInternal().instances.keys())).toEqual(['entity1:layer1']);
+
+      audioManager.destroyAll();
+
+      expect(disconnect).toHaveBeenCalled();
+      expect(getInternal().occlusionFilters.has('entity1')).toBe(false);
+      expect(getInternal().occlusionEnabled.has('entity1')).toBe(false);
+    });
+
     it('getSourcePosition returns panner position', () => {
       audioManager.createInstance('entity1', 'test-asset', {
         volume: 0.8, pitch: 1.0, loopAudio: false,
