@@ -13,8 +13,15 @@
  *
  * An arm that exists but only returns `Not yet implemented` counts as absent
  * here, and that distinction is load-bearing: `engine/src/core/commands/animation.rs`
- * holds eleven inline stub arms, so a name-only scan reports the entire
+ * holds nine inline stub arms, so a name-only scan reports the entire
  * animation-clip surface as routed when none of it does anything.
+ *
+ * A working arm is ALSO not enough. `commands::dispatch` consults `route_domain`
+ * first, and an unlisted name returns 255 → `Err("Unknown command: ...")` before
+ * any domain module is reached. So an arm the router does not name is dead however
+ * correct it is, and this pin requires both. `route_domain` pointing a name at the
+ * WRONG domain is a third way to be dead; that one is checked on the Rust side, in
+ * `mod.rs`'s `route_domain_parity` module, which can compare indices directly.
  *
  * Modelled on `web/src/lib/cutscene/__tests__/dispatch.test.ts`. Fails closed on
  * an unreadable or unparseable source file rather than passing vacuously.
@@ -47,9 +54,13 @@ const ALLOWED_UNROUTED: Record<string, string> = {
   preview_clip: 'PF-1174 — engine-side clip authoring unimplemented',
   remove_animation_clip: 'PF-1174 — engine-side clip authoring unimplemented',
 
-  // PF-1175: both match dispatch arms, both of which are inline stubs.
-  set_animation_state_machine: 'PF-1175 — engine arm is a `Not yet implemented` stub',
-  remove_animation_state_machine: 'PF-1175 — engine arm is a `Not yet implemented` stub',
+  // PF-1179: `sprites.rs` implements both against a per-entity `TilesetData`
+  // component keyed by `entityId`, but the store keys tilesets by asset id and
+  // the only caller has no entity to name. So they are deliberately left out of
+  // `route_domain` — routing them would trade a silent no-op for a silent
+  // `Missing entityId`. One side has to give first.
+  set_tileset: 'PF-1179 — entity-keyed engine arm vs asset-keyed caller',
+  remove_tileset: 'PF-1179 — entity-keyed engine arm vs asset-keyed caller',
 
   // PF-1176 / PF-1177: no arm under any spelling, and no removal infrastructure
   // either — each needs a pending-queue field and an apply system before an arm
@@ -95,8 +106,25 @@ const NOT_IMPLEMENTED = /is not implemented|Not yet implemented/;
 interface EngineArms {
   implemented: Set<string>;
   stubbed: Set<string>;
+  /** Names `route_domain` sends to a domain module. Anything else is unreachable. */
+  routed: Set<string>;
+  /** Arms that exist and are not stubs, but that `route_domain` never names. */
+  armedButUnrouted: Set<string>;
   fileCount: number;
   dispatchBodyCount: number;
+}
+
+/** Every command name listed in `fn route_domain`, whatever domain it maps to. */
+function readRoutedNames(): Set<string> {
+  const source = readFileSync(join(ENGINE_COMMANDS_DIR, 'mod.rs'), 'utf8');
+  // `route_domain` is private, so match on `fn` alone rather than `pub fn`.
+  const bodies = fnBodies(source, 'route_domain');
+  if (bodies.length !== 1) {
+    throw new Error(`expected exactly one route_domain, found ${bodies.length}`);
+  }
+  // The body is nothing but match arms and comments, so every quoted
+  // lower-snake token in it is a command name.
+  return new Set([...bodies[0][1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]));
 }
 
 function readEngineArms(): EngineArms {
@@ -139,7 +167,21 @@ function readEngineArms(): EngineArms {
   // the group; a name reached both ways is not implemented.
   for (const name of stubbed) implemented.delete(name);
 
-  return { implemented, stubbed, fileCount: files.length, dispatchBodyCount };
+  // An arm the router never names cannot run, so it does not count as
+  // implemented. Tracked separately so the checks below can prove this
+  // subtraction is really happening rather than being vacuous.
+  const routed = readRoutedNames();
+  const armedButUnrouted = new Set([...implemented].filter((name) => !routed.has(name)));
+  for (const name of armedButUnrouted) implemented.delete(name);
+
+  return {
+    implemented,
+    stubbed,
+    routed,
+    armedButUnrouted,
+    fileCount: files.length,
+    dispatchBodyCount,
+  };
 }
 
 interface StoreDispatches {
@@ -190,6 +232,22 @@ describe('store command names have engine dispatch arms', () => {
       expect(arms.stubbed.size).toBeGreaterThan(20);
     });
 
+    it('read the router', () => {
+      // A collapsed parse here would subtract every arm and turn the parity
+      // check into noise; an over-wide one would subtract nothing and restore
+      // the blind spot this scan exists to close.
+      expect(arms.routed.size).toBeGreaterThan(200);
+    });
+
+    it('actually subtracts arms the router does not name', () => {
+      // Proves the routed intersection is doing work. If the engine ever routes
+      // every arm this drops to zero and the assertion should be relaxed
+      // deliberately — not left passing on a scan that stopped subtracting.
+      expect(arms.armedButUnrouted.size).toBeGreaterThan(0);
+      expect(arms.armedButUnrouted.has('set_tileset')).toBe(true);
+      expect(arms.implemented.has('set_tileset')).toBe(false);
+    });
+
     it('read the store slices', () => {
       expect(store.fileCount).toBeGreaterThan(10);
       expect(storeDispatches.size).toBeGreaterThan(100);
@@ -214,18 +272,22 @@ describe('store command names have engine dispatch arms', () => {
       'update_camera_2d',
       'set_reverb_zone',
       'create_skeleton2d',
+      // Routed by PF-1178 after sitting implemented-but-unreachable.
+      'set_tilemap_data',
+      'remove_tilemap_data',
+      'set_animation_state_machine',
+      'remove_animation_state_machine',
     ])('scores %s as implemented', (name) => {
       expect(arms.implemented.has(name)).toBe(true);
     });
 
-    it.each([
-      'create_animation_clip',
-      'set_animation_state_machine',
-      'remove_animation_state_machine',
-    ])('scores the stub arm %s as NOT implemented', (name) => {
-      expect(arms.stubbed.has(name)).toBe(true);
-      expect(arms.implemented.has(name)).toBe(false);
-    });
+    it.each(['create_animation_clip', 'play_animation_clip', 'get_animation_clips'])(
+      'scores the stub arm %s as NOT implemented',
+      (name) => {
+        expect(arms.stubbed.has(name)).toBe(true);
+        expect(arms.implemented.has(name)).toBe(false);
+      },
+    );
 
     it.each(['mask', 'blend', 'value', 'high', 'add', 'toggle', 'step'])(
       'does not mistake the payload value %s for a command name',
