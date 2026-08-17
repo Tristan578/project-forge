@@ -11,6 +11,7 @@ import {
   generateRig,
 } from '@/lib/ai/autoRigging';
 import type { RigType, RigTemplate, BoneDefinition } from '@/lib/ai/autoRigging';
+import { parseSkeletonWire2d } from '@/lib/skeleton2d/skeletonPayload';
 
 const RIG_TYPE_LABELS: Record<RigType, string> = {
   humanoid: 'Humanoid (23 bones)',
@@ -204,7 +205,25 @@ export function AutoRiggingPanel() {
       });
       return;
     }
-    setSkeleton2d(primaryId, skeletonData as Parameters<typeof setSkeleton2d>[1]);
+    // `buildCreateSkeleton2dPayload` emits the ENGINE's wire shape, which is not the
+    // store's: a wire bone's `localPosition` is a 3-tuple where the store declares a
+    // pair, and a wire mesh attachment carries `weights` the store's flat attachment
+    // has nowhere to put. Casting it in (`as Parameters<typeof setSkeleton2d>[1]`) is
+    // the same class of lie as `{ ...input } satisfies T` — it type-checks and then
+    // the inspector renders a value whose declared type says it cannot exist. Narrow
+    // through the module that owns the wire→store direction instead. Bone z is
+    // dropped, which is correct: nothing in the engine reads `local_position[2]`
+    // (it is preserved but never used), the store cannot hold it, and the first
+    // `SKELETON2D_UPDATED` event narrows it away regardless.
+    const parsed = parseSkeletonWire2d(skeletonData);
+    if (!parsed) {
+      setStatus({
+        kind: 'error',
+        message: 'Could not apply the rig: the generated skeleton was not in a readable shape.',
+      });
+      return;
+    }
+    setSkeleton2d(primaryId, parsed);
     const applied = `Applied a ${currentRig.bones.length}-bone rig to the selected entity.`;
     setStatus(
       rigWarnings.length > 0
