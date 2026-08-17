@@ -18,7 +18,7 @@ import type { EntityType, InputBinding } from './types';
 import { parseArgs, zSetupGameFromDescription } from './types';
 import { getPresetById } from '@/lib/materialPresets';
 import { buildEntityIndex, findEntityByName } from '@/lib/engine/entityIndex';
-import { buildStoreComponent, parseGameComponentWire } from '@/lib/engine/gameComponentWire';
+import { buildStoreComponent } from '@/lib/engine/gameComponentWire';
 import type { GameplayAnalysis } from './helpers';
 import {
   buildCompoundResult,
@@ -470,18 +470,16 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         if (ent.gameComponent) {
           const componentType = ent.gameComponent as string;
           const componentProps = (ent.gameComponentProps as Record<string, unknown>) ?? {};
-          // `parseGameComponentWire`, not `buildStoreComponent`: every other call
-          // in this file names a component and writes its fields as literals right
-          // there, so the store's vocabulary is the one being spoken. This one takes
-          // both the name and the bag from the model, which answers in the engine's
-          // vocabulary — and `dialogueTrigger` is the one component whose store field
-          // names diverge from the Rust struct's. `buildStoreComponent` reads store
-          // names, so it would answer a fully-defaulted dialogue trigger for a bag
-          // that specified every field, and nothing downstream reports the difference.
-          const component = parseGameComponentWire({
-            componentType,
-            properties: componentProps,
-          });
+          // `buildStoreComponent`, not `parseGameComponentWire`: this tool's
+          // documented contract is a snake_case component TYPE alongside STORE
+          // field names, which is the mixed vocabulary every other call in this
+          // file speaks. `parseGameComponentWire` renames out of the ENGINE's
+          // vocabulary, so it would read `dialogueTreeId`/`interactionRadius` and
+          // answer a fully-defaulted dialogue trigger for a bag that named every
+          // field — `dialogueTrigger` is the one component whose store field names
+          // diverge from the Rust struct's, so it is also the only one where the
+          // choice is visible at all.
+          const component = buildStoreComponent(componentType, componentProps);
           if (component) ctx.store.addGameComponent(entityId, component);
         }
 

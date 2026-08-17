@@ -894,7 +894,7 @@ describe('gameComponentWire', () => {
   // said "thirteen" against a table of eighteen for as long as it existed.
   it('the counts stated in the coercer doc comments match the tables', () => {
     const source = readFileSync(
-      join(__dirname, '..', 'gameComponentWire.ts'),
+      resolve(__dirname, '..', 'gameComponentWire.ts'),
       'utf8',
     );
     const WORDS = [
