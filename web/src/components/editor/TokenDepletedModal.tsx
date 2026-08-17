@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { AlertCircle, ArrowUpCircle, CreditCard, Key } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useUserStore } from '@/stores/userStore';
@@ -14,23 +15,29 @@ export function TokenDepletedModal() {
   const showModal = useChatStore((s) => s.showTokenDepletedModal);
   const setShowModal = useChatStore((s) => s.setShowTokenDepletedModal);
   const tier = useUserStore((s) => s.tier);
+  const router = useRouter();
 
   const tierLabel = TIER_DISPLAY_NAMES[tier] ?? tier;
 
+  // `router.push` rather than `window.location.href`: a location assignment is a
+  // full document navigation, so it tears down the WASM engine and every unsaved
+  // store slice on the way to a billing page the user is expected to come back
+  // from. It is also what `@next/next/no-location-assign-relative-destination`
+  // flags — the rule and the behaviour want the same thing here.
   const handleUpgrade = useCallback(() => {
     setShowModal(false);
-    window.location.href = '/pricing';
-  }, [setShowModal]);
+    router.push('/pricing');
+  }, [setShowModal, router]);
 
   const handleBuyTokens = useCallback(() => {
     setShowModal(false);
-    window.location.href = '/settings/billing';
-  }, [setShowModal]);
+    router.push('/settings/billing');
+  }, [setShowModal, router]);
 
   const handleByok = useCallback(() => {
     setShowModal(false);
-    window.location.href = '/settings/api-keys';
-  }, [setShowModal]);
+    router.push('/settings/api-keys');
+  }, [setShowModal, router]);
 
   if (!showModal) return null;
 
