@@ -44,9 +44,6 @@ import type { CutsceneTrackType } from '@/stores/cutsceneStore';
  */
 type FieldReader = (value: unknown) => unknown;
 
-const readFiniteNumber: FieldReader = (value) =>
-  typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-
 const readNonNegativeNumber: FieldReader = (value) =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 
@@ -92,11 +89,12 @@ const readTargetEntity: FieldReader = (value) => {
  * silently, since a missing entry is a dropped parameter, not a type error.
  *
  * Their READER comes from the same module for the same reason. Mapping every
- * field to `readFiniteNumber` was uniform and wrong: seven of the nine cannot
- * hold a negative (a negative `followSmoothing` makes the follow diverge rather
- * than converge), and two legitimately can (`followHeight` frames from below,
- * `orbitalAutoRotateSpeed` orbits the other way). Only `gameCameraPayload`,
- * which owns the engine mapping, can say which is which.
+ * field to a plain finite-number check was uniform and wrong: seven of the ten
+ * cannot hold a negative (a negative `followSmoothing` makes the follow diverge
+ * rather than converge), and three legitimately can (`followHeight` frames from
+ * below, `followOffsetX` picks a shoulder, `orbitalAutoRotateSpeed` orbits the
+ * other way). Only `gameCameraPayload`, which owns the engine mapping, can say
+ * which is which.
  */
 const CAMERA_FIELDS: Record<string, FieldReader> = {
   mode: readCameraMode,

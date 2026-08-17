@@ -1213,7 +1213,7 @@ describe('blendGameCameraData', () => {
  * stays pointed at the target.
  *
  * A blanket non-negative rule is equally wrong, which is why this is a policy
- * per field rather than one reader: two of the nine are legitimately signed.
+ * per field rather than one reader: three of the ten are legitimately signed.
  */
 describe('camera field sign policy', () => {
   /**
@@ -1227,6 +1227,7 @@ describe('camera field sign policy', () => {
   const EXPECTED_SIGN: Record<NumericCameraField, 'nonNegative' | 'signed'> = {
     followDistance: 'nonNegative',
     followHeight: 'signed',
+    followOffsetX: 'signed',
     followSmoothing: 'nonNegative',
     firstPersonHeight: 'nonNegative',
     firstPersonMouseSensitivity: 'nonNegative',

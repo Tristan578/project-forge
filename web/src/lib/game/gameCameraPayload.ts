@@ -241,10 +241,13 @@ export const ENGINE_CAMERA_DEFAULTS = {
  * `followDistance` puts the camera in front of what it follows, a negative
  * `topDownHeight` puts it under the floor.
  *
- * Two are deliberately SIGNED, and a blanket non-negative rule would silently
- * break both:
+ * Three are deliberately SIGNED, and a blanket non-negative rule would silently
+ * break all three:
  *   - `followHeight` is `offset.y`, so a negative one places the camera below
  *     the target — the low-angle hero shot, a real framing choice.
+ *   - `followOffsetX` is `offset.x`, the lateral shoulder offset. Its sign picks
+ *     WHICH shoulder the camera sits over, so forcing it non-negative would pin
+ *     every over-the-shoulder camera in the product to the right shoulder.
  *   - `orbitalAutoRotateSpeed` is degrees per second applied as
  *     `angle += speed.to_radians() * dt`, so a negative one orbits the other
  *     way. There is no separate direction flag; the sign IS the direction.
@@ -261,6 +264,7 @@ export const ENGINE_CAMERA_DEFAULTS = {
 const CAMERA_FIELD_SIGN = {
   followDistance: 'nonNegative',
   followHeight: 'signed',
+  followOffsetX: 'signed',
   followSmoothing: 'nonNegative',
   firstPersonHeight: 'nonNegative',
   firstPersonMouseSensitivity: 'nonNegative',
