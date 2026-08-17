@@ -89,15 +89,55 @@ export function resolvePhysicsProfile(
   const presetKey = resolvePresetFromFeel(feel);
   const baseProfile = PHYSICS_PRESETS[presetKey] ?? PHYSICS_PRESETS[DEFAULT_PRESET_KEY];
 
+  // Hoisted into locals so `usableOverride`'s type predicate narrows them for
+  // real. Reading `config!['moveSpeed'] as number` inside the spread needed a
+  // non-null assertion AND a cast to compile, and both of those launder exactly
+  // the check this guard exists to enforce — a later edit to the guard would go
+  // on compiling while forwarding `undefined` or a string to the engine.
+  //
+  // Read behind `Object.hasOwn`: a bare `config?.['moveSpeed']` walks the
+  // prototype chain, so an inherited value the GDD never set would be forwarded
+  // to the engine as though a designer had chosen it.
+  const rawSpeed = own(config, 'moveSpeed');
+  const rawJump = own(config, 'jumpForce');
+
   return {
     ...baseProfile,
-    ...(typeof config?.['moveSpeed'] === 'number' && Number.isFinite(config['moveSpeed'])
-      ? { moveSpeed: config['moveSpeed'] as number }
-      : {}),
-    ...(typeof config?.['jumpForce'] === 'number' && Number.isFinite(config['jumpForce'])
-      ? { jumpForce: config['jumpForce'] as number }
-      : {}),
+    ...(usableOverride(rawSpeed, ENGINE_SPEED_MAX) ? { moveSpeed: rawSpeed } : {}),
+    ...(usableOverride(rawJump, ENGINE_JUMP_HEIGHT_MAX) ? { jumpForce: rawJump } : {}),
   };
+}
+
+/**
+ * The engine's own clamps on the fields these two overrides become
+ * (`build_game_component`, `engine/src/core/game_components.rs`): `speed` is
+ * clamped to `0.0..=1000.0` and `jumpHeight` to `0.0..=100.0`.
+ */
+const ENGINE_SPEED_MAX = 1000;
+const ENGINE_JUMP_HEIGHT_MAX = 100;
+
+/**
+ * Whether a config override is a value the engine will actually honour.
+ *
+ * `Number.isFinite` alone was not enough. `systemConfig` is raw GDD config, i.e.
+ * LLM-authored, and a plausible design phrase ("reverse controls", "moves
+ * backward") is enough to produce `"moveSpeed": -8`. A negative speed passed
+ * both guards, reached `add_game_component`, and was clamped by `prop_f32` to
+ * `0.0` — reproducing exactly the immovable player this whole path exists to
+ * fix, with no error raised anywhere. Zero is rejected for the same reason.
+ *
+ * Out-of-range is rejected rather than clamped here on purpose: silently
+ * substituting a number nobody chose is what makes this defect class invisible.
+ * Falling back to the preset value keeps the player playable AND keeps the
+ * preset's coherent relationship between speed, jump and gravity intact.
+ */
+/** An OWN property of `config`, or `undefined` — never anything inherited. */
+function own(config: Record<string, unknown> | undefined, key: string): unknown {
+  return config && Object.hasOwn(config, key) ? config[key] : undefined;
+}
+
+function usableOverride(value: unknown, max: number): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= max;
 }
 
 /**

@@ -134,6 +134,11 @@ function makeMockStore(overrides: Partial<EditorState> = {}): EditorState {
     debugPhysics: false,
     // scene_create mirrors the JS-side scene list into the store (PF-1097).
     setScenes: vi.fn(),
+    // character_setup routes the controller and the input bindings through the
+    // store rather than dispatching them itself, so store and engine cannot
+    // drift apart (PF-1124). Both of these actions dispatch.
+    addGameComponent: vi.fn(),
+    setInputPreset: vi.fn(),
     ...overrides,
   } as unknown as EditorState;
 }
@@ -334,30 +339,59 @@ describe('character_setup executor', () => {
     expect(executor.name).toBe('character_setup');
   });
 
-  it('dispatches add_game_component for 3D', async () => {
-    const ctx = makeMockCtx({ projectType: '3d' });
+  // `arcade_classic` (`DEFAULT_PRESET_KEY`) as this file MOCKS it above, run
+  // through `characterControllerFromProfile` — `gravityScale` is `gravity / 10`,
+  // spelled as the division so the value cannot drift on float rounding.
+  //
+  // Asserted whole rather than as `expect.any(Number)` because the NUMBERS are
+  // the behaviour here: the engine merges each recognised key onto
+  // `CharacterControllerData::default()`, so a dropped or misspelled field
+  // silently keeps an engine default and nothing anywhere reports it (see
+  // `rules/gotchas.md` → the `dispatchCommand` class).
+  const DEFAULT_CONTROLLER = {
+    speed: 6,
+    jumpHeight: 8,
+    gravityScale: 9.81 / 10,
+    canDoubleJump: false,
+  };
+
+  it('adds the CharacterController through the store for 3D', async () => {
+    const store = makeMockStore();
+    const ctx = makeMockCtx({ projectType: '3d', store });
     const result = await executor.execute(
       { entity: baseEntity, projectType: '3d', entityId: 'entity-1' },
       ctx,
     );
 
     expect(result.success).toBe(true);
-    // Manifest: add_game_component requires { entityId, componentType, properties? }
-    // Properties must be NESTED under 'properties' key, not at top level
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('add_game_component', {
-      entityId: 'entity-1',
-      componentType: 'character_controller',
-      properties: expect.objectContaining({
-        speed: expect.any(Number),
-        jumpHeight: expect.any(Number),
-        gravityScale: expect.any(Number),
-      }),
+    // `addGameComponent` is what dispatches `add_game_component`; going through
+    // it keeps `allGameComponents` in step with the engine, which a raw dispatch
+    // did not.
+    expect(store.addGameComponent).toHaveBeenCalledWith('entity-1', {
+      type: 'characterController',
+      characterController: DEFAULT_CONTROLLER,
     });
     expect(result.output?.['rigApplied']).toBe(false);
   });
 
+  // A controller with no bindings is still an immovable player: the engine ships
+  // an EMPTY `InputMap` and `capture_input` has no fallback to
+  // `default_bindings()`, so nothing drives the controller until
+  // `set_input_preset` is dispatched.
+  it('binds the input preset for the project type', async () => {
+    const store = makeMockStore();
+    const ctx = makeMockCtx({ projectType: '3d', store });
+    await executor.execute(
+      { entity: baseEntity, projectType: '3d', entityId: 'entity-1' },
+      ctx,
+    );
+
+    expect(store.setInputPreset).toHaveBeenCalledWith('fps');
+  });
+
   it('dispatches create_skeleton2d for 2D', async () => {
-    const ctx = makeMockCtx({ projectType: '2d' });
+    const store = makeMockStore();
+    const ctx = makeMockCtx({ projectType: '2d', store });
     const result = await executor.execute(
       { entity: baseEntity, projectType: '2d', entityId: 'entity-1' },
       ctx,
@@ -365,6 +399,11 @@ describe('character_setup executor', () => {
 
     expect(result.success).toBe(true);
     expect(ctx.dispatchCommand).toHaveBeenCalledWith('create_skeleton2d', expect.any(Object));
+    expect(store.addGameComponent).toHaveBeenCalledWith('entity-1', {
+      type: 'characterController',
+      characterController: DEFAULT_CONTROLLER,
+    });
+    expect(store.setInputPreset).toHaveBeenCalledWith('topdown');
     expect(result.output?.['rigApplied']).toBe(true);
   });
 

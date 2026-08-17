@@ -346,6 +346,17 @@ export const createOrchestratorSlice: StateCreator<
     // Get fresh editorStore state
     const { useEditorStore } = await import('@/stores/editorStore');
 
+    // The engine's `ProjectType` resource defaults to `ThreeD` and its ONLY
+    // writer is the `set_project_type` command. Nothing on this pipeline
+    // dispatched it — every executor merely read `ctx.projectType` — so a
+    // generated 2D game ran the whole engine in 3D mode: the character
+    // controller steered the player along the depth axis an orthographic camera
+    // cannot show, and no Camera2d was created. Setting it through the store
+    // (which dispatches) keeps store and engine in step, and it has to happen
+    // before the first step rather than inside one, because scene, camera and
+    // character steps all depend on it.
+    useEditorStore.getState().setProjectType(currentPlan.gdd.projectType);
+
     const ctx: ExecutorContext = {
       dispatchCommand: dispatcher,
       dispatchCommandBatch: getCommandBatchDispatcher() ?? undefined,

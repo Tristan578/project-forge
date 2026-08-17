@@ -141,12 +141,22 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
     // numbers — the engine rounds and clamps its `u32` fields, and a divergence
     // there is silent (see gameComponentWire.ts).
     const component = normalizeGameComponent(raw);
-    set(state => ({
-      allGameComponents: {
-        ...state.allGameComponents,
-        [entityId]: [...(state.allGameComponents[entityId] || []), component],
-      },
-    }));
+    set(state => {
+      // Replace any existing component of the same type rather than appending.
+      // `build_game_component` keys on `componentType` and OVERWRITES, so the
+      // engine holds exactly one per type — an unconditional push made the store
+      // hold two after any re-run of a step that adds a component (the
+      // generation pipeline is retryable), and nothing would report the
+      // divergence because `dispatchCommand` returns void. This matches
+      // `updateGameComponent`, which already keys on `type`.
+      const existing = state.allGameComponents[entityId] || [];
+      return {
+        allGameComponents: {
+          ...state.allGameComponents,
+          [entityId]: [...existing.filter(c => c.type !== component.type), component],
+        },
+      };
+    });
     // The engine wants `{ entityId, componentType, properties }`, not the store's
     // tagged union — see gameComponentWire.ts. Dispatching the store shape makes
     // handle_add_game_component reject with "Missing componentType", and because

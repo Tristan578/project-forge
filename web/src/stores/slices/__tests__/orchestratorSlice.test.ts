@@ -35,10 +35,20 @@ vi.mock('@/lib/monitoring/sentry-client', () => ({
   captureException: vi.fn(),
 }));
 
+/**
+ * `setProjectType` is on the mock because the pipeline calls it before the first
+ * step — see the `set_project_type` test below. It has to be a stable spy across
+ * `getState()` calls (the slice reads state more than once), so the mocked state
+ * object is a module-level singleton rather than a fresh literal per call.
+ */
+const mockEditorState = {
+  setProjectType: vi.fn(),
+};
+
 vi.mock('@/stores/editorStore', () => ({
   getCommandDispatcher: vi.fn().mockReturnValue(vi.fn()),
   getCommandBatchDispatcher: vi.fn().mockReturnValue(null),
-  useEditorStore: { getState: vi.fn().mockReturnValue({}) },
+  useEditorStore: { getState: vi.fn(() => mockEditorState) },
 }));
 
 vi.mock('@/stores/userStore', () => ({
@@ -460,6 +470,76 @@ describe('orchestratorSlice', () => {
       await store.getState().runPipelineFromPlan();
 
       expect(runPipeline).toHaveBeenCalledOnce();
+    });
+
+    // The engine's `ProjectType` resource defaults to `ThreeD`, is registered
+    // with `init_resource`, and its ONLY writer is the `set_project_type`
+    // command. Nothing on this pipeline ever dispatched it — every executor
+    // merely read `ctx.projectType`, which is a TypeScript-side field the engine
+    // never sees. So a generated 2D game ran the whole engine in 3D mode: the
+    // character controller steered the player along the depth axis an
+    // orthographic camera cannot show. Silent, as ever, because a command that
+    // is never sent raises nothing.
+    describe('project type reaches the engine', () => {
+      beforeEach(() => {
+        mockEditorState.setProjectType.mockClear();
+      });
+
+      it('sets the project type from the GDD before running the pipeline', async () => {
+        const plan = makeMockPlan();
+        plan.gdd.projectType = '2d';
+        store.getState().setPlan(plan);
+
+        await store.getState().runPipelineFromPlan();
+
+        expect(mockEditorState.setProjectType).toHaveBeenCalledWith('2d');
+      });
+
+      it('sets it for 3D too rather than relying on the engine default', async () => {
+        // Relying on the default would be correct today and wrong the moment a
+        // previous session left the resource on TwoD — the resource outlives any
+        // one generation run.
+        store.getState().setPlan(makeMockPlan());
+
+        await store.getState().runPipelineFromPlan();
+
+        expect(mockEditorState.setProjectType).toHaveBeenCalledWith('3d');
+      });
+
+      // Ordering is the whole point: scene, camera and character steps all read
+      // the resource, so setting it after the first step would leave those steps
+      // running in the wrong mode.
+      it('sets it before the first step runs', async () => {
+        const plan = makeMockPlan();
+        plan.gdd.projectType = '2d';
+        store.getState().setPlan(plan);
+
+        // The observation is CAPTURED inside the mock and asserted afterwards,
+        // never asserted inside it. `runPipelineFromPlan` wraps the call in a
+        // try/catch that turns any throw into `orchestratorStatus: 'failed'`, so
+        // an `expect` in here would have its AssertionError swallowed and the
+        // test would pass no matter which order the two calls happened in.
+        let projectTypeCallsBeforePipeline = -1;
+        const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+        (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+          projectTypeCallsBeforePipeline = mockEditorState.setProjectType.mock.calls.length;
+          return makeMockPlan();
+        });
+
+        await store.getState().runPipelineFromPlan();
+
+        expect(runPipeline).toHaveBeenCalled();
+        expect(projectTypeCallsBeforePipeline).toBe(1);
+        expect(mockEditorState.setProjectType).toHaveBeenCalledWith('2d');
+        // And the run really completed — a swallowed throw would leave 'failed'.
+        expect(store.getState().orchestratorStatus).not.toBe('failed');
+      });
+
+      it('does not touch the project type when there is no plan', async () => {
+        await store.getState().runPipelineFromPlan();
+
+        expect(mockEditorState.setProjectType).not.toHaveBeenCalled();
+      });
     });
   });
 

@@ -173,6 +173,32 @@ describe('gameSlice', () => {
       });
     });
 
+    it('replaces rather than duplicates when the same type is added twice', () => {
+      // `build_game_component` keys on `componentType` and OVERWRITES, so the
+      // engine holds exactly one component per type. An unconditional push left
+      // the store holding two after any re-run of a step that adds one — and the
+      // generation pipeline is retryable, so this is a reachable state, not a
+      // hypothetical. Nothing would report the divergence: `dispatchCommand`
+      // returns void.
+      const faster: GameComponentData = {
+        type: 'characterController',
+        characterController: {
+          speed: 12.0,
+          jumpHeight: 4.0,
+          gravityScale: 1.0,
+          canDoubleJump: false,
+        },
+      };
+
+      store.getState().addGameComponent('entity-1', characterController);
+      store.getState().addGameComponent('entity-1', health);
+      store.getState().addGameComponent('entity-1', faster);
+
+      // The survivor is the LAST write, matching what the engine now holds, and
+      // the unrelated component is untouched.
+      expect(store.getState().allGameComponents['entity-1']).toEqual([health, faster]);
+    });
+
     it('should update game component by type', () => {
       store.getState().addGameComponent('entity-1', characterController);
 
