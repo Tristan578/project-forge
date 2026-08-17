@@ -617,8 +617,11 @@ describe('physicsSlice — edge cases', () => {
       store.getState().setPhysics2d('platform', data, true);
 
       expect(store.getState().physics2d['platform'].oneWayPlatform).toBe(true);
-      const dispatched = mockDispatch.mock.calls[0][1] as Record<string, unknown>;
-      expect(dispatched.oneWayPlatform).toBe(true);
+      // Nested under `physicsData` — the shape `set_physics2d` actually
+      // deserializes. Reading it flat off the payload used to pass against a
+      // payload the engine rejected outright (PF-1167).
+      const dispatched = mockDispatch.mock.calls[0][1] as { physicsData: Record<string, unknown> };
+      expect(dispatched.physicsData.oneWayPlatform).toBe(true);
     });
 
     it('continuousDetection=true stores and dispatches correctly', () => {

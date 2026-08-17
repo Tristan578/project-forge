@@ -316,7 +316,11 @@ describe('handlePhysicsEvent — edge cases', () => {
   // =========================================================================
 
   describe('RAYCAST2D_RESULT — edge cases', () => {
-    it('always returns true regardless of payload', () => {
+    it('always returns false regardless of payload', () => {
+      // Was `toBe(true)`, asserting a placeholder handler for a name the engine
+      // never emits — it emits `RAYCAST2D_HIT`/`RAYCAST2D_MISS`. `false` is what
+      // `useEngineEvents` reports as unhandled, which is the honest answer while 2D
+      // raycasts have no consumer (PF-1167).
       const payloads = [
         {},
         { requestId: 'r1', hitEntity: null, point: [0, 0], distance: 0 },
@@ -325,7 +329,7 @@ describe('handlePhysicsEvent — edge cases', () => {
 
       for (const payload of payloads) {
         const result = handlePhysicsEvent('RAYCAST2D_RESULT', payload, mockSetGet.set, mockSetGet.get);
-        expect(result).toBe(true);
+        expect(result).toBe(false);
       }
     });
 
@@ -426,17 +430,68 @@ describe('handlePhysicsEvent — edge cases', () => {
   });
 
   // =========================================================================
-  // PHYSICS2D_REMOVED — edge cases
+  // PHYSICS2D_CHANGED — edge cases
   // =========================================================================
 
-  describe('PHYSICS2D_REMOVED — edge cases', () => {
-    it('calls removePhysics2d for each entity independently', () => {
-      handlePhysicsEvent('PHYSICS2D_REMOVED', { entityId: 'sprite-a' }, mockSetGet.set, mockSetGet.get);
-      handlePhysicsEvent('PHYSICS2D_REMOVED', { entityId: 'sprite-b' }, mockSetGet.set, mockSetGet.get);
+  describe('PHYSICS2D_CHANGED — edge cases', () => {
+    /**
+     * This block used to test `PHYSICS2D_REMOVED`, asserting `removePhysics2d` was
+     * called per entity. The engine emits no 2D removal event at all — there was
+     * nothing on the other end of that assertion (PF-1167).
+     */
+    it('applies each entity independently', () => {
+      handlePhysicsEvent(
+        'PHYSICS2D_CHANGED',
+        { entityId: 'sprite-a', enabled: true, body_type: 'Static' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+      handlePhysicsEvent(
+        'PHYSICS2D_CHANGED',
+        { entityId: 'sprite-b', enabled: false, body_type: 'Dynamic' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
 
-      expect(actions.removePhysics2d).toHaveBeenCalledTimes(2);
-      expect(actions.removePhysics2d.mock.calls[0][0]).toBe('sprite-a');
-      expect(actions.removePhysics2d.mock.calls[1][0]).toBe('sprite-b');
+      expect(actions.applyPhysics2dFromEngine).toHaveBeenCalledTimes(2);
+      expect(actions.applyPhysics2dFromEngine.mock.calls[0]).toEqual([
+        'sprite-a',
+        { bodyType: 'static' },
+        true,
+      ]);
+      expect(actions.applyPhysics2dFromEngine.mock.calls[1]).toEqual([
+        'sprite-b',
+        { bodyType: 'dynamic' },
+        false,
+      ]);
+    });
+
+    it('drops an unrecognised enum variant rather than defaulting it', () => {
+      // Defaulting would silently report `dynamic` — the one value that makes a
+      // ground platform fall out of the world.
+      handlePhysicsEvent(
+        'PHYSICS2D_CHANGED',
+        { entityId: 'sprite-c', enabled: true, body_type: 'Ragdoll', mass: 3 },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(actions.applyPhysics2dFromEngine).toHaveBeenCalledWith(
+        'sprite-c',
+        { mass: 3 },
+        true
+      );
+    });
+
+    it('ignores camelCase data keys, which the flattened struct never emits', () => {
+      handlePhysicsEvent(
+        'PHYSICS2D_CHANGED',
+        { entityId: 'sprite-d', enabled: true, gravityScale: 0.25 },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(actions.applyPhysics2dFromEngine).toHaveBeenCalledWith('sprite-d', {}, true);
     });
   });
 

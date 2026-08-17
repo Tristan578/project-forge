@@ -323,172 +323,129 @@ describe('handlePhysicsEvent', () => {
     });
   });
 
-  describe('PHYSICS2D_UPDATED', () => {
-    it('calls setPhysics2d with entityId, physics data, and enabled flag', () => {
-      const payload = {
-        entityId: 'sprite-1',
-        enabled: true,
-        bodyType: 'dynamic',
-        mass: 1.0,
-        friction: 0.5,
-        restitution: 0.3,
-        colliderType: 'rectangle',
-        gravityScale: 1.0,
-      };
-
+  /**
+   * `PHYSICS2D_CHANGED` is the name the engine actually emits. The three blocks
+   * that used to sit here asserted `PHYSICS2D_UPDATED`, `JOINT2D_UPDATED` and
+   * `PHYSICS2D_REMOVED` — names nothing has ever emitted — against flat camelCase
+   * payloads the engine has never sent. They passed for their whole life because
+   * the handler had a matching (equally phantom) `case` for each, so the suite
+   * described a wire format that existed only in the suite (PF-1167).
+   */
+  describe('PHYSICS2D_CHANGED', () => {
+    it('translates the flattened snake_case wire into store vocabulary', () => {
       const result = handlePhysicsEvent(
-        'PHYSICS2D_UPDATED',
-        payload,
+        'PHYSICS2D_CHANGED',
+        {
+          entityId: 'sprite-1',
+          enabled: true,
+          body_type: 'Static',
+          collider_shape: 'ConvexPolygon',
+          mass: 1,
+          friction: 0.5,
+          gravity_scale: 0,
+          one_way_platform: true,
+          surface_velocity: [3, 0],
+        },
         mockSetGet.set,
         mockSetGet.get
       );
 
       expect(result).toBe(true);
-      expect(actions.setPhysics2d).toHaveBeenCalledWith(
+      // toEqual on the whole patch, not objectContaining: the translation IS the
+      // behaviour, and objectContaining cannot see an untranslated key alongside a
+      // translated one.
+      expect(actions.applyPhysics2dFromEngine).toHaveBeenCalledWith(
         'sprite-1',
         {
-          bodyType: 'dynamic',
-          mass: 1.0,
+          bodyType: 'static',
+          colliderShape: 'convex_polygon',
+          mass: 1,
           friction: 0.5,
-          restitution: 0.3,
-          colliderType: 'rectangle',
-          gravityScale: 1.0,
+          gravityScale: 0,
+          oneWayPlatform: true,
+          surfaceVelocity: [3, 0],
         },
         true
       );
     });
 
-    it('handles disabled physics2d', () => {
-      const payload = {
-        entityId: 'sprite-2',
-        enabled: false,
-        bodyType: 'static',
-        mass: 0,
-        friction: 0.3,
-        colliderType: 'circle',
-      };
-
-      const result = handlePhysicsEvent(
-        'PHYSICS2D_UPDATED',
-        payload,
+    it('routes to the state-only action, never the dispatching one', () => {
+      // `setPhysics2d` dispatches `set_physics_2d` — a FULL REPLACE — so calling it
+      // from an inbound handler both echoes a command back at the engine and resets
+      // every field this event did not carry.
+      handlePhysicsEvent(
+        'PHYSICS2D_CHANGED',
+        { entityId: 'sprite-2', enabled: true, mass: 4 },
         mockSetGet.set,
         mockSetGet.get
       );
 
-      expect(result).toBe(true);
-      expect(actions.setPhysics2d).toHaveBeenCalledWith(
-        'sprite-2',
-        expect.objectContaining({ bodyType: 'static' }),
+      expect(actions.setPhysics2d).not.toHaveBeenCalled();
+      expect(actions.applyPhysics2dFromEngine).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports a disabled entity as disabled', () => {
+      handlePhysicsEvent(
+        'PHYSICS2D_CHANGED',
+        { entityId: 'sprite-3', enabled: false, body_type: 'Kinematic' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(actions.applyPhysics2dFromEngine).toHaveBeenCalledWith(
+        'sprite-3',
+        { bodyType: 'kinematic' },
         false
       );
     });
 
-    it('strips entityId and enabled from physics data passed to store', () => {
-      const payload = {
-        entityId: 'sprite-3',
-        enabled: true,
-        bodyType: 'dynamic',
-        mass: 2.0,
-      };
+    it('swallows a payload with no usable entityId rather than writing state', () => {
+      const result = handlePhysicsEvent(
+        'PHYSICS2D_CHANGED',
+        { enabled: true, mass: 2 },
+        mockSetGet.set,
+        mockSetGet.get
+      );
 
-      handlePhysicsEvent('PHYSICS2D_UPDATED', payload, mockSetGet.set, mockSetGet.get);
-
-      const calledData = actions.setPhysics2d.mock.calls[0][1];
-      expect(calledData).not.toHaveProperty('entityId');
-      expect(calledData).not.toHaveProperty('enabled');
-      expect(calledData).toHaveProperty('bodyType');
-      expect(calledData).toHaveProperty('mass');
+      // Handled — the event was ours — but nothing is written, because there is no
+      // entity to write it to.
+      expect(result).toBe(true);
+      expect(actions.applyPhysics2dFromEngine).not.toHaveBeenCalled();
     });
   });
 
-  describe('JOINT2D_UPDATED', () => {
-    it('calls setJoint2d with entityId and joint data', () => {
-      const payload = {
-        entityId: 'sprite-2',
-        jointType: 'revolute',
-        targetEntity: 'sprite-1',
-        anchor: [0, 0],
-      };
-
+  describe('2D event names nothing emits', () => {
+    /**
+     * These four are the phantom names this handler used to listen for. Pinning
+     * them as UNHANDLED is the point: `handlePhysicsEvent` returning `false` is
+     * what `useEngineEvents` reports as an unhandled event, so a future rename
+     * back onto one of these names fails here instead of silently going dead
+     * again. `JOINT2D_CHANGED` and `RAYCAST2D_HIT`/`RAYCAST2D_MISS` are the real
+     * engine names and are also unhandled today — deliberately, and tracked
+     * separately: a joint needs a translation layer, and 2D raycasts have no
+     * consumer at all.
+     */
+    it.each([
+      'PHYSICS2D_UPDATED',
+      'JOINT2D_UPDATED',
+      'PHYSICS2D_REMOVED',
+      'RAYCAST2D_RESULT',
+      'JOINT2D_CHANGED',
+      'RAYCAST2D_HIT',
+      'RAYCAST2D_MISS',
+    ])('%s is reported unhandled and touches no store action', (eventName) => {
       const result = handlePhysicsEvent(
-        'JOINT2D_UPDATED',
-        payload,
+        eventName,
+        { entityId: 'sprite-9', enabled: true, mass: 1 },
         mockSetGet.set,
         mockSetGet.get
       );
 
-      expect(result).toBe(true);
-      expect(actions.setJoint2d).toHaveBeenCalledWith(
-        'sprite-2',
-        {
-          jointType: 'revolute',
-          targetEntity: 'sprite-1',
-          anchor: [0, 0],
-        }
-      );
-    });
-
-    it('strips entityId from joint data passed to store', () => {
-      const payload = {
-        entityId: 'sprite-4',
-        jointType: 'fixed',
-        targetEntity: 'sprite-5',
-      };
-
-      handlePhysicsEvent('JOINT2D_UPDATED', payload, mockSetGet.set, mockSetGet.get);
-
-      const calledData = actions.setJoint2d.mock.calls[0][1];
-      expect(calledData).not.toHaveProperty('entityId');
-      expect(calledData).toHaveProperty('jointType');
-      expect(calledData).toHaveProperty('targetEntity');
-    });
-
-    it('handles joint with additional properties', () => {
-      const payload = {
-        entityId: 'sprite-6',
-        jointType: 'prismatic',
-        targetEntity: 'sprite-7',
-        anchor: [1, 2],
-        axis: [0, 1],
-        motorSpeed: 5.0,
-        motorEnabled: true,
-      };
-
-      const result = handlePhysicsEvent(
-        'JOINT2D_UPDATED',
-        payload,
-        mockSetGet.set,
-        mockSetGet.get
-      );
-
-      expect(result).toBe(true);
-      expect(actions.setJoint2d).toHaveBeenCalledWith(
-        'sprite-6',
-        {
-          jointType: 'prismatic',
-          targetEntity: 'sprite-7',
-          anchor: [1, 2],
-          axis: [0, 1],
-          motorSpeed: 5.0,
-          motorEnabled: true,
-        }
-      );
-    });
-  });
-
-  describe('PHYSICS2D_REMOVED', () => {
-    it('calls removePhysics2d with entityId', () => {
-      const payload = { entityId: 'sprite-3' };
-
-      const result = handlePhysicsEvent(
-        'PHYSICS2D_REMOVED',
-        payload,
-        mockSetGet.set,
-        mockSetGet.get
-      );
-
-      expect(result).toBe(true);
-      expect(actions.removePhysics2d).toHaveBeenCalledWith('sprite-3');
+      expect(result).toBe(false);
+      expect(actions.applyPhysics2dFromEngine).not.toHaveBeenCalled();
+      expect(actions.setPhysics2d).not.toHaveBeenCalled();
+      expect(actions.setJoint2d).not.toHaveBeenCalled();
+      expect(actions.removePhysics2d).not.toHaveBeenCalled();
     });
   });
 
@@ -716,52 +673,9 @@ describe('handlePhysicsEvent', () => {
     });
   });
 
-  describe('RAYCAST2D_RESULT', () => {
-    it('returns true (placeholder handler)', () => {
-      const result = handlePhysicsEvent(
-        'RAYCAST2D_RESULT',
-        {},
-        mockSetGet.set,
-        mockSetGet.get
-      );
-
-      expect(result).toBe(true);
-    });
-
-    it('returns true with raycast payload data', () => {
-      const payload = {
-        requestId: 'ray2d-1',
-        hitEntity: 'sprite-10',
-        point: [5.0, 3.0],
-        distance: 7.5,
-      };
-
-      const result = handlePhysicsEvent(
-        'RAYCAST2D_RESULT',
-        payload,
-        mockSetGet.set,
-        mockSetGet.get
-      );
-
-      expect(result).toBe(true);
-    });
-
-    it('returns true with null hit (miss)', () => {
-      const payload = {
-        requestId: 'ray2d-2',
-        hitEntity: null,
-        point: [0, 0],
-        distance: 0,
-      };
-
-      const result = handlePhysicsEvent(
-        'RAYCAST2D_RESULT',
-        payload,
-        mockSetGet.set,
-        mockSetGet.get
-      );
-
-      expect(result).toBe(true);
-    });
-  });
+  // `RAYCAST2D_RESULT` used to have three "returns true (placeholder handler)"
+  // cases here. It is covered by the "2D event names nothing emits" block above,
+  // which asserts the opposite — and the opposite is correct: the engine emits
+  // `RAYCAST2D_HIT`/`RAYCAST2D_MISS`, so a placeholder returning `true` claimed an
+  // event was handled that could never arrive under that name (PF-1167).
 });

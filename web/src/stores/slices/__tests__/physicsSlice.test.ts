@@ -158,10 +158,14 @@ describe('physicsSlice', () => {
 
       expect(store.getState().physics2d.entity1).toEqual(data);
       expect(store.getState().physics2dEnabled.entity1).toBe(true);
+      // The engine reads a NESTED `physicsData`. This assertion used to spread the
+      // fields flat next to `entityId`, which is a hard serde reject — and
+      // `dispatchCommand` returns `void`, so the test passed while every 2D physics
+      // edit was dropped before it reached the simulation (PF-1167).
       expect(mockDispatch).toHaveBeenCalledWith('set_physics_2d', {
         entityId: 'entity1',
         enabled: true,
-        ...data,
+        physicsData: data,
       });
     });
 

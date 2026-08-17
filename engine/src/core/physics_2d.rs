@@ -7,7 +7,20 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// Main physics configuration for a 2D entity
-#[derive(Component, Clone, Debug, Serialize, Deserialize)]
+///
+/// `#[serde(default)]` is load-bearing: without it every field is required, so a
+/// payload carrying a subset is a hard `from_value` failure and the whole command
+/// is dropped before it is queued — `dispatchCommand` returns `void`, so that
+/// looks identical to success from the browser (PF-1167).
+///
+/// The field names stay snake_case and the enum variants stay PascalCase because
+/// this struct is embedded in `EntitySnapshot`, which is what `.forge` scene files
+/// serialize. Renaming either would make every saved 2D scene fail to load. The
+/// browser's camelCase/lowercase vocabulary is accepted through `Physics2dPatch`
+/// and the `serde(alias)` attributes below instead, neither of which changes a
+/// single byte of what gets written to a scene file.
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Physics2dData {
     pub body_type: BodyType2d,
     pub collider_shape: ColliderShape2d,
@@ -59,22 +72,183 @@ impl Default for Physics2dData {
 }
 
 /// Rigid body type
+///
+/// The `alias` attributes accept the browser's lowercase spellings. They affect
+/// deserialization ONLY — `Serialize` still emits the PascalCase name, so scene
+/// files round-trip byte-identically and an old `.forge` keeps loading.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BodyType2d {
+    #[serde(alias = "dynamic")]
     Dynamic,
+    #[serde(alias = "static")]
     Static,
+    #[serde(alias = "kinematic")]
     Kinematic,
 }
 
 /// Collider shape type
+///
+/// See `BodyType2d` — the aliases are deserialize-only. `ConvexPolygon` carries
+/// both spellings because the chat schema says `convex_polygon` while a camelCase
+/// producer would say `convexPolygon`.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ColliderShape2d {
+    #[serde(alias = "box")]
     Box,
+    #[serde(alias = "circle")]
     Circle,
+    #[serde(alias = "capsule")]
     Capsule,
+    #[serde(alias = "convex_polygon", alias = "convexPolygon")]
     ConvexPolygon,
+    #[serde(alias = "edge")]
     Edge,
+    #[serde(alias = "auto")]
     Auto,
+}
+
+/// A partial update to `Physics2dData` — every field optional.
+///
+/// Mirrors `PhysicsPatch` (`core/physics.rs`) for the 2D path. Two things make
+/// this necessary rather than cosmetic:
+///
+/// 1. `set_2d_collider_shape` and `set_2d_body_type` used to build
+///    `Physics2dData { <the one field>, ..Default::default() }` and queue it as a
+///    whole-struct replace, so changing a platform's shape also reset its
+///    friction, mass, sensor flag and conveyor velocity to defaults (PF-1167).
+/// 2. There was no partial-update command at all, so the editor's only way to
+///    change one field was to resend all fourteen.
+///
+/// `rename_all = "camelCase"` is safe here in a way it would not be on
+/// `Physics2dData`: a patch only ever exists on the command wire, never in a
+/// scene file, so it can speak the browser's vocabulary directly.
+///
+/// Trade-off, identical to the 3D patch: because nothing is required, a
+/// misspelled key silently no-ops and the engine cannot detect it. The web client
+/// closes that gap by building every payload through `buildPhysics2dPatch`
+/// (`web/src/lib/physics/physics2dPayload.ts`), which copies only allowlisted
+/// keys. `deny_unknown_fields` would be the engine-side answer, but it cannot see
+/// the alias spellings as distinct and — more importantly — the drift test needs
+/// `Serialize` to enumerate the emitted names, so do NOT add
+/// `skip_serializing_if` here.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Physics2dPatch {
+    #[serde(alias = "body_type")]
+    pub body_type: Option<BodyType2d>,
+    #[serde(alias = "collider_shape")]
+    pub collider_shape: Option<ColliderShape2d>,
+    pub size: Option<[f32; 2]>,
+    pub radius: Option<f32>,
+    pub vertices: Option<Vec<[f32; 2]>>,
+    pub mass: Option<f32>,
+    pub friction: Option<f32>,
+    pub restitution: Option<f32>,
+    #[serde(alias = "gravity_scale")]
+    pub gravity_scale: Option<f32>,
+    #[serde(alias = "is_sensor")]
+    pub is_sensor: Option<bool>,
+    #[serde(alias = "lock_rotation")]
+    pub lock_rotation: Option<bool>,
+    #[serde(alias = "continuous_detection")]
+    pub continuous_detection: Option<bool>,
+    #[serde(alias = "one_way_platform")]
+    pub one_way_platform: Option<bool>,
+    #[serde(alias = "surface_velocity")]
+    pub surface_velocity: Option<[f32; 2]>,
+}
+
+impl Physics2dPatch {
+    /// A patch that carries every field of `data` — the full-replace semantics
+    /// `set_physics2d` has always had, expressed as a patch so there is only one
+    /// apply path to reason about.
+    pub fn full(data: &Physics2dData) -> Self {
+        Self {
+            body_type: Some(data.body_type),
+            collider_shape: Some(data.collider_shape),
+            size: Some(data.size),
+            radius: Some(data.radius),
+            vertices: Some(data.vertices.clone()),
+            mass: Some(data.mass),
+            friction: Some(data.friction),
+            restitution: Some(data.restitution),
+            gravity_scale: Some(data.gravity_scale),
+            is_sensor: Some(data.is_sensor),
+            lock_rotation: Some(data.lock_rotation),
+            continuous_detection: Some(data.continuous_detection),
+            one_way_platform: Some(data.one_way_platform),
+            surface_velocity: Some(data.surface_velocity),
+        }
+    }
+
+    /// Merge this patch into `target`, overwriting only the fields it carries.
+    ///
+    /// A patch carrying all 14 fields is equivalent to a whole-struct assignment,
+    /// so `set_physics2d`'s pre-existing behaviour is unchanged.
+    pub fn apply_to(&self, target: &mut Physics2dData) {
+        if let Some(body_type) = self.body_type {
+            target.body_type = body_type;
+        }
+        if let Some(collider_shape) = self.collider_shape {
+            target.collider_shape = collider_shape;
+        }
+        if let Some(size) = self.size {
+            target.size = size;
+        }
+        if let Some(radius) = self.radius {
+            target.radius = radius;
+        }
+        if let Some(vertices) = self.vertices.clone() {
+            target.vertices = vertices;
+        }
+        if let Some(mass) = self.mass {
+            target.mass = mass;
+        }
+        if let Some(friction) = self.friction {
+            target.friction = friction;
+        }
+        if let Some(restitution) = self.restitution {
+            target.restitution = restitution;
+        }
+        if let Some(gravity_scale) = self.gravity_scale {
+            target.gravity_scale = gravity_scale;
+        }
+        if let Some(is_sensor) = self.is_sensor {
+            target.is_sensor = is_sensor;
+        }
+        if let Some(lock_rotation) = self.lock_rotation {
+            target.lock_rotation = lock_rotation;
+        }
+        if let Some(continuous_detection) = self.continuous_detection {
+            target.continuous_detection = continuous_detection;
+        }
+        if let Some(one_way_platform) = self.one_way_platform {
+            target.one_way_platform = one_way_platform;
+        }
+        if let Some(surface_velocity) = self.surface_velocity {
+            target.surface_velocity = surface_velocity;
+        }
+    }
+
+    /// Merge this patch into `target` and return `(old, new)` — the value before
+    /// the merge and the value after it.
+    ///
+    /// This exists so the ORDER of the three steps (snapshot, merge, report) is
+    /// testable natively: the bridge's `apply_physics2d_updates` records
+    /// `UndoableAction::Physics2dChange` and emits the JS event from the returned
+    /// pair, and if the snapshot were taken after the merge then `old == new` and
+    /// every undo would silently restore nothing. The bridge is wasm-only, so
+    /// that ordering cannot be unit-tested there — keep the sequence here.
+    ///
+    /// `old == new` means the patch was a no-op. Callers must not push history or
+    /// emit a change event in that case: `HistoryStack::push` clears the redo
+    /// stack, so a no-op would destroy the user's redo history.
+    pub fn apply_recording(&self, target: &mut Physics2dData) -> (Physics2dData, Physics2dData) {
+        let old = target.clone();
+        self.apply_to(target);
+        let new = target.clone();
+        (old, new)
+    }
 }
 
 /// Marker component indicating 2D physics is active on this entity
@@ -126,5 +300,350 @@ impl Default for PhysicsJoint2d {
             local_anchor1: [0.0, 0.0],
             local_anchor2: [0.0, 0.0],
         }
+    }
+}
+
+#[cfg(test)]
+mod physics2d_patch_tests {
+    use super::*;
+
+    /// A configured platform — every field away from its default, so any
+    /// unintended reset shows up as a concrete value change rather than a
+    /// coincidence with `Default`.
+    fn configured_platform() -> Physics2dData {
+        Physics2dData {
+            body_type: BodyType2d::Static,
+            collider_shape: ColliderShape2d::Capsule,
+            size: [8.0, 0.5],
+            radius: 0.25,
+            vertices: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+            mass: 12.0,
+            friction: 1.75,
+            restitution: 0.9,
+            gravity_scale: 0.0,
+            is_sensor: true,
+            lock_rotation: true,
+            continuous_detection: true,
+            one_way_platform: true,
+            surface_velocity: [3.0, -1.0],
+        }
+    }
+
+    #[test]
+    fn apply_to_overwrites_only_carried_fields() {
+        let mut data = configured_platform();
+        let patch = Physics2dPatch {
+            friction: Some(0.1),
+            ..Default::default()
+        };
+
+        patch.apply_to(&mut data);
+
+        let mut expected = configured_platform();
+        expected.friction = 0.1;
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn empty_patch_changes_nothing() {
+        let mut data = configured_platform();
+        Physics2dPatch::default().apply_to(&mut data);
+        assert_eq!(data, configured_platform());
+    }
+
+    /// The defect PF-1167 was filed for: `set_2d_collider_shape` used to queue
+    /// `Physics2dData { collider_shape, ..Default::default() }`, so changing a
+    /// platform's shape also reset its friction, mass, sensor flag and conveyor
+    /// velocity. The narrow patch those handlers now build must leave all
+    /// thirteen other fields alone.
+    #[test]
+    fn collider_shape_patch_preserves_every_other_field() {
+        let mut data = configured_platform();
+        let patch = Physics2dPatch {
+            collider_shape: Some(ColliderShape2d::Circle),
+            radius: Some(2.0),
+            ..Default::default()
+        };
+
+        patch.apply_to(&mut data);
+
+        let mut expected = configured_platform();
+        expected.collider_shape = ColliderShape2d::Circle;
+        expected.radius = 2.0;
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn body_type_patch_preserves_every_other_field() {
+        let mut data = configured_platform();
+        let patch = Physics2dPatch {
+            body_type: Some(BodyType2d::Kinematic),
+            ..Default::default()
+        };
+
+        patch.apply_to(&mut data);
+
+        let mut expected = configured_platform();
+        expected.body_type = BodyType2d::Kinematic;
+        assert_eq!(data, expected);
+    }
+
+    /// `set_physics2d` keeps whole-struct replace semantics by queueing
+    /// `Physics2dPatch::full`, so applying one over unrelated existing data must
+    /// leave nothing of the old value behind.
+    #[test]
+    fn full_patch_replaces_everything() {
+        let mut data = configured_platform();
+        let replacement = Physics2dData {
+            body_type: BodyType2d::Dynamic,
+            collider_shape: ColliderShape2d::Edge,
+            size: [1.0, 2.0],
+            radius: 3.0,
+            vertices: vec![],
+            mass: 4.0,
+            friction: 0.0,
+            restitution: 0.0,
+            gravity_scale: 2.0,
+            is_sensor: false,
+            lock_rotation: false,
+            continuous_detection: false,
+            one_way_platform: false,
+            surface_velocity: [0.0, 0.0],
+        };
+
+        Physics2dPatch::full(&replacement).apply_to(&mut data);
+
+        assert_eq!(data, replacement);
+    }
+
+    /// The ordering pin. If the snapshot were taken after the merge, `old` would
+    /// equal `new` and every undo would silently restore nothing — and the bridge
+    /// is wasm-only, so that sequence cannot be tested where it is consumed.
+    #[test]
+    fn apply_recording_returns_the_pre_merge_value_as_old() {
+        let mut data = configured_platform();
+        let patch = Physics2dPatch {
+            mass: Some(99.0),
+            ..Default::default()
+        };
+
+        let (old, new) = patch.apply_recording(&mut data);
+
+        assert_eq!(old.mass, 12.0, "old must be the value BEFORE the merge");
+        assert_eq!(new.mass, 99.0);
+        assert_eq!(data, new);
+        assert_eq!(old, configured_platform());
+    }
+
+    /// The no-op signal the bridge's guard depends on: without `old == new` here,
+    /// `apply_physics2d_updates` would push history on every call and clear the
+    /// redo stack.
+    #[test]
+    fn apply_recording_reports_a_no_op_patch_as_unchanged() {
+        let mut data = configured_platform();
+
+        let (old, new) = Physics2dPatch::default().apply_recording(&mut data);
+        assert_eq!(old, new);
+
+        // Same when the patch carries a field already at the requested value.
+        let redundant = Physics2dPatch {
+            friction: Some(1.75),
+            ..Default::default()
+        };
+        let (old, new) = redundant.apply_recording(&mut data);
+        assert_eq!(old, new);
+    }
+
+    #[test]
+    fn full_then_apply_recording_round_trips_a_configured_platform() {
+        let source = configured_platform();
+        let mut target = Physics2dData::default();
+
+        let (old, new) = Physics2dPatch::full(&source).apply_recording(&mut target);
+
+        assert_eq!(old, Physics2dData::default());
+        assert_eq!(new, source);
+    }
+
+    // === Wire-vocabulary tests ===
+    //
+    // The browser speaks camelCase keys and lowercase enum values; scene files
+    // hold snake_case keys and PascalCase enum values. Both must deserialize.
+
+    #[test]
+    fn patch_accepts_camel_case_keys() {
+        let patch: Physics2dPatch = serde_json::from_value(serde_json::json!({
+            "bodyType": "static",
+            "colliderShape": "box",
+            "gravityScale": 0.0,
+            "isSensor": true,
+            "lockRotation": true,
+            "continuousDetection": true,
+            "oneWayPlatform": true,
+            "surfaceVelocity": [2.0, 0.0],
+        }))
+        .expect("camelCase patch must deserialize");
+
+        assert_eq!(patch.body_type, Some(BodyType2d::Static));
+        assert_eq!(patch.collider_shape, Some(ColliderShape2d::Box));
+        assert_eq!(patch.gravity_scale, Some(0.0));
+        assert_eq!(patch.is_sensor, Some(true));
+        assert_eq!(patch.lock_rotation, Some(true));
+        assert_eq!(patch.continuous_detection, Some(true));
+        assert_eq!(patch.one_way_platform, Some(true));
+        assert_eq!(patch.surface_velocity, Some([2.0, 0.0]));
+    }
+
+    /// Without the `alias` attributes on the patch, a snake_case producer's keys
+    /// would be ignored, deserialize to `None`, and no-op silently — the exact
+    /// failure mode this whole change exists to remove.
+    #[test]
+    fn patch_accepts_snake_case_keys() {
+        let patch: Physics2dPatch = serde_json::from_value(serde_json::json!({
+            "body_type": "Static",
+            "collider_shape": "convex_polygon",
+            "gravity_scale": 0.5,
+            "is_sensor": true,
+            "lock_rotation": true,
+            "continuous_detection": true,
+            "one_way_platform": true,
+            "surface_velocity": [1.0, 1.0],
+        }))
+        .expect("snake_case patch must deserialize");
+
+        assert_eq!(patch.body_type, Some(BodyType2d::Static));
+        assert_eq!(patch.collider_shape, Some(ColliderShape2d::ConvexPolygon));
+        assert_eq!(patch.gravity_scale, Some(0.5));
+        assert_eq!(patch.is_sensor, Some(true));
+        assert_eq!(patch.lock_rotation, Some(true));
+        assert_eq!(patch.continuous_detection, Some(true));
+        assert_eq!(patch.one_way_platform, Some(true));
+        assert_eq!(patch.surface_velocity, Some([1.0, 1.0]));
+    }
+
+    #[test]
+    fn enum_aliases_accept_both_spellings() {
+        for (wire, expected) in [
+            ("dynamic", BodyType2d::Dynamic),
+            ("Dynamic", BodyType2d::Dynamic),
+            ("static", BodyType2d::Static),
+            ("Static", BodyType2d::Static),
+            ("kinematic", BodyType2d::Kinematic),
+            ("Kinematic", BodyType2d::Kinematic),
+        ] {
+            let parsed: BodyType2d = serde_json::from_value(serde_json::json!(wire))
+                .unwrap_or_else(|e| panic!("body type '{wire}' must deserialize: {e}"));
+            assert_eq!(parsed, expected, "body type '{wire}'");
+        }
+
+        for (wire, expected) in [
+            ("box", ColliderShape2d::Box),
+            ("Box", ColliderShape2d::Box),
+            ("circle", ColliderShape2d::Circle),
+            ("Circle", ColliderShape2d::Circle),
+            ("capsule", ColliderShape2d::Capsule),
+            ("Capsule", ColliderShape2d::Capsule),
+            ("convex_polygon", ColliderShape2d::ConvexPolygon),
+            ("convexPolygon", ColliderShape2d::ConvexPolygon),
+            ("ConvexPolygon", ColliderShape2d::ConvexPolygon),
+            ("edge", ColliderShape2d::Edge),
+            ("Edge", ColliderShape2d::Edge),
+            ("auto", ColliderShape2d::Auto),
+            ("Auto", ColliderShape2d::Auto),
+        ] {
+            let parsed: ColliderShape2d = serde_json::from_value(serde_json::json!(wire))
+                .unwrap_or_else(|e| panic!("collider shape '{wire}' must deserialize: {e}"));
+            assert_eq!(parsed, expected, "collider shape '{wire}'");
+        }
+    }
+
+    /// `#[serde(default)]` on `Physics2dData` is what makes a partial payload a
+    /// merge candidate instead of a hard `from_value` failure that drops the
+    /// whole command before it is ever queued.
+    #[test]
+    fn physics2d_data_deserializes_from_a_partial_object() {
+        let data: Physics2dData = serde_json::from_value(serde_json::json!({
+            "body_type": "Static",
+            "friction": 1.2,
+        }))
+        .expect("partial Physics2dData must deserialize");
+
+        assert_eq!(data.body_type, BodyType2d::Static);
+        assert_eq!(data.friction, 1.2);
+        assert_eq!(data.mass, Physics2dData::default().mass);
+    }
+
+    /// The scene-file contract. `Physics2dData` is embedded in `EntitySnapshot`,
+    /// which is what `.forge` files serialize, so its emitted key spellings and
+    /// enum names are persistence format — the aliases above are deserialize-only
+    /// and must not have changed a single output byte.
+    #[test]
+    fn physics2d_data_serializes_snake_case_keys_and_pascal_case_variants() {
+        let json = serde_json::to_value(configured_platform()).expect("serialize");
+        let obj = json.as_object().expect("object");
+
+        for key in [
+            "body_type",
+            "collider_shape",
+            "size",
+            "radius",
+            "vertices",
+            "mass",
+            "friction",
+            "restitution",
+            "gravity_scale",
+            "is_sensor",
+            "lock_rotation",
+            "continuous_detection",
+            "one_way_platform",
+            "surface_velocity",
+        ] {
+            assert!(obj.contains_key(key), "scene files require the '{key}' key");
+        }
+        assert_eq!(obj.len(), 14, "no field may be added or dropped silently");
+
+        assert_eq!(obj["body_type"], serde_json::json!("Static"));
+        assert_eq!(obj["collider_shape"], serde_json::json!("Capsule"));
+    }
+
+    #[test]
+    fn physics2d_data_round_trips_through_json() {
+        let source = configured_platform();
+        let json = serde_json::to_string(&source).expect("serialize");
+        let parsed: Physics2dData = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed, source);
+    }
+
+    /// The drift guard's counterpart: the TS allowlist in
+    /// `web/src/lib/physics/physics2dPayload.ts` is pinned against these names,
+    /// so a field added here without one there is a test failure, not a silent
+    /// key the engine drops.
+    #[test]
+    fn patch_serializes_the_camel_case_names_the_web_client_sends() {
+        let json = serde_json::to_value(Physics2dPatch::full(&configured_platform()))
+            .expect("serialize");
+        let obj = json.as_object().expect("object");
+
+        let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "bodyType",
+                "colliderShape",
+                "continuousDetection",
+                "friction",
+                "gravityScale",
+                "isSensor",
+                "lockRotation",
+                "mass",
+                "oneWayPlatform",
+                "radius",
+                "restitution",
+                "size",
+                "surfaceVelocity",
+                "vertices",
+            ]
+        );
     }
 }

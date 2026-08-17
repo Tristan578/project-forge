@@ -3,6 +3,11 @@
  */
 
 import { StateCreator } from 'zustand';
+import {
+  buildSetPhysics2dPayload,
+  buildUpdatePhysics2dPayload,
+  defaultPhysics2dData,
+} from '@/lib/physics/physics2dPayload';
 import type { PhysicsData, JointData, Physics2dData, Joint2dData } from './types';
 
 export interface PhysicsSlice {
@@ -25,6 +30,11 @@ export interface PhysicsSlice {
   removeJoint: (entityId: string) => void;
   setPhysics2d: (entityId: string, data: Physics2dData, enabled: boolean) => void;
   updatePhysics2d: (entityId: string, data: Physics2dData) => void;
+  applyPhysics2dFromEngine: (
+    entityId: string,
+    data: Partial<Physics2dData>,
+    enabled: boolean,
+  ) => void;
   removePhysics2d: (entityId: string) => void;
   togglePhysics2d: (entityId: string, enabled: boolean) => void;
   setJoint2d: (entityId: string, data: Joint2dData) => void;
@@ -75,11 +85,41 @@ export const createPhysicsSlice: StateCreator<PhysicsSlice, [], [], PhysicsSlice
       physics2d: { ...state.physics2d, [entityId]: data },
       physics2dEnabled: { ...state.physics2dEnabled, [entityId]: enabled },
     }));
-    if (dispatchCommand) dispatchCommand('set_physics_2d', { entityId, ...data, enabled });
+    // Built, not spread: `set_physics2d` reads a NESTED `physicsData` object, so the
+    // flat spread this used to send deserialized to nothing and every 2D physics
+    // edit was dropped before it reached the simulation (PF-1167).
+    if (dispatchCommand) {
+      dispatchCommand('set_physics_2d', buildSetPhysics2dPayload(entityId, data, enabled));
+    }
   },
   updatePhysics2d: (entityId, data) => {
     set(state => ({ physics2d: { ...state.physics2d, [entityId]: data } }));
-    if (dispatchCommand) dispatchCommand('update_physics_2d', { entityId, ...data });
+    if (dispatchCommand) {
+      dispatchCommand('update_physics_2d', buildUpdatePhysics2dPayload(entityId, data));
+    }
+  },
+  /**
+   * Write engine-reported 2D physics into the store WITHOUT dispatching.
+   *
+   * The inbound `PHYSICS2D_CHANGED` handler must not call `setPhysics2d`: that
+   * dispatches `set_physics_2d` straight back at the engine, which is a FULL
+   * REPLACE, so any field the event did not carry would be reset to its default
+   * on the entity the engine just described. It also echoes a command per event.
+   *
+   * The patch is merged onto the entity's existing state — or onto engine
+   * defaults for an entity the store has never seen — so a partial event cannot
+   * blank the fields it left out.
+   */
+  applyPhysics2dFromEngine: (entityId, data, enabled) => {
+    set(state => {
+      const existing = Object.hasOwn(state.physics2d, entityId)
+        ? state.physics2d[entityId]
+        : defaultPhysics2dData();
+      return {
+        physics2d: { ...state.physics2d, [entityId]: { ...existing, ...data } },
+        physics2dEnabled: { ...state.physics2dEnabled, [entityId]: enabled },
+      };
+    });
   },
   removePhysics2d: (entityId) => {
     set(state => {

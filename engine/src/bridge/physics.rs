@@ -299,30 +299,81 @@ pub(super) fn apply_remove_joint_requests(
 // ============================================================================
 
 /// System that applies pending 2D physics update requests (always-active, metadata-only).
+///
+/// Mirrors `apply_physics_updates` (3D): merge the patch, and push history plus
+/// emit only when the merge actually changed something. The no-op guard is not an
+/// optimisation — `HistoryStack::push` clears the redo stack, so pushing on a
+/// patch that changed nothing would silently destroy the user's redo history, and
+/// this system previously pushed unconditionally on every update.
+///
+/// The second query handles an entity that has no `Physics2dData` at all. Without
+/// it, configuring 2D physics on a fresh entity was a total no-op: the loop found
+/// no match and dropped the command. `Without<Physics2dData>` makes the two
+/// queries disjoint, so there is no B0001 access conflict.
 pub(super) fn apply_physics2d_updates(
     mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
     mut query: Query<(&EntityId, &mut Physics2dData)>,
+    missing_query: Query<(Entity, &EntityId), Without<Physics2dData>>,
     phys2d_enabled_query: Query<&EntityId, With<Physics2dEnabled>>,
     mut history: ResMut<HistoryStack>,
 ) {
     for update in pending.physics2d_updates.drain(..) {
+        let enabled = phys2d_enabled_query.iter().any(|eid| eid.0 == update.entity_id);
+        let mut matched = false;
+
         for (entity_id, mut current_physics) in query.iter_mut() {
             if entity_id.0 == update.entity_id {
-                let old_physics = current_physics.clone();
-                *current_physics = update.physics_data.clone();
+                matched = true;
 
-                // Record for undo (using Physics2dChange action)
-                history.push(crate::core::history::UndoableAction::Physics2dChange {
-                    entity_id: update.entity_id.clone(),
-                    old_physics: Some(old_physics),
-                    new_physics: Some(update.physics_data.clone()),
-                });
+                // `bypass_change_detection` so a no-op patch does not mark the
+                // component `Changed` and re-trigger the selection emit system.
+                let (old_physics, new_physics) = update
+                    .patch
+                    .apply_recording(current_physics.bypass_change_detection());
 
-                // Emit change event
-                let enabled = phys2d_enabled_query.iter().any(|eid| eid.0 == update.entity_id);
-                events::emit_physics2d_changed(&update.entity_id, &update.physics_data, enabled);
+                if new_physics != old_physics {
+                    current_physics.set_changed();
+                    history.push(crate::core::history::UndoableAction::Physics2dChange {
+                        entity_id: update.entity_id.clone(),
+                        old_physics: Some(old_physics),
+                        new_physics: Some(new_physics.clone()),
+                    });
+                    events::emit_physics2d_changed(&update.entity_id, &new_physics, enabled);
+                }
                 break;
             }
+        }
+
+        if matched {
+            continue;
+        }
+
+        // No `Physics2dData` yet — build it from defaults plus the patch and
+        // insert it, so this command is how 2D physics gets configured on an
+        // entity for the first time rather than being silently dropped.
+        for (entity, entity_id) in missing_query.iter() {
+            if entity_id.0 == update.entity_id {
+                let mut new_physics = Physics2dData::default();
+                update.patch.apply_to(&mut new_physics);
+
+                commands.entity(entity).insert(new_physics.clone());
+                history.push(crate::core::history::UndoableAction::Physics2dChange {
+                    entity_id: update.entity_id.clone(),
+                    old_physics: None,
+                    new_physics: Some(new_physics.clone()),
+                });
+                events::emit_physics2d_changed(&update.entity_id, &new_physics, enabled);
+                matched = true;
+                break;
+            }
+        }
+
+        if !matched {
+            tracing::warn!(
+                "2D physics update ignored: no entity with id '{}'",
+                update.entity_id
+            );
         }
     }
 }
