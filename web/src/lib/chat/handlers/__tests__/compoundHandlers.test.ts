@@ -1160,14 +1160,24 @@ describe('compoundHandlers', () => {
       const { store } = await spawnWith({ physics: { bodyType: 'dynamic', friction: 1e40 } });
 
       const phys = lastCallArg(store.updatePhysics, 1) as Record<string, number>;
-      expect(Number.isFinite(phys.friction)).toBe(true);
-      expect(phys.friction).toBeLessThanOrEqual(3.4e38);
+      // Asserted as the exact bound, not merely as "finite": every value up to
+      // 1e30 is finite and below f32::MAX, so a looser assertion stays green
+      // with the 100 deleted and friction falling back to the generic cap.
+      expect(phys.friction).toBe(100);
     });
 
     it('refuses a zero density, which Rapier cannot integrate', async () => {
       const { store } = await spawnWith({ physics: { bodyType: 'dynamic', density: 0 } });
 
-      expect((lastCallArg(store.updatePhysics, 1) as Record<string, number>).density).toBeGreaterThan(0);
+      expect((lastCallArg(store.updatePhysics, 1) as Record<string, number>).density).toBe(0.0001);
+    });
+
+    it('clamps a restitution above 1, which would return more energy than the impact carried', async () => {
+      const { store } = await spawnWith({ physics: { bodyType: 'dynamic', restitution: 3, gravityScale: 1e6 } });
+
+      const phys = lastCallArg(store.updatePhysics, 1) as Record<string, number>;
+      expect(phys.restitution).toBe(1);
+      expect(phys.gravityScale).toBe(1000);
     });
 
     it('falls back to the default for a value of the wrong type, keeping the rest of the spec', async () => {
@@ -1188,11 +1198,34 @@ describe('compoundHandlers', () => {
       const { result, store } = await spawnWith({ light: 'bright' });
 
       // Nothing can be read out of a string, so every default applies —
-      // the same answer as supplying no fields, and no throw.
-      expect(lastCallArg(store.updateLight, 1)).toEqual(
-        expect.objectContaining({ lightType: 'point', intensity: 800 }),
-      );
+      // the same answer as supplying no fields, and no throw. Asserted as the
+      // whole object rather than a couple of keys: the claim is that EVERY
+      // field defaults, and objectContaining is blind to one that stopped.
+      expect(lastCallArg(store.updateLight, 1)).toEqual({
+        lightType: 'point',
+        color: [1, 1, 1],
+        intensity: 800,
+        shadowsEnabled: false,
+        shadowDepthBias: 0.02,
+        shadowNormalBias: 1.8,
+        range: 20,
+        radius: 0,
+        innerAngle: 0.4,
+        outerAngle: 0.8,
+      });
       expect(result.success).toBe(true);
+    });
+
+    it('clamps light values to what the field can mean', async () => {
+      const { store } = await spawnWith({
+        light: { lightType: 'spot', intensity: -5, outerAngle: 3, shadowDepthBias: 1e9 },
+      });
+
+      const light = lastCallArg(store.updateLight, 1) as Record<string, number>;
+      expect(light.intensity).toBe(0);
+      // A cone's half-angle past pi/2 is a hemisphere, not a spotlight.
+      expect(light.outerAngle).toBe(Math.PI / 2);
+      expect(light.shadowDepthBias).toBe(100);
     });
 
     it('rounds a fractional value for a field the engine deserializes as u32', async () => {
@@ -1228,9 +1261,38 @@ describe('compoundHandlers', () => {
       const calls = (store.addGameComponent as ReturnType<typeof vi.fn>).mock.calls;
       const controller = calls.find(([, c]) => (c as { type?: string }).type === 'characterController');
       const cc = (controller?.[1] as { characterController: Record<string, number> }).characterController;
-      expect(Number.isFinite(cc.speed)).toBe(true);
-      expect(cc.speed).toBeLessThanOrEqual(3.4e38);
+      // 1000 is the engine's own ceiling for `speed`, not a number chosen here
+      // — `helpers.test.ts` reads every one of these bounds out of the Rust.
+      expect(cc.speed).toBe(1000);
       expect(cc.jumpHeight).toBe(0);
+    });
+
+    // Each compound tool reaches the builders by its own path, and the defect
+    // was precisely that a builder was not on the path production ran. So the
+    // other two entry points that consume model-supplied specs get their own
+    // assertion rather than inheriting create_scene_from_description's.
+    it('validates specs reaching create_level_layout', async () => {
+      const { store } = await invoke('create_level_layout', {
+        theme: 'platformer',
+        obstacles: [{ type: 'cube', position: [0, 0, 0], physics: { bodyType: 'dynamic', restitution: 3 } }],
+      }, {
+        spawnEntity: vi.fn(() => 'e1'),
+      });
+
+      expect((lastCallArg(store.updatePhysics, 1) as Record<string, number>).restitution).toBe(1);
+    });
+
+    it('validates specs reaching configure_game_mechanics', async () => {
+      mockFindEntityByName.mockReturnValue('e1');
+      const { store } = await invoke('configure_game_mechanics', {
+        entityConfigs: [{
+          entityName: 'Coin',
+          gameComponents: [{ type: 'collectible', props: { value: 1.5 } }],
+        }],
+      });
+
+      const comp = lastCallArg(store.addGameComponent, 1) as { collectible: { value: number } };
+      expect(comp.collectible.value).toBe(2);
     });
   });
 });

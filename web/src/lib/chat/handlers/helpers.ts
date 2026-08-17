@@ -4,7 +4,7 @@
 
 import { z } from 'zod';
 import type { MaterialData, LightData, PhysicsData, SceneNode } from './types';
-import { zVec2, zVec3, zVec4 } from './types';
+import { F32_SAFE_MAX, zVec2, zVec3, zVec4 } from './types';
 
 // ===== Compound Action Types =====
 
@@ -26,18 +26,12 @@ export interface GameplayAnalysis {
 
 // ===== Zod Schemas for Builder Functions =====
 
-/**
- * Largest magnitude a model-supplied scalar may carry into the engine.
- *
- * Every one of these numbers is cast to `f32` on the Rust side while JSON
- * carries f64, so a *finite* value past `f32::MAX` (~3.4e38) arrives as `inf`
- * and poisons whatever it touches — an infinite density or roughness
- * propagates NaN through the physics and render graphs rather than merely
- * looking wrong. Zod rejects `Infinity` and `NaN` outright; this covers the
- * finite-but-unusable band beneath them, for fields with no tighter bound of
- * their own.
- */
-const F32_SAFE_MAX = 1e30;
+// `F32_SAFE_MAX` is the ceiling for a scalar with no tighter reading of its
+// own: every number here is cast to `f32` on the Rust side, so a finite value
+// past `f32::MAX` arrives as `inf` and propagates NaN through the physics and
+// render graphs rather than merely looking wrong. Zod rejects `Infinity` and
+// `NaN` outright; this covers the finite-but-unusable band beneath them. It
+// lives in `./types` because the vector schemas need the same bound.
 
 /**
  * A model-supplied number, clamped into the range the field can actually mean.
@@ -62,12 +56,16 @@ function zNum(min: number, max: number = F32_SAFE_MAX) {
 }
 
 /**
- * The same, for a field the engine deserializes into an integer type.
+ * The same, for a field the engine holds as an integer.
  *
- * serde performs no float-to-int coercion, so `value: 1.5` against a `u32`
- * fails the whole payload — and `dispatchCommand` returns void, so nothing
- * anywhere reports the rejection. Rounding here is what stops a plausible
- * model answer from silently dropping the command.
+ * Two different mechanisms sit behind these, and both want rounding. The
+ * material fields are real serde — `parallax_relief_max_steps` is an
+ * `Option<u32>`, and serde performs no float-to-int coercion, so `5.5` fails
+ * the *whole* `update_material` payload; `dispatchCommand` returns void, so
+ * nothing anywhere reports it. The game-component fields are read by the
+ * engine's own `prop_u32`, which rounds and clamps rather than rejecting — so
+ * there the risk is not a dropped command but a store that records `1.5` for
+ * an entity the engine gave `2`.
  */
 function zInt(min: number, max: number = 1e9) {
   return z
@@ -176,39 +174,47 @@ const zPartialPhysics = z.object({
 const zName = zOpt(z.string().max(256));
 const zNullableName = zOpt(z.string().max(256).nullable());
 
-/** Seconds. One hour is well past any interval a game loop can use. */
-const MAX_SECS = 3600;
-/** Metres per second, and the ceiling for anything else measured in units/sec. */
-const MAX_SPEED = 10000;
+// Every bound below is the engine's own, read from `build_game_component` in
+// `engine/src/core/game_components.rs` rather than reasoned about here. That
+// function reads each field through `prop_f32(props, key, min, max)` or
+// `prop_u32(props, key, max)`, which clamp on the Rust side — so a looser bound
+// here is not merely permissive, it is a divergence: the Zustand store, the
+// inspector, undo history and scene export would all record a value the running
+// entity never holds, with nothing reported on either side. Keep these in step
+// with that file; where a range reads oddly (jumpHeight caps at 100 while speed
+// caps at 1000) it is the engine's reading that wins.
 
 const zCharacterControllerProps = z.object({
-  speed: zNum(0, MAX_SPEED),
-  jumpHeight: zNum(0, MAX_SPEED),
-  gravityScale: zNum(-1000, 1000),
+  speed: zNum(0, 1000),
+  jumpHeight: zNum(0, 100),
+  gravityScale: zNum(-10, 10),
   canDoubleJump: zOpt(z.boolean()),
 }).passthrough();
 
 const zHealthProps = z.object({
-  maxHp: zNum(0),
-  currentHp: zNum(0),
-  invincibilitySecs: zNum(0, MAX_SECS),
+  // 0 max HP is an entity that is dead the frame it spawns; the engine floors
+  // it at 1 and would show a full bar against a maxHp the store said was 0.
+  maxHp: zNum(1, 1_000_000),
+  currentHp: zNum(0, 1_000_000),
+  invincibilitySecs: zNum(0, 60),
   respawnOnDeath: zOpt(z.boolean()),
   respawnPoint: zOpt(zVec3),
   despawnOnDeath: zOpt(z.boolean()),
 }).passthrough();
 
 const zCollectibleProps = z.object({
-  // `CollectibleData::value` is a u32, so a negative or fractional score is a
-  // hard serde reject that drops the whole command.
-  value: zInt(0),
+  // `CollectibleData::value` is a u32 and the engine rounds it; rounding here
+  // as well is what keeps the store's copy and the engine's copy the same
+  // number rather than 1.5 against 2.
+  value: zInt(0, 1_000_000),
   destroyOnCollect: zOpt(z.boolean()),
   pickupSoundAsset: zNullableName,
   // Degrees per second; the sign picks the direction.
-  rotateSpeed: zNum(-36000, 36000),
+  rotateSpeed: zNum(-100, 100),
 }).passthrough();
 
 const zDamageZoneProps = z.object({
-  damagePerSecond: zNum(0),
+  damagePerSecond: zNum(0, 10_000),
   oneShot: zOpt(z.boolean()),
 }).passthrough();
 
@@ -218,13 +224,18 @@ const zCheckpointProps = z.object({
 
 const zTeleporterProps = z.object({
   targetPosition: zOpt(zVec3),
-  cooldownSecs: zNum(0, MAX_SECS),
+  cooldownSecs: zNum(0, 300),
 }).passthrough();
 
 const zMovingPlatformProps = z.object({
-  speed: zNum(0, MAX_SPEED),
-  waypoints: zOpt(z.array(zVec3)),
-  pauseDuration: zNum(0, MAX_SECS),
+  speed: zNum(0, 1000),
+  // The engine's mover early-returns below two waypoints, so a one-point path
+  // is a platform that silently never moves. Dropping the field takes the
+  // builder's default instead, which is the same nothing but an honest one.
+  // Bounded above because it is the only field here whose cardinality the
+  // model picks, and the array is serialized into every scene export.
+  waypoints: zOpt(z.array(zVec3).min(2).max(1000)),
+  pauseDuration: zNum(0, 60),
   loopMode: zOpt(z.enum(['pingPong', 'loop', 'once'])),
 }).passthrough();
 
@@ -236,32 +247,39 @@ const zTriggerZoneProps = z.object({
 const zSpawnerProps = z.object({
   entityType: zName,
   // A zero interval spawns every frame until max_count, which reads as a hang.
-  intervalSecs: zNum(0.01, MAX_SECS),
-  // `SpawnerData::max_count` is a u32.
-  maxCount: zInt(0, 10000),
+  intervalSecs: zNum(0.1, 3600),
+  // `SpawnerData::max_count` is a u32, rounded and clamped by the engine.
+  maxCount: zInt(0, 1000),
   spawnOffset: zOpt(zVec3),
   onTrigger: zNullableName,
 }).passthrough();
 
 const zFollowerProps = z.object({
   targetEntityId: zNullableName,
-  speed: zNum(0, MAX_SPEED),
-  stopDistance: zNum(0),
+  speed: zNum(0, 1000),
+  stopDistance: zNum(0, 1000),
   lookAtTarget: zOpt(z.boolean()),
 }).passthrough();
 
 const zProjectileProps = z.object({
-  speed: zNum(0, MAX_SPEED),
-  damage: zNum(0),
-  lifetimeSecs: zNum(0, MAX_SECS),
+  speed: zNum(0, 10_000),
+  damage: zNum(0, 100_000),
+  lifetimeSecs: zNum(0, 300),
   gravity: zOpt(z.boolean()),
   destroyOnHit: zOpt(z.boolean()),
 }).passthrough();
 
 const zWinConditionProps = z.object({
-  conditionType: zName,
-  // `WinConditionData::target_score` is an Option<u32>.
-  targetScore: zInt(0),
+  // The engine matches these three spellings and falls through to `Score` for
+  // anything else — so `collect_all`, the snake_case the model has just used
+  // for every component type in the same call, silently turns "collect all the
+  // coins" into "reach 10 points". Rejecting it here leaves the builder's own
+  // default standing, which is the same `score`, but keeps the store honest
+  // about what the entity is rather than recording a type it cannot be.
+  conditionType: zOpt(z.enum(['score', 'collectAll', 'reachGoal'])),
+  // `WinConditionData::target_score` is an Option<u32>, rounded and clamped by
+  // the engine to at most u32::MAX.
+  targetScore: zInt(0, 4_294_967_295),
   targetEntityId: zNullableName,
 }).passthrough();
 
@@ -508,7 +526,7 @@ export function buildGameComponentFromInput(
       return {
         type: 'winCondition',
         winCondition: {
-          conditionType: (p.conditionType ?? 'score') as 'score' | 'collectAll' | 'reachGoal',
+          conditionType: p.conditionType ?? 'score',
           targetScore: p.targetScore ?? 10,
           targetEntityId: p.targetEntityId ?? null,
         },

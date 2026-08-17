@@ -31,17 +31,36 @@ export type { EditorState, MaterialData, LightData, PhysicsData, EntityType, Inp
 /** Non-empty entity ID string. */
 export const zEntityId = z.string().min(1);
 
+/**
+ * Largest magnitude a model-supplied number may carry into the engine.
+ *
+ * Every one of these values is cast to `f32` on the Rust side while JSON
+ * carries f64, so a *finite* value past `f32::MAX` (~3.4e38) arrives as `inf`
+ * and poisons whatever it touches. `.finite()` alone does not catch that band:
+ * `1e308` is finite in JS and is `inf` in f32.
+ */
+export const F32_SAFE_MAX = 1e30;
+
+/**
+ * A single vector component: finite, and inside the f32 range.
+ *
+ * Clamped rather than rejected so one absurd component does not discard the
+ * whole vector — the engine's own `prop_vec3` treats a vector as all-or-nothing,
+ * and dropping a position leaves an entity wherever it happened to spawn.
+ */
+const zF32 = z.number().finite().transform((v) => Math.min(F32_SAFE_MAX, Math.max(-F32_SAFE_MAX, v)));
+
 /** 3-component numeric vector as array (color RGB, etc.). */
-export const zVec3 = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
+export const zVec3 = z.tuple([zF32, zF32, zF32]);
 
 /** 3-component numeric vector as { x, y, z } object (transform position/rotation/scale). */
-export const zXYZ = z.object({ x: z.number().finite(), y: z.number().finite(), z: z.number().finite() });
+export const zXYZ = z.object({ x: zF32, y: zF32, z: zF32 });
 
 /** 4-component numeric vector (color RGBA). */
-export const zVec4 = z.tuple([z.number().finite(), z.number().finite(), z.number().finite(), z.number().finite()]);
+export const zVec4 = z.tuple([zF32, zF32, zF32, zF32]);
 
 /** 2-component numeric vector (UV offset/scale, 2D position). */
-export const zVec2 = z.tuple([z.number().finite(), z.number().finite()]);
+export const zVec2 = z.tuple([zF32, zF32]);
 
 /** Selection mode enum. */
 export const zSelectionMode = z.enum(['replace', 'add', 'toggle']);
