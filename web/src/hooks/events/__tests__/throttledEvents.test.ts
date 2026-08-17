@@ -25,9 +25,9 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { THROTTLED_EVENTS } from '../useEngineEvents';
+import { THROTTLED_EVENTS } from '../throttledEvents';
 
-const ENGINE_SRC = path.resolve(__dirname, '../../../../engine/src');
+const ENGINE_SRC = path.resolve(__dirname, '../../../../../engine/src');
 
 /**
  * The directory entries of `dir`, or a thrown explanation.
