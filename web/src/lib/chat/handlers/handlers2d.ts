@@ -29,6 +29,7 @@ import type {
   SliceMode,
   Grid2dSettings,
 } from '@/stores/slices/types';
+import { MAX_IK_BONE_CHAIN_2D } from '@/lib/skeleton2d/skeletonPayload';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1355,35 +1356,78 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(
         z.object({
           entityId: zEntityId,
-          chainName: z.string(),
-          startBone: z.string(),
-          endBone: z.string(),
+          // `name` + `bones` is the vocabulary the MCP manifest publishes, so an
+          // LLM following the documented schema sent a payload this handler used to
+          // reject outright. `chainName` + `startBone`/`endBone` is the traversal
+          // form it shipped with, and is what the auto-rigger's own `IKChain` speaks.
+          // Both are accepted; neither is guessed at.
+          name: z.string().min(1).optional(),
+          chainName: z.string().min(1).optional(),
+          bones: z.array(z.string().min(1)).min(2).max(MAX_IK_BONE_CHAIN_2D).optional(),
+          startBone: z.string().min(1).optional(),
+          endBone: z.string().min(1).optional(),
+          targetEntityId: z.number().int().min(0).optional(),
+          bendDirection: z.number().optional(),
+          mix: z.number().min(0).max(1).optional(),
         }),
         args,
       );
       if (p.error) return p.error;
 
-      const { entityId, chainName, startBone, endBone } = p.data;
+      const { entityId, bones: explicitChain, startBone, endBone, targetEntityId, bendDirection, mix } = p.data;
+      const chainName = p.data.name ?? p.data.chainName;
+      if (!chainName) {
+        return { success: false, error: 'Missing name (or chainName) for the IK chain' };
+      }
 
       const existing = ctx.store.skeletons2d[entityId] ?? defaultSkeleton2d();
 
-      // Build bone chain from skeleton bones
-      const bones = existing.bones;
-      const chain: string[] = [];
-      let current: string | null = endBone;
-      while (current && current !== startBone) {
-        chain.unshift(current);
-        const bone = bones.find(b => b.name === current);
-        current = bone?.parentBone ?? null;
+      let boneChain: string[];
+      if (explicitChain) {
+        boneChain = explicitChain;
+      } else if (startBone && endBone) {
+        // Walk endBone's parents up to startBone. `parentBone` is caller-supplied
+        // data, so a cycle (a -> b -> a) is representable and would spin forever;
+        // the seen-set ends the walk instead of hanging the tab.
+        const chain: string[] = [];
+        const seen = new Set<string>();
+        let current: string | null = endBone;
+        while (current && current !== startBone && !seen.has(current)) {
+          seen.add(current);
+          chain.unshift(current);
+          const bone = existing.bones.find(b => b.name === current);
+          current = bone?.parentBone ?? null;
+        }
+        if (current !== startBone) {
+          return {
+            success: false,
+            error: `No bone path from "${startBone}" to "${endBone}" — check the parentBone hierarchy`,
+          };
+        }
+        chain.unshift(startBone);
+        if (chain.length < 2) {
+          return { success: false, error: 'startBone and endBone must name different bones' };
+        }
+        if (chain.length > MAX_IK_BONE_CHAIN_2D) {
+          return {
+            success: false,
+            error: `Bone path is ${chain.length} long, over the ${MAX_IK_BONE_CHAIN_2D} limit`,
+          };
+        }
+        boneChain = chain;
+      } else {
+        return { success: false, error: 'Provide either bones, or both startBone and endBone' };
       }
-      if (current === startBone) chain.unshift(startBone);
 
       const ik: IkConstraint2d = {
         name: chainName,
-        boneChain: chain.length > 0 ? chain : [startBone, endBone],
-        targetEntityId: 0,
-        bendDirection: 1,
-        mix: 1,
+        boneChain,
+        // Was hardcoded to 0 with no way to override, so every constraint the AI
+        // created was inert: the engine's solver skips any whose target entity it
+        // cannot find, and 0 matches nothing.
+        targetEntityId: targetEntityId ?? 0,
+        bendDirection: bendDirection !== undefined && bendDirection < 0 ? -1 : 1,
+        mix: mix ?? 1,
       };
 
       ctx.store.setSkeleton2d(entityId, {

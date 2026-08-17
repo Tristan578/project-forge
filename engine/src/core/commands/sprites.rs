@@ -527,45 +527,97 @@ fn handle_set_skeleton2d_skin(payload: serde_json::Value) -> super::CommandResul
     }
 }
 
-/// Handle create_ik_chain2d command.
-/// Payload: { entityId, chainName, targetBone, chainLength, bendPositive }
-fn handle_create_ik_chain2d(payload: serde_json::Value) -> super::CommandResult {
+/// Upper bound on `bones` for one IK constraint. `solve_ik_constraints_2d` is a
+/// two-bone analytical solver, so anything past index 1 is inert data — the bound
+/// exists to keep a caller-supplied length from becoming an allocation.
+pub const MAX_IK_BONE_CHAIN_2D: usize = 64;
+
+/// Parse a `create_ik_chain2d` payload into the constraint the bridge queues.
+///
+/// Split out from the handler so it is testable natively: the queue call needs a
+/// thread-local `PendingCommands`, this does not.
+pub(crate) fn parse_ik_chain2d(
+    payload: &serde_json::Value,
+) -> Result<(String, crate::core::skeleton2d::IkConstraint2d), String> {
     let entity_id = payload.get("entityId")
         .and_then(|v| v.as_str())
         .ok_or("Missing entityId")?
         .to_string();
 
-    let chain_name = payload.get("chainName")
+    let name = payload.get("name")
         .and_then(|v| v.as_str())
-        .ok_or("Missing chainName")?
+        .ok_or("Missing name")?
         .to_string();
 
-    let target_bone = payload.get("targetBone")
-        .and_then(|v| v.as_str())
-        .ok_or("Missing targetBone")?
-        .to_string();
+    // A shorter chain is silently skipped by the solver (`bone_chain.len() < 2`),
+    // so refusing it here is the only way the caller learns anything happened.
+    let bones = payload.get("bones")
+        .and_then(|v| v.as_array())
+        .ok_or("Missing bones")?;
+    if bones.len() < 2 {
+        return Err(format!("bones needs at least 2 entries, got {}", bones.len()));
+    }
+    if bones.len() > MAX_IK_BONE_CHAIN_2D {
+        return Err(format!(
+            "bones exceeds the {} entry limit ({} given)",
+            MAX_IK_BONE_CHAIN_2D,
+            bones.len()
+        ));
+    }
+    let mut bone_chain: Vec<String> = Vec::with_capacity(bones.len());
+    for (index, bone) in bones.iter().enumerate() {
+        let name = bone
+            .as_str()
+            .ok_or_else(|| format!("bones[{}] is not a string", index))?;
+        if name.is_empty() {
+            return Err(format!("bones[{}] is empty", index));
+        }
+        bone_chain.push(name.to_string());
+    }
 
-    let chain_length = payload.get("chainLength")
-        .and_then(|v| v.as_u64())
-        .ok_or("Missing chainLength")? as usize;
-
-    let bend_positive = payload.get("bendPositive")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-
-    // Build bone chain by repeating target_bone name for the requested length.
-    // The bridge system will resolve actual parent traversal using skeleton data.
-    let bone_chain: Vec<String> = (0..chain_length.max(1))
-        .map(|_| target_bone.clone())
-        .collect();
-
-    let constraint = crate::core::skeleton2d::IkConstraint2d {
-        name: chain_name,
-        bone_chain,
-        target_entity_id: String::new(), // Placeholder
-        bend_direction: if bend_positive { 1.0 } else { -1.0 },
-        mix: 1.0,
+    // `IkConstraint2d::target_entity_id` is matched against `EntityId(String)`, but
+    // the manifest declares this a number and the browser store holds one. Accept
+    // either spelling rather than dropping the target and leaving a constraint the
+    // solver can never resolve.
+    let target = payload.get("targetEntityId").ok_or("Missing targetEntityId")?;
+    let target_entity_id = match target {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        _ => return Err("targetEntityId must be a string or a number".to_string()),
     };
+    if target_entity_id.is_empty() {
+        return Err("targetEntityId is empty".to_string());
+    }
+
+    // Sign is the whole meaning of this field, and a NaN would poison every bone
+    // rotation it multiplies.
+    let bend_direction = match payload.get("bendDirection").and_then(|v| v.as_f64()) {
+        Some(v) if v < 0.0 => -1.0,
+        _ => 1.0,
+    };
+
+    let mix = payload.get("mix")
+        .and_then(|v| v.as_f64())
+        .filter(|v| v.is_finite())
+        .map(|v| v.clamp(0.0, 1.0) as f32)
+        .unwrap_or(1.0);
+
+    Ok((
+        entity_id,
+        crate::core::skeleton2d::IkConstraint2d {
+            name,
+            bone_chain,
+            target_entity_id,
+            bend_direction,
+            mix,
+        },
+    ))
+}
+
+/// Handle create_ik_chain2d command.
+/// Payload: { entityId, name, bones: [string], targetEntityId, bendDirection?, mix? }
+fn handle_create_ik_chain2d(payload: serde_json::Value) -> super::CommandResult {
+    let (entity_id, constraint) = parse_ik_chain2d(&payload)?;
 
     if queue_create_ik_chain2d_from_bridge(CreateIkChain2dRequest {
         entity_id,
@@ -1142,5 +1194,138 @@ fn handle_set_grid_2d(payload: serde_json::Value) -> super::CommandResult {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+#[cfg(test)]
+mod ik_chain2d_tests {
+    use super::{parse_ik_chain2d, MAX_IK_BONE_CHAIN_2D};
+    use serde_json::json;
+
+    fn valid() -> serde_json::Value {
+        json!({
+            "entityId": "ent-1",
+            "name": "left_arm",
+            "bones": ["upper_arm", "forearm"],
+            "targetEntityId": 7,
+        })
+    }
+
+    #[test]
+    fn reads_the_manifest_vocabulary() {
+        let (entity_id, ik) = parse_ik_chain2d(&valid()).expect("valid payload");
+        assert_eq!(entity_id, "ent-1");
+        assert_eq!(ik.name, "left_arm");
+        assert_eq!(ik.bone_chain, vec!["upper_arm".to_string(), "forearm".to_string()]);
+        // A numeric target is stringified, not dropped: `EntityId` is a String and the
+        // solver skips any constraint whose target it cannot find.
+        assert_eq!(ik.target_entity_id, "7");
+        assert_eq!(ik.bend_direction, 1.0);
+        assert_eq!(ik.mix, 1.0);
+    }
+
+    #[test]
+    fn accepts_a_string_target() {
+        let mut payload = valid();
+        payload["targetEntityId"] = json!("ent-target");
+        let (_, ik) = parse_ik_chain2d(&payload).expect("string target");
+        assert_eq!(ik.target_entity_id, "ent-target");
+    }
+
+    #[test]
+    fn refuses_a_chain_longer_than_the_bound() {
+        let mut payload = valid();
+        payload["bones"] = json!(vec!["bone"; MAX_IK_BONE_CHAIN_2D + 1]);
+        let err = parse_ik_chain2d(&payload).expect_err("over the bound");
+        assert!(err.contains("exceeds"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn accepts_a_chain_at_the_bound() {
+        let mut payload = valid();
+        payload["bones"] = json!(vec!["bone"; MAX_IK_BONE_CHAIN_2D]);
+        let (_, ik) = parse_ik_chain2d(&payload).expect("at the bound");
+        assert_eq!(ik.bone_chain.len(), MAX_IK_BONE_CHAIN_2D);
+    }
+
+    #[test]
+    fn refuses_a_chain_the_solver_would_skip() {
+        let mut payload = valid();
+        payload["bones"] = json!(["upper_arm"]);
+        let err = parse_ik_chain2d(&payload).expect_err("single bone");
+        assert!(err.contains("at least 2"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn refuses_a_non_string_bone() {
+        let mut payload = valid();
+        payload["bones"] = json!(["upper_arm", 3]);
+        let err = parse_ik_chain2d(&payload).expect_err("numeric bone");
+        assert!(err.contains("bones[1]"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn refuses_an_empty_bone_name() {
+        let mut payload = valid();
+        payload["bones"] = json!(["upper_arm", ""]);
+        let err = parse_ik_chain2d(&payload).expect_err("empty bone");
+        assert!(err.contains("bones[1]"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn refuses_a_missing_target() {
+        let mut payload = valid();
+        payload.as_object_mut().unwrap().remove("targetEntityId");
+        assert!(parse_ik_chain2d(&payload).is_err());
+        payload["targetEntityId"] = json!("");
+        assert!(parse_ik_chain2d(&payload).is_err());
+        payload["targetEntityId"] = json!(true);
+        assert!(parse_ik_chain2d(&payload).is_err());
+    }
+
+    #[test]
+    fn refuses_missing_required_strings() {
+        for key in ["entityId", "name", "bones"] {
+            let mut payload = valid();
+            payload.as_object_mut().unwrap().remove(key);
+            assert!(parse_ik_chain2d(&payload).is_err(), "{} should be required", key);
+        }
+    }
+
+    #[test]
+    fn normalizes_bend_direction_to_a_sign() {
+        for (given, expected) in [
+            (json!(-1), -1.0_f32),
+            (json!(-0.25), -1.0),
+            (json!(1), 1.0),
+            (json!(12.5), 1.0),
+            (json!(0), 1.0),
+            (json!("left"), 1.0),
+        ] {
+            let mut payload = valid();
+            payload["bendDirection"] = given.clone();
+            let (_, ik) = parse_ik_chain2d(&payload).expect("bend direction");
+            assert_eq!(ik.bend_direction, expected, "bendDirection {} ", given);
+        }
+    }
+
+    #[test]
+    fn clamps_mix_and_rejects_non_finite() {
+        for (given, expected) in [
+            (json!(0), 0.0_f32),
+            (json!(0.5), 0.5),
+            (json!(1), 1.0),
+            (json!(4), 1.0),
+            (json!(-2), 0.0),
+            // Not representable in JSON, so it arrives as a string or null and the
+            // default stands rather than a NaN reaching every bone rotation.
+            (json!("NaN"), 1.0),
+            (serde_json::Value::Null, 1.0),
+        ] {
+            let mut payload = valid();
+            payload["mix"] = given.clone();
+            let (_, ik) = parse_ik_chain2d(&payload).expect("mix");
+            assert_eq!(ik.mix, expected, "mix {} ", given);
+        }
     }
 }

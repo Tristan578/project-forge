@@ -28,6 +28,13 @@
  * rig that is visibly wrong in one place instead of an entity that renders nothing.
  */
 
+/**
+ * Mirror of `MAX_IK_BONE_CHAIN_2D` in `engine/src/core/commands/sprites.rs`, which
+ * refuses a longer `bones` array outright. Pinned against the Rust source by this
+ * module's test so the two cannot drift into a silent rejection.
+ */
+export const MAX_IK_BONE_CHAIN_2D = 64;
+
 /** A bone exactly as `Bone2dDef` reads it. */
 export interface WireBone2d {
   name: string;

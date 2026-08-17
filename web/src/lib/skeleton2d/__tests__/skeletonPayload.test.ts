@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   buildCreateSkeleton2dPayload,
   buildWireSkeletonData2d,
+  MAX_IK_BONE_CHAIN_2D,
   type SkeletonSource2d,
 } from '../skeletonPayload';
 
@@ -235,6 +236,20 @@ describe('the wire shape matches engine/src/core/skeleton2d.rs', () => {
     expect(text.length, `empty ${RUST}`).toBeGreaterThan(0);
     return text;
   }
+
+  it('mirrors the engine bound on an IK bone chain', () => {
+    // Lives in the command module rather than the data module — it bounds what a
+    // caller may send, not what the struct can hold.
+    const SPRITES = join(
+      __dirname, '..', '..', '..', '..', '..',
+      'engine', 'src', 'core', 'commands', 'sprites.rs',
+    );
+    const text = readFileSync(SPRITES, 'utf8');
+    expect(text.length, `empty ${SPRITES}`).toBeGreaterThan(0);
+    const match = text.match(/pub const MAX_IK_BONE_CHAIN_2D: usize = (\d+);/);
+    expect(match, `no MAX_IK_BONE_CHAIN_2D in ${SPRITES}`).not.toBeNull();
+    expect(Number(match![1])).toBe(MAX_IK_BONE_CHAIN_2D);
+  });
 
   /**
    * The body of a `pub struct`/`pub enum`, cut at the closing brace in column 0.

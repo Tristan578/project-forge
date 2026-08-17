@@ -7,6 +7,7 @@ import { invokeHandler, createMockStore } from './handlerTestUtils';
 import { exportHandlers } from '../exportHandlers';
 import { assetHandlers } from '../assetHandlers';
 import { handlers2d } from '../handlers2d';
+import { MAX_IK_BONE_CHAIN_2D } from '@/lib/skeleton2d/skeletonPayload';
 import type { ToolCallContext, ExecutionResult } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -2279,6 +2280,19 @@ describe('handlers2d skeleton 2D commands', () => {
   // create_ik_chain2d
   // -------------------------------------------------------------------------
   describe('create_ik_chain2d', () => {
+    // Same shape as baseSkeleton's bones, with the two fields these tests vary.
+    const bone = (name: string, parentBone: string | null) => ({
+      ...baseSkeleton.bones[0],
+      name,
+      parentBone,
+    });
+
+    const constraintFrom = (store: { setSkeleton2d: unknown }) => {
+      const updated = (store.setSkeleton2d as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(updated.ikConstraints).toHaveLength(1);
+      return updated.ikConstraints[0];
+    };
+
     it('creates an IK chain from bone hierarchy', async () => {
       const { result, store } = await invoke2d(
         'create_ik_chain2d',
@@ -2286,18 +2300,123 @@ describe('handlers2d skeleton 2D commands', () => {
         { skeletons2d: { 'ent-1': baseSkeleton }, setSkeleton2d: vi.fn() },
       );
       expect(result.success).toBe(true);
-      const updated = (store.setSkeleton2d as ReturnType<typeof vi.fn>).mock.calls[0][1];
-      expect(updated.ikConstraints).toHaveLength(1);
-      expect(updated.ikConstraints[0].name).toBe('arm_ik');
+      const ik = constraintFrom(store);
+      expect(ik.name).toBe('arm_ik');
+      expect(ik.boneChain).toEqual(['root', 'arm']);
     });
 
-    it('creates default skeleton when none exists', async () => {
+    it('accepts the name + bones vocabulary the MCP manifest publishes', async () => {
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        {
+          entityId: 'ent-1',
+          name: 'arm_ik',
+          bones: ['root', 'arm'],
+          targetEntityId: 12,
+          bendDirection: -1,
+          mix: 0.25,
+        },
+        { skeletons2d: { 'ent-1': baseSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      // The full shape, not objectContaining — an invented key alongside these is
+      // exactly the defect class this command shipped with.
+      expect(constraintFrom(store)).toEqual({
+        name: 'arm_ik',
+        boneChain: ['root', 'arm'],
+        targetEntityId: 12,
+        bendDirection: -1,
+        mix: 0.25,
+      });
+    });
+
+    it('normalizes bendDirection to a sign and defaults target/mix', async () => {
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', name: 'ik', bones: ['root', 'arm'], bendDirection: 4.5 },
+        { skeletons2d: { 'ent-1': baseSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      const ik = constraintFrom(store);
+      expect(ik.bendDirection).toBe(1);
+      expect(ik.mix).toBe(1);
+      expect(ik.targetEntityId).toBe(0);
+    });
+
+    it('rejects a mix outside 0..1 rather than sending one the engine clamps', async () => {
       const { result } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', name: 'ik', bones: ['root', 'arm'], mix: 1.5 },
+        { skeletons2d: { 'ent-1': baseSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects a bones array past the engine bound', async () => {
+      const { result } = await invoke2d(
+        'create_ik_chain2d',
+        {
+          entityId: 'ent-1',
+          name: 'ik',
+          bones: Array.from({ length: MAX_IK_BONE_CHAIN_2D + 1 }, (_, i) => `b${i}`),
+        },
+        { skeletons2d: { 'ent-1': baseSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects a single-bone chain the solver would skip', async () => {
+      const { result } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', name: 'ik', bones: ['root'] },
+        { skeletons2d: { 'ent-1': baseSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it('reports no path instead of fabricating one when the hierarchy has none', async () => {
+      // Was asserted as a success: the handler used to fall back to
+      // [startBone, endBone], inventing an adjacency the rig does not have.
+      const { result, store } = await invoke2d(
         'create_ik_chain2d',
         { entityId: 'ent-new', chainName: 'ik', startBone: 'a', endBone: 'b' },
         { skeletons2d: {}, setSkeleton2d: vi.fn() },
       );
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('No bone path');
+      expect(store.setSkeleton2d).not.toHaveBeenCalled();
+    });
+
+    it('terminates on a cyclic parentBone hierarchy', async () => {
+      const cyclic = {
+        ...baseSkeleton,
+        bones: [bone('a', 'b'), bone('b', 'a')],
+      };
+      const { result } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', chainName: 'ik', startBone: 'root', endBone: 'b' },
+        { skeletons2d: { 'ent-1': cyclic }, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('No bone path');
+    });
+
+    it('returns error when neither bones nor a start/end pair is given', async () => {
+      const { result } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', name: 'ik' },
+        { skeletons2d: { 'ent-1': baseSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it('returns error when no chain name is given under either spelling', async () => {
+      const { result } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', bones: ['root', 'arm'] },
+        { skeletons2d: { 'ent-1': baseSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(false);
     });
 
     it('returns error when entityId is missing', async () => {
