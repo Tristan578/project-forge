@@ -412,14 +412,60 @@ describe('compoundHandlers does not shadow this module', () => {
 
   const source = readFileSync(join(__dirname, '..', 'compoundHandlers.ts'), 'utf8');
 
+  // The `\s*` before each keyword is load-bearing. A redeclaration does not
+  // have to sit at the top level to win: a `function buildCompoundResult()`
+  // inside a single handler body is a legal block-scoped shadow that raises no
+  // duplicate-identifier error, and for the five non-clamping helpers no value
+  // assertion anywhere would notice. Anchoring at column zero would see only
+  // the shape PF-1160 happened to take.
   it.each(SHARED)('imports %s rather than declaring its own', (name) => {
-    expect(source).toMatch(new RegExp(`^\\s*${name},\\s*$`, 'm'));
-    expect(source).not.toMatch(new RegExp(`^(?:export\\s+)?(?:async\\s+)?function\\s+${name}\\b`, 'm'));
-    expect(source).not.toMatch(new RegExp(`^(?:export\\s+)?(?:const|let|var)\\s+${name}\\b`, 'm'));
+    expect(source).not.toMatch(new RegExp(`^\\s*(?:export\\s+)?(?:async\\s+)?function\\s+${name}\\b`, 'm'));
+    expect(source).not.toMatch(new RegExp(`^\\s*(?:export\\s+)?(?:const|let|var)\\s+${name}\\b`, 'm'));
   });
 
-  it('takes every one of them from ./helpers', () => {
-    expect(source).toMatch(/}\s*from\s*'\.\/helpers'/);
+  // Naming the nine and finding *a* `from './helpers'` somewhere are two
+  // different claims: the type-only `import type { GameplayAnalysis }` at the
+  // top of the file already satisfies the second on its own. Bind them to the
+  // same value-import block, so deleting that block fails here rather than
+  // leaving the type import to answer for it.
+  it('takes every one of them from a value import of ./helpers', () => {
+    // `import\s+{` cannot match `import type {`, which is the point.
+    const valueImports = [...source.matchAll(/import\s+{([^}]*)}\s*from\s*'\.\/helpers'/g)].map((m) => m[1]);
+    expect(valueImports).toHaveLength(1);
+
+    const imported = new Set(valueImports[0].split(',').map((s) => s.trim()).filter(Boolean));
+    for (const name of SHARED) {
+      expect(imported.has(name)).toBe(true);
+    }
+  });
+});
+
+describe('fields that are not numbers fall back rather than throwing', () => {
+  // The numeric fields are covered above. These three are the other shapes
+  // `zOpt`'s `.catch(undefined)` sits behind, and they are the branch whose
+  // behaviour this change altered most: before it, `zPartialMaterial.parse`
+  // THREW on a bad enum, and the throw would have been caught one level up and
+  // reported as the whole step failing. Now it defaults silently, and that has
+  // to be a written-down decision rather than an accident of composition.
+
+  it('takes the default for an enum value the engine does not know', () => {
+    expect(buildMaterialFromPartial({ alphaMode: 'glass' }).alphaMode).toBe('opaque');
+  });
+
+  it('takes the default for a boolean the model spelled as a word', () => {
+    // The worst of the three: a wall the model meant to be immovable becomes a
+    // dynamic body and falls out of the world. The default is still the right
+    // answer — the alternative is dropping the entity's whole physics spec —
+    // but it is the case most worth having on record.
+    const physics = buildPhysicsFromPartial({ bodyType: 'squishy', isSensor: 'yes' });
+    expect(physics.bodyType).toBe('dynamic');
+    expect(physics.isSensor).toBe(false);
+  });
+
+  it('takes the default for a colour that is short a component', () => {
+    // RGB against an RGBA tuple is an ordinary model slip, and the result is
+    // silent: the material comes back white, not the red that was asked for.
+    expect(buildMaterialFromPartial({ baseColor: [1, 0, 0] }).baseColor).toEqual([1, 1, 1, 1]);
   });
 });
 
