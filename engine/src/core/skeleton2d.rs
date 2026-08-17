@@ -174,3 +174,123 @@ impl Default for BlendMode2d {
         Self::Normal
     }
 }
+
+/// Compute world-space positions for each bone by traversing the parent hierarchy.
+///
+/// Lives in `core/` rather than beside its one caller in `bridge/` because `bridge/`
+/// is compiled only for wasm32 — a native `cargo test` never sees it, so a guard
+/// written there could not be tested at all.
+pub fn compute_bone_world_positions(bones: &[Bone2dDef]) -> HashMap<String, [f32; 2]> {
+    let mut positions = HashMap::new();
+    // Build name -> index lookup
+    let name_to_idx: HashMap<&str, usize> = bones
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (b.name.as_str(), i))
+        .collect();
+
+    for bone in bones {
+        // Use only XY for 2D world-position accumulation; Z is stored but not used here.
+        let mut pos_x = bone.local_position[0];
+        let mut pos_y = bone.local_position[1];
+        let mut current = bone.parent_bone.as_deref();
+        // Walk up the hierarchy, accumulating positions.
+        //
+        // `parent_bone` is data, not structure: it arrives from an imported rig or a
+        // loaded `.forge` scene, neither of which the engine authored, so a cycle
+        // (a -> b -> a) is representable here. An unbounded walk over one would never
+        // return, and the caller runs inside a Bevy system on wasm32 — a single hung
+        // frame is the whole editor, with no error and no way back but a reload.
+        // Visiting a bone twice means a cycle by definition, so the seen-set ends the
+        // walk at the repeat and every other bone still gets a position.
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        seen.insert(bone.name.as_str());
+        while let Some(parent_name) = current {
+            if !seen.insert(parent_name) {
+                break;
+            }
+            if let Some(&idx) = name_to_idx.get(parent_name) {
+                pos_x += bones[idx].local_position[0];
+                pos_y += bones[idx].local_position[1];
+                current = bones[idx].parent_bone.as_deref();
+            } else {
+                break;
+            }
+        }
+        positions.insert(bone.name.clone(), [pos_x, pos_y]);
+    }
+    positions
+}
+
+#[cfg(test)]
+mod bone_world_position_tests {
+    use super::*;
+
+    fn bone(name: &str, parent: Option<&str>, x: f32, y: f32) -> Bone2dDef {
+        Bone2dDef {
+            name: name.to_string(),
+            parent_bone: parent.map(|p| p.to_string()),
+            local_position: [x, y, 0.0],
+            local_rotation: 0.0,
+            local_scale: [1.0, 1.0],
+            length: 1.0,
+            color: [1.0, 1.0, 1.0, 1.0],
+        }
+    }
+
+    #[test]
+    fn accumulates_positions_up_a_chain() {
+        let bones = vec![
+            bone("root", None, 1.0, 2.0),
+            bone("spine", Some("root"), 10.0, 20.0),
+            bone("head", Some("spine"), 100.0, 200.0),
+        ];
+        let positions = compute_bone_world_positions(&bones);
+        assert_eq!(positions["root"], [1.0, 2.0]);
+        assert_eq!(positions["spine"], [11.0, 22.0]);
+        assert_eq!(positions["head"], [111.0, 222.0]);
+    }
+
+    #[test]
+    fn a_two_bone_cycle_terminates_instead_of_hanging() {
+        // Neither bone is reachable from a root, so nothing in the editor would draw
+        // them — but this walk starts from EVERY bone, including the ones inside the
+        // cycle, so it is reached regardless. Without the seen-set this test does not
+        // fail, it never returns.
+        let bones = vec![bone("a", Some("b"), 1.0, 0.0), bone("b", Some("a"), 2.0, 0.0)];
+        let positions = compute_bone_world_positions(&bones);
+        // Each bone adds its own position, then its parent's, then stops on the repeat.
+        assert_eq!(positions["a"], [3.0, 0.0]);
+        assert_eq!(positions["b"], [3.0, 0.0]);
+    }
+
+    #[test]
+    fn a_self_parented_bone_terminates() {
+        let bones = vec![bone("only", Some("only"), 5.0, 7.0)];
+        let positions = compute_bone_world_positions(&bones);
+        // The seed insert of the bone's own name is what stops this one on step one,
+        // so it contributes its position exactly once rather than twice.
+        assert_eq!(positions["only"], [5.0, 7.0]);
+    }
+
+    #[test]
+    fn a_cycle_does_not_disturb_the_bones_outside_it() {
+        let bones = vec![
+            bone("root", None, 1.0, 1.0),
+            bone("child", Some("root"), 2.0, 2.0),
+            bone("a", Some("b"), 100.0, 0.0),
+            bone("b", Some("a"), 200.0, 0.0),
+        ];
+        let positions = compute_bone_world_positions(&bones);
+        assert_eq!(positions["root"], [1.0, 1.0]);
+        assert_eq!(positions["child"], [3.0, 3.0]);
+        assert_eq!(positions.len(), 4);
+    }
+
+    #[test]
+    fn an_unknown_parent_name_stops_the_walk() {
+        let bones = vec![bone("orphan", Some("ghost"), 4.0, 4.0)];
+        let positions = compute_bone_world_positions(&bones);
+        assert_eq!(positions["orphan"], [4.0, 4.0]);
+    }
+}

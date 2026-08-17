@@ -2698,8 +2698,66 @@ describe('handlers2d skeleton 2D commands', () => {
       ['a numeric activeSkin', '{"bones":[{"name":"a"}],"activeSkin":9}', '`activeSkin` must be a string'],
       ['a null slot', '{"bones":[{"name":"a"}],"slots":[null]}', '`slots[0]` is null'],
       ['a null constraint', '{"bones":[{"name":"a"}],"ikConstraints":[null]}', '`ikConstraints[0]` is null'],
+      // Every name below resolves, so the dangling-parent check above passes each
+      // one. A cycle is the case where the references are all valid and the graph
+      // still is not a tree.
+      [
+        'a self-parented bone',
+        '{"bones":[{"name":"a","parentBone":"a"}]}',
+        'forms a cycle: "a" -> "a"',
+      ],
+      [
+        'a two-bone cycle',
+        '{"bones":[{"name":"a","parentBone":"b"},{"name":"b","parentBone":"a"}]}',
+        'forms a cycle: "a" -> "b" -> "a"',
+      ],
+      [
+        'a cycle sitting beside a valid root',
+        '{"bones":[{"name":"root","parentBone":null},{"name":"a","parentBone":"b"},{"name":"b","parentBone":"a"}]}',
+        'forms a cycle',
+      ],
+      [
+        'a bone whose chain runs into a cycle it is not part of',
+        '{"bones":[{"name":"tip","parentBone":"a"},{"name":"a","parentBone":"b"},{"name":"b","parentBone":"a"}]}',
+        // The reported cycle is "a" -> "b" -> "a", not the "tip" the walk started
+        // from — naming the entry point would send the reader to the wrong bone.
+        'forms a cycle: "a" -> "b" -> "a"',
+      ],
     ])('rejects %s without touching the store', async (label, jsonData, expected) => {
       await rejects(label, jsonData, expected);
+    });
+
+    it('accepts a deep chain, which the shared acyclic set must not reject', async () => {
+      // The scan marks proven-acyclic bones so a long chain is walked once rather
+      // than once per bone on it. If that set were ever consulted as "seen on this
+      // path" instead, this rig would be reported as a cycle.
+      const bones = [
+        { name: 'b0', parentBone: null },
+        ...Array.from({ length: 40 }, (_, i) => ({ name: `b${i + 1}`, parentBone: `b${i}` })),
+      ];
+      const { result } = await invoke2d(
+        'import_skeleton_json',
+        { entityId: 'ent-1', jsonData: JSON.stringify({ bones }) },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts a bone tree where two branches share one parent', async () => {
+      // Two bones naming the same parent is a diamond only if they later rejoin;
+      // as a plain fan-out it is an ordinary rig, and a scan that marked a bone
+      // "on path" without ever clearing it would reject this.
+      const bones = [
+        { name: 'root', parentBone: null },
+        { name: 'left', parentBone: 'root' },
+        { name: 'right', parentBone: 'root' },
+      ];
+      const { result } = await invoke2d(
+        'import_skeleton_json',
+        { entityId: 'ent-1', jsonData: JSON.stringify({ bones }) },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
     });
 
     it('accepts a parent that appears later in the array', async () => {

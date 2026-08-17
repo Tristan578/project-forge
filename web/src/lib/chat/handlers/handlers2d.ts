@@ -1228,6 +1228,41 @@ function normalizeImportedSkeleton(parsed: unknown): SkeletonImportResult {
     }
   }
 
+  // Every `parentBone` naming a real bone still permits a cycle (a -> b -> a), and a
+  // cycle is not merely invalid data — it is unreachable from the root, so the
+  // inspector's tree silently omits those bones while the engine's world-position
+  // walk visits every bone including the ones inside the loop. This is the last
+  // boundary that sees the whole rig at once, so it is the one that can say which
+  // bones form the cycle rather than leaving a rig that half-renders.
+  const parentOf = new Map<string, string | null>();
+  for (const raw of rawBones) {
+    const parent = raw.parentBone;
+    parentOf.set(raw.name as string, typeof parent === 'string' ? parent : null);
+  }
+  // Bones proven to reach a root. Sharing this across the outer loop keeps the scan
+  // linear — without it a long chain is re-walked once per bone on it.
+  const acyclic = new Set<string>();
+  for (const raw of rawBones) {
+    const start = raw.name as string;
+    if (acyclic.has(start)) continue;
+    const path: string[] = [];
+    const onPath = new Set<string>();
+    let current: string | null = start;
+    while (current !== null && !acyclic.has(current)) {
+      if (onPath.has(current)) {
+        const cycle = path.slice(path.indexOf(current));
+        return {
+          ok: false,
+          reason: `\`parentBone\` forms a cycle: ${cycle.map(n => `"${n}"`).join(' -> ')} -> "${current}". A bone inside a cycle has no root, so it would never appear in the hierarchy.`,
+        };
+      }
+      onPath.add(current);
+      path.push(current);
+      current = parentOf.get(current) ?? null;
+    }
+    for (const name of path) acyclic.add(name);
+  }
+
   for (const field of ['slots', 'ikConstraints'] as const) {
     if (!Object.hasOwn(src, field)) continue;
     const error = rejectNonObjectEntries(src[field], field);
