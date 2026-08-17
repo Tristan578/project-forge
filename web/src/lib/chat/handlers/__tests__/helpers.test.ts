@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   buildCompoundResult,
@@ -184,9 +186,12 @@ describe('buildGameComponentFromInput', () => {
   });
 
   it('should build win_condition', () => {
-    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'collect_all' }) as Record<string, unknown>;
+    // `collectAll` is the one spelling the engine's match arm recognises; this
+    // asserted `collect_all` survived, which pinned the passthrough that turned
+    // a collect-all game into a score game (see the win-condition test below).
+    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'collectAll' }) as Record<string, unknown>;
     expect(comp.type).toBe('winCondition');
-    expect((comp.winCondition as Record<string, unknown>).conditionType).toBe('collect_all');
+    expect((comp.winCondition as Record<string, unknown>).conditionType).toBe('collectAll');
   });
 
   it('should return null for unknown types', () => {
@@ -312,5 +317,263 @@ describe('wallFromStartEnd', () => {
     expect(result.position).toEqual([1.5, 1, 2]); // midpoint
     const expectedLength = 5; // 3-4-5 triangle
     expect(result.scale[2]).toBeCloseTo(expectedLength);
+  });
+});
+
+// ===========================================================================
+// Bounds (PF-1160)
+//
+// The behaviour these builders are relied on for is that nothing they are
+// handed can throw and nothing can leave with a value the engine cannot
+// deserialize. Cases that need the whole handler to be meaningful live in
+// compoundHandlers.test.ts instead.
+// ===========================================================================
+
+describe('bounds on model-supplied values', () => {
+  it('never throws, whatever it is handed', () => {
+    const junk: unknown[] = [null, undefined, 'text', 42, [], () => {}, { metallic: {} }];
+
+    for (const input of junk) {
+      expect(() => buildMaterialFromPartial(input as Record<string, unknown>)).not.toThrow();
+      expect(() => buildLightFromPartial(input as Record<string, unknown>)).not.toThrow();
+      expect(() => buildPhysicsFromPartial(input as Record<string, unknown>)).not.toThrow();
+      expect(() => buildGameComponentFromInput('health', input as Record<string, unknown>)).not.toThrow();
+    }
+  });
+
+  it('leaves a valid value exactly as supplied', () => {
+    // The clamps must be invisible to any spec a model has business writing.
+    const mat = buildMaterialFromPartial({ metallic: 0.35, perceptualRoughness: 0.9, ior: 1.45 });
+
+    expect(mat.metallic).toBe(0.35);
+    expect(mat.perceptualRoughness).toBe(0.9);
+    expect(mat.ior).toBe(1.45);
+  });
+
+  it('drops an over-long identifier rather than truncating it', () => {
+    // Half an entity id names the wrong entity; no id at all takes the default.
+    const comp = buildGameComponentFromInput('follower', { targetEntityId: 'e'.repeat(300) });
+
+    expect((comp as { follower: { targetEntityId: string | null } }).follower.targetEntityId).toBeNull();
+  });
+
+  it('rounds target_score, which the engine reads as Option<u32>', () => {
+    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'score', targetScore: 9.7 });
+
+    expect((comp as { winCondition: { targetScore: number | null } }).winCondition.targetScore).toBe(10);
+  });
+
+  it('refuses a spawner interval of zero, which spawns every frame', () => {
+    const comp = buildGameComponentFromInput('spawner', { intervalSecs: 0 });
+
+    // The exact floor the engine clamps to, not merely "positive": a typo'd
+    // 1e-30 is also positive, and would leave the store recording a value the
+    // running spawner never holds.
+    expect((comp as { spawner: { intervalSecs: number } }).spawner.intervalSecs).toBe(0.1);
+  });
+
+  it('caps an absurd spawner count at the engine\'s own ceiling', () => {
+    const comp = buildGameComponentFromInput('spawner', { maxCount: 1e6 });
+
+    expect((comp as { spawner: { maxCount: number } }).spawner.maxCount).toBe(1000);
+  });
+
+  it('drops an over-long name on a non-nullable field back to its own default', () => {
+    // The nullable variant answers null; this one has no null to fall back to,
+    // so it takes the builder's default instead of a truncated string.
+    const comp = buildGameComponentFromInput('trigger_zone', { eventName: 'x'.repeat(300) });
+
+    expect((comp as { triggerZone: { eventName: string } }).triggerZone.eventName).toBe('trigger');
+  });
+
+  it('still returns null for a component type it does not know', () => {
+    expect(buildGameComponentFromInput('teleprompter', {})).toBeNull();
+  });
+});
+
+describe('compoundHandlers does not shadow this module', () => {
+  // PF-1160 was a private copy of every export below sitting in
+  // compoundHandlers.ts and winning over the import, so the validated module
+  // never ran. The four validating builders are protected by value assertions
+  // elsewhere in the suite; the other five clamp nothing, so a re-added copy
+  // of those would behave identically and no behavioural test could see it.
+  // This one reads the source and can.
+  const SHARED = [
+    'buildCompoundResult',
+    'buildMaterialFromPartial',
+    'buildLightFromPartial',
+    'buildPhysicsFromPartial',
+    'buildGameComponentFromInput',
+    'inferEntityType',
+    'identifyRole',
+    'mulberry32',
+    'wallFromStartEnd',
+  ] as const;
+
+  const source = readFileSync(join(__dirname, '..', 'compoundHandlers.ts'), 'utf8');
+
+  // The `\s*` before each keyword is load-bearing. A redeclaration does not
+  // have to sit at the top level to win: a `function buildCompoundResult()`
+  // inside a single handler body is a legal block-scoped shadow that raises no
+  // duplicate-identifier error, and for the five non-clamping helpers no value
+  // assertion anywhere would notice. Anchoring at column zero would see only
+  // the shape PF-1160 happened to take.
+  it.each(SHARED)('imports %s rather than declaring its own', (name) => {
+    expect(source).not.toMatch(new RegExp(`^\\s*(?:export\\s+)?(?:async\\s+)?function\\s+${name}\\b`, 'm'));
+    expect(source).not.toMatch(new RegExp(`^\\s*(?:export\\s+)?(?:const|let|var)\\s+${name}\\b`, 'm'));
+  });
+
+  // Naming the nine and finding *a* `from './helpers'` somewhere are two
+  // different claims: the type-only `import type { GameplayAnalysis }` at the
+  // top of the file already satisfies the second on its own. Bind them to the
+  // same value-import block, so deleting that block fails here rather than
+  // leaving the type import to answer for it.
+  it('takes every one of them from a value import of ./helpers', () => {
+    // `import\s+{` cannot match `import type {`, which is the point.
+    const valueImports = [...source.matchAll(/import\s+{([^}]*)}\s*from\s*'\.\/helpers'/g)].map((m) => m[1]);
+    expect(valueImports).toHaveLength(1);
+
+    const imported = new Set(valueImports[0].split(',').map((s) => s.trim()).filter(Boolean));
+    for (const name of SHARED) {
+      expect(imported.has(name)).toBe(true);
+    }
+  });
+});
+
+describe('fields that are not numbers fall back rather than throwing', () => {
+  // The numeric fields are covered above. These three are the other shapes
+  // `zOpt`'s `.catch(undefined)` sits behind, and they are the branch whose
+  // behaviour this change altered most: before it, `zPartialMaterial.parse`
+  // THREW on a bad enum, and the throw would have been caught one level up and
+  // reported as the whole step failing. Now it defaults silently, and that has
+  // to be a written-down decision rather than an accident of composition.
+
+  it('takes the default for an enum value the engine does not know', () => {
+    expect(buildMaterialFromPartial({ alphaMode: 'glass' }).alphaMode).toBe('opaque');
+  });
+
+  it('takes the default for a boolean the model spelled as a word', () => {
+    // The worst of the three: a wall the model meant to be immovable becomes a
+    // dynamic body and falls out of the world. The default is still the right
+    // answer — the alternative is dropping the entity's whole physics spec —
+    // but it is the case most worth having on record.
+    const physics = buildPhysicsFromPartial({ bodyType: 'squishy', isSensor: 'yes' });
+    expect(physics.bodyType).toBe('dynamic');
+    expect(physics.isSensor).toBe(false);
+  });
+
+  it('takes the default for a colour that is short a component', () => {
+    // RGB against an RGBA tuple is an ordinary model slip, and the result is
+    // silent: the material comes back white, not the red that was asked for.
+    expect(buildMaterialFromPartial({ baseColor: [1, 0, 0] }).baseColor).toEqual([1, 1, 1, 1]);
+  });
+});
+
+describe('the non-finite values zod rejects outright', () => {
+  // F32_SAFE_MAX covers the finite-but-unusable band; this pins the claim in
+  // its doc comment that zod already refuses what sits above it.
+  it.each([Infinity, -Infinity, NaN])('falls back to the default for %p', (value) => {
+    expect(buildMaterialFromPartial({ metallic: value }).metallic).toBe(0);
+    expect(buildPhysicsFromPartial({ density: value }).density).toBe(1.0);
+  });
+
+  it('clamps a material field whose minimum is not zero', () => {
+    // maxParallaxLayerCount is the one material field with a non-zero floor;
+    // 0 layers is not "no parallax", it is a division the shader cannot do.
+    expect(buildMaterialFromPartial({ maxParallaxLayerCount: 0 }).maxParallaxLayerCount).toBe(1);
+    expect(buildMaterialFromPartial({ parallaxReliefMaxSteps: 120 }).parallaxReliefMaxSteps).toBe(64);
+  });
+});
+
+describe('game-component bounds match the engine, field by field', () => {
+  // The engine reads every one of these props through `prop_f32(props, key,
+  // min, max)` / `prop_u32(props, key, max)`, which clamp on the Rust side. A
+  // looser bound here is not permissive, it is a divergence: the store, the
+  // inspector, undo history and scene export all record a value the running
+  // entity never holds, and neither side reports anything.
+  //
+  // So the expected numbers are not written down here at all — they are read
+  // out of the Rust, the way `gameCameraPayload.test.ts` reads its defaults.
+  // A hand-mirrored table is exactly what this is guarding against.
+  const RUST = join(__dirname, '..', '..', '..', '..', '..', '..', 'engine', 'src', 'core', 'game_components.rs');
+  const source = readFileSync(RUST, 'utf8');
+
+  const num = (literal: string): number =>
+    literal === 'u32::MAX' ? 4_294_967_295 : Number(literal.replace(/_/g, ''));
+
+  type Bound = { component: string; key: string; min: number; max: number };
+  const bounds: Bound[] = [];
+  let component: string | null = null;
+  for (const line of source.split('\n')) {
+    const arm = /^\s{8}"([a-z_]+)" => \{/.exec(line);
+    if (arm) component = arm[1];
+    if (!component) continue;
+    const f32 = /prop_f32\(&props, "(\w+)", (-?[\d_]+\.\d+), (-?[\d_]+\.\d+)\)/.exec(line);
+    if (f32) bounds.push({ component, key: f32[1], min: num(f32[2]), max: num(f32[3]) });
+    const u32 = /prop_u32\(&props, "(\w+)", ([\d_]+|u32::MAX)\)/.exec(line);
+    if (u32) bounds.push({ component, key: u32[1], min: 0, max: num(u32[2]) });
+  }
+
+  // Fail closed: an unreadable file, a renamed extractor or a reformatted call
+  // site would otherwise leave this suite asserting nothing at all.
+  it('found the engine call sites to compare against', () => {
+    expect(bounds.length).toBeGreaterThanOrEqual(18);
+    expect(bounds.every((b) => Number.isFinite(b.min) && Number.isFinite(b.max))).toBe(true);
+  });
+
+  // Components the engine knows and these builders do not (`interactable`)
+  // answer null; they are a gap in PF-1142's other builder, not a drift here.
+  const covered = bounds.filter((b) => buildGameComponentFromInput(b.component, {}) !== null);
+
+  it('covers every component both sides know', () => {
+    expect(new Set(covered.map((b) => b.component)).size).toBeGreaterThanOrEqual(10);
+  });
+
+  const read = (component: string, key: string, value: number): unknown => {
+    const built = buildGameComponentFromInput(component, { [key]: value }) as
+      | (Record<string, Record<string, unknown>> & { type: string })
+      | null;
+    return built === null ? null : built[built.type][key];
+  };
+
+  it.each(covered.map((b) => [`${b.component}.${b.key}`, b] as const))(
+    '%s clamps to the engine range on both ends',
+    (_label, b) => {
+      expect(read(b.component, b.key, b.max + 1000)).toBe(b.max);
+      expect(read(b.component, b.key, b.min - 1000)).toBe(b.min);
+    },
+  );
+});
+
+describe('fields the engine reads as something other than a number', () => {
+  it('refuses a win condition the engine would silently turn into "score"', () => {
+    // snake_case is the plausible model answer — every component type in the
+    // same call is spelled that way — and the engine's match falls through to
+    // Score, turning "collect all the coins" into "reach 10 points".
+    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'collect_all' });
+
+    expect((comp as { winCondition: { conditionType: string } }).winCondition.conditionType).toBe('score');
+    expect(
+      (buildGameComponentFromInput('win_condition', { conditionType: 'collectAll' }) as
+        { winCondition: { conditionType: string } }).winCondition.conditionType,
+    ).toBe('collectAll');
+  });
+
+  it('drops a one-point waypoint list, which is a platform that never moves', () => {
+    const comp = buildGameComponentFromInput('moving_platform', { waypoints: [[0, 0, 0]] });
+
+    // The engine's mover early-returns below two points and reports nothing,
+    // so the field falls back to the builder's own two-point default.
+    const fallback = (buildGameComponentFromInput('moving_platform', {}) as
+      { movingPlatform: { waypoints: number[][] } }).movingPlatform.waypoints;
+    expect(fallback).toHaveLength(2);
+    expect((comp as { movingPlatform: { waypoints: number[][] } }).movingPlatform.waypoints).toEqual(fallback);
+  });
+
+  it('keeps a vector component out of the f32 overflow band', () => {
+    // 1e308 is finite, so `.finite()` alone passes it — and it is `inf` in f32.
+    // The scalar fields were bounded from the start; the vectors were not.
+    expect(buildMaterialFromPartial({ emissive: [1e308, 0, 0, 1] }).emissive).toEqual([1e30, 0, 0, 1]);
+    expect(buildLightFromPartial({ color: [-1e308, 1, 1] }).color).toEqual([-1e30, 1, 1]);
   });
 });
