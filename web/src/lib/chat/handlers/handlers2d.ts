@@ -1493,6 +1493,12 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
       // full-replace `create_skeleton2d` built from the STORE mirror, whose attachment
       // type carries no `weights` field at all — so it would overwrite the weights this
       // command exists to compute.
+      //
+      // PF-1186: the engine accepts `method` and `iterations` and acts on neither
+      // — `compute_linear_weights(.., _iterations: u32)` discards the count and
+      // `method` is only logged, so `heat` and `envelope` are the same output.
+      // Forwarded anyway: the manifest publishes both, and sending them is what
+      // makes the gap a wiring fix rather than a second vocabulary to reconcile.
       ctx.dispatchCommand('auto_weight_skeleton2d', { entityId, method, iterations });
       return { success: true, result: { message: `Auto-weighting skeleton for entity ${entityId}` } };
     } catch (err) {

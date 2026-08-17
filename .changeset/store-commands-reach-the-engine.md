@@ -45,3 +45,19 @@ A second test on the engine side reads the routing table against the handlers it
 points at and fails if any handler is unreachable or pointed at the wrong
 section. That is what found the sixteen, and it covers every command the engine
 has rather than only the ones the editor happens to send.
+
+Auto-weighting a 2D skeleton now recomputes vertex weights instead of erasing
+them. The tool never called the engine command that does the work; it re-sent the
+whole rig from the editor's own copy, and that copy carries no weights at all —
+so the one action whose entire job is computing weights was the action that
+cleared them.
+
+IK chains created by the AI now bend. Every one of them pointed at a target
+entity that does not exist, on both sides of the bridge, and the solver skips any
+constraint whose target it cannot find — so an IK chain could be created, listed
+in the inspector, and never move a bone. The engine also built its chain out of
+one bone name repeated, and read the chain length straight from the request as an
+allocation size, which made an oversized number enough to take the engine down
+for the session. Asking for a chain between two bones with no path between them
+used to invent one; it now says so. A cycle in the bone hierarchy used to hang
+the tab.
