@@ -109,13 +109,15 @@ export function handleAudioEvent(
         blendRadius: zoneData.blendRadius,
         priority: zoneData.priority,
       };
-      useEditorStore.getState().setReverbZone(entityId, reverbZone, enabled);
+      // State-only: `setReverbZone` dispatches back at the engine, and this
+      // handler runs *because* the engine just applied a command.
+      useEditorStore.getState().applyReverbZoneFromEngine(entityId, reverbZone, enabled);
       return true;
     }
 
     case 'REVERB_ZONE_REMOVED': {
       const payload = castPayload<{ entityId: string }>(data);
-      useEditorStore.getState().removeReverbZone(payload.entityId);
+      useEditorStore.getState().applyReverbZoneRemovedFromEngine(payload.entityId);
       return true;
     }
 

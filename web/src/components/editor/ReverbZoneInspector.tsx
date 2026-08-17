@@ -110,6 +110,7 @@ export function ReverbZoneInspector({ entityId }: { entityId: string }) {
   const reverbZone = useEditorStore((s) => s.reverbZones[entityId]);
   const enabled = useEditorStore((s) => s.reverbZonesEnabled[entityId]);
   const updateReverbZone = useEditorStore((s) => s.updateReverbZone);
+  const setReverbZone = useEditorStore((s) => s.setReverbZone);
   const removeReverbZone = useEditorStore((s) => s.removeReverbZone);
   const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
 
@@ -123,16 +124,24 @@ export function ReverbZoneInspector({ entityId }: { entityId: string }) {
   );
 
   const handleAddReverbZone = useCallback(() => {
-    updateReverbZone(entityId, {
-      shape: { type: 'box', size: [10, 5, 10] },
-      preset: 'hall',
-      wetMix: 0.5,
-      decayTime: 2.0,
-      preDelay: 20,
-      blendRadius: 2.0,
-      priority: 0,
-    });
-  }, [entityId, updateReverbZone]);
+    // `setReverbZone(..., true)`, not `updateReverbZone`: the editing controls
+    // below are gated on `enabled`, so adding a zone without switching it on
+    // left the panel showing "Add Reverb Zone" over a configured zone — the
+    // edit UI was unreachable for this component's whole life.
+    setReverbZone(
+      entityId,
+      {
+        shape: { type: 'box', size: [10, 5, 10] },
+        preset: 'hall',
+        wetMix: 0.5,
+        decayTime: 2.0,
+        preDelay: 20,
+        blendRadius: 2.0,
+        priority: 0,
+      },
+      true
+    );
+  }, [entityId, setReverbZone]);
 
   const handleRemoveReverbZone = useCallback(() => {
     removeReverbZone(entityId);

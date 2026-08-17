@@ -56,7 +56,13 @@ export function createMockActions() {
     setEntityAudio: vi.fn(),
     setAudioBuses: vi.fn(),
     setReverbZone: vi.fn(),
+    updateReverbZone: vi.fn(),
     removeReverbZone: vi.fn(),
+    // State-only mirrors. An inbound handler must route here, never to the
+    // dispatching pair above — the engine emits the event *because* it just
+    // applied a command.
+    applyReverbZoneFromEngine: vi.fn(),
+    applyReverbZoneRemovedFromEngine: vi.fn(),
     setEntityScript: vi.fn(),
     setInputBindings: vi.fn(),
     addAssetToRegistry: vi.fn(),
