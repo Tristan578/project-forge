@@ -11,6 +11,26 @@ import type { GenerationJob } from '@/stores/generationStore';
 import { loadScripts as loadLibraryScripts } from '@/stores/scriptLibraryStore';
 import { buildEntityIndex } from '@/lib/engine/entityIndex';
 
+/**
+ * Render an entity id the scene graph has no name for.
+ *
+ * Engine ids are uuids, but `entityAudio` can be rebuilt from a `.forge` file,
+ * which is untrusted input. This context string is concatenated into the
+ * model's system prompt, so an unbounded id is a place a file can write
+ * arbitrary instructions into it. Newlines are what let such a string pose as a
+ * new section header, so they go first.
+ */
+const MAX_ENTITY_LABEL = 64;
+
+function safeEntityLabel(entityId: string): string {
+  // Keep printable ASCII only. Engine ids are uuids, so nothing legitimate is
+  // lost, and a negated class drops newlines and every other control character
+  // without naming one (which `no-control-regex` would flag).
+  const flattened = entityId.replace(/[^\x20-\x7E]+/g, ' ').trim();
+  return flattened.length > MAX_ENTITY_LABEL
+    ? `${flattened.slice(0, MAX_ENTITY_LABEL)}…`
+    : flattened || 'unnamed entity';
+}
 
 interface EditorSnapshot {
   sceneGraph: SceneGraph;
@@ -34,7 +54,7 @@ interface EditorSnapshot {
   sceneName?: string;
   assetRegistry?: Record<string, AssetMetadata>;
   allScripts?: Record<string, ScriptData>;
-  primaryAudio?: AudioData | null;
+  entityAudio?: Record<string, AudioData>;
   primaryParticle?: ParticleData | null;
   particleEnabled?: boolean;
   primaryAnimation?: AnimationPlaybackState | null;
@@ -404,6 +424,34 @@ export function buildSceneContext(state: EditorSnapshot): string {
     }
   }
 
+  // Sound sources. Distinct from the asset list above: an imported file the
+  // model can reference is not the same as an entity already wired to play it,
+  // and without this the model re-attaches audio to entities that already have
+  // it. Names come from the scene graph so the model can address them the same
+  // way the user does.
+  if (state.entityAudio) {
+    const sources = Object.entries(state.entityAudio);
+    if (sources.length > 0) {
+      const described = sources.map(([entityId, audio]) => {
+        // `Object.hasOwn` before the lookup: `entityId` can come from a `.forge`
+        // file, and a bare index walks the prototype chain, so an id of
+        // `toString` would read a function off `Object.prototype` rather than a
+        // node. Falling back to a BOUNDED id keeps a file-supplied string from
+        // landing verbatim in the model's system prompt.
+        const node = Object.hasOwn(state.sceneGraph.nodes, entityId)
+          ? state.sceneGraph.nodes[entityId]
+          : undefined;
+        const name = typeof node?.name === 'string' ? node.name : safeEntityLabel(entityId);
+        const traits = [audio.bus];
+        if (audio.loopAudio) traits.push('looping');
+        if (audio.spatial) traits.push('spatial');
+        if (audio.autoplay) traits.push('autoplay');
+        return `${name} (${traits.join(', ')})`;
+      }).join(', ');
+      sections.push(`\n## Sound Sources\n${sources.length} entit${sources.length === 1 ? 'y' : 'ies'} with audio: ${described}`);
+    }
+  }
+
   // Audio Buses
   if (state.audioBuses && state.audioBuses.length > 0) {
     const busesInfo = state.audioBuses.map((bus) => {
@@ -475,9 +523,13 @@ export function buildSceneContext(state: EditorSnapshot): string {
   // Dialogue Trees
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { useDialogueStore } = require('@/stores/dialogueStore');
+    const { useDialogueStore, listTrees } = require('@/stores/dialogueStore');
     const dialogueStore = useDialogueStore.getState();
-    const trees = Object.values(dialogueStore.dialogueTrees) as Array<{ id: string; name: string; nodes: unknown[] }>;
+    // `listTrees`, not `Object.values`: `tree.nodes.length` on an unwalkable entry
+    // throws, and the throw lands in the `catch` below — which would silently
+    // delete the entire Dialogue Trees section from what the model gets to see.
+    // One corrupt tree would make the model believe the game has no dialogue at all.
+    const trees = listTrees(dialogueStore.dialogueTrees) as Array<{ id: string; name: string; nodes: unknown[] }>;
     if (trees.length > 0) {
       sections.push('');
       sections.push(`## Dialogue Trees (${trees.length})`);

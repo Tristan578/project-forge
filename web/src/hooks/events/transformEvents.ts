@@ -6,6 +6,8 @@ import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings,
 import { saveAutoSave } from '@/lib/sceneFile';
 import { setLastExportedScene } from '@/lib/storage/autoSave';
 import { invalidateSceneCache } from '@/lib/ai/cachedContext';
+import { releaseEntityAudio, resetEntityAudioGraphForScene } from '@/lib/audio/entityAudioGraph';
+import { takeStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 import type { SceneNode } from '@/stores/slices/types';
 import { castPayload, type SetFn, type GetFn } from './types';
 import { SCENE_EXPORTED_EVENT, type SceneExportedDetail } from '@/lib/engine/sceneExportWire';
@@ -79,6 +81,12 @@ export function handleTransformEvent(
       if (removedNode) {
         useEditorStore.getState().onLightNodeRemoved(removedNode.components);
       }
+      // The engine emits no audio event for a deleted entity, so this is the
+      // only point at which its gain/panner chain can be disconnected from the
+      // bus graph. Entity ids are fresh uuids and never reused, so a missed
+      // release is a node that stays connected for the life of the tab.
+      useEditorStore.getState().setEntityAudio(payload.entityId, null);
+      releaseEntityAudio(payload.entityId);
       useEditorStore.setState({ sceneModified: true });
       scheduleAutoSave();
       invalidateSceneCache(); // PF-319: AI must not see deleted entities
@@ -193,7 +201,18 @@ export function handleTransformEvent(
         primaryPhysics: null,
         physicsEnabled: false,
         primaryAnimation: null,
+        // Every entity id in the OUTGOING scene is about to become meaningless.
+        // Left behind, they keep counting toward the accessibility audit and
+        // keep their Web Audio nodes attached to the bus graph.
+        //
+        // The incoming scene's audio comes from the JSON `loadScene` staged on
+        // its way past: the engine only ever emits AUDIO_CHANGED for the
+        // selected entity, so without this the scene reads as silent until the
+        // user clicks each entity in turn. Empty for `new_scene`, which is
+        // correct — an empty scene has no audio.
+        entityAudio: takeStagedSceneAudio(),
       });
+      resetEntityAudioGraphForScene();
       invalidateSceneCache(); // PF-319: new scene = completely new context
       return true;
     }

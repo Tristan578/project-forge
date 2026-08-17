@@ -17,7 +17,12 @@ vi.mock('@/stores/voiceProfileStore', () => ({
   ],
 }));
 
-vi.mock('@/stores/dialogueStore', () => ({
+// `listTrees` comes from the real module: the `useMemo` below walks `tree.nodes`, so
+// it is the guard that keeps an unwalkable stored tree from unmounting this panel.
+vi.mock('@/stores/dialogueStore', async () => ({
+  listTrees: (await vi.importActual<typeof import('@/stores/dialogueStore')>(
+    '@/stores/dialogueStore',
+  )).listTrees,
   useDialogueStore: {
     getState: vi.fn(() => ({
       dialogueTrees: {},
@@ -155,5 +160,30 @@ describe('VoiceProfilePanel', () => {
   it('uses useDialogueStore.getState for speaker discovery', () => {
     render(<VoiceProfilePanel />);
     expect(useDialogueStore.getState).toHaveBeenCalled();
+  });
+
+  it('discovers speakers from the walkable trees and survives an unwalkable one', () => {
+    // The speaker sweep is a walk of `tree.nodes` over trees that came from
+    // persisted JSON, inside a `useMemo` — so a `null` entry throws during render
+    // and unmounts the panel rather than merely omitting one tree's speakers.
+    // `listTrees` skips the bad entry, so the speakers of every other tree still
+    // reach the "without profiles" hint.
+    setupStore();
+    vi.mocked(useDialogueStore.getState).mockReturnValue({
+      dialogueTrees: {
+        broken: null,
+        good: {
+          id: 'good',
+          name: 'Village',
+          startNodeId: 'n1',
+          variables: {},
+          nodes: [{ id: 'n1', type: 'text', speaker: 'Blacksmith', text: 'Hi' }],
+        },
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    expect(() => render(<VoiceProfilePanel />)).not.toThrow();
+    expect(screen.getByText(/Blacksmith/)).toBeInTheDocument();
   });
 });

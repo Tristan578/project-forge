@@ -356,4 +356,20 @@ describe('audioManager - Occlusion Enhancement', () => {
     audioManager.updateOcclusionAmount('e1', 2.0);
     expect(filter!.Q.value).toBeCloseTo(4.0); // clamped to 1
   });
+
+  it('treats a non-finite amount as fully clear', () => {
+    // `physicsEvents` derives this as `1 - hitDistance / totalDistance` off a
+    // raycast payload and bounds it with `< 0` / `> 1`, both of which are false
+    // for NaN. A NaN reaching here becomes a NaN frequency, and
+    // `linearRampToValueAtTime` throws a RangeError out of an event hub that
+    // has no catch — so one bad raycast would kill the whole dispatch.
+    audioManager.setOcclusion('e1', true);
+    const filter = getInternal().occlusionFilters.get('e1');
+
+    expect(() => audioManager.updateOcclusionAmount('e1', Number.NaN)).not.toThrow();
+
+    const lastCall = vi.mocked(filter!.frequency.linearRampToValueAtTime).mock.calls.at(-1);
+    expect(lastCall?.[0]).toBeCloseTo(5000, 0);
+    expect(filter!.Q.value).toBeCloseTo(1.0);
+  });
 });

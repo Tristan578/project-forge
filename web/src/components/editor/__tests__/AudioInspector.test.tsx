@@ -27,11 +27,12 @@ vi.mock('@/components/ui/InfoTooltip', () => ({
 }));
 
 import { useEditorStore } from '@/stores/editorStore';
+import { useUserStore } from '@/stores/userStore';
 
 function mockEditorStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
     primaryId: 'ent-1',
-    primaryAudio: null,
+    entityAudio: {},
     assetRegistry: {},
     audioBuses: [{ name: 'master', volume: 1 }, { name: 'sfx', volume: 1 }],
     setAudio: vi.fn(),
@@ -57,16 +58,18 @@ describe('AudioInspector', () => {
 
   it('shows audio controls when audio data exists', () => {
     mockEditorStore({
-      primaryAudio: {
-        assetId: null,
-        volume: 1.0,
-        pitch: 1.0,
-        loopAudio: false,
-        spatial: false,
-        maxDistance: 50,
-        refDistance: 1,
-        rolloffFactor: 1,
-        autoplay: false,
+      entityAudio: {
+        'ent-1': {
+          assetId: null,
+          volume: 1.0,
+          pitch: 1.0,
+          loopAudio: false,
+          spatial: false,
+          maxDistance: 50,
+          refDistance: 1,
+          rolloffFactor: 1,
+          autoplay: false,
+        },
       },
     });
     render(<AudioInspector />);
@@ -77,23 +80,73 @@ describe('AudioInspector', () => {
     expect(screen.getByText('Remove Audio')).toBeInTheDocument();
   });
 
+  it('reads the selected entity, not whichever entity reported audio last', () => {
+    // The store used to keep one component for the whole scene, so selecting a
+    // silent entity showed the other entity's sound and editing it wrote to the
+    // wrong entity. Here only 'ent-2' has audio and 'ent-1' is selected.
+    mockEditorStore({
+      entityAudio: {
+        'ent-2': {
+          assetId: 'audio-2',
+          volume: 0.5,
+          pitch: 1.0,
+          loopAudio: false,
+          spatial: false,
+          maxDistance: 50,
+          refDistance: 1,
+          rolloffFactor: 1,
+          autoplay: false,
+        },
+      },
+    });
+    render(<AudioInspector />);
+    expect(screen.getByText('Add Audio')).toBeInTheDocument();
+    expect(screen.queryByText('Remove Audio')).not.toBeInTheDocument();
+  });
+
   it('shows spatial audio settings when spatial is enabled', () => {
     mockEditorStore({
-      primaryAudio: {
-        assetId: null,
-        volume: 1.0,
-        pitch: 1.0,
-        loopAudio: false,
-        spatial: true,
-        maxDistance: 50,
-        refDistance: 1,
-        rolloffFactor: 1,
-        autoplay: false,
+      entityAudio: {
+        'ent-1': {
+          assetId: null,
+          volume: 1.0,
+          pitch: 1.0,
+          loopAudio: false,
+          spatial: true,
+          maxDistance: 50,
+          refDistance: 1,
+          rolloffFactor: 1,
+          autoplay: false,
+        },
       },
     });
     render(<AudioInspector />);
     expect(screen.getByText('Max Distance')).toBeInTheDocument();
     expect(screen.getByText('Ref Distance')).toBeInTheDocument();
     expect(screen.getByText('Rolloff')).toBeInTheDocument();
+  });
+
+  it('names the tier a locked generate button needs, not just in the tooltip', () => {
+    // The buttons stay focusable when locked (aria-disabled, not disabled) so
+    // they can still make their pitch — but `title` is unreachable by keyboard,
+    // so the requirement has to be in the accessible name.
+    mockEditorStore();
+    useUserStore.setState({ tier: 'starter' });
+    render(<AudioInspector />);
+    expect(
+      screen.getByRole('button', { name: 'Generate sound with AI — requires Starter tier' })
+    ).toHaveAttribute('aria-disabled', 'true');
+    expect(
+      screen.getByRole('button', { name: 'Generate music with AI — requires Starter tier' })
+    ).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('drops the tier clause once the tier actually allows it', () => {
+    mockEditorStore();
+    useUserStore.setState({ tier: 'creator' });
+    render(<AudioInspector />);
+    expect(
+      screen.getByRole('button', { name: 'Generate sound with AI' })
+    ).not.toHaveAttribute('aria-disabled');
   });
 });

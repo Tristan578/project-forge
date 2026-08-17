@@ -379,6 +379,34 @@ describe('set_game_camera', () => {
     expect(result.success).toBe(false);
   });
 
+  // A validation error, not a silent drop: the engine HARD-REJECTS a negative
+  // follow rate, and `set_game_camera` is full-replace, so passing one through
+  // would lose mode/targetEntity/offset with it. Rejecting here names the field
+  // for the model instead of leaving it to guess why nothing moved (PF-1166).
+  it('rejects a negative followSmoothing instead of dispatching it', async () => {
+    const { result, store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
+      entityId: 'cam-1',
+      mode: 'thirdPersonFollow',
+      followSmoothing: -3,
+    });
+    expect(result.success).toBe(false);
+    expect(store.setGameCamera).not.toHaveBeenCalled();
+  });
+
+  it('accepts a followSmoothing of zero, which freezes the camera on purpose', async () => {
+    const { result, store } = await invokeHandler(gameplayHandlers, 'set_game_camera', {
+      entityId: 'cam-1',
+      mode: 'thirdPersonFollow',
+      followSmoothing: 0,
+    });
+    expect(result.success).toBe(true);
+    expect(store.setGameCamera).toHaveBeenCalledWith('cam-1', {
+      mode: 'thirdPersonFollow',
+      targetEntity: null,
+      followSmoothing: 0,
+    });
+  });
+
   // The store object is asserted in FULL (an object literal, not
   // `expect.objectContaining`): a key the AI invented and this handler passed
   // through would sit invisibly alongside a partial assertion, then be dropped

@@ -25,6 +25,14 @@ interface AudioInstance {
   pauseOffset: number;
   loop: boolean;
   bus: string;
+  /**
+   * Playback rate, held on the instance rather than only on `source`.
+   *
+   * `source` exists only while a sound is playing, and `play()` builds a fresh
+   * one each time — so a pitch set before playback, or set and then re-played,
+   * was silently discarded.
+   */
+  pitch: number;
 }
 
 interface BusState {
@@ -59,6 +67,42 @@ interface AdaptiveMusicTrack {
   intensity: number;
   bus: string;
 }
+
+/**
+ * Coerce a number into a range Web Audio will accept.
+ *
+ * Every numeric below reaches a Web Audio setter that throws `RangeError` on a
+ * non-finite or out-of-range value — `maxDistance <= 0`, a negative
+ * `refDistance` or `rolloffFactor` — and the values arrive from two places that
+ * cannot be trusted to have checked. An LLM tool call reaches
+ * `audioEntityHandlers` which copies the numbers off `args` on a bare
+ * `!== undefined`, and the engine emits them without clamping either (contrast
+ * `commands/audio.rs`'s bus path, which does `clamp(0.0, 1.0)`). A throw here
+ * lands in `useEngineEvents`, which has no catch, so one bad number would take
+ * down the whole event dispatch rather than one sound.
+ *
+ * `NaN` fails every comparison, so it is caught by the `Number.isFinite` guard
+ * rather than by the clamp — this is the `||`-vs-`??` trap in numeric form.
+ */
+function clampFinite(value: number | undefined, min: number, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * The ranges the inspector's own controls offer, so a clamped value is always
+ * one the user could have dialled in by hand.
+ */
+const VOLUME_RANGE = { min: 0, max: 1, fallback: 1 } as const;
+const PITCH_RANGE = { min: 0.25, max: 4, fallback: 1 } as const;
+const MAX_DISTANCE_RANGE = { min: 1, max: 100000, fallback: 50 } as const;
+const REF_DISTANCE_RANGE = { min: 0.1, max: 100000, fallback: 1 } as const;
+const ROLLOFF_RANGE = { min: 0, max: 10, fallback: 1 } as const;
+/**
+ * Normalized 0-1 controls (music intensity, occlusion amount). The fallback is
+ * the inert end of each: calm music, no muffling.
+ */
+const NORMALIZED_RANGE = { min: 0, max: 1, fallback: 0 } as const;
 
 class AudioManager {
   private ctx: AudioContext | null = null;
@@ -209,21 +253,23 @@ class AudioManager {
 
     const key = this.instanceKey(entityId, slot);
 
-    // Destroy existing instance if any
-    this.destroyInstance(entityId, slot);
+    // Replace any existing instance. `teardownInstance`, not `destroyInstance`:
+    // swapping an entity's clip is not the entity going away, so it must not
+    // drop that entity's occlusion filter.
+    this.teardownInstance(entityId, slot);
 
     // Create gain node for volume control
     const gainNode = ctx.createGain();
-    gainNode.gain.value = audioData.volume;
+    gainNode.gain.value = clampFinite(audioData.volume, VOLUME_RANGE.min, VOLUME_RANGE.max, VOLUME_RANGE.fallback);
 
     // Create panner node if spatial
     let pannerNode: PannerNode | null = null;
     if (audioData.spatial) {
       pannerNode = ctx.createPanner();
       pannerNode.distanceModel = 'inverse';
-      pannerNode.refDistance = audioData.refDistance;
-      pannerNode.maxDistance = audioData.maxDistance;
-      pannerNode.rolloffFactor = audioData.rolloffFactor;
+      pannerNode.refDistance = clampFinite(audioData.refDistance, REF_DISTANCE_RANGE.min, REF_DISTANCE_RANGE.max, REF_DISTANCE_RANGE.fallback);
+      pannerNode.maxDistance = clampFinite(audioData.maxDistance, MAX_DISTANCE_RANGE.min, MAX_DISTANCE_RANGE.max, MAX_DISTANCE_RANGE.fallback);
+      pannerNode.rolloffFactor = clampFinite(audioData.rolloffFactor, ROLLOFF_RANGE.min, ROLLOFF_RANGE.max, ROLLOFF_RANGE.fallback);
     }
 
     // Create instance
@@ -239,6 +285,10 @@ class AudioManager {
       pauseOffset: 0,
       loop: audioData.loopAudio,
       bus: audioData.bus ?? 'sfx',
+      // Clamped here as well as in `setPitch`, because `play()` writes this
+      // straight onto `source.playbackRate` — a `pitch: 0` off a tool call
+      // would otherwise be permanent silence with no error anywhere.
+      pitch: clampFinite(audioData.pitch, PITCH_RANGE.min, PITCH_RANGE.max, PITCH_RANGE.fallback),
     };
 
     this.instances.set(key, instance);
@@ -274,6 +324,7 @@ class AudioManager {
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.loop = instance.loop;
+    source.playbackRate.value = instance.pitch;
 
     // Route through bus
     const busName = instance.bus ?? 'sfx';
@@ -384,17 +435,25 @@ class AudioManager {
     const key = this.instanceKey(entityId, slot);
     const instance = this.instances.get(key);
     if (!instance) return;
-    instance.gainNode.gain.value = Math.max(0, Math.min(1, volume));
+    // `Math.max(0, Math.min(1, NaN))` is `NaN`, which the gain setter rejects —
+    // a clamp expressed with min/max alone does not exclude non-finite input.
+    instance.gainNode.gain.value = clampFinite(volume, VOLUME_RANGE.min, VOLUME_RANGE.max, VOLUME_RANGE.fallback);
   }
 
   /**
    * Set pitch (playback rate) for an entity's audio.
+   *
+   * Records the rate on the instance as well as the live source, so it survives
+   * the source being rebuilt by the next `play()` — and so it can be set on an
+   * instance that is not playing yet.
    */
   setPitch(entityId: string, rate: number, slot?: string): void {
     const key = this.instanceKey(entityId, slot);
     const instance = this.instances.get(key);
-    if (!instance?.source) return;
-    instance.source.playbackRate.value = Math.max(0.25, Math.min(4, rate));
+    if (!instance) return;
+    const clamped = clampFinite(rate, PITCH_RANGE.min, PITCH_RANGE.max, PITCH_RANGE.fallback);
+    instance.pitch = clamped;
+    if (instance.source) instance.source.playbackRate.value = clamped;
   }
 
   /**
@@ -404,6 +463,10 @@ class AudioManager {
     const key = this.instanceKey(entityId, slot);
     const instance = this.instances.get(key);
     if (!instance?.pannerNode) return;
+    // Skip the frame rather than falling back to the origin: a non-finite
+    // coordinate is a bad reading, and teleporting the sound to (0,0,0) would
+    // be audible where holding the last good position is not.
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
     instance.pannerNode.positionX.value = x;
     instance.pannerNode.positionY.value = y;
     instance.pannerNode.positionZ.value = z;
@@ -420,6 +483,9 @@ class AudioManager {
     fy: number,
     fz: number
   ): void {
+    // Same reasoning as `updatePosition`: a bad camera reading should leave the
+    // listener where it was, not throw out of the per-frame update.
+    if (![x, y, z, fx, fy, fz].every(Number.isFinite)) return;
     const ctx = this.ensureContext();
     const listener = ctx.listener;
 
@@ -444,6 +510,37 @@ class AudioManager {
    * Destroy an audio instance for an entity.
    */
   destroyInstance(entityId: string, slot?: string): void {
+    // The occlusion filter is keyed by ENTITY, not by instance key, so it
+    // belongs to the entity as a whole and only the slot-less destroy owns it.
+    // Nothing else dropped it: `setOcclusion(id, false)` was the single delete
+    // path, so an entity deleted while occluded left a live BiquadFilterNode
+    // and a `Set` entry behind for the lifetime of the tab.
+    //
+    // Released OUTSIDE `teardownInstance` — i.e. before its missing-instance
+    // bail — because `setOcclusion` builds the filter without needing an
+    // instance to exist. An entity occluded while its clip was still decoding
+    // (`createInstance` bails on a missing buffer) has a filter and no
+    // instance, and `syncEntityAudioInstance` calls this with a null component
+    // the moment the clip is cleared, so a release reached only via a live
+    // instance never runs for exactly the entity holding the orphan.
+    if (!slot) {
+      this.releaseOcclusion(entityId);
+    }
+
+    this.teardownInstance(entityId, slot);
+  }
+
+  /**
+   * Tear down an instance's nodes without touching the entity's occlusion.
+   *
+   * Split out from `destroyInstance` because `createInstance` calls it to
+   * REPLACE an instance, which is not the entity going away: routing that
+   * through the public destroy silently disabled occlusion on every clip swap,
+   * and — once the release moved ahead of the missing-instance bail — would
+   * have disabled it on the decode-retry path too, which is the very case the
+   * release exists to cover.
+   */
+  private teardownInstance(entityId: string, slot?: string): void {
     const key = this.instanceKey(entityId, slot);
     const instance = this.instances.get(key);
     if (!instance) return;
@@ -463,12 +560,52 @@ class AudioManager {
   }
 
   /**
+   * Drop an entity's occlusion filter and its enabled flag.
+   *
+   * Disconnecting matters as much as deleting: an undisconnected BiquadFilterNode
+   * that is still wired into a bus keeps its whole upstream chain reachable, so
+   * the "leak" is the graph, not just the map entry.
+   */
+  private releaseOcclusion(entityId: string): void {
+    const filter = this.occlusionFilters.get(entityId);
+    if (filter) {
+      filter.disconnect();
+      this.occlusionFilters.delete(entityId);
+    }
+    this.occlusionEnabled.delete(entityId);
+  }
+
+  /**
+   * Forget a decoded buffer.
+   *
+   * Call this when the ASSET goes away, not when a scene or a play session
+   * ends: `buffers` was written by `loadBuffer` and never deleted anywhere, so
+   * every asset a user imported and then deleted stayed decoded in memory —
+   * and decoded PCM is far larger than the compressed file it came from.
+   *
+   * Deliberately NOT called from `destroyAll`. Buffers outlive the scene by
+   * design (see `resetEntityAudioGraphForScene`): the name→id aliases survive a
+   * scene change precisely because the buffers they resolve to do, and dropping
+   * them on Stop would leave every clip silent with no path to re-decode.
+   */
+  releaseBuffer(assetId: string): void {
+    this.buffers.delete(assetId);
+  }
+
+  /**
    * Destroy all audio instances (used on Stop mode).
    */
   destroyAll(): void {
     for (const entityId of Array.from(this.instances.keys())) {
       this.destroyInstance(entityId);
     }
+    // Instance keys carry a `:slot` suffix, so the loop above never reaches the
+    // slot-less branch that releases occlusion for a layered entity. Sweep what
+    // is left rather than relying on the key shape.
+    for (const entityId of Array.from(this.occlusionFilters.keys())) {
+      this.releaseOcclusion(entityId);
+    }
+    this.occlusionEnabled.clear();
     this.cancelAllOneShots();
   }
 
@@ -518,7 +655,7 @@ class AudioManager {
       this.destroyInstance(entityId, slotName);
     }
     const gainNode = ctx.createGain();
-    gainNode.gain.value = options?.volume ?? 1.0;
+    gainNode.gain.value = clampFinite(options?.volume, VOLUME_RANGE.min, VOLUME_RANGE.max, VOLUME_RANGE.fallback);
     let pannerNode: PannerNode | null = null;
     if (options?.spatial) {
       pannerNode = ctx.createPanner();
@@ -546,6 +683,9 @@ class AudioManager {
       pauseOffset: 0,
       loop: options?.loop ?? false,
       bus: options?.bus ?? 'sfx',
+      // `options.pitch` was accepted by this signature and read by nothing — a
+      // layer's pitch was dropped on the floor at every call site.
+      pitch: clampFinite(options?.pitch, PITCH_RANGE.min, PITCH_RANGE.max, PITCH_RANGE.fallback),
     };
     this.instances.set(key, instance);
     // Auto-play the layer
@@ -654,11 +794,11 @@ class AudioManager {
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.loop = false;
-    if (options?.pitch) {
-      source.playbackRate.value = Math.max(0.25, Math.min(4, options.pitch));
+    if (options?.pitch !== undefined) {
+      source.playbackRate.value = clampFinite(options.pitch, PITCH_RANGE.min, PITCH_RANGE.max, PITCH_RANGE.fallback);
     }
     const gainNode = ctx.createGain();
-    gainNode.gain.value = Math.max(0, Math.min(1, options?.volume ?? 1.0));
+    gainNode.gain.value = clampFinite(options?.volume, VOLUME_RANGE.min, VOLUME_RANGE.max, VOLUME_RANGE.fallback);
     let pannerNode: PannerNode | null = null;
     if (options?.position) {
       pannerNode = ctx.createPanner();
@@ -666,9 +806,11 @@ class AudioManager {
       pannerNode.refDistance = 1;
       pannerNode.maxDistance = 50;
       pannerNode.rolloffFactor = 1;
-      pannerNode.positionX.value = options.position[0];
-      pannerNode.positionY.value = options.position[1];
-      pannerNode.positionZ.value = options.position[2];
+      // A coordinate is unbounded but must still be finite: `positionX.value`
+      // rejects `NaN`, and this array comes straight off a tool call.
+      pannerNode.positionX.value = clampFinite(options.position[0], -Infinity, Infinity, 0);
+      pannerNode.positionY.value = clampFinite(options.position[1], -Infinity, Infinity, 0);
+      pannerNode.positionZ.value = clampFinite(options.position[2], -Infinity, Infinity, 0);
     }
     const busName = options?.bus ?? 'sfx';
     const bus = this.buses.get(busName) ?? this.buses.get('sfx')!;
@@ -1074,7 +1216,11 @@ class AudioManager {
       return;
     }
 
-    const clamped = Math.max(0, Math.min(1, intensity));
+    // `Math.max(0, Math.min(1, NaN))` is NaN — a min/max clamp does not exclude
+    // non-finite input, and a NaN intensity reaches `linearRampToValueAtTime`
+    // through `computeStemVolume` and throws. `forge.audio.setMusicIntensity`
+    // hands this whatever a user script passed.
+    const clamped = clampFinite(intensity, NORMALIZED_RANGE.min, NORMALIZED_RANGE.max, NORMALIZED_RANGE.fallback);
     track.intensity = clamped;
 
     const ctx = this.ctx;
@@ -1267,7 +1413,12 @@ class AudioManager {
     const filter = this.occlusionFilters.get(entityId);
     if (!filter || !this.ctx) return;
 
-    const clamped = Math.max(0, Math.min(1, amount));
+    // Same non-finite hole as `setMusicIntensity`, and this one has a live
+    // caller: `physicsEvents` derives the amount as `1 - distance/total` off a
+    // raycast payload, and every comparison it guards with fails for NaN. A NaN
+    // here becomes a NaN frequency and `linearRampToValueAtTime` throws out of
+    // an event hub that has no catch.
+    const clamped = clampFinite(amount, NORMALIZED_RANGE.min, NORMALIZED_RANGE.max, NORMALIZED_RANGE.fallback);
     const now = this.ctx.currentTime;
 
     // Frequency: 5000 Hz (clear) to 200 Hz (fully occluded) — exponential interpolation

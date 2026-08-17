@@ -147,6 +147,51 @@ describe('GameCameraInspector', () => {
     expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', expect.objectContaining({ mode: 'firstPerson' }));
   });
 
+  describe('numeric parameter floors', () => {
+    /**
+     * The Smoothing row carries `min={0}` because the engine HARD-REJECTS a
+     * negative follow rate, and `set_game_camera` is full-replace — so one typed
+     * `-3` would drop mode, targetEntity and offset along with the rate
+     * (PF-1166). The `min` attribute alone is advisory: a typed value still fires
+     * `change`, so the floor has to be enforced in the parse.
+     */
+    function smoothingInput(container: HTMLElement): HTMLInputElement {
+      const label = Array.from(container.querySelectorAll('label')).find(
+        (l) => l.textContent?.trim() === 'Smoothing',
+      );
+      const id = label?.getAttribute('for');
+      expect(id, 'no <label for> pointing at the Smoothing control').toBeTruthy();
+      return container.querySelector(`#${CSS.escape(id!)}`) as HTMLInputElement;
+    }
+
+    it('advertises the floor to the browser and to assistive tech', () => {
+      setupStore();
+      const { container } = render(<GameCameraInspector />);
+      expect(smoothingInput(container).min).toBe('0');
+    });
+
+    it('refuses a negative Smoothing rather than dispatching it', () => {
+      setupStore();
+      const { container } = render(<GameCameraInspector />);
+      fireEvent.change(smoothingInput(container), { target: { value: '-3' } });
+      // Held at the previous value, exactly as a typo is — never sent as -3.
+      expect(mockSetGameCamera).toHaveBeenCalledWith(
+        'entity-1',
+        expect.objectContaining({ followSmoothing: 5 }),
+      );
+    });
+
+    it('accepts zero, which freezes the camera on purpose', () => {
+      setupStore();
+      const { container } = render(<GameCameraInspector />);
+      fireEvent.change(smoothingInput(container), { target: { value: '0' } });
+      expect(mockSetGameCamera).toHaveBeenCalledWith(
+        'entity-1',
+        expect.objectContaining({ followSmoothing: 0 }),
+      );
+    });
+  });
+
   it('shows fixed camera message for fixed mode', () => {
     setupStore({
       primaryGameCamera: { ...baseGameCamera, mode: 'fixed' as const },

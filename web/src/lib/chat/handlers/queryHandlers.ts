@@ -49,20 +49,27 @@ export const queryHandlers: Record<string, ToolHandler> = {
     };
   },
 
+  // Both getters below index a plain object with a string the model chose, so
+  // the read has to go through `Object.hasOwn`. A bare `store.allScripts[id]`
+  // walks the prototype chain: `entityId: "constructor"` resolves to
+  // `Object.prototype.constructor`, which is truthy, so the handler answered
+  // `hasScript: true` for an entity that does not exist and then reported every
+  // field as `undefined`. `"toString"`, `"valueOf"` and `"__proto__"` do the
+  // same. The lie is worse than the absence — the model plans around a script
+  // it believes is there.
   get_script: async (args, { store }) => {
     const p = parseArgs(z.object({ entityId: zEntityId }), args);
     if (p.error) return p.error;
+    if (!Object.hasOwn(store.allScripts, p.data.entityId)) return { success: true, result: { hasScript: false } };
     const script = store.allScripts[p.data.entityId];
-    if (!script) return { success: true, result: { hasScript: false } };
     return { success: true, result: { hasScript: true, source: script.source, enabled: script.enabled, template: script.template } };
   },
 
   get_audio: async (args, { store }) => {
     const p = parseArgs(z.object({ entityId: zEntityId }), args);
     if (p.error) return p.error;
-    const audio = store.primaryAudio;
-    if (!audio) return { success: true, result: { hasAudio: false } };
-    return { success: true, result: { hasAudio: true, ...audio } };
+    if (!Object.hasOwn(store.entityAudio, p.data.entityId)) return { success: true, result: { hasAudio: false } };
+    return { success: true, result: { hasAudio: true, ...store.entityAudio[p.data.entityId] } };
   },
 
   get_audio_buses: async (_args, { store }) => {

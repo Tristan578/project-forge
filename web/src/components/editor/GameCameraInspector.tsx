@@ -53,9 +53,16 @@ const MODE_DEFAULTS: Record<GameCameraMode, Partial<GameCameraData>> = {
  * an empty field and a typo to `0`, silently dispatching a real 0 to the engine
  * (a 0 follow distance puts the camera inside the player).
  */
-function parseNumberInput(raw: string, fallback: number): number {
+function parseNumberInput(raw: string, fallback: number, min?: number): number {
   const parsed = parseFloat(raw);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  if (!Number.isFinite(parsed)) return fallback;
+  // A value below the floor is refused exactly like a typo — keep the previous
+  // one. The `min` attribute alone is advisory: a typed-in `-3` still fires
+  // `change`, and for `followSmoothing` the engine HARD-REJECTS a negative rate,
+  // which drops the entire full-replace `set_game_camera` command rather than
+  // just that rate (PF-1166).
+  if (min !== undefined && parsed < min) return fallback;
+  return parsed;
 }
 
 
@@ -77,6 +84,7 @@ function NumberParamRow({
   term,
   field,
   step = '0.1',
+  min,
   camera,
   onChange,
 }: {
@@ -84,6 +92,8 @@ function NumberParamRow({
   term: string;
   field: NumericCameraField;
   step?: string;
+  /** Lowest value the engine accepts for this field, refused rather than clamped. */
+  min?: number;
   camera: GameCameraData;
   onChange: (patch: Partial<GameCameraData>) => void;
 }) {
@@ -102,11 +112,14 @@ function NumberParamRow({
         id={id}
         type="number"
         step={step}
+        min={min}
         value={current}
         onChange={(e) =>
           // A computed key widens to `{ [x: string]: number }`, which is why
           // this needs the assertion; `field` is constrained above.
-          onChange({ [field]: parseNumberInput(e.target.value, current) } as Partial<GameCameraData>)
+          onChange({
+            [field]: parseNumberInput(e.target.value, current, min),
+          } as Partial<GameCameraData>)
         }
         className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
           focus:ring-1 focus:ring-blue-500"
@@ -286,7 +299,8 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
           <>
             <NumberParamRow label="Distance" term="gameCameraFollowDist" field="followDistance" camera={primaryGameCamera} onChange={handleParamChange} />
             <NumberParamRow label="Height" term="gameCameraFollowHeight" field="followHeight" camera={primaryGameCamera} onChange={handleParamChange} />
-            <NumberParamRow label="Smoothing" term="gameCameraSmoothing" field="followSmoothing" camera={primaryGameCamera} onChange={handleParamChange} />
+            {/* min=0: the engine refuses a negative follow rate outright (PF-1166). */}
+            <NumberParamRow label="Smoothing" term="gameCameraSmoothing" field="followSmoothing" min={0} camera={primaryGameCamera} onChange={handleParamChange} />
           </>
         )}
 

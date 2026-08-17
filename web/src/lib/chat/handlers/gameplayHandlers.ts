@@ -102,7 +102,11 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       targetEntity: zEntityId.optional(),
       followDistance: z.number().optional(),
       followHeight: z.number().optional(),
-      followSmoothing: z.number().optional(),
+      // `.nonnegative()`, so the model gets a validation error naming the field
+      // instead of a silently dropped rate: the engine HARD-REJECTS a negative
+      // follow rate, and `set_game_camera` is full-replace, so one bad value
+      // takes mode, targetEntity and offset down with it (PF-1166).
+      followSmoothing: z.number().nonnegative().optional(),
       firstPersonHeight: z.number().optional(),
       firstPersonMouseSensitivity: z.number().optional(),
       sideScrollerDistance: z.number().optional(),
@@ -227,7 +231,10 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       light: ctx.store.primaryLight || undefined,
       physics: ctx.store.primaryPhysics || undefined,
       script: ctx.store.primaryScript || undefined,
-      audio: ctx.store.primaryAudio || undefined,
+      // `Object.hasOwn` for the same reason as `get_audio`: `entityId` reaches
+      // here from a tool call, and a bare index on a name like `"constructor"`
+      // would put an inherited function into the snapshot.
+      audio: Object.hasOwn(ctx.store.entityAudio, entityId) ? ctx.store.entityAudio[entityId] : undefined,
       particle: ctx.store.primaryParticle || undefined,
     };
 

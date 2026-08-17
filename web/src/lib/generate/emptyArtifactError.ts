@@ -42,6 +42,8 @@ export const GENERATION_TYPE_LABELS = [
   'Skybox',
   'Model',
   'Music',
+  'Sound effect',
+  'Voice',
 ] as const;
 
 export type GenerationTypeLabel = (typeof GENERATION_TYPE_LABELS)[number];

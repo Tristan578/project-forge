@@ -59,9 +59,9 @@ describe('audioSlice', () => {
       expect(busNames).toEqual(['master', 'sfx', 'music', 'ambient', 'voice']);
     });
 
-    it('should have null primaryAudio', () => {
+    it('should have no entity audio', () => {
       const state = store.getState();
-      expect(state.primaryAudio).toBeNull();
+      expect(state.entityAudio).toEqual({});
     });
 
     it('should have empty reverb zones', () => {
@@ -246,10 +246,34 @@ describe('audioSlice', () => {
         bus: 'sfx',
       };
 
-      store.getState().setPrimaryAudio(audioData);
+      store.getState().setEntityAudio('ent-1', audioData);
 
       const state = store.getState();
-      expect(state.primaryAudio).toEqual(audioData);
+      expect(state.entityAudio).toEqual({ 'ent-1': audioData });
+    });
+
+    it('should keep one entity\'s audio when another entity reports its own', () => {
+      // The store used to hold a single component, so whichever entity's
+      // AUDIO_CHANGED arrived last was the only one anything could read — a
+      // scene with two sound sources showed and played the wrong one.
+      const first: AudioData = {
+        assetId: 'audio-1',
+        volume: 0.8,
+        pitch: 1.0,
+        loopAudio: true,
+        spatial: false,
+        maxDistance: 50,
+        refDistance: 1,
+        rolloffFactor: 1,
+        autoplay: false,
+        bus: 'sfx',
+      };
+      const second: AudioData = { ...first, assetId: 'audio-2', volume: 0.2, bus: 'music' };
+
+      store.getState().setEntityAudio('ent-1', first);
+      store.getState().setEntityAudio('ent-2', second);
+
+      expect(store.getState().entityAudio).toEqual({ 'ent-1': first, 'ent-2': second });
     });
 
     it('should clear entity audio with null', () => {
@@ -266,12 +290,14 @@ describe('audioSlice', () => {
         bus: 'sfx',
       };
 
-      store.getState().setPrimaryAudio(audioData);
-      expect(store.getState().primaryAudio).toEqual(audioData);
+      store.getState().setEntityAudio('ent-1', audioData);
+      store.getState().setEntityAudio('ent-2', audioData);
+      expect(store.getState().entityAudio['ent-1']).toEqual(audioData);
 
-      store.getState().setPrimaryAudio(null);
+      // Clearing one entity leaves every other entity's audio in place.
+      store.getState().setEntityAudio('ent-1', null);
 
-      expect(store.getState().primaryAudio).toBeNull();
+      expect(store.getState().entityAudio).toEqual({ 'ent-2': audioData });
     });
   });
 

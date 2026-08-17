@@ -53,13 +53,12 @@ export const audioEntityHandlers: Record<string, ToolHandler> = {
     return { success: true, result: { message: `Paused audio on ${p.data.entityId}` } };
   },
 
-  get_audio: async (args, { store }) => {
-    const p = parseArgs(z.object({ entityId: zEntityId }), args);
-    if (p.error) return p.error;
-    const audio = store.primaryAudio;
-    if (!audio) return { success: true, result: { hasAudio: false } };
-    return { success: true, result: { hasAudio: true, ...audio } };
-  },
+  // `get_audio` deliberately lives in `queryHandlers` alongside `get_script`,
+  // `get_physics` and `get_audio_buses` — every other read-only getter. A
+  // byte-identical copy used to sit here too, and because `audioEntityHandlers`
+  // is spread AFTER `queryHandlers` in the registry it silently shadowed the
+  // other one. Two copies of a handler is one copy that can be fixed and one
+  // that keeps answering.
 
   update_audio_bus: async (args, { store }) => {
     const p = parseArgs(z.object({ busName: z.string().min(1) }), args);
