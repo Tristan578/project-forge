@@ -338,7 +338,13 @@ function wireIkConstraint(constraint: SourceIkConstraint2d, index: number): Wire
 }
 
 /** Convert a browser-side skeleton into the shape `SkeletonData2d` deserializes. */
-export function buildWireSkeletonData2d(data: SkeletonSource2d): WireSkeletonData2d {
+export function buildWireSkeletonData2d(source: SkeletonSource2d): WireSkeletonData2d {
+  // `import_skeleton_json` reaches here with a bare `JSON.parse` result cast to the
+  // store type, so this can be null, an array, or a string however the signature
+  // reads. A throw inside a store action loses more than a degraded rig does.
+  const data: SkeletonSource2d =
+    typeof source === 'object' && source !== null && !Array.isArray(source) ? source : {};
+
   const bones: WireBone2d[] = [];
   for (let i = 0; i < (data.bones?.length ?? 0); i += 1) {
     bones.push(wireBone(data.bones?.[i] ?? {}, i));
@@ -364,7 +370,8 @@ export function buildWireSkeletonData2d(data: SkeletonSource2d): WireSkeletonDat
     bones,
     slots,
     skins,
-    activeSkin: data.activeSkin ?? 'default',
+    // `active_skin` is a Rust `String`, so a number here is a reject, not a coercion.
+    activeSkin: typeof data.activeSkin === 'string' ? data.activeSkin : 'default',
     ikConstraints,
   };
 }

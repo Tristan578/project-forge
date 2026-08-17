@@ -676,10 +676,15 @@ async function invoke2d(
   name: string,
   args: Record<string, unknown> = {},
   storeOverrides: Record<string, unknown> = {},
-): Promise<{ result: ExecutionResult; store: ToolCallContext['store'] }> {
+): Promise<{
+  result: ExecutionResult;
+  store: ToolCallContext['store'];
+  dispatch: ReturnType<typeof vi.fn>;
+}> {
   const store = create2dStore(storeOverrides);
-  const result = await handlers2d[name](args, { store, dispatchCommand: vi.fn() });
-  return { result, store };
+  const dispatch = vi.fn();
+  const result = await handlers2d[name](args, { store, dispatchCommand: dispatch });
+  return { result, store, dispatch };
 }
 
 // ===========================================================================
@@ -2356,14 +2361,22 @@ describe('handlers2d skeleton 2D commands', () => {
   // auto_weight_skeleton2d
   // -------------------------------------------------------------------------
   describe('auto_weight_skeleton2d', () => {
-    it('re-dispatches existing skeleton to trigger auto-weighting', async () => {
-      const { result, store } = await invoke2d(
+    it('dispatches the engine auto-weight command, leaving the skeleton alone', async () => {
+      const { result, store, dispatch } = await invoke2d(
         'auto_weight_skeleton2d',
         { entityId: 'ent-1' },
         { skeletons2d: { 'ent-1': baseSkeleton }, setSkeleton2d: vi.fn() },
       );
       expect(result.success).toBe(true);
-      expect(store.setSkeleton2d).toHaveBeenCalledWith('ent-1', baseSkeleton);
+      expect(dispatch).toHaveBeenCalledWith('auto_weight_skeleton2d', {
+        entityId: 'ent-1',
+        method: undefined,
+        iterations: undefined,
+      });
+      // The engine recomputes weights in place and emits SKELETON2D_UPDATED. Sending
+      // the store mirror back would full-replace the skeleton with attachments that
+      // have no weights at all.
+      expect(store.setSkeleton2d).not.toHaveBeenCalled();
     });
 
     it('returns error when no skeleton for entity', async () => {

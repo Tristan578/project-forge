@@ -1426,15 +1426,30 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   auto_weight_skeleton2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const p = parseArgs(z.object({ entityId: zEntityId }), args);
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          // The manifest's vocabulary. The engine defaults to `heat` when this is
+          // absent, so it stays optional here even though the manifest marks it
+          // required — but a third spelling is a caller error worth reporting.
+          method: z.enum(['heat', 'envelope']).optional(),
+          iterations: z.number().int().min(1).max(100).optional(),
+        }),
+        args,
+      );
       if (p.error) return p.error;
-      const { entityId } = p.data;
+      const { entityId, method, iterations } = p.data;
       const existing = ctx.store.skeletons2d[entityId];
       if (!existing) {
         return { success: false, error: `No skeleton for entity ${entityId}` };
       }
-      // Auto-weighting is computed in the engine; trigger a re-dispatch.
-      ctx.store.setSkeleton2d(entityId, { ...existing });
+      // `auto_weight_skeleton2d` is a real engine command that recomputes every mesh
+      // attachment's vertex weights in place and emits SKELETON2D_UPDATED. Re-dispatching
+      // `setSkeleton2d` instead did the opposite of what it says: that sends a
+      // full-replace `create_skeleton2d` built from the STORE mirror, whose attachment
+      // type carries no `weights` field at all — so it would overwrite the weights this
+      // command exists to compute.
+      ctx.dispatchCommand('auto_weight_skeleton2d', { entityId, method, iterations });
       return { success: true, result: { message: `Auto-weighting skeleton for entity ${entityId}` } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to auto-weight skeleton 2D' };

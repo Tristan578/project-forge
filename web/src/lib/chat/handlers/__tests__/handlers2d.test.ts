@@ -711,13 +711,29 @@ describe('handlers2d skeleton2d edge cases', () => {
   describe('auto_weight_skeleton2d', () => {
     it('triggers auto-weight on entity', async () => {
       const skel = { bones: [{ name: 'root', parentBone: null, localPosition: [0, 0], localRotation: 0, localScale: [1, 1], length: 1, color: [1, 1, 1, 1] }], skins: {}, ikConstraints: [], activeSkin: null };
-      const { result, store } = await invoke(
+      const { result, dispatch, store } = await invoke(
         'auto_weight_skeleton2d',
-        { entityId: 'e1' },
+        { entityId: 'e1', method: 'heat', iterations: 4 },
         { skeletons2d: { e1: skel } },
       );
       expect(result.success).toBe(true);
-      expect(store.setSkeleton2d).toHaveBeenCalled();
+      expect(dispatch).toHaveBeenCalledWith('auto_weight_skeleton2d', {
+        entityId: 'e1',
+        method: 'heat',
+        iterations: 4,
+      });
+      // Must NOT round-trip the store mirror back to the engine: that is a
+      // full-replace `create_skeleton2d` whose attachments carry no weights.
+      expect(store.setSkeleton2d).not.toHaveBeenCalled();
+    });
+
+    it('rejects an auto-weight method the manifest does not declare', async () => {
+      const { result } = await invoke(
+        'auto_weight_skeleton2d',
+        { entityId: 'e1', method: 'linear' },
+        { skeletons2d: { e1: { bones: [], skins: {}, ikConstraints: [], activeSkin: null } } },
+      );
+      expect(result.success).toBe(false);
     });
   });
 });
