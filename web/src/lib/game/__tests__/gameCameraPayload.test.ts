@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  blendGameCameraData,
   buildSetGameCameraPayload,
   parseGameCameraWire,
   ENGINE_CAMERA_DEFAULTS,
+  NUMERIC_CAMERA_FIELDS,
   TRANSLATED_CAMERA_FIELDS,
   GAME_CAMERA_WIRE_KEYS,
   type SetGameCameraPayload,
@@ -122,6 +124,29 @@ describe('gameCameraPayload', () => {
         mode: 'fixed',
         targetEntity: null,
       });
+    });
+
+    it('sends a cleared target as null, the same shape the read side produces', () => {
+      // An inspector that clears the target field hands back '', not null. The
+      // engine resolves targetEntity by name, so '' becomes a target it can
+      // never find, and every `if (targetEntity)` in JS reads it as set. The
+      // parse side has always collapsed it; the build side has to agree or a
+      // clear does not survive its own round trip.
+      const payload = buildSetGameCameraPayload('cam-1', {
+        mode: 'thirdPersonFollow',
+        targetEntity: '',
+      });
+
+      expect(payload.targetEntity).toBeNull();
+      expect(parseGameCameraWire(payload as unknown as Record<string, unknown>)?.targetEntity).toBeNull();
+    });
+
+    it('round-trips a cleared target through the wire unchanged', () => {
+      const cleared = parseGameCameraWire({ mode: 'topDown', targetEntity: '', height: 12 });
+      expect(cleared?.targetEntity).toBeNull();
+
+      const rebuilt = buildSetGameCameraPayload('cam-1', cleared!);
+      expect(rebuilt.targetEntity).toBeNull();
     });
 
     describe('cross-mode authoring fields never leak onto the wire', () => {
@@ -964,6 +989,128 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
         'followHeight',
         'followDistance',
       ].sort(),
+    );
+  });
+});
+
+describe('blendGameCameraData', () => {
+  it('interpolates every numeric field the target sets', () => {
+    const blended = blendGameCameraData(
+      { mode: 'orbital', orbitalDistance: 10, orbitalAutoRotateSpeed: 0 },
+      { mode: 'orbital', orbitalDistance: 20, orbitalAutoRotateSpeed: 40 },
+      0.25,
+    );
+
+    expect(blended).toEqual({
+      mode: 'orbital',
+      targetEntity: null,
+      orbitalDistance: 12.5,
+      orbitalAutoRotateSpeed: 10,
+    });
+  });
+
+  it('returns the endpoints exactly at t=0 and t=1', () => {
+    const from = { mode: 'topDown' as const, topDownHeight: 5 };
+    const to = { mode: 'topDown' as const, topDownHeight: 25 };
+
+    expect(blendGameCameraData(from, to, 0).topDownHeight).toBe(5);
+    expect(blendGameCameraData(from, to, 1).topDownHeight).toBe(25);
+  });
+
+  it('clamps progress outside [0, 1] rather than extrapolating past the target', () => {
+    const from = { mode: 'topDown' as const, topDownHeight: 5 };
+    const to = { mode: 'topDown' as const, topDownHeight: 25 };
+
+    expect(blendGameCameraData(from, to, -3).topDownHeight).toBe(5);
+    expect(blendGameCameraData(from, to, 4).topDownHeight).toBe(25);
+  });
+
+  // Without a predecessor the camera's prior state is whatever the rest of the
+  // app last set — this module cannot name it, and inventing a start value would
+  // make the camera jump somewhere it never was before easing to the target.
+  it('cuts to the target when there is no predecessor', () => {
+    const to = { mode: 'topDown' as const, topDownHeight: 25 };
+    expect(blendGameCameraData(null, to, 0.5)).toBe(to);
+  });
+
+  // `orbitalDistance` and `topDownHeight` are unrelated quantities. Blending
+  // across a mode change would be arithmetic on two different vocabularies.
+  it('cuts to the target across a mode change', () => {
+    const to = { mode: 'topDown' as const, topDownHeight: 25 };
+    expect(blendGameCameraData({ mode: 'orbital', orbitalDistance: 3 }, to, 0.5)).toBe(to);
+  });
+
+  // The predecessor's own dispatch omitted the field, so the engine applied its
+  // `from_flat` default — that default is where the camera actually is.
+  it('blends from the engine default for a field the predecessor left unset', () => {
+    const blended = blendGameCameraData(
+      { mode: 'topDown' },
+      { mode: 'topDown', topDownHeight: ENGINE_CAMERA_DEFAULTS.topDownHeight + 10 },
+      0.5,
+    );
+    expect(blended.topDownHeight).toBe(ENGINE_CAMERA_DEFAULTS.topDownHeight + 5);
+  });
+
+  // The target omitting a field is not "leave it alone" — its own dispatch would
+  // have the engine apply the default. Dropping the field mid-blend applies that
+  // default on the FIRST frame, i.e. a cut in the middle of an ease. It has to be
+  // stepped toward the default like any other value.
+  it('eases toward the engine default for a field the target leaves unset', () => {
+    const from = { mode: 'topDown' as const, topDownHeight: 40 };
+    const to = { mode: 'topDown' as const };
+    const target = ENGINE_CAMERA_DEFAULTS.topDownHeight;
+
+    expect(blendGameCameraData(from, to, 0).topDownHeight).toBe(40);
+    expect(blendGameCameraData(from, to, 0.5).topDownHeight).toBe(40 + (target - 40) * 0.5);
+    // t=1 must be behaviourally identical to dispatching `to` alone: `from_flat`
+    // reads every parameter as `flat_f32(params, key, DEFAULT)`, so sending the
+    // default and omitting the key are the same command.
+    expect(blendGameCameraData(from, to, 1).topDownHeight).toBe(target);
+  });
+
+  it('omits a field neither side names', () => {
+    const blended = blendGameCameraData(
+      { mode: 'topDown' },
+      { mode: 'topDown' },
+      0.5,
+    );
+    expect(blended).toEqual({ mode: 'topDown', targetEntity: null });
+  });
+
+  // Every field NaN would be dropped by `buildSetGameCameraPayload`, the engine
+  // would apply its defaults, and the camera would silently reset mid-move.
+  it('lands on the destination rather than NaN when progress is not finite', () => {
+    const from = { mode: 'topDown' as const, topDownHeight: 40 };
+    const to = { mode: 'topDown' as const, topDownHeight: 60 };
+    expect(blendGameCameraData(from, to, NaN).topDownHeight).toBe(60);
+    expect(blendGameCameraData(from, to, Infinity).topDownHeight).toBe(60);
+  });
+
+  it('takes the target entity from the target keyframe and normalizes a cleared one', () => {
+    const from = { mode: 'thirdPersonFollow' as const, targetEntity: 'hero' };
+    expect(blendGameCameraData(from, { mode: 'thirdPersonFollow', targetEntity: 'boss' }, 0.5))
+      .toEqual({ mode: 'thirdPersonFollow', targetEntity: 'boss' });
+    expect(blendGameCameraData(from, { mode: 'thirdPersonFollow', targetEntity: '' }, 0.5))
+      .toEqual({ mode: 'thirdPersonFollow', targetEntity: null });
+  });
+
+  // Completeness, not a sample. A numeric field added to the authoring
+  // vocabulary is blended by construction — the loop reads NUMERIC_CAMERA_FIELDS
+  // rather than a hand-written list — and this fails if one ever stops being.
+  it('blends every field in NUMERIC_CAMERA_FIELDS', () => {
+    const midpoints = Object.fromEntries(
+      NUMERIC_CAMERA_FIELDS.map((field) => {
+        const blended = blendGameCameraData(
+          { mode: 'orbital', [field]: 0 },
+          { mode: 'orbital', [field]: 100 },
+          0.5,
+        );
+        return [field, blended[field]];
+      }),
+    );
+
+    expect(midpoints).toEqual(
+      Object.fromEntries(NUMERIC_CAMERA_FIELDS.map((field) => [field, 50])),
     );
   });
 });

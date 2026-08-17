@@ -86,10 +86,14 @@ export const sceneCreateExecutor: ExecutorDefinition = {
       ctx.dispatchCommand('new_scene', {});
     }
 
-    // Apply world configuration if provided (from world system registry)
-    if (worldType === 'tiled' || worldConfig) {
-      // World config is informational — stored in step output for downstream use
-    }
+    // `worldConfig` is parsed and then dropped. There is no scene-level world
+    // build command to send it to: `create_tilemap`, `set_tile` and
+    // `create_tileset` are routed in `core/commands/mod.rs` with no handler
+    // behind them, so a GDD that specifies a tiled world produces a scene with
+    // no world in it. Tracked separately — this executor cannot fix it, and the
+    // `if (worldType === 'tiled' || worldConfig) {}` that used to sit here, with
+    // an empty body and a comment claiming the config was "stored in step output
+    // for downstream use", read like it did.
 
     // `pendingCameraConfig` used to be returned here, described as something
     // `auto_polish` would apply "once a camera entity exists". Nothing ever read

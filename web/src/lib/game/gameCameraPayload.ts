@@ -219,6 +219,87 @@ function num(data: Partial<GameCameraData>, key: keyof GameCameraData): number |
 }
 
 /**
+ * Coerce a follow target to the one shape the engine and the store agree on.
+ *
+ * An empty string is not a target. The engine resolves `targetEntity` by name
+ * and finds nothing, so the camera reports a target it can never follow, and
+ * every JS consumer that asks `if (targetEntity)` gets `true` for it. The read
+ * side has always collapsed `''` to `null`; the write side used `?? null`, which
+ * passes `''` straight through — so a target cleared in the inspector went out
+ * on the wire as `''` and came back as `null`, and the two sides disagreed about
+ * what the camera was doing. Both directions go through here now.
+ */
+export function normalizeTargetEntity(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/**
+ * Interpolate a camera's numeric parameters from one authored state toward another.
+ *
+ * `set_game_camera` is an absolute set — the engine holds no notion of a
+ * transition, so a camera move that is supposed to take three seconds has to be
+ * stepped JS-side and dispatched frame by frame. This produces the state for one
+ * such step; `t` is already-eased progress, not raw time.
+ *
+ * A blend needs a start state, and there is exactly one case where this module
+ * can honestly name it: the previous keyframe on the same track, in the same
+ * mode. Without a predecessor the camera's prior state is whatever the rest of
+ * the app last set — unknowable from here — and across a mode change the two
+ * sides do not even share a parameter vocabulary, so blending `orbitalDistance`
+ * into `topDownHeight` would be arithmetic on unrelated quantities. Both cases
+ * return `to` unchanged: a cut, which is what already happens today and is at
+ * least not a lie about where the camera was.
+ *
+ * A field EITHER side leaves unset blends from {@link ENGINE_CAMERA_DEFAULTS}.
+ * That side's own dispatch omits the field, and `GameCameraMode::from_flat`
+ * reads every parameter as `flat_f32(params, key, DEFAULT)` — so sending the
+ * default and omitting the key are the same command, and the default is where
+ * the camera genuinely sits. Dropping the field instead, because the target
+ * happens not to name it, would let the engine apply that default on the FIRST
+ * frame of the move: a cut in the middle of an ease, which is the whole defect
+ * this function exists to remove. It would also break the invariant that
+ * `blend(from, to, 1)` behaves exactly like dispatching `to` alone.
+ */
+export function blendGameCameraData(
+  from: Partial<GameCameraData> | null,
+  to: Partial<GameCameraData> & { mode: GameCameraMode },
+  t: number,
+): Partial<GameCameraData> & { mode: GameCameraMode } {
+  if (!from || from.mode !== to.mode) return to;
+
+  // A non-finite `t` (a zero-length keyframe divided into elapsed time, say)
+  // would otherwise make every field NaN. `buildSetGameCameraPayload` drops a
+  // non-finite number, the engine falls back to its defaults, and the camera
+  // silently resets mid-move. Land on the destination instead — the end of the
+  // move is the one state that is definitely correct once time is meaningless.
+  const progress = Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : 1;
+
+  // Built key by key rather than spread. `to` is an authoring object, and the
+  // result feeds `buildSetGameCameraPayload` — the one place a stray key would
+  // be silently dropped by the engine instead of rejected here.
+  const blended: Partial<GameCameraData> & { mode: GameCameraMode } = {
+    mode: to.mode,
+    targetEntity: normalizeTargetEntity(to.targetEntity),
+  };
+  if (Object.hasOwn(to, 'engineParams') && to.engineParams) {
+    blended.engineParams = to.engineParams;
+  }
+
+  for (const key of NUMERIC_CAMERA_FIELDS) {
+    const start = num(from, key);
+    const target = num(to, key);
+    // Neither side names it: leave it off the payload entirely, so the engine
+    // keeps resolving it to the same default both keyframes were relying on.
+    if (start === undefined && target === undefined) continue;
+    const a = start ?? ENGINE_CAMERA_DEFAULTS[key];
+    const b = target ?? ENGINE_CAMERA_DEFAULTS[key];
+    blended[key] = a + (b - a) * progress;
+  }
+
+  return blended;
+}
+
+/**
  * Build a `set_game_camera` payload in the engine's own vocabulary.
  *
  * Use this instead of spreading a store object into the dispatch. A `satisfies
@@ -238,7 +319,7 @@ export function buildSetGameCameraPayload(
   const payload: SetGameCameraPayload = {
     entityId,
     mode: data.mode,
-    targetEntity: data.targetEntity ?? null,
+    targetEntity: normalizeTargetEntity(data.targetEntity),
   };
 
   switch (data.mode) {
@@ -393,11 +474,7 @@ export function parseGameCameraWire(payload: Record<string, unknown>): GameCamer
   if (!isCameraMode(rawMode)) return null;
   const mode = rawMode;
 
-  // An empty string is normalized to null, as the legacy handler did. Nothing
-  // downstream distinguishes "" from "no target", and leaving it as a string
-  // would make `targetEntity` truthy-but-unresolvable in every consumer.
-  const rawTarget = payload.targetEntity;
-  const targetEntity = typeof rawTarget === 'string' && rawTarget !== '' ? rawTarget : null;
+  const targetEntity = normalizeTargetEntity(payload.targetEntity);
   const data: GameCameraData = { mode, targetEntity };
 
   switch (mode) {

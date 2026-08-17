@@ -145,31 +145,72 @@ pub(super) fn process_game_component_queries(
 
 // ---- Game Camera Apply Systems ----
 
+/// What `set_game_camera` needs to read off a candidate entity: its id, whatever camera
+/// configuration it already carries (for the runtime state that is not authored), and whether the
+/// per-mode look state exists yet.
+type GameCameraRow = (
+    Entity,
+    &'static EntityId,
+    Option<&'static mut GameCameraData>,
+    Has<FirstPersonState>,
+    Has<OrbitalState>,
+);
+
 pub(super) fn apply_set_game_camera_requests(
     mut pending: ResMut<PendingCommands>,
-    mut entity_query: Query<(Entity, &EntityId, Option<&GameCameraData>)>,
+    mut entity_query: Query<GameCameraRow>,
     mut commands: Commands,
 ) {
     let requests: Vec<_> = pending.set_game_camera_requests.drain(..).collect();
     for request in requests {
-        let Some((entity, _eid, _existing)) = entity_query.iter_mut().find(|(_, eid, _)| eid.0 == request.entity_id) else {
+        let Some((entity, _eid, existing, has_first_person, has_orbital)) =
+            entity_query.iter_mut().find(|(_, eid, _, _, _)| eid.0 == request.entity_id)
+        else {
             continue;
         };
 
-        let camera_data = GameCameraData {
-            mode: request.mode.clone(),
-            target_entity: request.target_entity.clone(),
-            ..Default::default()
-        };
+        // Runtime shake state is carried across rather than reset — see
+        // `GameCameraData::configured`.
+        //
+        // Written THROUGH the query when the component is already present rather
+        // than re-inserted via `Commands`: a deferred insert is applied at the
+        // schedule's next sync point, which is after `apply_camera_shake_requests`
+        // has mutated the live component, so a `camera_shake` issued in the same
+        // frame as a `set_game_camera` was overwritten by this system's older
+        // snapshot. Nothing orders the two systems (they merely serialize on
+        // `PendingCommands`), so that was a silent loss in whichever order the
+        // scheduler picked. Now both mutate the same component immediately and
+        // neither can discard the other's write.
+        match existing {
+            Some(mut data) => {
+                let merged = GameCameraData::configured(
+                    Some(&data),
+                    request.mode.clone(),
+                    request.target_entity.clone(),
+                );
+                *data = merged;
+            }
+            None => {
+                commands.entity(entity).insert(GameCameraData::configured(
+                    None,
+                    request.mode.clone(),
+                    request.target_entity.clone(),
+                ));
+            }
+        }
 
-        commands.entity(entity).insert(camera_data);
-
-        // Insert state components if needed
+        // Insert state components if needed.
+        //
+        // Only when they are ABSENT: both accumulate where the player is
+        // looking, so re-inserting the default snaps the view back to its
+        // starting angle. A camera reconfigured mid-play — or stepped frame by
+        // frame through a cutscene keyframe — would otherwise have its look
+        // direction reset on every dispatch.
         match &request.mode {
-            GameCameraMode::FirstPerson { .. } => {
+            GameCameraMode::FirstPerson { .. } if !has_first_person => {
                 commands.entity(entity).insert(FirstPersonState::default());
             }
-            GameCameraMode::Orbital { .. } => {
+            GameCameraMode::Orbital { .. } if !has_orbital => {
                 commands.entity(entity).insert(OrbitalState::default());
             }
             _ => {}
