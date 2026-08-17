@@ -1120,4 +1120,117 @@ describe('compoundHandlers', () => {
       );
     });
   });
+
+  // ===========================================================================
+  // Model-supplied values are validated on the live path (PF-1160)
+  //
+  // These assert through the handlers rather than against `helpers.ts`
+  // directly, because the defect being fixed was that the handlers had their
+  // own unvalidated copies of those builders. A test that imports helpers can
+  // pass while production runs something else entirely, which is exactly what
+  // happened; only a handler-level assertion proves the validation runs.
+  // ===========================================================================
+
+  describe('validation of model-supplied specs', () => {
+    async function spawnWith(entity: Record<string, unknown>) {
+      return invoke('create_scene_from_description', { entities: [{ type: 'cube', name: 'X', ...entity }] }, {
+        spawnEntity: vi.fn(() => 'e1'),
+      });
+    }
+
+    function lastCallArg(fn: unknown, index: number): unknown {
+      const calls = (fn as ReturnType<typeof vi.fn>).mock.calls;
+      return calls[calls.length - 1][index];
+    }
+
+    it('clamps out-of-range material values into the range the field can mean', async () => {
+      const { store } = await spawnWith({ material: { metallic: 5, perceptualRoughness: -3, ior: 99 } });
+
+      const mat = lastCallArg(store.updateMaterial, 1) as Record<string, number>;
+      // 5 reads as "as metallic as it goes", so it clamps rather than falling
+      // back to the 0 default, which would read the intent backwards.
+      expect(mat.metallic).toBe(1);
+      expect(mat.perceptualRoughness).toBe(0);
+      expect(mat.ior).toBe(3);
+    });
+
+    it('keeps a finite-but-enormous number out of the f32 overflow band', async () => {
+      // 1e40 is a valid JSON number and survives every `as number` cast, but
+      // past f32::MAX it reaches the engine as `inf` and NaNs the graph.
+      const { store } = await spawnWith({ physics: { bodyType: 'dynamic', friction: 1e40 } });
+
+      const phys = lastCallArg(store.updatePhysics, 1) as Record<string, number>;
+      expect(Number.isFinite(phys.friction)).toBe(true);
+      expect(phys.friction).toBeLessThanOrEqual(3.4e38);
+    });
+
+    it('refuses a zero density, which Rapier cannot integrate', async () => {
+      const { store } = await spawnWith({ physics: { bodyType: 'dynamic', density: 0 } });
+
+      expect((lastCallArg(store.updatePhysics, 1) as Record<string, number>).density).toBeGreaterThan(0);
+    });
+
+    it('falls back to the default for a value of the wrong type, keeping the rest of the spec', async () => {
+      const { result, store } = await spawnWith({
+        physics: { bodyType: 'dynamic', restitution: 'bouncy' },
+      });
+
+      const phys = lastCallArg(store.updatePhysics, 1) as Record<string, unknown>;
+      expect(phys.restitution).toBe(0.3);
+      // The one bad field must not take the good ones down with it.
+      expect(phys.bodyType).toBe('dynamic');
+      expect(result.success).toBe(true);
+      const operations = (result.result as Record<string, unknown>).operations as Array<Record<string, unknown>>;
+      expect(operations[0].success).toBe(true);
+    });
+
+    it('survives a spec that is not an object at all', async () => {
+      const { result, store } = await spawnWith({ light: 'bright' });
+
+      // Nothing can be read out of a string, so every default applies —
+      // the same answer as supplying no fields, and no throw.
+      expect(lastCallArg(store.updateLight, 1)).toEqual(
+        expect.objectContaining({ lightType: 'point', intensity: 800 }),
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('rounds a fractional value for a field the engine deserializes as u32', async () => {
+      // serde has no float-to-int coercion: 1.5 against CollectibleData::value
+      // fails the whole payload, and dispatchCommand reports nothing.
+      const { store } = await spawnWith({
+        gameComponent: 'collectible',
+        gameComponentProps: { value: 1.5 },
+      });
+
+      const comp = lastCallArg(store.addGameComponent, 1) as { collectible: { value: number } };
+      expect(comp.collectible.value).toBe(2);
+      expect(Number.isInteger(comp.collectible.value)).toBe(true);
+    });
+
+    it('floors a negative value for a u32 field rather than passing it through', async () => {
+      const { store } = await spawnWith({
+        gameComponent: 'collectible',
+        gameComponentProps: { value: -10 },
+      });
+
+      expect((lastCallArg(store.addGameComponent, 1) as { collectible: { value: number } }).collectible.value)
+        .toBe(0);
+    });
+
+    it('validates game component props reaching setup_character too', async () => {
+      const { store } = await invoke('setup_character', {
+        controller: { speed: 1e40, jumpHeight: -5 },
+      }, {
+        spawnEntity: vi.fn(() => 'char-1'),
+      });
+
+      const calls = (store.addGameComponent as ReturnType<typeof vi.fn>).mock.calls;
+      const controller = calls.find(([, c]) => (c as { type?: string }).type === 'characterController');
+      const cc = (controller?.[1] as { characterController: Record<string, number> }).characterController;
+      expect(Number.isFinite(cc.speed)).toBe(true);
+      expect(cc.speed).toBeLessThanOrEqual(3.4e38);
+      expect(cc.jumpHeight).toBe(0);
+    });
+  });
 });

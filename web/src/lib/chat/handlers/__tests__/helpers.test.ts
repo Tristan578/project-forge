@@ -314,3 +314,57 @@ describe('wallFromStartEnd', () => {
     expect(result.scale[2]).toBeCloseTo(expectedLength);
   });
 });
+
+// ===========================================================================
+// Bounds (PF-1160)
+//
+// The behaviour these builders are relied on for is that nothing they are
+// handed can throw and nothing can leave with a value the engine cannot
+// deserialize. Cases that need the whole handler to be meaningful live in
+// compoundHandlers.test.ts instead.
+// ===========================================================================
+
+describe('bounds on model-supplied values', () => {
+  it('never throws, whatever it is handed', () => {
+    const junk: unknown[] = [null, undefined, 'text', 42, [], () => {}, { metallic: {} }];
+
+    for (const input of junk) {
+      expect(() => buildMaterialFromPartial(input as Record<string, unknown>)).not.toThrow();
+      expect(() => buildLightFromPartial(input as Record<string, unknown>)).not.toThrow();
+      expect(() => buildPhysicsFromPartial(input as Record<string, unknown>)).not.toThrow();
+      expect(() => buildGameComponentFromInput('health', input as Record<string, unknown>)).not.toThrow();
+    }
+  });
+
+  it('leaves a valid value exactly as supplied', () => {
+    // The clamps must be invisible to any spec a model has business writing.
+    const mat = buildMaterialFromPartial({ metallic: 0.35, perceptualRoughness: 0.9, ior: 1.45 });
+
+    expect(mat.metallic).toBe(0.35);
+    expect(mat.perceptualRoughness).toBe(0.9);
+    expect(mat.ior).toBe(1.45);
+  });
+
+  it('drops an over-long identifier rather than truncating it', () => {
+    // Half an entity id names the wrong entity; no id at all takes the default.
+    const comp = buildGameComponentFromInput('follower', { targetEntityId: 'e'.repeat(300) });
+
+    expect((comp as { follower: { targetEntityId: string | null } }).follower.targetEntityId).toBeNull();
+  });
+
+  it('rounds target_score, which the engine reads as Option<u32>', () => {
+    const comp = buildGameComponentFromInput('win_condition', { conditionType: 'score', targetScore: 9.7 });
+
+    expect((comp as { winCondition: { targetScore: number | null } }).winCondition.targetScore).toBe(10);
+  });
+
+  it('refuses a spawner interval of zero, which spawns every frame', () => {
+    const comp = buildGameComponentFromInput('spawner', { intervalSecs: 0 });
+
+    expect((comp as { spawner: { intervalSecs: number } }).spawner.intervalSecs).toBeGreaterThan(0);
+  });
+
+  it('still returns null for a component type it does not know', () => {
+    expect(buildGameComponentFromInput('teleprompter', {})).toBeNull();
+  });
+});
