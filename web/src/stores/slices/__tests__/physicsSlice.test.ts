@@ -303,21 +303,63 @@ describe('physicsSlice', () => {
     });
   });
 
+  /**
+   * Real joint fixtures, not `{ jointType } as unknown as Joint2dData`.
+   *
+   * The casts these replaced described a joint the type forbids — one had
+   * `jointType: 'fixed'`, which is not one of the four variants — so they could
+   * never have caught the wire-shape defect the payload builder exists to fix
+   * (PF-1167).
+   */
+  function makeJoint2d(overrides: Partial<Joint2dData> = {}): Joint2dData {
+    return {
+      targetEntityId: 'entity2',
+      jointType: 'revolute',
+      localAnchor1: [0, 1],
+      localAnchor2: [0, -1],
+      ...overrides,
+    };
+  }
+
   describe('setJoint2d', () => {
-    it('should update state and dispatch', () => {
-      const data: Joint2dData = { jointType: 'revolute' } as unknown as Joint2dData;
+    it('should update state and dispatch the full engine payload', () => {
+      const data = makeJoint2d({ motorVelocity: 3, motorMaxForce: 40 });
       store.getState().setJoint2d('entity1', data);
 
       expect(store.getState().joints2d.entity1).toEqual(data);
+      // Whole-payload assertion: the spread this replaced sent a shape the
+      // engine rejected outright, and `objectContaining` cannot see that.
       expect(mockDispatch).toHaveBeenCalledWith('set_joint_2d', {
         entityId: 'entity1',
-        ...data,
+        targetEntityId: 'entity2',
+        jointType: 'revolute',
+        localAnchor1: [0, 1],
+        localAnchor2: [0, -1],
+        motorVelocity: 3,
+        motorMaxForce: 40,
+      });
+    });
+
+    it('should not send params belonging to another joint type', () => {
+      // `maxDistance` is a rope parameter. `JointType2d::from_flat` reads only
+      // the keys its own arm names, so a stray key would be silently ignored —
+      // the same "looks sent, never applied" shape this whole fix is about.
+      const data = makeJoint2d({ jointType: 'spring', stiffness: 12, maxDistance: 99 });
+      store.getState().setJoint2d('entity1', data);
+
+      expect(mockDispatch).toHaveBeenCalledWith('set_joint_2d', {
+        entityId: 'entity1',
+        targetEntityId: 'entity2',
+        jointType: 'spring',
+        localAnchor1: [0, 1],
+        localAnchor2: [0, -1],
+        stiffness: 12,
       });
     });
 
     it('should store joints for multiple entities independently', () => {
-      const data1: Joint2dData = { jointType: 'revolute' } as unknown as Joint2dData;
-      const data2: Joint2dData = { jointType: 'prismatic' } as unknown as Joint2dData;
+      const data1 = makeJoint2d();
+      const data2 = makeJoint2d({ jointType: 'prismatic', axis: [1, 0] });
       store.getState().setJoint2d('entity1', data1);
       store.getState().setJoint2d('entity2', data2);
 
@@ -326,10 +368,19 @@ describe('physicsSlice', () => {
     });
   });
 
+  describe('applyJoint2dFromEngine', () => {
+    it('should write the joint WITHOUT dispatching back at the engine', () => {
+      const data = makeJoint2d({ jointType: 'rope', maxDistance: 5 });
+      store.getState().applyJoint2dFromEngine('entity1', data);
+
+      expect(store.getState().joints2d.entity1).toEqual(data);
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+  });
+
   describe('removeJoint2d', () => {
     it('should remove from map and dispatch', () => {
-      const data: Joint2dData = { jointType: 'fixed' } as unknown as Joint2dData;
-      store.getState().setJoint2d('entity1', data);
+      store.getState().setJoint2d('entity1', makeJoint2d());
 
       store.getState().removeJoint2d('entity1');
 
@@ -340,9 +391,8 @@ describe('physicsSlice', () => {
     });
 
     it('should not affect other joints when removing one', () => {
-      const data1: Joint2dData = { jointType: 'revolute' } as unknown as Joint2dData;
-      const data2: Joint2dData = { jointType: 'rope' } as unknown as Joint2dData;
-      store.getState().setJoint2d('entity1', data1);
+      const data2 = makeJoint2d({ jointType: 'rope', maxDistance: 4 });
+      store.getState().setJoint2d('entity1', makeJoint2d());
       store.getState().setJoint2d('entity2', data2);
 
       store.getState().removeJoint2d('entity1');

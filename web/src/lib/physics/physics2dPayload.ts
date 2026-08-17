@@ -24,7 +24,7 @@
  * import of either breaks `next build` from any API route that reaches this file.
  */
 
-import type { Physics2dData } from '@/stores/slices/types';
+import type { Joint2dData, Physics2dData } from '@/stores/slices/types';
 
 /**
  * The fields the engine's `Physics2dPatch` carries, as an OBJECT so the
@@ -275,4 +275,156 @@ export function parsePhysics2dWire(payload: unknown): ParsedPhysics2dWire | null
     enabled: wire.enabled === true,
     data,
   };
+}
+
+/* ------------------------------------------------------------------------- *
+ * 2D joints
+ *
+ * `set_joint_2d` was a hard serde reject on three independent axes at once: the
+ * store spread the joint's fields FLAT next to `entityId` while the handler
+ * expected them nested under `jointData`; the store speaks camelCase while
+ * `PhysicsJoint2d` carries no `rename_all`; and `JointType2d` is an enum of
+ * struct variants with no `#[serde(tag)]`, so it is externally tagged and can
+ * only read `{"Revolute": {…}}` — never the bare `'revolute'` the store sends.
+ * The engine now reads one flat camelCase vocabulary through
+ * `PhysicsJoint2d::from_flat` and emits the same one through `to_flat`, and this
+ * is the browser end of it.
+ * ------------------------------------------------------------------------- */
+
+/** The four joint types, as an object so membership is a `hasOwn` check. */
+const JOINT2D_TYPES = {
+  revolute: true,
+  prismatic: true,
+  rope: true,
+  spring: true,
+} satisfies Record<Joint2dData['jointType'], true>;
+
+/**
+ * The optional parameters each variant carries, keyed by joint type.
+ *
+ * Scoped per variant rather than sent as one flat union: `JointType2d::from_flat`
+ * reads only the keys its own arm names, so a `maxDistance` riding along with a
+ * spring joint would be silently ignored — the same "looks sent, never applied"
+ * shape this module exists to close. Sending only what the variant can use keeps
+ * the payload and the behaviour identical.
+ */
+/**
+ * Which optional parameters each variant actually reads.
+ *
+ * Exported so its test can pin it against `JointType2d::from_flat` in
+ * `engine/src/core/physics_2d.rs`. A key sent to the wrong variant is not an
+ * error there — `from_flat` reads only the keys its own arm names, so a stray
+ * one is silently ignored, which is the same "looks sent, never applied" shape
+ * this module exists to prevent.
+ */
+export const JOINT2D_PARAMS_BY_TYPE = {
+  revolute: ['limits', 'motorVelocity', 'motorMaxForce'],
+  prismatic: ['axis', 'limits', 'motorVelocity', 'motorMaxForce'],
+  rope: ['maxDistance'],
+  spring: ['restLength', 'stiffness', 'damping'],
+} as const satisfies Record<Joint2dData['jointType'], readonly (keyof Joint2dData)[]>;
+
+/** Fields every joint carries regardless of type. */
+const JOINT2D_COMMON_KEYS = ['targetEntityId', 'jointType', 'localAnchor1', 'localAnchor2'] as const;
+
+function isJoint2dType(raw: unknown): raw is Joint2dData['jointType'] {
+  return typeof raw === 'string' && Object.hasOwn(JOINT2D_TYPES, raw);
+}
+
+/**
+ * Build the payload `set_joint_2d` / `create_2d_joint` / `update_2d_joint` read.
+ *
+ * Picked key by key from an allowlist, never spread: `{ entityId, ...data }` is
+ * what shipped before, and it carried whatever the caller happened to hold —
+ * TypeScript's excess-property check does not apply to spread properties, so an
+ * invented key type-checks and then vanishes inside serde.
+ *
+ * Values are forwarded as-is rather than range-checked here. The engine rejects a
+ * non-finite or wrong-shaped value by NAME and `reportCommandRejected` surfaces
+ * that, so a second validator on this side could only disagree with the first —
+ * and a value dropped here would be indistinguishable from one never sent.
+ */
+export function buildSetJoint2dPayload(
+  entityId: string,
+  data: Joint2dData,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = { entityId };
+  for (const key of JOINT2D_COMMON_KEYS) {
+    payload[key] = data[key];
+  }
+  if (!isJoint2dType(data.jointType)) return payload;
+  for (const key of JOINT2D_PARAMS_BY_TYPE[data.jointType]) {
+    if (!Object.hasOwn(data, key)) continue;
+    const value = data[key];
+    if (value === undefined) continue;
+    payload[key] = value;
+  }
+  return payload;
+}
+
+export interface ParsedJoint2dWire {
+  entityId: string;
+  data: Joint2dData;
+}
+
+/** Read a `[number, number]` out of a wire value, rejecting anything else. */
+function wirePair(raw: unknown): [number, number] | undefined {
+  // Indexed rather than `.every`, which skips array holes and would report a
+  // gapped array as valid — see the fail-open-validator gotcha (PF-1143).
+  if (!Array.isArray(raw) || raw.length !== 2) return undefined;
+  const first = raw[0];
+  const second = raw[1];
+  if (typeof first !== 'number' || !Number.isFinite(first)) return undefined;
+  if (typeof second !== 'number' || !Number.isFinite(second)) return undefined;
+  return [first, second];
+}
+
+function wireNumber(raw: unknown): number | undefined {
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
+}
+
+/**
+ * Parse a `JOINT2D_CHANGED` payload into store vocabulary.
+ *
+ * Returns `null` for anything without a usable `entityId`, `targetEntityId` and
+ * known `jointType`, so a malformed event cannot write a half-built joint that
+ * the inspector would then send back at the engine as if the user had authored
+ * it. Anchors fall back to the engine's own `[0, 0]` default because they are
+ * required by the type; optional parameters are dropped when absent or
+ * unusable, never defaulted, since a default is indistinguishable from the
+ * engine reporting that value.
+ */
+export function parseJoint2dWire(payload: unknown): ParsedJoint2dWire | null {
+  if (typeof payload !== 'object' || payload === null) return null;
+  const wire = payload as Record<string, unknown>;
+
+  const entityId = wire.entityId;
+  if (typeof entityId !== 'string' || entityId.length === 0) return null;
+
+  const targetEntityId = wire.targetEntityId;
+  if (typeof targetEntityId !== 'string' || targetEntityId.length === 0) return null;
+
+  const jointType = wire.jointType;
+  if (!isJoint2dType(jointType)) return null;
+
+  const data: Joint2dData = {
+    targetEntityId,
+    jointType,
+    localAnchor1: wirePair(wire.localAnchor1) ?? [0, 0],
+    localAnchor2: wirePair(wire.localAnchor2) ?? [0, 0],
+  };
+
+  for (const key of JOINT2D_PARAMS_BY_TYPE[jointType]) {
+    if (!Object.hasOwn(wire, key)) continue;
+    const raw = wire[key];
+    if (key === 'limits' || key === 'axis') {
+      const pair = wirePair(raw);
+      if (pair) data[key] = pair;
+      continue;
+    }
+    const num = wireNumber(raw);
+    if (num !== undefined) data[key] = num;
+  }
+
+  return { entityId, data };
 }

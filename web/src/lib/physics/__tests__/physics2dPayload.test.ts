@@ -16,12 +16,15 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   PHYSICS2D_PATCH_KEYS,
+  JOINT2D_PARAMS_BY_TYPE,
   defaultPhysics2dData,
   buildSetPhysics2dPayload,
+  buildSetJoint2dPayload,
   buildUpdatePhysics2dPayload,
   parsePhysics2dWire,
+  parseJoint2dWire,
 } from '../physics2dPayload';
-import type { Physics2dData } from '@/stores/slices/types';
+import type { Joint2dData, Physics2dData } from '@/stores/slices/types';
 
 const RUST_PATH = path.resolve(__dirname, '../../../../../engine/src/core/physics_2d.rs');
 
@@ -429,6 +432,295 @@ describe('parsePhysics2dWire', () => {
       });
       // `mass` proves the parse ran rather than bailing out early.
       expect(parsed?.data).toEqual({ mass: 3 });
+    },
+  );
+});
+
+// ===========================================================================
+// 2D joints
+// ===========================================================================
+
+/**
+ * `set_joint_2d` was a hard serde reject on THREE independent axes at once:
+ * the engine expected the data nested under `jointData`, read snake_case keys,
+ * and typed `jointType` as an externally-tagged enum that can only accept
+ * `{"Revolute": {…}}`. The store spread a flat camelCase object with a bare
+ * mode string, so every 2D joint the editor ever created was dropped before it
+ * reached the simulation while the store kept its own optimistic copy — and
+ * `dispatchCommand` returns `void`, so nothing reported it (PF-1167).
+ */
+describe('buildSetJoint2dPayload', () => {
+  function makeJoint(overrides: Partial<Joint2dData> = {}): Joint2dData {
+    return {
+      targetEntityId: 'entity-b',
+      jointType: 'revolute',
+      localAnchor1: [1, 2],
+      localAnchor2: [-1, -2],
+      ...overrides,
+    };
+  }
+
+  it('builds the flat vocabulary the engine reads', () => {
+    expect(
+      buildSetJoint2dPayload(
+        'entity-a',
+        makeJoint({ limits: [-0.5, 0.5], motorVelocity: 3, motorMaxForce: 40 }),
+      ),
+    ).toEqual({
+      entityId: 'entity-a',
+      targetEntityId: 'entity-b',
+      jointType: 'revolute',
+      localAnchor1: [1, 2],
+      localAnchor2: [-1, -2],
+      limits: [-0.5, 0.5],
+      motorVelocity: 3,
+      motorMaxForce: 40,
+    });
+  });
+
+  it('omits params the caller did not set, so the engine applies its own defaults', () => {
+    expect(buildSetJoint2dPayload('entity-a', makeJoint())).toEqual({
+      entityId: 'entity-a',
+      targetEntityId: 'entity-b',
+      jointType: 'revolute',
+      localAnchor1: [1, 2],
+      localAnchor2: [-1, -2],
+    });
+  });
+
+  it('sends only the params the target variant reads', () => {
+    // `maxDistance` belongs to rope and `axis` to prismatic. Forwarding either
+    // alongside a spring joint would be silently ignored by `from_flat`.
+    const payload = buildSetJoint2dPayload(
+      'entity-a',
+      makeJoint({ jointType: 'spring', restLength: 2, maxDistance: 99, axis: [0, 1] }),
+    );
+    expect(payload).toEqual({
+      entityId: 'entity-a',
+      targetEntityId: 'entity-b',
+      jointType: 'spring',
+      localAnchor1: [1, 2],
+      localAnchor2: [-1, -2],
+      restLength: 2,
+    });
+  });
+
+  it.each(['prismatic', 'rope', 'spring'] as const)(
+    'carries the %s variant through unchanged',
+    (jointType) => {
+      const payload = buildSetJoint2dPayload('entity-a', makeJoint({ jointType }));
+      expect(payload.jointType).toBe(jointType);
+    },
+  );
+
+  it('still sends the identity fields when the joint type is unrecognized', () => {
+    // The engine rejects by NAME with a message that lists the four valid types,
+    // and `reportCommandRejected` surfaces that. Silently dropping the field here
+    // would turn a named error into a shapeless one.
+    const payload = buildSetJoint2dPayload('entity-a', {
+      ...makeJoint(),
+      jointType: 'welded' as Joint2dData['jointType'],
+    });
+    expect(payload).toEqual({
+      entityId: 'entity-a',
+      targetEntityId: 'entity-b',
+      jointType: 'welded',
+      localAnchor1: [1, 2],
+      localAnchor2: [-1, -2],
+    });
+  });
+
+  it.each(['constructor', 'toString', 'valueOf', '__proto__'])(
+    'does not treat the inherited table member %s as a joint type',
+    (hostile) => {
+      const payload = buildSetJoint2dPayload('entity-a', {
+        ...makeJoint(),
+        jointType: hostile as Joint2dData['jointType'],
+      });
+      // Identity fields only: a bare `TABLE[raw]` would resolve an inherited
+      // member here and index `JOINT2D_PARAMS_BY_TYPE` with it.
+      expect(Object.keys(payload).sort()).toEqual([
+        'entityId',
+        'jointType',
+        'localAnchor1',
+        'localAnchor2',
+        'targetEntityId',
+      ]);
+    },
+  );
+});
+
+describe('parseJoint2dWire', () => {
+  function wire(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      entityId: 'entity-a',
+      targetEntityId: 'entity-b',
+      jointType: 'revolute',
+      localAnchor1: [1, 2],
+      localAnchor2: [-1, -2],
+      ...overrides,
+    };
+  }
+
+  it('reads the flat vocabulary the engine emits', () => {
+    expect(parseJoint2dWire(wire({ limits: [-1, 1], motorVelocity: 2, motorMaxForce: 30 }))).toEqual(
+      {
+        entityId: 'entity-a',
+        data: {
+          targetEntityId: 'entity-b',
+          jointType: 'revolute',
+          localAnchor1: [1, 2],
+          localAnchor2: [-1, -2],
+          limits: [-1, 1],
+          motorVelocity: 2,
+          motorMaxForce: 30,
+        },
+      },
+    );
+  });
+
+  it.each([
+    ['a non-object payload', 'nope'],
+    ['null', null],
+    ['a missing entityId', { targetEntityId: 'b', jointType: 'revolute' }],
+    ['an empty entityId', wire({ entityId: '' })],
+    ['a numeric entityId', wire({ entityId: 7 })],
+    ['a missing targetEntityId', { entityId: 'a', jointType: 'revolute' }],
+    ['an empty targetEntityId', wire({ targetEntityId: '' })],
+    ['a numeric targetEntityId', wire({ targetEntityId: 7 })],
+    ['an unknown jointType', wire({ jointType: 'welded' })],
+    ['a PascalCase jointType', wire({ jointType: 'Revolute' })],
+    ['a missing jointType', { entityId: 'a', targetEntityId: 'b' }],
+  ])('rejects %s', (_label, payload) => {
+    expect(parseJoint2dWire(payload)).toBeNull();
+  });
+
+  it('falls back to a zero anchor rather than dropping the joint', () => {
+    const parsed = parseJoint2dWire(wire({ localAnchor1: undefined, localAnchor2: 'nope' }));
+    expect(parsed?.data.localAnchor1).toEqual([0, 0]);
+    expect(parsed?.data.localAnchor2).toEqual([0, 0]);
+  });
+
+  it('drops params that are not finite numbers', () => {
+    const parsed = parseJoint2dWire(
+      wire({ motorVelocity: Number.NaN, motorMaxForce: '40', limits: [0, Number.POSITIVE_INFINITY] }),
+    );
+    expect(parsed?.data).toEqual({
+      targetEntityId: 'entity-b',
+      jointType: 'revolute',
+      localAnchor1: [1, 2],
+      localAnchor2: [-1, -2],
+    });
+  });
+
+  it('rejects a gapped anchor array instead of reporting it valid', () => {
+    // A hole is skipped by `.every`/`.some`, so a callback-form check would
+    // report this pair as two valid numbers (PF-1143). The engine emits dense
+    // arrays, but a hole degrades to `null` across a JSON round trip.
+    const gapped = [1];
+    gapped.length = 2;
+    const parsed = parseJoint2dWire(wire({ localAnchor1: gapped }));
+    expect(parsed?.data.localAnchor1).toEqual([0, 0]);
+    expect(parseJoint2dWire(wire({ localAnchor1: [1, null] }))?.data.localAnchor1).toEqual([0, 0]);
+  });
+
+  it('ignores params belonging to a different variant', () => {
+    const parsed = parseJoint2dWire(wire({ jointType: 'rope', maxDistance: 5, stiffness: 12 }));
+    expect(parsed?.data).toEqual({
+      targetEntityId: 'entity-b',
+      jointType: 'rope',
+      localAnchor1: [1, 2],
+      localAnchor2: [-1, -2],
+      maxDistance: 5,
+    });
+  });
+
+  it('round-trips a built payload back into the same joint', () => {
+    const data: Joint2dData = {
+      targetEntityId: 'entity-b',
+      jointType: 'prismatic',
+      localAnchor1: [1, 2],
+      localAnchor2: [-1, -2],
+      axis: [0, 1],
+      limits: [-3, 3],
+      motorVelocity: 4,
+      motorMaxForce: 50,
+    };
+    expect(parseJoint2dWire(buildSetJoint2dPayload('entity-a', data))).toEqual({
+      entityId: 'entity-a',
+      data,
+    });
+  });
+
+  it('does not read an inherited property as a joint param', () => {
+    const polluted = Object.create({ maxDistance: 99 }) as Record<string, unknown>;
+    Object.assign(polluted, wire({ jointType: 'rope' }));
+    expect(parseJoint2dWire(polluted)?.data).toEqual({
+      targetEntityId: 'entity-b',
+      jointType: 'rope',
+      localAnchor1: [1, 2],
+      localAnchor2: [-1, -2],
+    });
+  });
+});
+
+/**
+ * Drift pin: `JOINT2D_PARAMS_BY_TYPE` must name exactly the keys each
+ * `JointType2d::from_flat` arm reads. Sending a key the arm does not name is a
+ * silent no-op, and omitting one the arm DOES name makes that parameter
+ * unreachable from the editor — neither shows up as a failure anywhere else.
+ */
+describe('JOINT2D_PARAMS_BY_TYPE vs JointType2d::from_flat', () => {
+  function fromFlatArms(): Record<string, string[]> {
+    const source = readRust();
+    const start = source.indexOf('pub fn from_flat(joint_type: &str');
+    if (start === -1) {
+      throw new Error(
+        'Could not find `JointType2d::from_flat` in physics_2d.rs. If it was renamed, ' +
+          'repoint this parser rather than deleting the assertion.',
+      );
+    }
+    const end = source.indexOf('\n    }', start);
+    if (end === -1) throw new Error('Could not find the end of `from_flat`.');
+    const body = source.slice(start, end);
+
+    const arms: Record<string, string[]> = {};
+    // Each arm opens `"<mode>" => Ok(JointType2d::…` and runs to the next arm.
+    const armPattern = /"([a-z]+)" => Ok\(/g;
+    const starts: Array<{ mode: string; at: number }> = [];
+    let match = armPattern.exec(body);
+    while (match !== null) {
+      starts.push({ mode: match[1], at: match.index });
+      match = armPattern.exec(body);
+    }
+    if (starts.length === 0) throw new Error('Parsed zero `from_flat` arms — refusing to pass.');
+
+    for (let i = 0; i < starts.length; i += 1) {
+      const slice = body.slice(starts[i].at, starts[i + 1]?.at ?? body.length);
+      const keys: string[] = [];
+      const keyPattern = /flat_(?:f32|vec2)\(params, "([A-Za-z]+)"\)/g;
+      let keyMatch = keyPattern.exec(slice);
+      while (keyMatch !== null) {
+        keys.push(keyMatch[1]);
+        keyMatch = keyPattern.exec(slice);
+      }
+      arms[starts[i].mode] = keys;
+    }
+    return arms;
+  }
+
+  it('names every mode the engine accepts, and no others', () => {
+    expect(Object.keys(fromFlatArms()).sort()).toEqual(
+      Object.keys(JOINT2D_PARAMS_BY_TYPE).sort(),
+    );
+  });
+
+  it.each(Object.keys(JOINT2D_PARAMS_BY_TYPE) as Joint2dData['jointType'][])(
+    'reads the same params as the %s arm',
+    (mode) => {
+      const rustKeys = fromFlatArms()[mode];
+      expect(rustKeys.length).toBeGreaterThan(0);
+      expect([...rustKeys].sort()).toEqual([...JOINT2D_PARAMS_BY_TYPE[mode]].sort());
     },
   );
 });

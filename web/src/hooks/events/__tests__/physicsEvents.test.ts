@@ -414,23 +414,97 @@ describe('handlePhysicsEvent', () => {
     });
   });
 
+  /**
+   * `JOINT2D_CHANGED` had no handler at all for its whole life, so every joint
+   * the engine reported was dropped on the floor. The emitter also FLATTENED
+   * `PhysicsJoint2d` into a camelCase wrapper — and `rename_all` does not
+   * propagate through `#[serde(flatten)]` — so the wire carried snake_case keys
+   * wrapped around a nested, externally-tagged PascalCase `JointType2d`, a shape
+   * the store's flat `Joint2dData` could not have been built from even if a
+   * handler had existed. Both halves are fixed together (PF-1167).
+   */
+  describe('JOINT2D_CHANGED', () => {
+    it('translates the flat wire into store vocabulary', () => {
+      const result = handlePhysicsEvent(
+        'JOINT2D_CHANGED',
+        {
+          entityId: 'sprite-1',
+          targetEntityId: 'sprite-2',
+          jointType: 'spring',
+          localAnchor1: [0, 1],
+          localAnchor2: [0, -1],
+          restLength: 2,
+          stiffness: 30,
+          damping: 0.25,
+        },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      // Whole-object assertion, not objectContaining: the shape IS the behaviour.
+      expect(actions.applyJoint2dFromEngine).toHaveBeenCalledWith('sprite-1', {
+        targetEntityId: 'sprite-2',
+        jointType: 'spring',
+        localAnchor1: [0, 1],
+        localAnchor2: [0, -1],
+        restLength: 2,
+        stiffness: 30,
+        damping: 0.25,
+      });
+    });
+
+    it('routes to the state-only action, never the dispatching one', () => {
+      // `setJoint2d` dispatches `set_joint_2d` — calling it from an inbound
+      // handler echoes a command straight back at the engine that just described
+      // the joint.
+      handlePhysicsEvent(
+        'JOINT2D_CHANGED',
+        {
+          entityId: 'sprite-1',
+          targetEntityId: 'sprite-2',
+          jointType: 'revolute',
+          localAnchor1: [0, 0],
+          localAnchor2: [0, 0],
+        },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(actions.setJoint2d).not.toHaveBeenCalled();
+      expect(actions.applyJoint2dFromEngine).toHaveBeenCalledTimes(1);
+    });
+
+    it('swallows an unreadable payload rather than writing state', () => {
+      const result = handlePhysicsEvent(
+        'JOINT2D_CHANGED',
+        // No `jointType` — there is no joint to write.
+        { entityId: 'sprite-1', targetEntityId: 'sprite-2' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      // Handled — the event was ours — but nothing is written.
+      expect(result).toBe(true);
+      expect(actions.applyJoint2dFromEngine).not.toHaveBeenCalled();
+    });
+  });
+
   describe('2D event names nothing emits', () => {
     /**
      * These four are the phantom names this handler used to listen for. Pinning
      * them as UNHANDLED is the point: `handlePhysicsEvent` returning `false` is
      * what `useEngineEvents` reports as an unhandled event, so a future rename
      * back onto one of these names fails here instead of silently going dead
-     * again. `JOINT2D_CHANGED` and `RAYCAST2D_HIT`/`RAYCAST2D_MISS` are the real
-     * engine names and are also unhandled today — deliberately, and tracked
-     * separately: a joint needs a translation layer, and 2D raycasts have no
-     * consumer at all.
+     * again. `RAYCAST2D_HIT`/`RAYCAST2D_MISS` are real engine names that are
+     * still unhandled — deliberately, and tracked separately: 2D raycasts have
+     * no consumer at all.
      */
     it.each([
       'PHYSICS2D_UPDATED',
       'JOINT2D_UPDATED',
       'PHYSICS2D_REMOVED',
       'RAYCAST2D_RESULT',
-      'JOINT2D_CHANGED',
       'RAYCAST2D_HIT',
       'RAYCAST2D_MISS',
     ])('%s is reported unhandled and touches no store action', (eventName) => {
@@ -445,6 +519,7 @@ describe('handlePhysicsEvent', () => {
       expect(actions.applyPhysics2dFromEngine).not.toHaveBeenCalled();
       expect(actions.setPhysics2d).not.toHaveBeenCalled();
       expect(actions.setJoint2d).not.toHaveBeenCalled();
+      expect(actions.applyJoint2dFromEngine).not.toHaveBeenCalled();
       expect(actions.removePhysics2d).not.toHaveBeenCalled();
     });
   });

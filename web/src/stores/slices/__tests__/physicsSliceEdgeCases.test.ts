@@ -208,13 +208,13 @@ describe('physicsSlice — edge cases', () => {
 
     it('stores multiple joints2d independently', () => {
       const jointA: Joint2dData = {
-        targetEntityId: 10,
+        targetEntityId: 'entity-target-A',
         jointType: 'revolute',
         localAnchor1: [0, 1],
         localAnchor2: [0, -1],
       };
       const jointB: Joint2dData = {
-        targetEntityId: 20,
+        targetEntityId: 'entity-target-B',
         jointType: 'prismatic',
         localAnchor1: [1, 0],
         localAnchor2: [-1, 0],
@@ -231,14 +231,14 @@ describe('physicsSlice — edge cases', () => {
 
     it('removeJoint2d does not remove other joints', () => {
       const jointA: Joint2dData = {
-        targetEntityId: 1,
+        targetEntityId: 'entity-target-A',
         jointType: 'rope',
         localAnchor1: [0, 0],
         localAnchor2: [0, 0],
         maxDistance: 5,
       };
       const jointB: Joint2dData = {
-        targetEntityId: 2,
+        targetEntityId: 'entity-target-B',
         jointType: 'spring',
         localAnchor1: [0, 0],
         localAnchor2: [0, 0],
@@ -444,7 +444,7 @@ describe('physicsSlice — edge cases', () => {
     for (const jointType of joint2dTypes) {
       it(`setJoint2d dispatches correct command for jointType=${jointType}`, () => {
         const data: Joint2dData = {
-          targetEntityId: 5,
+          targetEntityId: 'sprite-2',
           jointType,
           localAnchor1: [0, 0],
           localAnchor2: [0, 0],
@@ -452,10 +452,18 @@ describe('physicsSlice — edge cases', () => {
 
         store.getState().setJoint2d('sprite-1', data);
 
-        expect(mockDispatch).toHaveBeenCalledWith(
-          'set_joint_2d',
-          expect.objectContaining({ jointType })
-        );
+        // Asserted whole, not with `objectContaining`: the payload IS the
+        // behaviour here, and `objectContaining` is blind to the extra keys
+        // that made every `set_joint_2d` a hard serde reject (PF-1167).
+        // No optional params are set, so the engine applies its own per-variant
+        // defaults — omission is how the browser says "engine default".
+        expect(mockDispatch).toHaveBeenCalledWith('set_joint_2d', {
+          entityId: 'sprite-1',
+          targetEntityId: 'sprite-2',
+          jointType,
+          localAnchor1: [0, 0],
+          localAnchor2: [0, 0],
+        });
       });
     }
   });

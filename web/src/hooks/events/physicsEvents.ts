@@ -5,7 +5,7 @@
 import { useEditorStore, type PhysicsData, type JointData } from '@/stores/editorStore';
 import { getScriptCollisionCallback } from '@/lib/scripting/useScriptRunner';
 import { audioManager } from '@/lib/audio/audioManager';
-import { parsePhysics2dWire } from '@/lib/physics/physics2dPayload';
+import { parseJoint2dWire, parsePhysics2dWire } from '@/lib/physics/physics2dPayload';
 import { castPayload, type SetFn, type GetFn } from './types';
 
 /** Prefix used to identify audio occlusion raycast requests. */
@@ -116,6 +116,24 @@ export function handlePhysicsEvent(
       return true;
     }
 
+    /**
+     * `JOINT2D_CHANGED` had no handler at all: the emitter FLATTENED
+     * `PhysicsJoint2d` into a camelCase wrapper, and `rename_all` does not
+     * propagate through `#[serde(flatten)]`, so the wire carried snake_case keys
+     * around a nested, externally-tagged PascalCase `JointType2d` — a shape the
+     * store's flat `Joint2dData` could not be built from. The engine now emits
+     * the same flat vocabulary `set_joint_2d` reads (PF-1167).
+     *
+     * Routes to `applyJoint2dFromEngine`, not `setJoint2d`, because the latter
+     * dispatches `set_joint_2d` back at the engine that just reported the joint.
+     */
+    case 'JOINT2D_CHANGED': {
+      const parsed = parseJoint2dWire(data);
+      if (!parsed) return true;
+      useEditorStore.getState().applyJoint2dFromEngine(parsed.entityId, parsed.data);
+      return true;
+    }
+
     case 'COLLISION_EVENT': {
       const payload = castPayload<{ entityA: string; entityB: string; started: boolean }>(data);
       const collisionCb = getScriptCollisionCallback();
@@ -155,7 +173,7 @@ export function handlePhysicsEvent(
     }
 
     /*
-     * Three 2D events the engine emits and nothing here handles yet. They are
+     * Two 2D events the engine emits and nothing here handles yet. They are
      * listed rather than stubbed because a `case` for an event name the engine
      * never emits is indistinguishable from a working handler — that is exactly
      * how `PHYSICS2D_UPDATED`, `JOINT2D_UPDATED`, `PHYSICS2D_REMOVED` and
@@ -164,10 +182,6 @@ export function handlePhysicsEvent(
      * and no removal event at all. Falling through to `default` at least returns
      * `false`, which `useEngineEvents` reports as unhandled.
      *
-     * - `JOINT2D_CHANGED` needs a real translation layer, not a rename: the
-     *   store's `Joint2dData` is flat camelCase with a numeric `targetEntityId`,
-     *   while the engine's `PhysicsJoint2d` is snake_case with a NESTED,
-     *   externally-tagged `JointType2d` and a string id. Same class as PF-1126.
      * - `RAYCAST2D_HIT` / `RAYCAST2D_MISS` have no consumer at all — the 3D
      *   equivalent feeds audio occlusion and the script runtime; neither has a 2D
      *   counterpart yet.

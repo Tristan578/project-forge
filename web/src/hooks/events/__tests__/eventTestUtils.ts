@@ -52,6 +52,7 @@ export function createMockActions() {
     setPhysics2d: vi.fn(),
     applyPhysics2dFromEngine: vi.fn(),
     setJoint2d: vi.fn(),
+    applyJoint2dFromEngine: vi.fn(),
     removePhysics2d: vi.fn(),
     // Audio events
     setEntityAudio: vi.fn(),

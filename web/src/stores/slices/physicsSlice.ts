@@ -4,6 +4,7 @@
 
 import { StateCreator } from 'zustand';
 import {
+  buildSetJoint2dPayload,
   buildSetPhysics2dPayload,
   buildUpdatePhysics2dPayload,
   defaultPhysics2dData,
@@ -38,6 +39,7 @@ export interface PhysicsSlice {
   removePhysics2d: (entityId: string) => void;
   togglePhysics2d: (entityId: string, enabled: boolean) => void;
   setJoint2d: (entityId: string, data: Joint2dData) => void;
+  applyJoint2dFromEngine: (entityId: string, data: Joint2dData) => void;
   removeJoint2d: (entityId: string) => void;
   setGravity2d: (gravityX: number, gravityY: number) => void;
   setDebugPhysics2d: (enabled: boolean) => void;
@@ -135,7 +137,21 @@ export const createPhysicsSlice: StateCreator<PhysicsSlice, [], [], PhysicsSlice
   },
   setJoint2d: (entityId, data) => {
     set(state => ({ joints2d: { ...state.joints2d, [entityId]: data } }));
-    if (dispatchCommand) dispatchCommand('set_joint_2d', { entityId, ...data });
+    // Built, not spread: the flat spread this used to send was a hard serde
+    // reject on three counts at once, so every 2D joint the editor created was
+    // dropped before it reached the simulation while the store kept its own
+    // optimistic copy (PF-1167).
+    if (dispatchCommand) dispatchCommand('set_joint_2d', buildSetJoint2dPayload(entityId, data));
+  },
+  /**
+   * Write an engine-reported 2D joint into the store WITHOUT dispatching.
+   *
+   * Same reason as `applyPhysics2dFromEngine`: routing an inbound event through
+   * `setJoint2d` would echo a `set_joint_2d` straight back at the engine that
+   * just described the joint.
+   */
+  applyJoint2dFromEngine: (entityId, data) => {
+    set(state => ({ joints2d: { ...state.joints2d, [entityId]: data } }));
   },
   removeJoint2d: (entityId) => {
     set(state => {
