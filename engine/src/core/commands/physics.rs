@@ -740,26 +740,40 @@ fn handle_set_2d_body_type(payload: serde_json::Value) -> super::CommandResult {
     }
 }
 
-/// Payload for create_2d_joint command.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Create2dJointPayload {
-    entity_id: String,
-    joint_data: PhysicsJoint2d,
+/// Read the `{ entityId, ...jointFields }` payload both 2D joint commands carry.
+///
+/// This used to be a `#[derive(Deserialize)]` struct expecting the joint NESTED
+/// under `jointData`, which nothing has ever sent: the store dispatches
+/// `set_joint_2d` with the joint's fields flat next to `entityId`. That was a
+/// hard serde reject on three counts at once — nesting, snake_case field names,
+/// and an externally-tagged `JointType2d` that cannot read a bare mode string —
+/// so the entire outbound 2D joint surface was inert (PF-1167). One flat
+/// vocabulary now serves every joint command, in both directions.
+fn parse_joint_2d_payload(
+    payload: &serde_json::Value,
+    command: &str,
+) -> Result<(String, PhysicsJoint2d), String> {
+    let entity_id = payload
+        .get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Invalid {} payload: missing entityId", command))?
+        .to_string();
+    let joint_data = PhysicsJoint2d::from_flat(payload)
+        .map_err(|e| format!("Invalid {} payload: {}", command, e))?;
+    Ok((entity_id, joint_data))
 }
 
-/// Handle create_2d_joint command.
+/// Handle create_2d_joint / set_joint_2d.
 fn handle_create_2d_joint(payload: serde_json::Value) -> super::CommandResult {
-    let data: Create2dJointPayload = serde_json::from_value(payload)
-        .map_err(|e| format!("Invalid create_2d_joint payload: {}", e))?;
+    let (entity_id, joint_data) = parse_joint_2d_payload(&payload, "create_2d_joint")?;
 
     let request = CreateJoint2dRequest {
-        entity_id: data.entity_id.clone(),
-        joint_data: data.joint_data,
+        entity_id: entity_id.clone(),
+        joint_data,
     };
 
     if queue_create_joint2d_from_bridge(request) {
-        tracing::info!("Queued 2D joint creation for entity: {}", data.entity_id);
+        tracing::info!("Queued 2D joint creation for entity: {}", entity_id);
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
@@ -767,18 +781,17 @@ fn handle_create_2d_joint(payload: serde_json::Value) -> super::CommandResult {
 }
 
 /// Handle update_2d_joint command.
-/// Payload: { entityId, jointData: PhysicsJoint2d }
+/// Payload: { entityId, targetEntityId, jointType, ...typeSpecificParams }
 fn handle_update_2d_joint(payload: serde_json::Value) -> super::CommandResult {
-    let data: Create2dJointPayload = serde_json::from_value(payload)
-        .map_err(|e| format!("Invalid update_2d_joint payload: {}", e))?;
+    let (entity_id, joint_data) = parse_joint_2d_payload(&payload, "update_2d_joint")?;
 
     let request = UpdateJoint2dRequest {
-        entity_id: data.entity_id.clone(),
-        joint_data: data.joint_data,
+        entity_id: entity_id.clone(),
+        joint_data,
     };
 
     if queue_update_joint2d_from_bridge(request) {
-        tracing::info!("Queued 2D joint update for entity: {}", data.entity_id);
+        tracing::info!("Queued 2D joint update for entity: {}", entity_id);
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())

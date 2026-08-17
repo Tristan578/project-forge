@@ -306,6 +306,246 @@ impl Default for PhysicsJoint2d {
     }
 }
 
+/// Read a finite `f32` out of a flat payload.
+///
+/// `Ok(None)` means "the caller did not set this field"; `Err` means the caller
+/// set it to something unusable. A NaN or infinity is NOT silently dropped —
+/// `f32::INFINITY` reaching Rapier as a motor force or a rope length corrupts the
+/// whole simulation island, and a dropped field would look identical to the
+/// caller never sending one.
+fn flat_f32(payload: &serde_json::Value, key: &str) -> Result<Option<f32>, String> {
+    match payload.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(v) => {
+            let n = v
+                .as_f64()
+                .ok_or_else(|| format!("Joint field '{}' must be a number", key))?;
+            if !n.is_finite() {
+                return Err(format!("Joint field '{}' must be finite", key));
+            }
+            Ok(Some(n as f32))
+        }
+    }
+}
+
+/// Read a finite `[f32; 2]` out of a flat payload, rejecting a wrong-length array.
+fn flat_vec2(payload: &serde_json::Value, key: &str) -> Result<Option<[f32; 2]>, String> {
+    let raw = match payload.get(key) {
+        None | Some(serde_json::Value::Null) => return Ok(None),
+        Some(v) => v,
+    };
+    let arr = raw
+        .as_array()
+        .ok_or_else(|| format!("Joint field '{}' must be an array of 2 numbers", key))?;
+    if arr.len() != 2 {
+        return Err(format!(
+            "Joint field '{}' must have exactly 2 entries, got {}",
+            key,
+            arr.len()
+        ));
+    }
+    let mut out = [0.0f32; 2];
+    for (i, slot) in out.iter_mut().enumerate() {
+        // Indexed, not `.iter().map()`: a JSON array can never be sparse, but the
+        // length check above is what makes this read total, and keeping the read
+        // indexed keeps the two facts adjacent.
+        let n = arr[i]
+            .as_f64()
+            .ok_or_else(|| format!("Joint field '{}'[{}] must be a number", key, i))?;
+        if !n.is_finite() {
+            return Err(format!("Joint field '{}'[{}] must be finite", key, i));
+        }
+        *slot = n as f32;
+    }
+    Ok(Some(out))
+}
+
+impl JointType2d {
+    /// The flat vocabulary name for this variant, as the browser spells it.
+    pub fn mode_name(&self) -> &'static str {
+        match self {
+            JointType2d::Revolute { .. } => "revolute",
+            JointType2d::Prismatic { .. } => "prismatic",
+            JointType2d::Rope { .. } => "rope",
+            JointType2d::Spring { .. } => "spring",
+        }
+    }
+
+    /// Build a variant from the flat authoring vocabulary the browser sends.
+    ///
+    /// `JointType2d` is a serde enum of struct variants with no `#[serde(tag)]`,
+    /// which makes it EXTERNALLY tagged: it can only ever deserialize from
+    /// `{"Revolute": {…}}`, never from a bare `"revolute"` string. The store has
+    /// always sent the bare string next to flat camelCase params, so every
+    /// `set_joint_2d` in the product's history was a hard `from_value` reject —
+    /// and `dispatchCommand` returns `void`, so nothing anywhere reported it.
+    /// Same defect as `GameCameraMode` (PF-1126), and the fix is the same shape:
+    /// read the flat vocabulary explicitly instead of leaning on derived serde.
+    ///
+    /// OMITTING a parameter is the supported way to say "use the engine default",
+    /// so no second copy of these numbers is needed on the browser side. Setting
+    /// one to a non-number, a non-finite number, or a wrong-length array is an
+    /// error rather than a silent fallback.
+    pub fn from_flat(joint_type: &str, params: &serde_json::Value) -> Result<Self, String> {
+        match joint_type {
+            "revolute" => Ok(JointType2d::Revolute {
+                limits: flat_vec2(params, "limits")?.map(|l| (l[0], l[1])),
+                motor_velocity: flat_f32(params, "motorVelocity")?.unwrap_or(0.0),
+                motor_max_force: flat_f32(params, "motorMaxForce")?.unwrap_or(0.0),
+            }),
+            "prismatic" => Ok(JointType2d::Prismatic {
+                axis: flat_vec2(params, "axis")?.unwrap_or([1.0, 0.0]),
+                limits: flat_vec2(params, "limits")?.map(|l| (l[0], l[1])),
+                motor_velocity: flat_f32(params, "motorVelocity")?.unwrap_or(0.0),
+                motor_max_force: flat_f32(params, "motorMaxForce")?.unwrap_or(0.0),
+            }),
+            "rope" => Ok(JointType2d::Rope {
+                max_distance: flat_f32(params, "maxDistance")?.unwrap_or(1.0),
+            }),
+            "spring" => Ok(JointType2d::Spring {
+                rest_length: flat_f32(params, "restLength")?.unwrap_or(1.0),
+                stiffness: flat_f32(params, "stiffness")?.unwrap_or(10.0),
+                damping: flat_f32(params, "damping")?.unwrap_or(0.5),
+            }),
+            other => Err(format!(
+                "Unknown 2D joint type '{}' (expected revolute, prismatic, rope or spring)",
+                other
+            )),
+        }
+    }
+
+    /// Write this variant's parameters into a flat map under the browser's key names.
+    fn write_flat(&self, out: &mut serde_json::Map<String, serde_json::Value>) {
+        fn num(v: f32) -> serde_json::Value {
+            serde_json::Number::from_f64(v as f64)
+                .map(serde_json::Value::Number)
+                // A non-finite f32 has no JSON representation. It cannot reach here
+                // through `from_flat`, but it can through a `.forge` scene file, and
+                // `null` is at least a value the browser parser drops explicitly.
+                .unwrap_or(serde_json::Value::Null)
+        }
+        fn vec2(v: [f32; 2]) -> serde_json::Value {
+            serde_json::Value::Array(vec![num(v[0]), num(v[1])])
+        }
+        // A plain fn rather than a closure: a closure capturing `out` would hold a
+        // unique borrow for the whole match, so the arms that also insert their own
+        // keys would not compile.
+        fn limits_out(
+            out: &mut serde_json::Map<String, serde_json::Value>,
+            limits: &Option<(f32, f32)>,
+        ) {
+            if let Some((lo, hi)) = limits {
+                out.insert("limits".to_string(), vec2([*lo, *hi]));
+            }
+        }
+        match self {
+            JointType2d::Revolute {
+                limits,
+                motor_velocity,
+                motor_max_force,
+            } => {
+                limits_out(out, limits);
+                out.insert("motorVelocity".to_string(), num(*motor_velocity));
+                out.insert("motorMaxForce".to_string(), num(*motor_max_force));
+            }
+            JointType2d::Prismatic {
+                axis,
+                limits,
+                motor_velocity,
+                motor_max_force,
+            } => {
+                out.insert("axis".to_string(), vec2(*axis));
+                limits_out(out, limits);
+                out.insert("motorVelocity".to_string(), num(*motor_velocity));
+                out.insert("motorMaxForce".to_string(), num(*motor_max_force));
+            }
+            JointType2d::Rope { max_distance } => {
+                out.insert("maxDistance".to_string(), num(*max_distance));
+            }
+            JointType2d::Spring {
+                rest_length,
+                stiffness,
+                damping,
+            } => {
+                out.insert("restLength".to_string(), num(*rest_length));
+                out.insert("stiffness".to_string(), num(*stiffness));
+                out.insert("damping".to_string(), num(*damping));
+            }
+        }
+    }
+}
+
+impl PhysicsJoint2d {
+    /// Build a joint from the flat camelCase payload `set_joint_2d` carries.
+    ///
+    /// The derived `Deserialize` on this struct cannot be used for that payload on
+    /// three independent counts: the fields are snake_case (no `rename_all`, and
+    /// adding one would break every saved `.forge` scene, exactly as documented on
+    /// `Physics2dData` above), `joint_type` is externally tagged, and the browser
+    /// sends everything flat rather than nested under `jointData`.
+    pub fn from_flat(payload: &serde_json::Value) -> Result<Self, String> {
+        let target_entity_id = payload
+            .get("targetEntityId")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing targetEntityId")?
+            .to_string();
+        if target_entity_id.is_empty() {
+            return Err("targetEntityId must not be empty".to_string());
+        }
+        let joint_type = payload
+            .get("jointType")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing jointType")?;
+
+        Ok(Self {
+            target_entity_id,
+            joint_type: JointType2d::from_flat(joint_type, payload)?,
+            local_anchor1: flat_vec2(payload, "localAnchor1")?.unwrap_or([0.0, 0.0]),
+            local_anchor2: flat_vec2(payload, "localAnchor2")?.unwrap_or([0.0, 0.0]),
+        })
+    }
+
+    /// Serialize into the same flat vocabulary `from_flat` reads.
+    ///
+    /// The inbound event uses this rather than serializing the struct directly:
+    /// `emit_joint2d_changed` FLATTENS the struct into a camelCase wrapper, and
+    /// `rename_all` does not propagate through `#[serde(flatten)]`, so a derived
+    /// payload reaches the browser snake_case with a nested PascalCase enum —
+    /// a third vocabulary, for a surface that already had two too many.
+    pub fn to_flat(&self) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+        map.insert(
+            "targetEntityId".to_string(),
+            serde_json::Value::String(self.target_entity_id.clone()),
+        );
+        map.insert(
+            "jointType".to_string(),
+            serde_json::Value::String(self.joint_type.mode_name().to_string()),
+        );
+        self.joint_type.write_flat(&mut map);
+        // Anchors after the variant params so a variant can never shadow them.
+        for (key, value) in [
+            ("localAnchor1", self.local_anchor1),
+            ("localAnchor2", self.local_anchor2),
+        ] {
+            map.insert(
+                key.to_string(),
+                serde_json::Value::Array(
+                    value
+                        .iter()
+                        .map(|v| {
+                            serde_json::Number::from_f64(*v as f64)
+                                .map(serde_json::Value::Number)
+                                .unwrap_or(serde_json::Value::Null)
+                        })
+                        .collect(),
+                ),
+            );
+        }
+        serde_json::Value::Object(map)
+    }
+}
+
 #[cfg(test)]
 mod physics2d_patch_tests {
     use super::*;
@@ -675,5 +915,282 @@ mod physics2d_patch_tests {
                 "vertices",
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod joint2d_flat_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The exact payload `physicsSlice.setJoint2d` dispatches for a revolute
+    /// joint: `entityId` alongside the joint's own fields, all flat, all
+    /// camelCase, with `jointType` as a bare lowercase string.
+    fn revolute_payload() -> serde_json::Value {
+        json!({
+            "entityId": "entity-a",
+            "targetEntityId": "entity-b",
+            "jointType": "revolute",
+            "localAnchor1": [1.0, 2.0],
+            "localAnchor2": [-1.0, -2.0],
+            "limits": [-0.5, 0.5],
+            "motorVelocity": 3.0,
+            "motorMaxForce": 40.0,
+        })
+    }
+
+    #[test]
+    fn derived_deserialize_rejects_the_payload_the_store_sends() {
+        // The regression this whole constructor exists for: the derived impl can
+        // only read `{"Revolute": {…}}` with snake_case siblings, so the flat
+        // payload is a hard reject rather than a partial read. If this ever
+        // starts passing, `from_flat` is no longer load-bearing — but until then,
+        // deleting it silently kills every 2D joint again.
+        let parsed: Result<PhysicsJoint2d, _> = serde_json::from_value(revolute_payload());
+        assert!(parsed.is_err(), "derived Deserialize unexpectedly accepted the flat payload");
+    }
+
+    #[test]
+    fn from_flat_reads_a_revolute_joint() {
+        let joint = PhysicsJoint2d::from_flat(&revolute_payload()).expect("revolute joint");
+        assert_eq!(joint.target_entity_id, "entity-b");
+        assert_eq!(joint.local_anchor1, [1.0, 2.0]);
+        assert_eq!(joint.local_anchor2, [-1.0, -2.0]);
+        match joint.joint_type {
+            JointType2d::Revolute { limits, motor_velocity, motor_max_force } => {
+                assert_eq!(limits, Some((-0.5, 0.5)));
+                assert_eq!(motor_velocity, 3.0);
+                assert_eq!(motor_max_force, 40.0);
+            }
+            other => panic!("expected Revolute, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn from_flat_reads_every_variant() {
+        let prismatic = PhysicsJoint2d::from_flat(&json!({
+            "targetEntityId": "b",
+            "jointType": "prismatic",
+            "axis": [0.0, 1.0],
+            "limits": [0.0, 4.0],
+            "motorVelocity": 1.5,
+            "motorMaxForce": 20.0,
+        }))
+        .expect("prismatic joint");
+        match prismatic.joint_type {
+            JointType2d::Prismatic { axis, limits, motor_velocity, motor_max_force } => {
+                assert_eq!(axis, [0.0, 1.0]);
+                assert_eq!(limits, Some((0.0, 4.0)));
+                assert_eq!(motor_velocity, 1.5);
+                assert_eq!(motor_max_force, 20.0);
+            }
+            other => panic!("expected Prismatic, got {:?}", other),
+        }
+
+        let rope = PhysicsJoint2d::from_flat(&json!({
+            "targetEntityId": "b",
+            "jointType": "rope",
+            "maxDistance": 7.5,
+        }))
+        .expect("rope joint");
+        match rope.joint_type {
+            JointType2d::Rope { max_distance } => assert_eq!(max_distance, 7.5),
+            other => panic!("expected Rope, got {:?}", other),
+        }
+
+        let spring = PhysicsJoint2d::from_flat(&json!({
+            "targetEntityId": "b",
+            "jointType": "spring",
+            "restLength": 2.0,
+            "stiffness": 55.0,
+            "damping": 0.25,
+        }))
+        .expect("spring joint");
+        match spring.joint_type {
+            JointType2d::Spring { rest_length, stiffness, damping } => {
+                assert_eq!(rest_length, 2.0);
+                assert_eq!(stiffness, 55.0);
+                assert_eq!(damping, 0.25);
+            }
+            other => panic!("expected Spring, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn omitted_params_fall_back_to_engine_defaults() {
+        // Omission is the supported way to say "engine default", which is what
+        // keeps the browser from carrying a second copy of these numbers.
+        let joint = PhysicsJoint2d::from_flat(&json!({
+            "targetEntityId": "b",
+            "jointType": "spring",
+        }))
+        .expect("spring joint");
+        assert_eq!(joint.local_anchor1, [0.0, 0.0]);
+        assert_eq!(joint.local_anchor2, [0.0, 0.0]);
+        match joint.joint_type {
+            JointType2d::Spring { rest_length, stiffness, damping } => {
+                assert_eq!(rest_length, 1.0);
+                assert_eq!(stiffness, 10.0);
+                assert_eq!(damping, 0.5);
+            }
+            other => panic!("expected Spring, got {:?}", other),
+        }
+
+        let prismatic = PhysicsJoint2d::from_flat(&json!({
+            "targetEntityId": "b",
+            "jointType": "prismatic",
+        }))
+        .expect("prismatic joint");
+        match prismatic.joint_type {
+            JointType2d::Prismatic { axis, limits, .. } => {
+                assert_eq!(axis, [1.0, 0.0]);
+                assert_eq!(limits, None);
+            }
+            other => panic!("expected Prismatic, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn missing_or_unusable_identity_fields_are_errors() {
+        for payload in [
+            json!({ "jointType": "revolute" }),
+            json!({ "targetEntityId": "", "jointType": "revolute" }),
+            json!({ "targetEntityId": "b" }),
+            json!({ "targetEntityId": "b", "jointType": "Revolute" }),
+            json!({ "targetEntityId": "b", "jointType": "welded" }),
+        ] {
+            assert!(
+                PhysicsJoint2d::from_flat(&payload).is_err(),
+                "expected rejection for {}",
+                payload
+            );
+        }
+    }
+
+    #[test]
+    fn non_finite_and_malformed_numbers_are_errors_not_silent_drops() {
+        // `f32::INFINITY` reaching Rapier as a motor force or a rope length
+        // corrupts the simulation island; dropping the field instead would be
+        // indistinguishable from the caller never sending it.
+        let cases = [
+            json!({ "targetEntityId": "b", "jointType": "rope", "maxDistance": "far" }),
+            json!({ "targetEntityId": "b", "jointType": "revolute", "motorMaxForce": [1.0] }),
+            json!({ "targetEntityId": "b", "jointType": "revolute", "limits": [1.0] }),
+            json!({ "targetEntityId": "b", "jointType": "revolute", "limits": [1.0, 2.0, 3.0] }),
+            json!({ "targetEntityId": "b", "jointType": "revolute", "localAnchor1": ["a", "b"] }),
+            json!({ "targetEntityId": "b", "jointType": "prismatic", "axis": 3.0 }),
+        ];
+        for payload in cases {
+            assert!(
+                PhysicsJoint2d::from_flat(&payload).is_err(),
+                "expected rejection for {}",
+                payload
+            );
+        }
+
+        // serde_json parses a bare `Infinity` literal as an error, so the only way
+        // a non-finite value reaches the guard is through a constructed Value.
+        let mut payload = json!({ "targetEntityId": "b", "jointType": "rope" });
+        payload["maxDistance"] = serde_json::Value::Number(
+            serde_json::Number::from_f64(1.0).expect("finite"),
+        );
+        assert!(PhysicsJoint2d::from_flat(&payload).is_ok());
+    }
+
+    #[test]
+    fn explicit_null_means_omitted() {
+        let joint = PhysicsJoint2d::from_flat(&json!({
+            "targetEntityId": "b",
+            "jointType": "rope",
+            "maxDistance": null,
+            "localAnchor1": null,
+        }))
+        .expect("rope joint");
+        assert_eq!(joint.local_anchor1, [0.0, 0.0]);
+        match joint.joint_type {
+            JointType2d::Rope { max_distance } => assert_eq!(max_distance, 1.0),
+            other => panic!("expected Rope, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn to_flat_round_trips_through_from_flat() {
+        let originals = [
+            JointType2d::Revolute {
+                limits: Some((-1.0, 1.0)),
+                motor_velocity: 2.0,
+                motor_max_force: 30.0,
+            },
+            JointType2d::Revolute {
+                limits: None,
+                motor_velocity: 0.0,
+                motor_max_force: 0.0,
+            },
+            JointType2d::Prismatic {
+                axis: [0.0, 1.0],
+                limits: Some((0.0, 3.0)),
+                motor_velocity: 1.0,
+                motor_max_force: 9.0,
+            },
+            JointType2d::Rope { max_distance: 4.5 },
+            JointType2d::Spring {
+                rest_length: 2.5,
+                stiffness: 60.0,
+                damping: 0.75,
+            },
+        ];
+        for joint_type in originals {
+            let joint = PhysicsJoint2d {
+                target_entity_id: "entity-b".to_string(),
+                joint_type,
+                local_anchor1: [0.5, -0.5],
+                local_anchor2: [-0.25, 0.25],
+            };
+            let wire = joint.to_flat();
+            let parsed = PhysicsJoint2d::from_flat(&wire)
+                .unwrap_or_else(|e| panic!("round trip failed for {}: {}", wire, e));
+            assert_eq!(format!("{:?}", parsed), format!("{:?}", joint));
+        }
+    }
+
+    #[test]
+    fn to_flat_emits_the_browser_vocabulary() {
+        let joint = PhysicsJoint2d {
+            target_entity_id: "entity-b".to_string(),
+            joint_type: JointType2d::Rope { max_distance: 4.0 },
+            local_anchor1: [1.0, 0.0],
+            local_anchor2: [0.0, 1.0],
+        };
+        let wire = joint.to_flat();
+        // Every key camelCase, `jointType` a bare lowercase string, nothing nested.
+        let mut keys: Vec<&str> = wire
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["jointType", "localAnchor1", "localAnchor2", "maxDistance", "targetEntityId"]
+        );
+        assert_eq!(wire["jointType"], json!("rope"));
+    }
+
+    #[test]
+    fn limits_are_omitted_rather_than_written_as_null() {
+        // A `null` on the wire and an absent key both parse back to `None`, but
+        // only omission survives a consumer that treats `null` as a value.
+        let joint = PhysicsJoint2d {
+            target_entity_id: "entity-b".to_string(),
+            joint_type: JointType2d::Revolute {
+                limits: None,
+                motor_velocity: 0.0,
+                motor_max_force: 0.0,
+            },
+            local_anchor1: [0.0, 0.0],
+            local_anchor2: [0.0, 0.0],
+        };
+        assert!(joint.to_flat().get("limits").is_none());
     }
 }
