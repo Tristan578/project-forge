@@ -127,13 +127,15 @@ export const characterSetupExecutor: ExecutorDefinition = {
     // later store-driven `update_game_component` (`applyPhysicsProfile`) would
     // reason from a store that disagreed with the engine.
     //
-    // Normalizing is also what BOUNDS this. `systemConfig` is an LLM-authored
-    // bag, so a `moveSpeed: 1e9` reaches here intact; the engine would clamp it
-    // to 1000 and this step would report success on a player moving at a speed
-    // nothing asked for. `addGameComponent` runs `normalizeGameComponent`, which
-    // applies the same per-property ranges the engine does, so the store and the
-    // engine agree on the clamped value rather than on the number the model
-    // wrote (PF-1147).
+    // Normalizing is also the second of two bounds on the numbers below.
+    // `systemConfig` is an LLM-authored bag, and `resolvePhysicsProfile` is the
+    // first bound: it REJECTS a `moveSpeed` or `jumpForce` outside the engine's
+    // range rather than clamping it, so the preset the feel directive selected
+    // stands instead of a ceiling nobody chose. `addGameComponent` then runs
+    // `normalizeGameComponent`, which applies the same per-property ranges the
+    // engine does — that one catches anything reaching the store by a route
+    // without a resolver in front of it, and keeps the store and the engine on
+    // the same number rather than each holding its own default (PF-1147).
     ctx.getStore().addGameComponent(entityId, {
       type: 'characterController',
       characterController: { ...controller, canDoubleJump: false },
