@@ -189,6 +189,33 @@ describe('ReverbZoneInspector', () => {
     expect(screen.getByText('Priority')).toBeInTheDocument();
   });
 
+  it('gives every editing control an accessible name', () => {
+    // This surface was unreachable dead code until the enable fix landed, so the
+    // missing label association had no live user impact and nothing caught it.
+    // `getByLabelText` resolves only through htmlFor/id or aria-*, so a visual
+    // label sitting next to an unassociated input fails this.
+    setupStore({ reverbZone: baseReverbZone, enabled: true });
+    render(<ReverbZoneInspector entityId="entity-1" />);
+
+    for (const name of ['Shape', 'Type', 'Wet Mix', 'Decay Time', 'Pre-Delay', 'Priority']) {
+      expect(screen.getByLabelText(name)).toBeInTheDocument();
+    }
+    // Three inputs under one "Size" label — each axis needs its own name, or all
+    // three announce identically.
+    for (const axis of ['Size X', 'Size Y', 'Size Z']) {
+      expect(screen.getByLabelText(axis)).toBeInTheDocument();
+    }
+  });
+
+  it('gives the sphere radius input an accessible name', () => {
+    setupStore({
+      reverbZone: { ...baseReverbZone, shape: { type: 'sphere' as const, radius: 5 } },
+      enabled: true,
+    });
+    render(<ReverbZoneInspector entityId="entity-1" />);
+    expect(screen.getByLabelText('Radius')).toBeInTheDocument();
+  });
+
   it('shows Remove Reverb Zone button', () => {
     setupStore({ reverbZone: baseReverbZone, enabled: true });
     render(<ReverbZoneInspector entityId="entity-1" />);
