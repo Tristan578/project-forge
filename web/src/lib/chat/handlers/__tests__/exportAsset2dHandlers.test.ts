@@ -2587,104 +2587,133 @@ describe('handlers2d skeleton 2D commands', () => {
   // import_skeleton_json
   // -------------------------------------------------------------------------
   describe('import_skeleton_json', () => {
-    it('parses JSON and sets skeleton data', async () => {
-      const skeleton = { bones: [], slots: [], skins: {}, activeSkin: 'default', ikConstraints: [] };
+    const ROOT = { name: 'root', parentBone: null };
+
+    it('imports a rig sent under the manifest name', async () => {
+      // `jsonData` is the ONLY spelling the manifest publishes, and the handler read
+      // `json` — so every call that followed the documented schema failed validation.
+      const skeleton = { bones: [ROOT], slots: [], skins: {}, activeSkin: 'default', ikConstraints: [] };
       const { result, store } = await invoke2d(
         'import_skeleton_json',
-        { entityId: 'ent-1', json: JSON.stringify(skeleton) },
+        { entityId: 'ent-1', jsonData: JSON.stringify(skeleton), format: 'custom' },
         { setSkeleton2d: vi.fn() },
       );
       expect(result.success).toBe(true);
       expect(store.setSkeleton2d).toHaveBeenCalledWith('ent-1', skeleton);
     });
 
-    it('returns error when JSON is invalid', async () => {
-      const { result } = await invoke2d(
+    it('still accepts the legacy json spelling', async () => {
+      const { result, store } = await invoke2d(
         'import_skeleton_json',
-        { entityId: 'ent-1', json: '{invalid json}' },
+        { entityId: 'ent-1', json: JSON.stringify({ bones: [ROOT] }) },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      expect(store.setSkeleton2d).toHaveBeenCalledWith('ent-1', {
+        bones: [ROOT],
+        slots: [],
+        skins: {},
+        activeSkin: 'default',
+        ikConstraints: [],
+      });
+    });
+
+    it('rejects a format with no converter instead of importing an empty rig', async () => {
+      // The manifest advertised dragonbones and spine for the whole life of this
+      // command. Read as the custom format a DragonBones file has no top-level
+      // `bones` at all, so it used to store nothing and report success.
+      const { result, store } = await invoke2d(
+        'import_skeleton_json',
+        { entityId: 'ent-1', jsonData: '{"armature":[]}', format: 'dragonbones' },
         { setSkeleton2d: vi.fn() },
       );
       expect(result.success).toBe(false);
+      expect(result.error).toContain('dragonbones');
+      expect(store.setSkeleton2d).not.toHaveBeenCalled();
+    });
+
+    it('returns error when the JSON is invalid', async () => {
+      const { result, store } = await invoke2d(
+        'import_skeleton_json',
+        { entityId: 'ent-1', jsonData: '{invalid json}' },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('jsonData is not valid JSON');
+      expect(store.setSkeleton2d).not.toHaveBeenCalled();
     });
 
     it('returns error when entityId is missing', async () => {
-      const { result } = await invoke2d('import_skeleton_json', { json: '{}' });
+      const { result } = await invoke2d('import_skeleton_json', { jsonData: '{}' });
       expect(result.success).toBe(false);
     });
 
-    // `JSON.parse` returns whatever the caller's file says, and the old handler
-    // cast that straight into the store. Every reader downstream (`bones.find`,
-    // the spread in `create_ik_chain2d`, the inspector's `.map`) assumes the
-    // stored copy is well-shaped, so one malformed import threw somewhere far
-    // from the import that caused it. Normalizing at the boundary means the
-    // store only ever holds a real skeleton.
-    const stored = (store: { setSkeleton2d: unknown }) => {
-      const mock = store.setSkeleton2d as ReturnType<typeof vi.fn>;
-      expect(mock).toHaveBeenCalledTimes(1);
-      return mock.mock.calls[0][1] as SkeletonData2d;
+    it('returns error when no JSON is supplied under either name', async () => {
+      const { result } = await invoke2d('import_skeleton_json', { entityId: 'ent-1' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Missing jsonData');
+    });
+
+    // `setSkeleton2d` is a FULL REPLACE. Coercing a malformed file to an empty
+    // skeleton and reporting `success: true` therefore destroyed the rig the entity
+    // had while telling the caller a rig had been imported — the store is now left
+    // untouched and the reason names the field.
+    const rejects = async (label: string, jsonData: string, expected: string) => {
+      const { result, store } = await invoke2d(
+        'import_skeleton_json',
+        { entityId: 'ent-1', jsonData },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success, label).toBe(false);
+      expect(result.error, label).toContain(expected);
+      expect(store.setSkeleton2d, label).not.toHaveBeenCalled();
     };
 
     it.each([
-      ['null', 'null'],
-      ['a bare array', '[]'],
-      ['a string', '"skeleton"'],
-      ['a number', '7'],
-    ])('stores an empty skeleton when the JSON is %s', async (_label, json) => {
-      const { result, store } = await invoke2d(
-        'import_skeleton_json',
-        { entityId: 'ent-1', json },
-        { setSkeleton2d: vi.fn() },
-      );
-      expect(result.success).toBe(true);
-      expect(stored(store)).toEqual({
-        bones: [],
-        slots: [],
-        skins: {},
-        activeSkin: 'default',
-        ikConstraints: [],
-      });
+      ['null', 'null', 'got null'],
+      ['a bare array', '[]', 'got an array'],
+      ['a string', '"skeleton"', 'got a string'],
+      ['a number', '7', 'got a number'],
+    ])('rejects JSON that is %s', async (label, jsonData, expected) => {
+      await rejects(label, jsonData, expected);
     });
 
-    it('replaces container fields that are not the shape their readers assume', async () => {
-      const { result, store } = await invoke2d(
-        'import_skeleton_json',
-        {
-          entityId: 'ent-1',
-          // `bones: 3` makes `bones.find(...)` throw; `skins: []` makes every
-          // `skins[name]` lookup miss; a numeric `activeSkin` reaches the
-          // inspector as a key that can never match.
-          json: JSON.stringify({ bones: 3, slots: null, skins: [], activeSkin: 9 }),
-        },
-        { setSkeleton2d: vi.fn() },
-      );
-      expect(result.success).toBe(true);
-      expect(stored(store)).toEqual({
-        bones: [],
-        slots: [],
-        skins: {},
-        activeSkin: 'default',
-        ikConstraints: [],
-      });
+    it.each([
+      // `bones: 3` makes `bones.find(...)` throw; the field is not optional,
+      // because a file with no bones is not a rig.
+      ['no bones field', '{"slots":[]}', 'missing required field `bones`'],
+      ['a non-array bones', '{"bones":3}', '`bones` must be an array'],
+      ['an empty bones array', '{"bones":[]}', '`bones` is empty'],
+      // `JSON.stringify` writes an array hole as `null` and `JSON.parse` can only
+      // ever produce that `null`, so this is the shape a round-tripped sparse array
+      // arrives in — and `bones.find(b => b.name === x)` throws on it.
+      ['a null bone', '{"bones":[null,{"name":"root"}]}', '`bones[0]` is null'],
+      ['a nameless bone', '{"bones":[{"parentBone":null}]}', '`bones[0]` has no `name`'],
+      ['a duplicate bone name', '{"bones":[{"name":"a"},{"name":"a"}]}', 'repeats the bone name "a"'],
+      ['a dangling parent', '{"bones":[{"name":"a","parentBone":"ghost"}]}', 'not among the imported bones'],
+      ['a non-string parent', '{"bones":[{"name":"a","parentBone":7}]}', '`bones[0].parentBone` is a number'],
+      // `skins: []` makes every `skins[name]` lookup miss; a numeric `activeSkin`
+      // reaches the inspector as a key that can never match.
+      ['array skins', '{"bones":[{"name":"a"}],"skins":[]}', '`skins` must be an object'],
+      ['a numeric activeSkin', '{"bones":[{"name":"a"}],"activeSkin":9}', '`activeSkin` must be a string'],
+      ['a null slot', '{"bones":[{"name":"a"}],"slots":[null]}', '`slots[0]` is null'],
+      ['a null constraint', '{"bones":[{"name":"a"}],"ikConstraints":[null]}', '`ikConstraints[0]` is null'],
+    ])('rejects %s without touching the store', async (label, jsonData, expected) => {
+      await rejects(label, jsonData, expected);
     });
 
-    it('drops null elements, which is what an array hole degrades into', async () => {
-      const bone = { name: 'root', parentBone: null };
+    it('accepts a parent that appears later in the array', async () => {
+      // Child-before-parent is legal in an exported file; only a name that is
+      // nowhere in the set is a dangling reference.
+      const bones = [{ name: 'hand', parentBone: 'arm' }, { name: 'arm', parentBone: null }];
       const { result, store } = await invoke2d(
         'import_skeleton_json',
-        {
-          entityId: 'ent-1',
-          // `JSON.stringify` writes a hole as `null`, and `JSON.parse` can only
-          // ever produce the `null` — so this is the shape a round-tripped
-          // sparse array actually arrives in. `bones.find(b => b.name === x)`
-          // throws on the null; the constraint list is read the same way.
-          json: '{"bones":[null,' + JSON.stringify(bone) + '],"ikConstraints":[null]}',
-        },
+        { entityId: 'ent-1', jsonData: JSON.stringify({ bones }) },
         { setSkeleton2d: vi.fn() },
       );
       expect(result.success).toBe(true);
-      const skeleton = stored(store);
-      expect(skeleton.bones).toEqual([bone]);
-      expect(skeleton.ikConstraints).toEqual([]);
+      const stored = (store.setSkeleton2d as ReturnType<typeof vi.fn>).mock.calls[0][1] as SkeletonData2d;
+      expect(stored.bones).toEqual(bones);
     });
   });
 
@@ -2699,11 +2728,7 @@ describe('handlers2d skeleton 2D commands', () => {
         { skeletons2d: { 'ent-1': baseSkeleton }, setSkeleton2d: vi.fn() },
       );
       expect(result.success).toBe(true);
-      expect(dispatch).toHaveBeenCalledWith('auto_weight_skeleton2d', {
-        entityId: 'ent-1',
-        method: undefined,
-        iterations: undefined,
-      });
+      expect(dispatch).toHaveBeenCalledWith('auto_weight_skeleton2d', { entityId: 'ent-1' });
       // The engine recomputes weights in place and emits SKELETON2D_UPDATED. Sending
       // the store mirror back would full-replace the skeleton with attachments that
       // have no weights at all.
