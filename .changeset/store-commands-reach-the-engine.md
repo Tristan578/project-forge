@@ -35,8 +35,10 @@ tileset attached to a specific object while the editor tracks tilesets per
 image, and picking a side changes behaviour rather than just wiring. It is
 tracked and now recorded in the code instead of failing quietly.
 
-A new test scans every command name the editor dispatches and fails if one has
-no working engine arm behind it, so the next one cannot ship silently. Names
+A new test scans every command name the editor's state layer dispatches and
+fails if one has no working engine arm behind it, so the next one cannot ship
+silently. It covers the store, which is where all of these bugs were; the AI
+tool handlers dispatch a few names of their own and are not scanned yet. Names
 that are genuinely waiting on engine work are listed explicitly with a ticket,
 and the list fails if an entry becomes implemented or stops being used — it
 cannot quietly grow stale.
@@ -44,13 +46,18 @@ cannot quietly grow stale.
 A second test on the engine side reads the routing table against the handlers it
 points at and fails if any handler is unreachable or pointed at the wrong
 section. That is what found the sixteen, and it covers every command the engine
-has rather than only the ones the editor happens to send.
+has rather than only the ones the editor happens to send. It reads the list of
+handler sections off disk rather than from a list kept by hand, so a section
+added later cannot sit outside the check by not being mentioned in it.
 
 Auto-weighting a 2D skeleton now recomputes vertex weights instead of erasing
 them. The tool never called the engine command that does the work; it re-sent the
 whole rig from the editor's own copy, and that copy carries no weights at all —
 so the one action whose entire job is computing weights was the action that
-cleared them.
+cleared them. Its two options are also gone: the engine has only ever had one
+weighting method and ignores the iteration count, so offering a choice between
+them described a control that did not exist. Sending one still works and still
+weights the rig, and the result now says the option had no effect.
 
 IK chains created by the AI now bend. Every one of them pointed at a target
 entity that does not exist, on both sides of the bridge, and the solver skips any
@@ -74,7 +81,11 @@ path. Editing a rig in the inspector and importing one from a file both went
 through a builder that had none of them, so a chain long enough to crash the
 engine, a blend weight outside the range the solver understands, or a bend
 direction that is neither left nor right could all still reach it from the
-editor. Importing a rig now also survives a file that is not a rig: a malformed
-import used to be stored as-is and then threw somewhere else entirely — in the
-inspector, or the next time a constraint was added — rather than at the import
-that caused it.
+editor. Importing a rig is also no longer destructive. Storing a rig replaces
+whatever the object had, and anything the importer did not understand — a
+mistyped file, an export from another animation tool, a file that is not a rig at
+all — was quietly turned into an empty rig and reported as a successful import.
+So a bad file replaced a real rig with nothing and said it had worked. A file
+that cannot be read is now refused, the reason names the part of it that is
+wrong, and the rig already on the object is left alone. Formats the importer has
+never been able to read are no longer offered in the first place.
