@@ -2222,9 +2222,21 @@ fn execute_undo(
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref pd) = old_physics {
+                        // Restore the DATA only. `Physics2dEnabled` is a separate
+                        // marker toggled by its own command, and nothing that
+                        // records this action changes it — so inserting it here
+                        // turned physics ON for a disabled entity every time a
+                        // property edit was undone. Matches the 3D
+                        // `PhysicsChange` arm, which never touches
+                        // `PhysicsEnabled`.
                         commands.entity(entity).insert(pd.clone());
-                        commands.entity(entity).insert(super::physics_2d::Physics2dEnabled);
                     } else {
+                        // The asymmetry is deliberate: with no data to restore
+                        // the entity had no 2D body at all, and an enabled
+                        // marker with no `Physics2dData` is a state no command
+                        // can produce (`apply_physics2d_toggles` inserts
+                        // default data whenever it inserts the marker), so the
+                        // pair has to come off together.
                         commands.entity(entity).remove::<super::physics_2d::Physics2dData>();
                         commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
                     }
@@ -2555,8 +2567,9 @@ fn execute_redo(
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref pd) = new_physics {
+                        // Data only — see the undo arm: enablement is a
+                        // separate marker this action never records.
                         commands.entity(entity).insert(pd.clone());
-                        commands.entity(entity).insert(super::physics_2d::Physics2dEnabled);
                     } else {
                         commands.entity(entity).remove::<super::physics_2d::Physics2dData>();
                         commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
@@ -4549,6 +4562,162 @@ mod bridge_registration_pin_tests {
             BRIDGE_SRC.contains("init_resource::<core::terrain::TerrainChangeEvents>()"),
             "TerrainChangeEvents is never initialised; `collect_terrain_changes` panics on \
              the first frame it runs",
+        );
+    }
+}
+
+#[cfg(test)]
+mod physics2d_history_tests {
+    //! `Physics2dChange` records a change to `Physics2dData` and nothing else.
+    //! Enablement lives in the separate `Physics2dEnabled` marker, toggled by
+    //! its own command. Both history arms used to insert that marker alongside
+    //! the restored data, so undoing any 2D property edit silently switched
+    //! physics ON for an entity the user had deliberately disabled — and the
+    //! inspector reads the data, not the marker, so nothing showed it.
+
+    use super::{HistoryStack, UndoableAction};
+    use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
+    use crate::core::physics_2d::{Physics2dData, Physics2dEnabled};
+    use bevy::prelude::*;
+
+    macro_rules! run_system {
+        ($world:expr, $system:expr) => {{
+            let mut schedule = Schedule::default();
+            schedule.add_systems($system);
+            schedule.run($world);
+        }};
+    }
+
+    /// Exactly the resources `apply_undo_requests` / `apply_redo_requests` read.
+    fn base_world() -> World {
+        let mut world = World::new();
+        world.insert_resource(HistoryStack::default());
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        world
+    }
+
+    fn physics(friction: f32) -> Physics2dData {
+        Physics2dData { friction, ..Default::default() }
+    }
+
+    /// Spawn an entity carrying everything the undo systems' main query needs.
+    /// `enabled` decides whether the `Physics2dEnabled` marker is present —
+    /// i.e. whether the body is simulating.
+    fn spawn_body(world: &mut World, id: &str, data: Physics2dData, enabled: bool) -> Entity {
+        let entity = world
+            .spawn((
+                EntityId(id.to_string()),
+                EntityName(id.to_string()),
+                EntityVisible(true),
+                Transform::default(),
+                data,
+            ))
+            .id();
+        if enabled {
+            world.entity_mut(entity).insert(Physics2dEnabled);
+        }
+        entity
+    }
+
+    fn record_edit(world: &mut World, id: &str, old: Option<Physics2dData>, new: Option<Physics2dData>) {
+        world
+            .resource_mut::<HistoryStack>()
+            .push(UndoableAction::Physics2dChange {
+                entity_id: id.to_string(),
+                old_physics: old,
+                new_physics: new,
+            });
+    }
+
+    fn undo(world: &mut World) {
+        crate::core::history::queue_undo_from_bridge();
+        run_system!(world, super::apply_undo_requests);
+    }
+
+    fn redo(world: &mut World) {
+        crate::core::history::queue_redo_from_bridge();
+        run_system!(world, super::apply_redo_requests);
+    }
+
+    fn friction_of(world: &World, entity: Entity) -> f32 {
+        world
+            .entity(entity)
+            .get::<Physics2dData>()
+            .expect("Physics2dData must still be present")
+            .friction
+    }
+
+    fn is_enabled(world: &World, entity: Entity) -> bool {
+        world.entity(entity).contains::<Physics2dEnabled>()
+    }
+
+    #[test]
+    fn undoing_a_property_edit_leaves_a_disabled_body_disabled() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", physics(0.9), false);
+        record_edit(&mut world, "sprite-1", Some(physics(0.5)), Some(physics(0.9)));
+
+        undo(&mut world);
+
+        assert_eq!(friction_of(&world, entity), 0.5, "undo must restore the old friction");
+        assert!(
+            !is_enabled(&world, entity),
+            "undo restores DATA; it must not switch 2D physics on for an entity the user disabled",
+        );
+    }
+
+    #[test]
+    fn redoing_a_property_edit_leaves_a_disabled_body_disabled() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", physics(0.9), false);
+        record_edit(&mut world, "sprite-1", Some(physics(0.5)), Some(physics(0.9)));
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert_eq!(friction_of(&world, entity), 0.9, "redo must reapply the new friction");
+        assert!(
+            !is_enabled(&world, entity),
+            "redo restores DATA; the enabled marker is not part of this action either",
+        );
+    }
+
+    /// The other direction of the same rule: not touching the marker must not
+    /// mean an enabled body loses its simulation on undo.
+    #[test]
+    fn undo_and_redo_preserve_an_enabled_body() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", physics(0.9), true);
+        record_edit(&mut world, "sprite-1", Some(physics(0.5)), Some(physics(0.9)));
+
+        undo(&mut world);
+        assert_eq!(friction_of(&world, entity), 0.5);
+        assert!(is_enabled(&world, entity), "an enabled body must stay enabled across undo");
+
+        redo(&mut world);
+        assert_eq!(friction_of(&world, entity), 0.9);
+        assert!(is_enabled(&world, entity), "an enabled body must stay enabled across redo");
+    }
+
+    /// `old_physics: None` means the entity had no 2D body at record time, so
+    /// undo removes the data — and the marker with it, since an enabled marker
+    /// with no data is a state no command can produce.
+    #[test]
+    fn undoing_to_no_recorded_data_clears_both_the_data_and_the_marker() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", physics(0.9), true);
+        record_edit(&mut world, "sprite-1", None, Some(physics(0.9)));
+
+        undo(&mut world);
+
+        assert!(
+            world.entity(entity).get::<Physics2dData>().is_none(),
+            "undo must remove the data when none was recorded",
+        );
+        assert!(
+            !is_enabled(&world, entity),
+            "the enabled marker must not outlive the data it describes",
         );
     }
 }
