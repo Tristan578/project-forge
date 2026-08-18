@@ -301,10 +301,19 @@ pub enum UndoableAction {
     },
 
     /// Reverb zone configuration changed
+    ///
+    /// Enablement is a separate marker component (`ReverbZoneEnabled`), and a
+    /// reverb zone can be authored, enabled, disabled and removed all through
+    /// this one action — so the flag is recorded here rather than left to the
+    /// undo arm to guess. Guessing is what PF-1173 was: the arms used to insert
+    /// the marker unconditionally, silently enabling a zone the user had turned
+    /// off.
     ReverbZoneChange {
         entity_id: String,
         old_reverb: Option<super::reverb_zone::ReverbZoneData>,
         new_reverb: Option<super::reverb_zone::ReverbZoneData>,
+        old_enabled: bool,
+        new_enabled: bool,
     },
 
     /// Particle configuration changed

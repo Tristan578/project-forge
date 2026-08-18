@@ -261,6 +261,33 @@ describe('handleAudioEvent', () => {
   });
 
   describe('REVERB_ZONE_CHANGED', () => {
+    it('routes to the state-only action, never the dispatching one', () => {
+      // `setReverbZone` sends `set_reverb_zone` + `toggle_reverb_zone` at the
+      // engine, and this handler runs *because* the engine just applied a
+      // command — so routing there is an unbounded ping-pong that also floods
+      // the history stack with one entry per frame.
+      handleAudioEvent(
+        'REVERB_ZONE_CHANGED',
+        {
+          entityId: 'reverb-0',
+          enabled: true,
+          shape: { type: 'sphere' as const, radius: 4 },
+          preset: 'cave',
+          wetMix: 0.9,
+          decayTime: 4,
+          preDelay: 0.05,
+          blendRadius: 2,
+          priority: 0,
+        },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(actions.applyReverbZoneFromEngine).toHaveBeenCalledTimes(1);
+      expect(actions.setReverbZone).not.toHaveBeenCalled();
+      expect(actions.updateReverbZone).not.toHaveBeenCalled();
+    });
+
     it('handles sphere shape reverb zone', () => {
       const payload = {
         entityId: 'reverb-1',
@@ -282,7 +309,7 @@ describe('handleAudioEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(actions.setReverbZone).toHaveBeenCalledWith(
+      expect(actions.applyReverbZoneFromEngine).toHaveBeenCalledWith(
         'reverb-1',
         {
           shape: { type: 'sphere', radius: 10 },
@@ -318,7 +345,7 @@ describe('handleAudioEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(actions.setReverbZone).toHaveBeenCalledWith(
+      expect(actions.applyReverbZoneFromEngine).toHaveBeenCalledWith(
         'reverb-2',
         {
           shape: { type: 'box', size: [20, 10, 15] },
@@ -354,7 +381,7 @@ describe('handleAudioEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(actions.setReverbZone).toHaveBeenCalledWith(
+      expect(actions.applyReverbZoneFromEngine).toHaveBeenCalledWith(
         'reverb-3',
         expect.objectContaining({
           shape: { type: 'sphere', radius: 5 },
@@ -384,7 +411,7 @@ describe('handleAudioEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(actions.setReverbZone).toHaveBeenCalledWith(
+      expect(actions.applyReverbZoneFromEngine).toHaveBeenCalledWith(
         'reverb-4',
         expect.objectContaining({
           shape: { type: 'box', size: [10, 5, 10] },
@@ -406,7 +433,8 @@ describe('handleAudioEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(actions.removeReverbZone).toHaveBeenCalledWith('reverb-5');
+      expect(actions.applyReverbZoneRemovedFromEngine).toHaveBeenCalledWith('reverb-5');
+      expect(actions.removeReverbZone).not.toHaveBeenCalled();
     });
   });
 

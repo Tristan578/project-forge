@@ -6,12 +6,11 @@ use crate::core::pending_commands::{
     queue_audio_update_from_bridge, queue_audio_removal_from_bridge,
     queue_audio_playback_from_bridge, queue_audio_bus_update_from_bridge,
     queue_audio_bus_create_from_bridge, queue_audio_bus_delete_from_bridge,
-    queue_audio_bus_effects_update_from_bridge, queue_reverb_zone_update_from_bridge,
-    queue_reverb_zone_toggle_from_bridge, queue_reverb_zone_removal_from_bridge,
+    queue_audio_bus_effects_update_from_bridge, queue_reverb_zone_command_from_bridge,
     AudioUpdate, AudioRemoval, AudioPlayback, AudioBusUpdate, AudioBusCreate,
-    AudioBusDelete, AudioBusEffectsUpdate, ReverbZoneUpdate, ReverbZoneToggle,
-    ReverbZoneRemoval, QueryRequest,
+    AudioBusDelete, AudioBusEffectsUpdate, QueryRequest,
 };
+use crate::core::reverb_zone::ReverbZoneCommand;
 
 /// Dispatch audio commands.
 pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::CommandResult> {
@@ -323,12 +322,12 @@ fn handle_set_reverb_zone(payload: serde_json::Value) -> super::CommandResult {
     let data: SetReverbZonePayload = serde_json::from_value(payload)
         .map_err(|e| format!("Invalid set_reverb_zone payload: {}", e))?;
 
-    let update = ReverbZoneUpdate {
+    let command = ReverbZoneCommand::Set {
         entity_id: data.entity_id.clone(),
-        reverb_zone_data: data.reverb_data,
+        data: data.reverb_data,
     };
 
-    if queue_reverb_zone_update_from_bridge(update) {
+    if queue_reverb_zone_command_from_bridge(command) {
         tracing::info!("Queued reverb zone update for entity: {}", data.entity_id);
         Ok(())
     } else {
@@ -346,12 +345,12 @@ fn handle_toggle_reverb_zone(payload: serde_json::Value) -> super::CommandResult
         .and_then(|v| v.as_bool())
         .ok_or("Missing enabled")?;
 
-    let toggle = ReverbZoneToggle {
+    let command = ReverbZoneCommand::Toggle {
         entity_id: entity_id.clone(),
         enabled,
     };
 
-    if queue_reverb_zone_toggle_from_bridge(toggle) {
+    if queue_reverb_zone_command_from_bridge(command) {
         tracing::info!("Queued reverb zone toggle for entity: {}", entity_id);
         Ok(())
     } else {
@@ -366,11 +365,11 @@ fn handle_remove_reverb_zone(payload: serde_json::Value) -> super::CommandResult
         .ok_or("Missing entityId")?
         .to_string();
 
-    let removal = ReverbZoneRemoval {
+    let command = ReverbZoneCommand::Remove {
         entity_id: entity_id.clone(),
     };
 
-    if queue_reverb_zone_removal_from_bridge(removal) {
+    if queue_reverb_zone_command_from_bridge(command) {
         tracing::info!("Queued reverb zone removal for entity: {}", entity_id);
         Ok(())
     } else {
