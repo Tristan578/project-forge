@@ -313,6 +313,21 @@ impl Default for PhysicsJoint2d {
 /// `f32::INFINITY` reaching Rapier as a motor force or a rope length corrupts the
 /// whole simulation island, and a dropped field would look identical to the
 /// caller never sending one.
+///
+/// The finiteness check has to come AFTER the cast, and that ordering is the
+/// whole guard. A Rust `f64 as f32` conversion SATURATES on overflow rather than
+/// wrapping or trapping, so `1e39` — an ordinary JSON number, finite as an f64 —
+/// becomes exactly the `f32::INFINITY` this function exists to keep away from
+/// Rapier. Checking the f64 first and casting afterwards reads as a guard while
+/// letting the value through. The TypeScript side does not stop it either:
+/// `Number.isFinite(1e39)` is `true`, so the wire builder forwards it.
+///
+/// Checking after the cast is also strictly more total than checking before it:
+/// an f64 NaN or infinity casts to an f32 NaN or infinity, so the one check
+/// covers both. (`serde_json` is declared without `arbitrary_precision`, and
+/// `Number::from_f64` refuses non-finite input, so a non-finite f64 cannot in
+/// fact reach here at all — the pre-cast check was unreachable as well as
+/// misordered.)
 fn flat_f32(payload: &serde_json::Value, key: &str) -> Result<Option<f32>, String> {
     match payload.get(key) {
         None | Some(serde_json::Value::Null) => Ok(None),
@@ -320,10 +335,14 @@ fn flat_f32(payload: &serde_json::Value, key: &str) -> Result<Option<f32>, Strin
             let n = v
                 .as_f64()
                 .ok_or_else(|| format!("Joint field '{}' must be a number", key))?;
-            if !n.is_finite() {
-                return Err(format!("Joint field '{}' must be finite", key));
+            let narrowed = n as f32;
+            if !narrowed.is_finite() {
+                return Err(format!(
+                    "Joint field '{}' must be finite and within f32 range, got {}",
+                    key, n
+                ));
             }
-            Ok(Some(n as f32))
+            Ok(Some(narrowed))
         }
     }
 }
@@ -352,10 +371,17 @@ fn flat_vec2(payload: &serde_json::Value, key: &str) -> Result<Option<[f32; 2]>,
         let n = arr[i]
             .as_f64()
             .ok_or_else(|| format!("Joint field '{}'[{}] must be a number", key, i))?;
-        if !n.is_finite() {
-            return Err(format!("Joint field '{}'[{}] must be finite", key, i));
+        // After the cast, for the reason spelled out on `flat_f32`: the narrowing
+        // saturates to infinity, so a check on the f64 is a guard the value walks
+        // straight past.
+        let narrowed = n as f32;
+        if !narrowed.is_finite() {
+            return Err(format!(
+                "Joint field '{}'[{}] must be finite and within f32 range, got {}",
+                key, i, n
+            ));
         }
-        *slot = n as f32;
+        *slot = narrowed;
     }
     Ok(Some(out))
 }
@@ -1088,13 +1114,44 @@ mod joint2d_flat_tests {
             );
         }
 
-        // serde_json parses a bare `Infinity` literal as an error, so the only way
-        // a non-finite value reaches the guard is through a constructed Value.
-        let mut payload = json!({ "targetEntityId": "b", "jointType": "rope" });
-        payload["maxDistance"] = serde_json::Value::Number(
-            serde_json::Number::from_f64(1.0).expect("finite"),
-        );
-        assert!(PhysicsJoint2d::from_flat(&payload).is_ok());
+        // The route a non-finite value can ACTUALLY take into Rapier, which is not
+        // the one the guard was originally written for. `serde_json` is declared
+        // without `arbitrary_precision` and `Number::from_f64` refuses non-finite
+        // input, so no f64 infinity can ever be parsed or constructed — the f64
+        // finiteness check was unreachable. What is reachable is `f64 as f32`
+        // saturating: every value below is an ordinary JSON number, finite as an
+        // f64 and past `f32::MAX`, and each one landed on Rapier as ±infinity.
+        // `Number.isFinite` is `true` for all of them, so TypeScript forwards them.
+        for payload in [
+            json!({ "targetEntityId": "b", "jointType": "rope", "maxDistance": 1e39 }),
+            json!({ "targetEntityId": "b", "jointType": "rope", "maxDistance": -3.5e38 }),
+            json!({ "targetEntityId": "b", "jointType": "revolute", "motorMaxForce": 1e300 }),
+            // The same defect one helper over: a legal pair whose second entry
+            // overflows, which a per-element check placed before the cast admits.
+            json!({ "targetEntityId": "b", "jointType": "revolute", "localAnchor1": [1.0, 1e39] }),
+        ] {
+            assert!(
+                PhysicsJoint2d::from_flat(&payload).is_err(),
+                "expected f32-overflow rejection for {}",
+                payload
+            );
+        }
+
+        // The boundary stays open: just inside `f32::MAX` is a usable value, not a
+        // rejection. Without this the guard above could be satisfied by refusing
+        // every large number, which would be a different bug.
+        let joint = PhysicsJoint2d::from_flat(
+            &json!({ "targetEntityId": "b", "jointType": "rope", "maxDistance": 3.4e38 }),
+        )
+        .expect("a value inside f32 range is usable");
+        match joint.joint_type {
+            JointType2d::Rope { max_distance } => assert!(
+                max_distance.is_finite() && max_distance > 3.0e38,
+                "a value inside f32 range must survive the narrowing intact, got {}",
+                max_distance
+            ),
+            other => panic!("expected a rope joint, got {:?}", other),
+        }
     }
 
     #[test]

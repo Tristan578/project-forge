@@ -376,7 +376,22 @@ describe('physicsSlice — edge cases', () => {
       it(`createJoint dispatches correct command for jointType=${jointType}`, () => {
         const data = makeJointData({ jointType });
         store.getState().createJoint('ent1', data);
-        expect(mockDispatch).toHaveBeenCalledWith('create_joint', expect.objectContaining({ jointType }));
+        // `toEqual`, not `objectContaining({ jointType })`. `createJoint` builds
+        // its payload by spreading `data`, so the payload IS the behaviour here —
+        // and `objectContaining` asserts what is present while staying blind to
+        // whatever else rides along. That blindness is what let the sibling 2D
+        // command dispatch a payload the engine dropped (PF-1167): the assertion
+        // passed on every shape the producer could possibly emit.
+        expect(mockDispatch).toHaveBeenCalledWith('create_joint', {
+          entityId: 'ent1',
+          jointType,
+          connectedEntityId: 'ent-b',
+          anchorSelf: [0, 0, 0],
+          anchorOther: [0, 0, 0],
+          axis: [0, 1, 0],
+          limits: null,
+          motor: null,
+        });
       });
     }
   });
