@@ -32,6 +32,22 @@ describe('game-creation/types — Phase 2A Layer 1', () => {
       expect(() => zSystemCategory.parse('shooting')).toThrow();
       expect(() => zSystemCategory.parse('')).toThrow();
     });
+
+    it('rejection names the offending value and the valid option set', () => {
+      const result = zSystemCategory.safeParse('platformer');
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      // path: [] is expected — zSystemCategory is a bare enum, not embedded in
+      // an object here (that embedding + field-path happens one layer up, in
+      // decomposer.ts's zGameSystem.category). What this schema itself must
+      // guarantee is that the message names the rejected value and enumerates
+      // the valid options, so a caller can tell what was wrong without
+      // re-deriving the 12-member union by hand.
+      expect(result.error.issues).toHaveLength(1);
+      expect(result.error.issues[0].path).toEqual([]);
+      expect(result.error.issues[0].message).toMatch(/movement/);
+      expect(result.error.issues[0].message).toMatch(/physics/);
+    });
   });
 
   describe('FALLBACK_SCHEMA', () => {
@@ -58,6 +74,16 @@ describe('game-creation/types — Phase 2A Layer 1', () => {
     it('accepts names at max length (1 + 63 = 64 chars)', () => {
       const maxName = 'a'.repeat(64); // 1 char [a-z] + 63 chars [a-z0-9_-]
       expect(FALLBACK_SCHEMA.parse(`primitive:${maxName}`)).toBe(`primitive:${maxName}`);
+    });
+
+    it('rejection names the violated format via the schema-supplied message', () => {
+      const result = FALLBACK_SCHEMA.safeParse('cube');
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.issues).toHaveLength(1);
+      expect(result.error.issues[0].message).toBe(
+        'Fallback must be "primitive:<name>" or "builtin:<name>" with lowercase alphanumeric name'
+      );
     });
   });
 
