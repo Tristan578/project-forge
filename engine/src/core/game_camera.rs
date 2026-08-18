@@ -280,14 +280,6 @@ fn flat_damping(params: &serde_json::Value, key: &str, default: f32) -> Result<f
     Ok(value)
 }
 
-/// Clamp with bounds that are not trusted to be ordered or finite.
-///
-/// [`GameCameraMode::from_flat`] rejects an inverted range at the command
-/// boundary, but that is not the only way one arrives: `.forge` scene files
-/// deserialize straight into the struct through the derived impl and never pass
-/// through `from_flat` at all. So the consume sites order the bounds themselves
-/// rather than trusting the field — a bad range should frame the shot wrongly,
-/// never take the engine down.
 /// The per-frame lerp factor for a damped follow, on `0.0..=1.0`.
 ///
 /// [`flat_damping`] refuses a negative rate at the command boundary, but that is
@@ -313,6 +305,14 @@ fn follow_lerp_factor(damping: f32, delta: f32) -> f32 {
     t.clamp(0.0, 1.0)
 }
 
+/// Clamp with bounds that are not trusted to be ordered or finite.
+///
+/// [`GameCameraMode::from_flat`] rejects an inverted range at the command
+/// boundary, but that is not the only way one arrives: `.forge` scene files
+/// deserialize straight into the struct through the derived impl and never pass
+/// through `from_flat` at all. So the consume sites order the bounds themselves
+/// rather than trusting the field — a bad range should frame the shot wrongly,
+/// never take the engine down.
 fn clamp_ordered(value: f32, a: f32, b: f32) -> f32 {
     let (lo, hi) = (a.min(b), a.max(b));
     if !lo.is_finite() || !hi.is_finite() {
@@ -1174,7 +1174,7 @@ mod from_flat_tests {
         match third_person {
             GameCameraMode::ThirdPersonFollow { damping, .. } => {
                 // Damping is a RATE PER SECOND, not a 0..1 blend factor: the follow
-                // systems compute `t = (damping * delta).min(1.0)`, so 0.0 yields
+                // systems compute `t = damping_t(damping, delta)`, so 0.0 yields
                 // t = 0 and the camera never converges on its target — it freezes
                 // where it is. That is a legitimate thing to ask for and a
                 // completely different outcome from the 5.0 default, which is
@@ -1329,6 +1329,12 @@ mod from_flat_tests {
         // The fix: a negative factor would extrapolate away from the target and
         // compound every frame. Floored to a frozen camera the author can see.
         assert_eq!(follow_lerp_factor(-3.0, 1.0 / 60.0), 0.0);
+        // No magnitude of negative rate may reverse the follow, and the bound
+        // that was already here has to hold for a long frame after a stall as
+        // well as for a large rate — the product is what saturates, so both
+        // factors need their own case.
+        assert_eq!(follow_lerp_factor(-1e9, 1.0), 0.0);
+        assert_eq!(follow_lerp_factor(5.0, 10.0), 1.0);
         // NaN must not reach `lerp`: `clamp` panics only on a NaN BOUND, so with
         // literal bounds it returns NaN quietly, and a NaN translation poisons
         // every transform derived from it.
