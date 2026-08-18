@@ -53,10 +53,10 @@ export default defineConfig({
       // Kept in lockstep with vitest.config.ts by the coverage ratchet
       // (PF-996) — do not edit by hand.
       thresholds: {
-        statements: 81,
-        branches: 71,
-        functions: 76,
-        lines: 82,
+        statements: 82,
+        branches: 74,
+        functions: 77,
+        lines: 84,
       },
     },
   },
