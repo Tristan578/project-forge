@@ -2222,9 +2222,21 @@ fn execute_undo(
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref pd) = old_physics {
+                        // Restore the DATA only. `Physics2dEnabled` is a separate
+                        // marker toggled by its own command, and nothing that
+                        // records this action changes it — so inserting it here
+                        // turned physics ON for a disabled entity every time a
+                        // property edit was undone. Matches the 3D
+                        // `PhysicsChange` arm, which never touches
+                        // `PhysicsEnabled`.
                         commands.entity(entity).insert(pd.clone());
-                        commands.entity(entity).insert(super::physics_2d::Physics2dEnabled);
                     } else {
+                        // The asymmetry is deliberate: with no data to restore
+                        // the entity had no 2D body at all, and an enabled
+                        // marker with no `Physics2dData` is a state no command
+                        // can produce (`apply_physics2d_toggles` inserts
+                        // default data whenever it inserts the marker), so the
+                        // pair has to come off together.
                         commands.entity(entity).remove::<super::physics_2d::Physics2dData>();
                         commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
                     }
@@ -2248,8 +2260,13 @@ fn execute_undo(
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref td) = old_tilemap {
+                        // Data only, for the same reason as `Physics2dChange`
+                        // above. `TilemapEnabled` is restored conditionally
+                        // from a recorded bool by both other restore paths
+                        // (`insert_aux_components`, `spawn_from_snapshot`), so
+                        // a disabled tilemap is a real state — and this action
+                        // records no enablement, so it must not invent one.
                         commands.entity(entity).insert(td.clone());
-                        commands.entity(entity).insert(TilemapEnabled);
                     } else {
                         commands.entity(entity).remove::<super::tilemap::TilemapData>();
                         commands.entity(entity).remove::<TilemapEnabled>();
@@ -2262,8 +2279,8 @@ fn execute_undo(
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref sk) = old_skeleton {
+                        // Data only — same rule as `TilemapChange` above.
                         commands.entity(entity).insert(sk.clone());
-                        commands.entity(entity).insert(super::skeleton2d::SkeletonEnabled2d);
                     } else {
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonData2d>();
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
@@ -2555,8 +2572,9 @@ fn execute_redo(
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref pd) = new_physics {
+                        // Data only — see the undo arm: enablement is a
+                        // separate marker this action never records.
                         commands.entity(entity).insert(pd.clone());
-                        commands.entity(entity).insert(super::physics_2d::Physics2dEnabled);
                     } else {
                         commands.entity(entity).remove::<super::physics_2d::Physics2dData>();
                         commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
@@ -2581,8 +2599,8 @@ fn execute_redo(
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref td) = new_tilemap {
+                        // Data only — see the undo arm.
                         commands.entity(entity).insert(td.clone());
-                        commands.entity(entity).insert(TilemapEnabled);
                     } else {
                         commands.entity(entity).remove::<super::tilemap::TilemapData>();
                         commands.entity(entity).remove::<TilemapEnabled>();
@@ -2595,8 +2613,8 @@ fn execute_redo(
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref sk) = new_skeleton {
+                        // Data only — see the undo arm.
                         commands.entity(entity).insert(sk.clone());
-                        commands.entity(entity).insert(super::skeleton2d::SkeletonEnabled2d);
                     } else {
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonData2d>();
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
@@ -4549,6 +4567,610 @@ mod bridge_registration_pin_tests {
             BRIDGE_SRC.contains("init_resource::<core::terrain::TerrainChangeEvents>()"),
             "TerrainChangeEvents is never initialised; `collect_terrain_changes` panics on \
              the first frame it runs",
+        );
+    }
+}
+
+#[cfg(test)]
+mod physics2d_history_tests {
+    //! `Physics2dChange` records a change to `Physics2dData` and nothing else.
+    //! Enablement lives in the separate `Physics2dEnabled` marker, toggled by
+    //! its own command. Both history arms used to insert that marker alongside
+    //! the restored data, so undoing any 2D property edit silently switched
+    //! physics ON for an entity the user had deliberately disabled — and the
+    //! inspector reads the data, not the marker, so nothing showed it.
+
+    use super::{HistoryStack, UndoableAction};
+    use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
+    use crate::core::physics_2d::{Physics2dData, Physics2dEnabled};
+    use bevy::prelude::*;
+
+    macro_rules! run_system {
+        ($world:expr, $system:expr) => {{
+            let mut schedule = Schedule::default();
+            schedule.add_systems($system);
+            schedule.run($world);
+        }};
+    }
+
+    /// Exactly the resources `apply_undo_requests` / `apply_redo_requests` read.
+    fn base_world() -> World {
+        let mut world = World::new();
+        world.insert_resource(HistoryStack::default());
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        world
+    }
+
+    /// `mass` is deliberately off `Physics2dData::default()` (1.0), and every
+    /// caller passes a `friction` off the default (0.5) too. Without that, a
+    /// regression replacing `insert(pd.clone())` with `insert(default())` would
+    /// satisfy these assertions by coincidence instead of failing them — the
+    /// fixture has to differ from the default on the fields it asserts, or it
+    /// cannot tell "restored the recorded data" from "inserted a blank struct".
+    fn physics(friction: f32) -> Physics2dData {
+        Physics2dData { friction, mass: 3.5, ..Default::default() }
+    }
+
+    /// Spawn an entity carrying everything the undo systems' main query needs.
+    /// `enabled` decides whether the `Physics2dEnabled` marker is present —
+    /// i.e. whether the body is simulating.
+    fn spawn_body(world: &mut World, id: &str, data: Physics2dData, enabled: bool) -> Entity {
+        let entity = world
+            .spawn((
+                EntityId(id.to_string()),
+                EntityName(id.to_string()),
+                EntityVisible(true),
+                Transform::default(),
+                data,
+            ))
+            .id();
+        if enabled {
+            world.entity_mut(entity).insert(Physics2dEnabled);
+        }
+        entity
+    }
+
+    fn record_edit(world: &mut World, id: &str, old: Option<Physics2dData>, new: Option<Physics2dData>) {
+        world
+            .resource_mut::<HistoryStack>()
+            .push(UndoableAction::Physics2dChange {
+                entity_id: id.to_string(),
+                old_physics: old,
+                new_physics: new,
+            });
+    }
+
+    fn undo(world: &mut World) {
+        crate::core::history::queue_undo_from_bridge();
+        run_system!(world, super::apply_undo_requests);
+    }
+
+    fn redo(world: &mut World) {
+        crate::core::history::queue_redo_from_bridge();
+        run_system!(world, super::apply_redo_requests);
+    }
+
+    fn friction_of(world: &World, entity: Entity) -> f32 {
+        world
+            .entity(entity)
+            .get::<Physics2dData>()
+            .expect("Physics2dData must still be present")
+            .friction
+    }
+
+    fn mass_of(world: &World, entity: Entity) -> f32 {
+        world
+            .entity(entity)
+            .get::<Physics2dData>()
+            .expect("Physics2dData must still be present")
+            .mass
+    }
+
+    fn is_enabled(world: &World, entity: Entity) -> bool {
+        world.entity(entity).contains::<Physics2dEnabled>()
+    }
+
+    #[test]
+    fn undoing_a_property_edit_leaves_a_disabled_body_disabled() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", physics(0.9), false);
+        record_edit(&mut world, "sprite-1", Some(physics(0.25)), Some(physics(0.9)));
+
+        undo(&mut world);
+
+        assert_eq!(friction_of(&world, entity), 0.25, "undo must restore the old friction");
+        assert_eq!(
+            mass_of(&world, entity),
+            3.5,
+            "undo must restore the recorded struct, not insert a default one",
+        );
+        assert!(
+            !is_enabled(&world, entity),
+            "undo restores DATA; it must not switch 2D physics on for an entity the user disabled",
+        );
+    }
+
+    #[test]
+    fn redoing_a_property_edit_leaves_a_disabled_body_disabled() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", physics(0.9), false);
+        record_edit(&mut world, "sprite-1", Some(physics(0.25)), Some(physics(0.9)));
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert_eq!(friction_of(&world, entity), 0.9, "redo must reapply the new friction");
+        assert_eq!(
+            mass_of(&world, entity),
+            3.5,
+            "redo must reapply the recorded struct, not insert a default one",
+        );
+        assert!(
+            !is_enabled(&world, entity),
+            "redo restores DATA; the enabled marker is not part of this action either",
+        );
+    }
+
+    /// The other direction of the same rule: not touching the marker must not
+    /// mean an enabled body loses its simulation on undo.
+    #[test]
+    fn undo_and_redo_preserve_an_enabled_body() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", physics(0.9), true);
+        record_edit(&mut world, "sprite-1", Some(physics(0.25)), Some(physics(0.9)));
+
+        undo(&mut world);
+        assert_eq!(friction_of(&world, entity), 0.25);
+        assert!(is_enabled(&world, entity), "an enabled body must stay enabled across undo");
+
+        redo(&mut world);
+        assert_eq!(friction_of(&world, entity), 0.9);
+        assert!(is_enabled(&world, entity), "an enabled body must stay enabled across redo");
+    }
+
+    /// `old_physics: None` means the entity had no 2D body at record time, so
+    /// undo removes the data — and the marker with it, since an enabled marker
+    /// with no data is a state no command can produce.
+    #[test]
+    fn undoing_to_no_recorded_data_clears_both_the_data_and_the_marker() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", physics(0.9), true);
+        record_edit(&mut world, "sprite-1", None, Some(physics(0.9)));
+
+        undo(&mut world);
+
+        assert!(
+            world.entity(entity).get::<Physics2dData>().is_none(),
+            "undo must remove the data when none was recorded",
+        );
+        assert!(
+            !is_enabled(&world, entity),
+            "the enabled marker must not outlive the data it describes",
+        );
+    }
+
+    /// The redo mirror of the branch above: `new_physics: None` means the edit
+    /// being reapplied removed the body, so redo must clear the data and take
+    /// the marker with it. Without this case the `None` arm of `execute_redo`
+    /// is untested — all three redo tests above go through `Some`.
+    #[test]
+    fn redoing_to_no_new_data_clears_both_the_data_and_the_marker() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", physics(0.25), true);
+        record_edit(&mut world, "sprite-1", Some(physics(0.25)), None);
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert!(
+            world.entity(entity).get::<Physics2dData>().is_none(),
+            "redo must remove the data when the edit being reapplied removed it",
+        );
+        assert!(
+            !is_enabled(&world, entity),
+            "the enabled marker must not outlive the data it describes",
+        );
+    }
+}
+
+#[cfg(test)]
+mod tilemap_skeleton2d_history_tests {
+    //! The same defect as `physics2d_history_tests`, two more times.
+    //!
+    //! `TilemapChange` and `SkeletonChange` each record only their data
+    //! component. Enablement lives in a separate marker — `TilemapEnabled`,
+    //! `SkeletonEnabled2d` — which every other restore path in this file
+    //! (`insert_aux_components`, `spawn_from_snapshot`) reinstates
+    //! CONDITIONALLY from a recorded bool, i.e. "data present, marker absent"
+    //! is a state the engine deliberately round-trips. Both history arms used
+    //! to insert the marker unconditionally alongside the restored data, so
+    //! undoing a tilemap or skeleton edit switched rendering back on for a
+    //! surface the user had turned off.
+
+    use super::{HistoryStack, UndoableAction};
+    use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
+    use crate::core::skeleton2d::{SkeletonData2d, SkeletonEnabled2d};
+    use crate::core::tilemap::{TilemapData, TilemapEnabled};
+    use bevy::prelude::*;
+
+    macro_rules! run_system {
+        ($world:expr, $system:expr) => {{
+            let mut schedule = Schedule::default();
+            schedule.add_systems($system);
+            schedule.run($world);
+        }};
+    }
+
+    fn base_world() -> World {
+        let mut world = World::new();
+        world.insert_resource(HistoryStack::default());
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        world
+    }
+
+    fn undo(world: &mut World) {
+        crate::core::history::queue_undo_from_bridge();
+        run_system!(world, super::apply_undo_requests);
+    }
+
+    fn redo(world: &mut World) {
+        crate::core::history::queue_redo_from_bridge();
+        run_system!(world, super::apply_redo_requests);
+    }
+
+    /// Spawn an entity carrying everything the undo systems' main query needs,
+    /// plus `data`. `marker` is the enablement marker, inserted only when
+    /// `Some` — both markers are unit structs that do not implement `Default`,
+    /// so they are passed by value rather than conjured from a bound.
+    fn spawn_with<D: Component, M: Component>(
+        world: &mut World,
+        id: &str,
+        data: D,
+        marker: Option<M>,
+    ) -> Entity {
+        let entity = world
+            .spawn((
+                EntityId(id.to_string()),
+                EntityName(id.to_string()),
+                EntityVisible(true),
+                Transform::default(),
+                data,
+            ))
+            .id();
+        if let Some(marker) = marker {
+            world.entity_mut(entity).insert(marker);
+        }
+        entity
+    }
+
+    fn spawn_tilemap(world: &mut World, id: &str, data: TilemapData, enabled: bool) -> Entity {
+        spawn_with(world, id, data, enabled.then_some(TilemapEnabled))
+    }
+
+    fn spawn_skeleton(world: &mut World, id: &str, data: SkeletonData2d, enabled: bool) -> Entity {
+        spawn_with(world, id, data, enabled.then_some(SkeletonEnabled2d))
+    }
+
+    // ---- tilemap ------------------------------------------------------
+
+    /// `tile_size` is deliberately off `TilemapData::default()` (`[32, 32]`),
+    /// and every caller passes a non-empty `tileset_asset_id` (default is
+    /// `""`). Without that, a regression replacing `insert(td.clone())` with
+    /// `insert(TilemapData::default())` would satisfy these assertions by
+    /// coincidence instead of failing them.
+    fn tilemap(tileset: &str) -> TilemapData {
+        TilemapData {
+            tileset_asset_id: tileset.to_string(),
+            tile_size: [16, 16],
+            ..Default::default()
+        }
+    }
+
+    fn tileset_of(world: &World, entity: Entity) -> String {
+        world
+            .entity(entity)
+            .get::<TilemapData>()
+            .expect("TilemapData must still be present")
+            .tileset_asset_id
+            .clone()
+    }
+
+    fn tile_size_of(world: &World, entity: Entity) -> [u32; 2] {
+        world
+            .entity(entity)
+            .get::<TilemapData>()
+            .expect("TilemapData must still be present")
+            .tile_size
+    }
+
+    fn record_tilemap_edit(
+        world: &mut World,
+        id: &str,
+        old: Option<TilemapData>,
+        new: Option<TilemapData>,
+    ) {
+        world.resource_mut::<HistoryStack>().push(UndoableAction::TilemapChange {
+            entity_id: id.to_string(),
+            old_tilemap: old,
+            new_tilemap: new,
+        });
+    }
+
+    #[test]
+    fn undoing_a_tilemap_edit_leaves_a_disabled_tilemap_disabled() {
+        let mut world = base_world();
+        let entity =
+            spawn_tilemap(&mut world, "map-1", tilemap("b"), false);
+        record_tilemap_edit(&mut world, "map-1", Some(tilemap("a")), Some(tilemap("b")));
+
+        undo(&mut world);
+
+        assert_eq!(tileset_of(&world, entity), "a", "undo must restore the old tileset");
+        assert_eq!(
+            tile_size_of(&world, entity),
+            [16, 16],
+            "undo must restore the recorded struct, not insert a default one",
+        );
+        assert!(
+            !world.entity(entity).contains::<TilemapEnabled>(),
+            "undo restores DATA; it must not switch tilemap rendering on for a \
+             tilemap the user disabled",
+        );
+    }
+
+    #[test]
+    fn redoing_a_tilemap_edit_leaves_a_disabled_tilemap_disabled() {
+        let mut world = base_world();
+        let entity =
+            spawn_tilemap(&mut world, "map-1", tilemap("b"), false);
+        record_tilemap_edit(&mut world, "map-1", Some(tilemap("a")), Some(tilemap("b")));
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert_eq!(tileset_of(&world, entity), "b", "redo must reapply the new tileset");
+        assert_eq!(
+            tile_size_of(&world, entity),
+            [16, 16],
+            "redo must reapply the recorded struct, not insert a default one",
+        );
+        assert!(
+            !world.entity(entity).contains::<TilemapEnabled>(),
+            "redo restores DATA; enablement is not part of this action either",
+        );
+    }
+
+    #[test]
+    fn undo_and_redo_preserve_an_enabled_tilemap() {
+        let mut world = base_world();
+        let entity =
+            spawn_tilemap(&mut world, "map-1", tilemap("b"), true);
+        record_tilemap_edit(&mut world, "map-1", Some(tilemap("a")), Some(tilemap("b")));
+
+        undo(&mut world);
+        assert_eq!(tileset_of(&world, entity), "a");
+        assert!(
+            world.entity(entity).contains::<TilemapEnabled>(),
+            "an enabled tilemap must stay enabled across undo",
+        );
+
+        redo(&mut world);
+        assert_eq!(tileset_of(&world, entity), "b");
+        assert!(
+            world.entity(entity).contains::<TilemapEnabled>(),
+            "an enabled tilemap must stay enabled across redo",
+        );
+    }
+
+    #[test]
+    fn undoing_to_no_recorded_tilemap_clears_both_the_data_and_the_marker() {
+        let mut world = base_world();
+        let entity =
+            spawn_tilemap(&mut world, "map-1", tilemap("b"), true);
+        record_tilemap_edit(&mut world, "map-1", None, Some(tilemap("b")));
+
+        undo(&mut world);
+
+        assert!(
+            world.entity(entity).get::<TilemapData>().is_none(),
+            "undo must remove the data when none was recorded",
+        );
+        assert!(
+            !world.entity(entity).contains::<TilemapEnabled>(),
+            "the enabled marker must not outlive the data it describes",
+        );
+    }
+
+    #[test]
+    fn redoing_to_no_new_tilemap_clears_both_the_data_and_the_marker() {
+        let mut world = base_world();
+        let entity =
+            spawn_tilemap(&mut world, "map-1", tilemap("a"), true);
+        record_tilemap_edit(&mut world, "map-1", Some(tilemap("a")), None);
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert!(
+            world.entity(entity).get::<TilemapData>().is_none(),
+            "redo must remove the data when the edit being reapplied removed it",
+        );
+        assert!(
+            !world.entity(entity).contains::<TilemapEnabled>(),
+            "the enabled marker must not outlive the data it describes",
+        );
+    }
+
+    // ---- skeleton2d ---------------------------------------------------
+
+    /// A second bone puts the fixture off `SkeletonData2d::default()` (exactly
+    /// one bone, named `root`) as well as the varying `active_skin` (default
+    /// `"default"`), so an `insert(default())` regression fails both
+    /// assertions rather than coincidentally satisfying them.
+    fn skeleton(active_skin: &str) -> SkeletonData2d {
+        let mut sk = SkeletonData2d { active_skin: active_skin.to_string(), ..Default::default() };
+        let mut spine = sk.bones[0].clone();
+        spine.name = "spine".to_string();
+        spine.parent_bone = Some("root".to_string());
+        sk.bones.push(spine);
+        sk
+    }
+
+    fn active_skin_of(world: &World, entity: Entity) -> String {
+        world
+            .entity(entity)
+            .get::<SkeletonData2d>()
+            .expect("SkeletonData2d must still be present")
+            .active_skin
+            .clone()
+    }
+
+    fn bone_count_of(world: &World, entity: Entity) -> usize {
+        world
+            .entity(entity)
+            .get::<SkeletonData2d>()
+            .expect("SkeletonData2d must still be present")
+            .bones
+            .len()
+    }
+
+    fn record_skeleton_edit(
+        world: &mut World,
+        id: &str,
+        old: Option<SkeletonData2d>,
+        new: Option<SkeletonData2d>,
+    ) {
+        world.resource_mut::<HistoryStack>().push(UndoableAction::SkeletonChange {
+            entity_id: id.to_string(),
+            old_skeleton: old,
+            new_skeleton: new,
+        });
+    }
+
+    #[test]
+    fn undoing_a_skeleton_edit_leaves_a_disabled_skeleton_disabled() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(
+            &mut world,
+            "rig-1",
+            skeleton("armor"),
+            false,
+        );
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), Some(skeleton("armor")));
+
+        undo(&mut world);
+
+        assert_eq!(active_skin_of(&world, entity), "cloth", "undo must restore the old skin");
+        assert_eq!(
+            bone_count_of(&world, entity),
+            2,
+            "undo must restore the recorded struct, not insert a default one",
+        );
+        assert!(
+            !world.entity(entity).contains::<SkeletonEnabled2d>(),
+            "undo restores DATA; it must not switch skeletal animation on for a \
+             rig the user disabled",
+        );
+    }
+
+    #[test]
+    fn redoing_a_skeleton_edit_leaves_a_disabled_skeleton_disabled() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(
+            &mut world,
+            "rig-1",
+            skeleton("armor"),
+            false,
+        );
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), Some(skeleton("armor")));
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert_eq!(active_skin_of(&world, entity), "armor", "redo must reapply the new skin");
+        assert_eq!(
+            bone_count_of(&world, entity),
+            2,
+            "redo must reapply the recorded struct, not insert a default one",
+        );
+        assert!(
+            !world.entity(entity).contains::<SkeletonEnabled2d>(),
+            "redo restores DATA; enablement is not part of this action either",
+        );
+    }
+
+    #[test]
+    fn undo_and_redo_preserve_an_enabled_skeleton() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(
+            &mut world,
+            "rig-1",
+            skeleton("armor"),
+            true,
+        );
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), Some(skeleton("armor")));
+
+        undo(&mut world);
+        assert_eq!(active_skin_of(&world, entity), "cloth");
+        assert!(
+            world.entity(entity).contains::<SkeletonEnabled2d>(),
+            "an enabled rig must stay enabled across undo",
+        );
+
+        redo(&mut world);
+        assert_eq!(active_skin_of(&world, entity), "armor");
+        assert!(
+            world.entity(entity).contains::<SkeletonEnabled2d>(),
+            "an enabled rig must stay enabled across redo",
+        );
+    }
+
+    #[test]
+    fn undoing_to_no_recorded_skeleton_clears_both_the_data_and_the_marker() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(
+            &mut world,
+            "rig-1",
+            skeleton("armor"),
+            true,
+        );
+        record_skeleton_edit(&mut world, "rig-1", None, Some(skeleton("armor")));
+
+        undo(&mut world);
+
+        assert!(
+            world.entity(entity).get::<SkeletonData2d>().is_none(),
+            "undo must remove the data when none was recorded",
+        );
+        assert!(
+            !world.entity(entity).contains::<SkeletonEnabled2d>(),
+            "the enabled marker must not outlive the data it describes",
+        );
+    }
+
+    #[test]
+    fn redoing_to_no_new_skeleton_clears_both_the_data_and_the_marker() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(
+            &mut world,
+            "rig-1",
+            skeleton("cloth"),
+            true,
+        );
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), None);
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert!(
+            world.entity(entity).get::<SkeletonData2d>().is_none(),
+            "redo must remove the data when the edit being reapplied removed it",
+        );
+        assert!(
+            !world.entity(entity).contains::<SkeletonEnabled2d>(),
+            "the enabled marker must not outlive the data it describes",
         );
     }
 }

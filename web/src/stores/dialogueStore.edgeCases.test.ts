@@ -157,6 +157,81 @@ describe('dialogueStore — edge cases (PF-360)', () => {
   });
 
   // =========================================================================
+  // Prototype-named tree ids
+  //
+  // `dialogueTrees` is a plain object literal, so a bare `trees[treeId]` answers
+  // inherited keys as readily as own ones. `trees['__proto__']` is
+  // `Object.prototype` — truthy — so every `if (!tree) return` guard in the store
+  // used to pass, and the next line read `tree.nodes` off it as `undefined` and
+  // threw. Tree ids are not trusted input: they arrive from generated cutscene
+  // keyframes and from `forge.dialogue.start()` in user scripts, neither of which
+  // is constrained to ids that exist.
+  // =========================================================================
+
+  describe('prototype-named tree ids', () => {
+    const PROTOTYPE_KEYS = ['__proto__', 'constructor', 'toString', 'valueOf', 'hasOwnProperty'];
+
+    it.each(PROTOTYPE_KEYS)('startDialogue(%p) is an inert no-op', (treeId) => {
+      expect(() => useDialogueStore.getState().startDialogue(treeId)).not.toThrow();
+      expect(useDialogueStore.getState().runtime.isActive).toBe(false);
+      expect(useDialogueStore.getState().runtime.activeTreeId).toBeNull();
+    });
+
+    it.each(PROTOTYPE_KEYS)('exportTree(%p) returns null rather than throwing', (treeId) => {
+      expect(useDialogueStore.getState().exportTree(treeId)).toBeNull();
+    });
+
+    it.each(PROTOTYPE_KEYS)('duplicateTree(%p) returns null rather than throwing', (treeId) => {
+      expect(useDialogueStore.getState().duplicateTree(treeId)).toBeNull();
+    });
+
+    it.each(PROTOTYPE_KEYS)('the mutators reject %p without touching the store', (treeId) => {
+      const before = useDialogueStore.getState().dialogueTrees;
+      const node: EndNode = { id: 'node_x', type: 'end', position: { x: 0, y: 0 } };
+
+      expect(() => useDialogueStore.getState().updateTree(treeId, { name: 'Hijacked' })).not.toThrow();
+      expect(() => useDialogueStore.getState().addNode(treeId, node)).not.toThrow();
+      expect(() => useDialogueStore.getState().updateNode(treeId, 'node_x', {})).not.toThrow();
+      expect(() => useDialogueStore.getState().removeNode(treeId, 'node_x')).not.toThrow();
+      // `removeTree` reads no tree, so it takes the membership half of the guard
+      // rather than `getTree`. Unguarded it was content-safe — deleting a non-own
+      // key touches nothing — but it still swapped in a fresh `dialogueTrees` and
+      // wrote localStorage for an id that named nothing, which the identity
+      // assertion below is exactly what catches.
+      expect(() => useDialogueStore.getState().removeTree(treeId)).not.toThrow();
+
+      // Not merely "did not crash": an id naming nothing must write nothing. A
+      // guard that let the mutation through against `Object.prototype` would be
+      // a prototype-pollution primitive, not just a missing early return.
+      expect(useDialogueStore.getState().dialogueTrees).toBe(before);
+    });
+
+    it('a real tree literally named __proto__ still round-trips', () => {
+      // `Object.hasOwn` answers the question that matters — is this key the
+      // object's own? — so an own key that happens to collide with a prototype
+      // name is a normal tree, not a blocked one. A blocklist of names would get
+      // this wrong.
+      const tree = {
+        id: '__proto__',
+        name: 'Odd but legal',
+        nodes: [{ id: 'n1', type: 'end' as const, position: { x: 0, y: 0 } }],
+        startNodeId: 'n1',
+        variables: {},
+      };
+      const trees: Record<string, typeof tree> = {};
+      Object.defineProperty(trees, '__proto__', {
+        value: tree,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+      useDialogueStore.setState({ dialogueTrees: trees });
+
+      expect(useDialogueStore.getState().exportTree('__proto__')).not.toBeNull();
+    });
+  });
+
+  // =========================================================================
   // Deeply nested conditions
   // =========================================================================
 

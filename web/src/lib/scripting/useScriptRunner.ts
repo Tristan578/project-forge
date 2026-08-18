@@ -372,6 +372,10 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           }
           case 'dialogue_set_variable': {
             const dStore = useDialogueStore.getState();
+            // `msg.treeId` comes off a worker `postMessage`, i.e. from a user
+            // script — so `__proto__` reaches here. A bare index would return the
+            // truthy `Object.prototype` and spread its (absent) `variables` into
+            // an `updateTree` call for a tree that does not exist.
             const tree = getTree(dStore.dialogueTrees, msg.treeId);
             if (tree) {
               dStore.updateTree(msg.treeId, { variables: { ...tree.variables, [msg.key]: msg.value } });

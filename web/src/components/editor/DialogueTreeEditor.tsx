@@ -454,7 +454,10 @@ export function DialogueTreeEditor() {
   // Load on mount
   useState(() => { loadFromLocalStorage(); });
 
-  const tree = (selectedTreeId ? getTree(dialogueTrees, selectedTreeId) : undefined) ?? null;
+  // `selectTree()` accepts any string, including one that came from an imported
+  // project, so this read is not developer-controlled either. `getTree` takes the
+  // `null` directly — a ternary here would be a second guard shape.
+  const tree = getTree(dialogueTrees, selectedTreeId) ?? null;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">

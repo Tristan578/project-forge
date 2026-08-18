@@ -201,3 +201,58 @@ describe('cutsceneStore', () => {
     });
   });
 });
+
+/**
+ * Cutscene ids reach this store from AI tool arguments and from saved projects,
+ * so `__proto__` and its siblings are reachable. A bare `state.cutscenes[id]`
+ * answers them with something truthy, which walks past every
+ * `if (!cutscene) return state` guard below.
+ */
+describe('prototype-named cutscene ids', () => {
+  const PROTOTYPE_IDS = ['__proto__', 'constructor', 'toString', 'valueOf', 'hasOwnProperty'];
+
+  it.each(PROTOTYPE_IDS)('updateCutscene leaves the store untouched for %s', (id) => {
+    useCutsceneStore.getState().updateCutscene(id, { name: 'Injected' });
+
+    // The failure mode this pins is not a throw: pre-fix, `existing` was
+    // `Object.prototype` and this wrote `{ ...Object.prototype, ...patch }` back
+    // under that key, materialising a bogus cutscene as a real own entry.
+    expect(useCutsceneStore.getState().cutscenes).toEqual({});
+  });
+
+  it.each(PROTOTYPE_IDS)('addTrack is a no-op for %s', (id) => {
+    useCutsceneStore.getState().addTrack(id, makeTrack('t1'));
+    expect(useCutsceneStore.getState().cutscenes).toEqual({});
+  });
+
+  it.each(PROTOTYPE_IDS)('updateTrack is a no-op for %s', (id) => {
+    useCutsceneStore.getState().updateTrack(id, 't1', { muted: true });
+    expect(useCutsceneStore.getState().cutscenes).toEqual({});
+  });
+
+  it.each(PROTOTYPE_IDS)('removeTrack is a no-op for %s', (id) => {
+    useCutsceneStore.getState().removeTrack(id, 't1');
+    expect(useCutsceneStore.getState().cutscenes).toEqual({});
+  });
+
+  it.each(PROTOTYPE_IDS)('addKeyframe is a no-op for %s', (id) => {
+    useCutsceneStore.getState().addKeyframe(id, 't1', makeKeyframe(0));
+    expect(useCutsceneStore.getState().cutscenes).toEqual({});
+  });
+
+  it.each(PROTOTYPE_IDS)('removeKeyframe is a no-op for %s', (id) => {
+    useCutsceneStore.getState().removeKeyframe(id, 't1', 0);
+    expect(useCutsceneStore.getState().cutscenes).toEqual({});
+  });
+
+  it('still updates a cutscene genuinely named __proto__', () => {
+    // A computed key creates an own property; a `__proto__:` literal would set
+    // the prototype instead. Rejecting inherited lookups, not unusual names.
+    const id = '__proto__';
+    useCutsceneStore.getState().addCutscene({ ...makeCutscene(id), id });
+    useCutsceneStore.getState().updateCutscene(id, { name: 'Renamed' });
+
+    expect(Object.getOwnPropertyDescriptor(useCutsceneStore.getState().cutscenes, id)?.value)
+      .toMatchObject({ name: 'Renamed' });
+  });
+});
