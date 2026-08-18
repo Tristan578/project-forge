@@ -126,6 +126,16 @@ export const characterSetupExecutor: ExecutorDefinition = {
     // so the speed and jump the GDD asked for could not be seen or tuned, and a
     // later store-driven `update_game_component` (`applyPhysicsProfile`) would
     // reason from a store that disagreed with the engine.
+    //
+    // Normalizing is also the second of two bounds on the numbers below.
+    // `systemConfig` is an LLM-authored bag, and `resolvePhysicsProfile` is the
+    // first bound: it REJECTS a `moveSpeed` or `jumpForce` outside the engine's
+    // range rather than clamping it, so the preset the feel directive selected
+    // stands instead of a ceiling nobody chose. `addGameComponent` then runs
+    // `normalizeGameComponent`, which applies the same per-property ranges the
+    // engine does — that one catches anything reaching the store by a route
+    // without a resolver in front of it, and keeps the store and the engine on
+    // the same number rather than each holding its own default (PF-1147).
     ctx.getStore().addGameComponent(entityId, {
       type: 'characterController',
       characterController: { ...controller, canDoubleJump: false },
