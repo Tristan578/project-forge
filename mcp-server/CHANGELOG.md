@@ -1,5 +1,25 @@
 # @project-forge/mcp-server
 
+## 0.2.2
+
+### Patch Changes
+
+- [#9089](https://github.com/Tristan578/project-forge/pull/9089) [`06c5e97`](https://github.com/Tristan578/project-forge/commit/06c5e97daf271b33967b19aaba0128ece04eff49) Thanks [@dependabot](https://github.com/apps/dependabot)! - chore(deps): bump the `hono` security-pin override 4.12.31→4.13.0 ([#9089](https://github.com/Tristan578/project-forge/issues/9089))
+
+  Same shape as [#8995](https://github.com/Tristan578/project-forge/issues/8995): Dependabot's bump only edited the root `package.json` override, and npm does not re-resolve an already-pinned transitive when only its override value changes — so the bump shipped as a silent no-op with the lockfile still on 4.12.31 while Lockfile Sync stayed green (an override-forced package is a documented blind spot of that gate's `npm ls` stage). Relocked on Node 24 via `npm update hono --package-lock-only`; only the `hono` version/resolved/integrity lines changed, and the integrity matches the registry. `hono` reaches the tree through `@modelcontextprotocol/sdk` (mcp-server) and is a peer of `@hono/node-server`.
+
+- [#9100](https://github.com/Tristan578/project-forge/pull/9100) [`fcf39f3`](https://github.com/Tristan578/project-forge/commit/fcf39f3c4678e2b709978b7af2254ab571e5e991) Thanks [@Tristan578](https://github.com/Tristan578)! - chore(deps): relock `nanoid`, `js-yaml` and `dompurify` to clear three published advisories ([#9099](https://github.com/Tristan578/project-forge/issues/9099))
+
+  The `npm audit` gate was red on all three audited workspaces (`.`, `web`, `mcp-server`):
+
+  - **GHSA-2v37-7h3g-55p8** (high) — `nanoid`: a custom generator can loop indefinitely when `size` is zero. `3.3.16` → `3.3.18`.
+  - **GHSA-5p4m-2wfm-xmqj** (high) — `js-yaml`: quadratic CPU consumption resolving `!!omap`. `4.3.0` → `4.3.1` at the root, and the two nested `3.15.0` copies (under `gray-matter/` and `read-yaml-file/`) → `3.15.1`. A root-only bump would have left both nested copies vulnerable.
+  - **GHSA-55q2-fjhq-7xh7** (moderate) — `dompurify`: an `IN_PLACE` hook removal leaves a detached subtree executable (XSS). The existing root override was pinned `>=3.4.12`, one patch short of the fix, so it actively held the vulnerable version in place; tightened to `>=3.4.13` and relocked to `3.4.13`.
+
+  Every fix was already published, so no `ALLOWED_ADVISORIES` waiver was added — the allowlist stays empty, which is its correct steady state.
+
+  Relocked on the pinned Node 24 toolchain with a scoped `npm update … --package-lock-only`. The committed lockfile carries exactly five changed nodes (`version`/`resolved`/`integrity` only) with zero nodes added or removed; the `libc` metadata that `npm update` strips from 34 Linux-only optional native nodes was restored so the file round-trips through `npm install --package-lock-only` unchanged.
+
 ## 0.2.1
 
 ### Patch Changes
