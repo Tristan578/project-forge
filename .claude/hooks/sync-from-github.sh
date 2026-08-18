@@ -25,6 +25,15 @@ if ! curl -s --connect-timeout 2 "http://localhost:3010/api/board" >/dev/null 2>
     exit 0
 fi
 
-python3 "$SCRIPT_DIR/github_project_sync.py" pull 2>/dev/null
+python3 "$SCRIPT_DIR/github_project_sync.py" pull 2>&1
+
+# Then a state-based sweep. `pull` only sees the 100 most recently closed
+# issues and only acts when the map's remembered status differs, so a ticket
+# whose update failed once — or whose issue was closed outside that window —
+# is invisible to it forever. `reconcile` compares the two systems' ACTUAL
+# states, so it cannot latch and is safe to re-run. It applies the same rule
+# push already applies (a done ticket closes its issue); the difference is
+# that it is driven by observation rather than by a memo.
+python3 "$SCRIPT_DIR/github_project_sync.py" reconcile-apply 2>&1
 
 exit 0

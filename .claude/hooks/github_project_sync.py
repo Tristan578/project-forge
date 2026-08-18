@@ -722,19 +722,52 @@ def gh_set_status(config, item_id, local_status):
     ])
 
 
+def gh_get_issue_state(config, issue_number):
+    """Return "OPEN"/"CLOSED" for one issue, or None if it cannot be read."""
+    owner = config["owner"]
+    repo = config["repo"]
+    try:
+        out = gh_run([
+            "gh", "issue", "view", str(issue_number),
+            "--repo", f"{owner}/{repo}", "--json", "state",
+        ], timeout=30)
+        return json.loads(out).get("state")
+    except Exception:
+        return None
+
+
 def gh_sync_issue_state(config, issue_number, local_status, prev_status=None):
-    """Close GitHub issue when ticket moves to done, reopen only if moving back from done."""
+    """Close GitHub issue when ticket moves to done, reopen only if moving back from done.
+
+    Raises when the issue does not end up in the intended state. The close/reopen
+    calls stay check=False because `gh` also exits non-zero for benign no-ops
+    (closing an already-closed issue), so the exit code is not a usable signal —
+    the resulting STATE is. Without this verification a silently-failed close
+    still let the caller write `lastLocalStatus`, and the push-side change
+    detector — which compares against that memo — never fired for the ticket
+    again, latching the drift permanently.
+    """
     owner = config["owner"]
     repo = config["repo"]
     repo_arg = f"{owner}/{repo}"
     if local_status == "done":
+        want = "CLOSED"
         gh_run(["gh", "issue", "close", str(issue_number), "--repo", repo_arg,
                 "--reason", "completed"], check=False)
     elif prev_status == "done":
         # Only reopen if the ticket was previously done — avoids overriding
         # manual GitHub issue closures for tickets that were never done locally
+        want = "OPEN"
         gh_run(["gh", "issue", "reopen", str(issue_number), "--repo", repo_arg],
                check=False)
+    else:
+        return
+
+    actual = gh_get_issue_state(config, issue_number)
+    if actual is not None and actual != want:
+        raise RuntimeError(
+            f"issue #{issue_number} is {actual}, expected {want} after state sync"
+        )
 
 
 def gh_update_issue(config, issue_number, title=None, body=None):
@@ -1100,11 +1133,13 @@ def pull():
             entry = tmap.get(tid, {})
             any_change = False
 
+            status_ok = True
             if entry.get("lastGithubStatus") != gh_status:
                 try:
                     tb_post(f"/tickets/{tid}/move", {"status": local_status})
                     any_change = True
                 except Exception as e:
+                    status_ok = False
                     errors += 1
                     print(f"  ! Status update failed {title}: {e}", file=sys.stderr)
 
@@ -1114,10 +1149,18 @@ def pull():
             tmap[tid].update({
                 "githubItemId": item_id,
                 "githubIssueNumber": gh_issue_num,
-                "lastLocalStatus": local_status if any_change else entry.get("lastLocalStatus", local_status),
-                "lastGithubStatus": gh_status,
                 "title": title,
             })
+            # Only record the reconciled status when the local move actually
+            # landed. Writing it unconditionally — as this did — made a single
+            # failed move permanent: the next run compares against the memo,
+            # sees no change, and skips the ticket forever.
+            if status_ok:
+                tmap[tid]["lastLocalStatus"] = (
+                    local_status if any_change
+                    else entry.get("lastLocalStatus", local_status)
+                )
+                tmap[tid]["lastGithubStatus"] = gh_status
 
             if parsed and parsed.get("version", 0) >= 2:
                 remote_body_hash = parsed.get("bodyHash", "")
@@ -1733,6 +1776,174 @@ def close_orphan_issues():
 # Main
 # ---------------------------------------------------------------------------
 
+def assert_not_truncated(row_count, limit):
+    """Raise when a listing came back at its own limit.
+
+    A truncated list is worse than a failed one: every unseen issue looks
+    "missing" to classify_drift(), which declines to touch it, so the drift is
+    silently preserved rather than fixed. Measured 2026-08-18 — a limit of
+    5000 against 7954 issues hid ~2950 and misreported 8 live links as gone.
+    """
+    if row_count >= limit:
+        raise RuntimeError(
+            f"issue listing returned {row_count} rows at limit {limit} — the "
+            "list is truncated and reconcile would misreport the unseen "
+            "issues as missing. Raise the limit."
+        )
+
+
+def classify_drift(tickets, tmap, states):
+    """Sort tickets into the four reconciliation buckets. Pure — no I/O.
+
+    `states` maps issue number -> "OPEN"/"CLOSED". Terminal state wins in both
+    directions: a closed issue means the ticket is done, a done ticket means
+    the issue should be closed. Tickets absent from `tmap` are not ours to
+    reconcile and are skipped entirely.
+    """
+    to_close = []      # local done, issue open
+    to_done = []       # issue closed, local not done
+    unlinked = []      # carries an issue number this repo does not have
+    never_linked = []  # no issue number at all — nothing to reconcile against
+
+    for t in tickets:
+        entry = tmap.get(t["id"])
+        if not entry:
+            continue
+        num = entry.get("githubIssueNumber")
+        if not num:
+            # Distinct from a dangling link: no issue was ever created, so
+            # there is no GitHub state to disagree with. push() creates one
+            # for any non-done ticket; a done one stays as-is.
+            never_linked.append((t, num))
+            continue
+        state = states.get(num)
+        if state is None:
+            unlinked.append((t, num))
+            continue
+        local_done = t.get("status") == "done"
+        gh_closed = state == "CLOSED"
+        if local_done == gh_closed:
+            continue
+        (to_close if local_done else to_done).append((t, num))
+
+    return to_close, to_done, unlinked, never_linked
+
+
+def gh_get_issue_states(config, limit=50000):
+    """Every issue in the repo as {number: state}.
+
+    pull() fetches only the 100 most recently closed issues, which is a
+    recency WINDOW, not a view of the repo: an issue closed before that window
+    can never be seen by pull again, so a ticket left behind by a bulk closure
+    is unreachable by the normal sync no matter how many times it runs.
+
+    `limit` must exceed the repo's issue count or this reintroduces exactly
+    that defect at a larger size — a truncated list reports every unseen issue
+    as "missing", which reconcile then declines to touch, so the drift is
+    silently preserved rather than fixed. Getting back exactly `limit` rows
+    means truncation is possible, so it raises instead of returning a partial
+    view. (Measured 2026-08-18: 7954 issues; the original 5000 hid ~2950.)
+    """
+    owner = config["owner"]
+    repo = config["repo"]
+    result = subprocess.run(
+        [
+            "gh", "issue", "list",
+            "--repo", f"{owner}/{repo}",
+            "--state", "all",
+            "--limit", str(limit),
+            "--json", "number,state",
+        ],
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=600,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"gh issue list failed: {result.stderr.strip()}")
+    rows = json.loads(result.stdout)
+    assert_not_truncated(len(rows), limit)
+    return {i["number"]: i["state"] for i in rows}
+
+
+def reconcile(apply_changes=False):
+    """Idempotent, state-based reconciliation of local status vs GitHub issue state.
+
+    push() and pull() both decide whether to act by comparing against a
+    REMEMBERED value in the map (`lastLocalStatus` / `lastGithubStatus`). That
+    memo is written from intent rather than from observation, so any ticket
+    whose update failed once — or whose issue sits outside pull's closed-issue
+    recency window — is latched: the change detector never fires for it again
+    and the two systems disagree forever.
+
+    This pass compares the two systems' ACTUAL states, so it cannot latch and
+    is safe to re-run. Terminal state wins in both directions: a closed issue
+    marks its ticket done, a done ticket closes its issue.
+    """
+    config = load_config()
+    mapping = load_map()
+    tmap = mapping.get("tickets", {})
+    project_id = resolve_project_id(config)
+    if not project_id:
+        print("[FATAL] resolve_project_id() returned empty/None. Aborting.", file=sys.stderr)
+        sys.exit(1)
+
+    if not tb_available():
+        print("[SYNC] Taskboard API unavailable — skipping reconcile")
+        return
+
+    tickets = tb_get(f"/tickets?project={project_id}")
+    if tickets is None:
+        print("[SYNC] Taskboard API unavailable — skipping reconcile")
+        return
+
+    states = gh_get_issue_states(config)
+    print(f"  [reconcile] {len(tickets)} local tickets vs {len(states)} GitHub issues")
+
+    to_close, to_done, unlinked, never_linked = classify_drift(tickets, tmap, states)
+
+    print(f"  issue CLOSED but ticket not done : {len(to_done)}")
+    print(f"  ticket done but issue OPEN       : {len(to_close)}")
+    print(f"  mapped to a missing issue        : {len(unlinked)}")
+    print(f"  no issue ever created            : {len(never_linked)}")
+
+    if not apply_changes:
+        for t, n in to_done[:20]:
+            print(f"    would set done   PF-{t['number']:<5} #{n:<6} {t['title'][:56]}")
+        for t, n in to_close[:20]:
+            print(f"    would close      PF-{t['number']:<5} #{n:<6} {t['title'][:56]}")
+        for t, n in unlinked[:20]:
+            print(f"    ! no such issue  PF-{t['number']:<5} #{n}")
+        print("  (dry run — pass 'reconcile-apply' to write these changes)")
+        return
+
+    fixed = 0
+    errors = 0
+    for t, num in to_done:
+        try:
+            tb_post(f"/tickets/{t['id']}/move", {"status": "done"})
+            e = tmap.setdefault(t["id"], {})
+            e["lastLocalStatus"] = "done"
+            e["lastGithubStatus"] = local_to_github(config, "done")
+            fixed += 1
+        except Exception as exc:
+            errors += 1
+            print(f"  ! PF-{t['number']} -> done failed: {exc}", file=sys.stderr)
+
+    for t, num in to_close:
+        try:
+            gh_sync_issue_state(config, num, "done", prev_status="in_progress")
+            e = tmap.setdefault(t["id"], {})
+            e["lastLocalStatus"] = "done"
+            e["lastGithubStatus"] = local_to_github(config, "done")
+            fixed += 1
+        except Exception as exc:
+            errors += 1
+            print(f"  ! close #{num} failed: {exc}", file=sys.stderr)
+
+    mapping["tickets"] = tmap
+    save_map(mapping)
+    print(f"[reconcile] {fixed} reconciled, {errors} errors, {len(unlinked)} unlinked left alone")
+
+
 COMMANDS = {
     "push": lambda: push(include_done=False),
     "push-all": lambda: push(include_done=True),
@@ -1741,6 +1952,8 @@ COMMANDS = {
     "migrate-drafts": migrate_drafts,
     "dedup": dedup_local,
     "close-orphans": close_orphan_issues,
+    "reconcile": lambda: reconcile(apply_changes=False),
+    "reconcile-apply": lambda: reconcile(apply_changes=True),
 }
 
 if __name__ == "__main__":

@@ -33,6 +33,8 @@ secrets.json
 .claude/taskboard.db-shm
 # Generated sync state — not for version control
 .claude/hooks/github-project-map.json
+.claude/hooks/.sync-push.lock
+.claude/hooks/.sync.log
 
 # ----- Windsurf / AI Tooling -----
 # Track Windsurf rules and workflows

@@ -29,6 +29,21 @@ if [ "$1" = "--all" ]; then
     MODE="push-all"
 fi
 
-python3 "$SCRIPT_DIR/github_project_sync.py" "$MODE" 2>/dev/null
+# Log rather than discard. This ran as `2>/dev/null` inside a caller that
+# already redirects to /dev/null, so a failing sync was invisible from both
+# sides — which is how 240 tickets drifted out of alignment with their GitHub
+# issues without anything ever reporting it. Still exits 0: a sync failure
+# must not block the CLI.
+LOG="$SCRIPT_DIR/.sync.log"
+{
+    echo "--- $(date '+%Y-%m-%d %H:%M:%S') $MODE ---"
+    python3 "$SCRIPT_DIR/github_project_sync.py" "$MODE" 2>&1
+    echo "--- exit $? ---"
+} >>"$LOG" 2>&1
+
+# Keep the log bounded (last 2000 lines).
+if [ "$(wc -l <"$LOG" 2>/dev/null || echo 0)" -gt 2000 ]; then
+    tail -n 1000 "$LOG" >"$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+fi
 
 exit 0
