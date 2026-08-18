@@ -764,9 +764,16 @@ def gh_sync_issue_state(config, issue_number, local_status, prev_status=None):
         return
 
     actual = gh_get_issue_state(config, issue_number)
-    if actual is not None and actual != want:
+    if actual != want:
+        # `actual is None` means the state could not be read at all. That is an
+        # UNVERIFIED state, not a passing one: letting it through would record
+        # the memo for a close nothing confirmed, which is precisely the latch
+        # this function exists to remove. Every call site treats the raise as a
+        # per-ticket error and carries on, so failing here costs one ticket's
+        # sync for this run rather than the run.
         raise RuntimeError(
-            f"issue #{issue_number} is {actual}, expected {want} after state sync"
+            f"issue #{issue_number} is {actual or 'unreadable'}, expected "
+            f"{want} after state sync"
         )
 
 
@@ -802,21 +809,31 @@ def github_to_local(config, github_status):
 # PUSH: local taskboard → GitHub Project
 # ---------------------------------------------------------------------------
 
-def push(include_done=False):
-    # --- Exclusive file lock to prevent concurrent sync ---
+def with_sync_lock(label, fn):
+    """Run `fn` under the exclusive sync lock, or skip if another run holds it.
+
+    push and reconcile write the same two systems, so they must not interleave:
+    reconcile decides from a snapshot of GitHub state that a concurrent push is
+    busy invalidating. Shared rather than duplicated because reconcile now runs
+    detached from session start, which is what makes the overlap reachable.
+    """
     lock_path = _MAIN_HOOKS / ".sync-push.lock"
     lock_fd = open(lock_path, "w")
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except (IOError, OSError):
-        print("[SYNC] Another push is already running — skipping to prevent duplicates")
+        print(f"[SYNC] Another sync is already running — skipping {label}")
         lock_fd.close()
         return
     try:
-        _push_inner(include_done)
+        return fn()
     finally:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         lock_fd.close()
+
+
+def push(include_done=False):
+    return with_sync_lock("push", lambda: _push_inner(include_done))
 
 
 def _push_inner(include_done=False):
@@ -879,7 +896,16 @@ def _push_inner(include_done=False):
             if tid in tmap and tmap[tid].get("lastLocalStatus") == "done":
                 gh_num = tmap[tid].get("githubIssueNumber") or db_get_github_issue_number(tid)
                 if gh_num:
-                    gh_sync_issue_state(config, gh_num, "done")
+                    # Must not escape the loop: save_map() runs after it, so an
+                    # uncaught raise here would discard every link this run had
+                    # recorded so far. One ticket failing to verify is a
+                    # per-ticket error, exactly as on the create/update paths.
+                    try:
+                        gh_sync_issue_state(config, gh_num, "done")
+                    except Exception as e:
+                        errors += 1
+                        print(f"  ! State sync failed {display}: {e}",
+                              file=sys.stderr)
                 skipped += 1
                 continue
 
@@ -1792,13 +1818,22 @@ def assert_not_truncated(row_count, limit):
         )
 
 
-def classify_drift(tickets, tmap, states):
-    """Sort tickets into the four reconciliation buckets. Pure — no I/O.
+def classify_drift(tickets, tmap, states, resolve_link=None):
+    """Sort tickets into the four reconciliation buckets.
+
+    Does no I/O of its own — every input, including the link lookup, is
+    injected, which is what makes the decision logic testable at all.
 
     `states` maps issue number -> "OPEN"/"CLOSED". Terminal state wins in both
     directions: a closed issue means the ticket is done, a done ticket means
     the issue should be closed. Tickets absent from `tmap` are not ours to
     reconcile and are skipped entirely.
+
+    `resolve_link(ticket_id)` supplies the authoritative issue number from the
+    taskboard database, which is the precedence push() itself applies: the map
+    file is a cache and can be stale or lost, and reconciling against a stale
+    number is worse than not reconciling at all. Injected rather than called
+    directly so this stays pure and testable; omitted, the map is used alone.
     """
     to_close = []      # local done, issue open
     to_done = []       # issue closed, local not done
@@ -1809,7 +1844,9 @@ def classify_drift(tickets, tmap, states):
         entry = tmap.get(t["id"])
         if not entry:
             continue
-        num = entry.get("githubIssueNumber")
+        num = resolve_link(t["id"]) if resolve_link else None
+        if not num:
+            num = entry.get("githubIssueNumber")
         if not num:
             # Distinct from a dangling link: no issue was ever created, so
             # there is no GitHub state to disagree with. push() creates one
@@ -1865,6 +1902,10 @@ def gh_get_issue_states(config, limit=50000):
 
 
 def reconcile(apply_changes=False):
+    return with_sync_lock("reconcile", lambda: _reconcile_inner(apply_changes))
+
+
+def _reconcile_inner(apply_changes=False):
     """Idempotent, state-based reconciliation of local status vs GitHub issue state.
 
     push() and pull() both decide whether to act by comparing against a
@@ -1898,7 +1939,9 @@ def reconcile(apply_changes=False):
     states = gh_get_issue_states(config)
     print(f"  [reconcile] {len(tickets)} local tickets vs {len(states)} GitHub issues")
 
-    to_close, to_done, unlinked, never_linked = classify_drift(tickets, tmap, states)
+    to_close, to_done, unlinked, never_linked = classify_drift(
+        tickets, tmap, states, resolve_link=db_get_github_issue_number
+    )
 
     print(f"  issue CLOSED but ticket not done : {len(to_done)}")
     print(f"  ticket done but issue OPEN       : {len(to_close)}")

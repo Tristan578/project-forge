@@ -34,6 +34,15 @@ python3 "$SCRIPT_DIR/github_project_sync.py" pull 2>&1
 # states, so it cannot latch and is safe to re-run. It applies the same rule
 # push already applies (a done ticket closes its issue); the difference is
 # that it is driven by observation rather than by a memo.
-python3 "$SCRIPT_DIR/github_project_sync.py" reconcile-apply 2>&1
+#
+# Detached, because it lists EVERY issue in the repo (~8k) and this script runs
+# on the SessionStart path: inline, it made the user wait on that listing
+# before the session could start. Nothing downstream reads its result, so it
+# only needs to be started. It takes the same exclusive lock push does, so a
+# sweep still running when the next sync fires skips itself rather than
+# interleaving. Output goes to the shared sync log, bounded like the others.
+SYNC_LOG="$SCRIPT_DIR/.sync.log"
+nohup python3 "$SCRIPT_DIR/github_project_sync.py" reconcile-apply >>"$SYNC_LOG" 2>&1 &
+echo "[SYNC] reconcile sweep started in background (log: .sync.log)"
 
 exit 0

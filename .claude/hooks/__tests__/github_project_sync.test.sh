@@ -165,6 +165,143 @@ print(len(c) + len(d) + len(u) + len(n))
 assert_out "empty map -> nothing to reconcile" "0" "$out"
 
 echo
+# ------------------------------------------------- review findings
+# Everything below guards a defect a reviewer found in the first cut of this
+# change. Each one failed silently: none of them raised, logged, or reddened a
+# test — they just left the two systems disagreeing.
+
+# --- an unreadable issue state is UNVERIFIED, not verified -----------------
+# gh_get_issue_state() swallows every exception and returns None. Treating that
+# as "state matches" makes the caller record the memo for a close nothing
+# confirmed, which is the latch this whole change exists to remove.
+out="$(run_py "
+m.gh_run = lambda *a, **k: ''
+m.gh_get_issue_state = lambda cfg, n: None
+try:
+    m.gh_sync_issue_state({'owner': 'o', 'repo': 'r'}, 7, 'done')
+    print('no-raise')
+except RuntimeError:
+    print('raised')
+")"
+assert_out "unreadable issue state raises rather than passing" "raised" "$out"
+
+out="$(run_py "
+m.gh_run = lambda *a, **k: ''
+m.gh_get_issue_state = lambda cfg, n: 'CLOSED'
+m.gh_sync_issue_state({'owner': 'o', 'repo': 'r'}, 7, 'done')
+print('ok')
+")"
+assert_out "a confirmed CLOSED state passes verification" "ok" "$out"
+
+# --- every gh_sync_issue_state call is guarded ----------------------------
+# The raise above is only survivable because each caller catches it. push()
+# calls save_map() AFTER its ticket loop, so one uncaught raise mid-loop throws
+# away every link the run recorded. Asserted structurally over the whole module
+# because the offending call site sits behind a live taskboard + gh.
+out="$(run_py "
+import ast, os
+src = open(os.path.join(os.environ['HOOKS_DIR'], 'github_project_sync.py')).read()
+
+bare, guarded = [], []
+
+
+def walk(node, protected):
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.Call) and getattr(child.func, 'id', None) == 'gh_sync_issue_state':
+            (guarded if protected else bare).append(child.lineno)
+        if isinstance(child, ast.Try):
+            for sub in child.body:
+                walk(sub, True)
+            for sub in child.handlers + child.orelse + child.finalbody:
+                walk(sub, protected)
+        else:
+            walk(child, protected)
+
+
+walk(ast.parse(src), False)
+total = len(bare) + len(guarded)
+if total < 4:
+    # A parser that silently matched nothing would otherwise report clean.
+    print('parser-found-only-' + str(total))
+elif bare:
+    print('bare-at-' + ','.join(str(l) for l in sorted(bare)))
+else:
+    print('all-guarded')
+")"
+assert_out "every gh_sync_issue_state call sits inside a try block" "all-guarded" "$out"
+
+# --- reconcile resolves the issue link the way push does ------------------
+# push prefers SQLite's github_issue_number and falls back to the map. When
+# classify_drift read the map alone, a ticket whose cached entry was stale
+# reconciled against the wrong issue; one whose entry lost its number was
+# skipped as "never linked" while a real issue sat open.
+LINKFIX="
+tickets = [{'id': 'a', 'number': 1, 'title': 't', 'status': 'done'}]
+"
+
+out="$(run_py "
+$LINKFIX
+tmap = {'a': {'githubIssueNumber': 111}}
+states = {111: 'OPEN', 222: 'OPEN'}
+close, done, unlinked, never = m.classify_drift(
+    tickets, tmap, states, resolve_link=lambda tid: 222)
+print(close[0][1] if close else 'none')
+")"
+assert_out "the database link wins over a stale map entry" "222" "$out"
+
+out="$(run_py "
+$LINKFIX
+tmap = {'a': {'githubIssueNumber': 111}}
+close, done, unlinked, never = m.classify_drift(
+    tickets, tmap, {111: 'OPEN'}, resolve_link=lambda tid: None)
+print(close[0][1] if close else 'none')
+")"
+assert_out "falls back to the map when the database has no link" "111" "$out"
+
+out="$(run_py "
+$LINKFIX
+close, done, unlinked, never = m.classify_drift(
+    tickets, {'a': {'lastLocalStatus': 'done'}}, {333: 'OPEN'},
+    resolve_link=lambda tid: 333)
+print(close[0][1] if close else 'none')
+")"
+assert_out "a map entry that lost its number still reconciles via the database" "333" "$out"
+
+out="$(run_py "
+import inspect, os
+src = inspect.getsource(m.reconcile) + inspect.getsource(m._reconcile_inner)
+print('wired' if 'db_get_github_issue_number' in src else 'not-wired')
+")"
+assert_out "reconcile wires the database resolver into classify_drift" "wired" "$out"
+
+# --- push and reconcile share one exclusive lock --------------------------
+# reconcile now runs detached from session start, so it can overlap a push.
+# They write the same two systems, and reconcile decides from a snapshot of
+# GitHub state that a concurrent push is busy invalidating.
+out="$(run_py "
+import fcntl
+lock = open(m._MAIN_HOOKS / '.sync-push.lock', 'w')
+fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+ran = []
+m._reconcile_inner = lambda *a, **k: ran.append(1)
+m.reconcile(apply_changes=True)
+fcntl.flock(lock, fcntl.LOCK_UN)
+lock.close()
+print('ran-anyway' if ran else 'skipped')
+" | tail -1)"
+assert_out "reconcile skips while another sync holds the lock" "skipped" "$out"
+
+# --- session start does not block on the full-repo listing ----------------
+# reconcile lists every issue in the repo (~8k). Run inline it delayed every
+# session start by that listing; it only needs to be started, not awaited.
+WRAPPER="$HOOKS_DIR/sync-from-github.sh"
+if grep -Eq '^[[:space:]]*(nohup[[:space:]]+)?python3 .*reconcile-apply.*&[[:space:]]*$' "$WRAPPER"; then
+  echo "ok   - session-start runs reconcile-apply detached, not inline"
+else
+  echo "FAIL - session-start still blocks on reconcile-apply"
+  FAILURES=$((FAILURES + 1))
+fi
+
 if [ "$FAILURES" -eq 0 ]; then
   echo "All github_project_sync tests passed."
   exit 0
