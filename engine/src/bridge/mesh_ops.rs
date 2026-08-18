@@ -48,7 +48,15 @@ pub(super) fn apply_array_requests(
         Option<&AssetRef>,
     )>,
     script_query: Query<(&EntityId, Option<&ScriptData>)>,
-    audio_query: Query<(&EntityId, Option<&AudioData>)>,
+    // Reverb rides along with audio rather than taking its own param: this
+    // function is already over clippy's argument threshold, and a reverb zone
+    // is an audio component.
+    audio_query: Query<(
+        &EntityId,
+        Option<&AudioData>,
+        Option<&core::reverb_zone::ReverbZoneData>,
+        Option<&core::reverb_zone::ReverbZoneEnabled>,
+    )>,
     particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
     csg_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>)>,
@@ -65,7 +73,13 @@ pub(super) fn apply_array_requests(
         };
 
         let src_script_data = script_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, sd)| sd.cloned());
-        let src_audio_data = audio_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, ad)| ad.cloned());
+        // Array copies are a third restore path alongside spawn_from_snapshot and
+        // insert_aux_components, and reverb was missing from all three (PF-1182).
+        let (src_audio_data, src_reverb_zone_data, src_reverb_zone_enabled) = audio_query
+            .iter()
+            .find(|(eid, _, _, _)| eid.0 == src_eid.0)
+            .map(|(_, ad, rzd, rze)| (ad.cloned(), rzd.cloned(), rze.is_some()))
+            .unwrap_or((None, None, false));
         let (src_particle_data, src_particle_enabled) = particle_query.iter().find(|(eid, _, _)| eid.0 == src_eid.0).map(|(_, pd, pe)| (pd.cloned(), pe.is_some())).unwrap_or((None, false));
         let src_shader_data = shader_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, sed)| sed.cloned());
         let src_csg_data = csg_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, cmd)| cmd.cloned());
@@ -138,9 +152,9 @@ pub(super) fn apply_array_requests(
 
             if let Some(m) = mesh_h { ec.insert(m.clone()); }
             if let Some(mat) = mat_h { ec.insert(mat.clone()); }
-            if let Some(p) = pl { ec.insert(p.clone()); }
-            if let Some(d) = dl { ec.insert(d.clone()); }
-            if let Some(s) = sl { ec.insert(s.clone()); }
+            if let Some(p) = pl { ec.insert(*p); }
+            if let Some(d) = dl { ec.insert(*d); }
+            if let Some(s) = sl { ec.insert(*s); }
             if let Some(md) = mat_data { ec.insert(md.clone()); }
             if let Some(ld) = light_data { ec.insert(ld.clone()); }
             if let Some(pd) = phys_data { ec.insert(pd.clone()); }
@@ -148,6 +162,8 @@ pub(super) fn apply_array_requests(
             if let Some(ar) = asset_ref { ec.insert(ar.clone()); }
             if let Some(ref sd) = src_script_data { ec.insert(sd.clone()); }
             if let Some(ref ad) = src_audio_data { ec.insert(ad.clone()); ec.insert(AudioEnabled); }
+            if let Some(ref rzd) = src_reverb_zone_data { ec.insert(rzd.clone()); }
+            if src_reverb_zone_enabled { ec.insert(core::reverb_zone::ReverbZoneEnabled); }
             if let Some(ref pd) = src_particle_data { ec.insert(pd.clone()); }
             if src_particle_enabled { ec.insert(ParticleEnabled); }
             if let Some(ref sed) = src_shader_data { ec.insert(sed.clone()); }
@@ -172,6 +188,8 @@ pub(super) fn apply_array_requests(
                 snap.asset_ref = asset_ref.cloned();
                 snap.script_data = src_script_data.clone();
                 snap.audio_data = src_audio_data.clone();
+                snap.reverb_zone_data = src_reverb_zone_data.clone();
+                snap.reverb_zone_enabled = src_reverb_zone_enabled;
                 snap.particle_data = src_particle_data.clone();
                 snap.particle_enabled = src_particle_enabled;
                 snap.shader_effect_data = src_shader_data.clone();

@@ -3,6 +3,7 @@
  */
 
 import { StateCreator } from 'zustand';
+import { buildCreateSkeleton2dPayload } from '@/lib/skeleton2d/skeletonPayload';
 import type { AnimationPlaybackState, AnimationClipData, SkeletonData2d, SkeletalAnimation2d } from './types';
 
 export interface AnimationSlice {
@@ -31,6 +32,13 @@ export interface AnimationSlice {
   previewClip: (entityId: string, action: 'play' | 'stop' | 'seek', seekTime?: number) => void;
   removeAnimationClip: (entityId: string) => void;
   setSkeleton2d: (entityId: string, data: SkeletonData2d) => void;
+  /**
+   * State-only mirror of what the engine reports. `setSkeleton2d` dispatches
+   * `create_skeleton2d`, so driving it from an inbound event handler echoes a
+   * full-replace command straight back at the engine that just described the
+   * rig — and a full replace built from a misread payload destroys it.
+   */
+  applySkeleton2dFromEngine: (entityId: string, data: SkeletonData2d) => void;
   removeSkeleton2d: (entityId: string) => void;
   setSkeletalAnimations2d: (entityId: string, animations: SkeletalAnimation2d[]) => void;
   setSelectedBone: (boneName: string | null) => void;
@@ -101,7 +109,27 @@ export const createAnimationSlice: StateCreator<AnimationSlice, [], [], Animatio
   },
   setSkeleton2d: (entityId, data) => {
     set(state => ({ skeletons2d: { ...state.skeletons2d, [entityId]: data } }));
-    if (dispatchCommand) dispatchCommand('set_skeleton_2d', { entityId, ...data });
+    // The engine spells this `create_skeleton2d` (no underscore before the 2d), reads
+    // the data NESTED under `skeletonData`, and does NOT accept the store's shape:
+    // `local_position` is `[f32; 3]`, `target_entity_id` is a `String`, and
+    // `AttachmentData` is a tagged enum with no optional fields. Any one of those is a
+    // hard `Invalid skeletonData` reject that loses the whole rig, so the payload is
+    // built by `buildCreateSkeleton2dPayload` rather than passed through.
+    if (dispatchCommand) {
+      // A store action has no result channel, so a bounded IK chain would otherwise
+      // reach the engine at a length the inspector never showed. The console is the
+      // only channel available here; the callers that have a better one pass their
+      // own collector to `buildCreateSkeleton2dPayload`.
+      const warnings: string[] = [];
+      const payload = buildCreateSkeleton2dPayload(entityId, data, warnings);
+      for (const warning of warnings) {
+        console.warn(`[skeleton2d] ${warning}`);
+      }
+      dispatchCommand('create_skeleton2d', payload);
+    }
+  },
+  applySkeleton2dFromEngine: (entityId, data) => {
+    set(state => ({ skeletons2d: { ...state.skeletons2d, [entityId]: data } }));
   },
   removeSkeleton2d: (entityId) => {
     set(state => {

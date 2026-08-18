@@ -503,6 +503,31 @@ describe('handlers2d physics2d edge cases', () => {
       });
       expect(result.success).toBe(false);
     });
+
+    it('falls back to real defaults for an inherited-key entityId', async () => {
+      // The `?? defaultPhysics2dData()` fallback never fired for '__proto__',
+      // because the bare read returned truthy `Object.prototype`. Spreading that
+      // contributes nothing (its properties are non-enumerable), so the payload
+      // was the request's own fields with every other field ABSENT — and
+      // `set_physics_2d` is a full replace (PF-1167).
+      const { result: proto, store: protoStore } = await invoke('set_physics2d', {
+        entityId: '__proto__',
+        bodyType: 'static',
+      });
+      const { result: fresh, store: freshStore } = await invoke('set_physics2d', {
+        entityId: 'never-seen',
+        bodyType: 'static',
+      });
+      expect(proto.success).toBe(true);
+      expect(fresh.success).toBe(true);
+
+      const protoPayload = vi.mocked(protoStore.setPhysics2d).mock.calls[0][1];
+      const freshPayload = vi.mocked(freshStore.setPhysics2d).mock.calls[0][1];
+      // An unknown id is an unknown id, whatever it is named.
+      expect(protoPayload).toEqual(freshPayload);
+      // And the defaults are really there, rather than both being near-empty.
+      expect(Object.keys(protoPayload as object).length).toBeGreaterThan(1);
+    });
   });
 
   describe('remove_physics2d', () => {
@@ -534,6 +559,19 @@ describe('handlers2d physics2d edge cases', () => {
       const { result } = await invoke('get_physics2d', { entityId: 'missing' });
       expect(result.success).toBe(false);
     });
+
+    it.each(['__proto__', 'constructor', 'toString'])(
+      'reports %s as missing instead of returning an inherited value',
+      async (entityId) => {
+        // `zEntityId` is `z.string().min(1)`, so these reach the handler. A bare
+        // `ctx.store.physics2d[entityId]` read resolves to `Object.prototype` or a
+        // function — truthy — so `if (!data)` never fired and the handler returned
+        // a prototype object to the model as if it were physics data (PF-1167).
+        const { result } = await invoke('get_physics2d', { entityId });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('No 2D physics data');
+      },
+    );
   });
 
   describe('set_gravity2d', () => {
@@ -711,13 +749,41 @@ describe('handlers2d skeleton2d edge cases', () => {
   describe('auto_weight_skeleton2d', () => {
     it('triggers auto-weight on entity', async () => {
       const skel = { bones: [{ name: 'root', parentBone: null, localPosition: [0, 0], localRotation: 0, localScale: [1, 1], length: 1, color: [1, 1, 1, 1] }], skins: {}, ikConstraints: [], activeSkin: null };
-      const { result, store } = await invoke(
+      const { result, dispatch, store } = await invoke(
         'auto_weight_skeleton2d',
-        { entityId: 'e1' },
+        { entityId: 'e1', method: 'heat', iterations: 4 },
         { skeletons2d: { e1: skel } },
       );
       expect(result.success).toBe(true);
-      expect(store.setSkeleton2d).toHaveBeenCalled();
+      // PF-1186: the engine's `compute_linear_weights(.., _iterations: u32)` discards
+      // the count and only LOGS `method`, so `heat` and `envelope` are the same
+      // output. Forwarding either made the tool report a choice it had not honoured,
+      // so both are dropped from the payload — and the caller is told so rather than
+      // having a call rejected that the engine would have done anyway.
+      expect(dispatch).toHaveBeenCalledWith('auto_weight_skeleton2d', { entityId: 'e1' });
+      expect((result.result as { warning?: string }).warning).toContain('method and iterations');
+      // Must NOT round-trip the store mirror back to the engine: that is a
+      // full-replace `create_skeleton2d` whose attachments carry no weights.
+      expect(store.setSkeleton2d).not.toHaveBeenCalled();
+    });
+
+    it('says nothing about ignored options when none were sent', async () => {
+      const { result } = await invoke(
+        'auto_weight_skeleton2d',
+        { entityId: 'e1' },
+        { skeletons2d: { e1: { bones: [], skins: {}, ikConstraints: [], activeSkin: null } } },
+      );
+      expect(result.success).toBe(true);
+      expect(result.result).not.toHaveProperty('warning');
+    });
+
+    it('rejects an auto-weight method the manifest does not declare', async () => {
+      const { result } = await invoke(
+        'auto_weight_skeleton2d',
+        { entityId: 'e1', method: 'linear' },
+        { skeletons2d: { e1: { bones: [], skins: {}, ikConstraints: [], activeSkin: null } } },
+      );
+      expect(result.success).toBe(false);
     });
   });
 });

@@ -7,7 +7,9 @@ import { invokeHandler, createMockStore } from './handlerTestUtils';
 import { exportHandlers } from '../exportHandlers';
 import { assetHandlers } from '../assetHandlers';
 import { handlers2d } from '../handlers2d';
+import { MAX_IK_BONE_CHAIN_2D } from '@/lib/skeleton2d/skeletonPayload';
 import type { ToolCallContext, ExecutionResult } from '../types';
+import type { SkeletonData2d } from '@/stores/slices/types';
 
 // ---------------------------------------------------------------------------
 // Mock the export engine so tests don't perform real file I/O
@@ -676,10 +678,15 @@ async function invoke2d(
   name: string,
   args: Record<string, unknown> = {},
   storeOverrides: Record<string, unknown> = {},
-): Promise<{ result: ExecutionResult; store: ToolCallContext['store'] }> {
+): Promise<{
+  result: ExecutionResult;
+  store: ToolCallContext['store'];
+  dispatch: ReturnType<typeof vi.fn>;
+}> {
   const store = create2dStore(storeOverrides);
-  const result = await handlers2d[name](args, { store, dispatchCommand: vi.fn() });
-  return { result, store };
+  const dispatch = vi.fn();
+  const result = await handlers2d[name](args, { store, dispatchCommand: dispatch });
+  return { result, store, dispatch };
 }
 
 // ===========================================================================
@@ -2274,30 +2281,284 @@ describe('handlers2d skeleton 2D commands', () => {
   // create_ik_chain2d
   // -------------------------------------------------------------------------
   describe('create_ik_chain2d', () => {
+    // Same shape as baseSkeleton's bones, with the two fields these tests vary.
+    const bone = (name: string, parentBone: string | null) => ({
+      ...baseSkeleton.bones[0],
+      name,
+      parentBone,
+    });
+
+    // A rig that ALREADY carries a constraint. `baseSkeleton.ikConstraints` is
+    // `[]`, so asserting against it cannot tell an append from a replace — a
+    // handler that overwrote the array would pass every assertion below.
+    const existingIk = {
+      name: 'leg_ik',
+      boneChain: ['root', 'arm'],
+      targetEntityId: 'ent-existing-target',
+      bendDirection: -1,
+      mix: 0.5,
+    };
+    const riggedSkeleton = { ...baseSkeleton, ikConstraints: [existingIk] };
+
+    const constraintFrom = (store: { setSkeleton2d: unknown }) => {
+      const mock = store.setSkeleton2d as ReturnType<typeof vi.fn>;
+      expect(mock).toHaveBeenCalledTimes(1);
+      const updated = mock.mock.calls[0][1];
+      expect(updated.ikConstraints).toHaveLength(2);
+      expect(updated.ikConstraints[0]).toEqual(existingIk);
+      return updated.ikConstraints[1];
+    };
+
+    /** Every rejection path must say why AND leave the rig untouched. */
+    const expectRejected = (
+      result: ExecutionResult,
+      store: { setSkeleton2d: unknown },
+      match: string,
+    ) => {
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(match);
+      expect(store.setSkeleton2d).not.toHaveBeenCalled();
+    };
+
     it('creates an IK chain from bone hierarchy', async () => {
       const { result, store } = await invoke2d(
         'create_ik_chain2d',
         { entityId: 'ent-1', chainName: 'arm_ik', startBone: 'root', endBone: 'arm' },
-        { skeletons2d: { 'ent-1': baseSkeleton }, setSkeleton2d: vi.fn() },
+        { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      const ik = constraintFrom(store);
+      expect(ik.name).toBe('arm_ik');
+      expect(ik.boneChain).toEqual(['root', 'arm']);
+    });
+
+    it('accepts the name + bones vocabulary the MCP manifest publishes', async () => {
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        {
+          entityId: 'ent-1',
+          name: 'arm_ik',
+          bones: ['root', 'arm'],
+          targetEntityId: 'ent-target',
+          bendDirection: -1,
+          mix: 0.25,
+        },
+        { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      // The full shape, not objectContaining — an invented key alongside these is
+      // exactly the defect class this command shipped with. `targetEntityId` is a
+      // string because the engine field is an `EntityId` UUID; the number this
+      // handler used to send could never resolve to one.
+      expect(constraintFrom(store)).toEqual({
+        name: 'arm_ik',
+        boneChain: ['root', 'arm'],
+        targetEntityId: 'ent-target',
+        bendDirection: -1,
+        mix: 0.25,
+      });
+    });
+
+    it('writes back the whole skeleton, not just the constraint list', async () => {
+      const { store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', name: 'arm_ik', bones: ['root', 'arm'] },
+        { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      // Bones, slots, skins and activeSkin all have to survive an IK edit — the
+      // handler rebuilds the object by spread, so a dropped key is silent.
+      expect(store.setSkeleton2d).toHaveBeenCalledTimes(1);
+      expect(store.setSkeleton2d).toHaveBeenCalledWith('ent-1', {
+        ...riggedSkeleton,
+        ikConstraints: [
+          existingIk,
+          { name: 'arm_ik', boneChain: ['root', 'arm'], targetEntityId: '', bendDirection: 1, mix: 1 },
+        ],
+      });
+    });
+
+    it('creates the skeleton when the entity has none', async () => {
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-new', name: 'ik', bones: ['root', 'arm'] },
+        { skeletons2d: {}, setSkeleton2d: vi.fn() },
       );
       expect(result.success).toBe(true);
       const updated = (store.setSkeleton2d as ReturnType<typeof vi.fn>).mock.calls[0][1];
       expect(updated.ikConstraints).toHaveLength(1);
-      expect(updated.ikConstraints[0].name).toBe('arm_ik');
+      expect(updated.bones).toEqual([]);
     });
 
-    it('creates default skeleton when none exists', async () => {
-      const { result } = await invoke2d(
+    it('does not read a prototype key as an existing skeleton', async () => {
+      // `skeletons2d['__proto__']` is `Object.prototype` on a bare read: truthy,
+      // so it passes the "has a skeleton" branch, and its absent `ikConstraints`
+      // then throws inside the spread. Own-key reads make it read as absent.
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: '__proto__', name: 'ik', bones: ['root', 'arm'] },
+        { skeletons2d: {}, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      const updated = (store.setSkeleton2d as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(updated.ikConstraints).toHaveLength(1);
+    });
+
+    it('normalizes bendDirection to a sign and defaults target/mix', async () => {
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', name: 'ik', bones: ['root', 'arm'], bendDirection: 4.5 },
+        { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      const ik = constraintFrom(store);
+      expect(ik.bendDirection).toBe(1);
+      expect(ik.mix).toBe(1);
+      // Empty, not `0` — the engine matches this against an `EntityId` string, so
+      // a placeholder id would look configured while resolving to nothing.
+      expect(ik.targetEntityId).toBe('');
+    });
+
+    it('treats bendDirection 0 as positive, matching the engine', async () => {
+      // `parse_ik_chain2d` is `Some(v) if v < 0.0 => -1.0, _ => 1.0` — zero is not
+      // a third state, and a `< 0` test in TS has to agree or the same rig bends
+      // opposite ways depending on which path authored it.
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', name: 'ik', bones: ['root', 'arm'], bendDirection: 0 },
+        { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      expect(constraintFrom(store).bendDirection).toBe(1);
+    });
+
+    it('normalizes a negative bendDirection to -1 rather than forwarding it', async () => {
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', name: 'ik', bones: ['root', 'arm'], bendDirection: -2.5 },
+        { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      expect(constraintFrom(store).bendDirection).toBe(-1);
+    });
+
+    it('keeps a mix of 0 instead of defaulting it away', async () => {
+      // 0 is full FK — a legal authored value, and one the engine accepts, so it
+      // must survive `mix ?? 1`. That it produces no solver movement is not the
+      // same case as the single-bone chain rejected below: the engine's own
+      // `parse_ik_chain2d` clamps this value and errors on that one.
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', name: 'ik', bones: ['root', 'arm'], mix: 0 },
+        { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      expect(constraintFrom(store).mix).toBe(0);
+    });
+
+    it('rejects a mix outside 0..1 rather than sending one the engine clamps', async () => {
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', name: 'ik', bones: ['root', 'arm'], mix: 1.5 },
+        { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expectRejected(result, store, 'mix');
+    });
+
+    it('rejects a bones array past the engine bound', async () => {
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        {
+          entityId: 'ent-1',
+          name: 'ik',
+          bones: Array.from({ length: MAX_IK_BONE_CHAIN_2D + 1 }, (_, i) => `b${i}`),
+        },
+        { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expectRejected(result, store, 'bones');
+    });
+
+    it('rejects an empty bone name at the head of the chain', async () => {
+      // Index 0 specifically: a guard written as a loop over `bones.slice(1)`, or
+      // one that trusts the first element as the root, passes every other index.
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', name: 'ik', bones: ['', 'arm'] },
+        { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expectRejected(result, store, 'bones');
+    });
+
+    it('rejects an empty chain name', async () => {
+      // `''` is falsy, so a `name ?? chainName` fallback would silently swap in
+      // the other spelling — and with neither given, produce a nameless rig.
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', name: '', bones: ['root', 'arm'] },
+        { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expectRejected(result, store, 'name');
+    });
+
+    it('rejects a single-bone chain the solver would skip', async () => {
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', name: 'ik', bones: ['root'] },
+        { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expectRejected(result, store, 'bones');
+    });
+
+    it('reports no path instead of fabricating one when the hierarchy has none', async () => {
+      // Was asserted as a success: the handler used to fall back to
+      // [startBone, endBone], inventing an adjacency the rig does not have.
+      const { result, store } = await invoke2d(
         'create_ik_chain2d',
         { entityId: 'ent-new', chainName: 'ik', startBone: 'a', endBone: 'b' },
         { skeletons2d: {}, setSkeleton2d: vi.fn() },
       );
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('No bone path');
+      expect(store.setSkeleton2d).not.toHaveBeenCalled();
+    });
+
+    it('terminates on a cyclic parentBone hierarchy', async () => {
+      const cyclic = {
+        ...baseSkeleton,
+        bones: [bone('a', 'b'), bone('b', 'a')],
+      };
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', chainName: 'ik', startBone: 'root', endBone: 'b' },
+        { skeletons2d: { 'ent-1': cyclic }, setSkeleton2d: vi.fn() },
+      );
+      expectRejected(result, store, 'No bone path');
+    });
+
+    it('returns error when neither bones nor a start/end pair is given', async () => {
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', name: 'ik' },
+        { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expectRejected(result, store, 'startBone');
+    });
+
+    it('returns error when no chain name is given under either spelling', async () => {
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { entityId: 'ent-1', bones: ['root', 'arm'] },
+        { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
+      );
+      expectRejected(result, store, 'name');
     });
 
     it('returns error when entityId is missing', async () => {
-      const { result } = await invoke2d('create_ik_chain2d', { chainName: 'ik', startBone: 'a', endBone: 'b' });
-      expect(result.success).toBe(false);
+      const { result, store } = await invoke2d(
+        'create_ik_chain2d',
+        { chainName: 'ik', startBone: 'a', endBone: 'b' },
+        { setSkeleton2d: vi.fn() },
+      );
+      expectRejected(result, store, 'entityId');
     });
   });
 
@@ -2326,29 +2587,257 @@ describe('handlers2d skeleton 2D commands', () => {
   // import_skeleton_json
   // -------------------------------------------------------------------------
   describe('import_skeleton_json', () => {
-    it('parses JSON and sets skeleton data', async () => {
-      const skeleton = { bones: [], slots: [], skins: {}, activeSkin: 'default', ikConstraints: [] };
+    const ROOT = { name: 'root', parentBone: null };
+
+    it('imports a rig sent under the manifest name', async () => {
+      // `jsonData` is the ONLY spelling the manifest publishes, and the handler read
+      // `json` — so every call that followed the documented schema failed validation.
+      const skeleton = { bones: [ROOT], slots: [], skins: {}, activeSkin: 'default', ikConstraints: [] };
       const { result, store } = await invoke2d(
         'import_skeleton_json',
-        { entityId: 'ent-1', json: JSON.stringify(skeleton) },
+        { entityId: 'ent-1', jsonData: JSON.stringify(skeleton), format: 'custom' },
         { setSkeleton2d: vi.fn() },
       );
       expect(result.success).toBe(true);
       expect(store.setSkeleton2d).toHaveBeenCalledWith('ent-1', skeleton);
     });
 
-    it('returns error when JSON is invalid', async () => {
-      const { result } = await invoke2d(
+    it('still accepts the legacy json spelling', async () => {
+      const { result, store } = await invoke2d(
         'import_skeleton_json',
-        { entityId: 'ent-1', json: '{invalid json}' },
+        { entityId: 'ent-1', json: JSON.stringify({ bones: [ROOT] }) },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      expect(store.setSkeleton2d).toHaveBeenCalledWith('ent-1', {
+        bones: [ROOT],
+        slots: [],
+        skins: {},
+        activeSkin: 'default',
+        ikConstraints: [],
+      });
+    });
+
+    it('rejects a format with no converter instead of importing an empty rig', async () => {
+      // The manifest advertised dragonbones and spine for the whole life of this
+      // command. Read as the custom format a DragonBones file has no top-level
+      // `bones` at all, so it used to store nothing and report success.
+      const { result, store } = await invoke2d(
+        'import_skeleton_json',
+        { entityId: 'ent-1', jsonData: '{"armature":[]}', format: 'dragonbones' },
         { setSkeleton2d: vi.fn() },
       );
       expect(result.success).toBe(false);
+      expect(result.error).toContain('dragonbones');
+      expect(store.setSkeleton2d).not.toHaveBeenCalled();
+    });
+
+    it('returns error when the JSON is invalid', async () => {
+      const { result, store } = await invoke2d(
+        'import_skeleton_json',
+        { entityId: 'ent-1', jsonData: '{invalid json}' },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('jsonData is not valid JSON');
+      expect(store.setSkeleton2d).not.toHaveBeenCalled();
     });
 
     it('returns error when entityId is missing', async () => {
-      const { result } = await invoke2d('import_skeleton_json', { json: '{}' });
+      const { result } = await invoke2d('import_skeleton_json', { jsonData: '{}' });
       expect(result.success).toBe(false);
+    });
+
+    it('returns error when no JSON is supplied under either name', async () => {
+      const { result } = await invoke2d('import_skeleton_json', { entityId: 'ent-1' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Missing jsonData');
+    });
+
+    // `setSkeleton2d` is a FULL REPLACE. Coercing a malformed file to an empty
+    // skeleton and reporting `success: true` therefore destroyed the rig the entity
+    // had while telling the caller a rig had been imported — the store is now left
+    // untouched and the reason names the field.
+    const rejects = async (label: string, jsonData: string, expected: string) => {
+      const { result, store } = await invoke2d(
+        'import_skeleton_json',
+        { entityId: 'ent-1', jsonData },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success, label).toBe(false);
+      expect(result.error, label).toContain(expected);
+      expect(store.setSkeleton2d, label).not.toHaveBeenCalled();
+    };
+
+    it.each([
+      ['null', 'null', 'got null'],
+      ['a bare array', '[]', 'got an array'],
+      ['a string', '"skeleton"', 'got a string'],
+      ['a number', '7', 'got a number'],
+    ])('rejects JSON that is %s', async (label, jsonData, expected) => {
+      await rejects(label, jsonData, expected);
+    });
+
+    it.each([
+      // `bones: 3` makes `bones.find(...)` throw; the field is not optional,
+      // because a file with no bones is not a rig.
+      ['no bones field', '{"slots":[]}', 'missing required field `bones`'],
+      ['a non-array bones', '{"bones":3}', '`bones` must be an array'],
+      ['an empty bones array', '{"bones":[]}', '`bones` is empty'],
+      // `JSON.stringify` writes an array hole as `null` and `JSON.parse` can only
+      // ever produce that `null`, so this is the shape a round-tripped sparse array
+      // arrives in — and `bones.find(b => b.name === x)` throws on it.
+      ['a null bone', '{"bones":[null,{"name":"root"}]}', '`bones[0]` is null'],
+      ['a nameless bone', '{"bones":[{"parentBone":null}]}', '`bones[0]` has no `name`'],
+      ['a duplicate bone name', '{"bones":[{"name":"a"},{"name":"a"}]}', 'repeats the bone name "a"'],
+      ['a dangling parent', '{"bones":[{"name":"a","parentBone":"ghost"}]}', 'not among the imported bones'],
+      ['a non-string parent', '{"bones":[{"name":"a","parentBone":7}]}', '`bones[0].parentBone` is a number'],
+      // `skins: []` makes every `skins[name]` lookup miss; a numeric `activeSkin`
+      // reaches the inspector as a key that can never match.
+      ['array skins', '{"bones":[{"name":"a"}],"skins":[]}', '`skins` must be an object'],
+      ['a numeric activeSkin', '{"bones":[{"name":"a"}],"activeSkin":9}', '`activeSkin` must be a string'],
+      ['a null slot', '{"bones":[{"name":"a"}],"slots":[null]}', '`slots[0]` is null'],
+      ['a null constraint', '{"bones":[{"name":"a"}],"ikConstraints":[null]}', '`ikConstraints[0]` is null'],
+      // Every name below resolves, so the dangling-parent check above passes each
+      // one. A cycle is the case where the references are all valid and the graph
+      // still is not a tree.
+      [
+        'a self-parented bone',
+        '{"bones":[{"name":"a","parentBone":"a"}]}',
+        'forms a cycle: "a" -> "a"',
+      ],
+      [
+        'a two-bone cycle',
+        '{"bones":[{"name":"a","parentBone":"b"},{"name":"b","parentBone":"a"}]}',
+        'forms a cycle: "a" -> "b" -> "a"',
+      ],
+      [
+        'a cycle sitting beside a valid root',
+        '{"bones":[{"name":"root","parentBone":null},{"name":"a","parentBone":"b"},{"name":"b","parentBone":"a"}]}',
+        'forms a cycle',
+      ],
+      [
+        'a bone whose chain runs into a cycle it is not part of',
+        '{"bones":[{"name":"tip","parentBone":"a"},{"name":"a","parentBone":"b"},{"name":"b","parentBone":"a"}]}',
+        // The reported cycle is "a" -> "b" -> "a", not the "tip" the walk started
+        // from — naming the entry point would send the reader to the wrong bone.
+        'forms a cycle: "a" -> "b" -> "a"',
+      ],
+      // `boneChain` is stored, not defaulted. Nothing downstream throws on a bad
+      // one — the readers all defend themselves — so the whole cost lands as a
+      // rig that imported "successfully" and an IK constraint the solver skips.
+      [
+        'a constraint with no boneChain',
+        '{"bones":[{"name":"a"}],"ikConstraints":[{"name":"ik"}]}',
+        '`ikConstraints[0]` has no `boneChain`',
+      ],
+      [
+        'a non-array boneChain',
+        '{"bones":[{"name":"a"}],"ikConstraints":[{"name":"ik","boneChain":7}]}',
+        '`ikConstraints[0].boneChain` is a number',
+      ],
+      // The shape a sparse chain round-trips as: `JSON.stringify` writes a hole as
+      // `null` and `JSON.parse` can only ever hand back that `null`.
+      [
+        'a null entry in a boneChain',
+        '{"bones":[{"name":"a"}],"ikConstraints":[{"name":"ik","boneChain":["a",null]}]}',
+        '`ikConstraints[0].boneChain[1]` is null',
+      ],
+      [
+        'a numeric entry in a boneChain',
+        '{"bones":[{"name":"a"}],"ikConstraints":[{"name":"ik","boneChain":[3]}]}',
+        '`ikConstraints[0].boneChain[0]` is a number',
+      ],
+      [
+        'an empty string in a boneChain',
+        '{"bones":[{"name":"a"}],"ikConstraints":[{"name":"ik","boneChain":[""]}]}',
+        '`ikConstraints[0].boneChain[0]` is a string',
+      ],
+      // Same class as the dangling `parentBone` above, one field over: the name
+      // resolves to nothing, so the solver has no bone to move.
+      [
+        'a boneChain naming a bone that is not in the rig',
+        '{"bones":[{"name":"a"}],"ikConstraints":[{"name":"ik","boneChain":["a","ghost"]}]}',
+        '`ikConstraints[0].boneChain[1]` names "ghost"',
+      ],
+    ])('rejects %s without touching the store', async (label, jsonData, expected) => {
+      await rejects(label, jsonData, expected);
+    });
+
+    it('accepts an ikConstraint whose chain names real bones', async () => {
+      const skeleton = {
+        bones: [{ name: 'root', parentBone: null }, { name: 'arm', parentBone: 'root' }],
+        ikConstraints: [{ name: 'arm_ik', boneChain: ['root', 'arm'], targetEntityId: '', bendDirection: 1, mix: 1 }],
+      };
+      const { result, store } = await invoke2d(
+        'import_skeleton_json',
+        { entityId: 'ent-1', jsonData: JSON.stringify(skeleton) },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      const stored = (store.setSkeleton2d as ReturnType<typeof vi.fn>).mock.calls[0][1] as SkeletonData2d;
+      expect(stored.ikConstraints).toEqual(skeleton.ikConstraints);
+    });
+
+    it('accepts an empty boneChain, which is unfinished rather than malformed', async () => {
+      // Nothing is destroyed by a constraint that solves no bones, and an author
+      // adding one field at a time passes through this state.
+      const { result } = await invoke2d(
+        'import_skeleton_json',
+        {
+          entityId: 'ent-1',
+          jsonData: '{"bones":[{"name":"a"}],"ikConstraints":[{"name":"ik","boneChain":[]}]}',
+        },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts a deep chain, which the shared acyclic set must not reject', async () => {
+      // The scan marks proven-acyclic bones so a long chain is walked once rather
+      // than once per bone on it. If that set were ever consulted as "seen on this
+      // path" instead, this rig would be reported as a cycle.
+      const bones = [
+        { name: 'b0', parentBone: null },
+        ...Array.from({ length: 40 }, (_, i) => ({ name: `b${i + 1}`, parentBone: `b${i}` })),
+      ];
+      const { result } = await invoke2d(
+        'import_skeleton_json',
+        { entityId: 'ent-1', jsonData: JSON.stringify({ bones }) },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts a bone tree where two branches share one parent', async () => {
+      // Two bones naming the same parent is a diamond only if they later rejoin;
+      // as a plain fan-out it is an ordinary rig, and a scan that marked a bone
+      // "on path" without ever clearing it would reject this.
+      const bones = [
+        { name: 'root', parentBone: null },
+        { name: 'left', parentBone: 'root' },
+        { name: 'right', parentBone: 'root' },
+      ];
+      const { result } = await invoke2d(
+        'import_skeleton_json',
+        { entityId: 'ent-1', jsonData: JSON.stringify({ bones }) },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts a parent that appears later in the array', async () => {
+      // Child-before-parent is legal in an exported file; only a name that is
+      // nowhere in the set is a dangling reference.
+      const bones = [{ name: 'hand', parentBone: 'arm' }, { name: 'arm', parentBone: null }];
+      const { result, store } = await invoke2d(
+        'import_skeleton_json',
+        { entityId: 'ent-1', jsonData: JSON.stringify({ bones }) },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      const stored = (store.setSkeleton2d as ReturnType<typeof vi.fn>).mock.calls[0][1] as SkeletonData2d;
+      expect(stored.bones).toEqual(bones);
     });
   });
 
@@ -2356,14 +2845,18 @@ describe('handlers2d skeleton 2D commands', () => {
   // auto_weight_skeleton2d
   // -------------------------------------------------------------------------
   describe('auto_weight_skeleton2d', () => {
-    it('re-dispatches existing skeleton to trigger auto-weighting', async () => {
-      const { result, store } = await invoke2d(
+    it('dispatches the engine auto-weight command, leaving the skeleton alone', async () => {
+      const { result, store, dispatch } = await invoke2d(
         'auto_weight_skeleton2d',
         { entityId: 'ent-1' },
         { skeletons2d: { 'ent-1': baseSkeleton }, setSkeleton2d: vi.fn() },
       );
       expect(result.success).toBe(true);
-      expect(store.setSkeleton2d).toHaveBeenCalledWith('ent-1', baseSkeleton);
+      expect(dispatch).toHaveBeenCalledWith('auto_weight_skeleton2d', { entityId: 'ent-1' });
+      // The engine recomputes weights in place and emits SKELETON2D_UPDATED. Sending
+      // the store mirror back would full-replace the skeleton with attachments that
+      // have no weights at all.
+      expect(store.setSkeleton2d).not.toHaveBeenCalled();
     });
 
     it('returns error when no skeleton for entity', async () => {

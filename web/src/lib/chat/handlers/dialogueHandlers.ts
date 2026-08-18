@@ -63,6 +63,8 @@ export const dialogueHandlers: Record<string, ToolHandler> = {
     useDialogueStore.getState().addNode(treeId, node);
     // Connect from another node if specified
     if (connectFromNodeId) {
+      // `getTree`: `z.string().min(1)` accepts `__proto__`, and a bare read
+      // would hand back the truthy `Object.prototype`, which has no `.nodes`.
       const tree = getTree(useDialogueStore.getState().dialogueTrees, treeId);
       if (tree) {
         const fromNode = tree.nodes.find(n => n.id === connectFromNodeId);
@@ -113,6 +115,9 @@ export const dialogueHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ treeId: z.string().min(1) }), args);
     if (p.error) return p.error;
     const { useDialogueStore, getTree } = await import('@/stores/dialogueStore');
+    // The worst shape of the bare read: this one does not throw. A `treeId` of
+    // `constructor` would return `success: true` and hand the model the `Object`
+    // constructor dressed up as a dialogue tree.
     const tree = getTree(useDialogueStore.getState().dialogueTrees, p.data.treeId);
     if (!tree) return { success: false, error: 'Tree not found' };
     return { success: true, result: tree };

@@ -11,6 +11,7 @@ import {
   generateRig,
 } from '@/lib/ai/autoRigging';
 import type { RigType, RigTemplate, BoneDefinition } from '@/lib/ai/autoRigging';
+import { parseSkeletonWire2d } from '@/lib/skeleton2d/skeletonPayload';
 
 const RIG_TYPE_LABELS: Record<RigType, string> = {
   humanoid: 'Humanoid (23 bones)',
@@ -118,6 +119,19 @@ export function AutoRiggingPanel() {
   const [currentRig, setCurrentRig] = useState<RigTemplate | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showBoneTree, setShowBoneTree] = useState(true);
+  // Both actions in this panel used to be silent on every path — Apply Rig
+  // returned early on a missing selection or an unusable rig and said nothing,
+  // and Generate had a `finally` with no `catch`, so a throw only cleared the
+  // spinner. The status lives in one place so a screen reader announces either
+  // outcome (PF-1170).
+  // `warn` is a third outcome, not a shade of the other two: a rig whose IK chain the
+  // payload builder had to bound did apply, so calling it an error is wrong — and
+  // calling it a plain success is how a chain that cannot reach its target looks like
+  // one that can.
+  const [status, setStatus] = useState<{
+    kind: 'ok' | 'warn' | 'error';
+    message: string;
+  } | null>(null);
 
   const detectedType = useMemo(
     () => description.trim() ? detectRigType(description) : null,
@@ -128,12 +142,22 @@ export function AutoRiggingPanel() {
 
   const handleGenerate = useCallback(async () => {
     setIsGenerating(true);
+    setStatus(null);
     try {
       const rig = await generateRig(
         description,
         selectedType === 'auto' ? undefined : selectedType,
       );
       setCurrentRig(rig);
+      setStatus({
+        kind: 'ok',
+        message: `Generated a ${rig.type} rig with ${rig.bones.length} bones. Not applied yet.`,
+      });
+    } catch (err) {
+      setStatus({
+        kind: 'error',
+        message: `Could not generate a rig: ${err instanceof Error ? err.message : 'unknown error'}`,
+      });
     } finally {
       setIsGenerating(false);
     }
@@ -141,23 +165,71 @@ export function AutoRiggingPanel() {
 
   const handleSelectTemplate = useCallback((type: RigType) => {
     const templateFn = RIG_TEMPLATES[type];
-    setCurrentRig(templateFn());
+    const rig = templateFn();
+    setCurrentRig(rig);
     setSelectedType(type);
+    setStatus({
+      kind: 'ok',
+      message: `Loaded the ${type} template with ${rig.bones.length} bones. Not applied yet.`,
+    });
   }, []);
 
   const setSkeleton2d = useEditorStore((s) => s.setSkeleton2d);
 
   const handleApplyRig = useCallback(() => {
-    if (!currentRig || !primaryId) return;
+    if (!currentRig) {
+      setStatus({ kind: 'error', message: 'Generate or choose a rig first.' });
+      return;
+    }
+    if (!primaryId) {
+      setStatus({ kind: 'error', message: 'Select an entity in the scene to apply the rig to.' });
+      return;
+    }
 
     // Go through the store (not direct dispatch) so Zustand state stays
     // in sync with the engine — required for save, inspector, and scripts.
-    const commands = rigToCommands(currentRig, primaryId);
-    const skeletonCmd = commands.find((c) => c.command === 'set_skeleton_2d');
-    if (skeletonCmd) {
-      const { entityId: _eid, ...skeletonData } = skeletonCmd.payload as Record<string, unknown>;
-      setSkeleton2d(primaryId, skeletonData as unknown as Parameters<typeof setSkeleton2d>[1]);
+    const rigWarnings: string[] = [];
+    const commands = rigToCommands(currentRig, primaryId, rigWarnings);
+    // `rigToCommands` emits the engine's real command name and nests the skeleton
+    // under `skeletonData`. This used to look for `set_skeleton_2d` and spread the
+    // payload root, so once the builder was corrected the find never matched and
+    // Apply Rig silently did nothing (PF-1170).
+    const skeletonCmd = commands.find((c) => c.command === 'create_skeleton2d');
+    const skeletonData = (skeletonCmd?.payload as { skeletonData?: unknown } | undefined)?.skeletonData;
+    if (!skeletonData) {
+      // The silent `if (skeletonData)` here is exactly how the broken command
+      // name above went unnoticed for as long as it did.
+      setStatus({
+        kind: 'error',
+        message: 'Could not apply the rig: the generated rig produced no skeleton to send.',
+      });
+      return;
     }
+    // `buildCreateSkeleton2dPayload` emits the ENGINE's wire shape, which is not the
+    // store's: a wire bone's `localPosition` is a 3-tuple where the store declares a
+    // pair, and a wire mesh attachment carries `weights` the store's flat attachment
+    // has nowhere to put. Casting it in (`as Parameters<typeof setSkeleton2d>[1]`) is
+    // the same class of lie as `{ ...input } satisfies T` — it type-checks and then
+    // the inspector renders a value whose declared type says it cannot exist. Narrow
+    // through the module that owns the wire→store direction instead. Bone z is
+    // dropped, which is correct: nothing in the engine reads `local_position[2]`
+    // (it is preserved but never used), the store cannot hold it, and the first
+    // `SKELETON2D_UPDATED` event narrows it away regardless.
+    const parsed = parseSkeletonWire2d(skeletonData);
+    if (!parsed) {
+      setStatus({
+        kind: 'error',
+        message: 'Could not apply the rig: the generated skeleton was not in a readable shape.',
+      });
+      return;
+    }
+    setSkeleton2d(primaryId, parsed);
+    const applied = `Applied a ${currentRig.bones.length}-bone rig to the selected entity.`;
+    setStatus(
+      rigWarnings.length > 0
+        ? { kind: 'warn', message: `${applied} ${rigWarnings.join(' ')}` }
+        : { kind: 'ok', message: applied },
+    );
   }, [currentRig, primaryId, setSkeleton2d]);
 
   const rootBones = useMemo(
@@ -340,6 +412,28 @@ export function AutoRiggingPanel() {
             </button>
           </>
         )}
+
+        {/* Rendered unconditionally: a live region only announces changes to a
+            region already in the accessibility tree, so mounting it alongside
+            the message would leave the first result unannounced. */}
+        <div role="status" aria-live="polite" className="min-h-0">
+          {status && (
+            <p
+              className={`flex items-start gap-1.5 rounded px-2 py-1.5 text-[11px] ${
+                status.kind === 'ok'
+                  ? 'bg-emerald-950/50 text-emerald-300'
+                  : status.kind === 'warn'
+                    ? 'bg-amber-950/50 text-amber-300'
+                    : 'bg-red-950/50 text-red-300'
+              }`}
+            >
+              {status.kind === 'ok'
+                ? <CheckCircle2 className="mt-px h-3 w-3 shrink-0" aria-hidden="true" />
+                : <AlertCircle className="mt-px h-3 w-3 shrink-0" aria-hidden="true" />}
+              {status.message}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

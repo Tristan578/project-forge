@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  acceptsNegative,
   blendGameCameraData,
   buildSetGameCameraPayload,
   parseGameCameraWire,
+  readCameraFieldValue,
   ENGINE_CAMERA_DEFAULTS,
   NUMERIC_CAMERA_FIELDS,
   TRANSLATED_CAMERA_FIELDS,
@@ -1196,5 +1198,94 @@ describe('blendGameCameraData', () => {
     expect(midpoints).toEqual(
       Object.fromEntries(NUMERIC_CAMERA_FIELDS.map((field) => [field, 50])),
     );
+  });
+});
+
+/**
+ * The per-field sign policy (PF-1145, Sentry finding on #9246).
+ *
+ * `Number.isFinite()` was the whole guard at four separate surfaces, and it is
+ * not enough: a negative `followSmoothing` reaches the engine as a negative
+ * `damping`, and the follow step lerps toward the target by `damping * delta`.
+ * `lerp` does not bound its parameter, so a negative one EXTRAPOLATES — the
+ * camera moves away from what it is converging on by a fixed fraction of the
+ * remaining gap every frame, which compounds into divergence while the view
+ * stays pointed at the target.
+ *
+ * A blanket non-negative rule is equally wrong, which is why this is a policy
+ * per field rather than one reader: three of the ten are legitimately signed.
+ */
+describe('camera field sign policy', () => {
+  /**
+   * The whole classification, spelled out, rather than "these two are signed".
+   *
+   * A `toEqual` on the full record is what makes a NEWLY added numeric field
+   * fail here: an exact list of the signed ones would stay green while an
+   * unconsidered field slipped in as non-negative. `satisfies` in the source
+   * forces a decision at compile time; this forces the decision to be reviewed.
+   */
+  const EXPECTED_SIGN: Record<NumericCameraField, 'nonNegative' | 'signed'> = {
+    followDistance: 'nonNegative',
+    followHeight: 'signed',
+    followOffsetX: 'signed',
+    followSmoothing: 'nonNegative',
+    firstPersonHeight: 'nonNegative',
+    firstPersonMouseSensitivity: 'nonNegative',
+    sideScrollerDistance: 'nonNegative',
+    topDownHeight: 'nonNegative',
+    orbitalDistance: 'nonNegative',
+    orbitalAutoRotateSpeed: 'signed',
+  };
+
+  it('classifies every numeric camera field, and only those', () => {
+    const actual = Object.fromEntries(
+      NUMERIC_CAMERA_FIELDS.map((f) => [f, acceptsNegative(f) ? 'signed' : 'nonNegative']),
+    );
+    expect(actual).toEqual(EXPECTED_SIGN);
+  });
+
+  describe('readCameraFieldValue', () => {
+    it('drops a negative value for every field that cannot hold one', () => {
+      for (const field of NUMERIC_CAMERA_FIELDS) {
+        if (EXPECTED_SIGN[field] === 'signed') continue;
+        expect(readCameraFieldValue(field, -1), field).toBeUndefined();
+        expect(readCameraFieldValue(field, -0.0001), field).toBeUndefined();
+      }
+    });
+
+    it('keeps a negative value for the two fields where the sign is the meaning', () => {
+      // `followHeight` is `offset.y`: below the target is the low-angle hero shot.
+      expect(readCameraFieldValue('followHeight', -3)).toBe(-3);
+      // `orbitalAutoRotateSpeed` is degrees/sec with no separate direction flag,
+      // so negating it is the ONLY way to orbit the other way.
+      expect(readCameraFieldValue('orbitalAutoRotateSpeed', -15)).toBe(-15);
+    });
+
+    it('keeps zero and positive values for every field', () => {
+      for (const field of NUMERIC_CAMERA_FIELDS) {
+        expect(readCameraFieldValue(field, 0), field).toBe(0);
+        expect(readCameraFieldValue(field, 7.5), field).toBe(7.5);
+      }
+    });
+
+    it('drops non-finite and non-number input for every field', () => {
+      for (const field of NUMERIC_CAMERA_FIELDS) {
+        for (const bad of [NaN, Infinity, -Infinity, '5', null, undefined, {}, [], true]) {
+          expect(readCameraFieldValue(field, bad), `${field} <- ${String(bad)}`).toBeUndefined();
+        }
+      }
+    });
+
+    it('keeps negative zero, which is not a negative value', () => {
+      // `-0 < 0` is false, so this passes the range check on its own. Asserted
+      // because it looks like a hole and is not one: -0 === 0 everywhere the
+      // engine reads it.
+      // Both `toBe` and `toEqual` compare with `Object.is`, which separates -0
+      // from 0 — so the value is asserted with its sign intact, and the
+      // property that actually matters (it is zero, not a negative) is asserted
+      // with `===`, which is what every downstream consumer uses.
+      expect(readCameraFieldValue('followDistance', -0)).toBe(-0);
+      expect(readCameraFieldValue('followDistance', -0) === 0).toBe(true);
+    });
   });
 });

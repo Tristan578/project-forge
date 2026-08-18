@@ -720,6 +720,12 @@ fn insert_aux_components(entity_commands: &mut bevy::ecs::system::EntityCommands
         entity_commands.insert(ad.clone());
         entity_commands.insert(AudioEnabled);
     }
+    if let Some(ref rzd) = aux.reverb_zone_data {
+        entity_commands.insert(rzd.clone());
+    }
+    if aux.reverb_zone_enabled {
+        entity_commands.insert(super::reverb_zone::ReverbZoneEnabled);
+    }
     if let Some(ref pd) = aux.particle_data {
         entity_commands.insert(pd.clone());
     }
@@ -2192,16 +2198,38 @@ fn execute_undo(
                 }
             }
         }
-        UndoableAction::ReverbZoneChange { entity_id, old_reverb, .. } => {
+        UndoableAction::ReverbZoneChange { entity_id, old_reverb, old_enabled, .. } => {
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
+                    // Restore the marker from what was RECORDED, never
+                    // unconditionally: enabling a zone the user had disabled is
+                    // the PF-1173 bug, and this action also covers removal, so
+                    // the marker genuinely varies.
                     if let Some(ref rz) = old_reverb {
                         commands.entity(entity).insert(rz.clone());
-                        commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
                     } else {
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneData>();
+                    }
+                    if *old_enabled {
+                        commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
+                    } else {
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneEnabled>();
                     }
+                    // This arm is pure `core/` and cannot emit, and the bridge's
+                    // only reverb emitter is gated on both `selection.primary`
+                    // and `Changed<ReverbZoneData>` — so it reaches neither a
+                    // non-selected entity nor this arm's removal branch, and the
+                    // browser's mirror kept a zone the engine had just dropped.
+                    // Carry the state written, don't ask for it to be re-read:
+                    // the drain runs in a different system and `Commands` are
+                    // deferred.
+                    super::pending_commands::queue_reverb_zone_resync_pending(
+                        super::reverb_zone::ReverbZoneResync {
+                            entity_id: entity_id.clone(),
+                            data: old_reverb.clone(),
+                            enabled: *old_enabled,
+                        },
+                    );
                     break;
                 }
             }
@@ -2222,9 +2250,21 @@ fn execute_undo(
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref pd) = old_physics {
+                        // Restore the DATA only. `Physics2dEnabled` is a separate
+                        // marker toggled by its own command, and nothing that
+                        // records this action changes it — so inserting it here
+                        // turned physics ON for a disabled entity every time a
+                        // property edit was undone. Matches the 3D
+                        // `PhysicsChange` arm, which never touches
+                        // `PhysicsEnabled`.
                         commands.entity(entity).insert(pd.clone());
-                        commands.entity(entity).insert(super::physics_2d::Physics2dEnabled);
                     } else {
+                        // The asymmetry is deliberate: with no data to restore
+                        // the entity had no 2D body at all, and an enabled
+                        // marker with no `Physics2dData` is a state no command
+                        // can produce (`apply_physics2d_toggles` inserts
+                        // default data whenever it inserts the marker), so the
+                        // pair has to come off together.
                         commands.entity(entity).remove::<super::physics_2d::Physics2dData>();
                         commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
                     }
@@ -2248,8 +2288,13 @@ fn execute_undo(
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref td) = old_tilemap {
+                        // Data only, for the same reason as `Physics2dChange`
+                        // above. `TilemapEnabled` is restored conditionally
+                        // from a recorded bool by both other restore paths
+                        // (`insert_aux_components`, `spawn_from_snapshot`), so
+                        // a disabled tilemap is a real state — and this action
+                        // records no enablement, so it must not invent one.
                         commands.entity(entity).insert(td.clone());
-                        commands.entity(entity).insert(TilemapEnabled);
                     } else {
                         commands.entity(entity).remove::<super::tilemap::TilemapData>();
                         commands.entity(entity).remove::<TilemapEnabled>();
@@ -2262,8 +2307,8 @@ fn execute_undo(
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref sk) = old_skeleton {
+                        // Data only — same rule as `TilemapChange` above.
                         commands.entity(entity).insert(sk.clone());
-                        commands.entity(entity).insert(super::skeleton2d::SkeletonEnabled2d);
                     } else {
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonData2d>();
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
@@ -2525,16 +2570,29 @@ fn execute_redo(
                 }
             }
         }
-        UndoableAction::ReverbZoneChange { entity_id, new_reverb, .. } => {
+        UndoableAction::ReverbZoneChange { entity_id, new_reverb, new_enabled, .. } => {
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
+                    // Mirror of the undo arm: the marker comes from the recorded
+                    // post-state, not from "data is present".
                     if let Some(ref rz) = new_reverb {
                         commands.entity(entity).insert(rz.clone());
-                        commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
                     } else {
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneData>();
+                    }
+                    if *new_enabled {
+                        commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
+                    } else {
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneEnabled>();
                     }
+                    // Same re-report as the undo arm, with the post-state.
+                    super::pending_commands::queue_reverb_zone_resync_pending(
+                        super::reverb_zone::ReverbZoneResync {
+                            entity_id: entity_id.clone(),
+                            data: new_reverb.clone(),
+                            enabled: *new_enabled,
+                        },
+                    );
                     break;
                 }
             }
@@ -2555,8 +2613,9 @@ fn execute_redo(
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref pd) = new_physics {
+                        // Data only — see the undo arm: enablement is a
+                        // separate marker this action never records.
                         commands.entity(entity).insert(pd.clone());
-                        commands.entity(entity).insert(super::physics_2d::Physics2dEnabled);
                     } else {
                         commands.entity(entity).remove::<super::physics_2d::Physics2dData>();
                         commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
@@ -2581,8 +2640,8 @@ fn execute_redo(
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref td) = new_tilemap {
+                        // Data only — see the undo arm.
                         commands.entity(entity).insert(td.clone());
-                        commands.entity(entity).insert(TilemapEnabled);
                     } else {
                         commands.entity(entity).remove::<super::tilemap::TilemapData>();
                         commands.entity(entity).remove::<TilemapEnabled>();
@@ -2595,8 +2654,8 @@ fn execute_redo(
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref sk) = new_skeleton {
+                        // Data only — see the undo arm.
                         commands.entity(entity).insert(sk.clone());
-                        commands.entity(entity).insert(super::skeleton2d::SkeletonEnabled2d);
                     } else {
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonData2d>();
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
@@ -4549,6 +4608,1094 @@ mod bridge_registration_pin_tests {
             BRIDGE_SRC.contains("init_resource::<core::terrain::TerrainChangeEvents>()"),
             "TerrainChangeEvents is never initialised; `collect_terrain_changes` panics on \
              the first frame it runs",
+        );
+    }
+}
+
+#[cfg(test)]
+mod reverb_zone_history_tests {
+    //! Undo/redo of a reverb zone must restore the RECORDED enablement, not
+    //! infer it from "data is present".
+    //!
+    //! Two distinct failures motivate these: the PF-1173 class, where the arms
+    //! inserted `ReverbZoneEnabled` unconditionally and so switched a zone on
+    //! that the user had deliberately turned off; and reverb removal, which
+    //! PF-1182 makes undoable for the first time — a data-only restore would
+    //! bring the zone back invisibly disabled, and because
+    //! `ReverbZoneInspector` gates its editing controls on the enabled flag, the
+    //! user would be looking at "Add Reverb Zone" with a configured zone sitting
+    //! underneath it.
+
+    use super::{apply_redo_requests, apply_undo_requests, HistoryStack, UndoableAction};
+    use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
+    use crate::core::history::{queue_redo_from_bridge, queue_undo_from_bridge};
+    use crate::core::reverb_zone::{ReverbZoneData, ReverbZoneEnabled, ReverbZoneResync};
+    use bevy::prelude::*;
+
+    /// A zone distinguishable from `ReverbZoneData::default()` in every field a
+    /// test reads, so "restored the recorded data" cannot pass by accident.
+    fn cave() -> ReverbZoneData {
+        ReverbZoneData {
+            preset: "cave".to_string(),
+            wet_mix: 0.9,
+            ..Default::default()
+        }
+    }
+
+    /// World carrying exactly the resources `apply_undo_requests` /
+    /// `apply_redo_requests` read, plus one entity with the components their
+    /// primary query requires.
+    fn world_with(data: Option<ReverbZoneData>, enabled: bool) -> (World, Entity) {
+        let mut world = World::new();
+        world.insert_resource(HistoryStack::default());
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+
+        let mut entity = world.spawn((
+            EntityId("zone-1".to_string()),
+            EntityName("Zone".to_string()),
+            EntityVisible(true),
+            Transform::default(),
+        ));
+        if let Some(d) = data {
+            entity.insert(d);
+        }
+        if enabled {
+            entity.insert(ReverbZoneEnabled);
+        }
+        let id = entity.id();
+        (world, id)
+    }
+
+    /// Run one system once through a Schedule, which also flushes the deferred
+    /// `Commands` the undo arms queue — without the flush every assertion below
+    /// would read the pre-undo state and pass vacuously.
+    fn run_once(world: &mut World, system: fn(Commands, ResMut<HistoryStack>, Query<(Entity, &EntityId, &mut Transform, &mut EntityName, &mut EntityVisible)>, Query<(&EntityId, &mut crate::core::material::MaterialData)>, Query<(&EntityId, &mut crate::core::lighting::LightData)>, Query<(&EntityId, &mut crate::core::physics::PhysicsData)>, Query<(Entity, &EntityId, Option<&crate::core::scripting::ScriptData>)>, Query<(Entity, &EntityId, Option<&crate::core::audio::AudioData>)>, Query<(Entity, &EntityId, Option<&crate::core::particles::ParticleData>)>, ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>)) {
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system);
+        schedule.run(world);
+    }
+
+    fn undo(world: &mut World) {
+        queue_undo_from_bridge();
+        run_once(world, apply_undo_requests);
+    }
+
+    fn redo(world: &mut World) {
+        queue_redo_from_bridge();
+        run_once(world, apply_redo_requests);
+    }
+
+    fn state(world: &World, entity: Entity) -> (Option<ReverbZoneData>, bool) {
+        (
+            world.get::<ReverbZoneData>(entity).cloned(),
+            world.get::<ReverbZoneEnabled>(entity).is_some(),
+        )
+    }
+
+    /// A property edit on a DISABLED zone: undoing it must not start the reverb.
+    #[test]
+    fn undoing_a_property_edit_leaves_a_disabled_zone_disabled() {
+        let edited = ReverbZoneData { wet_mix: 0.2, ..cave() };
+        let (mut world, entity) = world_with(Some(edited), false);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: Some(ReverbZoneData { wet_mix: 0.2, ..cave() }),
+            old_enabled: false,
+            new_enabled: false,
+        });
+
+        undo(&mut world);
+
+        assert_eq!(state(&world, entity), (Some(cave()), false));
+    }
+
+    /// The redo mirror — the two arms are separate code and each has to be right.
+    #[test]
+    fn redoing_a_property_edit_leaves_a_disabled_zone_disabled() {
+        let (mut world, entity) = world_with(Some(cave()), false);
+        let edited = ReverbZoneData { wet_mix: 0.2, ..cave() };
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: Some(edited.clone()),
+            old_enabled: false,
+            new_enabled: false,
+        });
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert_eq!(state(&world, entity), (Some(edited), false));
+    }
+
+    /// The opposite direction: "don't touch the marker" must not decay into
+    /// "lose the reverb" for a zone that was enabled all along.
+    #[test]
+    fn undo_and_redo_preserve_an_enabled_zone() {
+        let edited = ReverbZoneData { wet_mix: 0.2, ..cave() };
+        let (mut world, entity) = world_with(Some(edited.clone()), true);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: Some(edited.clone()),
+            old_enabled: true,
+            new_enabled: true,
+        });
+
+        undo(&mut world);
+        assert_eq!(state(&world, entity), (Some(cave()), true));
+
+        redo(&mut world);
+        assert_eq!(state(&world, entity), (Some(edited), true));
+    }
+
+    /// Removal is undoable as of PF-1182, and it has to come back ENABLED —
+    /// restoring the data alone would leave the inspector showing "Add Reverb
+    /// Zone" over a zone that is really there.
+    #[test]
+    fn undoing_a_removal_brings_the_zone_back_enabled() {
+        let (mut world, entity) = world_with(None, false);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: None,
+            old_enabled: true,
+            new_enabled: false,
+        });
+
+        undo(&mut world);
+
+        assert_eq!(state(&world, entity), (Some(cave()), true));
+    }
+
+    /// Redoing that removal clears both components again.
+    #[test]
+    fn redoing_a_removal_clears_the_data_and_the_marker() {
+        let (mut world, entity) = world_with(None, false);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: None,
+            old_enabled: true,
+            new_enabled: false,
+        });
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert_eq!(state(&world, entity), (None, false));
+    }
+
+    /// Undoing the AUTHORING of a zone removes it entirely: there was nothing
+    /// there before, so an enabled marker must not survive.
+    #[test]
+    fn undoing_the_creation_of_a_zone_removes_both_components() {
+        let (mut world, entity) = world_with(Some(cave()), true);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: None,
+            new_reverb: Some(cave()),
+            old_enabled: false,
+            new_enabled: true,
+        });
+
+        undo(&mut world);
+
+        assert_eq!(state(&world, entity), (None, false));
+    }
+
+    // -- the browser has to be told, and only these arms can tell it ---------
+
+    /// Run `body` with a live pending queue registered, and hand back the reverb
+    /// resyncs it collected.
+    ///
+    /// The registration is not ceremony. `with_pending` reaches a thread-local
+    /// raw pointer that only the bridge's `Startup` system sets in production, so
+    /// an unregistered push is a SILENT no-op — a test that skipped this would
+    /// assert an empty queue and pass no matter what the arms did.
+    fn resyncs_from(body: impl FnOnce()) -> Vec<ReverbZoneResync> {
+        struct PendingGuard;
+        impl Drop for PendingGuard {
+            fn drop(&mut self) {
+                crate::core::pending::unregister_pending_commands();
+            }
+        }
+
+        let mut pending = crate::core::pending::PendingCommands::default();
+        crate::core::pending::register_pending_commands(&mut pending as *mut _);
+        let guard = PendingGuard;
+        body();
+        // Clear the pointer before `pending` is moved out of this frame, and even
+        // if `body` unwound.
+        drop(guard);
+        pending.reverb_zone_resyncs
+    }
+
+    /// Undoing a creation is the case no `Changed<ReverbZoneData>` watcher can
+    /// ever see: the component is GONE, so the only way the browser learns to
+    /// drop its copy is this arm queueing the re-report itself.
+    #[test]
+    fn undoing_a_creation_queues_a_removal_resync() {
+        let (mut world, _) = world_with(Some(cave()), true);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: None,
+            new_reverb: Some(cave()),
+            old_enabled: false,
+            new_enabled: true,
+        });
+
+        let queued = resyncs_from(|| undo(&mut world));
+
+        assert_eq!(
+            queued,
+            vec![ReverbZoneResync {
+                entity_id: "zone-1".to_string(),
+                data: None,
+                enabled: false,
+            }]
+        );
+    }
+
+    /// Undo carries the pre-state and redo the post-state, and each resync
+    /// carries the data the arm WROTE — never an entity id to be re-read, since
+    /// the drain runs in a different system and `Commands` are deferred.
+    #[test]
+    fn undo_and_redo_of_a_removal_queue_the_state_each_one_wrote() {
+        let (mut world, _) = world_with(None, false);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: None,
+            old_enabled: true,
+            new_enabled: false,
+        });
+
+        assert_eq!(
+            resyncs_from(|| undo(&mut world)),
+            vec![ReverbZoneResync {
+                entity_id: "zone-1".to_string(),
+                data: Some(cave()),
+                enabled: true,
+            }]
+        );
+
+        assert_eq!(
+            resyncs_from(|| redo(&mut world)),
+            vec![ReverbZoneResync {
+                entity_id: "zone-1".to_string(),
+                data: None,
+                enabled: false,
+            }]
+        );
+    }
+}
+
+#[cfg(test)]
+mod duplicate_aux_component_tests {
+    //! `insert_aux_components` is the DUPLICATE restore path;
+    //! `spawn_from_snapshot` is the undo/redo one. A component wired into only
+    //! one of them survives one operation and vanishes on the other, with no
+    //! error anywhere — which is exactly how reverb zones came to be dropped by
+    //! Ctrl+D while surviving an undone delete (PF-1182).
+
+    use super::{insert_aux_components, AuxComponentData};
+    use crate::core::reverb_zone::{ReverbZoneData, ReverbZoneEnabled};
+    use bevy::prelude::*;
+
+    /// Distinguishable from `ReverbZoneData::default()` (`"hall"` / `0.5`) in
+    /// both fields the assertion reads, so an `insert(default())` mutant fails.
+    fn cave() -> ReverbZoneData {
+        ReverbZoneData {
+            preset: "cave".to_string(),
+            wet_mix: 0.9,
+            ..Default::default()
+        }
+    }
+
+    fn restore(aux: &AuxComponentData) -> (World, Entity) {
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        {
+            let mut commands = world.commands();
+            let mut entity_commands = commands.entity(entity);
+            insert_aux_components(&mut entity_commands, aux);
+        }
+        world.flush();
+        (world, entity)
+    }
+
+    #[test]
+    fn duplicating_carries_an_enabled_reverb_zone() {
+        let (world, entity) = restore(&AuxComponentData {
+            reverb_zone_data: Some(cave()),
+            reverb_zone_enabled: true,
+            ..Default::default()
+        });
+
+        assert_eq!(world.get::<ReverbZoneData>(entity), Some(&cave()));
+        assert!(
+            world.get::<ReverbZoneEnabled>(entity).is_some(),
+            "the duplicate lost the enabled marker, so its zone is configured but silent"
+        );
+    }
+
+    /// The inverse: a zone the user deliberately turned off must not come back
+    /// switched on, the PF-1173 failure direction.
+    #[test]
+    fn duplicating_a_disabled_reverb_zone_leaves_it_disabled() {
+        let (world, entity) = restore(&AuxComponentData {
+            reverb_zone_data: Some(cave()),
+            reverb_zone_enabled: false,
+            ..Default::default()
+        });
+
+        assert_eq!(world.get::<ReverbZoneData>(entity), Some(&cave()));
+        assert!(world.get::<ReverbZoneEnabled>(entity).is_none());
+    }
+
+    #[test]
+    fn duplicating_an_entity_with_no_reverb_zone_adds_neither() {
+        let (world, entity) = restore(&AuxComponentData::default());
+
+        assert!(world.get::<ReverbZoneData>(entity).is_none());
+        assert!(world.get::<ReverbZoneEnabled>(entity).is_none());
+    }
+}
+
+#[cfg(test)]
+mod aux_component_parity {
+    //! The behavioural tests above prove reverb specifically is carried. They
+    //! say nothing about the NEXT field added to `AuxComponentData`, which is
+    //! the actual defect: the collector and `spawn_from_snapshot` get updated,
+    //! `insert_aux_components` is forgotten, and nothing anywhere reports it.
+    //!
+    //! So pin the divergence itself — every field of the struct must be read by
+    //! `insert_aux_components`, minus an explicitly reasoned exemption list.
+    //! Same source-parity idiom as `route_domain_parity` in `commands/mod.rs`,
+    //! and fail-closed for the same reason: a slice that silently returns empty
+    //! is what makes this class of test report green on a broken parser.
+
+    const SOURCE: &str = include_str!("entity_factory.rs");
+
+    /// Fields `insert_aux_components` must deliberately NOT restore.
+    const EXEMPT: &[(&str, &str)] = &[(
+        "active_game_camera",
+        "apply_duplicate_requests zeroes it on purpose — a duplicate must not \
+         steal the active-camera flag from the entity it was copied from",
+    )];
+
+    /// Every field of `AuxComponentData`. Both floors below exist because
+    /// `find` returning a short slice would otherwise pass vacuously.
+    const FIELD_FLOOR: usize = 22;
+    /// Fields actually read by `insert_aux_components` (= FIELD_FLOOR - EXEMPT).
+    const RESTORED_FLOOR: usize = 21;
+
+    /// Source text from `marker` up to the first line that closes its block.
+    fn block_after(marker: &str) -> &'static str {
+        let start = SOURCE.find(marker).unwrap_or_else(|| {
+            panic!("parser is stale: {marker:?} no longer appears in the source")
+        });
+        let rest = &SOURCE[start..];
+        let end = rest
+            .find("\n}")
+            .unwrap_or_else(|| panic!("parser is stale: no closing brace after {marker:?}"));
+        &rest[..end]
+    }
+
+    fn struct_fields() -> Vec<String> {
+        block_after("struct AuxComponentData {")
+            .lines()
+            .skip(1)
+            .filter_map(|line| {
+                let name = line.trim().split_once(':')?.0;
+                let looks_like_a_field = !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+                looks_like_a_field.then(|| name.to_string())
+            })
+            .collect()
+    }
+
+    fn restored_fields() -> Vec<String> {
+        let body = block_after("fn insert_aux_components");
+        let mut found: Vec<String> = Vec::new();
+        for (at, _) in body.match_indices("aux.") {
+            let name: String = body[at + "aux.".len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() && !found.contains(&name) {
+                found.push(name);
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn every_aux_field_is_restored_on_the_duplicate_path() {
+        let fields = struct_fields();
+        let restored = restored_fields();
+
+        assert!(
+            fields.len() >= FIELD_FLOOR,
+            "parsed only {} AuxComponentData fields (floor {FIELD_FLOOR}) — the parser broke, \
+             not the struct; fix it before trusting this test",
+            fields.len()
+        );
+        assert!(
+            restored.len() >= RESTORED_FLOOR,
+            "parsed only {} `aux.` reads in insert_aux_components (floor {RESTORED_FLOOR}) — \
+             the parser broke, not the function",
+            restored.len()
+        );
+
+        let missing: Vec<&String> = fields
+            .iter()
+            .filter(|f| {
+                !restored.contains(f) && !EXEMPT.iter().any(|(exempt, _)| *exempt == f.as_str())
+            })
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "insert_aux_components (the duplicate path) never restores {missing:?}, but \
+             spawn_from_snapshot (the undo/redo path) does. Duplicating an entity would \
+             silently drop them. Add them to insert_aux_components, or to EXEMPT with a reason."
+        );
+
+        let unknown: Vec<&String> = restored.iter().filter(|r| !fields.contains(r)).collect();
+        assert!(
+            unknown.is_empty(),
+            "insert_aux_components reads {unknown:?}, which are not AuxComponentData fields — \
+             the parser is matching something it should not"
+        );
+    }
+
+    /// An exemption that stops being true in either direction is worse than no
+    /// exemption at all, because it reads as reviewed.
+    #[test]
+    fn exemptions_are_still_accurate() {
+        let fields = struct_fields();
+        let restored = restored_fields();
+
+        for (name, reason) in EXEMPT {
+            assert!(
+                fields.contains(&name.to_string()),
+                "EXEMPT lists {name:?} ({reason}), but AuxComponentData no longer has that \
+                 field — drop the entry"
+            );
+            assert!(
+                !restored.contains(&name.to_string()),
+                "EXEMPT lists {name:?} as deliberately not restored, but \
+                 insert_aux_components does restore it now — drop the entry"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod physics2d_history_tests {
+    //! `Physics2dChange` records a change to `Physics2dData` and nothing else.
+    //! Enablement lives in the separate `Physics2dEnabled` marker, toggled by
+    //! its own command. Both history arms used to insert that marker alongside
+    //! the restored data, so undoing any 2D property edit silently switched
+    //! physics ON for an entity the user had deliberately disabled — and the
+    //! inspector reads the data, not the marker, so nothing showed it.
+
+    use super::{HistoryStack, UndoableAction};
+    use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
+    use crate::core::physics_2d::{Physics2dData, Physics2dEnabled};
+    use bevy::prelude::*;
+
+    macro_rules! run_system {
+        ($world:expr, $system:expr) => {{
+            let mut schedule = Schedule::default();
+            schedule.add_systems($system);
+            schedule.run($world);
+        }};
+    }
+
+    /// Exactly the resources `apply_undo_requests` / `apply_redo_requests` read.
+    fn base_world() -> World {
+        let mut world = World::new();
+        world.insert_resource(HistoryStack::default());
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        world
+    }
+
+    /// `mass` is deliberately off `Physics2dData::default()` (1.0), and every
+    /// caller passes a `friction` off the default (0.5) too. Without that, a
+    /// regression replacing `insert(pd.clone())` with `insert(default())` would
+    /// satisfy these assertions by coincidence instead of failing them — the
+    /// fixture has to differ from the default on the fields it asserts, or it
+    /// cannot tell "restored the recorded data" from "inserted a blank struct".
+    fn physics(friction: f32) -> Physics2dData {
+        Physics2dData { friction, mass: 3.5, ..Default::default() }
+    }
+
+    /// Spawn an entity carrying everything the undo systems' main query needs.
+    /// `enabled` decides whether the `Physics2dEnabled` marker is present —
+    /// i.e. whether the body is simulating.
+    fn spawn_body(world: &mut World, id: &str, data: Physics2dData, enabled: bool) -> Entity {
+        let entity = world
+            .spawn((
+                EntityId(id.to_string()),
+                EntityName(id.to_string()),
+                EntityVisible(true),
+                Transform::default(),
+                data,
+            ))
+            .id();
+        if enabled {
+            world.entity_mut(entity).insert(Physics2dEnabled);
+        }
+        entity
+    }
+
+    fn record_edit(world: &mut World, id: &str, old: Option<Physics2dData>, new: Option<Physics2dData>) {
+        world
+            .resource_mut::<HistoryStack>()
+            .push(UndoableAction::Physics2dChange {
+                entity_id: id.to_string(),
+                old_physics: old,
+                new_physics: new,
+            });
+    }
+
+    fn undo(world: &mut World) {
+        crate::core::history::queue_undo_from_bridge();
+        run_system!(world, super::apply_undo_requests);
+    }
+
+    fn redo(world: &mut World) {
+        crate::core::history::queue_redo_from_bridge();
+        run_system!(world, super::apply_redo_requests);
+    }
+
+    fn friction_of(world: &World, entity: Entity) -> f32 {
+        world
+            .entity(entity)
+            .get::<Physics2dData>()
+            .expect("Physics2dData must still be present")
+            .friction
+    }
+
+    fn mass_of(world: &World, entity: Entity) -> f32 {
+        world
+            .entity(entity)
+            .get::<Physics2dData>()
+            .expect("Physics2dData must still be present")
+            .mass
+    }
+
+    fn is_enabled(world: &World, entity: Entity) -> bool {
+        world.entity(entity).contains::<Physics2dEnabled>()
+    }
+
+    #[test]
+    fn undoing_a_property_edit_leaves_a_disabled_body_disabled() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", physics(0.9), false);
+        record_edit(&mut world, "sprite-1", Some(physics(0.25)), Some(physics(0.9)));
+
+        undo(&mut world);
+
+        assert_eq!(friction_of(&world, entity), 0.25, "undo must restore the old friction");
+        assert_eq!(
+            mass_of(&world, entity),
+            3.5,
+            "undo must restore the recorded struct, not insert a default one",
+        );
+        assert!(
+            !is_enabled(&world, entity),
+            "undo restores DATA; it must not switch 2D physics on for an entity the user disabled",
+        );
+    }
+
+    #[test]
+    fn redoing_a_property_edit_leaves_a_disabled_body_disabled() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", physics(0.9), false);
+        record_edit(&mut world, "sprite-1", Some(physics(0.25)), Some(physics(0.9)));
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert_eq!(friction_of(&world, entity), 0.9, "redo must reapply the new friction");
+        assert_eq!(
+            mass_of(&world, entity),
+            3.5,
+            "redo must reapply the recorded struct, not insert a default one",
+        );
+        assert!(
+            !is_enabled(&world, entity),
+            "redo restores DATA; the enabled marker is not part of this action either",
+        );
+    }
+
+    /// The other direction of the same rule: not touching the marker must not
+    /// mean an enabled body loses its simulation on undo.
+    #[test]
+    fn undo_and_redo_preserve_an_enabled_body() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", physics(0.9), true);
+        record_edit(&mut world, "sprite-1", Some(physics(0.25)), Some(physics(0.9)));
+
+        undo(&mut world);
+        assert_eq!(friction_of(&world, entity), 0.25);
+        assert!(is_enabled(&world, entity), "an enabled body must stay enabled across undo");
+
+        redo(&mut world);
+        assert_eq!(friction_of(&world, entity), 0.9);
+        assert!(is_enabled(&world, entity), "an enabled body must stay enabled across redo");
+    }
+
+    /// `old_physics: None` means the entity had no 2D body at record time, so
+    /// undo removes the data — and the marker with it, since an enabled marker
+    /// with no data is a state no command can produce.
+    #[test]
+    fn undoing_to_no_recorded_data_clears_both_the_data_and_the_marker() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", physics(0.9), true);
+        record_edit(&mut world, "sprite-1", None, Some(physics(0.9)));
+
+        undo(&mut world);
+
+        assert!(
+            world.entity(entity).get::<Physics2dData>().is_none(),
+            "undo must remove the data when none was recorded",
+        );
+        assert!(
+            !is_enabled(&world, entity),
+            "the enabled marker must not outlive the data it describes",
+        );
+    }
+
+    /// The redo mirror of the branch above: `new_physics: None` means the edit
+    /// being reapplied removed the body, so redo must clear the data and take
+    /// the marker with it. Without this case the `None` arm of `execute_redo`
+    /// is untested — all three redo tests above go through `Some`.
+    #[test]
+    fn redoing_to_no_new_data_clears_both_the_data_and_the_marker() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", physics(0.25), true);
+        record_edit(&mut world, "sprite-1", Some(physics(0.25)), None);
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert!(
+            world.entity(entity).get::<Physics2dData>().is_none(),
+            "redo must remove the data when the edit being reapplied removed it",
+        );
+        assert!(
+            !is_enabled(&world, entity),
+            "the enabled marker must not outlive the data it describes",
+        );
+    }
+}
+
+#[cfg(test)]
+mod tilemap_skeleton2d_history_tests {
+    //! The same defect as `physics2d_history_tests`, two more times.
+    //!
+    //! `TilemapChange` and `SkeletonChange` each record only their data
+    //! component. Enablement lives in a separate marker — `TilemapEnabled`,
+    //! `SkeletonEnabled2d` — which every other restore path in this file
+    //! (`insert_aux_components`, `spawn_from_snapshot`) reinstates
+    //! CONDITIONALLY from a recorded bool, i.e. "data present, marker absent"
+    //! is a state the engine deliberately round-trips. Both history arms used
+    //! to insert the marker unconditionally alongside the restored data, so
+    //! undoing a tilemap or skeleton edit switched rendering back on for a
+    //! surface the user had turned off.
+
+    use super::{HistoryStack, UndoableAction};
+    use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
+    use crate::core::skeleton2d::{SkeletonData2d, SkeletonEnabled2d};
+    use crate::core::tilemap::{TilemapData, TilemapEnabled};
+    use bevy::prelude::*;
+
+    macro_rules! run_system {
+        ($world:expr, $system:expr) => {{
+            let mut schedule = Schedule::default();
+            schedule.add_systems($system);
+            schedule.run($world);
+        }};
+    }
+
+    fn base_world() -> World {
+        let mut world = World::new();
+        world.insert_resource(HistoryStack::default());
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        world
+    }
+
+    fn undo(world: &mut World) {
+        crate::core::history::queue_undo_from_bridge();
+        run_system!(world, super::apply_undo_requests);
+    }
+
+    fn redo(world: &mut World) {
+        crate::core::history::queue_redo_from_bridge();
+        run_system!(world, super::apply_redo_requests);
+    }
+
+    /// Spawn an entity carrying everything the undo systems' main query needs,
+    /// plus `data`. `marker` is the enablement marker, inserted only when
+    /// `Some` — both markers are unit structs that do not implement `Default`,
+    /// so they are passed by value rather than conjured from a bound.
+    fn spawn_with<D: Component, M: Component>(
+        world: &mut World,
+        id: &str,
+        data: D,
+        marker: Option<M>,
+    ) -> Entity {
+        let entity = world
+            .spawn((
+                EntityId(id.to_string()),
+                EntityName(id.to_string()),
+                EntityVisible(true),
+                Transform::default(),
+                data,
+            ))
+            .id();
+        if let Some(marker) = marker {
+            world.entity_mut(entity).insert(marker);
+        }
+        entity
+    }
+
+    fn spawn_tilemap(world: &mut World, id: &str, data: TilemapData, enabled: bool) -> Entity {
+        spawn_with(world, id, data, enabled.then_some(TilemapEnabled))
+    }
+
+    fn spawn_skeleton(world: &mut World, id: &str, data: SkeletonData2d, enabled: bool) -> Entity {
+        spawn_with(world, id, data, enabled.then_some(SkeletonEnabled2d))
+    }
+
+    // ---- tilemap ------------------------------------------------------
+
+    /// `tile_size` is deliberately off `TilemapData::default()` (`[32, 32]`),
+    /// and every caller passes a non-empty `tileset_asset_id` (default is
+    /// `""`). Without that, a regression replacing `insert(td.clone())` with
+    /// `insert(TilemapData::default())` would satisfy these assertions by
+    /// coincidence instead of failing them.
+    fn tilemap(tileset: &str) -> TilemapData {
+        TilemapData {
+            tileset_asset_id: tileset.to_string(),
+            tile_size: [16, 16],
+            ..Default::default()
+        }
+    }
+
+    fn tileset_of(world: &World, entity: Entity) -> String {
+        world
+            .entity(entity)
+            .get::<TilemapData>()
+            .expect("TilemapData must still be present")
+            .tileset_asset_id
+            .clone()
+    }
+
+    fn tile_size_of(world: &World, entity: Entity) -> [u32; 2] {
+        world
+            .entity(entity)
+            .get::<TilemapData>()
+            .expect("TilemapData must still be present")
+            .tile_size
+    }
+
+    fn record_tilemap_edit(
+        world: &mut World,
+        id: &str,
+        old: Option<TilemapData>,
+        new: Option<TilemapData>,
+    ) {
+        world.resource_mut::<HistoryStack>().push(UndoableAction::TilemapChange {
+            entity_id: id.to_string(),
+            old_tilemap: old,
+            new_tilemap: new,
+        });
+    }
+
+    #[test]
+    fn undoing_a_tilemap_edit_leaves_a_disabled_tilemap_disabled() {
+        let mut world = base_world();
+        let entity =
+            spawn_tilemap(&mut world, "map-1", tilemap("b"), false);
+        record_tilemap_edit(&mut world, "map-1", Some(tilemap("a")), Some(tilemap("b")));
+
+        undo(&mut world);
+
+        assert_eq!(tileset_of(&world, entity), "a", "undo must restore the old tileset");
+        assert_eq!(
+            tile_size_of(&world, entity),
+            [16, 16],
+            "undo must restore the recorded struct, not insert a default one",
+        );
+        assert!(
+            !world.entity(entity).contains::<TilemapEnabled>(),
+            "undo restores DATA; it must not switch tilemap rendering on for a \
+             tilemap the user disabled",
+        );
+    }
+
+    #[test]
+    fn redoing_a_tilemap_edit_leaves_a_disabled_tilemap_disabled() {
+        let mut world = base_world();
+        let entity =
+            spawn_tilemap(&mut world, "map-1", tilemap("b"), false);
+        record_tilemap_edit(&mut world, "map-1", Some(tilemap("a")), Some(tilemap("b")));
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert_eq!(tileset_of(&world, entity), "b", "redo must reapply the new tileset");
+        assert_eq!(
+            tile_size_of(&world, entity),
+            [16, 16],
+            "redo must reapply the recorded struct, not insert a default one",
+        );
+        assert!(
+            !world.entity(entity).contains::<TilemapEnabled>(),
+            "redo restores DATA; enablement is not part of this action either",
+        );
+    }
+
+    #[test]
+    fn undo_and_redo_preserve_an_enabled_tilemap() {
+        let mut world = base_world();
+        let entity =
+            spawn_tilemap(&mut world, "map-1", tilemap("b"), true);
+        record_tilemap_edit(&mut world, "map-1", Some(tilemap("a")), Some(tilemap("b")));
+
+        undo(&mut world);
+        assert_eq!(tileset_of(&world, entity), "a");
+        assert!(
+            world.entity(entity).contains::<TilemapEnabled>(),
+            "an enabled tilemap must stay enabled across undo",
+        );
+
+        redo(&mut world);
+        assert_eq!(tileset_of(&world, entity), "b");
+        assert!(
+            world.entity(entity).contains::<TilemapEnabled>(),
+            "an enabled tilemap must stay enabled across redo",
+        );
+    }
+
+    #[test]
+    fn undoing_to_no_recorded_tilemap_clears_both_the_data_and_the_marker() {
+        let mut world = base_world();
+        let entity =
+            spawn_tilemap(&mut world, "map-1", tilemap("b"), true);
+        record_tilemap_edit(&mut world, "map-1", None, Some(tilemap("b")));
+
+        undo(&mut world);
+
+        assert!(
+            world.entity(entity).get::<TilemapData>().is_none(),
+            "undo must remove the data when none was recorded",
+        );
+        assert!(
+            !world.entity(entity).contains::<TilemapEnabled>(),
+            "the enabled marker must not outlive the data it describes",
+        );
+    }
+
+    #[test]
+    fn redoing_to_no_new_tilemap_clears_both_the_data_and_the_marker() {
+        let mut world = base_world();
+        let entity =
+            spawn_tilemap(&mut world, "map-1", tilemap("a"), true);
+        record_tilemap_edit(&mut world, "map-1", Some(tilemap("a")), None);
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert!(
+            world.entity(entity).get::<TilemapData>().is_none(),
+            "redo must remove the data when the edit being reapplied removed it",
+        );
+        assert!(
+            !world.entity(entity).contains::<TilemapEnabled>(),
+            "the enabled marker must not outlive the data it describes",
+        );
+    }
+
+    // ---- skeleton2d ---------------------------------------------------
+
+    /// A second bone puts the fixture off `SkeletonData2d::default()` (exactly
+    /// one bone, named `root`) as well as the varying `active_skin` (default
+    /// `"default"`), so an `insert(default())` regression fails both
+    /// assertions rather than coincidentally satisfying them.
+    fn skeleton(active_skin: &str) -> SkeletonData2d {
+        let mut sk = SkeletonData2d { active_skin: active_skin.to_string(), ..Default::default() };
+        let mut spine = sk.bones[0].clone();
+        spine.name = "spine".to_string();
+        spine.parent_bone = Some("root".to_string());
+        sk.bones.push(spine);
+        sk
+    }
+
+    fn active_skin_of(world: &World, entity: Entity) -> String {
+        world
+            .entity(entity)
+            .get::<SkeletonData2d>()
+            .expect("SkeletonData2d must still be present")
+            .active_skin
+            .clone()
+    }
+
+    fn bone_count_of(world: &World, entity: Entity) -> usize {
+        world
+            .entity(entity)
+            .get::<SkeletonData2d>()
+            .expect("SkeletonData2d must still be present")
+            .bones
+            .len()
+    }
+
+    fn record_skeleton_edit(
+        world: &mut World,
+        id: &str,
+        old: Option<SkeletonData2d>,
+        new: Option<SkeletonData2d>,
+    ) {
+        world.resource_mut::<HistoryStack>().push(UndoableAction::SkeletonChange {
+            entity_id: id.to_string(),
+            old_skeleton: old,
+            new_skeleton: new,
+        });
+    }
+
+    #[test]
+    fn undoing_a_skeleton_edit_leaves_a_disabled_skeleton_disabled() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(
+            &mut world,
+            "rig-1",
+            skeleton("armor"),
+            false,
+        );
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), Some(skeleton("armor")));
+
+        undo(&mut world);
+
+        assert_eq!(active_skin_of(&world, entity), "cloth", "undo must restore the old skin");
+        assert_eq!(
+            bone_count_of(&world, entity),
+            2,
+            "undo must restore the recorded struct, not insert a default one",
+        );
+        assert!(
+            !world.entity(entity).contains::<SkeletonEnabled2d>(),
+            "undo restores DATA; it must not switch skeletal animation on for a \
+             rig the user disabled",
+        );
+    }
+
+    #[test]
+    fn redoing_a_skeleton_edit_leaves_a_disabled_skeleton_disabled() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(
+            &mut world,
+            "rig-1",
+            skeleton("armor"),
+            false,
+        );
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), Some(skeleton("armor")));
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert_eq!(active_skin_of(&world, entity), "armor", "redo must reapply the new skin");
+        assert_eq!(
+            bone_count_of(&world, entity),
+            2,
+            "redo must reapply the recorded struct, not insert a default one",
+        );
+        assert!(
+            !world.entity(entity).contains::<SkeletonEnabled2d>(),
+            "redo restores DATA; enablement is not part of this action either",
+        );
+    }
+
+    #[test]
+    fn undo_and_redo_preserve_an_enabled_skeleton() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(
+            &mut world,
+            "rig-1",
+            skeleton("armor"),
+            true,
+        );
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), Some(skeleton("armor")));
+
+        undo(&mut world);
+        assert_eq!(active_skin_of(&world, entity), "cloth");
+        assert!(
+            world.entity(entity).contains::<SkeletonEnabled2d>(),
+            "an enabled rig must stay enabled across undo",
+        );
+
+        redo(&mut world);
+        assert_eq!(active_skin_of(&world, entity), "armor");
+        assert!(
+            world.entity(entity).contains::<SkeletonEnabled2d>(),
+            "an enabled rig must stay enabled across redo",
+        );
+    }
+
+    #[test]
+    fn undoing_to_no_recorded_skeleton_clears_both_the_data_and_the_marker() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(
+            &mut world,
+            "rig-1",
+            skeleton("armor"),
+            true,
+        );
+        record_skeleton_edit(&mut world, "rig-1", None, Some(skeleton("armor")));
+
+        undo(&mut world);
+
+        assert!(
+            world.entity(entity).get::<SkeletonData2d>().is_none(),
+            "undo must remove the data when none was recorded",
+        );
+        assert!(
+            !world.entity(entity).contains::<SkeletonEnabled2d>(),
+            "the enabled marker must not outlive the data it describes",
+        );
+    }
+
+    #[test]
+    fn redoing_to_no_new_skeleton_clears_both_the_data_and_the_marker() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(
+            &mut world,
+            "rig-1",
+            skeleton("cloth"),
+            true,
+        );
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), None);
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert!(
+            world.entity(entity).get::<SkeletonData2d>().is_none(),
+            "redo must remove the data when the edit being reapplied removed it",
+        );
+        assert!(
+            !world.entity(entity).contains::<SkeletonEnabled2d>(),
+            "the enabled marker must not outlive the data it describes",
         );
     }
 }

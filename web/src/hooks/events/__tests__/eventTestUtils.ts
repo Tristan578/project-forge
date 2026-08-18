@@ -50,13 +50,21 @@ export function createMockActions() {
     setPrimaryJoint: vi.fn(),
     setDebugPhysics: vi.fn(),
     setPhysics2d: vi.fn(),
+    applyPhysics2dFromEngine: vi.fn(),
     setJoint2d: vi.fn(),
+    applyJoint2dFromEngine: vi.fn(),
     removePhysics2d: vi.fn(),
     // Audio events
     setEntityAudio: vi.fn(),
     setAudioBuses: vi.fn(),
     setReverbZone: vi.fn(),
+    updateReverbZone: vi.fn(),
     removeReverbZone: vi.fn(),
+    // State-only mirrors. An inbound handler must route here, never to the
+    // dispatching pair above — the engine emits the event *because* it just
+    // applied a command.
+    applyReverbZoneFromEngine: vi.fn(),
+    applyReverbZoneRemovedFromEngine: vi.fn(),
     setEntityScript: vi.fn(),
     setInputBindings: vi.fn(),
     addAssetToRegistry: vi.fn(),
@@ -74,6 +82,13 @@ export function createMockActions() {
     setSpriteData: vi.fn(),
     setTilemapData: vi.fn(),
     setSkeleton2d: vi.fn(),
+    // State-only mirrors of engine-reported state. An inbound handler MUST use
+    // these, never the dispatching siblings above — those echo a full-replace
+    // command straight back at the engine that just described the state.
+    applySpriteFromEngine: vi.fn(),
+    applyCamera2dFromEngine: vi.fn(),
+    applyTilemapFromEngine: vi.fn(),
+    applySkeleton2dFromEngine: vi.fn(),
     // Particle events
     setPrimaryParticle: vi.fn(),
     setParticleEnabled: vi.fn(),

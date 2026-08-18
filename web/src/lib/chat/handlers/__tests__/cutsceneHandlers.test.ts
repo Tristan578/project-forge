@@ -316,3 +316,64 @@ describe('delete_cutscene', () => {
     expect(result.success).toBe(false);
   });
 });
+
+// ============================================================================
+// Prototype-named ids
+// ============================================================================
+
+/**
+ * `cutsceneId` is validated as `z.string().min(1)`, which accepts `__proto__`
+ * and every other `Object.prototype` member name. A bare `cutscenes[id]` read
+ * answers those with something truthy, so the `if (!cutscene)` guard below it
+ * passes and the handler proceeds on a cutscene that does not exist.
+ */
+const PROTOTYPE_IDS = ['__proto__', 'constructor', 'toString', 'valueOf', 'hasOwnProperty'];
+
+describe('prototype-named cutscene ids', () => {
+  it.each(PROTOTYPE_IDS)('play_cutscene reports %s as not found', async (id) => {
+    const { result, dispatchCommand } = await invokeHandler(cutsceneHandlers, 'play_cutscene', {
+      cutsceneId: id,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not found');
+    // The dispatch is the damage, not the failure: `play` fires before the
+    // player is built, so walking past the guard leaves the engine in Play mode
+    // and then throws inside `load` with no player left to stop it.
+    expect(dispatchCommand).not.toHaveBeenCalled();
+    expect(mockLoad).not.toHaveBeenCalled();
+    expect(mockPlay).not.toHaveBeenCalled();
+  });
+
+  it.each(PROTOTYPE_IDS)('delete_cutscene reports %s as not found', async (id) => {
+    const { result } = await invokeHandler(cutsceneHandlers, 'delete_cutscene', { cutsceneId: id });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not found');
+  });
+
+  it('still plays a cutscene genuinely named __proto__', async () => {
+    // Rejecting inherited lookups, not unusual names.
+    useCutsceneStore.setState({ cutscenes: { ...makeProtoNamedMap() } });
+
+    const { result } = await invokeHandler(cutsceneHandlers, 'play_cutscene', {
+      cutsceneId: '__proto__',
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockPlay).toHaveBeenCalled();
+  });
+});
+
+function makeProtoNamedMap(): Record<string, Cutscene> {
+  const map: Record<string, Cutscene> = {};
+  // Computed-key assignment, not a `__proto__:` literal — the latter sets the
+  // prototype instead of creating an own property.
+  Object.defineProperty(map, '__proto__', {
+    value: makeCutscene('__proto__'),
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+  return map;
+}

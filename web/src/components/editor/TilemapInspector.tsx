@@ -191,11 +191,13 @@ export function TilemapInspector() {
           <div className="flex items-center justify-between">
             <label className="text-xs text-zinc-400">Layers</label>
             <button
+              type="button"
               onClick={handleAddLayer}
               className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300"
               title="Add Layer"
+              aria-label="Add layer"
             >
-              <Plus size={12} />
+              <Plus size={12} aria-hidden="true" />
             </button>
           </div>
 
@@ -211,24 +213,35 @@ export function TilemapInspector() {
                   value={layer.name}
                   onChange={(e) => handleUpdateLayer(index, { name: e.target.value })}
                   className="min-w-0 flex-1 rounded border-0 bg-transparent px-1 py-0.5 text-xs text-zinc-300 focus:bg-zinc-800 focus:outline-none"
+                  aria-label={`Name of layer ${index + 1}`}
                 />
 
-                {/* Visibility toggle */}
+                {/* Visibility toggle. Every control in this row is icon-only, and
+                    `title` alone names them "Hide layer" — identical on all of
+                    them — so the layer being acted on has to be in the label. */}
                 <button
+                  type="button"
                   onClick={() => handleUpdateLayer(index, { visible: !layer.visible })}
                   className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300"
                   title={layer.visible ? 'Hide layer' : 'Show layer'}
+                  aria-label={`${layer.visible ? 'Hide' : 'Show'} layer ${layer.name || index + 1}`}
+                  aria-pressed={layer.visible}
                 >
-                  {layer.visible ? <Eye size={12} /> : <EyeOff size={12} />}
+                  {layer.visible
+                    ? <Eye size={12} aria-hidden="true" />
+                    : <EyeOff size={12} aria-hidden="true" />}
                 </button>
 
                 {/* Collision toggle */}
                 <button
+                  type="button"
                   onClick={() => handleUpdateLayer(index, { isCollision: !layer.isCollision })}
                   className={`rounded p-1 ${layer.isCollision ? 'text-yellow-500' : 'text-zinc-400'} hover:bg-zinc-800`}
                   title={layer.isCollision ? 'Collision enabled' : 'Collision disabled'}
+                  aria-label={`Collision on layer ${layer.name || index + 1}`}
+                  aria-pressed={layer.isCollision}
                 >
-                  <Shield size={12} />
+                  <Shield size={12} aria-hidden="true" />
                 </button>
 
                 {/* Opacity slider */}
@@ -241,15 +254,18 @@ export function TilemapInspector() {
                   onChange={(e) => handleUpdateLayer(index, { opacity: parseFloat(e.target.value) })}
                   className="w-12"
                   title={`Opacity: ${(layer.opacity * 100).toFixed(0)}%`}
+                  aria-label={`Opacity of layer ${layer.name || index + 1}`}
                 />
 
                 {/* Delete button */}
                 <button
+                  type="button"
                   onClick={() => handleRemoveLayer(index)}
                   className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-red-500"
                   title="Delete layer"
+                  aria-label={`Delete layer ${layer.name || index + 1}`}
                 >
-                  <Trash2 size={12} />
+                  <Trash2 size={12} aria-hidden="true" />
                 </button>
               </div>
             ))}

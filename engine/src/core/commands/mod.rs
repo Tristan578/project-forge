@@ -93,6 +93,7 @@ fn route_domain(command: &str) -> u8 {
         | "get_physics" | "apply_force" | "raycast_query"
         | "create_joint" | "update_joint" | "remove_joint" | "list_joints"
         | "set_physics2d" | "remove_physics2d"
+        | "update_physics2d" | "toggle_physics2d"
         | "set_2d_collider_shape" | "set_2d_body_type"
         | "get_physics2d" | "create_2d_joint" | "update_2d_joint" | "remove_2d_joint"
         | "apply_force2d" | "apply_impulse2d"
@@ -103,6 +104,7 @@ fn route_domain(command: &str) -> u8 {
         | "apply_impulse" | "set_linear_velocity" | "set_angular_velocity"
         | "get_velocity" | "raycast" | "get_joint"
         | "set_physics_2d" | "remove_physics_2d" | "set_physics_2d_enabled"
+        | "update_physics_2d" | "toggle_physics_2d"
         | "get_physics_2d" | "set_joint_2d" | "remove_joint_2d" | "get_joint_2d"
         | "list_joints_2d" | "apply_force_2d" | "apply_impulse_2d"
         | "set_linear_velocity_2d" | "set_angular_velocity_2d"
@@ -123,7 +125,10 @@ fn route_domain(command: &str) -> u8 {
         | "get_animation_graph" | "create_animation_clip" | "add_keyframe"
         | "remove_keyframe" | "update_keyframe" | "get_animation_clips"
         | "play_animation_clip" | "stop_animation_clip"
-        | "set_animation_state_machine" | "remove_animation_state_machine"
+        // NOTE: `set_animation_state_machine` / `remove_animation_state_machine`
+        // are NOT here. They live in the sprites group below, because that is
+        // where the working handlers are. Routing them to this domain sent them
+        // to a `Not yet implemented` stub that shadowed a real implementation.
         | "list_skeleton_animations" | "get_skeleton_animation" => 4,
 
         // --- particles domain ---
@@ -171,7 +176,27 @@ fn route_domain(command: &str) -> u8 {
         | "create_tileset" | "update_tileset" | "delete_tileset"
         | "create_tilemap" | "update_tilemap" | "delete_tilemap"
         | "get_tilemap" | "set_tile" | "clear_tilemap" | "fill_tiles"
-        | "get_sorting_layers" | "set_sorting_layers" => 10,
+        | "get_sorting_layers" | "set_sorting_layers"
+        // The spellings `sprites::dispatch` actually implements. Absent from
+        // this list they were unreachable: `route_domain` returns 255 for an
+        // unlisted name and `dispatch` answers `Unknown command`, so the arm
+        // never runs however correct it is. That took the whole 2D tilemap and
+        // 2D skeletal surface offline for every caller (PF-1178).
+        | "add_keyframe2d" | "play_skeletal_animation2d" | "set_skeleton2d_skin"
+        | "create_ik_chain2d" | "get_skeleton2d" | "auto_weight_skeleton2d"
+        | "add_skeleton2d_mesh_attachment" | "get_sprite_sheet_state"
+        | "get_sprite_animator_state" | "set_tilemap_data" | "remove_tilemap_data"
+        | "paint_tile" | "erase_tile" | "set_grid_2d"
+        // Implemented here, not in `animation.rs`. The router used to send these
+        // two to domain 4, whose arms are inline `Not yet implemented` stubs, so
+        // a real handler sat unreachable and every sprite state machine the
+        // editor configured was silently discarded (PF-1178).
+        | "set_animation_state_machine" | "remove_animation_state_machine" => 10,
+        // DELIBERATELY UNROUTED: `sprites::dispatch` implements `set_tileset` and
+        // `remove_tileset` against a per-entity `TilesetData` component keyed by
+        // `entityId`, but the only caller keys tilesets by asset id and has no
+        // entity to name. Routing them would turn a silent no-op into a silent
+        // `Missing entityId`. Blocked on PF-1179 deciding which side is right.
 
         // --- edit_mode domain ---
         "enter_edit_mode" | "exit_edit_mode" | "set_selection_mode"
@@ -332,6 +357,258 @@ pub(crate) fn default_true() -> bool {
 /// Helper for default volume in serde.
 pub(crate) fn default_volume() -> f32 {
     1.0
+}
+
+/// `route_domain` is a second, independent gate in front of every domain arm.
+/// An unlisted name returns 255 and `dispatch` answers `Unknown command`, so a
+/// perfectly correct arm is unreachable — and no test that calls a domain's own
+/// `dispatch` can see it, because that call bypasses the router entirely. This
+/// module reads the domain sources at compile time and holds the two lists to
+/// each other, so the omission fails a test instead of shipping (PF-1178).
+#[cfg(test)]
+mod route_domain_parity {
+    use super::route_domain;
+
+    /// `(file name, domain index, source text)` for every module `dispatch` routes to.
+    const DOMAIN_MODULES: &[(&str, u8, &str)] = &[
+        ("transform.rs", 0, include_str!("transform.rs")),
+        ("material.rs", 1, include_str!("material.rs")),
+        ("physics.rs", 2, include_str!("physics.rs")),
+        ("audio.rs", 3, include_str!("audio.rs")),
+        ("animation.rs", 4, include_str!("animation.rs")),
+        ("particles.rs", 5, include_str!("particles.rs")),
+        ("performance.rs", 6, include_str!("performance.rs")),
+        ("procedural.rs", 7, include_str!("procedural.rs")),
+        ("scene.rs", 8, include_str!("scene.rs")),
+        ("game.rs", 9, include_str!("game.rs")),
+        ("sprites.rs", 10, include_str!("sprites.rs")),
+        ("edit_mode.rs", 11, include_str!("edit_mode.rs")),
+    ];
+
+    /// Arms that exist but are intentionally NOT routed. Each needs a reason; the
+    /// checks below fail if an entry becomes routed or stops being an arm, so this
+    /// list cannot rot into a blanket exemption.
+    const DELIBERATELY_UNROUTED: &[(&str, &str)] = &[
+        // Both take a per-entity `TilesetData` keyed by `entityId`; the only
+        // caller keys tilesets by asset id and has no entity to name. Routing
+        // them trades a silent no-op for a silent `Missing entityId`.
+        ("set_tileset", "PF-1179 — entity-keyed arm vs asset-keyed caller"),
+        ("remove_tileset", "PF-1179 — entity-keyed arm vs asset-keyed caller"),
+    ];
+
+    /// The `pub fn dispatch` body only. A whole-file scan would match quoted
+    /// payload values inside the handlers as if they were command names.
+    fn dispatch_body(source: &str) -> Option<&str> {
+        let start = source.find("pub fn dispatch")?;
+        let rest = &source[start..];
+        // Handlers sit after `dispatch`, so the first `}` in column 0 ends it.
+        let end = rest.find("\n}")? + 2;
+        Some(&rest[..end])
+    }
+
+    /// Quoted lower-snake identifiers in match-arm position (`"x" =>` / `"x" |`).
+    fn arm_names(body: &str) -> Vec<&str> {
+        let bytes = body.as_bytes();
+        let mut names = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] != b'"' {
+                i += 1;
+                continue;
+            }
+            let start = i + 1;
+            let Some(offset) = body[start..].find('"') else { break };
+            let close = start + offset;
+            let name = &body[start..close];
+            let mut after = close + 1;
+            while after < bytes.len() && bytes[after].is_ascii_whitespace() {
+                after += 1;
+            }
+            let tail = &body[after..];
+            let in_arm_position = tail.starts_with("=>") || tail.starts_with('|');
+            let is_identifier = !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+            if in_arm_position && is_identifier {
+                names.push(name);
+            }
+            i = close + 1;
+        }
+        names
+    }
+
+    #[test]
+    fn the_source_parse_found_the_arms() {
+        let mut total = 0;
+        for (file, _, source) in DOMAIN_MODULES {
+            let body = dispatch_body(source)
+                .unwrap_or_else(|| panic!("{file}: no `pub fn dispatch` body found"));
+            let names = arm_names(body);
+            assert!(
+                names.len() > 3,
+                "{file}: parsed only {} arms — the scanner has broken and would \
+                 report every domain as fully routed",
+                names.len()
+            );
+            total += names.len();
+        }
+        assert!(total > 200, "parsed only {total} arms across all domains");
+    }
+
+    #[test]
+    fn arm_names_ignores_quoted_payload_values() {
+        // `"mask"` and `"high"` are payload VALUES; only `set_layer_mask` is a command.
+        let body = "pub fn dispatch(c: &str) {\n    match c {\n        \
+                    \"set_layer_mask\" | \"toggle_mask\" => p.get(\"mask\"),\n        \
+                    _ => none(\"high\"),\n    }\n}\n";
+        assert_eq!(arm_names(body), vec!["set_layer_mask", "toggle_mask"]);
+    }
+
+    #[test]
+    fn every_implemented_arm_is_routed_to_its_own_domain() {
+        let exempt: Vec<&str> = DELIBERATELY_UNROUTED.iter().map(|(n, _)| *n).collect();
+        let mut unreachable = Vec::new();
+        for (file, index, source) in DOMAIN_MODULES {
+            let body = dispatch_body(source).expect("dispatch body");
+            for name in arm_names(body) {
+                if exempt.contains(&name) {
+                    continue;
+                }
+                let routed = route_domain(name);
+                if routed != *index {
+                    unreachable.push(format!(
+                        "{name}: implemented in {file} (domain {index}) but route_domain says \
+                         {routed}{}",
+                        if routed == 255 { " (unroutable)" } else { "" }
+                    ));
+                }
+            }
+        }
+        assert!(
+            unreachable.is_empty(),
+            "These arms cannot be reached through `dispatch`. Add the name to its \
+             domain's `route_domain` group, or record it in DELIBERATELY_UNROUTED \
+             with a reason:\n  {}",
+            unreachable.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn deliberately_unrouted_entries_are_still_accurate() {
+        let all_arms: Vec<&str> = DOMAIN_MODULES
+            .iter()
+            .flat_map(|(_, _, source)| arm_names(dispatch_body(source).expect("dispatch body")))
+            .collect();
+        for (name, reason) in DELIBERATELY_UNROUTED {
+            assert!(
+                reason.len() > 20,
+                "{name}: an exemption without a real reason is not an exemption"
+            );
+            assert!(
+                all_arms.contains(name),
+                "{name} is no longer a dispatch arm — delete its DELIBERATELY_UNROUTED entry"
+            );
+            assert_eq!(
+                route_domain(name),
+                255,
+                "{name} is routed now — delete its DELIBERATELY_UNROUTED entry"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_name_is_unroutable() {
+        assert_eq!(route_domain("no_such_command_xyz"), 255);
+    }
+
+    /// `DOMAIN_MODULES` is hand-maintained, and every check above iterates it — so a
+    /// NEW domain module escapes all of them by simply not being listed. Nothing
+    /// fails, and the domain reports itself fully routed while none of its arms have
+    /// ever been held against `route_domain`. Read the directory instead: the file
+    /// system is the authority on which modules exist.
+    #[test]
+    fn every_domain_module_on_disk_is_listed() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/core/commands");
+        let entries = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("cannot enumerate {dir}: {e} — this check must not pass vacuously"));
+
+        let mut on_disk: Vec<String> = Vec::new();
+        for entry in entries {
+            let name = entry.expect("readable dir entry").file_name();
+            let name = name.to_str().expect("module file name is not UTF-8").to_owned();
+            // `mod.rs` is this file: it holds the router and domain 12's inline arms,
+            // and has no `pub fn dispatch` of the domain shape to scan.
+            if name.ends_with(".rs") && name != "mod.rs" {
+                on_disk.push(name);
+            }
+        }
+        assert!(
+            on_disk.len() > 5,
+            "found only {} domain modules in {dir} — the enumeration has broken and \
+             would report every list as complete",
+            on_disk.len()
+        );
+
+        let listed: Vec<&str> = DOMAIN_MODULES.iter().map(|(f, _, _)| *f).collect();
+        let mut missing: Vec<&String> = on_disk.iter().filter(|f| !listed.contains(&f.as_str())).collect();
+        missing.sort();
+        assert!(
+            missing.is_empty(),
+            "These domain modules exist but no check above looks at them — add each to \
+             DOMAIN_MODULES with its `route_domain` index: {missing:?}"
+        );
+
+        let mut stale: Vec<&&str> = listed.iter().filter(|f| !on_disk.contains(&f.to_string())).collect();
+        stale.sort();
+        assert!(
+            stale.is_empty(),
+            "DOMAIN_MODULES names files that no longer exist: {stale:?}"
+        );
+    }
+
+    /// A duplicated index would make `every_implemented_arm_is_routed_to_its_own_domain`
+    /// compare one module's arms against another module's number, and a listed module
+    /// that `dispatch` never calls is unreachable however well `route_domain` groups it.
+    #[test]
+    fn each_listed_index_dispatches_to_its_own_module() {
+        let router = include_str!("mod.rs");
+        let body = dispatch_body(router).expect("mod.rs has a `pub fn dispatch`");
+
+        let mut seen: Vec<u8> = Vec::new();
+        for (file, index, _) in DOMAIN_MODULES {
+            assert!(
+                !seen.contains(index),
+                "{file}: domain index {index} is already claimed by another module — the \
+                 arm check would grade it against the wrong number"
+            );
+            seen.push(*index);
+
+            let module = file.strip_suffix(".rs").expect("module file name ends in .rs");
+            let arm = format!("{index} => {module}::dispatch");
+            // A bare `contains` is satisfied by a LONGER number ending in these digits —
+            // renumbering the arm to `111 => edit_mode::dispatch` still contains
+            // `11 => edit_mode::dispatch`, so the check passed on an index nothing routes
+            // to. Require the digit run to start at the match.
+            let routed = body
+                .match_indices(&arm)
+                .any(|(at, _)| !body[..at].ends_with(|c: char| c.is_ascii_digit()));
+            assert!(
+                routed,
+                "{file} is listed as domain {index}, but `dispatch` has no `{arm}` arm — \
+                 every command routed there would answer Unknown command"
+            );
+        }
+
+        seen.sort_unstable();
+        let expected: Vec<u8> = (0..DOMAIN_MODULES.len() as u8).collect();
+        assert_eq!(
+            seen, expected,
+            "domain indices must be the contiguous set 0..{} — a gap means an arm number \
+             nothing implements",
+            DOMAIN_MODULES.len()
+        );
+    }
 }
 
 #[cfg(test)]

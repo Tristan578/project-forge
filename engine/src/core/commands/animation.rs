@@ -46,8 +46,9 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "get_animation_clips" => Some(Err("Not yet implemented: get_animation_clips".to_string())),
         "play_animation_clip" => Some(Err("Not yet implemented: play_animation_clip".to_string())),
         "stop_animation_clip" => Some(Err("Not yet implemented: stop_animation_clip".to_string())),
-        "set_animation_state_machine" => Some(Err("Not yet implemented: set_animation_state_machine".to_string())),
-        "remove_animation_state_machine" => Some(Err("Not yet implemented: remove_animation_state_machine".to_string())),
+        // `set_animation_state_machine` / `remove_animation_state_machine` are
+        // NOT stubbed here any more: `sprites.rs` implements both, and the stubs
+        // shadowed it for as long as the router pointed the names at this domain.
         "list_skeleton_animations" => Some(Err("Not yet implemented: list_skeleton_animations".to_string())),
         "get_skeleton_animation" => Some(Err("Not yet implemented: get_skeleton_animation".to_string())),
 

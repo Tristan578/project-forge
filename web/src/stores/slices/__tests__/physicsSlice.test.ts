@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
 import { createPhysicsSlice, setPhysicsDispatcher, type PhysicsSlice } from '../physicsSlice';
 import type { PhysicsData, JointData, Physics2dData, Joint2dData } from '../types';
+import { defaultPhysics2dData } from '@/lib/physics/physics2dPayload';
 
 let store: ReturnType<typeof createSliceStore<PhysicsSlice>>;
 let mockDispatch: ReturnType<typeof createMockDispatch>;
@@ -158,10 +159,14 @@ describe('physicsSlice', () => {
 
       expect(store.getState().physics2d.entity1).toEqual(data);
       expect(store.getState().physics2dEnabled.entity1).toBe(true);
+      // The engine reads a NESTED `physicsData`. This assertion used to spread the
+      // fields flat next to `entityId`, which is a hard serde reject — and
+      // `dispatchCommand` returns `void`, so the test passed while every 2D physics
+      // edit was dropped before it reached the simulation (PF-1167).
       expect(mockDispatch).toHaveBeenCalledWith('set_physics_2d', {
         entityId: 'entity1',
         enabled: true,
-        ...data,
+        physicsData: data,
       });
     });
 
@@ -182,7 +187,14 @@ describe('physicsSlice', () => {
       store.getState().setPhysics2d('entity1', data, false);
 
       expect(store.getState().physics2dEnabled.entity1).toBe(false);
-      expect(mockDispatch).toHaveBeenCalledWith('set_physics_2d', expect.objectContaining({ enabled: false }));
+      // `toEqual`, not `objectContaining`: the payload SHAPE is the behaviour here,
+      // and `objectContaining({ enabled: false })` passes just as happily against
+      // the old flat spread that the engine hard-rejected (PF-1167).
+      expect(mockDispatch).toHaveBeenCalledWith('set_physics_2d', {
+        entityId: 'entity1',
+        physicsData: data,
+        enabled: false,
+      });
     });
   });
 
@@ -226,21 +238,128 @@ describe('physicsSlice', () => {
     });
   });
 
+  describe('applyPhysics2dFromEngine', () => {
+    it('should not dispatch anything', () => {
+      // The whole reason this action exists. Routing the inbound
+      // `PHYSICS2D_CHANGED` event through `setPhysics2d` would send
+      // `set_physics_2d` straight back at the engine — a FULL REPLACE, so every
+      // field the event did not carry would be reset on the entity the engine had
+      // just finished describing, plus one echoed command per event (PF-1167).
+      store.getState().applyPhysics2dFromEngine('entity1', { friction: 0.25 }, true);
+
+      expect(store.getState().physics2d.entity1?.friction).toBe(0.25);
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+
+    it('should merge onto existing state rather than replacing it', () => {
+      const existing: Physics2dData = {
+        ...defaultPhysics2dData(),
+        bodyType: 'static',
+        mass: 7,
+        oneWayPlatform: true,
+      };
+      store.getState().setPhysics2d('entity1', existing, true);
+      mockDispatch.mockClear();
+
+      store.getState().applyPhysics2dFromEngine('entity1', { friction: 0.75 }, true);
+
+      expect(store.getState().physics2d.entity1).toEqual({
+        ...existing,
+        friction: 0.75,
+      });
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+
+    it('should merge onto engine defaults for an entity the store has never seen', () => {
+      // A partial event about an unknown entity must not leave the other thirteen
+      // fields `undefined` — the inspector reads them unconditionally
+      // (`physics2d.mass.toFixed(1)`), so a hole here throws in the panel.
+      store.getState().applyPhysics2dFromEngine('ghost', { bodyType: 'kinematic' }, true);
+
+      expect(store.getState().physics2d.ghost).toEqual({
+        ...defaultPhysics2dData(),
+        bodyType: 'kinematic',
+      });
+    });
+
+    it('should write enabled verbatim, including false', () => {
+      store.getState().setPhysics2d('entity1', defaultPhysics2dData(), true);
+
+      store.getState().applyPhysics2dFromEngine('entity1', {}, false);
+
+      expect(store.getState().physics2dEnabled.entity1).toBe(false);
+    });
+
+    it('should not read an inherited key for an entity id from the prototype chain', () => {
+      // `state.physics2d['__proto__']` is `Object.prototype` — truthy, so a bare
+      // read would spread it as the "existing" state instead of falling back to
+      // engine defaults. Hence the `Object.hasOwn` guard in the action.
+      store.getState().applyPhysics2dFromEngine('__proto__', { mass: 3 }, true);
+
+      expect(store.getState().physics2d['__proto__']).toEqual({
+        ...defaultPhysics2dData(),
+        mass: 3,
+      });
+    });
+  });
+
+  /**
+   * Real joint fixtures, not `{ jointType } as unknown as Joint2dData`.
+   *
+   * The casts these replaced described a joint the type forbids — one had
+   * `jointType: 'fixed'`, which is not one of the four variants — so they could
+   * never have caught the wire-shape defect the payload builder exists to fix
+   * (PF-1167).
+   */
+  function makeJoint2d(overrides: Partial<Joint2dData> = {}): Joint2dData {
+    return {
+      targetEntityId: 'entity2',
+      jointType: 'revolute',
+      localAnchor1: [0, 1],
+      localAnchor2: [0, -1],
+      ...overrides,
+    };
+  }
+
   describe('setJoint2d', () => {
-    it('should update state and dispatch', () => {
-      const data: Joint2dData = { jointType: 'revolute' } as unknown as Joint2dData;
+    it('should update state and dispatch the full engine payload', () => {
+      const data = makeJoint2d({ motorVelocity: 3, motorMaxForce: 40 });
       store.getState().setJoint2d('entity1', data);
 
       expect(store.getState().joints2d.entity1).toEqual(data);
+      // Whole-payload assertion: the spread this replaced sent a shape the
+      // engine rejected outright, and `objectContaining` cannot see that.
       expect(mockDispatch).toHaveBeenCalledWith('set_joint_2d', {
         entityId: 'entity1',
-        ...data,
+        targetEntityId: 'entity2',
+        jointType: 'revolute',
+        localAnchor1: [0, 1],
+        localAnchor2: [0, -1],
+        motorVelocity: 3,
+        motorMaxForce: 40,
+      });
+    });
+
+    it('should not send params belonging to another joint type', () => {
+      // `maxDistance` is a rope parameter. `JointType2d::from_flat` reads only
+      // the keys its own arm names, so a stray key would be silently ignored —
+      // the same "looks sent, never applied" shape this whole fix is about.
+      const data = makeJoint2d({ jointType: 'spring', stiffness: 12, maxDistance: 99 });
+      store.getState().setJoint2d('entity1', data);
+
+      expect(mockDispatch).toHaveBeenCalledWith('set_joint_2d', {
+        entityId: 'entity1',
+        targetEntityId: 'entity2',
+        jointType: 'spring',
+        localAnchor1: [0, 1],
+        localAnchor2: [0, -1],
+        stiffness: 12,
       });
     });
 
     it('should store joints for multiple entities independently', () => {
-      const data1: Joint2dData = { jointType: 'revolute' } as unknown as Joint2dData;
-      const data2: Joint2dData = { jointType: 'prismatic' } as unknown as Joint2dData;
+      const data1 = makeJoint2d();
+      const data2 = makeJoint2d({ jointType: 'prismatic', axis: [1, 0] });
       store.getState().setJoint2d('entity1', data1);
       store.getState().setJoint2d('entity2', data2);
 
@@ -249,10 +368,19 @@ describe('physicsSlice', () => {
     });
   });
 
+  describe('applyJoint2dFromEngine', () => {
+    it('should write the joint WITHOUT dispatching back at the engine', () => {
+      const data = makeJoint2d({ jointType: 'rope', maxDistance: 5 });
+      store.getState().applyJoint2dFromEngine('entity1', data);
+
+      expect(store.getState().joints2d.entity1).toEqual(data);
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+  });
+
   describe('removeJoint2d', () => {
     it('should remove from map and dispatch', () => {
-      const data: Joint2dData = { jointType: 'fixed' } as unknown as Joint2dData;
-      store.getState().setJoint2d('entity1', data);
+      store.getState().setJoint2d('entity1', makeJoint2d());
 
       store.getState().removeJoint2d('entity1');
 
@@ -263,9 +391,8 @@ describe('physicsSlice', () => {
     });
 
     it('should not affect other joints when removing one', () => {
-      const data1: Joint2dData = { jointType: 'revolute' } as unknown as Joint2dData;
-      const data2: Joint2dData = { jointType: 'rope' } as unknown as Joint2dData;
-      store.getState().setJoint2d('entity1', data1);
+      const data2 = makeJoint2d({ jointType: 'rope', maxDistance: 4 });
+      store.getState().setJoint2d('entity1', makeJoint2d());
       store.getState().setJoint2d('entity2', data2);
 
       store.getState().removeJoint2d('entity1');

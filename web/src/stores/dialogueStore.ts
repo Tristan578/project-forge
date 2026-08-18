@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { showError } from '@/lib/toast';
 
+import { hasOwnKey } from '@/lib/utils/ownLookup';
+
 const DIALOGUE_STORAGE_KEY = 'forge_dialogue_trees';
 
 // ============================================================================
@@ -290,8 +292,15 @@ function withVariableBag(tree: unknown): unknown {
  */
 export function getTree(
   trees: Record<string, DialogueTree>,
-  treeId: string,
+  treeId: string | null | undefined,
 ): DialogueTree | undefined {
+  // The id is allowed to be absent because the two ids that reach here most often
+  // — `runtime.activeTreeId` and `selectedTreeId` — are `string | null`, and a
+  // caller forced to write `id ? getTree(...) : undefined` is a second guard shape
+  // that can disagree with this one. The `typeof` check is not cosmetic: without
+  // it `Object.hasOwn(trees, null)` coerces to the key `"null"`, so a tree
+  // genuinely named `null` would answer a lookup for "no tree selected".
+  if (typeof treeId !== 'string') return undefined;
   // The container is checked too. `loadFromLocalStorage` normalizes a non-record
   // blob away, but this function does not receive the store's map — it receives
   // whatever its caller passed, from eight call sites that read it through a
@@ -713,6 +722,14 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
   },
 
   removeTree: (treeId: string) => {
+    // The one mutator that reads no tree, so it takes the membership half of the
+    // guard rather than `getTree`. `delete` of a non-own key is content-safe — it
+    // does not touch `Object.prototype` — but without this the store still swapped
+    // in a fresh `dialogueTrees` object and wrote localStorage for an id that named
+    // nothing, re-rendering every subscriber over a no-op. Guarding out here, not
+    // inside `set`, is what also skips the write.
+    if (!hasOwnKey(get().dialogueTrees, treeId)) return;
+
     set(state => {
       const newTrees = { ...state.dialogueTrees };
       delete newTrees[treeId];

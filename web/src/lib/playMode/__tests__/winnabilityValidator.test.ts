@@ -193,6 +193,45 @@ describe('validateWinnability', () => {
     });
   });
 
+  describe('unrecognized conditionType', () => {
+    // The union type says this is unreachable, but the value is LLM-authored
+    // and also arrives from `.forge` scenes written by older builds. The gate
+    // used to `return []` here, which declared such a scene WINNABLE — the
+    // engine meanwhile collapses an unparseable type to Score with a target
+    // that never accrues, so the player got a game that cannot be won.
+    function bogus(conditionType: string): GameComponentData {
+      return {
+        type: 'winCondition',
+        winCondition: {
+          conditionType: conditionType as 'score',
+          targetScore: 10,
+          targetEntityId: 'goal',
+        },
+      };
+    }
+
+    it.each(['collect_all', 'reach_goal', 'REACHGOAL', ''])(
+      'refuses to declare a scene winnable for conditionType %o',
+      (conditionType) => {
+        const report = validateWinnability(graph(['player', 'goal']), {
+          player: [player],
+          wc: [bogus(conditionType)],
+        });
+        expect(report.winnable).toBe(false);
+        expect(report.issues.map(i => i.code)).toContain('UNKNOWN_WIN_CONDITION');
+      },
+    );
+
+    it('still passes when a VALID condition sits alongside the unrecognized one', () => {
+      const report = validateWinnability(graph(['player', 'goal']), {
+        player: [player],
+        bad: [bogus('collect_all')],
+        good: [reachGoal('goal')],
+      });
+      expect(report.winnable).toBe(true);
+    });
+  });
+
   describe('multiple win conditions', () => {
     it('is winnable when any single condition is satisfiable', () => {
       const report = validateWinnability(graph(['player', 'goal']), {

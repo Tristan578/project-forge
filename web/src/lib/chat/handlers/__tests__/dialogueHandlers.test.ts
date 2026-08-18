@@ -509,7 +509,7 @@ describe('tree ids from tool arguments do not reach the prototype chain', () => 
   // `Object.prototype` for `"__proto__"` and a function for `"constructor"` —
   // both truthy, so the `if (!tree)` below each lookup passed them straight
   // through to `tree.nodes.find(...)`, which throws on a value with no `nodes`.
-  const INHERITED = ['__proto__', 'constructor', 'toString', 'valueOf'];
+  const INHERITED = ['__proto__', 'constructor', 'toString', 'valueOf', 'hasOwnProperty', 'isPrototypeOf'];
 
   for (const treeId of INHERITED) {
     it(`get_dialogue_tree("${treeId}") reports not-found instead of handing back a builtin`, async () => {
@@ -553,6 +553,8 @@ describe('tree ids from tool arguments do not reach the prototype chain', () => 
       treeId: '__proto__',
     });
     expect(result.success).toBe(true);
-    expect(result.result).toEqual(tree);
+    // Identity, not deep equality: the point is that the OWN value came back,
+    // and a `toEqual` would also pass against a lookalike built by the guard.
+    expect(result.result).toBe(tree);
   });
 });

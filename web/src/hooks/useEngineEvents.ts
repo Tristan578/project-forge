@@ -19,25 +19,10 @@ import {
   handlePerformanceEvent,
   handleEditModeEvent,
 } from './events';
+import { THROTTLED_EVENTS } from './events/throttledEvents';
 import { createSelectionBatcher, type SelectionPayload } from './selectionBatcher';
 import { createPlayModeThrottle } from '@/lib/throttle/playModeThrottle';
 import type { CommandResponse } from './useEngine';
-
-/**
- * Events that carry high-frequency runtime data and can be throttled to 10fps
- * during play mode without meaningful loss of user-perceivable fidelity.
- *
- * Events NOT in this set (scene graph changes, selection, mode transitions,
- * collision events, script errors, history changes) are always processed immediately.
- */
-const THROTTLED_EVENTS = new Set([
-  'TRANSFORM_CHANGED',
-  'ANIMATION_STATE_CHANGED',
-  'ANIMATION_LIST_CHANGED',
-  'PHYSICS_CHANGED',
-  'DEBUG_PHYSICS_CHANGED',
-  'PHYSICS2D_UPDATED',
-]);
 
 /**
  * Coerce whatever `handle_command` returned into a `CommandResponse`.

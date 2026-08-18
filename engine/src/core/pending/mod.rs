@@ -185,9 +185,11 @@ pub struct PendingCommands {
     pub audio_bus_creates: Vec<AudioBusCreate>,
     pub audio_bus_deletes: Vec<AudioBusDelete>,
     pub audio_bus_effects_updates: Vec<AudioBusEffectsUpdate>,
-    pub reverb_zone_updates: Vec<ReverbZoneUpdate>,
-    pub reverb_zone_toggles: Vec<ReverbZoneToggle>,
-    pub reverb_zone_removals: Vec<ReverbZoneRemoval>,
+    /// One ordered queue for `set` / `toggle` / `remove`, so "the later command
+    /// wins" is expressible at all (`core::reverb_zone::ReverbZoneCommand`).
+    pub reverb_zone_commands: Vec<crate::core::reverb_zone::ReverbZoneCommand>,
+    /// Re-reports from undo/redo, which write reverb state without a command.
+    pub reverb_zone_resyncs: Vec<crate::core::reverb_zone::ReverbZoneResync>,
     // animation domain
     pub animation_requests: Vec<AnimationRequest>,
     pub animation_clip_updates: Vec<AnimationClipUpdate>,
