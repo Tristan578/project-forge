@@ -505,11 +505,47 @@ describe('buildSetJoint2dPayload', () => {
     });
   });
 
-  it.each(['prismatic', 'rope', 'spring'] as const)(
-    'carries the %s variant through unchanged',
-    (jointType) => {
-      const payload = buildSetJoint2dPayload('entity-a', makeJoint({ jointType }));
-      expect(payload.jointType).toBe(jointType);
+  // Every variant's params at once. Handing all eight to each variant is what
+  // makes the rows below a test of the FILTERING rather than of the pass-through:
+  // each one has to keep its own three or four and drop the rest.
+  const ALL_JOINT_PARAMS: Partial<Joint2dData> = {
+    limits: [-3, 3],
+    motorVelocity: 4,
+    motorMaxForce: 50,
+    axis: [0, 1],
+    maxDistance: 5,
+    restLength: 2,
+    stiffness: 12,
+    damping: 0.4,
+  };
+
+  const VARIANT_PARAMS: [Joint2dData['jointType'], Partial<Joint2dData>][] = [
+    ['revolute', { limits: [-3, 3], motorVelocity: 4, motorMaxForce: 50 }],
+    ['prismatic', { axis: [0, 1], limits: [-3, 3], motorVelocity: 4, motorMaxForce: 50 }],
+    ['rope', { maxDistance: 5 }],
+    ['spring', { restLength: 2, stiffness: 12, damping: 0.4 }],
+  ];
+
+  it.each(VARIANT_PARAMS)(
+    'carries the %s variant through with only its own params',
+    (jointType, expectedParams) => {
+      const payload = buildSetJoint2dPayload(
+        'entity-a',
+        makeJoint({ ...ALL_JOINT_PARAMS, jointType }),
+      );
+      // `toEqual` on the whole payload rather than a read of `payload.jointType`.
+      // The payload IS the behaviour of a builder like this one, and an assertion
+      // on one key passes for every shape the builder could emit — including one
+      // carrying a foreign variant's params, which is the case these rows exist
+      // to rule out.
+      expect(payload).toEqual({
+        entityId: 'entity-a',
+        targetEntityId: 'entity-b',
+        jointType,
+        localAnchor1: [1, 2],
+        localAnchor2: [-1, -2],
+        ...expectedParams,
+      });
     },
   );
 
@@ -635,8 +671,21 @@ describe('parseJoint2dWire', () => {
     });
   });
 
-  it('round-trips a built payload back into the same joint', () => {
-    const data: Joint2dData = {
+  // Every variant, not just the widest one. The builder and the parser each own a
+  // per-variant key list, and a round-trip that exercises one variant proves only
+  // that those two lists agree about that variant — a key dropped from `rope` or
+  // `spring` on either side survives a prismatic-only round-trip untouched.
+  const ROUND_TRIP_CASES: Joint2dData[] = [
+    {
+      targetEntityId: 'entity-b',
+      jointType: 'revolute',
+      localAnchor1: [1, 2],
+      localAnchor2: [-1, -2],
+      limits: [-3, 3],
+      motorVelocity: 4,
+      motorMaxForce: 50,
+    },
+    {
       targetEntityId: 'entity-b',
       jointType: 'prismatic',
       localAnchor1: [1, 2],
@@ -645,12 +694,34 @@ describe('parseJoint2dWire', () => {
       limits: [-3, 3],
       motorVelocity: 4,
       motorMaxForce: 50,
-    };
-    expect(parseJoint2dWire(buildSetJoint2dPayload('entity-a', data))).toEqual({
-      entityId: 'entity-a',
-      data,
-    });
-  });
+    },
+    {
+      targetEntityId: 'entity-b',
+      jointType: 'rope',
+      localAnchor1: [1, 2],
+      localAnchor2: [-1, -2],
+      maxDistance: 5,
+    },
+    {
+      targetEntityId: 'entity-b',
+      jointType: 'spring',
+      localAnchor1: [1, 2],
+      localAnchor2: [-1, -2],
+      restLength: 2,
+      stiffness: 12,
+      damping: 0.4,
+    },
+  ];
+
+  it.each(ROUND_TRIP_CASES)(
+    'round-trips a built $jointType payload back into the same joint',
+    (data) => {
+      expect(parseJoint2dWire(buildSetJoint2dPayload('entity-a', data))).toEqual({
+        entityId: 'entity-a',
+        data,
+      });
+    },
+  );
 
   it('does not read an inherited property as a joint param', () => {
     const polluted = Object.create({ maxDistance: 99 }) as Record<string, unknown>;
