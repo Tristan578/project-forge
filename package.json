@@ -61,7 +61,7 @@
   },
   "devDependencies": {
     "@changesets/changelog-github": "^1.0.0",
-    "@changesets/cli": "^2.31.1",
+    "@changesets/cli": "^3.0.0",
     "@storybook/react": "^10.5.8",
     "@storybook/react-vite": "^10.5.8",
     "@vitest/coverage-v8": "^4.1.10",
