@@ -38,6 +38,7 @@ const baseReverbZone: ReverbZoneData = {
 
 describe('ReverbZoneInspector', () => {
   const mockUpdateReverbZone = vi.fn();
+  const mockSetReverbZone = vi.fn();
   const mockRemoveReverbZone = vi.fn();
   const mockNavigateDocs = vi.fn();
 
@@ -51,6 +52,7 @@ describe('ReverbZoneInspector', () => {
         reverbZones: reverbZone ? { 'entity-1': reverbZone } : {},
         reverbZonesEnabled: { 'entity-1': enabled },
         updateReverbZone: mockUpdateReverbZone,
+        setReverbZone: mockSetReverbZone,
         removeReverbZone: mockRemoveReverbZone,
       };
       return typeof selector === 'function' ? selector(state) : state;
@@ -82,14 +84,42 @@ describe('ReverbZoneInspector', () => {
     expect(screen.getByText('Add Reverb Zone')).toBeInTheDocument();
   });
 
-  it('calls updateReverbZone with defaults when Add Reverb Zone clicked', () => {
+  it('enables the zone it adds when Add Reverb Zone is clicked', () => {
     setupStore({ enabled: false });
     render(<ReverbZoneInspector entityId="entity-1" />);
     fireEvent.click(screen.getByText('Add Reverb Zone'));
-    expect(mockUpdateReverbZone).toHaveBeenCalledWith(
-      'entity-1',
-      expect.objectContaining({ preset: 'hall', wetMix: 0.5 })
-    );
+
+    // Full payload, and `enabled: true` as the third argument. The editing
+    // controls below are gated on that flag, so adding a zone without it left
+    // this panel showing "Add Reverb Zone" over a configured zone — the edit UI
+    // was unreachable, and the zone was silent in the engine besides.
+    expect(mockSetReverbZone.mock.calls).toEqual([
+      [
+        'entity-1',
+        {
+          shape: { type: 'box', size: [10, 5, 10] },
+          preset: 'hall',
+          wetMix: 0.5,
+          decayTime: 2.0,
+          preDelay: 20,
+          blendRadius: 2.0,
+          priority: 0,
+        },
+        true,
+      ],
+    ]);
+    expect(mockUpdateReverbZone).not.toHaveBeenCalled();
+  });
+
+  it('reveals the editing controls once the added zone is enabled', () => {
+    // The reveal is the whole point of the flag: this is the state the store
+    // lands in after `setReverbZone(..., true)`.
+    setupStore({ reverbZone: baseReverbZone, enabled: true });
+    render(<ReverbZoneInspector entityId="entity-1" />);
+
+    expect(screen.queryByText('Add Reverb Zone')).not.toBeInTheDocument();
+    expect(screen.getByText('Shape')).toBeInTheDocument();
+    expect(screen.getByText('Remove Reverb Zone')).toBeInTheDocument();
   });
 
   it('shows controls when enabled with reverbZone', () => {
@@ -157,6 +187,33 @@ describe('ReverbZoneInspector', () => {
     setupStore({ reverbZone: baseReverbZone, enabled: true });
     render(<ReverbZoneInspector entityId="entity-1" />);
     expect(screen.getByText('Priority')).toBeInTheDocument();
+  });
+
+  it('gives every editing control an accessible name', () => {
+    // This surface was unreachable dead code until the enable fix landed, so the
+    // missing label association had no live user impact and nothing caught it.
+    // `getByLabelText` resolves only through htmlFor/id or aria-*, so a visual
+    // label sitting next to an unassociated input fails this.
+    setupStore({ reverbZone: baseReverbZone, enabled: true });
+    render(<ReverbZoneInspector entityId="entity-1" />);
+
+    for (const name of ['Shape', 'Type', 'Wet Mix', 'Decay Time', 'Pre-Delay', 'Priority']) {
+      expect(screen.getByLabelText(name)).toBeInTheDocument();
+    }
+    // Three inputs under one "Size" label — each axis needs its own name, or all
+    // three announce identically.
+    for (const axis of ['Size X', 'Size Y', 'Size Z']) {
+      expect(screen.getByLabelText(axis)).toBeInTheDocument();
+    }
+  });
+
+  it('gives the sphere radius input an accessible name', () => {
+    setupStore({
+      reverbZone: { ...baseReverbZone, shape: { type: 'sphere' as const, radius: 5 } },
+      enabled: true,
+    });
+    render(<ReverbZoneInspector entityId="entity-1" />);
+    expect(screen.getByLabelText('Radius')).toBeInTheDocument();
   });
 
   it('shows Remove Reverb Zone button', () => {

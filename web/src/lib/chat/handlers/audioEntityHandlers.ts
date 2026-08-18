@@ -257,15 +257,22 @@ export const audioEntityHandlers: Record<string, ToolHandler> = {
       ? { type: 'sphere' as const, radius: radius ?? 5 }
       : { type: 'box' as const, size: [sizeX ?? 10, sizeY ?? 5, sizeZ ?? 10] as [number, number, number] };
 
-    store.updateReverbZone(p.data.entityId, {
-      shape: shapeData,
-      preset: reverbType ?? current?.preset ?? 'hall',
-      wetMix: wetMix ?? current?.wetMix ?? 0.5,
-      decayTime: decayTime ?? current?.decayTime ?? 2.0,
-      preDelay: preDelay ?? current?.preDelay ?? 20,
-      blendRadius: current?.blendRadius ?? 2.0,
-      priority: priority ?? current?.priority ?? 0,
-    });
+    // `setReverbZone(..., true)`: enablement is a separate marker component in
+    // the engine, so a zone authored without it is configured and silent. An
+    // AI asked to set a reverb zone means an audible one.
+    store.setReverbZone(
+      p.data.entityId,
+      {
+        shape: shapeData,
+        preset: reverbType ?? current?.preset ?? 'hall',
+        wetMix: wetMix ?? current?.wetMix ?? 0.5,
+        decayTime: decayTime ?? current?.decayTime ?? 2.0,
+        preDelay: preDelay ?? current?.preDelay ?? 20,
+        blendRadius: current?.blendRadius ?? 2.0,
+        priority: priority ?? current?.priority ?? 0,
+      },
+      true
+    );
     return { success: true, result: { message: `Reverb zone set on ${p.data.entityId}` } };
   },
 

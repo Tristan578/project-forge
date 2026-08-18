@@ -41,6 +41,10 @@ export interface AudioSlice {
   setReverbZone: (entityId: string, data: ReverbZoneData, enabled: boolean) => void;
   removeReverbZone: (entityId: string) => void;
   updateReverbZone: (entityId: string, data: ReverbZoneData) => void;
+  /** State-only mirror of an engine `REVERB_ZONE_CHANGED`. Dispatches nothing. */
+  applyReverbZoneFromEngine: (entityId: string, data: ReverbZoneData, enabled: boolean) => void;
+  /** State-only mirror of an engine `REVERB_ZONE_REMOVED`. Dispatches nothing. */
+  applyReverbZoneRemovedFromEngine: (entityId: string) => void;
   fadeInAudio: (entityId: string, durationMs: number) => void;
   fadeOutAudio: (entityId: string, durationMs: number) => void;
   playOneShotAudio: (assetId: string, options?: { position?: [number, number, number]; bus?: string; volume?: number; pitch?: number }) => void;
@@ -136,7 +140,15 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
       reverbZones: { ...state.reverbZones, [entityId]: data },
       reverbZonesEnabled: { ...state.reverbZonesEnabled, [entityId]: enabled },
     }));
-    if (dispatchCommand) dispatchCommand('set_reverb_zone', { entityId, ...data, enabled });
+    if (dispatchCommand) {
+      // Two commands, because enablement is a separate marker component in the
+      // engine and `SetReverbZonePayload` is `entityId` + a flattened
+      // `ReverbZoneData` with no `enabled` field. Flattening one in — which this
+      // did for its whole life — is silently discarded by serde, so the zone was
+      // configured and never switched on.
+      dispatchCommand('set_reverb_zone', { entityId, ...data });
+      dispatchCommand('toggle_reverb_zone', { entityId, enabled });
+    }
   },
   removeReverbZone: (entityId) => {
     set(state => {
@@ -148,9 +160,27 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
   },
   updateReverbZone: (entityId, data) => {
     set(state => ({ reverbZones: { ...state.reverbZones, [entityId]: data } }));
-    // `set_reverb_zone` is the only arm the engine has ever had; it takes
-    // `entityId` plus a flattened ReverbZoneData, which is exactly this payload.
+    // `set_reverb_zone`, not `update_reverb_zone`: the latter has never had an
+    // engine dispatch arm, and `dispatchCommand` returns void, so every reverb
+    // zone ever authored was dropped without a signal. Enablement is left alone
+    // here — this is the edit path, and an edit must not switch a zone on.
     if (dispatchCommand) dispatchCommand('set_reverb_zone', { entityId, ...data });
+  },
+  applyReverbZoneFromEngine: (entityId, data, enabled) => {
+    // State only. The engine emits `REVERB_ZONE_CHANGED` after applying a
+    // command, so routing that back through `setReverbZone` — which dispatches —
+    // is an unbounded per-frame ping-pong that also floods the history stack.
+    set(state => ({
+      reverbZones: { ...state.reverbZones, [entityId]: data },
+      reverbZonesEnabled: { ...state.reverbZonesEnabled, [entityId]: enabled },
+    }));
+  },
+  applyReverbZoneRemovedFromEngine: (entityId) => {
+    set(state => {
+      const { [entityId]: _, ...rest } = state.reverbZones;
+      const { [entityId]: _enabled, ...restEnabled } = state.reverbZonesEnabled;
+      return { reverbZones: rest, reverbZonesEnabled: restEnabled };
+    });
   },
   fadeInAudio: (entityId, durationMs) => {
     audioManager.fadeIn(entityId, durationMs);

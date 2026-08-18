@@ -45,6 +45,7 @@ function makeAudioStore(overrides: Record<string, unknown> = {}) {
     setDuckingRule: vi.fn(),
     reverbZones: {} as Record<string, Record<string, unknown>>,
     updateReverbZone: vi.fn(),
+    setReverbZone: vi.fn(),
     removeReverbZone: vi.fn(),
     ...overrides,
   };
@@ -474,14 +475,29 @@ describe('audioEntityHandlers', () => {
   // set_reverb_zone / remove_reverb_zone
   // =========================================================================
   describe('set_reverb_zone', () => {
-    it('sets box reverb zone with defaults', async () => {
+    // Full-payload `toEqual` with the `enabled` argument, not `objectContaining`
+    // on a partial: `updateReverbZone` dispatched a command the engine has never
+    // had an arm for, and it left enablement untouched — so an AI asked for a
+    // reverb zone produced a zone that was neither applied nor audible.
+    it('sets box reverb zone with defaults, enabled', async () => {
       const { result, store } = await invoke('set_reverb_zone', { entityId: 'ent-1' });
       expect(result.success).toBe(true);
-      expect(store.updateReverbZone).toHaveBeenCalledWith('ent-1', expect.objectContaining({
-        shape: { type: 'box', size: [10, 5, 10] },
-        preset: 'hall',
-        wetMix: 0.5,
-      }));
+      expect(vi.mocked(store.setReverbZone).mock.calls).toEqual([
+        [
+          'ent-1',
+          {
+            shape: { type: 'box', size: [10, 5, 10] },
+            preset: 'hall',
+            wetMix: 0.5,
+            decayTime: 2.0,
+            preDelay: 20,
+            blendRadius: 2.0,
+            priority: 0,
+          },
+          true,
+        ],
+      ]);
+      expect(store.updateReverbZone).not.toHaveBeenCalled();
     });
 
     it('sets sphere reverb zone', async () => {
@@ -491,9 +507,21 @@ describe('audioEntityHandlers', () => {
         radius: 12,
       });
       expect(result.success).toBe(true);
-      expect(store.updateReverbZone).toHaveBeenCalledWith('ent-1', expect.objectContaining({
-        shape: { type: 'sphere', radius: 12 },
-      }));
+      expect(vi.mocked(store.setReverbZone).mock.calls).toEqual([
+        [
+          'ent-1',
+          {
+            shape: { type: 'sphere', radius: 12 },
+            preset: 'hall',
+            wetMix: 0.5,
+            decayTime: 2.0,
+            preDelay: 20,
+            blendRadius: 2.0,
+            priority: 0,
+          },
+          true,
+        ],
+      ]);
     });
 
     it('uses existing zone values when present', async () => {
@@ -508,14 +536,21 @@ describe('audioEntityHandlers', () => {
       const reverbZones = { 'ent-1': existing };
       const { result, store } = await invoke('set_reverb_zone', { entityId: 'ent-1' }, { reverbZones });
       expect(result.success).toBe(true);
-      expect(store.updateReverbZone).toHaveBeenCalledWith('ent-1', expect.objectContaining({
-        preset: 'cave',
-        wetMix: 0.8,
-        decayTime: 4.0,
-        preDelay: 30,
-        blendRadius: 3.0,
-        priority: 5,
-      }));
+      expect(vi.mocked(store.setReverbZone).mock.calls).toEqual([
+        [
+          'ent-1',
+          {
+            shape: { type: 'box', size: [10, 5, 10] },
+            preset: 'cave',
+            wetMix: 0.8,
+            decayTime: 4.0,
+            preDelay: 30,
+            blendRadius: 3.0,
+            priority: 5,
+          },
+          true,
+        ],
+      ]);
     });
 
     it('overrides existing values with provided args', async () => {
@@ -527,10 +562,21 @@ describe('audioEntityHandlers', () => {
         wetMix: 0.3,
       }, { reverbZones });
       expect(result.success).toBe(true);
-      expect(store.updateReverbZone).toHaveBeenCalledWith('ent-1', expect.objectContaining({
-        preset: 'room',
-        wetMix: 0.3,
-      }));
+      expect(vi.mocked(store.setReverbZone).mock.calls).toEqual([
+        [
+          'ent-1',
+          {
+            shape: { type: 'box', size: [10, 5, 10] },
+            preset: 'room',
+            wetMix: 0.3,
+            decayTime: 4.0,
+            preDelay: 30,
+            blendRadius: 3.0,
+            priority: 0,
+          },
+          true,
+        ],
+      ]);
     });
   });
 

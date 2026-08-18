@@ -720,6 +720,12 @@ fn insert_aux_components(entity_commands: &mut bevy::ecs::system::EntityCommands
         entity_commands.insert(ad.clone());
         entity_commands.insert(AudioEnabled);
     }
+    if let Some(ref rzd) = aux.reverb_zone_data {
+        entity_commands.insert(rzd.clone());
+    }
+    if aux.reverb_zone_enabled {
+        entity_commands.insert(super::reverb_zone::ReverbZoneEnabled);
+    }
     if let Some(ref pd) = aux.particle_data {
         entity_commands.insert(pd.clone());
     }
@@ -2192,16 +2198,38 @@ fn execute_undo(
                 }
             }
         }
-        UndoableAction::ReverbZoneChange { entity_id, old_reverb, .. } => {
+        UndoableAction::ReverbZoneChange { entity_id, old_reverb, old_enabled, .. } => {
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
+                    // Restore the marker from what was RECORDED, never
+                    // unconditionally: enabling a zone the user had disabled is
+                    // the PF-1173 bug, and this action also covers removal, so
+                    // the marker genuinely varies.
                     if let Some(ref rz) = old_reverb {
                         commands.entity(entity).insert(rz.clone());
-                        commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
                     } else {
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneData>();
+                    }
+                    if *old_enabled {
+                        commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
+                    } else {
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneEnabled>();
                     }
+                    // This arm is pure `core/` and cannot emit, and the bridge's
+                    // only reverb emitter is gated on both `selection.primary`
+                    // and `Changed<ReverbZoneData>` — so it reaches neither a
+                    // non-selected entity nor this arm's removal branch, and the
+                    // browser's mirror kept a zone the engine had just dropped.
+                    // Carry the state written, don't ask for it to be re-read:
+                    // the drain runs in a different system and `Commands` are
+                    // deferred.
+                    super::pending_commands::queue_reverb_zone_resync_pending(
+                        super::reverb_zone::ReverbZoneResync {
+                            entity_id: entity_id.clone(),
+                            data: old_reverb.clone(),
+                            enabled: *old_enabled,
+                        },
+                    );
                     break;
                 }
             }
@@ -2542,16 +2570,29 @@ fn execute_redo(
                 }
             }
         }
-        UndoableAction::ReverbZoneChange { entity_id, new_reverb, .. } => {
+        UndoableAction::ReverbZoneChange { entity_id, new_reverb, new_enabled, .. } => {
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
+                    // Mirror of the undo arm: the marker comes from the recorded
+                    // post-state, not from "data is present".
                     if let Some(ref rz) = new_reverb {
                         commands.entity(entity).insert(rz.clone());
-                        commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
                     } else {
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneData>();
+                    }
+                    if *new_enabled {
+                        commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
+                    } else {
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneEnabled>();
                     }
+                    // Same re-report as the undo arm, with the post-state.
+                    super::pending_commands::queue_reverb_zone_resync_pending(
+                        super::reverb_zone::ReverbZoneResync {
+                            entity_id: entity_id.clone(),
+                            data: new_reverb.clone(),
+                            enabled: *new_enabled,
+                        },
+                    );
                     break;
                 }
             }
@@ -4568,6 +4609,490 @@ mod bridge_registration_pin_tests {
             "TerrainChangeEvents is never initialised; `collect_terrain_changes` panics on \
              the first frame it runs",
         );
+    }
+}
+
+#[cfg(test)]
+mod reverb_zone_history_tests {
+    //! Undo/redo of a reverb zone must restore the RECORDED enablement, not
+    //! infer it from "data is present".
+    //!
+    //! Two distinct failures motivate these: the PF-1173 class, where the arms
+    //! inserted `ReverbZoneEnabled` unconditionally and so switched a zone on
+    //! that the user had deliberately turned off; and reverb removal, which
+    //! PF-1182 makes undoable for the first time — a data-only restore would
+    //! bring the zone back invisibly disabled, and because
+    //! `ReverbZoneInspector` gates its editing controls on the enabled flag, the
+    //! user would be looking at "Add Reverb Zone" with a configured zone sitting
+    //! underneath it.
+
+    use super::{apply_redo_requests, apply_undo_requests, HistoryStack, UndoableAction};
+    use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
+    use crate::core::history::{queue_redo_from_bridge, queue_undo_from_bridge};
+    use crate::core::reverb_zone::{ReverbZoneData, ReverbZoneEnabled, ReverbZoneResync};
+    use bevy::prelude::*;
+
+    /// A zone distinguishable from `ReverbZoneData::default()` in every field a
+    /// test reads, so "restored the recorded data" cannot pass by accident.
+    fn cave() -> ReverbZoneData {
+        ReverbZoneData {
+            preset: "cave".to_string(),
+            wet_mix: 0.9,
+            ..Default::default()
+        }
+    }
+
+    /// World carrying exactly the resources `apply_undo_requests` /
+    /// `apply_redo_requests` read, plus one entity with the components their
+    /// primary query requires.
+    fn world_with(data: Option<ReverbZoneData>, enabled: bool) -> (World, Entity) {
+        let mut world = World::new();
+        world.insert_resource(HistoryStack::default());
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+
+        let mut entity = world.spawn((
+            EntityId("zone-1".to_string()),
+            EntityName("Zone".to_string()),
+            EntityVisible(true),
+            Transform::default(),
+        ));
+        if let Some(d) = data {
+            entity.insert(d);
+        }
+        if enabled {
+            entity.insert(ReverbZoneEnabled);
+        }
+        let id = entity.id();
+        (world, id)
+    }
+
+    /// Run one system once through a Schedule, which also flushes the deferred
+    /// `Commands` the undo arms queue — without the flush every assertion below
+    /// would read the pre-undo state and pass vacuously.
+    fn run_once(world: &mut World, system: fn(Commands, ResMut<HistoryStack>, Query<(Entity, &EntityId, &mut Transform, &mut EntityName, &mut EntityVisible)>, Query<(&EntityId, &mut crate::core::material::MaterialData)>, Query<(&EntityId, &mut crate::core::lighting::LightData)>, Query<(&EntityId, &mut crate::core::physics::PhysicsData)>, Query<(Entity, &EntityId, Option<&crate::core::scripting::ScriptData>)>, Query<(Entity, &EntityId, Option<&crate::core::audio::AudioData>)>, Query<(Entity, &EntityId, Option<&crate::core::particles::ParticleData>)>, ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>)) {
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system);
+        schedule.run(world);
+    }
+
+    fn undo(world: &mut World) {
+        queue_undo_from_bridge();
+        run_once(world, apply_undo_requests);
+    }
+
+    fn redo(world: &mut World) {
+        queue_redo_from_bridge();
+        run_once(world, apply_redo_requests);
+    }
+
+    fn state(world: &World, entity: Entity) -> (Option<ReverbZoneData>, bool) {
+        (
+            world.get::<ReverbZoneData>(entity).cloned(),
+            world.get::<ReverbZoneEnabled>(entity).is_some(),
+        )
+    }
+
+    /// A property edit on a DISABLED zone: undoing it must not start the reverb.
+    #[test]
+    fn undoing_a_property_edit_leaves_a_disabled_zone_disabled() {
+        let edited = ReverbZoneData { wet_mix: 0.2, ..cave() };
+        let (mut world, entity) = world_with(Some(edited), false);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: Some(ReverbZoneData { wet_mix: 0.2, ..cave() }),
+            old_enabled: false,
+            new_enabled: false,
+        });
+
+        undo(&mut world);
+
+        assert_eq!(state(&world, entity), (Some(cave()), false));
+    }
+
+    /// The redo mirror — the two arms are separate code and each has to be right.
+    #[test]
+    fn redoing_a_property_edit_leaves_a_disabled_zone_disabled() {
+        let (mut world, entity) = world_with(Some(cave()), false);
+        let edited = ReverbZoneData { wet_mix: 0.2, ..cave() };
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: Some(edited.clone()),
+            old_enabled: false,
+            new_enabled: false,
+        });
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert_eq!(state(&world, entity), (Some(edited), false));
+    }
+
+    /// The opposite direction: "don't touch the marker" must not decay into
+    /// "lose the reverb" for a zone that was enabled all along.
+    #[test]
+    fn undo_and_redo_preserve_an_enabled_zone() {
+        let edited = ReverbZoneData { wet_mix: 0.2, ..cave() };
+        let (mut world, entity) = world_with(Some(edited.clone()), true);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: Some(edited.clone()),
+            old_enabled: true,
+            new_enabled: true,
+        });
+
+        undo(&mut world);
+        assert_eq!(state(&world, entity), (Some(cave()), true));
+
+        redo(&mut world);
+        assert_eq!(state(&world, entity), (Some(edited), true));
+    }
+
+    /// Removal is undoable as of PF-1182, and it has to come back ENABLED —
+    /// restoring the data alone would leave the inspector showing "Add Reverb
+    /// Zone" over a zone that is really there.
+    #[test]
+    fn undoing_a_removal_brings_the_zone_back_enabled() {
+        let (mut world, entity) = world_with(None, false);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: None,
+            old_enabled: true,
+            new_enabled: false,
+        });
+
+        undo(&mut world);
+
+        assert_eq!(state(&world, entity), (Some(cave()), true));
+    }
+
+    /// Redoing that removal clears both components again.
+    #[test]
+    fn redoing_a_removal_clears_the_data_and_the_marker() {
+        let (mut world, entity) = world_with(None, false);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: None,
+            old_enabled: true,
+            new_enabled: false,
+        });
+
+        undo(&mut world);
+        redo(&mut world);
+
+        assert_eq!(state(&world, entity), (None, false));
+    }
+
+    /// Undoing the AUTHORING of a zone removes it entirely: there was nothing
+    /// there before, so an enabled marker must not survive.
+    #[test]
+    fn undoing_the_creation_of_a_zone_removes_both_components() {
+        let (mut world, entity) = world_with(Some(cave()), true);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: None,
+            new_reverb: Some(cave()),
+            old_enabled: false,
+            new_enabled: true,
+        });
+
+        undo(&mut world);
+
+        assert_eq!(state(&world, entity), (None, false));
+    }
+
+    // -- the browser has to be told, and only these arms can tell it ---------
+
+    /// Run `body` with a live pending queue registered, and hand back the reverb
+    /// resyncs it collected.
+    ///
+    /// The registration is not ceremony. `with_pending` reaches a thread-local
+    /// raw pointer that only the bridge's `Startup` system sets in production, so
+    /// an unregistered push is a SILENT no-op — a test that skipped this would
+    /// assert an empty queue and pass no matter what the arms did.
+    fn resyncs_from(body: impl FnOnce()) -> Vec<ReverbZoneResync> {
+        struct PendingGuard;
+        impl Drop for PendingGuard {
+            fn drop(&mut self) {
+                crate::core::pending::unregister_pending_commands();
+            }
+        }
+
+        let mut pending = crate::core::pending::PendingCommands::default();
+        crate::core::pending::register_pending_commands(&mut pending as *mut _);
+        let guard = PendingGuard;
+        body();
+        // Clear the pointer before `pending` is moved out of this frame, and even
+        // if `body` unwound.
+        drop(guard);
+        pending.reverb_zone_resyncs
+    }
+
+    /// Undoing a creation is the case no `Changed<ReverbZoneData>` watcher can
+    /// ever see: the component is GONE, so the only way the browser learns to
+    /// drop its copy is this arm queueing the re-report itself.
+    #[test]
+    fn undoing_a_creation_queues_a_removal_resync() {
+        let (mut world, _) = world_with(Some(cave()), true);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: None,
+            new_reverb: Some(cave()),
+            old_enabled: false,
+            new_enabled: true,
+        });
+
+        let queued = resyncs_from(|| undo(&mut world));
+
+        assert_eq!(
+            queued,
+            vec![ReverbZoneResync {
+                entity_id: "zone-1".to_string(),
+                data: None,
+                enabled: false,
+            }]
+        );
+    }
+
+    /// Undo carries the pre-state and redo the post-state, and each resync
+    /// carries the data the arm WROTE — never an entity id to be re-read, since
+    /// the drain runs in a different system and `Commands` are deferred.
+    #[test]
+    fn undo_and_redo_of_a_removal_queue_the_state_each_one_wrote() {
+        let (mut world, _) = world_with(None, false);
+        world.resource_mut::<HistoryStack>().push(UndoableAction::ReverbZoneChange {
+            entity_id: "zone-1".to_string(),
+            old_reverb: Some(cave()),
+            new_reverb: None,
+            old_enabled: true,
+            new_enabled: false,
+        });
+
+        assert_eq!(
+            resyncs_from(|| undo(&mut world)),
+            vec![ReverbZoneResync {
+                entity_id: "zone-1".to_string(),
+                data: Some(cave()),
+                enabled: true,
+            }]
+        );
+
+        assert_eq!(
+            resyncs_from(|| redo(&mut world)),
+            vec![ReverbZoneResync {
+                entity_id: "zone-1".to_string(),
+                data: None,
+                enabled: false,
+            }]
+        );
+    }
+}
+
+#[cfg(test)]
+mod duplicate_aux_component_tests {
+    //! `insert_aux_components` is the DUPLICATE restore path;
+    //! `spawn_from_snapshot` is the undo/redo one. A component wired into only
+    //! one of them survives one operation and vanishes on the other, with no
+    //! error anywhere — which is exactly how reverb zones came to be dropped by
+    //! Ctrl+D while surviving an undone delete (PF-1182).
+
+    use super::{insert_aux_components, AuxComponentData};
+    use crate::core::reverb_zone::{ReverbZoneData, ReverbZoneEnabled};
+    use bevy::prelude::*;
+
+    /// Distinguishable from `ReverbZoneData::default()` (`"hall"` / `0.5`) in
+    /// both fields the assertion reads, so an `insert(default())` mutant fails.
+    fn cave() -> ReverbZoneData {
+        ReverbZoneData {
+            preset: "cave".to_string(),
+            wet_mix: 0.9,
+            ..Default::default()
+        }
+    }
+
+    fn restore(aux: &AuxComponentData) -> (World, Entity) {
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        {
+            let mut commands = world.commands();
+            let mut entity_commands = commands.entity(entity);
+            insert_aux_components(&mut entity_commands, aux);
+        }
+        world.flush();
+        (world, entity)
+    }
+
+    #[test]
+    fn duplicating_carries_an_enabled_reverb_zone() {
+        let (world, entity) = restore(&AuxComponentData {
+            reverb_zone_data: Some(cave()),
+            reverb_zone_enabled: true,
+            ..Default::default()
+        });
+
+        assert_eq!(world.get::<ReverbZoneData>(entity), Some(&cave()));
+        assert!(
+            world.get::<ReverbZoneEnabled>(entity).is_some(),
+            "the duplicate lost the enabled marker, so its zone is configured but silent"
+        );
+    }
+
+    /// The inverse: a zone the user deliberately turned off must not come back
+    /// switched on, the PF-1173 failure direction.
+    #[test]
+    fn duplicating_a_disabled_reverb_zone_leaves_it_disabled() {
+        let (world, entity) = restore(&AuxComponentData {
+            reverb_zone_data: Some(cave()),
+            reverb_zone_enabled: false,
+            ..Default::default()
+        });
+
+        assert_eq!(world.get::<ReverbZoneData>(entity), Some(&cave()));
+        assert!(world.get::<ReverbZoneEnabled>(entity).is_none());
+    }
+
+    #[test]
+    fn duplicating_an_entity_with_no_reverb_zone_adds_neither() {
+        let (world, entity) = restore(&AuxComponentData::default());
+
+        assert!(world.get::<ReverbZoneData>(entity).is_none());
+        assert!(world.get::<ReverbZoneEnabled>(entity).is_none());
+    }
+}
+
+#[cfg(test)]
+mod aux_component_parity {
+    //! The behavioural tests above prove reverb specifically is carried. They
+    //! say nothing about the NEXT field added to `AuxComponentData`, which is
+    //! the actual defect: the collector and `spawn_from_snapshot` get updated,
+    //! `insert_aux_components` is forgotten, and nothing anywhere reports it.
+    //!
+    //! So pin the divergence itself — every field of the struct must be read by
+    //! `insert_aux_components`, minus an explicitly reasoned exemption list.
+    //! Same source-parity idiom as `route_domain_parity` in `commands/mod.rs`,
+    //! and fail-closed for the same reason: a slice that silently returns empty
+    //! is what makes this class of test report green on a broken parser.
+
+    const SOURCE: &str = include_str!("entity_factory.rs");
+
+    /// Fields `insert_aux_components` must deliberately NOT restore.
+    const EXEMPT: &[(&str, &str)] = &[(
+        "active_game_camera",
+        "apply_duplicate_requests zeroes it on purpose — a duplicate must not \
+         steal the active-camera flag from the entity it was copied from",
+    )];
+
+    /// Every field of `AuxComponentData`. Both floors below exist because
+    /// `find` returning a short slice would otherwise pass vacuously.
+    const FIELD_FLOOR: usize = 22;
+    /// Fields actually read by `insert_aux_components` (= FIELD_FLOOR - EXEMPT).
+    const RESTORED_FLOOR: usize = 21;
+
+    /// Source text from `marker` up to the first line that closes its block.
+    fn block_after(marker: &str) -> &'static str {
+        let start = SOURCE.find(marker).unwrap_or_else(|| {
+            panic!("parser is stale: {marker:?} no longer appears in the source")
+        });
+        let rest = &SOURCE[start..];
+        let end = rest
+            .find("\n}")
+            .unwrap_or_else(|| panic!("parser is stale: no closing brace after {marker:?}"));
+        &rest[..end]
+    }
+
+    fn struct_fields() -> Vec<String> {
+        block_after("struct AuxComponentData {")
+            .lines()
+            .skip(1)
+            .filter_map(|line| {
+                let name = line.trim().split_once(':')?.0;
+                let looks_like_a_field = !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+                looks_like_a_field.then(|| name.to_string())
+            })
+            .collect()
+    }
+
+    fn restored_fields() -> Vec<String> {
+        let body = block_after("fn insert_aux_components");
+        let mut found: Vec<String> = Vec::new();
+        for (at, _) in body.match_indices("aux.") {
+            let name: String = body[at + "aux.".len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() && !found.contains(&name) {
+                found.push(name);
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn every_aux_field_is_restored_on_the_duplicate_path() {
+        let fields = struct_fields();
+        let restored = restored_fields();
+
+        assert!(
+            fields.len() >= FIELD_FLOOR,
+            "parsed only {} AuxComponentData fields (floor {FIELD_FLOOR}) — the parser broke, \
+             not the struct; fix it before trusting this test",
+            fields.len()
+        );
+        assert!(
+            restored.len() >= RESTORED_FLOOR,
+            "parsed only {} `aux.` reads in insert_aux_components (floor {RESTORED_FLOOR}) — \
+             the parser broke, not the function",
+            restored.len()
+        );
+
+        let missing: Vec<&String> = fields
+            .iter()
+            .filter(|f| {
+                !restored.contains(f) && !EXEMPT.iter().any(|(exempt, _)| *exempt == f.as_str())
+            })
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "insert_aux_components (the duplicate path) never restores {missing:?}, but \
+             spawn_from_snapshot (the undo/redo path) does. Duplicating an entity would \
+             silently drop them. Add them to insert_aux_components, or to EXEMPT with a reason."
+        );
+
+        let unknown: Vec<&String> = restored.iter().filter(|r| !fields.contains(r)).collect();
+        assert!(
+            unknown.is_empty(),
+            "insert_aux_components reads {unknown:?}, which are not AuxComponentData fields — \
+             the parser is matching something it should not"
+        );
+    }
+
+    /// An exemption that stops being true in either direction is worse than no
+    /// exemption at all, because it reads as reviewed.
+    #[test]
+    fn exemptions_are_still_accurate() {
+        let fields = struct_fields();
+        let restored = restored_fields();
+
+        for (name, reason) in EXEMPT {
+            assert!(
+                fields.contains(&name.to_string()),
+                "EXEMPT lists {name:?} ({reason}), but AuxComponentData no longer has that \
+                 field — drop the entry"
+            );
+            assert!(
+                !restored.contains(&name.to_string()),
+                "EXEMPT lists {name:?} as deliberately not restored, but \
+                 insert_aux_components does restore it now — drop the entry"
+            );
+        }
     }
 }
 

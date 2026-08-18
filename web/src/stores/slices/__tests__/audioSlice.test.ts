@@ -312,18 +312,22 @@ describe('audioSlice', () => {
       priority: 1,
     };
 
-    it('should set reverb zone', () => {
+    // Full-payload `toEqual` on the whole call list, not `objectContaining` /
+    // `toHaveBeenCalledWith`: the payload IS the behaviour here, and the bug
+    // this replaces was an INVENTED key (`enabled` flattened onto
+    // `set_reverb_zone`, which serde discards) plus a phantom command name. An
+    // assertion blind to extra keys and extra calls cannot see either.
+    it('should set reverb zone via two commands — config then enablement', () => {
       store.getState().setReverbZone('entity-1', reverbData, true);
 
       const state = store.getState();
       expect(state.reverbZones['entity-1']).toEqual(reverbData);
       expect(state.reverbZonesEnabled['entity-1']).toBe(true);
 
-      expect(mockDispatch).toHaveBeenCalledWith('set_reverb_zone', {
-        entityId: 'entity-1',
-        ...reverbData,
-        enabled: true,
-      });
+      expect(mockDispatch.mock.calls).toEqual([
+        ['set_reverb_zone', { entityId: 'entity-1', ...reverbData }],
+        ['toggle_reverb_zone', { entityId: 'entity-1', enabled: true }],
+      ]);
     });
 
     it('should set reverb zone with enabled false', () => {
@@ -333,15 +337,15 @@ describe('audioSlice', () => {
       expect(state.reverbZones['entity-2']).toEqual(reverbData);
       expect(state.reverbZonesEnabled['entity-2']).toBe(false);
 
-      expect(mockDispatch).toHaveBeenCalledWith('set_reverb_zone', {
-        entityId: 'entity-2',
-        ...reverbData,
-        enabled: false,
-      });
+      expect(mockDispatch.mock.calls).toEqual([
+        ['set_reverb_zone', { entityId: 'entity-2', ...reverbData }],
+        ['toggle_reverb_zone', { entityId: 'entity-2', enabled: false }],
+      ]);
     });
 
-    it('should update existing reverb zone', () => {
+    it('should update existing reverb zone via set_reverb_zone, leaving enablement alone', () => {
       store.getState().setReverbZone('entity-1', reverbData, true);
+      mockDispatch.mockClear();
 
       const updatedData: ReverbZoneData = {
         ...reverbData,
@@ -353,11 +357,37 @@ describe('audioSlice', () => {
 
       const state = store.getState();
       expect(state.reverbZones['entity-1']).toEqual(updatedData);
+      // Still enabled, and no second command tried to change that.
+      expect(state.reverbZonesEnabled['entity-1']).toBe(true);
 
-      expect(mockDispatch).toHaveBeenCalledWith('set_reverb_zone', {
-        entityId: 'entity-1',
-        ...updatedData,
-      });
+      // `update_reverb_zone` has never had an engine dispatch arm — every zone
+      // ever edited was dropped, silently, because dispatch returns void.
+      expect(mockDispatch.mock.calls).toEqual([
+        ['set_reverb_zone', { entityId: 'entity-1', ...updatedData }],
+      ]);
+    });
+
+    it('should mirror an engine REVERB_ZONE_CHANGED without dispatching back', () => {
+      store.getState().applyReverbZoneFromEngine('entity-9', reverbData, true);
+
+      const state = store.getState();
+      expect(state.reverbZones['entity-9']).toEqual(reverbData);
+      expect(state.reverbZonesEnabled['entity-9']).toBe(true);
+
+      // The engine emits this event *because* it just applied a command;
+      // dispatching from here is an unbounded ping-pong that also floods history.
+      expect(mockDispatch.mock.calls).toEqual([]);
+    });
+
+    it('should mirror an engine REVERB_ZONE_REMOVED without dispatching back', () => {
+      store.getState().applyReverbZoneFromEngine('entity-9', reverbData, true);
+      store.getState().applyReverbZoneRemovedFromEngine('entity-9');
+
+      const state = store.getState();
+      expect(state.reverbZones['entity-9']).toBeUndefined();
+      expect(state.reverbZonesEnabled['entity-9']).toBeUndefined();
+
+      expect(mockDispatch.mock.calls).toEqual([]);
     });
 
     it('should remove reverb zone', () => {
