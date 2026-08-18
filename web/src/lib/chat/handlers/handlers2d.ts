@@ -1145,6 +1145,9 @@ function skeletonOf(
 /** What a value IS, for an error message that names the caller's mistake. */
 function jsonKind(value: unknown): string {
   if (value === null) return 'null';
+  // A round-tripped array hole reads back as `undefined` through an indexed access,
+  // and `a undefined` reads like a typo rather than a diagnosis.
+  if (value === undefined) return 'missing';
   if (Array.isArray(value)) return 'an array';
   return `a ${typeof value}`;
 }
@@ -1267,6 +1270,37 @@ function normalizeImportedSkeleton(parsed: unknown): SkeletonImportResult {
     if (!Object.hasOwn(src, field)) continue;
     const error = rejectNonObjectEntries(src[field], field);
     if (error) return { ok: false, reason: error };
+  }
+
+  // `boneChain` was the one field this function stored by cast rather than by
+  // check, and the cast says `string[]` about whatever the file happened to hold.
+  // The damage is not a crash — every reader defends itself (`boneNameList`
+  // returns `[]` for a non-array, the outbound builder drops the chain and warns)
+  // — it is the exact failure this function exists to prevent: the import reports
+  // success, `setSkeleton2d` replaces the rig, and the solver then silently skips
+  // a constraint whose chain is a number or names bones the rig does not have.
+  // Checked by INDEX for the PF-1143 reason: a round-tripped hole arrives as the
+  // `null` a callback form would never look at.
+  if (Object.hasOwn(src, 'ikConstraints')) {
+    const constraints = src.ikConstraints as Record<string, unknown>[];
+    for (let i = 0; i < constraints.length; i += 1) {
+      const chain = constraints[i]!.boneChain;
+      if (chain === undefined) {
+        return { ok: false, reason: `\`ikConstraints[${i}]\` has no \`boneChain\` — a constraint is the bones it solves` };
+      }
+      if (!Array.isArray(chain)) {
+        return { ok: false, reason: `\`ikConstraints[${i}].boneChain\` is ${jsonKind(chain)}, not an array of bone names` };
+      }
+      for (let j = 0; j < chain.length; j += 1) {
+        const boneName: unknown = chain[j];
+        if (typeof boneName !== 'string' || boneName.length === 0) {
+          return { ok: false, reason: `\`ikConstraints[${i}].boneChain[${j}]\` is ${jsonKind(boneName)}, not a bone name` };
+        }
+        if (!names.has(boneName)) {
+          return { ok: false, reason: `\`ikConstraints[${i}].boneChain[${j}]\` names "${boneName}", which is not among the imported bones` };
+        }
+      }
+    }
   }
 
   if (Object.hasOwn(src, 'skins')) {

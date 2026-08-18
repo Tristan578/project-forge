@@ -2723,8 +2723,74 @@ describe('handlers2d skeleton 2D commands', () => {
         // from — naming the entry point would send the reader to the wrong bone.
         'forms a cycle: "a" -> "b" -> "a"',
       ],
+      // `boneChain` is stored, not defaulted. Nothing downstream throws on a bad
+      // one — the readers all defend themselves — so the whole cost lands as a
+      // rig that imported "successfully" and an IK constraint the solver skips.
+      [
+        'a constraint with no boneChain',
+        '{"bones":[{"name":"a"}],"ikConstraints":[{"name":"ik"}]}',
+        '`ikConstraints[0]` has no `boneChain`',
+      ],
+      [
+        'a non-array boneChain',
+        '{"bones":[{"name":"a"}],"ikConstraints":[{"name":"ik","boneChain":7}]}',
+        '`ikConstraints[0].boneChain` is a number',
+      ],
+      // The shape a sparse chain round-trips as: `JSON.stringify` writes a hole as
+      // `null` and `JSON.parse` can only ever hand back that `null`.
+      [
+        'a null entry in a boneChain',
+        '{"bones":[{"name":"a"}],"ikConstraints":[{"name":"ik","boneChain":["a",null]}]}',
+        '`ikConstraints[0].boneChain[1]` is null',
+      ],
+      [
+        'a numeric entry in a boneChain',
+        '{"bones":[{"name":"a"}],"ikConstraints":[{"name":"ik","boneChain":[3]}]}',
+        '`ikConstraints[0].boneChain[0]` is a number',
+      ],
+      [
+        'an empty string in a boneChain',
+        '{"bones":[{"name":"a"}],"ikConstraints":[{"name":"ik","boneChain":[""]}]}',
+        '`ikConstraints[0].boneChain[0]` is a string',
+      ],
+      // Same class as the dangling `parentBone` above, one field over: the name
+      // resolves to nothing, so the solver has no bone to move.
+      [
+        'a boneChain naming a bone that is not in the rig',
+        '{"bones":[{"name":"a"}],"ikConstraints":[{"name":"ik","boneChain":["a","ghost"]}]}',
+        '`ikConstraints[0].boneChain[1]` names "ghost"',
+      ],
     ])('rejects %s without touching the store', async (label, jsonData, expected) => {
       await rejects(label, jsonData, expected);
+    });
+
+    it('accepts an ikConstraint whose chain names real bones', async () => {
+      const skeleton = {
+        bones: [{ name: 'root', parentBone: null }, { name: 'arm', parentBone: 'root' }],
+        ikConstraints: [{ name: 'arm_ik', boneChain: ['root', 'arm'], targetEntityId: '', bendDirection: 1, mix: 1 }],
+      };
+      const { result, store } = await invoke2d(
+        'import_skeleton_json',
+        { entityId: 'ent-1', jsonData: JSON.stringify(skeleton) },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      const stored = (store.setSkeleton2d as ReturnType<typeof vi.fn>).mock.calls[0][1] as SkeletonData2d;
+      expect(stored.ikConstraints).toEqual(skeleton.ikConstraints);
+    });
+
+    it('accepts an empty boneChain, which is unfinished rather than malformed', async () => {
+      // Nothing is destroyed by a constraint that solves no bones, and an author
+      // adding one field at a time passes through this state.
+      const { result } = await invoke2d(
+        'import_skeleton_json',
+        {
+          entityId: 'ent-1',
+          jsonData: '{"bones":[{"name":"a"}],"ikConstraints":[{"name":"ik","boneChain":[]}]}',
+        },
+        { setSkeleton2d: vi.fn() },
+      );
+      expect(result.success).toBe(true);
     });
 
     it('accepts a deep chain, which the shared acyclic set must not reject', async () => {
