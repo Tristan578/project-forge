@@ -678,19 +678,24 @@ pub fn emit_physics2d_changed(entity_id: &str, physics_data: &crate::core::physi
 }
 
 /// Emit a 2D joint changed event for an entity.
+///
+/// Built through `PhysicsJoint2d::to_flat()` rather than by flattening the struct
+/// with serde. `#[serde(rename_all)]` does not propagate through
+/// `#[serde(flatten)]`, so a derived payload reaches the browser with snake_case
+/// keys and a nested, externally-tagged PascalCase `joint_type` — a third
+/// vocabulary for a surface that already had two too many, and one no consumer
+/// could read. `to_flat` is the exact inverse of the `from_flat` that
+/// `set_joint_2d` uses, and it is unit-tested in `core/` where the bridge is not
+/// compiled (PF-1167).
 pub fn emit_joint2d_changed(entity_id: &str, joint_data: &crate::core::physics_2d::PhysicsJoint2d) {
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Joint2dPayload<'a> {
-        entity_id: &'a str,
-        #[serde(flatten)]
-        data: &'a crate::core::physics_2d::PhysicsJoint2d,
+    let mut payload = joint_data.to_flat();
+    if let Some(map) = payload.as_object_mut() {
+        map.insert(
+            "entityId".to_string(),
+            serde_json::Value::String(entity_id.to_string()),
+        );
     }
-
-    emit_event("JOINT2D_CHANGED", &Joint2dPayload {
-        entity_id,
-        data: joint_data,
-    });
+    emit_event("JOINT2D_CHANGED", &payload);
 }
 
 /// Emit a 2D raycast hit event.

@@ -68,13 +68,6 @@ const ALLOWED_UNROUTED: Record<string, string> = {
   // renames in PF-1170.
   remove_skeleton_2d: 'PF-1176 — needs pending field + apply system + arm',
   remove_game_camera: 'PF-1177 — needs pending field + apply system + arm',
-
-  // Transitional: both arms are added by PF-1167 (#9276), which is open against
-  // this same engine directory. Whichever PR merges second will see the
-  // staleness check below fail and must delete these two lines — so the
-  // bookkeeping lands on a PR rather than silently on main.
-  update_physics_2d: 'PF-1167 (#9276) adds this arm; delete when that merges',
-  toggle_physics_2d: 'PF-1167 (#9276) adds this arm; delete when that merges',
 };
 
 /** Text of a brace-balanced block starting at `openIndex` (which must be a `{`). */

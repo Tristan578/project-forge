@@ -5,7 +5,8 @@
 
 import { z } from 'zod';
 import type { ToolHandler, ExecutionResult } from './types';
-import { zEntityId, zVec2, zVec4, parseArgs } from './types';
+import { zEntityId, zVec2, zVec4, parseArgs, ownEntry } from './types';
+import { defaultPhysics2dData } from '@/lib/physics/physics2dPayload';
 import type {
   SpriteData,
   Camera2dData,
@@ -203,7 +204,7 @@ const spriteHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(z.object({ entityId: zEntityId, textureAssetId: z.string() }), args);
       if (p.error) return p.error;
       const { entityId, textureAssetId } = p.data;
-      const existing = ctx.store.sprites[entityId] ?? defaultSpriteData();
+      const existing = ownEntry(ctx.store.sprites, entityId) ?? defaultSpriteData();
       ctx.store.setSpriteData(entityId, { ...existing, textureAssetId });
       return { success: true, result: { message: `Set texture on entity ${entityId}` } };
     } catch (err) {
@@ -216,7 +217,7 @@ const spriteHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(z.object({ entityId: zEntityId, color: z.string() }), args);
       if (p.error) return p.error;
       const { entityId, color } = p.data;
-      const existing = ctx.store.sprites[entityId] ?? defaultSpriteData();
+      const existing = ownEntry(ctx.store.sprites, entityId) ?? defaultSpriteData();
       const colorTint = hexToRgba(color);
       ctx.store.setSpriteData(entityId, { ...existing, colorTint });
       return { success: true, result: { message: `Set tint on entity ${entityId}` } };
@@ -233,7 +234,7 @@ const spriteHandlers: Record<string, ToolHandler> = {
       );
       if (p.error) return p.error;
       const { entityId, flipX, flipY } = p.data;
-      const existing = ctx.store.sprites[entityId] ?? defaultSpriteData();
+      const existing = ownEntry(ctx.store.sprites, entityId) ?? defaultSpriteData();
       ctx.store.setSpriteData(entityId, {
         ...existing,
         flipX: flipX ?? existing.flipX,
@@ -257,7 +258,7 @@ const spriteHandlers: Record<string, ToolHandler> = {
       );
       if (p.error) return p.error;
       const { entityId, sortingLayer, sortingOrder } = p.data;
-      const existing = ctx.store.sprites[entityId] ?? defaultSpriteData();
+      const existing = ownEntry(ctx.store.sprites, entityId) ?? defaultSpriteData();
       ctx.store.setSpriteData(entityId, {
         ...existing,
         sortingLayer: sortingLayer ?? existing.sortingLayer,
@@ -274,7 +275,7 @@ const spriteHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(z.object({ entityId: zEntityId, anchor: zSpriteAnchor }), args);
       if (p.error) return p.error;
       const { entityId, anchor } = p.data;
-      const existing = ctx.store.sprites[entityId] ?? defaultSpriteData();
+      const existing = ownEntry(ctx.store.sprites, entityId) ?? defaultSpriteData();
       ctx.store.setSpriteData(entityId, { ...existing, anchor });
       return { success: true, result: { message: `Set anchor on entity ${entityId}` } };
     } catch (err) {
@@ -287,7 +288,7 @@ const spriteHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(z.object({ entityId: zEntityId }), args);
       if (p.error) return p.error;
       const { entityId } = p.data;
-      const data = ctx.store.sprites[entityId];
+      const data = ownEntry(ctx.store.sprites, entityId);
       if (!data) {
         return { success: false, error: `No sprite data for entity ${entityId}` };
       }
@@ -477,7 +478,7 @@ const spriteAnimHandlers: Record<string, ToolHandler> = {
 
       const { entityId, clipName, frames, fps = 12, looping = true } = p.data;
 
-      const existing = ctx.store.spriteSheets[entityId];
+      const existing = ownEntry(ctx.store.spriteSheets, entityId);
       if (!existing) {
         return { success: false, error: `No sprite sheet for entity ${entityId}` };
       }
@@ -537,7 +538,7 @@ const spriteAnimHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(z.object({ entityId: zEntityId, clipName: z.string() }), args);
       if (p.error) return p.error;
       const { entityId, clipName } = p.data;
-      const existing = ctx.store.spriteAnimators[entityId];
+      const existing = ownEntry(ctx.store.spriteAnimators, entityId);
       if (!existing) {
         return { success: false, error: `No sprite animator for entity ${entityId}` };
       }
@@ -592,7 +593,7 @@ const spriteAnimHandlers: Record<string, ToolHandler> = {
       );
       if (p.error) return p.error;
       const { entityId, paramName, value } = p.data;
-      const existing = ctx.store.animationStateMachines[entityId];
+      const existing = ownEntry(ctx.store.animationStateMachines, entityId);
       if (!existing) {
         return { success: false, error: `No animation state machine for entity ${entityId}` };
       }
@@ -736,7 +737,7 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 
       const { entityId, layerIndex, x, y, tileIndex } = p.data;
 
-      const tilemap = ctx.store.tilemaps[entityId];
+      const tilemap = ownEntry(ctx.store.tilemaps, entityId);
       if (!tilemap) {
         return { success: false, error: `No tilemap for entity ${entityId}` };
       }
@@ -774,7 +775,7 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 
       const { entityId, layerIndex, fromX, fromY, toX, toY, tileIndex } = p.data;
 
-      const tilemap = ctx.store.tilemaps[entityId];
+      const tilemap = ownEntry(ctx.store.tilemaps, entityId);
       if (!tilemap) {
         return { success: false, error: `No tilemap for entity ${entityId}` };
       }
@@ -816,7 +817,7 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 
       const { entityId, layerIndex, fromX, fromY, toX, toY } = p.data;
 
-      const tilemap = ctx.store.tilemaps[entityId];
+      const tilemap = ownEntry(ctx.store.tilemaps, entityId);
       if (!tilemap) {
         return { success: false, error: `No tilemap for entity ${entityId}` };
       }
@@ -853,7 +854,7 @@ const tilemapHandlers: Record<string, ToolHandler> = {
       );
       if (p.error) return p.error;
       const { entityId, name, visible = true } = p.data;
-      const tilemap = ctx.store.tilemaps[entityId];
+      const tilemap = ownEntry(ctx.store.tilemaps, entityId);
       if (!tilemap) {
         return { success: false, error: `No tilemap for entity ${entityId}` };
       }
@@ -871,7 +872,7 @@ const tilemapHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(z.object({ entityId: zEntityId, layerIndex: z.number().int().nonnegative() }), args);
       if (p.error) return p.error;
       const { entityId, layerIndex } = p.data;
-      const tilemap = ctx.store.tilemaps[entityId];
+      const tilemap = ownEntry(ctx.store.tilemaps, entityId);
       if (!tilemap) {
         return { success: false, error: `No tilemap for entity ${entityId}` };
       }
@@ -903,7 +904,7 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 
       const { entityId, layerIndex, name, visible, opacity } = p.data;
 
-      const tilemap = ctx.store.tilemaps[entityId];
+      const tilemap = ownEntry(ctx.store.tilemaps, entityId);
       if (!tilemap) {
         return { success: false, error: `No tilemap for entity ${entityId}` };
       }
@@ -938,7 +939,7 @@ const tilemapHandlers: Record<string, ToolHandler> = {
       if (p.error) return p.error;
 
       const { entityId, width, height } = p.data;
-      const tilemap = ctx.store.tilemaps[entityId];
+      const tilemap = ownEntry(ctx.store.tilemaps, entityId);
       if (!tilemap) {
         return { success: false, error: `No tilemap for entity ${entityId}` };
       }
@@ -968,7 +969,7 @@ const tilemapHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(z.object({ entityId: zEntityId }), args);
       if (p.error) return p.error;
       const { entityId } = p.data;
-      const data = ctx.store.tilemaps[entityId];
+      const data = ownEntry(ctx.store.tilemaps, entityId);
       if (!data) {
         return { success: false, error: `No tilemap for entity ${entityId}` };
       }
@@ -983,25 +984,6 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 // 2D Physics Commands
 // ---------------------------------------------------------------------------
 
-function defaultPhysics2d(): Physics2dData {
-  return {
-    bodyType: 'dynamic',
-    colliderShape: 'box',
-    size: [1, 1],
-    radius: 0.5,
-    vertices: [],
-    mass: 1,
-    friction: 0.5,
-    restitution: 0,
-    gravityScale: 1,
-    isSensor: false,
-    lockRotation: false,
-    continuousDetection: false,
-    oneWayPlatform: false,
-    surfaceVelocity: [0, 0],
-  };
-}
-
 const physics2dHandlers: Record<string, ToolHandler> = {
   set_physics2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
@@ -1011,7 +993,11 @@ const physics2dHandlers: Record<string, ToolHandler> = {
       );
       if (p.error) return p.error;
       const { entityId, ...physicsArgs } = p.data;
-      const existing = ctx.store.physics2d[entityId] ?? defaultPhysics2d();
+      // `ownEntry`, not a bare index read: `zEntityId` is `z.string().min(1)`, so it
+      // accepts `'__proto__'`, and `ctx.store.physics2d['__proto__']` then returns
+      // `Object.prototype` — truthy, so the `??` fallback never fires and the merge
+      // below builds a near-empty full-replace payload (PF-1167).
+      const existing = ownEntry(ctx.store.physics2d, entityId) ?? defaultPhysics2dData();
       const data: Physics2dData = { ...existing, ...physicsArgs };
       ctx.store.setPhysics2d(entityId, data, true);
       return { success: true, result: { message: `Set 2D physics on entity ${entityId}` } };
@@ -1036,7 +1022,7 @@ const physics2dHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(z.object({ entityId: zEntityId }), args);
       if (p.error) return p.error;
       const { entityId } = p.data;
-      const data = ctx.store.physics2d[entityId];
+      const data = ownEntry(ctx.store.physics2d, entityId);
       if (!data) {
         return { success: false, error: `No 2D physics data for entity ${entityId}` };
       }
@@ -1126,20 +1112,6 @@ function defaultSkeleton2d(): SkeletonData2d {
     activeSkin: 'default',
     ikConstraints: [],
   };
-}
-
-/**
- * `skeletons2d` is a plain object, so a bare `skeletons2d[entityId]` walks the
- * prototype chain: an entity id of `__proto__` or `constructor` resolves to a
- * truthy inherited value that passes every `if (!existing)` guard, and the next
- * `existing.bones.find(...)` throws far from the cause. Read own keys only, so
- * an inherited name reads as absent.
- */
-function skeletonOf(
-  skeletons: Record<string, SkeletonData2d>,
-  entityId: string,
-): SkeletonData2d | undefined {
-  return Object.hasOwn(skeletons, entityId) ? skeletons[entityId] : undefined;
 }
 
 /** What a value IS, for an error message that names the caller's mistake. */
@@ -1364,7 +1336,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
       const { entityId, boneName, parentBone, position, rotation = 0, length = 1 } = p.data;
 
-      const existing = skeletonOf(ctx.store.skeletons2d, entityId) ?? defaultSkeleton2d();
+      const existing = ownEntry(ctx.store.skeletons2d, entityId) ?? defaultSkeleton2d();
       const bone: Bone2dDef = {
         name: boneName,
         parentBone: parentBone ?? null,
@@ -1387,7 +1359,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(z.object({ entityId: zEntityId, boneName: z.string() }), args);
       if (p.error) return p.error;
       const { entityId, boneName } = p.data;
-      const existing = skeletonOf(ctx.store.skeletons2d, entityId);
+      const existing = ownEntry(ctx.store.skeletons2d, entityId);
       if (!existing) {
         return { success: false, error: `No skeleton for entity ${entityId}` };
       }
@@ -1418,7 +1390,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
       const { entityId, boneName, position, rotation, length } = p.data;
 
-      const existing = skeletonOf(ctx.store.skeletons2d, entityId);
+      const existing = ownEntry(ctx.store.skeletons2d, entityId);
       if (!existing) {
         return { success: false, error: `No skeleton for entity ${entityId}` };
       }
@@ -1454,7 +1426,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
       const { entityId, animName, looping = true } = p.data;
 
-      const existing = ctx.store.skeletalAnimations2d[entityId] ?? [];
+      const existing = ownEntry(ctx.store.skeletalAnimations2d, entityId) ?? [];
       const anim: SkeletalAnimation2d = {
         name: animName,
         duration: 1,
@@ -1486,7 +1458,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
       const { entityId, animName, boneName, frame, position, rotation } = p.data;
 
-      const existing = ctx.store.skeletalAnimations2d[entityId];
+      const existing = ownEntry(ctx.store.skeletalAnimations2d, entityId);
       if (!existing) {
         return { success: false, error: `No skeletal animations for entity ${entityId}` };
       }
@@ -1539,7 +1511,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
       if (p.error) return p.error;
       const { entityId, skinName, attachments } = p.data;
 
-      const existing = skeletonOf(ctx.store.skeletons2d, entityId) ?? defaultSkeleton2d();
+      const existing = ownEntry(ctx.store.skeletons2d, entityId) ?? defaultSkeleton2d();
       const skin = { name: skinName, attachments: (attachments ?? {}) as SkeletonData2d['skins'][string]['attachments'] };
 
       ctx.store.setSkeleton2d(entityId, {
@@ -1582,7 +1554,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
         return { success: false, error: 'Missing name (or chainName) for the IK chain' };
       }
 
-      const existing = skeletonOf(ctx.store.skeletons2d, entityId) ?? defaultSkeleton2d();
+      const existing = ownEntry(ctx.store.skeletons2d, entityId) ?? defaultSkeleton2d();
 
       let boneChain: string[];
       if (explicitChain) {
@@ -1652,7 +1624,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(z.object({ entityId: zEntityId }), args);
       if (p.error) return p.error;
       const { entityId } = p.data;
-      const data = skeletonOf(ctx.store.skeletons2d, entityId);
+      const data = ownEntry(ctx.store.skeletons2d, entityId);
       if (!data) {
         return { success: false, error: `No skeleton data for entity ${entityId}` };
       }
@@ -1746,7 +1718,7 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
       );
       if (p.error) return p.error;
       const { entityId, method, iterations } = p.data;
-      const existing = skeletonOf(ctx.store.skeletons2d, entityId);
+      const existing = ownEntry(ctx.store.skeletons2d, entityId);
       if (!existing) {
         return { success: false, error: `No skeleton for entity ${entityId}` };
       }
